@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nyxara — sovereign cognitive-agent runtime
+#  Python project metadata
+# ─────────────────────────────────────────────────────────────────────────────
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nyxara"
+version = "0.1.0"
+description = "Nyxara — kernel-sovereign cognitive agent. LLM proposes, kernel disposes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Jaypal Khoja (JP)" }]
+keywords = ["agent", "cognition", "kernel", "global-workspace", "active-inference"]
+
+dependencies = [
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "sympy>=1.12",
+    "z3-solver>=4.12",
+    "networkx>=3.2",
+    "structlog>=24.1",
+    "tenacity>=8.2",
+    "httpx>=0.27",
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+vector = ["faiss-cpu>=1.8", "sentence-transformers>=2.6"]
+senses = ["openai-whisper>=20231117", "pillow>=10.2", "pypdf>=4.1"]
+llm = ["openai>=1.30", "anthropic>=0.25"]
+dev = ["pytest>=8.1", "pytest-asyncio>=0.23", "ruff>=0.3", "mypy>=1.9"]
+
+[project.scripts]
+nyxara = "nyxara.boot:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nyxara*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
