@@ -46,6 +46,7 @@ __all__ = [
     "ResourceLimits",
     "FeatureFlags",
     "LLMConfig",
+    "FoundryConfig",
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
@@ -84,7 +85,9 @@ class LLMProvider(str, Enum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
-    LOCAL = "local"
+    LOCAL = "local"               # OpenAI-compatible HTTP endpoint (e.g. Ollama)
+    TRANSFORMERS = "transformers"  # in-process HuggingFace model (open-source)
+    SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     MOCK = "mock"
 
 
@@ -153,10 +156,12 @@ class FeatureFlags(BaseModel):
     continuous_cognition: bool = True   # kernel/stream.py default-mode thinking
     proactive_agency: bool = True       # agency/proactive.py
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
+    self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
     vision: bool = False                # heavy ML; off by default
     audio: bool = False                 # heavy ML; off by default
+    transformers_inference: bool = False  # in-process HuggingFace model; heavy ML, off by default
     dream_consolidation: bool = True    # memory/consolidation.py
     simulation_required: bool = True    # sim/ dry-run gate before real action
     invariant_enforcement: bool = True  # kernel/invariants.py — NEVER off in prod
@@ -177,6 +182,12 @@ class LLMConfig(BaseModel):
     anthropic_model: str = "claude-opus-4-8"
     openai_model: str = "gpt-4o"
     local_model: str = "local-default"
+    # In-process open-source model loaded via HuggingFace transformers (optional dep).
+    transformers_model: str = "sshleifer/tiny-gpt2"
+    transformers_device: str = ""          # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
+    self_model_dir: Optional[Path] = None
+    self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
 
     anthropic_api_key: Optional[SecretStr] = None
     openai_api_key: Optional[SecretStr] = None
@@ -195,6 +206,8 @@ class LLMConfig(BaseModel):
             LLMProvider.ANTHROPIC: self.anthropic_model,
             LLMProvider.OPENAI: self.openai_model,
             LLMProvider.LOCAL: self.local_model,
+            LLMProvider.TRANSFORMERS: self.transformers_model,
+            LLMProvider.SELF: "nyxara-self",
             LLMProvider.MOCK: "mock",
         }[self.provider]
 
@@ -204,6 +217,36 @@ class LLMConfig(BaseModel):
         if self.provider is LLMProvider.OPENAI:
             return self.openai_api_key
         return None
+
+
+class FoundryConfig(BaseModel):
+    """NYXARA's self-built-model foundry settings (growth/foundry.py).
+
+    Off by default (heavy & self-modifying, like vision/audio). The default backend is
+    ``auto`` which uses the optional torch nano-GPT when torch is installed and falls
+    back to the always-available pure-stdlib n-gram model otherwise.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = False
+    backend: Literal["auto", "ngram", "nanogpt"] = "auto"
+    # Pure-stdlib n-gram backend.
+    ngram_order: int = Field(default=3, ge=1, le=8)
+    # Optional torch nano-GPT dimensions (only used when torch is present).
+    block_size: int = Field(default=64, ge=8, le=1024)
+    n_layer: int = Field(default=2, ge=1, le=24)
+    n_head: int = Field(default=2, ge=1, le=32)
+    n_embd: int = Field(default=64, ge=8, le=2048)
+    # Training / data.
+    train_steps: int = Field(default=200, ge=1)
+    max_corpus_items: int = Field(default=2000, ge=1)
+    eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
+    # A candidate must beat the active model's perplexity by at least this fraction.
+    min_perplexity_improvement: float = Field(default=1e-4, ge=0.0)
+    # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
+    max_versions_kept: int = Field(default=10, ge=1)
+    seed: int = 0
 
 
 class MemoryConfig(BaseModel):
@@ -334,6 +377,7 @@ class NyxaraSettings(BaseSettings):
     resources: ResourceLimits = Field(default_factory=ResourceLimits)
     features: FeatureFlags = Field(default_factory=FeatureFlags)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
