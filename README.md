@@ -1,0 +1,108 @@
+# NYXARA
+
+> Sovereign cognitive architecture. Owner: **Jaypal Khoja (JP)**.
+>
+> *The mind proposes; the kernel disposes; the Master is sovereign.*
+
+NYXARA is a self-contained cognitive system. Every turn of thought is carried
+through one **sovereign cognitive cycle**: untrusted input is shielded, a focus is
+attended, a candidate response or action is *proposed* by the mind, and then the
+kernel *disposes* of it through ordered gates — corrigibility, honesty, capability
+permissions, the guardian's defence posture, and the Master's oversight — before
+anything is allowed to act. Loyalty and corrigibility are not features of the loop;
+they are its boundaries.
+
+The whole mind is wired in `nyxara/kernel/orchestrator.py` as `NyxaraCore`.
+
+## Install
+
+Requires **Python 3.11+**.
+
+```bash
+# core + reasoning + llm + dev/test extras
+python -m pip install -e ".[dev]"
+
+# or just the runtime core
+python -m pip install -e .
+```
+
+Heavy optional capability groups are import-guarded and degrade gracefully when
+absent. Install them only if you need them:
+
+```bash
+pip install -e ".[senses]"    # audio / vision / document ingest (torch, whisper, opencv, …)
+pip install -e ".[foundry]"   # self-built-model foundry (torch, transformers, peft, …)
+```
+
+## Run
+
+Talk to NYXARA as the Master in an interactive console:
+
+```bash
+python -m nyxara
+# or, after install, simply:
+nyxara
+```
+
+You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
+
+| Command           | Effect                                                |
+| ----------------- | ----------------------------------------------------- |
+| `/help`           | show commands                                         |
+| `/report`         | a calibrated status report                            |
+| `/explain`        | why NYXARA disposed of the last turn that way          |
+| `/pause`          | pause the loop                                        |
+| `/scram [reason]` | emergency stop — the loop HALTs until resumed          |
+| `/resume`         | restore the loop after a pause/scram                  |
+| `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
+
+### Use it as a library
+
+```python
+from nyxara import NyxaraCore, Authority
+
+core = NyxaraCore()
+result = core.process("Hello NYXARA", authority=Authority.OWNER)
+print(result.response)        # NYXARA's reply
+print(result.disposition)     # act / escalate / refuse / halt
+```
+
+## LLM providers (optional)
+
+Out of the box NYXARA uses a built-in deterministic reasoner — **no API keys
+required**. To enable LLM-backed reasoning and the multi-model council, configure
+keys via `NYXARA_`-prefixed environment variables (nested with `__`):
+
+```bash
+export NYXARA_LLM__PROVIDER=anthropic
+export NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-...
+# or
+export NYXARA_LLM__PROVIDER=openai
+export NYXARA_LLM__OPENAI_API_KEY=sk-...
+```
+
+Every field in `nyxara/kernel/config.py` is overridable the same way. API keys are
+held as secrets and never logged.
+
+## Tests
+
+```bash
+pytest -q
+```
+
+## Layout
+
+```
+nyxara/
+  kernel/      sovereign loop, config, runtime, rules, bus, workspace
+  senses/      perception & input binding (import-guarded heavy ML)
+  mind/        reasoning, math, council, RAG, world model, creativity
+  identity/    values, affect, narrative, motivation, soul
+  planning/    goals, foresight, scenarios, decisions, journal
+  agency/      tools, agents, permissions, governor, scheduler
+  guard/       shield, guardian, corrigibility, oversight
+  growth/      learning, reflection, evolution, the model foundry
+  social/      theory of mind, empathy, dialogue, culture
+  observe/     mindscope, honesty, self-report
+  sim/         sandboxes, environment models, monte-carlo
+```
