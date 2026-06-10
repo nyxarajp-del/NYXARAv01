@@ -50,6 +50,8 @@ __all__ = [
     "AnthropicProvider",
     "OpenAIProvider",
     "LocalProvider",
+    "TransformersProvider",
+    "SelfProvider",
     "LLM",
 ]
 
@@ -383,12 +385,105 @@ class LocalProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# Transformers provider — in-process open-source model (HuggingFace)
+# --------------------------------------------------------------------------- #
+class TransformersProvider(LLMProviderBase):
+    """Run an open-source model in-process via HuggingFace ``transformers``.
+
+    The LLM stays a tool NYXARA *uses*: request in -> text out, no state, no control.
+    Heavy deps (``transformers`` + ``torch``) are imported lazily and reported honestly,
+    so a bare machine degrades to the mock rather than erroring.
+    """
+
+    name = "transformers"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._pipe = None
+        self._pipe_model: Optional[str] = None
+
+    def available(self) -> bool:
+        try:
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def default_model(self) -> str:
+        return self.settings.llm.transformers_model
+
+    def _ensure_pipe(self, model: str):
+        if self._pipe is None or self._pipe_model != model:
+            from transformers import pipeline
+            device = self.settings.llm.transformers_device or None
+            self._pipe = pipeline("text-generation", model=model,
+                                  device_map=device if device else None)
+            self._pipe_model = model
+        return self._pipe
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        pipe = self._ensure_pipe(model)
+        prompt = (req.system + "\n\n" if req.system else "") + req.last_user()
+        out = pipe(prompt, max_new_tokens=req.max_tokens, temperature=max(req.temperature, 1e-3),
+                   top_p=req.top_p, do_sample=req.temperature > 0,
+                   return_full_text=False)
+        text = out[0].get("generated_text", "") if out else ""
+        usage = Usage(prompt_tokens=estimate_tokens(prompt),
+                      completion_tokens=estimate_tokens(text))
+        return (text, "stop", usage, out)
+
+
+# --------------------------------------------------------------------------- #
+# Self provider — NYXARA's OWN model, trained & promoted by the foundry
+# --------------------------------------------------------------------------- #
+class SelfProvider(LLMProviderBase):
+    """Serve NYXARA's own model (built from scratch by growth/foundry.py).
+
+    ``available()`` is honest: it returns True only once a model has been trained AND
+    promoted (a ``foundry/active`` pointer exists). The model itself is loaded lazily to
+    avoid an import cycle (growth/foundry_models imports nothing from mind/llm)."""
+
+    name = "self"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._lm = None
+
+    def _root(self):
+        from pathlib import Path
+        d = self.settings.llm.self_model_dir or (self.settings.paths.data_dir / "foundry")
+        return Path(d)
+
+    def available(self) -> bool:
+        try:
+            return (self._root() / "active").exists()
+        except Exception:
+            return False
+
+    def default_model(self) -> str:
+        return "nyxara-self"
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        from nyxara.growth.foundry_models import load_active_model  # lazy: no import cycle
+        if self._lm is None:
+            self._lm = load_active_model(self.settings)
+        prompt = (req.system + "\n" if req.system else "") + req.last_user()
+        text = self._lm.generate(prompt, max_tokens=req.max_tokens)
+        usage = Usage(prompt_tokens=estimate_tokens(prompt),
+                      completion_tokens=estimate_tokens(text))
+        return (text, "stop", usage, {"self": True, "kind": self._lm.kind})
+
+
+# --------------------------------------------------------------------------- #
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
     ProviderName.ANTHROPIC: AnthropicProvider,
     ProviderName.OPENAI: OpenAIProvider,
     ProviderName.LOCAL: LocalProvider,
+    ProviderName.TRANSFORMERS: TransformersProvider,
+    ProviderName.SELF: SelfProvider,
     ProviderName.MOCK: MockProvider,
 }
 
@@ -528,6 +623,11 @@ if __name__ == "__main__":  # pragma: no cover
         print("bad json raises      : OK")
 
     # adapters report availability honestly (no keys in TEST -> only mock/local)
-    print(f"\nadapter availability : {llm.provider_status()}")
+    status = llm.provider_status()
+    print(f"\nadapter availability : {status}")
+    # the open-source + self-built providers are registered and degrade honestly
+    assert "transformers" in status and "self" in status
+    assert status["self"] is False     # no model trained/promoted yet on a bare machine
+    print("transformers/self    : registered; both unavailable on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

@@ -153,7 +153,7 @@ def test_provider_status():
     llm = _mock_llm()
     status = llm.provider_status()
     assert status["mock"] is True
-    assert set(status) == {"anthropic", "openai", "local", "mock"}
+    assert set(status) == {"anthropic", "openai", "local", "transformers", "self", "mock"}
 
 
 def test_async_complete():
