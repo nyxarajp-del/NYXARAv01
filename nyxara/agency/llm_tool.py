@@ -29,6 +29,7 @@ from nyxara.mind.llm import LLM, LLMRequest
 
 __all__ = [
     "register_llm_tool",
+    "register_council_tool",
     "register_foundry_tools",
 ]
 
@@ -69,6 +70,51 @@ def register_llm_tool(registry: ToolRegistry, llm: LLM, *, name: str = "llm.comp
         reversible=True,
         cost=cost,
         rate_resource="llm",               # its own governor bucket
+    )
+    return registry.register(spec)
+
+
+# --------------------------------------------------------------------------- #
+# The multi-LLM council as a governed tool
+# --------------------------------------------------------------------------- #
+def register_council_tool(registry: ToolRegistry, council: Any, *,
+                          name: str = "llm.council", cost: float = 1.0) -> ToolSpec:
+    """Register the multi-LLM council (:class:`~nyxara.mind.council.LLMCouncil`) as a tool.
+
+    Like ``llm.complete``, this is a governed ``TOOL_CALL``: NYXARA convenes the whole panel
+    of models — open-source, cloud, and her own — through the same audited, rate-limited,
+    spend-budgeted pipeline. The panel advises; NYXARA (the handler, her own code) judges. No
+    member is ever handed control. Charges the ``"llm"`` rate bucket per deliberation.
+    """
+
+    def _council(prompt: str, system: str = "", mode: str = "synthesize",
+                 members: Optional[List[str]] = None, max_tokens: int = 1024,
+                 temperature: float = 0.7) -> Dict[str, Any]:
+        from nyxara.mind.llm import LLMRequest
+        req = LLMRequest.from_prompt(prompt, system=system or None,
+                                     max_tokens=max_tokens, temperature=temperature)
+        return council.deliberate(req, members=members, mode=mode).to_dict()
+
+    spec = ToolSpec(
+        name=name,
+        handler=_council,
+        description="Consult MANY LLMs as a panel and let NYXARA synthesise the verdicts.",
+        params=[
+            ToolParam("prompt", "str", description="the question put to the council"),
+            ToolParam("system", "str", required=False, default="",
+                      description="optional system instruction passed to every member"),
+            ToolParam("mode", "str", required=False, default="synthesize",
+                      description="'synthesize' (merge) or 'vote' (weighted majority)"),
+            ToolParam("members", "list", required=False, default=None,
+                      description="override which providers are seated (None -> all available)"),
+            ToolParam("max_tokens", "int", required=False, default=1024),
+            ToolParam("temperature", "float", required=False, default=0.7),
+        ],
+        capability=Capability.TOOL_CALL,   # the council is a tool, not the driver
+        risk=RiskTier.LOW,
+        reversible=True,
+        cost=cost,
+        rate_resource="llm",
     )
     return registry.register(spec)
 

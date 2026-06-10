@@ -6,12 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from nyxara.agency.llm_tool import register_foundry_tools, register_llm_tool
+from nyxara.agency.llm_tool import (
+    register_council_tool,
+    register_foundry_tools,
+    register_llm_tool,
+)
 from nyxara.agency.permissions import Authority, Capability
 from nyxara.agency.tools import ToolRegistry
 from nyxara.growth.foundry import Foundry
 from nyxara.growth.learn import Experience, ReplayBuffer
 from nyxara.kernel.config import NyxaraSettings, Profile
+from nyxara.mind.council import LLMCouncil
 from nyxara.mind.llm import LLM
 
 
@@ -59,6 +64,55 @@ def test_llm_tool_charges_spend_budget():
     assert reg.invoke("llm.complete", {"prompt": "a"}).ok          # 1.0 charged
     drained = reg.invoke("llm.complete", {"prompt": "b"})          # would exceed 1.5
     assert not drained.ok and "spend" in (drained.error or "")
+
+
+# -------------------- the multi-LLM council as a governed tool -------------------- #
+from nyxara.kernel.config import LLMProvider as ProviderName
+from nyxara.mind.llm import LLMProviderBase, Usage
+
+
+class _Fixed(LLMProviderBase):
+    """A deterministic council member (hermetic — never touches the network)."""
+
+    def __init__(self, name: str, answer: str) -> None:
+        super().__init__()
+        self.name = name
+        self._answer = answer
+
+    def available(self) -> bool:
+        return True
+
+    def default_model(self) -> str:
+        return f"{self.name}-1"
+
+    def _complete(self, req, model):
+        return (self._answer, "stop", Usage(1, 1), None)
+
+
+def _panel_council() -> LLMCouncil:
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.provider = ProviderName.LOCAL
+    providers = {"alpha": _Fixed("alpha", "the master is JP"),
+                 "beta": _Fixed("beta", "your master is JP")}
+    return LLMCouncil(LLM(settings=settings, providers=providers), settings=settings)
+
+
+def test_council_tool_registered_as_tool_call():
+    reg = ToolRegistry()
+    spec = register_council_tool(reg, _panel_council())
+    assert spec.name == "llm.council"
+    assert spec.capability is Capability.TOOL_CALL   # the panel is a tool, not the driver
+    assert spec.rate_resource == "llm"
+
+
+def test_council_tool_deliberation_is_governed_and_auditable():
+    reg = ToolRegistry()
+    register_council_tool(reg, _panel_council())
+    r = reg.invoke("llm.council", {"prompt": "who is your master?"})
+    assert r.ok
+    assert r.value["members_answered"] == 2          # both panel members answered, audited
+    assert "JP" in r.value["answer"]
+    assert r.to_dict()["tool"] == "llm.council"
 
 
 # -------------------- foundry tools are fail-closed (SELF_MODIFY) -------------------- #
