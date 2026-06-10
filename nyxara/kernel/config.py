@@ -47,6 +47,7 @@ __all__ = [
     "FeatureFlags",
     "LLMConfig",
     "FoundryConfig",
+    "CouncilConfig",
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
@@ -157,6 +158,7 @@ class FeatureFlags(BaseModel):
     proactive_agency: bool = True       # agency/proactive.py
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
     self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
+    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
     vision: bool = False                # heavy ML; off by default
@@ -247,6 +249,33 @@ class FoundryConfig(BaseModel):
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0
+
+
+class CouncilConfig(BaseModel):
+    """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
+
+    NYXARA does not bind herself to a single model. She convenes a *council* of language
+    models — open-source (``transformers``/``local``), cloud (``anthropic``/``openai``), and
+    most importantly her OWN model forged by the foundry (``self``) — asks each as a governed
+    tool, and then **NYXARA herself** judges and synthesises the verdicts. No single model
+    ever drives; the panel advises, the sovereign decides. As the foundry sharpens her own
+    model and promotes it, ``self`` joins the council and (via ``prefer_self_weight``)
+    presides over it — her own intelligence growing into the seat of judgement.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = False
+    # Providers seated on the council. Empty -> every currently-available provider.
+    members: List[str] = Field(default_factory=list)
+    # Per-provider vote/synthesis weight; unset providers default to 1.0.
+    weights: Dict[str, float] = Field(default_factory=dict)
+    # NYXARA's own model presides with extra weight as the foundry improves it.
+    prefer_self_weight: float = Field(default=1.5, ge=0.0)
+    # Who drafts the consensus prose (falls back to "self", then to a deterministic pick).
+    synthesizer: str = "self"
+    # The mock answers only when no real member is available (keeps a council never silent).
+    include_mock_fallback: bool = True
 
 
 class MemoryConfig(BaseModel):
@@ -378,6 +407,7 @@ class NyxaraSettings(BaseSettings):
     features: FeatureFlags = Field(default_factory=FeatureFlags)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
+    council: CouncilConfig = Field(default_factory=CouncilConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)

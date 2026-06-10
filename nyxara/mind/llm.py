@@ -527,6 +527,22 @@ class LLM:
     def provider_status(self) -> Dict[str, bool]:
         return {n: p.available() for n, p in self._providers.items()}
 
+    def available_providers(self) -> List[str]:
+        """Names of every currently-usable provider — the pool a council draws from."""
+        return [n for n, p in self._providers.items() if p.available()]
+
+    def complete_with(self, name: str, req: LLMRequest) -> LLMResponse:
+        """Complete through ONE named provider, honestly (no silent mock substitution).
+
+        Unlike :meth:`complete`, this never falls back to the mock: a council needs each
+        member to answer *as itself* or be recorded as absent, so a failed member must raise
+        rather than be impersonated. Retry/circuit-breaker resilience still applies.
+        """
+        prov = self._providers.get(name)
+        if prov is None:
+            raise LLMError(f"no such provider '{name}'", context={"provider": name})
+        return self._call_with_resilience(prov, req)
+
     # ---- core call (with retry + optional breaker, falling back to mock) ---- #
     def complete(self, req: LLMRequest) -> LLMResponse:
         provider = self.chosen_provider()
