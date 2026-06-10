@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings>=2.1",
 ]
 
+[project.scripts]
+nyxara = "nyxara.__main__:main"
+
 [project.optional-dependencies]
 # Reasoning / math / data
 reasoning = ["z3-solver>=4.12", "sympy>=1.12", "numpy>=1.26", "networkx>=3.2", "scikit-learn>=1.4"]
