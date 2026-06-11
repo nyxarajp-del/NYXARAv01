@@ -81,8 +81,34 @@ export NYXARA_LLM__PROVIDER=openai
 export NYXARA_LLM__OPENAI_API_KEY=sk-...
 ```
 
-Every field in `nyxara/kernel/config.py` is overridable the same way. API keys are
-held as secrets and never logged.
+#### Qwen3 4B — local open-source (downloaded & run on your machine)
+
+A fully local, no-API-key model. The weights are downloaded once via HuggingFace and
+cached; inference then runs in-process with **no network**.
+
+```bash
+pip install -e ".[qwen]"               # transformers>=4.51 + torch + accelerate
+export NYXARA_LLM__PROVIDER=qwen
+# defaults to Qwen/Qwen3-4B; override the checkpoint or device if you like:
+export NYXARA_LLM__QWEN_MODEL=Qwen/Qwen3-4B
+export NYXARA_LLM__QWEN_DEVICE=cuda    # "" -> auto/CPU; e.g. cuda / cpu / mps
+export NYXARA_LLM__QWEN_ENABLE_THINKING=false   # true -> Qwen3 thinking traces (slower)
+```
+
+#### GPT-OSS-120B — Groq cloud (OpenAI-compatible API)
+
+Groq serves the open-weight **GPT-OSS-120B** behind an OpenAI-shaped endpoint, so it
+reuses the `openai` SDK — no extra dependency.
+
+```bash
+export NYXARA_LLM__PROVIDER=groq
+export NYXARA_LLM__GROQ_API_KEY=gsk-...
+export NYXARA_LLM__GROQ_MODEL=openai/gpt-oss-120b   # the default
+```
+
+Both new models also join the **multi-model council** automatically once available — the
+panel advises, NYXARA decides. Every field in `nyxara/kernel/config.py` is overridable the
+same way. API keys are held as secrets and never logged.
 
 ## Tests
 
