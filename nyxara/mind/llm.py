@@ -13,10 +13,13 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Multi-provider, selected by config:
 
-* :class:`AnthropicProvider` — Claude (anthropic SDK + ``ANTHROPIC_API_KEY``)
-* :class:`OpenAIProvider`    — GPT (openai SDK + ``OPENAI_API_KEY``)
-* :class:`LocalProvider`     — any OpenAI-compatible endpoint (e.g. Ollama, via httpx)
-* :class:`MockProvider`      — deterministic, offline; the always-available fallback
+* :class:`AnthropicProvider`   — Claude (anthropic SDK + ``ANTHROPIC_API_KEY``)
+* :class:`OpenAIProvider`      — GPT (openai SDK + ``OPENAI_API_KEY``)
+* :class:`GroqProvider`        — Groq cloud, OpenAI-compatible (e.g. ``openai/gpt-oss-120b`` + ``GROQ_API_KEY``)
+* :class:`LocalProvider`       — any OpenAI-compatible endpoint (e.g. Ollama, via httpx)
+* :class:`TransformersProvider`— any in-process HuggingFace model (open-source)
+* :class:`QwenProvider`        — Qwen3 open-source model, downloaded & run locally (HuggingFace)
+* :class:`MockProvider`        — deterministic, offline; the always-available fallback
 
 Each adapter imports its SDK lazily and reports ``available()`` honestly, so this
 module works with zero heavy deps installed (falling back to the mock).
@@ -49,8 +52,10 @@ __all__ = [
     "MockProvider",
     "AnthropicProvider",
     "OpenAIProvider",
+    "GroqProvider",
     "LocalProvider",
     "TransformersProvider",
+    "QwenProvider",
     "SelfProvider",
     "LLM",
 ]
@@ -349,6 +354,73 @@ class OpenAIProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# Groq provider — Groq cloud, OpenAI-compatible (e.g. openai/gpt-oss-120b)
+# --------------------------------------------------------------------------- #
+class GroqProvider(LLMProviderBase):
+    """Groq cloud inference via its OpenAI-compatible API.
+
+    Groq serves open-weight models (e.g. ``openai/gpt-oss-120b``) behind an
+    OpenAI-shaped endpoint, so we drive it with the already-present ``openai`` SDK
+    pointed at Groq's ``base_url`` — no extra dependency required. Stateless like every
+    other adapter: request in -> text out. Imports lazily and reports availability
+    honestly (SDK importable AND a key present), degrading to the mock otherwise.
+    """
+
+    name = "groq"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._client = None
+
+    def _key(self) -> Optional[str]:
+        import os
+        k = self.settings.llm.groq_api_key
+        return (k.get_secret_value() if k else None) or os.getenv("GROQ_API_KEY")
+
+    def available(self) -> bool:
+        try:
+            import openai  # noqa: F401 — Groq speaks the OpenAI wire protocol
+        except Exception:
+            return False
+        return bool(self._key())
+
+    def default_model(self) -> str:
+        return self.settings.llm.groq_model
+
+    def _ensure_client(self):
+        if self._client is None:
+            import openai
+            self._client = openai.OpenAI(
+                api_key=self._key(),
+                base_url=self.settings.llm.groq_base_url,
+            )
+        return self._client
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        client = self._ensure_client()
+        messages = req.provider_messages()
+        if req.system:
+            messages = [{"role": "system", "content": req.system}] + messages
+        kwargs: Dict[str, Any] = {
+            "model": model, "messages": messages, "temperature": req.temperature,
+            "max_tokens": req.max_tokens, "top_p": req.top_p,
+        }
+        if req.stop:
+            kwargs["stop"] = list(req.stop)
+        if req.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        if req.seed is not None:
+            kwargs["seed"] = req.seed
+        resp = client.chat.completions.create(**kwargs)
+        choice = resp.choices[0]
+        text = choice.message.content or ""
+        u = getattr(resp, "usage", None)
+        usage = Usage(prompt_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
+                      completion_tokens=getattr(u, "completion_tokens", 0) if u else 0)
+        return (text, choice.finish_reason or "stop", usage, resp)
+
+
+# --------------------------------------------------------------------------- #
 # Local provider — any OpenAI-compatible HTTP endpoint
 # --------------------------------------------------------------------------- #
 class LocalProvider(LLMProviderBase):
@@ -435,6 +507,91 @@ class TransformersProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# Qwen provider — Qwen3 open-source model, downloaded & run locally (HuggingFace)
+# --------------------------------------------------------------------------- #
+class QwenProvider(LLMProviderBase):
+    """Run an open-source **Qwen3** model in-process, downloaded via HuggingFace.
+
+    The model is fetched on first use (``Qwen/Qwen3-4B`` by default) and cached locally
+    by the ``transformers`` hub, then served entirely on this machine — no API key, no
+    network at inference time. Unlike the generic :class:`TransformersProvider` (which
+    flattens the prompt for tiny demo models), this adapter uses Qwen3's **chat template**
+    so multi-turn ``system``/``user``/``assistant`` messages are formatted correctly, and
+    optionally toggles Qwen3's *thinking* mode.
+
+    Heavy deps (``transformers`` + ``torch``) are imported lazily and reported honestly,
+    so a bare machine degrades to the mock rather than erroring. Stateless: the loaded
+    weights are a cached instrument, never conversation memory.
+    """
+
+    name = "qwen"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._model = None
+        self._tokenizer = None
+        self._loaded_name: Optional[str] = None
+
+    def available(self) -> bool:
+        try:
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def default_model(self) -> str:
+        return self.settings.llm.qwen_model
+
+    def _ensure_model(self, model: str):
+        if self._model is None or self._loaded_name != model:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            device = self.settings.llm.qwen_device or None
+            self._tokenizer = AutoTokenizer.from_pretrained(model)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model,
+                torch_dtype="auto",
+                device_map=device if device else "auto",
+            )
+            self._loaded_name = model
+            self._torch = torch
+        return self._model, self._tokenizer
+
+    def _build_messages(self, req: LLMRequest) -> List[Dict[str, str]]:
+        messages = req.provider_messages()
+        if req.system:
+            messages = [{"role": "system", "content": req.system}] + messages
+        return messages
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        lm, tok = self._ensure_model(model)
+        messages = self._build_messages(req)
+        text_in = tok.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=self.settings.llm.qwen_enable_thinking,
+        )
+        inputs = tok([text_in], return_tensors="pt").to(lm.device)
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": req.max_tokens,
+            "top_p": req.top_p,
+            "do_sample": req.temperature > 0,
+        }
+        if req.temperature > 0:
+            gen_kwargs["temperature"] = req.temperature
+        with self._torch.no_grad():
+            generated = lm.generate(**inputs, **gen_kwargs)
+        # keep only the newly-generated continuation, not the echoed prompt
+        new_tokens = generated[0][inputs["input_ids"].shape[1]:]
+        out = tok.decode(new_tokens, skip_special_tokens=True).strip()
+        usage = Usage(prompt_tokens=int(inputs["input_ids"].shape[1]),
+                      completion_tokens=int(new_tokens.shape[0]))
+        return (out, "stop", usage, {"qwen": True, "model": model})
+
+
+# --------------------------------------------------------------------------- #
 # Self provider — NYXARA's OWN model, trained & promoted by the foundry
 # --------------------------------------------------------------------------- #
 class SelfProvider(LLMProviderBase):
@@ -481,8 +638,10 @@ class SelfProvider(LLMProviderBase):
 _PROVIDER_CLASSES = {
     ProviderName.ANTHROPIC: AnthropicProvider,
     ProviderName.OPENAI: OpenAIProvider,
+    ProviderName.GROQ: GroqProvider,
     ProviderName.LOCAL: LocalProvider,
     ProviderName.TRANSFORMERS: TransformersProvider,
+    ProviderName.QWEN: QwenProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.MOCK: MockProvider,
 }
@@ -641,9 +800,11 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (no keys in TEST -> only mock/local)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    # the open-source + self-built providers are registered and degrade honestly
-    assert "transformers" in status and "self" in status
+    # the open-source + cloud + self-built providers are all registered and degrade honestly
+    for p in ("transformers", "qwen", "groq", "self"):
+        assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False     # no model trained/promoted yet on a bare machine
-    print("transformers/self    : registered; both unavailable on a bare machine ✓")
+    assert status["groq"] is False     # no GROQ_API_KEY in the TEST profile
+    print("qwen/groq/self       : registered; all unavailable on a bare keyless machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

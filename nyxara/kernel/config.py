@@ -86,8 +86,10 @@ class LLMProvider(str, Enum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    GROQ = "groq"                 # Groq cloud API (OpenAI-compatible); e.g. openai/gpt-oss-120b
     LOCAL = "local"               # OpenAI-compatible HTTP endpoint (e.g. Ollama)
     TRANSFORMERS = "transformers"  # in-process HuggingFace model (open-source)
+    QWEN = "qwen"                 # in-process Qwen3 open-source model, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     MOCK = "mock"
 
@@ -183,16 +185,24 @@ class LLMConfig(BaseModel):
     # Per-provider default models.
     anthropic_model: str = "claude-opus-4-8"
     openai_model: str = "gpt-4o"
+    # Groq cloud (OpenAI-compatible). GPT-OSS-120B is an open-weight model served by Groq.
+    groq_model: str = "openai/gpt-oss-120b"
     local_model: str = "local-default"
     # In-process open-source model loaded via HuggingFace transformers (optional dep).
     transformers_model: str = "sshleifer/tiny-gpt2"
     transformers_device: str = ""          # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # In-process Qwen3 open-source model, downloaded & run locally via HuggingFace.
+    qwen_model: str = "Qwen/Qwen3-4B"
+    qwen_device: str = ""                   # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    qwen_enable_thinking: bool = False      # Qwen3 thinking mode (slower; emits <think> traces)
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
 
     anthropic_api_key: Optional[SecretStr] = None
     openai_api_key: Optional[SecretStr] = None
+    groq_api_key: Optional[SecretStr] = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
     local_base_url: str = "http://127.0.0.1:11434/v1"
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -207,8 +217,10 @@ class LLMConfig(BaseModel):
         return {
             LLMProvider.ANTHROPIC: self.anthropic_model,
             LLMProvider.OPENAI: self.openai_model,
+            LLMProvider.GROQ: self.groq_model,
             LLMProvider.LOCAL: self.local_model,
             LLMProvider.TRANSFORMERS: self.transformers_model,
+            LLMProvider.QWEN: self.qwen_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.MOCK: "mock",
         }[self.provider]
@@ -218,6 +230,8 @@ class LLMConfig(BaseModel):
             return self.anthropic_api_key
         if self.provider is LLMProvider.OPENAI:
             return self.openai_api_key
+        if self.provider is LLMProvider.GROQ:
+            return self.groq_api_key
         return None
 
 
