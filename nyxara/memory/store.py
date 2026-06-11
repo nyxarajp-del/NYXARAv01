@@ -51,6 +51,8 @@ __all__ = [
     "MemoryType",
     "MemoryRecord",
     "HashingEmbedder",
+    "SentenceTransformerEmbedder",
+    "make_embedder",
     "VectorIndex",
     "MemoryStore",
     "has_numpy",
@@ -118,6 +120,49 @@ class HashingEmbedder:
             vec[idx] += sign
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
+
+
+class SentenceTransformerEmbedder:
+    """A learned semantic embedder (sentence-transformers), import-guarded.
+
+    Satisfies the same ``embed(text) -> list[float]`` shape as :class:`HashingEmbedder`,
+    but maps text into a *meaning* space rather than a lexical-overlap one, so recall is
+    semantic ("intrusion" finds "unauthorised login") instead of keyword-only. The model
+    is loaded lazily; :meth:`available` reports honestly so a bare machine degrades to the
+    hashing embedder rather than crashing.
+    """
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+                 device: str = "") -> None:
+        from sentence_transformers import SentenceTransformer  # lazy, optional dep
+        self.model_name = model_name
+        self._model = SentenceTransformer(model_name, device=device or None)
+        self.dim = int(self._model.get_sentence_embedding_dimension())
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            import sentence_transformers  # noqa: F401
+            return True
+        except Exception:  # pragma: no cover - depends on install
+            return False
+
+    def embed(self, text: str) -> List[float]:
+        vec = self._model.encode([text], normalize_embeddings=True)[0]
+        return [float(x) for x in vec]
+
+
+def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
+    """Build the configured embedder: learned-semantic when enabled & available, else hashing."""
+    s = settings or get_settings()
+    mc = s.memory
+    if getattr(mc, "semantic_embeddings", False) and SentenceTransformerEmbedder.available():
+        try:
+            return SentenceTransformerEmbedder(mc.embedding_model, mc.embedding_device)
+        except Exception:  # noqa: BLE001 — fall back rather than fail to boot
+            pass
+    dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128
+    return HashingEmbedder(dim=dim)
 
 
 # --------------------------------------------------------------------------- #
@@ -268,14 +313,13 @@ class MemoryStore:
     def __init__(
         self,
         *,
-        embedder: Optional[HashingEmbedder] = None,
+        embedder: Optional[Any] = None,
         settings: Optional[NyxaraSettings] = None,
         weights: Optional[_ScoreWeights] = None,
         on_evict: Optional[Callable[[MemoryRecord], None]] = None,
     ) -> None:
         self._settings = settings or get_settings()
-        dim = min(256, self._settings.memory.embedding_dim) if self._settings.memory.embedding_dim else 128
-        self.embedder = embedder or HashingEmbedder(dim=dim)
+        self.embedder = embedder or make_embedder(self._settings)
         self._index = VectorIndex(self.embedder.dim)
         self._kv: Dict[str, MemoryRecord] = {}
         self.weights = weights or _ScoreWeights()
