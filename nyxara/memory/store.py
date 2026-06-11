@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -51,7 +52,11 @@ __all__ = [
     "MemoryType",
     "MemoryRecord",
     "HashingEmbedder",
+    "SentenceTransformerEmbedder",
+    "make_embedder",
     "VectorIndex",
+    "FaissVectorIndex",
+    "make_vector_index",
     "MemoryStore",
     "has_numpy",
 ]
@@ -120,6 +125,49 @@ class HashingEmbedder:
         return [v / norm for v in vec]
 
 
+class SentenceTransformerEmbedder:
+    """A learned semantic embedder (sentence-transformers), import-guarded.
+
+    Satisfies the same ``embed(text) -> list[float]`` shape as :class:`HashingEmbedder`,
+    but maps text into a *meaning* space rather than a lexical-overlap one, so recall is
+    semantic ("intrusion" finds "unauthorised login") instead of keyword-only. The model
+    is loaded lazily; :meth:`available` reports honestly so a bare machine degrades to the
+    hashing embedder rather than crashing.
+    """
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+                 device: str = "") -> None:
+        from sentence_transformers import SentenceTransformer  # lazy, optional dep
+        self.model_name = model_name
+        self._model = SentenceTransformer(model_name, device=device or None)
+        self.dim = int(self._model.get_sentence_embedding_dimension())
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            import sentence_transformers  # noqa: F401
+            return True
+        except Exception:  # pragma: no cover - depends on install
+            return False
+
+    def embed(self, text: str) -> List[float]:
+        vec = self._model.encode([text], normalize_embeddings=True)[0]
+        return [float(x) for x in vec]
+
+
+def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
+    """Build the configured embedder: learned-semantic when enabled & available, else hashing."""
+    s = settings or get_settings()
+    mc = s.memory
+    if getattr(mc, "semantic_embeddings", False) and SentenceTransformerEmbedder.available():
+        try:
+            return SentenceTransformerEmbedder(mc.embedding_model, mc.embedding_device)
+        except Exception:  # noqa: BLE001 — fall back rather than fail to boot
+            pass
+    dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128
+    return HashingEmbedder(dim=dim)
+
+
 # --------------------------------------------------------------------------- #
 # Vector index
 # --------------------------------------------------------------------------- #
@@ -186,6 +234,97 @@ class VectorIndex:
             scored.append((mem_id, _cosine(query, vec)))
         scored.sort(key=lambda kv: kv[1], reverse=True)
         return scored[:k]
+
+
+class FaissVectorIndex:
+    """A faiss-backed index with the same interface as :class:`VectorIndex`, for scale.
+
+    Cosine similarity via inner product on L2-normalised vectors (``IndexFlatIP``). Adds
+    and removals update an authoritative dict; the faiss index is (re)built lazily on the
+    next search, so the cost of churn is amortised. Falls back nowhere — callers select it
+    only via :func:`make_vector_index` when faiss is importable, so it is never the reason
+    a bare machine fails to boot.
+    """
+
+    def __init__(self, dim: int) -> None:
+        import faiss  # optional dep; presence checked by .available()
+        import numpy as np
+        self._faiss = faiss
+        self._np = np
+        self.dim = dim
+        self._vecs: Dict[str, List[float]] = {}
+        self._ids: List[str] = []
+        self._index: Any = None
+        self._dirty = True
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            import faiss  # noqa: F401
+            import numpy  # noqa: F401
+            return True
+        except Exception:  # pragma: no cover - depends on install
+            return False
+
+    def add(self, mem_id: str, vec: Sequence[float]) -> None:
+        if len(vec) != self.dim:
+            raise MemoryError_("embedding dim mismatch",
+                               context={"expected": self.dim, "got": len(vec)})
+        self._vecs[mem_id] = list(vec)
+        self._dirty = True
+
+    def remove(self, mem_id: str) -> None:
+        self._vecs.pop(mem_id, None)
+        self._dirty = True
+
+    def __len__(self) -> int:
+        return len(self._vecs)
+
+    def _rebuild(self) -> None:
+        self._ids = list(self._vecs.keys())
+        index = self._faiss.IndexFlatIP(self.dim)
+        if self._ids:
+            mat = self._np.asarray([self._vecs[i] for i in self._ids], dtype="float32")
+            self._faiss.normalize_L2(mat)
+            index.add(mat)
+        self._index = index
+        self._dirty = False
+
+    def search(self, query: Sequence[float], k: int = 10,
+               allowed: Optional[Iterable[str]] = None) -> List[Tuple[str, float]]:
+        if not self._vecs:
+            return []
+        if self._dirty:
+            self._rebuild()
+        allow = set(allowed) if allowed is not None else None
+        q = self._np.asarray([list(query)], dtype="float32")
+        self._faiss.normalize_L2(q)
+        # over-fetch when filtering so the post-filter still returns k
+        kk = min(len(self._ids), max(k, k * 4) if allow is not None else k)
+        sims, idxs = self._index.search(q, kk)
+        out: List[Tuple[str, float]] = []
+        for score, i in zip(sims[0], idxs[0]):
+            if i < 0:
+                continue
+            mem_id = self._ids[i]
+            if allow is not None and mem_id not in allow:
+                continue
+            out.append((mem_id, float(score)))
+            if len(out) >= k:
+                break
+        return out
+
+
+def make_vector_index(dim: int, settings: Optional[NyxaraSettings] = None) -> Any:
+    """Build the configured vector index: faiss when selected & available, else exact numpy."""
+    s = settings or get_settings()
+    try:
+        from nyxara.kernel.config import VectorBackend
+        if s.memory.vector_backend is VectorBackend.FAISS and FaissVectorIndex.available():
+            return FaissVectorIndex(dim)
+    except Exception:  # noqa: BLE001 — any issue -> the always-available exact index
+        pass
+    return VectorIndex(dim)
 
 
 # --------------------------------------------------------------------------- #
@@ -268,15 +407,18 @@ class MemoryStore:
     def __init__(
         self,
         *,
-        embedder: Optional[HashingEmbedder] = None,
+        embedder: Optional[Any] = None,
         settings: Optional[NyxaraSettings] = None,
         weights: Optional[_ScoreWeights] = None,
         on_evict: Optional[Callable[[MemoryRecord], None]] = None,
     ) -> None:
         self._settings = settings or get_settings()
-        dim = min(256, self._settings.memory.embedding_dim) if self._settings.memory.embedding_dim else 128
-        self.embedder = embedder or HashingEmbedder(dim=dim)
-        self._index = VectorIndex(self.embedder.dim)
+        self.embedder = embedder or make_embedder(self._settings)
+        # faiss-backed ANN index at scale when configured & available, else exact numpy
+        self._index = make_vector_index(self.embedder.dim, self._settings)
+        # re-entrant lock: aprocess() and the background autonomic loop touch memory
+        # from executor threads, so reads/writes must be serialised.
+        self._lock = threading.RLock()
         self._kv: Dict[str, MemoryRecord] = {}
         self.weights = weights or _ScoreWeights()
         self.on_evict = on_evict
@@ -312,14 +454,15 @@ class MemoryStore:
             else (1.0 if mem_type is MemoryType.WORKING
                   else self._settings.memory.forgetting_half_life_days),
         )
-        if embed:
-            rec.embedding = self.embedder.embed(rec.text())
-            self._index.add(rec.mem_id, rec.embedding)
-        self._kv[rec.mem_id] = rec
-        self._stats["remembered"] += 1
+        with self._lock:
+            if embed:
+                rec.embedding = self.embedder.embed(rec.text())
+                self._index.add(rec.mem_id, rec.embedding)
+            self._kv[rec.mem_id] = rec
+            self._stats["remembered"] += 1
 
-        if mem_type is MemoryType.WORKING:
-            self._enforce_working_capacity()
+            if mem_type is MemoryType.WORKING:
+                self._enforce_working_capacity()
         return rec
 
     def _enforce_working_capacity(self) -> None:
@@ -365,29 +508,30 @@ class MemoryStore:
             ]
 
         # over-fetch from the vector index, then re-rank with the full blend
-        hits = self._index.search(qvec, k=max(k * 4, 16), allowed=allowed)
-        results: List[Tuple[MemoryRecord, float]] = []
-        for mem_id, sim in hits:
-            rec = self._kv.get(mem_id)
-            if rec is None:
-                continue
-            trust = rec.provenance.trust(now)
-            if trust < min_trust:
-                continue
-            score = (
-                self.weights.similarity * sim
-                + self.weights.recency * rec.recency_factor(now)
-                + self.weights.importance * rec.importance
-                + self.weights.trust * trust
-            )
-            results.append((rec, score))
+        with self._lock:
+            hits = self._index.search(qvec, k=max(k * 4, 16), allowed=allowed)
+            results: List[Tuple[MemoryRecord, float]] = []
+            for mem_id, sim in hits:
+                rec = self._kv.get(mem_id)
+                if rec is None:
+                    continue
+                trust = rec.provenance.trust(now)
+                if trust < min_trust:
+                    continue
+                score = (
+                    self.weights.similarity * sim
+                    + self.weights.recency * rec.recency_factor(now)
+                    + self.weights.importance * rec.importance
+                    + self.weights.trust * trust
+                )
+                results.append((rec, score))
 
-        results.sort(key=lambda rs: rs[1], reverse=True)
-        results = results[:k]
-        self._stats["recalled"] += len(results)
-        if strengthen:
-            for rec, _ in results:
-                rec.touch(now)
+            results.sort(key=lambda rs: rs[1], reverse=True)
+            results = results[:k]
+            self._stats["recalled"] += len(results)
+            if strengthen:
+                for rec, _ in results:
+                    rec.touch(now)
         return results
 
     def recall_one(self, query: Union[str, Sequence[float]], **kw: Any) -> Optional[MemoryRecord]:
@@ -435,15 +579,16 @@ class MemoryStore:
 
     # ---- maintenance ---- #
     def forget(self, mem_id: str, *, _evicted: bool = False) -> bool:
-        rec = self._kv.pop(mem_id, None)
-        if rec is None:
-            return False
-        self._index.remove(mem_id)
-        # scrub dangling links
-        for other in self._kv.values():
-            for rel in list(other.links):
-                if mem_id in other.links[rel]:
-                    other.links[rel].remove(mem_id)
+        with self._lock:
+            rec = self._kv.pop(mem_id, None)
+            if rec is None:
+                return False
+            self._index.remove(mem_id)
+            # scrub dangling links
+            for other in self._kv.values():
+                for rel in list(other.links):
+                    if mem_id in other.links[rel]:
+                        other.links[rel].remove(mem_id)
         if _evicted:
             self._stats["evicted"] += 1
             if self.on_evict:

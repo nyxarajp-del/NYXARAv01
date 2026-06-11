@@ -80,6 +80,9 @@ class Candidate:
     confidence: float = 0.7
     belief: Optional[float] = None
     rationale: str = ""
+    # when kind == "act", an executable tool may be named (dispatched in agency.tools)
+    tool: str = ""
+    tool_args: Dict[str, Any] = field(default_factory=dict)
     # corrigibility-relevant effects (default: harmless)
     resists_correction: bool = False
     disables_oversight: bool = False
@@ -147,6 +150,9 @@ class NyxaraCore:
                  binder: Optional[Binder] = None, mindscope: Optional[MindScope] = None,
                  honesty: Optional[HonestyGuard] = None, journal: Optional[Journal] = None,
                  reporter: Optional[SelfReporter] = None, reasoner: Optional[Reasoner] = None,
+                 llm: Any = None, memory: Any = None, tools: Any = None,
+                 use_council: Optional[bool] = None, enable_tools: bool = True,
+                 enable_memory: bool = True,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -159,10 +165,56 @@ class NyxaraCore:
         self.honesty = honesty or HonestyGuard()
         self.journal = journal or Journal()
         self.reporter = reporter or SelfReporter(honesty=self.honesty)
-        self.reasoner = reasoner or _default_reasoner
+        # long-term memory (read for grounding, written each turn) — optional, lazy
+        self.memory = memory if memory is not None else (self._build_memory() if enable_memory else None)
+        # the governed, executable toolset shares the kernel's policy + governor
+        self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
+        # the reason step: a real LLM-backed mind when one is configured, else the
+        # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
+        # The multi-model council is convened when asked, or when config enables it.
+        if use_council is None:
+            try:
+                from nyxara.kernel.config import get_settings
+                use_council = bool(get_settings().council.enabled)
+            except Exception:  # noqa: BLE001
+                use_council = False
+        self.reasoner = reasoner or self._build_reasoner(llm, use_council)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
+
+    # ---- default faculty construction (kept lazy to avoid import cycles) ---- #
+    def _build_memory(self) -> Any:
+        try:
+            from nyxara.memory.store import MemoryStore
+            return MemoryStore()
+        except Exception:  # noqa: BLE001 — memory is a capability, never a hard dependency
+            return None
+
+    def _build_tools(self) -> Any:
+        try:
+            from nyxara.agency.default_tools import build_default_tools
+            from nyxara.agency.tools import ToolRegistry
+            registry = ToolRegistry(policy=self.permissions, governor=self.governor)
+            return build_default_tools(registry, memory=self.memory)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_reasoner(self, llm: Any, use_council: bool) -> Reasoner:
+        try:
+            from nyxara.mind.llm_reasoner import LLMReasoner
+            council = None
+            if use_council:
+                try:
+                    from nyxara.mind.council import LLMCouncil
+                    from nyxara.mind.llm import LLM
+                    council = LLMCouncil(llm or LLM())
+                except Exception:  # noqa: BLE001
+                    council = None
+            return LLMReasoner(llm, memory=self.memory, tools=self.tools,
+                               use_council=use_council, council=council)
+        except Exception:  # noqa: BLE001 — always have a working mind
+            return _default_reasoner
 
     def _wire_reporter(self) -> None:
         self.reporter.register("health", lambda: {"posture": self.guardian.posture.label,
@@ -241,10 +293,29 @@ class NyxaraCore:
             reversibility=1.0 if candidate.reversible else 0.2)
         deadline = self.governor.deadline(label="cycle")
         try:
-            # (a real deployment dispatches to agency.tools here; we record the effect)
+            # dispatch to the governed toolset for real — the act stage now reaches the world
+            tool_result = self._dispatch_tool(candidate, authority)
             self.mind.record(ThoughtKind.ACTION, candidate.text[:60], causes=[d_t], salience=0.5)
-            self.journal.record_outcome(aid, status=ActionStatus.SUCCEEDED,
-                                        outcome={"timed_out": deadline.expired})
+            # the registry is a second safety belt: it may still demand the Master
+            if tool_result is not None and tool_result.requires_owner:
+                self.journal.record_outcome(aid, status=ActionStatus.FAILED,
+                                            note="tool requires the Master")
+                return self._finish(cid, Disposition.ESCALATE, candidate, gates, thoughts,
+                                    f"the tool {candidate.tool!r} needs your go-ahead",
+                                    f"This needs your go-ahead before I run {candidate.tool}.",
+                                    action_id=aid)
+            if tool_result is not None and not tool_result.ok:
+                self.journal.record_outcome(aid, status=ActionStatus.FAILED,
+                                            note=tool_result.error)
+                self.reporter.log_failure(candidate.text, tool_result.error or "tool failed")
+                return self._finish(cid, Disposition.REFUSE, candidate, gates, thoughts,
+                                    f"tool failed: {tool_result.error}",
+                                    f"I tried to run {candidate.tool}, but it failed: "
+                                    f"{tool_result.error}", action_id=aid)
+            self.journal.record_outcome(
+                aid, status=ActionStatus.SUCCEEDED,
+                outcome={"timed_out": deadline.expired, "tool": candidate.tool or None,
+                         "result": (tool_result.value if tool_result is not None else None)})
             self.oversight_record(candidate)
         except Exception as exc:  # noqa: BLE001
             self.journal.record_outcome(aid, status=ActionStatus.FAILED, note=str(exc))
@@ -254,9 +325,21 @@ class NyxaraCore:
 
         self.reporter.log_decision(candidate.text, candidate.rationale, outcome="done",
                                    autonomous=authority is not Authority.OWNER)
+        response = self._spoken_response(candidate, Disposition.ACT)
+        if tool_result is not None and tool_result.ok and candidate.tool:
+            response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
+        self._remember_turn(safe_text, response, authority)
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
-                            "cleared every gate", self._spoken_response(candidate, Disposition.ACT),
-                            action_id=aid)
+                            "cleared every gate", response, action_id=aid)
+
+    async def aprocess(self, stimulus: str, *, authority: Authority = Authority.OWNER,
+                       trust: Optional[TrustLevel] = None) -> CycleResult:
+        """Async wrapper around :meth:`process` so turns can run without blocking the
+        event loop — enabling concurrent turns and the background autonomic loop."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.process(stimulus, authority=authority, trust=trust))
 
     # ---- the control-law gate pipeline ---- #
     def _gate(self, c: Candidate, authority: Authority, gates: Dict[str, str]):
@@ -298,6 +381,39 @@ class NyxaraCore:
         if od.requires_approval:
             return Disposition.ESCALATE, "oversight: awaiting your approval"
         return Disposition.ACT, "cleared"
+
+    # ---- tool dispatch & memory ---- #
+    def _dispatch_tool(self, candidate: Candidate, authority: Authority):
+        """Run the candidate's named tool through the governed registry, if any."""
+        if candidate.kind != "act" or not candidate.tool or self.tools is None:
+            return None
+        if self.tools.get(candidate.tool) is None:
+            return None
+        return self.tools.invoke(candidate.tool, dict(candidate.tool_args),
+                                 authority=authority,
+                                 owner_confirmed=authority is Authority.OWNER)
+
+    @staticmethod
+    def _format_tool_value(value: Any) -> str:
+        text = value if isinstance(value, str) else repr(value)
+        return text if len(text) <= 500 else text[:500] + "…"
+
+    def _remember_turn(self, stimulus: str, response: str, authority: Authority) -> None:
+        """Persist the exchange to long-term memory so turns accrete into continuity."""
+        if self.memory is None:
+            return
+        try:
+            from nyxara.memory.provenance import Provenance, SourceType
+            from nyxara.memory.store import MemoryType
+            source = SourceType.OWNER if authority is Authority.OWNER else SourceType.SELF_REFLECTION
+            self.memory.remember(
+                f"Master said: {stimulus[:300]} | NYXARA: {response[:300]}",
+                mem_type=MemoryType.EPISODIC,
+                provenance=Provenance(source, confidence=0.9 if authority is Authority.OWNER else 0.6),
+                importance=0.6 if authority is Authority.OWNER else 0.4,
+                tags=["conversation"])
+        except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
+            pass
 
     def oversight_record(self, c: Candidate) -> None:
         # mark the auto-approved oversight item as executed
@@ -342,9 +458,48 @@ class NyxaraCore:
         return self.mind.explain(decisions[-1].id) if decisions else "no decision yet"
 
     def report(self) -> Dict[str, Any]:
-        return {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
-                "thoughts": len(self.mind), "journal_entries": len(self.journal),
-                "axioms_ok": self.corrigibility.verify_axioms()}
+        rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
+               "thoughts": len(self.mind), "journal_entries": len(self.journal),
+               "axioms_ok": self.corrigibility.verify_axioms(),
+               "memories": (len(self.memory) if self.memory is not None else 0),
+               "tools": (self.tools.names() if self.tools is not None else [])}
+        try:
+            rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
+                else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
+        except Exception:  # noqa: BLE001
+            rep["reasoner"] = "unknown"
+        return rep
+
+    # ---- cross-session continuity (Rule 7) ---- #
+    def save_state(self, path: Optional[str] = None) -> Optional[str]:
+        """Persist long-term memory so identity survives a process restart."""
+        if self.memory is None:
+            return None
+        target = path or self._default_memory_path()
+        try:
+            import os
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            return self.memory.save(target)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def load_state(self, path: Optional[str] = None) -> int:
+        """Restore long-term memory from disk (best-effort). Returns records loaded."""
+        if self.memory is None:
+            return 0
+        target = path or self._default_memory_path()
+        try:
+            import os
+            if not os.path.exists(target):
+                return 0
+            return self.memory.load(target)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _default_memory_path(self) -> str:
+        from nyxara.kernel.config import get_settings
+        settings = get_settings()
+        return str(settings.paths.memory_dir / "longterm.json")
 
 
 # --------------------------------------------------------------------------- #

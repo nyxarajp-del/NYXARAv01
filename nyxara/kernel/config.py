@@ -297,6 +297,12 @@ class MemoryConfig(BaseModel):
 
     vector_backend: VectorBackend = VectorBackend.NUMPY
     embedding_dim: int = Field(default=768, ge=8, le=8192)
+    # Learned semantic embeddings (opt-in; needs the optional sentence-transformers dep).
+    # Off by default so a bare machine uses the always-available hashing embedder and
+    # persisted vectors keep a stable dimension across restarts.
+    semantic_embeddings: bool = False
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_device: str = ""             # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
     working_memory_slots: int = Field(default=7, ge=1, le=64)  # Miller's 7±2
     episodic_capacity: int = Field(default=100_000, ge=100)
     consolidation_interval_s: float = Field(default=3600.0, gt=0)

@@ -18,6 +18,7 @@ Or run the interactive console with ``python -m nyxara`` (see
 from __future__ import annotations
 
 from nyxara.agency.permissions import Authority
+from nyxara.kernel.autonomic import AutonomicLoop
 from nyxara.kernel.orchestrator import (
     Candidate,
     CycleResult,
@@ -34,4 +35,5 @@ __all__ = [
     "Disposition",
     "Candidate",
     "CycleResult",
+    "AutonomicLoop",
 ]
