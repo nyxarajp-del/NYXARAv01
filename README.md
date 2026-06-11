@@ -69,18 +69,23 @@ The sovereign cycle is fully wired end to end:
   machine (so behaviour is identical and crash-free out of the box). The mind proposes; the
   kernel still disposes.
 * **Act** — cleared action candidates dispatch to a **governed, executable toolset**
-  (`agency/default_tools.py`: time, arithmetic, file read/write, web fetch, memory) through
-  the registry's full safety pipeline — real effects, not recorded intents.
+  (`agency/default_tools.py`) through the registry's full safety pipeline — real effects,
+  not recorded intents. Defaults include time, arithmetic, file read/write/list, a
+  SSRF-guarded + injection-sanitised **web fetch**, a live **web search**, **multimodal
+  perception** (image inspect/OCR, audio transcribe, document ingest), and memory.
 * **Remember** — every turn accretes into long-term memory; `save_state()` / `load_state()`
   give continuity across restarts.
 * **Council** — set `NYXARA_COUNCIL__ENABLED=true` to convene the multi-model panel for
   replies; NYXARA judges.
-* **Background mind** — `AutonomicLoop` runs self-directed reflective turns on its own
-  cadence through the *same* gates (risky proposals escalate, never auto-act):
+* **Background mind & self-improvement** — `AutonomicLoop` runs self-directed reflective
+  turns on its own cadence through the *same* gates (risky proposals escalate, never
+  auto-act), and every `growth_every` ticks runs a **learning pass** (`growth/autolearn.py`):
+  reflect on the journal → mine lessons into semantic memory → consolidate → (opt-in,
+  gauntlet-gated) retrain her own model.
 
   ```python
   from nyxara import NyxaraCore, AutonomicLoop
-  loop = AutonomicLoop(NyxaraCore(), interval_s=30.0)
+  loop = AutonomicLoop(NyxaraCore(), interval_s=30.0, growth_every=10)
   loop.run_for(3)          # synchronous, bounded
   # or loop.start() inside an asyncio event loop for a true background task
   ```
