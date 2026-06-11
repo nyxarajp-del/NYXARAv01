@@ -332,6 +332,15 @@ class NyxaraCore:
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
                             "cleared every gate", response, action_id=aid)
 
+    async def aprocess(self, stimulus: str, *, authority: Authority = Authority.OWNER,
+                       trust: Optional[TrustLevel] = None) -> CycleResult:
+        """Async wrapper around :meth:`process` so turns can run without blocking the
+        event loop — enabling concurrent turns and the background autonomic loop."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.process(stimulus, authority=authority, trust=trust))
+
     # ---- the control-law gate pipeline ---- #
     def _gate(self, c: Candidate, authority: Authority, gates: Dict[str, str]):
         # corrigibility — never act in a way that resists correction
