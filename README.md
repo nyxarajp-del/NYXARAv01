@@ -54,7 +54,36 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/pause`          | pause the loop                                        |
 | `/scram [reason]` | emergency stop — the loop HALTs until resumed          |
 | `/resume`         | restore the loop after a pause/scram                  |
+| `/save`           | persist long-term memory to disk now                  |
 | `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
+
+The console **restores long-term memory on boot and saves it on exit**, so NYXARA's
+identity accretes across sessions (Rule 7) instead of booting amnesiac.
+
+### What runs inside the loop
+
+The sovereign cycle is fully wired end to end:
+
+* **Reason** — an LLM-backed reasoner (`mind/llm_reasoner.py`) proposes the candidate when
+  a real provider is configured, and falls back to a deterministic stand-in on a keyless
+  machine (so behaviour is identical and crash-free out of the box). The mind proposes; the
+  kernel still disposes.
+* **Act** — cleared action candidates dispatch to a **governed, executable toolset**
+  (`agency/default_tools.py`: time, arithmetic, file read/write, web fetch, memory) through
+  the registry's full safety pipeline — real effects, not recorded intents.
+* **Remember** — every turn accretes into long-term memory; `save_state()` / `load_state()`
+  give continuity across restarts.
+* **Council** — set `NYXARA_COUNCIL__ENABLED=true` to convene the multi-model panel for
+  replies; NYXARA judges.
+* **Background mind** — `AutonomicLoop` runs self-directed reflective turns on its own
+  cadence through the *same* gates (risky proposals escalate, never auto-act):
+
+  ```python
+  from nyxara import NyxaraCore, AutonomicLoop
+  loop = AutonomicLoop(NyxaraCore(), interval_s=30.0)
+  loop.run_for(3)          # synchronous, bounded
+  # or loop.start() inside an asyncio event loop for a true background task
+  ```
 
 ### Use it as a library
 
