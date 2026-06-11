@@ -1,0 +1,194 @@
+"""NYXARA · agency/default_tools.py — a small, safe, real default toolset (⚙).
+
+A mind that can only talk is half a mind. This module hands NYXARA a handful of
+*actually executable* tools so the sovereign loop's **act** stage reaches into the
+world for real (governed, typed, capability-bound) instead of merely recording an
+intent. Every tool here is deliberately conservative:
+
+* read-only / low-blast-radius by default (time, arithmetic, file reads, memory);
+* the few that write are typed and capability-bound so the kernel's gates and the
+  registry's safety pipeline still decide whether they may run;
+* heavy/optional reach (the network) is import-guarded and fails as data, never as a
+  crash.
+
+These are *defaults* — :func:`build_default_tools` registers them onto any
+:class:`~nyxara.agency.tools.ToolRegistry`, and a deployment can add, remove, or
+override freely. The registry, not this module, enforces permission/governance.
+"""
+
+from __future__ import annotations
+
+import ast
+import operator
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from nyxara.agency.permissions import Capability, RiskTier
+from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
+
+__all__ = ["build_default_tools", "safe_calculate"]
+
+# --------------------------------------------------------------------------- #
+# A safe arithmetic evaluator (no builtins, no names, no attribute access)
+# --------------------------------------------------------------------------- #
+_BIN_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+    ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod, ast.Pow: operator.pow,
+}
+_UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+
+def safe_calculate(expression: str) -> float:
+    """Evaluate a pure-arithmetic expression with no access to names or builtins."""
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in _BIN_OPS:
+            return _BIN_OPS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
+            return _UNARY_OPS[type(node.op)](_eval(node.operand))
+        raise ValueError(f"unsupported expression element: {type(node).__name__}")
+
+    tree = ast.parse(expression, mode="eval")
+    return _eval(tree)
+
+
+# --------------------------------------------------------------------------- #
+# Builder
+# --------------------------------------------------------------------------- #
+def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
+                        max_read_bytes: int = 200_000) -> ToolRegistry:
+    """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
+
+    ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
+    ``recall_memory`` / ``remember_fact`` tools to her actual long-term store.
+    """
+    existing = set(registry.names())
+
+    def _add(spec: ToolSpec) -> None:
+        if spec.name not in existing:
+            registry.register(spec)
+
+    # ---- time: trivial, read-only ---- #
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    _add(ToolSpec("now", handler=_now, description="current UTC time (ISO-8601)",
+                  capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+    # ---- arithmetic: safe, no eval of names/builtins ---- #
+    _add(ToolSpec("calculate", handler=safe_calculate,
+                  description="evaluate a pure-arithmetic expression, e.g. '2*(3+4)'",
+                  params=[ToolParam("expression", "str", description="arithmetic only")],
+                  capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+    # ---- filesystem reads: low risk, scoped by target ---- #
+    def _read_file(path: str) -> str:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read(max_read_bytes)
+
+    _add(ToolSpec("read_file", handler=_read_file,
+                  description="read a UTF-8 text file (truncated to a safe size)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _list_dir(path: str = ".") -> List[str]:
+        return sorted(os.listdir(path))
+
+    _add(ToolSpec("list_dir", handler=_list_dir,
+                  description="list the entries of a directory",
+                  params=[ToolParam("path", "str", required=False, default=".")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    # ---- filesystem write: moderate, capability-bound ---- #
+    def _write_file(path: str, content: str) -> str:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"wrote {len(content)} chars to {path}"
+
+    _add(ToolSpec("write_file", handler=_write_file,
+                  description="write UTF-8 text to a file (overwrites)",
+                  params=[ToolParam("path", "str"), ToolParam("content", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    # ---- network fetch: import-guarded, fails as data ---- #
+    def _web_fetch(url: str) -> str:
+        try:
+            import httpx  # optional dep
+        except Exception as exc:  # pragma: no cover - depends on install
+            raise RuntimeError(f"web fetch unavailable (install httpx): {exc}")
+        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            return r.text[:max_read_bytes]
+
+    _add(ToolSpec("web_fetch", handler=_web_fetch,
+                  description="fetch the text body of an HTTP(S) URL",
+                  params=[ToolParam("url", "str")],
+                  capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
+                  target_param="url"))
+
+    # ---- memory tools: wired only when a store is provided ---- #
+    if memory is not None:
+        def _recall_memory(query: str, k: int = 5) -> List[str]:
+            return [rec.text()[:300] for rec, _ in memory.recall(query, k=k)]
+
+        _add(ToolSpec("recall_memory", handler=_recall_memory,
+                      description="search NYXARA's long-term memory for relevant records",
+                      params=[ToolParam("query", "str"),
+                              ToolParam("k", "int", required=False, default=5)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        def _remember_fact(text: str, importance: float = 0.6) -> str:
+            from nyxara.memory.store import MemoryType
+            rec = memory.remember(text, mem_type=MemoryType.SEMANTIC,
+                                  importance=max(0.0, min(1.0, importance)))
+            return rec.mem_id
+
+        _add(ToolSpec("remember_fact", handler=_remember_fact,
+                      description="commit a fact to NYXARA's semantic long-term memory",
+                      params=[ToolParam("text", "str"),
+                              ToolParam("importance", "float", required=False, default=0.6)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+    return registry
+
+
+# --------------------------------------------------------------------------- #
+# Self-test / demo
+# --------------------------------------------------------------------------- #
+if __name__ == "__main__":  # pragma: no cover
+    from nyxara.agency.permissions import Authority
+
+    print("=" * 70)
+    print("NYXARA default-tools self-test")
+    print("=" * 70)
+
+    reg = build_default_tools(ToolRegistry())
+    print(f"\nregistered tools    : {reg.names()}")
+
+    r = reg.invoke("calculate", {"expression": "2*(3+4)"}, authority=Authority.OWNER)
+    print(f"calculate 2*(3+4)   : ok={r.ok} value={r.value}")
+    assert r.ok and r.value == 14.0
+
+    r = reg.invoke("now", {}, authority=Authority.OWNER)
+    print(f"now                 : ok={r.ok} value={r.value}")
+    assert r.ok and "T" in r.value
+
+    # arithmetic evaluator rejects anything that isn't arithmetic
+    rejected = False
+    try:
+        safe_calculate("__import__('os').system('echo hi')")
+    except Exception:
+        rejected = True
+    assert rejected
+    print("calc injection guard: rejected non-arithmetic ✓")
+
+    print("\nALL SELF-TESTS PASSED ✓")
