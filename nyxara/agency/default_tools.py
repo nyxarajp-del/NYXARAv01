@@ -118,22 +118,48 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
                   reversible=False, target_param="path"))
 
-    # ---- network fetch: import-guarded, fails as data ---- #
+    # ---- network fetch: SSRF-guarded, injection-sanitised (senses/web), fails as data ---- #
     def _web_fetch(url: str) -> str:
-        try:
-            import httpx  # optional dep
-        except Exception as exc:  # pragma: no cover - depends on install
-            raise RuntimeError(f"web fetch unavailable (install httpx): {exc}")
-        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-            r = client.get(url)
-            r.raise_for_status()
-            return r.text[:max_read_bytes]
+        from nyxara.senses.web import Web  # SSRF guards + prompt-injection sanitiser + caching
+        page = Web().page(url)
+        # sanitized_text strips injection patterns from untrusted web content (defense in depth)
+        return page.sanitized_text()[:max_read_bytes]
 
     _add(ToolSpec("web_fetch", handler=_web_fetch,
-                  description="fetch the text body of an HTTP(S) URL",
+                  description="fetch & sanitise the readable text of an HTTP(S) page",
                   params=[ToolParam("url", "str")],
                   capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
                   target_param="url"))
+
+    # ---- web search: live results via DuckDuckGo's instant-answer API ---- #
+    def _web_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+        import json
+        import urllib.parse
+        from nyxara.senses.web import WebFetcher
+        q = urllib.parse.quote(query)
+        url = (f"https://api.duckduckgo.com/?q={q}"
+               "&format=json&no_html=1&no_redirect=1&skip_disambig=1")
+        res = WebFetcher().fetch(url)
+        if not res.ok:
+            raise RuntimeError(res.error or f"search failed (HTTP {res.status})")
+        data = json.loads(res.body)
+        out: List[Dict[str, str]] = []
+        if data.get("AbstractText"):
+            out.append({"title": data.get("Heading", ""),
+                        "text": data["AbstractText"], "url": data.get("AbstractURL", "")})
+        for topic in data.get("RelatedTopics", []):
+            if len(out) >= max_results:
+                break
+            if isinstance(topic, dict) and topic.get("Text"):
+                out.append({"title": "", "text": topic["Text"],
+                            "url": topic.get("FirstURL", "")})
+        return out[:max_results]
+
+    _add(ToolSpec("web_search", handler=_web_search,
+                  description="search the web and return titled result snippets with URLs",
+                  params=[ToolParam("query", "str"),
+                          ToolParam("max_results", "int", required=False, default=5)],
+                  capability=Capability.NET_OUT, risk=RiskTier.LOW))
 
     # ---- memory tools: wired only when a store is provided ---- #
     if memory is not None:

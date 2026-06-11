@@ -68,6 +68,19 @@ def test_async_background_task_bounded():
     assert loop.ticks == 3 and not loop.running
 
 
+def test_periodic_growth_runs():
+    loop = _loop(growth_every=2)
+    loop.run_for(4)
+    assert loop.report()["growth_passes"] == 2
+    assert len(loop.growth_reports) == 2
+
+
+def test_no_growth_when_disabled():
+    loop = _loop()  # growth_every defaults to 0
+    loop.run_for(4)
+    assert loop.report()["growth_passes"] == 0
+
+
 def test_aprocess_matches_process():
     core = NyxaraCore()
 

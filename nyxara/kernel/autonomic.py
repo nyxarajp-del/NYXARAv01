@@ -50,11 +50,33 @@ class AutonomicLoop:
     interval_s: float = 30.0
     prompts: Sequence[str] = field(default_factory=lambda: tuple(DEFAULT_PROMPTS))
     authority: Authority = Authority.AUTONOMOUS
+    growth_every: int = 0                 # run a learning pass every N ticks (0 = never)
+    growth_engine: Any = None
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[CycleResult] = field(default_factory=list)
+    growth_reports: List[Any] = field(default_factory=list)
     ticks: int = 0
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        # auto-build a growth engine bound to this core when periodic learning is requested
+        if self.growth_every and self.growth_engine is None:
+            try:
+                from nyxara.growth.autolearn import GrowthEngine
+                self.growth_engine = GrowthEngine.from_core(self.core)
+            except Exception:  # noqa: BLE001
+                self.growth_engine = None
+
+    def _maybe_grow(self) -> None:
+        if not self.growth_every or self.growth_engine is None:
+            return
+        if self.ticks % self.growth_every != 0:
+            return
+        try:
+            self.growth_reports.append(self.growth_engine.run())
+        except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+            pass
 
     # ---- one step ---- #
     def _next_prompt(self) -> str:
@@ -70,6 +92,7 @@ class AutonomicLoop:
         self.history.append(result)
         if result.disposition is Disposition.ESCALATE:
             self.escalations.append(result)
+        self._maybe_grow()
         return result
 
     def run_for(self, n: int, *, sleep: bool = False) -> List[CycleResult]:
@@ -98,6 +121,7 @@ class AutonomicLoop:
                     self.history.append(result)
                     if result.disposition is Disposition.ESCALATE:
                         self.escalations.append(result)
+                    self._maybe_grow()
                 done += 1
                 if max_ticks is not None and done >= max_ticks:
                     break
@@ -131,7 +155,8 @@ class AutonomicLoop:
         return {"ticks": self.ticks, "running": self.running,
                 "interval_s": self.interval_s,
                 "acted": sum(1 for r in self.history if r.disposition is Disposition.ACT),
-                "escalations": len(self.escalations)}
+                "escalations": len(self.escalations),
+                "growth_passes": len(self.growth_reports)}
 
 
 # --------------------------------------------------------------------------- #
