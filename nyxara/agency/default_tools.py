@@ -204,6 +204,30 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   params=[ToolParam("path", "str")],
                   capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
 
+    # ---- generative output: image / speech (heavy models optional, real fallback) ---- #
+    def _generate_image(prompt: str, path: str, size: int = 256) -> Dict[str, Any]:
+        from nyxara.senses.generate import ImageGenerator
+        return ImageGenerator().generate(prompt, path, size=size).to_dict()
+
+    _add(ToolSpec("generate_image", handler=_generate_image,
+                  description="generate an image from a text prompt to a PNG path "
+                              "(diffusion if available, deterministic identicon otherwise)",
+                  params=[ToolParam("prompt", "str"), ToolParam("path", "str"),
+                          ToolParam("size", "int", required=False, default=256)],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _synthesize_speech(text: str, path: str) -> Dict[str, Any]:
+        from nyxara.senses.generate import SpeechSynthesizer
+        return SpeechSynthesizer().synthesize(text, path).to_dict()
+
+    _add(ToolSpec("synthesize_speech", handler=_synthesize_speech,
+                  description="synthesise speech from text to a WAV path (TTS engine if "
+                              "available, a tone signature otherwise)",
+                  params=[ToolParam("text", "str"), ToolParam("path", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
     # ---- memory tools: wired only when a store is provided ---- #
     if memory is not None:
         def _recall_memory(query: str, k: int = 5) -> List[str]:
@@ -226,6 +250,21 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("text", "str"),
                               ToolParam("importance", "float", required=False, default=0.6)],
                       capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        # ---- forge her own model from lived memory (Master-gated, gauntlet-protected) ---- #
+        def _train_self_model(generations: int = 1) -> Dict[str, Any]:
+            from nyxara.growth.autolearn import GrowthEngine
+            engine = GrowthEngine(memory=memory, enable_foundry=True)
+            results = engine.improve_self(generations=max(1, generations))
+            return {"generations": len(results),
+                    "promoted": sum(1 for r in results if getattr(r, "promoted", False)),
+                    "results": [r.to_dict() for r in results]}
+
+        _add(ToolSpec("train_self_model", handler=_train_self_model,
+                      description="train/upgrade NYXARA's OWN model from her lived memory "
+                                  "(gauntlet-gated promotion; n-gram backend if torch absent)",
+                      params=[ToolParam("generations", "int", required=False, default=1)],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
 
     return registry
 

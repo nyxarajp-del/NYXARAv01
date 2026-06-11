@@ -86,6 +86,32 @@ def test_memory_tools_present_only_with_store():
     assert "remember_fact" in reg.names() and "recall_memory" in reg.names()
 
 
+def test_generate_image_tool(tmp_path):
+    p = tmp_path / "art.png"
+    r = _reg().invoke("generate_image", {"prompt": "a sovereign mind", "path": str(p),
+                                         "size": 64}, authority=Authority.OWNER)
+    assert r.ok and r.value["ok"] and p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_synthesize_speech_tool(tmp_path):
+    p = tmp_path / "say.wav"
+    r = _reg().invoke("synthesize_speech", {"text": "hello Master", "path": str(p)},
+                      authority=Authority.OWNER)
+    assert r.ok and r.value["ok"] and p.read_bytes()[:4] == b"RIFF"
+
+
+def test_train_self_model_is_master_gated():
+    from nyxara.memory.store import MemoryStore, MemoryType
+    mem = MemoryStore()
+    for i in range(20):
+        mem.remember(f"NYXARA serves JP loyally, note {i}", mem_type=MemoryType.SEMANTIC)
+    reg = _reg(memory=mem)
+    assert "train_self_model" in reg.names()
+    # SELF_MODIFY is owner-exclusive: an autonomous call must escalate, never run
+    auto = reg.invoke("train_self_model", {"generations": 1}, authority=Authority.AUTONOMOUS)
+    assert not auto.ok and auto.requires_owner
+
+
 def test_memory_roundtrip_through_tools():
     from nyxara.memory.store import MemoryStore
     mem = MemoryStore()

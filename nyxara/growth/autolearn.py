@@ -155,6 +155,20 @@ class GrowthEngine:
             return None
 
     # ---- forge (opt-in, gated) ---- #
+    def _memory_corpus(self, *, max_items: int = 2000) -> List[str]:
+        """Harvest training text from NYXARA's own lived memory (semantic + episodic)."""
+        if self.memory is None:
+            return []
+        texts: List[str] = []
+        try:
+            for rec in self.memory._kv.values():  # all records, regardless of recency
+                t = rec.text().strip()
+                if t:
+                    texts.append(t)
+        except Exception:  # noqa: BLE001
+            return []
+        return texts[:max_items]
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
@@ -162,7 +176,10 @@ class GrowthEngine:
             foundry = self._foundry
             if foundry is None:
                 from nyxara.growth.foundry import Foundry
-                foundry = self._foundry = Foundry(settings=self.settings)
+                # seed the foundry with her real memory so she trains on lived experience,
+                # not just a static corpus — this is what makes the self-model *hers*
+                foundry = self._foundry = Foundry(
+                    settings=self.settings, seed_corpus=self._memory_corpus())
             return foundry.self_improve(generations=generations)
         except Exception:  # noqa: BLE001 — forging is heavy/optional; never fatal
             return []

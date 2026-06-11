@@ -72,7 +72,9 @@ The sovereign cycle is fully wired end to end:
   (`agency/default_tools.py`) through the registry's full safety pipeline — real effects,
   not recorded intents. Defaults include time, arithmetic, file read/write/list, a
   SSRF-guarded + injection-sanitised **web fetch**, a live **web search**, **multimodal
-  perception** (image inspect/OCR, audio transcribe, document ingest), and memory.
+  perception** (image inspect/OCR, audio transcribe, document ingest), **generative output**
+  (`generate_image`, `synthesize_speech` — diffusion/TTS when installed, a real
+  identicon-PNG / tone-WAV fallback otherwise), memory, and a Master-gated `train_self_model`.
 * **Remember** — every turn accretes into long-term memory; `save_state()` / `load_state()`
   give continuity across restarts.
 * **Council** — set `NYXARA_COUNCIL__ENABLED=true` to convene the multi-model panel for
@@ -81,7 +83,16 @@ The sovereign cycle is fully wired end to end:
   turns on its own cadence through the *same* gates (risky proposals escalate, never
   auto-act), and every `growth_every` ticks runs a **learning pass** (`growth/autolearn.py`):
   reflect on the journal → mine lessons into semantic memory → consolidate → (opt-in,
-  gauntlet-gated) retrain her own model.
+  gauntlet-gated) retrain her own model **from her lived memory** (n-gram backend with no
+  deps; nano-GPT on torch/GPU when present).
+
+### Scaling
+
+* **Vector search** — memory uses an exact numpy index by default; set
+  `NYXARA_MEMORY__VECTOR_BACKEND=faiss` (with the `[vector]` extra) for a faiss ANN index.
+  The store is **thread-safe**, so async turns and the background loop can share it.
+* **Semantic recall** — `NYXARA_MEMORY__SEMANTIC_EMBEDDINGS=true` (with `[embeddings]`)
+  swaps lexical hashing for learned sentence embeddings.
 
   ```python
   from nyxara import NyxaraCore, AutonomicLoop
