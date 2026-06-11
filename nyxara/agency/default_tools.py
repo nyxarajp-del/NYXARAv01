@@ -161,6 +161,49 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                           ToolParam("max_results", "int", required=False, default=5)],
                   capability=Capability.NET_OUT, risk=RiskTier.LOW))
 
+    # ---- multimodal perception: image / audio / documents (heavy ML import-guarded) ---- #
+    def _inspect_image(path: str) -> Dict[str, Any]:
+        from nyxara.senses.vision import Vision
+        info = Vision().inspect(path)
+        return info.to_dict() if info is not None else {"error": "unrecognised image"}
+
+    _add(ToolSpec("inspect_image", handler=_inspect_image,
+                  description="read an image's dimensions/format/size (no ML needed)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
+
+    def _read_image_text(path: str) -> Dict[str, Any]:
+        from nyxara.senses.vision import Vision
+        text, note = Vision().ocr(path)
+        return {"text": text, "note": note}
+
+    _add(ToolSpec("read_image_text", handler=_read_image_text,
+                  description="OCR the text in an image (honest note if OCR is unavailable)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
+
+    def _transcribe_audio(path: str) -> Dict[str, Any]:
+        from nyxara.senses.audio import Audio
+        text, note = Audio().transcribe(path)
+        return {"transcript": text, "note": note}
+
+    _add(ToolSpec("transcribe_audio", handler=_transcribe_audio,
+                  description="transcribe speech in an audio file (honest note if unavailable)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
+
+    def _read_document(path: str) -> Dict[str, Any]:
+        from nyxara.senses.ingest import Ingestor
+        doc = Ingestor().ingest_file(path)
+        return {"type": doc.doc_type.value, "text": doc.text[:max_read_bytes],
+                "words": doc.word_count, "note": doc.note}
+
+    _add(ToolSpec("read_document", handler=_read_document,
+                  description="extract text from a document (txt/md/pdf/docx/…); honest note "
+                              "if a parser is missing",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
+
     # ---- memory tools: wired only when a store is provided ---- #
     if memory is not None:
         def _recall_memory(query: str, k: int = 5) -> List[str]:

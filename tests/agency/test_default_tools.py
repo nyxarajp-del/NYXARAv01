@@ -54,6 +54,31 @@ def test_list_dir(tmp_path):
     assert r.ok and "a.txt" in r.value
 
 
+def test_multimodal_tools_registered():
+    names = set(_reg().names())
+    assert {"inspect_image", "read_image_text", "transcribe_audio", "read_document"} <= names
+
+
+def test_read_document_plain_text(tmp_path):
+    p = tmp_path / "doc.txt"
+    p.write_text("NYXARA serves JP. " * 10)
+    r = _reg().invoke("read_document", {"path": str(p)}, authority=Authority.OWNER)
+    assert r.ok and r.value["words"] >= 20 and "NYXARA" in r.value["text"]
+
+
+def test_transcribe_audio_degrades_honestly(tmp_path):
+    import struct
+    import wave
+    wp = tmp_path / "a.wav"
+    w = wave.open(str(wp), "w")
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+    w.writeframes(struct.pack("<" + "h" * 800, *([0] * 800)))
+    w.close()
+    r = _reg().invoke("transcribe_audio", {"path": str(wp)}, authority=Authority.OWNER)
+    # without whisper installed the transcript is None but the call must succeed with a note
+    assert r.ok and (r.value["transcript"] is not None or r.value["note"])
+
+
 def test_memory_tools_present_only_with_store():
     assert "remember_fact" not in _reg().names()
     from nyxara.memory.store import MemoryStore
