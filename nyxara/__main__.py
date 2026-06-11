@@ -19,6 +19,7 @@ methods the Master would call programmatically:
     /pause             pause the loop (the Master may resume)
     /scram [reason]    emergency stop — the loop HALTs until resumed
     /resume            restore the loop after a pause/scram
+    /save              persist long-term memory to disk now
     /quit              leave the console (Ctrl-D / Ctrl-C also work)
 
 This module adds **no** mind logic; it is purely a front door onto the existing
@@ -52,6 +53,7 @@ commands:
   /pause             pause the loop
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
+  /save              persist long-term memory to disk now
   /quit              leave the console"""
 
 # disposition -> short glyph for the status line
@@ -100,6 +102,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "resume":
         core.resume()
         print("loop restored ✓")
+    elif cmd == "save":
+        path = core.save_state()
+        print(f"memory persisted → {path}" if path else "no memory to persist.")
     else:
         print(f"unknown command: /{cmd} — type /help")
     return True
@@ -114,18 +119,30 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(_BANNER)
+    # Rule 7 — continuity across restarts: restore long-term memory if any exists.
+    restored = core.load_state()
+    if restored:
+        print(f"continuity          : restored {restored} memories from a prior session ✓")
+
+    def _shutdown() -> None:
+        path = core.save_state()
+        if path:
+            print(f"memory persisted → {path}")
+        print("until next time, Master.")
+
     while True:
         try:
             line = input("\nMaster> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nuntil next time, Master.")
+            print()
+            _shutdown()
             return 0
 
         if not line:
             continue
         if line.startswith("/"):
             if not _handle_command(core, line):
-                print("until next time, Master.")
+                _shutdown()
                 return 0
             continue
 
