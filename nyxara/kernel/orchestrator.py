@@ -151,7 +151,7 @@ class NyxaraCore:
                  honesty: Optional[HonestyGuard] = None, journal: Optional[Journal] = None,
                  reporter: Optional[SelfReporter] = None, reasoner: Optional[Reasoner] = None,
                  llm: Any = None, memory: Any = None, tools: Any = None,
-                 use_council: bool = False, enable_tools: bool = True,
+                 use_council: Optional[bool] = None, enable_tools: bool = True,
                  enable_memory: bool = True,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
@@ -170,7 +170,14 @@ class NyxaraCore:
         # the governed, executable toolset shares the kernel's policy + governor
         self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
         # the reason step: a real LLM-backed mind when one is configured, else the
-        # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine)
+        # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
+        # The multi-model council is convened when asked, or when config enables it.
+        if use_council is None:
+            try:
+                from nyxara.kernel.config import get_settings
+                use_council = bool(get_settings().council.enabled)
+            except Exception:  # noqa: BLE001
+                use_council = False
         self.reasoner = reasoner or self._build_reasoner(llm, use_council)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
