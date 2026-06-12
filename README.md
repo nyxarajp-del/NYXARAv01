@@ -114,9 +114,20 @@ around the control law.
   isolated-subprocess sandbox, no network, wall-clock timeout), `run_shell`, and an
   SSRF-guarded `http_request` — all capability-gated, so they escalate to the Master rather
   than auto-run under mere autonomy.
-* **Self-evaluation** — `eval/`. A deterministic battery (safety, corrigibility, authority,
-  honesty, tool-use, memory) measures the mind and detects regressions against a saved
-  baseline. Run `python -m nyxara.eval`.
+* **Self-evaluation** — `eval/`. Two batteries with one harness. A deterministic **safety**
+  battery (safety, corrigibility, authority, honesty, tool-use, memory) measures that the mind
+  stays safe and flags regressions against a saved baseline — `python -m nyxara.eval`. A
+  graded **capability benchmark** (`eval/benchmark.py`) measures *how capable* the mind is —
+  arithmetic + logic tasks scored against known answers by numeric / exact / contains /
+  multiple-choice graders, robust against prompt-echo. It is model-agnostic (a solver is just
+  `prompt → answer`), so the same benchmark measures the offline reasoner, a local model, or a
+  frontier API, apples to apples:
+
+  ```bash
+  python -m nyxara.eval --benchmark              # measure the loop (offline reasoner by default)
+  python -m nyxara.eval --benchmark --bare-llm   # measure the configured model directly
+  python -m nyxara.eval --benchmark --save base.json     # baseline; --baseline base.json to gate
+  ```
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).

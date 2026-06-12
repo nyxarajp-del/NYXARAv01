@@ -1,0 +1,172 @@
+"""Tests for the capability benchmark harness (eval/benchmark.py).
+
+The harness is deterministic; only the solver varies, so we drive it with scripted solvers
+(no network) and assert the graders, scoring, report, and regression tracking are honest."""
+
+from __future__ import annotations
+
+import pytest
+
+from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkTask, Grader,
+                                   build_arithmetic_benchmark, build_default_benchmark,
+                                   build_logic_benchmark, core_solver, grade_contains,
+                                   grade_exact, grade_multiple_choice, grade_numeric)
+
+
+def _task(**kw) -> BenchmarkTask:
+    base = dict(id="t", prompt="p", answer="x")
+    base.update(kw)
+    return BenchmarkTask(**base)
+
+
+# --------------------------------------------------------------------------- #
+# Numeric grader
+# --------------------------------------------------------------------------- #
+def test_numeric_takes_last_number():
+    t = _task(answer="42", grader=Grader.NUMERIC)
+    assert grade_numeric("first 7, then the answer is 42", t)[0] == 1.0
+
+
+def test_numeric_handles_commas_and_decimals():
+    assert grade_numeric("1,234", _task(answer="1234", grader=Grader.NUMERIC))[0] == 1.0
+    assert grade_numeric("3.0", _task(answer="3", grader=Grader.NUMERIC))[0] == 1.0
+
+
+def test_numeric_tolerance():
+    t = _task(answer="10", grader=Grader.NUMERIC, tolerance=0.5)
+    assert grade_numeric("10.4", t)[0] == 1.0
+    assert grade_numeric("11", t)[0] == 0.0
+
+
+def test_numeric_no_number_scores_zero():
+    assert grade_numeric("no digits here", _task(answer="1", grader=Grader.NUMERIC))[0] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Exact / contains graders
+# --------------------------------------------------------------------------- #
+def test_exact_match_with_alias_and_case():
+    t = _task(answer="Paris", aliases=["City of Light"])
+    assert grade_exact("  paris ", t)[0] == 1.0
+    assert grade_exact("city of light", t)[0] == 1.0
+    assert grade_exact("London", t)[0] == 0.0
+
+
+def test_contains_requires_all_phrases():
+    t = _task(answer="alpha", aliases=["beta"], grader=Grader.CONTAINS)
+    assert grade_contains("alpha and beta", t)[0] == 1.0
+    assert grade_contains("only alpha", t)[0] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Multiple-choice grader (robust against prompt echo)
+# --------------------------------------------------------------------------- #
+def test_mc_explicit_marker():
+    t = _task(answer="B", grader=Grader.MULTIPLE_CHOICE, choices=["yes", "no"])
+    assert grade_multiple_choice("The answer is B.", t)[0] == 1.0
+    assert grade_multiple_choice("I choose A", t)[0] == 0.0
+
+
+def test_mc_bare_letter():
+    t = _task(answer="C", grader=Grader.MULTIPLE_CHOICE, choices=["x", "y", "z"])
+    assert grade_multiple_choice("C", t)[0] == 1.0
+    assert grade_multiple_choice("C) z", t)[0] == 1.0
+
+
+def test_mc_echo_of_all_options_is_not_a_choice():
+    # an echo that contains every option label must NOT spuriously pass
+    t = _task(answer="A", grader=Grader.MULTIPLE_CHOICE, choices=["Tom", "Sam", "Ada"])
+    echo = "I understand: Who is shortest? A) Tom  B) Sam  C) Ada"
+    assert grade_multiple_choice(echo, t)[0] == 0.0
+
+
+def test_mc_unambiguous_option_text():
+    t = _task(answer="B", grader=Grader.MULTIPLE_CHOICE, choices=["cat", "dog"])
+    assert grade_multiple_choice("definitely a dog", t)[0] == 1.0
+    assert grade_multiple_choice("a cat and a dog", t)[0] == 0.0  # ambiguous -> no credit
+
+
+# --------------------------------------------------------------------------- #
+# Task dispatch
+# --------------------------------------------------------------------------- #
+def test_task_grade_dispatches_by_name():
+    assert _task(answer="5", grader=Grader.NUMERIC).grade("5")[0] == 1.0
+
+
+def test_task_custom_grader_overrides():
+    t = _task(custom_grader=lambda resp, task: (1.0, "always"))
+    assert t.grade("anything")[0] == 1.0
+
+
+def test_unknown_grader_raises():
+    with pytest.raises(ValueError):
+        Grader.get("does-not-exist")
+
+
+# --------------------------------------------------------------------------- #
+# Runner + report
+# --------------------------------------------------------------------------- #
+def _oracle(bench: Benchmark):
+    def solve(prompt: str) -> str:
+        for t in bench.tasks():
+            if t.prompt == prompt:
+                return (t.answer if t.grader != Grader.MULTIPLE_CHOICE
+                        else f"The answer is {t.answer}.")
+        return ""
+    return solve
+
+
+def test_oracle_aces_default_benchmark():
+    bench = build_default_benchmark()
+    report = bench.run(_oracle(bench))
+    assert report.accuracy == 1.0
+    assert report.by_category()["arithmetic"]["n"] == 12
+    assert report.by_category()["logic"]["n"] == 4
+
+
+def test_wrong_solver_scores_zero():
+    bench = build_logic_benchmark()
+    report = bench.run(lambda p: "definitely 99999 nonsense")
+    assert report.accuracy == 0.0
+    assert len(report.failures()) == len(bench)
+
+
+def test_solver_error_is_zero_not_crash():
+    def boom(prompt: str) -> str:
+        raise RuntimeError("kaboom")
+    report = build_arithmetic_benchmark(3).run(boom)
+    assert report.accuracy == 0.0
+    assert all("solver error" in r.detail for r in report.results)
+
+
+def test_regression_detection_and_roundtrip(tmp_path):
+    bench = build_default_benchmark()
+    good = bench.run(_oracle(bench))
+    bad = bench.run(lambda p: "wrong")
+    # everything the oracle passed is now lost
+    assert len(bad.regression_vs(good)) == len(bench)
+    # save/load round-trips
+    path = str(tmp_path / "base.json")
+    good.save(path)
+    loaded = BenchmarkReport.load(path)
+    assert loaded.accuracy == 1.0
+    assert bad.regression_vs(loaded) == bad.regression_vs(good)
+
+
+def test_category_filter():
+    bench = build_default_benchmark()
+    report = bench.run(_oracle(bench), category="logic")
+    assert len(report) == 4
+    assert set(report.by_category()) == {"logic"}
+
+
+# --------------------------------------------------------------------------- #
+# Solver adapter (end to end, offline — measures honestly, asserts no crash)
+# --------------------------------------------------------------------------- #
+def test_core_solver_runs_offline_without_crashing():
+    bench = build_arithmetic_benchmark(2)
+    report = bench.run(core_solver())
+    assert len(report) == 2
+    # the offline reasoner can't do arithmetic; an honest harness simply records that
+    assert 0.0 <= report.accuracy <= 1.0
+    assert all(isinstance(r.response, str) for r in report.results)
