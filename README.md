@@ -177,6 +177,42 @@ docker run -p 8000:8000 -e NYXARA_SERVER__API_TOKEN=change-me \
   -e NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-... -v nyxara-data:/data nyxara
 ```
 
+## Connect external tools via MCP
+
+NYXARA is an **MCP (Model Context Protocol) client** (`agency/mcp_client.py`), so the whole
+MCP ecosystem — filesystem, git, databases, browsers, SaaS connectors — becomes available to
+her. Each remote tool is registered as an ordinary governed `ToolSpec`, so it clears the same
+capability / risk / authority / sandbox gates as a native tool: the mind proposes the call,
+the kernel disposes of it. Remote effects are unknown, so MCP tools register at **MODERATE,
+irreversible** by default — an autonomous call *escalates to the Master* rather than running
+unsupervised.
+
+The transport is a stdlib-only JSON-RPC-over-stdio client (no third-party SDK). Configure
+servers and turn it on:
+
+```python
+from nyxara import NyxaraCore
+from nyxara.kernel.config import reload_settings
+
+reload_settings(mcp={
+    "enabled": True,
+    "servers": [
+        {"name": "fs", "command": "npx",
+         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]},
+    ],
+})
+core = NyxaraCore()          # connects on boot; the server's tools appear as mcp.fs.*
+```
+
+A server that won't start is skipped, never fatal. You can also drive a client directly:
+
+```python
+from nyxara.agency.mcp_client import MCPClient, MCPServerConfig, register_mcp_tools
+
+with MCPClient(MCPServerConfig(name="git", command="uvx", args=["mcp-server-git"])) as c:
+    register_mcp_tools(registry, c)     # c.list_tools() / c.call_tool(name, args)
+```
+
 ## LLM providers (optional)
 
 Out of the box NYXARA uses a built-in deterministic reasoner — **no API keys

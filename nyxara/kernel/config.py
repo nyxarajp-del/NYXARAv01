@@ -51,6 +51,8 @@ __all__ = [
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
+    "MCPServerSpec",
+    "MCPConfig",
     "ServerConfig",
     "ObservabilityConfig",
     "PathsConfig",
@@ -357,6 +359,37 @@ class AgencyConfig(BaseModel):
     new_tool_trust: Literal["zero", "scoped"] = "zero"  # least-privilege default
 
 
+class MCPServerSpec(BaseModel):
+    """One external Model Context Protocol server NYXARA may connect to (stdio transport)."""
+
+    model_config = {"validate_assignment": True}
+
+    name: str                                   # short id; namespaces the server's tools
+    command: str                                # executable, e.g. "npx", "python", "uvx"
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
+    # Risk tier its tools register at (remote effects are unknown -> conservative default).
+    risk: Literal["trivial", "low", "moderate", "high", "critical"] = "moderate"
+    reversible: bool = False
+
+
+class MCPConfig(BaseModel):
+    """Model Context Protocol client settings (agency/mcp_client.py).
+
+    When ``enabled`` and ``servers`` are set, NYXARA connects to each MCP server on boot and
+    registers its tools into the governed registry — so the whole MCP ecosystem (filesystem,
+    git, databases, browsers, SaaS connectors, …) reaches her through the same gates as any
+    native tool. Off by default: enabling it launches the configured subprocesses.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = False
+    servers: List[MCPServerSpec] = Field(default_factory=list)
+    timeout_s: float = Field(default=30.0, gt=0)
+
+
 class ServerConfig(BaseModel):
     """HTTP/WebSocket API server settings (nyxara/server/app.py).
 
@@ -475,6 +508,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)

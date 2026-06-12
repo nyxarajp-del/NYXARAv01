@@ -203,9 +203,24 @@ class NyxaraCore:
             from nyxara.agency.default_tools import build_default_tools
             from nyxara.agency.tools import ToolRegistry
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
-            return build_default_tools(registry, memory=self.memory)
+            tools = build_default_tools(registry, memory=self.memory)
+            self._connect_mcp(registry)
+            return tools
         except Exception:  # noqa: BLE001
             return None
+
+    def _connect_mcp(self, registry: Any) -> None:
+        """Connect configured MCP servers and register their tools (opt-in; never fatal)."""
+        self._mcp_clients: List[Any] = []
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            if not settings.mcp.enabled or not settings.mcp.servers:
+                return
+            from nyxara.agency.mcp_client import connect_configured_mcp
+            self._mcp_clients = connect_configured_mcp(registry, settings)
+        except Exception:  # noqa: BLE001 — MCP is a capability, never a hard dependency
+            self._mcp_clients = []
 
     def _build_skills(self) -> Any:
         try:
