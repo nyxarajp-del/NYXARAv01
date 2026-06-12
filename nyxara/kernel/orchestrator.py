@@ -1044,8 +1044,133 @@ class NyxaraCore:
                             pass
             except Exception:  # noqa: BLE001
                 pass
+        # 5) curiosity — close a known-unknown by a safe, internal investigation
+        try:
+            cur = self.curiosity_pass()
+            if cur.get("resolved"):
+                report["curiosity"] = cur.get("investigated")
+        except Exception:  # noqa: BLE001
+            pass
         self._last_maintenance = time.time()
         return report
+
+    # ---- curiosity: close known-unknowns by value-directed internal experiments ---- #
+    def curiosity_pass(self, *, max_experiments: int = 1) -> Dict[str, Any]:
+        """Notice what she knows she does not know, value those gaps (value of
+        information), and run a *safe, internal* experiment on the most valuable one —
+        consulting her own grounded knowledge — folding any answer back as a belief and a
+        memory. Nothing here touches the world or the gates: an external question would
+        still go through the Master. Gated by oversight; wholly best-effort."""
+        report: Dict[str, Any] = {"gaps": 0, "investigated": None, "resolved": False}
+        if self.self_model is None:
+            return report
+        try:
+            if not self.oversight.gate():   # a paused/scrammed mind does not wander
+                return report
+        except Exception:  # noqa: BLE001
+            pass
+        gaps = self.known_unknowns()
+        report["gaps"] = len(gaps)
+        if not gaps:
+            return report
+        try:
+            from nyxara.planning.voi import ActionType, InfoSource
+            voi = self._voi()
+            source = InfoSource("internal knowledge", kind="gather",
+                                reliability=0.7, cost=0.2)
+            # value the gaps; investigate the most valuable ones VoI deems worth gathering
+            ordered = sorted(gaps, key=self._gap_uncertainty, reverse=True)
+            for topic in ordered[: max(1, max_experiments)]:
+                rec = voi.decide(uncertainty=self._gap_uncertainty(topic), stakes=0.5,
+                                 sources=[source])
+                if rec.action is not ActionType.GATHER:
+                    continue
+                report["investigated"] = topic
+                finding = self._investigate(topic)
+                if finding is None:
+                    continue
+                if self._learn_self_fact(*finding, topic=topic):
+                    report["resolved"] = True
+                    break
+        except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
+            pass
+        return report
+
+    def _voi(self) -> Any:
+        if getattr(self, "_voi_engine", None) is None:
+            from nyxara.planning.voi import ValueOfInformation
+            self._voi_engine = ValueOfInformation()
+        return self._voi_engine
+
+    def _gap_uncertainty(self, topic: str) -> float:
+        """1 - effective confidence in the gap's (subject, predicate); 1.0 if unknown."""
+        subject, _, predicate = topic.partition(".")
+        if subject and predicate and self.self_model is not None:
+            try:
+                return _clamp01(1.0 - self.self_model.confidence_in(subject, predicate))
+            except Exception:  # noqa: BLE001
+                pass
+        return 1.0
+
+    def _investigate(self, topic: str) -> Optional[tuple]:
+        """A safe, internal experiment for one self-knowledge gap: settle it from grounded
+        knowledge (config + the foundational knowledge base). Returns
+        (subject, predicate, value, confidence) or None. Touches nothing in the world."""
+        subject, _, predicate = topic.partition(".")
+        if not subject or not predicate:
+            return None
+        value = self._known_self_fact(subject, predicate)
+        if value is None:
+            return None
+        # corroborate against the grounded knowledge base — evidence raises confidence
+        conf = 0.8
+        try:
+            if self.knowledge is not None:
+                hits = self.knowledge.retrieve(f"{subject} {predicate}", k=2)
+                if hits and any(str(value).lower() in h.text.lower() for h in hits):
+                    conf = 0.95
+        except Exception:  # noqa: BLE001
+            pass
+        return (subject, predicate, value, conf)
+
+    def _known_self_fact(self, subject: str, predicate: str) -> Optional[str]:
+        """The grounded self-facts NYXARA can settle from her own foundation."""
+        s, p = subject.lower(), predicate.lower()
+        if s == "nyxara" and p == "name":
+            return "NYXARA"
+        if s == "nyxara" and p == "is_a":
+            return "a sovereign cognitive agent in service of the Master"
+        if s == "master" and p == "name":
+            try:
+                from nyxara.kernel.config import get_settings
+                return get_settings().owner.name
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def _learn_self_fact(self, subject: str, predicate: str, value: str, confidence: float,
+                         *, topic: str) -> bool:
+        """Fold an investigated finding into the self-model (resolving the unknown) and
+        lay down a semantic memory so the discovery accretes into continuity."""
+        try:
+            from nyxara.memory.provenance import Provenance, SourceType
+            self.self_model.believe(
+                subject, predicate, value, confidence=confidence,
+                provenance=Provenance(SourceType.SELF_REFLECTION, confidence=confidence))
+            self.self_model.resolve_unknown(topic)
+            self.mind.record(ThoughtKind.INFERENCE,
+                             f"curiosity: learned {subject} {predicate} = {value}"[:80],
+                             salience=0.6, confidence=confidence)
+            if self.memory is not None:
+                from nyxara.memory.store import MemoryType
+                self.memory.remember(
+                    f"Learned: {subject} {predicate} is {value}.",
+                    mem_type=MemoryType.SEMANTIC,
+                    provenance=Provenance(SourceType.SELF_REFLECTION, confidence=confidence),
+                    importance=0.5, tags=["curiosity", "self-knowledge"])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     def start_cognition(self, *, interval: float = 2.0, idle_after: float = 30.0) -> bool:
         """Start the default-mode stream on a background thread (Layer 5: concurrent
