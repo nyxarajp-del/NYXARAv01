@@ -67,6 +67,7 @@ class LLMReasoner:
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
                  skill_memory: Any = None, soul: Any = None, history: Any = None,
+                 knowledge: Any = None,
                  max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
@@ -81,6 +82,8 @@ class LLMReasoner:
         # a live, verbatim short-term conversation buffer (Layer 7: multi-turn context).
         # A shared sequence of (role, text) the kernel appends to after each turn.
         self.history = history
+        # foundational world knowledge (Layer 6): a retriever queried for ground truth
+        self.knowledge = knowledge
         self.max_memory_context = max_memory_context
         self.max_history = max_history
         self.system = system or self._default_system()
@@ -157,9 +160,23 @@ class LLMReasoner:
             lines.append(f"{who}: {str(text)[:300]}")
         return "\n\nRecent conversation (most recent last):\n" + "\n".join(lines)
 
+    def _knowledge_context(self, stimulus: str) -> str:
+        """Foundational ground truth (owner, rules, architecture) relevant to the stimulus."""
+        if self.knowledge is None:
+            return ""
+        try:
+            hits = self.knowledge.retrieve(stimulus, k=3)
+        except Exception:  # noqa: BLE001
+            return ""
+        if not hits:
+            return ""
+        lines = "\n".join(f"- {h.text[:240]}" for h in hits)
+        return f"\n\nFoundational knowledge (ground truth):\n{lines}"
+
     def _context_block(self, stimulus: str) -> str:
         """The recalled-memory + learned-skill + tool-catalog grounding for a stimulus."""
         return (f"{self._history_context()}"
+                f"{self._knowledge_context(stimulus)}"
                 f"{self._memory_context(stimulus)}"
                 f"{self._skill_context(stimulus)}"
                 f"{self._tool_catalog()}")

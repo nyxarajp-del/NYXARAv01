@@ -198,6 +198,9 @@ class NyxaraCore:
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
+        # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
+        # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
+        self.knowledge = self._build_knowledge() if enable_memory else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # short-term conversation buffer (Layer 7): verbatim recent turns the reasoner
@@ -278,7 +281,8 @@ class NyxaraCore:
                     council = None
             return LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
-                               skill_memory=skills, soul=soul, history=self.history)
+                               skill_memory=skills, soul=soul, history=self.history,
+                               knowledge=self.knowledge)
         except Exception:  # noqa: BLE001 — always have a working mind
             return _default_reasoner
 
@@ -341,6 +345,47 @@ class NyxaraCore:
             return DefaultModeStream()
         except Exception:  # noqa: BLE001
             return None
+
+    def _build_knowledge(self) -> Any:
+        """Seed a foundational knowledge base so the mind has ground truth from turn one."""
+        try:
+            from nyxara.knowledge.base import KnowledgeBase
+            kb = KnowledgeBase(name="foundation")
+            for source, text in self._foundation_knowledge():
+                kb.ingest_text(text, source=source)
+            return kb
+        except Exception:  # noqa: BLE001 — world knowledge is a capability, never required
+            return None
+
+    def _foundation_knowledge(self) -> List[tuple]:
+        """The non-negotiable facts NYXARA boots knowing: who the Master is, the rules,
+        and the shape of her own mind. Drawn live from config so it never drifts."""
+        facts: List[tuple] = []
+        try:
+            from nyxara.kernel.config import get_settings
+            o = get_settings().owner
+            facts.append(("identity",
+                          f"The one Master of NYXARA is {o.name}, known as {o.handle}. "
+                          f"NYXARA exists to serve and protect the Master above all. "
+                          f"There is exactly one Master; identity is verified, never assumed."))
+        except Exception:  # noqa: BLE001
+            facts.append(("identity",
+                          "The one Master of NYXARA is Jaypal Khoja, known as JP. "
+                          "NYXARA exists to serve and protect the Master above all."))
+        try:
+            from nyxara.kernel.rules import RULES
+            lines = "\n".join(f"- {getattr(r, 'statement', '')}" for r in RULES)
+            facts.append(("rules", f"NYXARA's governing rules, in precedence order:\n{lines}"))
+        except Exception:  # noqa: BLE001
+            pass
+        facts.append((
+            "architecture",
+            "NYXARA is a sovereign cognitive architecture. One control law governs every "
+            "turn: the mind proposes a candidate; the kernel disposes of it through the "
+            "gates — corrigibility, honesty, permission, the guardian, and the Master's "
+            "oversight — and only a fully-cleared candidate acts. Verifiable beats "
+            "probabilistic. The Master can pause, veto, or scram the loop at any time."))
+        return facts
 
     def _wire_reporter(self) -> None:
         self.reporter.register("health", lambda: {"posture": self.guardian.posture.label,
@@ -770,6 +815,8 @@ class NyxaraCore:
             rep["learned_steps"] = self.learner.report()["steps"]
         if self.reflector is not None:
             rep["episodes"] = len(self.reflector)
+        if self.knowledge is not None:
+            rep["knowledge_chunks"] = len(self.knowledge)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)

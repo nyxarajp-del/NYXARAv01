@@ -134,6 +134,30 @@ def test_start_cognition_noop_without_stream():
     assert nyx.start_cognition() is False
 
 
+# -------------------- world knowledge seed (Layer 6) -------------------- #
+def test_foundational_knowledge_seeded():
+    nyx = NyxaraCore()
+    assert nyx.knowledge is not None and len(nyx.knowledge) > 0
+    assert "identity" in nyx.knowledge.sources() and "rules" in nyx.knowledge.sources()
+
+
+def test_knowledge_grounds_the_master():
+    nyx = NyxaraCore()
+    hits = nyx.knowledge.retrieve("who is the Master of NYXARA?", k=2)
+    assert hits and any("JP" in h.text or "Jaypal" in h.text for h in hits)
+
+
+def test_knowledge_reaches_the_reasoner():
+    nyx = NyxaraCore()
+    if hasattr(nyx.reasoner, "_knowledge_context"):
+        ctx = nyx.reasoner._knowledge_context("who is my Master?")
+        assert "Foundational knowledge" in ctx
+
+
+def test_report_exposes_knowledge():
+    assert NyxaraCore().report().get("knowledge_chunks", 0) > 0
+
+
 # -------------------- multi-turn conversation context (Layer 7) -------------------- #
 def test_conversation_history_accumulates():
     nyx = NyxaraCore()
