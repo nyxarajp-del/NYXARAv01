@@ -265,7 +265,7 @@ class FoundryConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = False
-    backend: Literal["auto", "ngram", "nanogpt"] = "auto"
+    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "auto"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
     # Optional torch nano-GPT dimensions (only used when torch is present).
@@ -273,6 +273,16 @@ class FoundryConfig(BaseModel):
     n_layer: int = Field(default=2, ge=1, le=24)
     n_head: int = Field(default=2, ge=1, le=32)
     n_embd: int = Field(default=64, ge=8, le=2048)
+    # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
+    # Adapts a real pretrained base to NYXARA's lived memory by training a small low-rank
+    # adapter — the path to genuine capability. A GPU is recommended for real bases; the
+    # tiny default keeps it runnable (and testable) on CPU.
+    base_model: str = "sshleifer/tiny-gpt2"
+    lora_r: int = Field(default=8, ge=1, le=256)
+    lora_alpha: int = Field(default=16, ge=1, le=1024)
+    lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
+    lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
+    max_seq_len: int = Field(default=256, ge=8, le=8192)
     # Training / data.
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)

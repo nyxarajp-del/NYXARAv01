@@ -89,8 +89,13 @@ The sovereign cycle is fully wired end to end:
   turns on its own cadence through the *same* gates (risky proposals escalate, never
   auto-act), and every `growth_every` ticks runs a **learning pass** (`growth/autolearn.py`):
   reflect on the journal → mine lessons into semantic memory → consolidate → (opt-in,
-  gauntlet-gated) retrain her own model **from her lived memory** (n-gram backend with no
-  deps; nano-GPT on torch/GPU when present).
+  gauntlet-gated) retrain her own model **from her lived memory**. Three backends, one
+  contract, chosen by what the machine can run: an n-gram model with **no deps**; a
+  from-scratch **nano-GPT** on torch; and **LoRA fine-tuning of a real pretrained base**
+  (`NYXARA_FOUNDRY__BACKEND=lora`, `.[foundry]`) — the path to genuine capability, learning a
+  small low-rank adapter on top of a model that already speaks the language. Set
+  `NYXARA_FOUNDRY__BASE_MODEL` to a real base (e.g. `Qwen/Qwen2.5-0.5B`) and use a GPU; the
+  tiny default keeps it runnable on CPU. Every candidate still clears the promotion gauntlet.
 
 ### Capability layers (added on top of the sovereign loop)
 
