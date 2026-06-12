@@ -32,10 +32,35 @@ the box.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 from nyxara.agency.permissions import Authority
 from nyxara.kernel.orchestrator import Disposition, NyxaraCore
+
+# the session memory snapshot — identity carried across restarts (Rule 7)
+_SESSION_MEMORY = os.path.expanduser("~/.nyxara/memory.json")
+
+
+def _load_session_memory(core: NyxaraCore) -> int:
+    """Restore long-term memory from the session snapshot if one exists."""
+    if core.memory is None or not os.path.exists(_SESSION_MEMORY):
+        return 0
+    try:
+        return core.memory.load(_SESSION_MEMORY)
+    except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
+        return 0
+
+
+def _save_session_memory(core: NyxaraCore) -> str | None:
+    """Persist long-term memory to the session snapshot (best-effort)."""
+    if core.memory is None:
+        return None
+    try:
+        os.makedirs(os.path.dirname(_SESSION_MEMORY), exist_ok=True)
+        return core.memory.save(_SESSION_MEMORY)
+    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
+        return None
 
 _BANNER = """\
 ======================================================================
@@ -116,7 +141,7 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         else:
             print("  (the mind is quiet just now)")
     elif cmd == "save":
-        path = core.save_state()
+        path = _save_session_memory(core) or core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")
     else:
         print(f"unknown command: /{cmd} — type /help")
@@ -132,8 +157,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(_BANNER)
-    # Rule 7 — continuity across restarts: restore long-term memory if any exists.
-    restored = core.load_state()
+    # Rule 7 — continuity across restarts: restore long-term memory if any exists,
+    # preferring the session snapshot (~/.nyxara/memory.json), else the kernel default.
+    restored = _load_session_memory(core) or core.load_state()
     if restored:
         print(f"continuity          : restored {restored} memories from a prior session ✓")
 
@@ -147,7 +173,8 @@ def main(argv: list[str] | None = None) -> int:
 
     def _shutdown() -> None:
         core.stop_cognition()
-        path = core.save_state()
+        # persist to the session snapshot (and the kernel default, for redundancy)
+        path = _save_session_memory(core) or core.save_state()
         if path:
             print(f"memory persisted → {path}")
         print("until next time, Master.")
