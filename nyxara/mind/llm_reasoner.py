@@ -66,13 +66,15 @@ class LLMReasoner:
     def __init__(self, llm: Optional[LLM] = None, *, memory: Any = None, tools: Any = None,
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
-                 max_memory_context: int = 5) -> None:
+                 skill_memory: Any = None, max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
         self.memory = memory
         self.tools = tools
         self.use_council = use_council
         self.council = council
+        # learned procedural skills, injected into the prompt so experience changes behaviour
+        self.skill_memory = skill_memory
         self.max_memory_context = max_memory_context
         self.system = system or self._default_system()
 
@@ -115,9 +117,18 @@ class LLMReasoner:
             lines.append(f"- {name}({params}): {spec.description}")
         return "\n\nTools you may call (set kind=\"act\"):\n" + "\n".join(lines)
 
+    def _skill_context(self, stimulus: str) -> str:
+        if self.skill_memory is None:
+            return ""
+        try:
+            return self.skill_memory.as_prompt(stimulus)
+        except Exception:  # noqa: BLE001 — learned skills are advisory, never fatal
+            return ""
+
     def _build_prompt(self, stimulus: str) -> str:
         return (f"The Master says:\n{stimulus}"
                 f"{self._memory_context(stimulus)}"
+                f"{self._skill_context(stimulus)}"
                 f"{self._tool_catalog()}\n\n{_DECISION_INSTRUCTIONS}")
 
     # ---- the reasoning act ---- #

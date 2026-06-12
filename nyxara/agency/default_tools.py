@@ -61,11 +61,17 @@ def safe_calculate(expression: str) -> float:
 # Builder
 # --------------------------------------------------------------------------- #
 def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
+                        knowledge: Any = None, enable_code: bool = True,
                         max_read_bytes: int = 200_000) -> ToolRegistry:
     """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
 
     ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
-    ``recall_memory`` / ``remember_fact`` tools to her actual long-term store.
+    ``recall_memory`` / ``remember_fact`` tools to her actual long-term store. When a
+    store is present a :class:`~nyxara.knowledge.base.KnowledgeBase` is also wired
+    (``knowledge_ingest`` / ``knowledge_search``) for grounded retrieval, unless an
+    explicit ``knowledge`` base is supplied. ``enable_code`` adds the higher-blast-radius
+    reach (sandboxed code, a shell, a generic HTTP request) — all owner-gated by the
+    registry's capability/risk pipeline, so they escalate rather than auto-run.
     """
     existing = set(registry.names())
 
@@ -265,6 +271,73 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                                   "(gauntlet-gated promotion; n-gram backend if torch absent)",
                       params=[ToolParam("generations", "int", required=False, default=1)],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
+
+    # ---- knowledge base: grounded ingest + retrieval (backed by the store) ---- #
+    kb = knowledge
+    if kb is None and memory is not None:
+        try:
+            from nyxara.knowledge.base import KnowledgeBase
+            kb = KnowledgeBase(store=memory, name="kb")
+        except Exception:  # noqa: BLE001 — knowledge is a capability, never a hard dep
+            kb = None
+    if kb is not None:
+        def _knowledge_ingest(text: str, source: str = "doc") -> Dict[str, Any]:
+            n = kb.ingest_text(text, source=source)
+            return {"chunks": n, "source": source, "size": len(kb)}
+
+        _add(ToolSpec("knowledge_ingest", handler=_knowledge_ingest,
+                      description="chunk & store text into the knowledge base for grounded recall",
+                      params=[ToolParam("text", "str"),
+                              ToolParam("source", "str", required=False, default="doc")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _knowledge_search(query: str, k: int = 4) -> List[Dict[str, Any]]:
+            return [{"text": c.text[:300], "source": c.source, "score": round(c.score, 3)}
+                    for c in kb.retrieve(query, k=k)]
+
+        _add(ToolSpec("knowledge_search", handler=_knowledge_search,
+                      description="retrieve the most relevant knowledge-base chunks for a query",
+                      params=[ToolParam("query", "str"),
+                              ToolParam("k", "int", required=False, default=4)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+    # ---- higher-reach tools: sandboxed code, shell, generic HTTP (capability-gated) ---- #
+    if enable_code:
+        def _run_python(code: str, timeout_s: float = 5.0) -> Dict[str, Any]:
+            from nyxara.agency.code_sandbox import run_python
+            return run_python(code, timeout_s=max(0.1, min(timeout_s, 30.0))).to_dict()
+
+        _add(ToolSpec("run_python", handler=_run_python,
+                      description="execute Python in an isolated subprocess sandbox "
+                                  "(no network, wall-clock timeout); returns stdout/value/errors",
+                      params=[ToolParam("code", "str"),
+                              ToolParam("timeout_s", "float", required=False, default=5.0)],
+                      capability=Capability.CODE_EXEC, risk=RiskTier.HIGH, reversible=False))
+
+        def _run_shell(command: str, timeout_s: float = 10.0) -> Dict[str, Any]:
+            from nyxara.agency.code_sandbox import safe_shell
+            return safe_shell(command, timeout_s=max(0.1, min(timeout_s, 60.0))).to_dict()
+
+        _add(ToolSpec("run_shell", handler=_run_shell,
+                      description="run a shell command in a subprocess (captured output, "
+                                  "wall-clock timeout) — owner-gated, irreversible",
+                      params=[ToolParam("command", "str"),
+                              ToolParam("timeout_s", "float", required=False, default=10.0)],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="command"))
+
+        def _http_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
+            from nyxara.agency.net_request import http_request
+            return http_request(url, method=method, body=body or None)
+
+        _add(ToolSpec("http_request", handler=_http_request,
+                      description="make an SSRF-guarded HTTP(S) request (GET/POST/…); "
+                                  "returns status/headers/body, failing as data",
+                      params=[ToolParam("url", "str"),
+                              ToolParam("method", "str", required=False, default="GET"),
+                              ToolParam("body", "str", required=False, default="")],
+                      capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
+                      target_param="url"))
 
     return registry
 
