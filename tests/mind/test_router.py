@@ -129,3 +129,44 @@ def test_reasoner_does_not_route_when_disabled():
 def test_router_result_serialises():
     d = RouterResult("hi there", "self", 0.81, True).to_dict()
     assert d["source"] == "self" and d["handed_off"] is True and d["confidence"] == 0.81
+
+
+# --------------------------------------------------------------------------- #
+# Phase 4: neuro-symbolic faculty-first + honest abstention
+# --------------------------------------------------------------------------- #
+def test_faculty_answers_math_exactly_even_without_any_llm():
+    # no own model, no real teacher — yet exact arithmetic is still computed
+    r = Router(_Teacher(providers=["mock"]), settings=_settings(),
+               self_provider=_Own("x", ok=False))
+    res = r.draft("What is 12 * 12?")
+    assert res.source == "faculty" and res.text == "144" and res.handed_off is True
+
+
+def test_faculty_proves_logic():
+    r = Router(_Teacher(providers=["mock"]), settings=_settings(),
+               self_provider=_Own("x", ok=False))
+    res = r.draft("Is (A -> B) and A -> B a tautology?")
+    assert res.source == "faculty" and "valid" in res.text
+
+
+def test_faculty_beats_even_a_confident_own_model():
+    # the own model would answer, but a verifiable faculty fits -> exact wins
+    r = Router(_Teacher(), settings=_settings(),
+               self_provider=_Own("I think it's about 140 or so."))
+    assert r.draft("what is 12 * 12").source == "faculty"
+
+
+def test_abstains_when_own_is_weak_and_no_teacher():
+    from nyxara.mind.metacognition import HONEST_ABSTENTION
+    r = Router(_Teacher(providers=["mock"]),
+               settings=_settings(consult_teacher=False, abstain_below=0.3),
+               self_provider=_Own("the the the the the"))
+    res = r.draft("Explain quantum chromodynamics.")
+    assert res.source == "abstain" and res.text == HONEST_ABSTENTION
+
+
+def test_faculties_can_be_disabled():
+    r = Router(_Teacher(), settings=_settings(use_faculties=False),
+               self_provider=_Own("A fine coherent answer, Master."))
+    # with faculties off, a math prompt is no longer short-circuited to exact compute
+    assert r.draft("what is 12 * 12").source != "faculty"

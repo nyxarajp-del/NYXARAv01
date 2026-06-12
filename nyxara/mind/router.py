@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 from nyxara.kernel.config import NyxaraSettings, get_settings
+from nyxara.mind.metacognition import HONEST_ABSTENTION, MetaCognition, MetaDecision
 
 __all__ = ["RouterResult", "answer_quality", "default_verifier", "Router"]
 
@@ -113,6 +114,8 @@ class Router:
             from nyxara.mind.llm import SelfProvider
             self_provider = SelfProvider(self.settings)
         self._self = self_provider
+        self.meta = MetaCognition(answer_threshold=self.cfg.threshold,
+                                  abstain_below=self.cfg.abstain_below)
 
     # ---- availability ---- #
     def self_available(self) -> bool:
@@ -152,30 +155,54 @@ class Router:
         return (self.llm.complete_with(name, req).text or "").strip()
 
     def draft(self, prompt: str, *, system: Optional[str] = None) -> RouterResult:
-        """Draft a reply: own model first (if it clears the bar), else the teacher."""
+        """Draft a reply: a verifiable faculty first, then own model, then the teacher.
+
+        Neuro-symbolic: exact computation/proof beats any neural guess, so a fitting faculty
+        short-circuits everything. Otherwise the metacognition gate chooses own / teacher /
+        an honest abstention — NYXARA never bluffs when she has nothing trustworthy to say."""
+        # 0) verifiable faculty — exact math / logic wins over any guess
+        if self.cfg.use_faculties:
+            fac = self._faculty_answer(prompt)
+            if fac is not None:
+                text, conf = fac
+                return RouterResult(text, "faculty", conf, handed_off=True)
+
+        # 1) NYXARA's own model
         own: Optional[str] = None
         confidence = 0.0
         if self.self_available():
             try:
                 own = self._own_answer(prompt, system)
                 confidence = float(self.verifier(prompt, own))
-            except Exception:  # noqa: BLE001 — a failed own attempt simply defers to the teacher
+            except Exception:  # noqa: BLE001 — a failed own attempt simply defers downstream
                 own, confidence = None, 0.0
             if own and confidence >= self.cfg.threshold:
                 return RouterResult(own, "self", confidence, handed_off=True)
 
+        # 2) metacognition decides: own / teacher / honest abstention
         teacher = self._teacher_name() if self.cfg.consult_teacher else None
-        if teacher is not None:
+        verdict = self.meta.assess(prompt, own_answer=own, own_conf=confidence,
+                                   teacher_available=teacher is not None)
+        if verdict.decision is MetaDecision.CONSULT_TEACHER and teacher is not None:
             try:
                 return RouterResult(self._teacher_answer(prompt, system, teacher),
                                     "teacher", confidence, handed_off=False)
             except Exception:  # noqa: BLE001
                 pass
-
-        # no teacher to consult — keep the own answer if we have one, else nothing
-        if own:
+        if verdict.decision is MetaDecision.ANSWER_SELF and own:
             return RouterResult(own, "self", confidence, handed_off=True)
+        if own and confidence > self.cfg.abstain_below:
+            return RouterResult(own, "self", confidence, handed_off=True)
+        if own:
+            return RouterResult(HONEST_ABSTENTION, "abstain", confidence, handed_off=False)
         return RouterResult("", "none", 0.0, handed_off=False)
+
+    def _faculty_answer(self, prompt: str) -> Optional[Tuple[str, float]]:
+        try:
+            from nyxara.mind.reasoning_faculties import solve_with_faculties
+            return solve_with_faculties(prompt)
+        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            return None
 
 
 # --------------------------------------------------------------------------- #

@@ -386,6 +386,10 @@ class RouterConfig(BaseModel):
     consult_teacher: bool = True
     # Cap on the own model's reply length when routing.
     max_tokens: int = Field(default=256, ge=1)
+    # Phase 4: consult verifiable faculties (exact math / logic) before any neural guess.
+    use_faculties: bool = True
+    # With no teacher to consult, an own answer this weak is declined honestly ("I don't know").
+    abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
 class MemoryConfig(BaseModel):
