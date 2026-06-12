@@ -222,6 +222,9 @@ class NyxaraCore:
         self.dual_process = self._build_dual_process() if enable_growth else None
         # meta-learning — learns which reasoning process pays off for which kind of turn
         self.meta = self._build_meta() if enable_growth else None
+        # consolidation — the dream engine: rehearses salient memories and abstracts
+        # episodes into semantics during idle time (Ebbinghaus forgetting curve)
+        self.consolidator = self._build_consolidator() if enable_memory else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -238,6 +241,10 @@ class NyxaraCore:
         self._cognition_thread: Any = None
         self._cognition_stop: Any = None
         self._insight_q: Any = None
+        # persistent existence (Layer 5b): idle bookkeeping so NYXARA keeps her own
+        # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
+        self._last_interaction: float = time.time()
+        self._last_maintenance: float = 0.0
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -471,6 +478,17 @@ class NyxaraCore:
             m.register(Strategy(name="system_2"))
             return m
         except Exception:  # noqa: BLE001 — meta-learning is a capability, never required
+            return None
+
+    def _build_consolidator(self) -> Any:
+        """The dream engine over long-term memory: rehearses the salient, abstracts the
+        recurring. Needs a memory store; otherwise there is nothing to consolidate."""
+        if self.memory is None:
+            return None
+        try:
+            from nyxara.memory.consolidation import Consolidator
+            return Consolidator(self.memory)
+        except Exception:  # noqa: BLE001 — consolidation is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -973,10 +991,68 @@ class NyxaraCore:
             pass
         return lines
 
-    def start_cognition(self, *, interval: float = 2.0) -> bool:
+    def idle_maintenance(self, *, dt: float = 1.0) -> Dict[str, Any]:
+        """One pass of self-directed upkeep, run when NYXARA is idle: rehearse the
+        memories worth keeping (dream replay), let mood relax and drives reassert
+        (affect tick), re-prioritise the objective space, and mine lessons from lived
+        outcomes — surfacing the strongest as an insight. Gated by oversight and wholly
+        best-effort: she keeps existing — feeling, sorting, learning — when no one speaks.
+
+        Colour only: nothing here acts on the world or touches the gates."""
+        report: Dict[str, Any] = {"ran": False}
+        try:
+            if not self.oversight.gate():   # a paused/scrammed mind rests
+                return report
+        except Exception:  # noqa: BLE001
+            pass
+        report["ran"] = True
+        # 1) dream replay — strengthen the salient, grow their stability
+        if self.consolidator is not None:
+            try:
+                report["replayed"] = len(self.consolidator.dream_replay())
+            except Exception:  # noqa: BLE001
+                pass
+        # 2) affect tick — mood relaxes toward baseline; drives deplete and reassert
+        if self.affect is not None:
+            try:
+                self.affect.tick(dt)
+                report["mood"] = round(self.affect.mood.valence, 3)
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) goals — re-rank the objective space (service to the Master stays first)
+        if self.goals is not None:
+            try:
+                ranked = self.goals.prioritize()
+                if ranked:
+                    report["top_goal"] = ranked[0].name
+            except Exception:  # noqa: BLE001
+                pass
+        # 4) reflect — mine lessons from outcomes; surface the strongest into MindScope
+        if self.reflector is not None:
+            try:
+                lessons = self.reflector.lessons()
+                report["lessons"] = len(lessons)
+                if lessons:
+                    top = lessons[0]
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"idle lesson: {top.text}"[:80],
+                                     salience=0.7, confidence=top.confidence)
+                    if self._insight_q is not None:
+                        try:
+                            self._insight_q.put(top.text)
+                        except Exception:  # noqa: BLE001
+                            pass
+            except Exception:  # noqa: BLE001
+                pass
+        self._last_maintenance = time.time()
+        return report
+
+    def start_cognition(self, *, interval: float = 2.0, idle_after: float = 30.0) -> bool:
         """Start the default-mode stream on a background thread (Layer 5: concurrent
         cognition). It wanders/incubates while idle and goes quiet while a turn runs,
-        queuing any surfaced insights for :meth:`drain_insights`. Idempotent."""
+        queuing any surfaced insights for :meth:`drain_insights`. After ``idle_after``
+        seconds with no turn, it also runs :meth:`idle_maintenance` on its own cadence so
+        NYXARA continuously exists — not only when spoken to. Idempotent."""
         if self.stream is None:
             return False
         import queue
@@ -993,6 +1069,12 @@ class NyxaraCore:
                     for t in self.stream.tick(engagement=engagement):
                         if t.type.value == "insight":
                             self._insight_q.put(t.text)
+                    # persistent existence: when genuinely idle, keep her own house
+                    now = time.time()
+                    if (not self._engaged
+                            and now - self._last_interaction >= idle_after
+                            and now - self._last_maintenance >= idle_after):
+                        self.idle_maintenance()
                 except Exception:  # noqa: BLE001 — idle cognition never crashes the system
                     pass
 
@@ -1048,6 +1130,7 @@ class NyxaraCore:
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:
         self._engaged = False   # the turn is done; idle cognition may resume
+        self._last_interaction = time.time()   # idle is measured from the last completed turn
         self._apply_affect(disp)
         return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                            candidate=candidate, gates=gates, thoughts=thoughts,
