@@ -134,6 +134,33 @@ def test_start_cognition_noop_without_stream():
     assert nyx.start_cognition() is False
 
 
+# -------------------- multi-turn conversation context (Layer 7) -------------------- #
+def test_conversation_history_accumulates():
+    nyx = NyxaraCore()
+    nyx.process("my name is JP", authority=Authority.OWNER)
+    nyx.process("what did I just tell you?", authority=Authority.OWNER)
+    # two turns -> four messages (master + nyxara each)
+    assert len(nyx.history) == 4
+    roles = [r for r, _ in nyx.history]
+    assert roles == ["master", "nyxara", "master", "nyxara"]
+
+
+def test_history_is_bounded():
+    nyx = NyxaraCore(history_turns=2)
+    for i in range(5):
+        nyx.process(f"message {i}", authority=Authority.OWNER)
+    # 2 turns kept -> at most 4 messages
+    assert len(nyx.history) <= 4
+
+
+def test_history_reaches_the_reasoner():
+    nyx = NyxaraCore()
+    nyx.process("remember the milk", authority=Authority.OWNER)
+    if hasattr(nyx.reasoner, "_history_context"):
+        ctx = nyx.reasoner._history_context()
+        assert "Recent conversation" in ctx and "remember the milk" in ctx
+
+
 # -------------------- faculties never override the control law -------------------- #
 def test_faculties_do_not_change_dispositions():
     # a benign owner turn still acts; a risky autonomous one still escalates/refuses

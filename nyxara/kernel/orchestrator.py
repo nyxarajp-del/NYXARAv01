@@ -161,6 +161,7 @@ class NyxaraCore:
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
+                 history_turns: int = 6,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -199,6 +200,10 @@ class NyxaraCore:
             self._build_stream() if enable_growth else None)
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
+        # short-term conversation buffer (Layer 7): verbatim recent turns the reasoner
+        # reads for multi-turn coherence, complementing semantic memory recall.
+        from collections import deque
+        self.history: Any = deque(maxlen=2 * max(1, history_turns))
         # background default-mode cognition (Layer 5): off until started
         self._engaged = False
         self._cognition_thread: Any = None
@@ -273,7 +278,7 @@ class NyxaraCore:
                     council = None
             return LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
-                               skill_memory=skills, soul=soul)
+                               skill_memory=skills, soul=soul, history=self.history)
         except Exception:  # noqa: BLE001 — always have a working mind
             return _default_reasoner
 
@@ -410,8 +415,9 @@ class NyxaraCore:
             self.reporter.log_decision(candidate.text, candidate.rationale,
                                        outcome=disp.value, autonomous=authority is not Authority.OWNER)
             self._grow(candidate, disp, authority=authority, success=False)
-            return self._finish(cid, disp, candidate, gates, thoughts, reason,
-                                self._spoken_response(candidate, disp))
+            response = self._spoken_response(candidate, disp)
+            self._record_history(safe_text, response, authority)
+            return self._finish(cid, disp, candidate, gates, thoughts, reason, response)
 
         # 5. ACT — only a fully-cleared candidate, under a deadline, journalled
         aid = self.journal.record_action(
@@ -456,6 +462,7 @@ class NyxaraCore:
         response = self._spoken_response(candidate, Disposition.ACT)
         if tool_result is not None and tool_result.ok and candidate.tool:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
+        self._record_history(safe_text, response, authority)
         self._remember_turn(safe_text, response, authority)
         tool_value = tool_result.value if (tool_result is not None and tool_result.ok) else None
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
@@ -539,6 +546,15 @@ class NyxaraCore:
     def _format_tool_value(value: Any) -> str:
         text = value if isinstance(value, str) else repr(value)
         return text if len(text) <= 500 else text[:500] + "…"
+
+    def _record_history(self, stimulus: str, response: str, authority: Authority) -> None:
+        """Append a verbatim exchange to the short-term buffer (Layer 7: multi-turn context)."""
+        try:
+            who = "master" if authority is Authority.OWNER else authority.value
+            self.history.append((who, stimulus))
+            self.history.append(("nyxara", response))
+        except Exception:  # noqa: BLE001 — the buffer is advisory, never fatal
+            pass
 
     def _remember_turn(self, stimulus: str, response: str, authority: Authority) -> None:
         """Persist the exchange to long-term memory so turns accrete into continuity."""

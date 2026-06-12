@@ -66,8 +66,8 @@ class LLMReasoner:
     def __init__(self, llm: Optional[LLM] = None, *, memory: Any = None, tools: Any = None,
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
-                 skill_memory: Any = None, soul: Any = None,
-                 max_memory_context: int = 5) -> None:
+                 skill_memory: Any = None, soul: Any = None, history: Any = None,
+                 max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
         self.memory = memory
@@ -78,7 +78,11 @@ class LLMReasoner:
         self.skill_memory = skill_memory
         # the personality attractor — gives the model a steady, recognisable voice
         self.soul = soul
+        # a live, verbatim short-term conversation buffer (Layer 7: multi-turn context).
+        # A shared sequence of (role, text) the kernel appends to after each turn.
+        self.history = history
         self.max_memory_context = max_memory_context
+        self.max_history = max_history
         self.system = system or self._default_system()
 
     # ---- prompts ---- #
@@ -137,9 +141,26 @@ class LLMReasoner:
         except Exception:  # noqa: BLE001 — learned skills are advisory, never fatal
             return ""
 
+    def _history_context(self) -> str:
+        """The last few verbatim turns, so replies stay coherent across a conversation."""
+        if not self.history:
+            return ""
+        try:
+            recent = list(self.history)[-2 * self.max_history:]
+        except Exception:  # noqa: BLE001
+            return ""
+        if not recent:
+            return ""
+        lines = []
+        for role, text in recent:
+            who = "Master" if str(role).lower() in ("master", "owner", "user") else "NYXARA"
+            lines.append(f"{who}: {str(text)[:300]}")
+        return "\n\nRecent conversation (most recent last):\n" + "\n".join(lines)
+
     def _context_block(self, stimulus: str) -> str:
         """The recalled-memory + learned-skill + tool-catalog grounding for a stimulus."""
-        return (f"{self._memory_context(stimulus)}"
+        return (f"{self._history_context()}"
+                f"{self._memory_context(stimulus)}"
                 f"{self._skill_context(stimulus)}"
                 f"{self._tool_catalog()}")
 
