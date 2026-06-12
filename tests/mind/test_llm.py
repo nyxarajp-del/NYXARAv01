@@ -262,3 +262,46 @@ def test_unavailable_provider_falls_back_to_mock():
     settings.llm.provider = ProviderName.LOCAL
     llm = LLM(settings=settings, providers={"local": _Unavailable(), "mock": MockProvider()})
     assert llm.chosen_provider().name == "mock"
+
+
+# -------------------- self-model prompt formatting (Phase 0) -------------------- #
+def test_format_self_prompt_renders_system_and_turns():
+    from nyxara.mind.llm import (format_self_prompt, _SELF_USER_TAG,
+                                 _SELF_ASSISTANT_TAG)
+    req = LLMRequest.from_messages(
+        [Message(Role.USER, "first"), Message(Role.ASSISTANT, "reply"),
+         Message(Role.USER, "second")], system="You are NYXARA.")
+    prompt = format_self_prompt(req)
+    assert prompt.startswith("You are NYXARA.")
+    assert f"{_SELF_USER_TAG}\nfirst" in prompt
+    assert f"{_SELF_ASSISTANT_TAG}\nreply" in prompt
+    # ends primed for NYXARA to continue (an add_generation_prompt)
+    assert prompt.endswith(_SELF_ASSISTANT_TAG + "\n")
+
+
+def test_format_self_prompt_without_system():
+    from nyxara.mind.llm import format_self_prompt, _SELF_USER_TAG
+    prompt = format_self_prompt(LLMRequest.from_prompt("hi"))
+    assert prompt.startswith(f"{_SELF_USER_TAG}\nhi")
+
+
+def test_truncate_at_stops_cuts_at_earliest_marker():
+    from nyxara.mind.llm import truncate_at_stops, _SELF_USER_TAG
+    raw = f"The answer is 42.\n{_SELF_USER_TAG}\nnext question"
+    text, hit = truncate_at_stops(raw, (f"\n{_SELF_USER_TAG}",))
+    assert text == "The answer is 42."
+    assert hit is True
+
+
+def test_truncate_at_stops_no_marker_keeps_text():
+    from nyxara.mind.llm import truncate_at_stops
+    text, hit = truncate_at_stops("a clean answer", ("### User:",))
+    assert text == "a clean answer"
+    assert hit is False
+
+
+def test_self_provider_unavailable_without_promoted_model(tmp_path):
+    from nyxara.mind.llm import SelfProvider
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"   # empty -> no active model
+    assert SelfProvider(settings).available() is False

@@ -170,3 +170,19 @@ def test_core_solver_runs_offline_without_crashing():
     # the offline reasoner can't do arithmetic; an honest harness simply records that
     assert 0.0 <= report.accuracy <= 1.0
     assert all(isinstance(r.response, str) for r in report.results)
+
+
+# --------------------------------------------------------------------------- #
+# Self-model solver (Phase 0) — honest about an un-forged substrate
+# --------------------------------------------------------------------------- #
+def test_self_solver_is_honest_without_a_promoted_model(tmp_path):
+    """No model forged yet -> own model scores 0, never crashes (the Phase-0 floor)."""
+    from nyxara.eval.benchmark import self_solver
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"   # empty -> no active model
+    bench = build_arithmetic_benchmark(2)
+    report = bench.run(self_solver(settings=settings))
+    assert len(report) == 2
+    assert report.accuracy == 0.0
+    assert all(r.response == "" for r in report.results)

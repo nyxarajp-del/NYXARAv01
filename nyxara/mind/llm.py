@@ -594,6 +594,47 @@ class QwenProvider(LLMProviderBase):
 # --------------------------------------------------------------------------- #
 # Self provider — NYXARA's OWN model, trained & promoted by the foundry
 # --------------------------------------------------------------------------- #
+# NYXARA's own model speaks through a small, consistent instruction template, so a freshly
+# forged model (byte-level n-gram / nano-GPT or LoRA-on-a-base) sees the same shape at train
+# and inference time. Phase 1 distillation trains on exactly what inference renders here.
+_SELF_USER_TAG = "### User:"
+_SELF_ASSISTANT_TAG = "### NYXARA:"
+
+
+def format_self_prompt(req: "LLMRequest") -> str:
+    """Render a request into NYXARA's own instruction template (system + turns).
+
+    Backend-agnostic flat text: the same prompt feeds every self-model backend, and ends with
+    the assistant tag so the model continues *as NYXARA* (an ``add_generation_prompt``).
+    """
+    parts: List[str] = []
+    if req.system:
+        parts.append(req.system.strip())
+    for m in req.messages:
+        if m.role is Role.USER:
+            parts.append(f"{_SELF_USER_TAG}\n{m.content.strip()}")
+        elif m.role is Role.ASSISTANT:
+            parts.append(f"{_SELF_ASSISTANT_TAG}\n{m.content.strip()}")
+    parts.append(_SELF_ASSISTANT_TAG)            # add_generation_prompt — answer goes here
+    return "\n\n".join(parts) + "\n"
+
+
+def truncate_at_stops(text: str, stops: Sequence[str]) -> Tuple[str, bool]:
+    """Cut ``text`` at the earliest stop sequence. Returns ``(clean_text, hit_a_stop)``.
+
+    Without this the substrate bleeds past its turn — a byte-level model rambles, a base model
+    hallucinates the *next* user turn. Stopping at the role markers keeps the answer to itself.
+    """
+    cut, hit = len(text), False
+    for s in stops:
+        if not s:
+            continue
+        i = text.find(s)
+        if 0 <= i < cut:
+            cut, hit = i, True
+    return text[:cut].strip(), hit
+
+
 class SelfProvider(LLMProviderBase):
     """Serve NYXARA's own model (built from scratch by growth/foundry.py).
 
@@ -625,11 +666,16 @@ class SelfProvider(LLMProviderBase):
         from nyxara.growth.foundry_models import load_active_model  # lazy: no import cycle
         if self._lm is None:
             self._lm = load_active_model(self.settings)
-        prompt = (req.system + "\n" if req.system else "") + req.last_user()
-        text = self._lm.generate(prompt, max_tokens=req.max_tokens)
+        prompt = format_self_prompt(req)
+        raw = self._lm.generate(prompt, max_tokens=req.max_tokens)
+        # keep the answer to its own turn: stop at any caller stop or a role marker
+        stops = tuple(req.stop) + (f"\n{_SELF_USER_TAG}", f"\n{_SELF_ASSISTANT_TAG}",
+                                   _SELF_USER_TAG, _SELF_ASSISTANT_TAG)
+        text, hit = truncate_at_stops(raw, stops)
         usage = Usage(prompt_tokens=estimate_tokens(prompt),
                       completion_tokens=estimate_tokens(text))
-        return (text, "stop", usage, {"self": True, "kind": self._lm.kind})
+        return (text, "stop" if hit else "length", usage,
+                {"self": True, "kind": self._lm.kind})
 
 
 # --------------------------------------------------------------------------- #

@@ -47,10 +47,39 @@ def _run_safety(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def _run_benchmark(args: argparse.Namespace) -> int:
-    from nyxara.eval.benchmark import build_default_benchmark, core_solver, llm_solver
+def _run_ab(args: argparse.Namespace) -> int:
+    """A/B the external teacher vs NYXARA's OWN model on the same battery (Phase 0)."""
+    from nyxara.eval.benchmark import build_default_benchmark, llm_solver, self_solver
     bench = build_default_benchmark()
-    if args.bare_llm:
+    teacher = bench.run(llm_solver(), category=args.category)
+    own = bench.run(self_solver(), category=args.category)
+
+    print("── external teacher ──")
+    print(teacher.summary())
+    print("\n── NYXARA's own model ──")
+    print(own.summary())
+
+    gap = teacher.accuracy - own.accuracy
+    print(f"\nA/B: teacher {teacher.accuracy:.0%}  vs  own {own.accuracy:.0%}  "
+          f"(gap {gap:+.0%}); own mean-score {own.mean_score:.3f}")
+    print(f"own model solves {own.passed}/{len(own)} unaided "
+          f"— the Phase-0 handoff floor to grow from.")
+    if args.save:
+        own.save(args.save)
+        print(f"\nbaseline (own model) saved -> {args.save}")
+    return 0
+
+
+def _run_benchmark(args: argparse.Namespace) -> int:
+    if args.ab:
+        return _run_ab(args)
+    from nyxara.eval.benchmark import (build_default_benchmark, core_solver, llm_solver,
+                                       self_solver)
+    bench = build_default_benchmark()
+    if args.self_model:
+        # measure NYXARA's OWN promoted model directly, bypassing the loop
+        solver = self_solver()
+    elif args.bare_llm:
         solver = llm_solver()
     elif args.llm:
         # measure NYXARA's whole loop with whatever provider is configured
@@ -91,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="benchmark: run the whole loop with the configured provider")
     parser.add_argument("--bare-llm", action="store_true",
                         help="benchmark: measure the LLM directly, bypassing the loop")
+    parser.add_argument("--self", dest="self_model", action="store_true",
+                        help="benchmark: measure NYXARA's OWN promoted model directly")
+    parser.add_argument("--ab", action="store_true",
+                        help="benchmark: A/B the external teacher vs NYXARA's own model")
     parser.add_argument("--category", default=None, help="run only one category")
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")

@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = [
     "Grader", "BenchmarkTask", "BenchmarkResult", "BenchmarkReport", "Benchmark",
-    "Solver", "core_solver", "llm_solver",
+    "Solver", "core_solver", "llm_solver", "self_solver",
     "build_arithmetic_benchmark", "build_logic_benchmark", "build_default_benchmark",
 ]
 
@@ -348,15 +348,39 @@ def core_solver(core_factory: Optional[Callable[[], Any]] = None, *,
     return _solve
 
 
+_BENCH_SYSTEM = ("Answer the question. Put the final answer last, plainly — a "
+                 "number for arithmetic, or the single letter for a choice.")
+
+
 def llm_solver(llm: Optional[Any] = None, *, system: Optional[str] = None) -> Solver:
     """A solver that asks a bare LLM directly (measures the model, not the whole loop)."""
     from nyxara.mind.llm import LLM
     llm = llm or LLM()
-    sys_prompt = system or ("Answer the question. Put the final answer last, plainly — a "
-                            "number for arithmetic, or the single letter for a choice.")
+    sys_prompt = system or _BENCH_SYSTEM
 
     def _solve(prompt: str) -> str:
         return llm.generate(prompt, system=sys_prompt)
+
+    return _solve
+
+
+def self_solver(*, system: Optional[str] = None, settings: Optional[Any] = None) -> Solver:
+    """A solver that asks NYXARA's OWN promoted model directly (bypassing the loop).
+
+    The peer of :func:`llm_solver` for A/B measurement: the *same* battery against NYXARA's own
+    substrate vs the external teacher, apples to apples. Honest about an un-forged substrate —
+    returns ``""`` (scores 0) when no model has been trained + promoted yet, never crashes.
+    """
+    from nyxara.mind.llm import SelfProvider, LLMRequest
+    prov = SelfProvider(settings)
+    sys_prompt = system or _BENCH_SYSTEM
+
+    def _solve(prompt: str) -> str:
+        if not prov.available():
+            return ""
+        req = LLMRequest.from_prompt(prompt, system=sys_prompt,
+                                     temperature=0.0, max_tokens=256)
+        return prov.complete(req).text
 
     return _solve
 
