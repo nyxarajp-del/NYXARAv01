@@ -100,6 +100,7 @@ class LLMProvider(str, Enum):
 class VectorBackend(str, Enum):
     FAISS = "faiss"
     NUMPY = "numpy"  # pure-python/numpy fallback, always available
+    QDRANT = "qdrant"  # managed/embedded Qdrant vector DB (scales beyond one process)
 
 
 # --------------------------------------------------------------------------- #
@@ -315,12 +316,21 @@ class MemoryConfig(BaseModel):
 
     vector_backend: VectorBackend = VectorBackend.NUMPY
     embedding_dim: int = Field(default=768, ge=8, le=8192)
-    # Learned semantic embeddings (opt-in; needs the optional sentence-transformers dep).
-    # Off by default so a bare machine uses the always-available hashing embedder and
-    # persisted vectors keep a stable dimension across restarts.
-    semantic_embeddings: bool = False
+    # Learned semantic embeddings — ON by default so recall is meaning-based ("intrusion"
+    # finds "unauthorised login"), not keyword-only. It degrades gracefully: when the
+    # optional sentence-transformers dep is absent, the store falls back to the always-
+    # available hashing embedder, and loading memory saved under a different embedder
+    # re-embeds it into the current space (no crash, no lost memories).
+    semantic_embeddings: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = ""             # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # Managed/embedded Qdrant vector DB (used when vector_backend=qdrant). Leave url empty
+    # for an embedded local store at ``qdrant_path`` (or in-memory if that is empty too);
+    # set url (+ api_key) to point at a managed Qdrant cluster for real scale.
+    qdrant_url: str = ""
+    qdrant_api_key: Optional[SecretStr] = None
+    qdrant_collection: str = "nyxara_memory"
+    qdrant_path: str = ""                  # embedded on-disk path; "" -> in-memory
     working_memory_slots: int = Field(default=7, ge=1, le=64)  # Miller's 7±2
     episodic_capacity: int = Field(default=100_000, ge=100)
     consolidation_interval_s: float = Field(default=3600.0, gt=0)

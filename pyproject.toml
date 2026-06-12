@@ -29,6 +29,9 @@ llm = ["anthropic>=0.40", "openai>=1.40", "httpx>=0.27"]
 qwen = ["transformers>=4.51", "torch>=2.2", "accelerate>=0.30"]
 # Vector / retrieval (scale: faiss ANN index, selected via NYXARA_MEMORY__VECTOR_BACKEND=faiss)
 vector = ["faiss-cpu>=1.8", "numpy>=1.26"]
+# Managed/embedded Qdrant vector DB (NYXARA_MEMORY__VECTOR_BACKEND=qdrant). Embedded
+# local/in-memory out of the box; point qdrant_url at a cluster for real scale.
+qdrant = ["qdrant-client>=1.7"]
 # Learned semantic embeddings (NYXARA_MEMORY__SEMANTIC_EMBEDDINGS=true)
 embeddings = ["sentence-transformers>=2.7"]
 # Generative output — images (diffusion) & speech (offline TTS). Both degrade to a real,

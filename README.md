@@ -124,10 +124,17 @@ around the control law.
 ### Scaling
 
 * **Vector search** — memory uses an exact numpy index by default; set
-  `NYXARA_MEMORY__VECTOR_BACKEND=faiss` (with the `[vector]` extra) for a faiss ANN index.
-  The store is **thread-safe**, so async turns and the background loop can share it.
-* **Semantic recall** — `NYXARA_MEMORY__SEMANTIC_EMBEDDINGS=true` (with `[embeddings]`)
-  swaps lexical hashing for learned sentence embeddings.
+  `NYXARA_MEMORY__VECTOR_BACKEND=faiss` (with the `[vector]` extra) for a faiss ANN index, or
+  `=qdrant` (with the `[qdrant]` extra) for a **managed/embedded Qdrant vector DB** that
+  scales beyond one process's RAM. Qdrant works three ways with no code change — in-memory by
+  default, embedded on-disk via `NYXARA_MEMORY__QDRANT_PATH`, or a managed cluster via
+  `NYXARA_MEMORY__QDRANT_URL` (+ `QDRANT_API_KEY`). The store is **thread-safe**, so async
+  turns and the background loop can share it.
+* **Semantic recall** — learned sentence embeddings are **on by default** (meaning-based
+  recall: "intrusion" finds "unauthorised login"). Install the `[embeddings]` extra to make
+  them learned rather than the always-available hashing fallback; loading memory saved under
+  a different embedder **re-embeds it into the current space**, so the upgrade is lossless.
+  Set `NYXARA_MEMORY__SEMANTIC_EMBEDDINGS=false` to force the dependency-free hashing embedder.
 
   ```python
   from nyxara import NyxaraCore, AutonomicLoop
