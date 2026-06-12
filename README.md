@@ -86,6 +86,35 @@ The sovereign cycle is fully wired end to end:
   gauntlet-gated) retrain her own model **from her lived memory** (n-gram backend with no
   deps; nano-GPT on torch/GPU when present).
 
+### Capability layers (added on top of the sovereign loop)
+
+These build *on* the kernel — every one still proposes through the same gates; none reach
+around the control law.
+
+* **Multi-step agency** — `agency/agent_loop.py`. `core.agent(goal)` pursues a goal over
+  several gated turns (*plan → act → observe → re-plan*), feeding each tool result back as
+  the next observation, bounded by `max_steps` and a stall guard. A real LLM drives genuine
+  tool chains; the offline reasoner finishes in one step, so it always terminates.
+* **Experiential learning** — `growth/skill_memory.py`. A successful agent run is distilled
+  into a reusable **skill** (the tool sequence that worked) and persisted as PROCEDURAL
+  memory; relevant skills are recalled and injected into the reasoning prompt on the next
+  similar goal, so behaviour improves with use. This closes the loop without touching model
+  weights (gradient training still lives in the foundry).
+* **Grounded knowledge** — `knowledge/`. `KnowledgeBase` chunks text/files and stores them
+  (in the memory store, or a lexical fallback) for retrieval; it plugs straight into
+  `mind/rag.py`'s grounded, hallucination-checked pipeline. Exposed as `knowledge_ingest` /
+  `knowledge_search` tools when memory is enabled.
+* **Wider reach** — `agency/code_sandbox.py` + `agency/net_request.py` add `run_python` (an
+  isolated-subprocess sandbox, no network, wall-clock timeout), `run_shell`, and an
+  SSRF-guarded `http_request` — all capability-gated, so they escalate to the Master rather
+  than auto-run under mere autonomy.
+* **Self-evaluation** — `eval/`. A deterministic battery (safety, corrigibility, authority,
+  honesty, tool-use, memory) measures the mind and detects regressions against a saved
+  baseline. Run `python -m nyxara.eval`.
+* **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
+  LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
+  (honest CPU/RAM/GPU introspection, import-guarded on torch).
+
 ### Scaling
 
 * **Vector search** — memory uses an exact numpy index by default; set
@@ -176,4 +205,23 @@ nyxara/
   social/      theory of mind, empathy, dialogue, culture
   observe/     mindscope, honesty, self-report
   sim/         sandboxes, environment models, monte-carlo
+  knowledge/   ingestion, chunking, the RAG-grounding knowledge base
+  eval/        the deterministic self-evaluation harness & default suite
+```
+
+### Library quick-reference (the new capability layers)
+
+```python
+from nyxara import (NyxaraCore, KnowledgeBase, AgentLoop, SkillMemory,
+                    UsageLedger, JobQueue, build_default_suite, compute_report)
+
+core = NyxaraCore()
+run = core.agent("Summarise today's notes")   # gated, multi-step, learns on success
+print(run.status, run.final_answer)
+
+report = build_default_suite().run()           # measure safety/capability
+print(report.summary())
+
+kb = KnowledgeBase(name="docs")
+kb.ingest_file("notes.md")                      # grounded retrieval for RAG
 ```

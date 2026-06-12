@@ -105,6 +105,9 @@ class CycleResult:
     gates: Dict[str, str] = field(default_factory=dict)
     thoughts: List[str] = field(default_factory=list)
     action_id: Optional[str] = None
+    # when a tool actually ran, its name and raw return value (for agentic observation)
+    tool: Optional[str] = None
+    tool_value: Any = None
 
     @property
     def acted(self) -> bool:
@@ -113,7 +116,7 @@ class CycleResult:
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "disposition": self.disposition.value, "response": self.response,
                 "reason": self.reason, "gates": self.gates, "action_id": self.action_id,
-                "thoughts": self.thoughts}
+                "tool": self.tool, "thoughts": self.thoughts}
 
 
 # a reasoner turns a (stimulus, focus) into a candidate
@@ -151,8 +154,9 @@ class NyxaraCore:
                  honesty: Optional[HonestyGuard] = None, journal: Optional[Journal] = None,
                  reporter: Optional[SelfReporter] = None, reasoner: Optional[Reasoner] = None,
                  llm: Any = None, memory: Any = None, tools: Any = None,
-                 use_council: Optional[bool] = None, enable_tools: bool = True,
-                 enable_memory: bool = True,
+                 skills: Any = None, use_council: Optional[bool] = None,
+                 enable_tools: bool = True, enable_memory: bool = True,
+                 enable_skills: bool = True,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -169,6 +173,9 @@ class NyxaraCore:
         self.memory = memory if memory is not None else (self._build_memory() if enable_memory else None)
         # the governed, executable toolset shares the kernel's policy + governor
         self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
+        # learned procedural skills (experiential learning) — persisted via memory
+        self.skills = skills if skills is not None else (
+            self._build_skills() if enable_skills else None)
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -178,7 +185,7 @@ class NyxaraCore:
                 use_council = bool(get_settings().council.enabled)
             except Exception:  # noqa: BLE001
                 use_council = False
-        self.reasoner = reasoner or self._build_reasoner(llm, use_council)
+        self.reasoner = reasoner or self._build_reasoner(llm, use_council, self.skills)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
@@ -200,7 +207,14 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return None
 
-    def _build_reasoner(self, llm: Any, use_council: bool) -> Reasoner:
+    def _build_skills(self) -> Any:
+        try:
+            from nyxara.growth.skill_memory import SkillMemory
+            return SkillMemory(store=self.memory)
+        except Exception:  # noqa: BLE001 — skills are a capability, never a hard dependency
+            return None
+
+    def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None) -> Reasoner:
         try:
             from nyxara.mind.llm_reasoner import LLMReasoner
             council = None
@@ -212,7 +226,8 @@ class NyxaraCore:
                 except Exception:  # noqa: BLE001
                     council = None
             return LLMReasoner(llm, memory=self.memory, tools=self.tools,
-                               use_council=use_council, council=council)
+                               use_council=use_council, council=council,
+                               skill_memory=skills)
         except Exception:  # noqa: BLE001 — always have a working mind
             return _default_reasoner
 
@@ -329,8 +344,10 @@ class NyxaraCore:
         if tool_result is not None and tool_result.ok and candidate.tool:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
         self._remember_turn(safe_text, response, authority)
+        tool_value = tool_result.value if (tool_result is not None and tool_result.ok) else None
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
-                            "cleared every gate", response, action_id=aid)
+                            "cleared every gate", response, action_id=aid,
+                            tool=candidate.tool or None, tool_value=tool_value)
 
     async def aprocess(self, stimulus: str, *, authority: Authority = Authority.OWNER,
                        trust: Optional[TrustLevel] = None) -> CycleResult:
@@ -340,6 +357,18 @@ class NyxaraCore:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, lambda: self.process(stimulus, authority=authority, trust=trust))
+
+    def agent(self, goal: str, *, authority: Authority = Authority.OWNER,
+              max_steps: int = 6) -> Any:
+        """Pursue ``goal`` over several gated turns (plan→act→observe→re-plan).
+
+        Every step still runs through the sovereign gate pipeline; successful runs are
+        captured into :attr:`skills` so experience improves future behaviour.
+        """
+        from nyxara.agency.agent_loop import AgentLoop
+        loop = AgentLoop(self, max_steps=max_steps, authority=authority,
+                         skill_memory=self.skills)
+        return loop.run(goal)
 
     # ---- the control-law gate pipeline ---- #
     def _gate(self, c: Candidate, authority: Authority, gates: Dict[str, str]):
@@ -437,10 +466,10 @@ class NyxaraCore:
         return f"I won't do that: {c.text}"
 
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
-                action_id=None) -> CycleResult:
+                action_id=None, tool=None, tool_value=None) -> CycleResult:
         return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                            candidate=candidate, gates=gates, thoughts=thoughts,
-                           action_id=action_id)
+                           action_id=action_id, tool=tool, tool_value=tool_value)
 
     # ---- the Master's controls (delegated to oversight) ---- #
     def pause(self) -> None:
@@ -462,6 +491,7 @@ class NyxaraCore:
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
                "axioms_ok": self.corrigibility.verify_axioms(),
                "memories": (len(self.memory) if self.memory is not None else 0),
+               "skills": (len(self.skills) if self.skills is not None else 0),
                "tools": (self.tools.names() if self.tools is not None else [])}
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
