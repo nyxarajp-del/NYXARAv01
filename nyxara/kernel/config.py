@@ -309,6 +309,10 @@ class FoundryConfig(BaseModel):
     eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
     # A candidate must beat the active model's perplexity by at least this fraction.
     min_perplexity_improvement: float = Field(default=1e-4, ge=0.0)
+    # Capability gauntlet (Phase 3): a promotion must not *regress* on a held capability
+    # benchmark, not merely lower perplexity. Tolerant of tiny noise via the margin.
+    capability_gate: bool = True
+    capability_regression_tol: float = Field(default=1e-6, ge=0.0)
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0
@@ -359,6 +363,33 @@ class CouncilConfig(BaseModel):
     synthesizer: str = "self"
     # The mock answers only when no real member is available (keeps a council never silent).
     include_mock_fallback: bool = True
+
+
+class RouterConfig(BaseModel):
+    """Confidence-router settings (mind/router.py) — Phase 2 of the sovereign-brain path.
+
+    The router lets NYXARA's OWN forged model answer first; a verifier scores that answer, and
+    only if it clears ``threshold`` does she speak it herself (a *handoff*). Otherwise she
+    consults the external teacher. This is the measurable, reversible bridge from
+    LLM-wrapper to own substrate: as the own-model improves, the handoff rate rises on its own.
+    Off by default — opt in once the foundry has forged a model worth trusting.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = False
+    # Minimum verifier score (0..1) for NYXARA to speak her own model's answer unaided.
+    threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # An answer shorter than this many characters is never trusted (degenerate output).
+    min_chars: int = Field(default=2, ge=0)
+    # When the own answer fails the bar, fall back to the external teacher (else keep own).
+    consult_teacher: bool = True
+    # Cap on the own model's reply length when routing.
+    max_tokens: int = Field(default=256, ge=1)
+    # Phase 4: consult verifiable faculties (exact math / logic) before any neural guess.
+    use_faculties: bool = True
+    # With no teacher to consult, an own answer this weak is declined honestly ("I don't know").
+    abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
 class MemoryConfig(BaseModel):
@@ -565,6 +596,7 @@ class NyxaraSettings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
+    router: RouterConfig = Field(default_factory=RouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)

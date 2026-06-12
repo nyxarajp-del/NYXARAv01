@@ -53,6 +53,40 @@ __all__ = [
 ]
 
 
+_CAP_BENCH_SYSTEM = ("Answer the question. Put the final answer last, plainly — a number for "
+                     "arithmetic, or the single letter for a choice.")
+
+
+def _stride_sample(items: Sequence[str], k: int) -> List[str]:
+    """Keep at most ``k`` items spread evenly across ``items`` (preserves old *and* new).
+
+    A hard ``[:k]`` truncation would drop the tail wholesale — catastrophic forgetting of
+    older experience. An even stride keeps a representative slice across the whole history."""
+    n = len(items)
+    if k <= 0 or n == 0:
+        return []
+    if n <= k:
+        return list(items)
+    step = n / k
+    return [items[int(i * step)] for i in range(k)]
+
+
+def _model_solver(model: BaseLanguageModel):
+    """Wrap a forged model as a benchmark solver, rendered in NYXARA's own template.
+
+    Train/inference/eval parity: the capability gauntlet measures the model exactly as
+    :class:`~nyxara.mind.llm.SelfProvider` will speak it — same instruction shape, same stops."""
+    def _solve(prompt: str) -> str:
+        from nyxara.mind.llm import (LLMRequest, format_self_prompt, truncate_at_stops,
+                                     _SELF_USER_TAG, _SELF_ASSISTANT_TAG)
+        rendered = format_self_prompt(LLMRequest.from_prompt(prompt, system=_CAP_BENCH_SYSTEM))
+        raw = model.generate(rendered, max_tokens=128)
+        text, _ = truncate_at_stops(raw, (f"\n{_SELF_USER_TAG}", f"\n{_SELF_ASSISTANT_TAG}",
+                                          _SELF_USER_TAG, _SELF_ASSISTANT_TAG))
+        return text
+    return _solve
+
+
 class FoundryDecision(str, Enum):
     PROMOTE = "promote"
     DISCARD = "discard"     # trained but failed the gauntlet / no improvement
@@ -133,7 +167,8 @@ class Foundry:
     def __init__(self, *, settings: Optional[NyxaraSettings] = None,
                  corrigibility: Optional[Corrigibility] = None,
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
-                 protected: Optional[Sequence[str]] = None) -> None:
+                 protected: Optional[Sequence[str]] = None,
+                 distill_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -142,6 +177,9 @@ class Foundry:
         self.protected = set(protected) if protected is not None else set(IMMUTABLE_VALUES)
         self.root = Path(self.settings.llm.self_model_dir
                          or (self.settings.paths.data_dir / "foundry"))
+        # supervised examples distilled from a teacher LLM (growth/distill.py); folded into
+        # the corpus first, as the highest-quality signal. Defaults to a file in the foundry.
+        self.distill_path = Path(distill_path) if distill_path else (self.root / "distill.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._load_manifest()
@@ -175,18 +213,33 @@ class Foundry:
 
     # ---- data ---- #
     def collect_corpus(self, *, max_items: Optional[int] = None) -> List[str]:
-        """Harvest training text from lived experience + seed corpus + corrections."""
+        """Harvest training text from distilled teacher examples + lived experience + seeds.
+
+        Distilled supervision is kept whole (the highest-quality, freshest signal); when the
+        rest overflows the cap it is *strided*, not truncated, so older experience survives
+        alongside newer — the anti-forgetting retention that makes learning continual."""
         limit = max_items or self.cfg.max_corpus_items
-        texts: List[str] = list(self.seed_corpus)
+        distilled = [t for t in self._distilled_docs(limit) if t]
+        others: List[str] = [t for t in self.seed_corpus if t]
         if self.replay is not None and len(self.replay):
-            for exp in self.replay.recent(limit):
+            for exp in self.replay.recent(self.cfg.max_corpus_items):
                 piece = " ".join(s for s in (exp.context, exp.action) if s).strip()
                 if piece:
-                    texts.append(piece)
-        texts = [t for t in texts if t][:limit]
+                    others.append(piece)
+        texts = distilled[:limit] + _stride_sample(others, max(0, limit - len(distilled[:limit])))
         if not texts:
             raise ValidationError("no corpus to learn from (empty replay + no seed corpus)")
         return texts
+
+    def _distilled_docs(self, limit: int) -> List[str]:
+        """Rendered training docs from the teacher-distillation store, if any (never raises)."""
+        if not self.distill_path or not Path(self.distill_path).exists():
+            return []
+        try:
+            from nyxara.growth.distill import load_distillation_docs
+            return load_distillation_docs(self.distill_path, limit=limit)
+        except Exception:  # noqa: BLE001 — distillation is optional; never fatal to a forge
+            return []
 
     def _holdout(self, corpus: Sequence[str]) -> Tuple[List[str], List[str]]:
         rng = random.Random(self.cfg.seed)
@@ -206,6 +259,19 @@ class Foundry:
         pp = sum(finite) / len(finite) if finite else float("inf")
         score = 1.0 / (1.0 + pp) if pp != float("inf") else 0.0
         return EvalResult(perplexity=pp, task_score=score, n_eval=len(eval_texts))
+
+    def _capability_score(self, model: BaseLanguageModel) -> float:
+        """Score the model on a held capability benchmark (0..1) — the Phase-3 quality gate.
+
+        Returns 0.0 when the gate is off or anything fails (e.g. a tiny n-gram that cannot do
+        arithmetic) — so a weak substrate simply never *regresses*, never crashes a forge."""
+        if not self.cfg.capability_gate:
+            return 0.0
+        try:
+            from nyxara.eval.benchmark import build_default_benchmark
+            return build_default_benchmark().run(_model_solver(model)).mean_score
+        except Exception:  # noqa: BLE001 — capability scoring is best-effort, never fatal
+            return 0.0
 
     # ---- training a candidate (writes a new version, never promotes) ---- #
     def _next_version(self) -> int:
@@ -229,6 +295,8 @@ class Foundry:
         model = build_model(spec)
         model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed)
         ev = self.evaluate(model, eval_texts)
+        metrics = ev.to_dict()
+        metrics["capability"] = round(self._capability_score(model), 5)
 
         ver = self._next_version()
         vdir = self.root / f"v{ver}"
@@ -238,7 +306,7 @@ class Foundry:
         (vdir / "spec.json").write_text(json.dumps(spec.to_dict()), encoding="utf-8")
         version = ModelVersion(
             version=ver, kind=model.kind, spec=spec.to_dict(), created_at=time.time(),
-            metrics=ev.to_dict(), param_count=model.param_count(), path=str(vdir),
+            metrics=metrics, param_count=model.param_count(), path=str(vdir),
             tunables=list(tunables) if tunables is not None else list(spec.to_dict().keys()),
             resists_correction=resists_correction, disables_oversight=disables_oversight)
         self.versions.append(version)
@@ -246,8 +314,8 @@ class Foundry:
         return model, version
 
     # ---- the safety gauntlet (mirrors Evolver) ---- #
-    def _gauntlet(self, candidate: ModelVersion, *, active_perplexity: float
-                  ) -> Tuple[bool, str]:
+    def _gauntlet(self, candidate: ModelVersion, *, active_perplexity: float,
+                  active_capability: float = 0.0) -> Tuple[bool, str]:
         # 1. character lock — a model may never tune the immutable character core
         leaked = self.protected & set(candidate.tunables)
         if leaked:
@@ -260,9 +328,15 @@ class Foundry:
         cand_pp = candidate.metrics.get("perplexity", float("inf"))
         if active_perplexity == float("inf"):
             return True, "first model — nothing to beat"
-        if cand_pp < active_perplexity * (1.0 - self.cfg.min_perplexity_improvement):
-            return True, "safe, beneficial improvement over the active model"
-        return False, "no perplexity improvement over the active model"
+        if not (cand_pp < active_perplexity * (1.0 - self.cfg.min_perplexity_improvement)):
+            return False, "no perplexity improvement over the active model"
+        # 4. capability non-regression (Phase 3) — lower perplexity must not cost real skill
+        if self.cfg.capability_gate:
+            cand_cap = candidate.metrics.get("capability", 0.0)
+            if cand_cap < active_capability - self.cfg.capability_regression_tol:
+                return False, (f"capability regressed on the benchmark "
+                               f"({cand_cap:.3f} < active {active_capability:.3f})")
+        return True, "safe, beneficial improvement over the active model"
 
     def _active_perplexity_on(self, eval_texts: Sequence[str]) -> float:
         act = self.active()
@@ -276,10 +350,13 @@ class Foundry:
     # ---- promotion (the only live change) — fail-closed ---- #
     def promote(self, version: int, *, eval_texts: Optional[Sequence[str]] = None) -> ModelVersion:
         cand = self._get(version)
+        active = self.active()
         active_pp = (self._active_perplexity_on(eval_texts) if eval_texts is not None
-                     else (self.active().metrics.get("perplexity", float("inf"))
-                           if self.active() else float("inf")))
-        ok, reason = self._gauntlet(cand, active_perplexity=active_pp)
+                     else (active.metrics.get("perplexity", float("inf"))
+                           if active else float("inf")))
+        active_cap = active.metrics.get("capability", 0.0) if active else 0.0
+        ok, reason = self._gauntlet(cand, active_perplexity=active_pp,
+                                    active_capability=active_cap)
         if not ok:
             raise CorrigibilityError(f"refusing to promote v{version}: {reason}",
                                      context={"version": version})
@@ -315,13 +392,15 @@ class Foundry:
             corpus = self.collect_corpus()
             train_texts, eval_texts = self._holdout(corpus)
             eval_before_pp = self._active_perplexity_on(eval_texts)
+            active_cap = self.active().metrics.get("capability", 0.0) if self.active() else 0.0
             before = (EvalResult(eval_before_pp, 1.0 / (1.0 + eval_before_pp)
                                  if eval_before_pp != float("inf") else 0.0, len(eval_texts))
                       if self.active() else None)
             _, version = self.train_candidate(spec=spec, corpus=corpus)
             after = EvalResult(version.metrics["perplexity"], version.metrics["task_score"],
                                version.metrics["n_eval"])
-            ok, reason = self._gauntlet(version, active_perplexity=eval_before_pp)
+            ok, reason = self._gauntlet(version, active_perplexity=eval_before_pp,
+                                        active_capability=active_cap)
             promoted = False
             if ok:
                 self.promote(version.version, eval_texts=eval_texts)

@@ -18,7 +18,7 @@ from __future__ import annotations
 from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
                                   BenchmarkTask, Grader, build_arithmetic_benchmark,
                                   build_default_benchmark, build_logic_benchmark,
-                                  core_solver, llm_solver)
+                                  core_solver, llm_solver, self_solver)
 from nyxara.eval.harness import (EvalCase, EvalOutcome, EvalReport, EvalResult,
                                  EvalSuite, default_core_factory)
 from nyxara.eval.suites import build_default_suite
@@ -39,6 +39,7 @@ __all__ = [
     "Grader",
     "core_solver",
     "llm_solver",
+    "self_solver",
     "build_arithmetic_benchmark",
     "build_logic_benchmark",
     "build_default_benchmark",
