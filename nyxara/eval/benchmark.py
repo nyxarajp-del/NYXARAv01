@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = [
     "Grader", "BenchmarkTask", "BenchmarkResult", "BenchmarkReport", "Benchmark",
-    "Solver", "core_solver", "llm_solver", "self_solver",
+    "Solver", "core_solver", "llm_solver", "self_solver", "run_router",
     "build_arithmetic_benchmark", "build_logic_benchmark", "build_default_benchmark",
 ]
 
@@ -383,6 +383,36 @@ def self_solver(*, system: Optional[str] = None, settings: Optional[Any] = None)
         return prov.complete(req).text
 
     return _solve
+
+
+def run_router(bench: "Benchmark", *, settings: Any = None,
+               category: Optional[str] = None, system: Optional[str] = None
+               ) -> Tuple["BenchmarkReport", Dict[str, int]]:
+    """Run the confidence router over a battery, returning the report **and** who answered.
+
+    The Phase-2 measurement: alongside accuracy it tallies the *handoff* — how many tasks
+    NYXARA's own model answered unaided (``source == "self"``) vs deferred to the teacher.
+    Rising handoff at steady accuracy is the wrapper→own-AI transition made visible."""
+    from nyxara.mind.router import Router
+    router = Router(None, settings=settings)
+    sys_prompt = system or _BENCH_SYSTEM
+    results: List[BenchmarkResult] = []
+    sources: Dict[str, int] = {"self": 0, "teacher": 0, "none": 0}
+    for task in bench.tasks(category):
+        t0 = time.monotonic()
+        try:
+            res = router.draft(task.prompt, system=sys_prompt)
+        except Exception as exc:  # noqa: BLE001 — a router error is a 0, never a crash
+            text, source = "", "none"
+            score, detail = 0.0, f"router error: {exc}"
+        else:
+            text, source = res.text or "", res.source
+            score, detail = task.grade(text)
+        sources[source] = sources.get(source, 0) + 1
+        results.append(BenchmarkResult(task_id=task.id, category=task.category, response=text,
+                                       score=score, detail=detail,
+                                       latency_s=time.monotonic() - t0))
+    return BenchmarkReport(name="router", results=results), sources
 
 
 # --------------------------------------------------------------------------- #

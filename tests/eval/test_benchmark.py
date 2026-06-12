@@ -186,3 +186,16 @@ def test_self_solver_is_honest_without_a_promoted_model(tmp_path):
     assert len(report) == 2
     assert report.accuracy == 0.0
     assert all(r.response == "" for r in report.results)
+
+
+def test_run_router_reports_sources_offline(tmp_path):
+    """With no forged model and no real teacher, the router is honest: all 'none', 0 acc."""
+    from nyxara.eval.benchmark import run_router
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    bench = build_arithmetic_benchmark(2)
+    report, sources = run_router(bench, settings=settings)
+    assert len(report) == 2
+    assert sources["self"] == 0
+    assert sum(sources.values()) == 2

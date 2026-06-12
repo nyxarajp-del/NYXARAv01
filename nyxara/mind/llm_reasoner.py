@@ -87,6 +87,7 @@ class LLMReasoner:
         self.max_memory_context = max_memory_context
         self.max_history = max_history
         self.system = system or self._default_system()
+        self._router = None      # Phase 2: lazily built when the confidence router is enabled
 
     # ---- prompts ---- #
     def _default_system(self) -> str:
@@ -194,7 +195,37 @@ class LLMReasoner:
         except Exception:  # noqa: BLE001 — never let the mind crash the loop
             return _default_reasoner(stimulus, focus)
 
+    def _maybe_route(self, stimulus: str) -> Optional[Candidate]:
+        """Phase 2: let NYXARA's OWN model answer first when the router is enabled & confident.
+
+        Returns a conversational :class:`Candidate` only on a verified handoff; otherwise
+        ``None`` so the normal teacher path runs. The reply is still gated downstream like any
+        other — the router decides *which mind drafts*, never whether the words may be spoken.
+        """
+        rcfg = getattr(self.settings, "router", None)
+        if rcfg is None or not rcfg.enabled:
+            return None
+        try:
+            if self._router is None:
+                from nyxara.mind.router import Router
+                self._router = Router(self.llm, settings=self.settings)
+            if not self._router.self_available():
+                return None
+            res = self._router.draft(stimulus, system=self._effective_system())
+            if res.source == "self" and res.handed_off and res.text:
+                return Candidate(
+                    text=res.text, kind="respond", capability=Capability.MESSAGE_SEND,
+                    target="", risk=RiskTier.LOW, reversible=True,
+                    confidence=res.confidence, belief=res.confidence,
+                    rationale="answered by NYXARA's own model (router handoff)")
+        except Exception:  # noqa: BLE001 — routing is advisory; never crash the turn
+            return None
+        return None
+
     def _reason(self, stimulus: str, focus: Any) -> Candidate:
+        routed = self._maybe_route(stimulus)
+        if routed is not None:
+            return routed
         cfg = self.settings.llm
         temperature = min(cfg.temperature, 0.5)
         # Deliberate (think -> decide -> critique) when configured; else a single shot.

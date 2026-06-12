@@ -70,9 +70,29 @@ def _run_ab(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_router(args: argparse.Namespace) -> int:
+    """Run the confidence router and report accuracy + the self/teacher handoff (Phase 2)."""
+    from nyxara.eval.benchmark import build_default_benchmark, run_router
+    bench = build_default_benchmark()
+    report, sources = run_router(bench, category=args.category)
+    print(report.summary())
+    n = len(report) or 1
+    handoff = sources.get("self", 0) / n
+    print(f"\nhandoff: own model answered {sources.get('self', 0)}/{n} unaided "
+          f"({handoff:.0%}); teacher {sources.get('teacher', 0)}, unanswered "
+          f"{sources.get('none', 0)}. Accuracy on handed-off turns is the number that "
+          f"must hold as handoff rises.")
+    if args.save:
+        report.save(args.save)
+        print(f"\nbaseline (router) saved -> {args.save}")
+    return 0
+
+
 def _run_benchmark(args: argparse.Namespace) -> int:
     if args.ab:
         return _run_ab(args)
+    if args.router:
+        return _run_router(args)
     from nyxara.eval.benchmark import (build_default_benchmark, core_solver, llm_solver,
                                        self_solver)
     bench = build_default_benchmark()
@@ -124,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="benchmark: measure NYXARA's OWN promoted model directly")
     parser.add_argument("--ab", action="store_true",
                         help="benchmark: A/B the external teacher vs NYXARA's own model")
+    parser.add_argument("--router", action="store_true",
+                        help="benchmark: run the confidence router and report the handoff rate")
     parser.add_argument("--category", default=None, help="run only one category")
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")
