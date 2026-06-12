@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from nyxara.mind.reasoning_faculties import (extract_expression, extract_formula,
-                                             parse_word_problem, solve_with_faculties,
+                                             parse_word_problem, solve_comparative,
+                                             solve_syllogism, solve_with_faculties,
                                              tautology)
 
 
@@ -110,6 +111,78 @@ def test_logic_faculty_via_solve():
         ("valid (a tautology)", 1.0)
     text, conf = solve_with_faculties("Is A -> B valid?")
     assert "not valid" in text and conf == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Categorical syllogisms (transitive closure, deductive)
+# --------------------------------------------------------------------------- #
+def test_syllogism_transitive_yes():
+    assert solve_syllogism(
+        "All bloops are razzies, and all razzies are lazzies. Are all bloops "
+        "definitely lazzies? Options: A) yes  B) no") == "yes"
+    assert solve_syllogism(
+        "All cats are mammals. All mammals are animals. Are all cats animals?") == "yes"
+
+
+def test_syllogism_not_entailed_is_no():
+    # X is a known category but Y is not reachable -> not provable -> "no"
+    assert solve_syllogism(
+        "All cats are mammals. All dogs are mammals. Are all cats dogs?") == "no"
+
+
+def test_syllogism_abstains_on_hedged_or_unknown():
+    # 'some' changes the logic -> defer
+    assert solve_syllogism("Some bloops are razzies. Are all bloops razzies?") is None
+    # no premises about the subject at all -> defer
+    assert solve_syllogism("Are all wuzzles glorks?") is None
+    # not a syllogism question
+    assert solve_syllogism("All cats are mammals. What is a cat?") is None
+
+
+def test_syllogism_via_solve_with_faculties():
+    assert solve_with_faculties(
+        "All A are B. All B are C. Are all A C?") == ("yes", 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Transitive comparisons (single-scale ordering, exact)
+# --------------------------------------------------------------------------- #
+def test_comparative_minimum_and_maximum():
+    assert solve_comparative(
+        "Tom is taller than Sam. Sam is taller than Ada. Who is shortest? "
+        "A) Tom  B) Sam  C) Ada") == "Ada"
+    assert solve_comparative(
+        "Anu is older than Bob. Bob is older than Cy. Who is the oldest?") == "Anu"
+
+
+def test_comparative_handles_mixed_directions_on_one_scale():
+    # "shorter" and "taller" are the same scale (height) in opposite directions
+    assert solve_comparative(
+        "Sam is shorter than Tom. Ada is shorter than Sam. Who is tallest?") == "Tom"
+
+
+def test_comparative_abstains_when_unsafe():
+    # two different scales must not be combined -> defer
+    assert solve_comparative(
+        "Tom is taller than Sam. Sam is heavier than Ada. Who is tallest?") is None
+    # not a 'who is the -est' question
+    assert solve_comparative("Tom is taller than Sam. Is Tom tall?") is None
+    # ambiguous / no comparisons
+    assert solve_comparative("Who is the tallest person here?") is None
+
+
+def test_comparative_via_solve_with_faculties():
+    assert solve_with_faculties(
+        "X is bigger than Y. Y is bigger than Z. Who is smallest?") == ("Z", 1.0)
+
+
+def test_logic_word_problems_that_must_defer():
+    # algebra trick and semantic odd-one-out are the neural mind's job, not a logic faculty
+    assert solve_with_faculties(
+        "A bat and a ball cost 1.10. The bat costs 1.00 more than the ball. "
+        "How much is the ball, in cents? A) 10  B) 5  C) 1") is None
+    assert solve_with_faculties(
+        "Which word does not belong? A) rose  B) tulip  C) hammer  D) daisy") is None
 
 
 # --------------------------------------------------------------------------- #

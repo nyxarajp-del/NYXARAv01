@@ -15,7 +15,7 @@ an action — the kernel still disposes.
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from nyxara.mind.faculties import (Faculty, FacultyRegistry, FacultySelector, Task, TaskType)
 from nyxara.mind.proposal import ProposalKind
@@ -25,6 +25,8 @@ __all__ = [
     "extract_expression", "MathFaculty",
     "parse_word_problem", "WordProblemFaculty",
     "tautology", "extract_formula", "LogicFaculty",
+    "solve_syllogism", "SyllogismFaculty",
+    "solve_comparative", "ComparativeFaculty",
     "build_default_faculties", "solve_with_faculties",
 ]
 
@@ -373,6 +375,187 @@ class LogicFaculty(Faculty):
 
 
 # --------------------------------------------------------------------------- #
+# Categorical syllogisms — transitive closure over "all X are Y" (deductive, exact)
+# --------------------------------------------------------------------------- #
+# "All bloops are razzies, all razzies are lazzies. Are all bloops lazzies?" is a deduction,
+# not a vibe: subset is transitive, so the answer is *proven* by reachability. We parse only
+# universal-affirmative premises ("all X are Y" / "every X is a Y") and a yes/no "are all X Y?"
+# question; anything with some/no/not (which changes the logic) is left to the neural mind.
+_SYL_PREMISE = re.compile(r"(?<!not )\ball\s+([a-z]+)\s+are\s+([a-z]+)\b", re.I)
+_SYL_PREMISE2 = re.compile(r"\bevery\s+([a-z]+)\s+is\s+(?:an?\s+)?([a-z]+)\b", re.I)
+_SYL_QUESTION = re.compile(r"\b(?:are\s+all|is\s+every)\s+([a-z]+)\s+"
+                           r"(?:definitely\s+|really\s+|always\s+|necessarily\s+)?"
+                           r"(?:an?\s+)?([a-z]+)\b", re.I)
+
+
+def _reachable(graph: Dict[str, Set[str]], start: str) -> Set[str]:
+    """Every node reachable from ``start`` (transitive closure of a directed graph)."""
+    seen: Set[str] = set()
+    stack = list(graph.get(start, ()))
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        stack.extend(graph.get(n, ()))
+    return seen
+
+
+def solve_syllogism(text: str) -> Optional[str]:
+    """Answer 'yes'/'no' to a categorical-syllogism question, or None to defer.
+
+    Deductive: 'are all X (definitely) Y?' is *yes* iff Y is reachable from X through the
+    'all … are …' subset edges, and otherwise *no* (not provable) — but only when X is a real
+    category in the premises. Returns None on anything it cannot parse as a clean universal
+    syllogism, so a verifiable faculty never overclaims."""
+    low = (text or "").lower()
+    q = _SYL_QUESTION.search(low)
+    if q is None:
+        return None
+    subj, pred = q.group(1), q.group(2)
+    graph: Dict[str, Set[str]] = {}
+    for rx in (_SYL_PREMISE, _SYL_PREMISE2):
+        for a, b in rx.findall(low):
+            if a == b:
+                continue
+            graph.setdefault(a, set()).add(b)
+    if not graph:
+        return None
+    # premises that hedge or weaken the universal (some/no/not) are out of this faculty's scope
+    if re.search(r"\b(some|no|none|not|n't|most|few|only)\b",
+                 re.sub(r"(?:options?|answer)\b.*$", "", low)):
+        return None
+    if pred in _reachable(graph, subj):
+        return "yes"
+    if subj in graph:                      # we know this category, but Y is not entailed
+        return "no"
+    return None                            # unknown subject — defer rather than guess
+
+
+class SyllogismFaculty(Faculty):
+    """Categorical syllogisms answered by transitive closure — a proof, not a guess."""
+
+    name = "syllogism"
+    handles = frozenset({TaskType.LOGIC})
+    verifiable = True
+    reliability = 1.0
+    cost = 0.3
+
+    def _answer(self, task: Task) -> Optional[str]:
+        return solve_syllogism(task.description or str(task.payload or ""))
+
+    def suitability(self, task: Task) -> float:
+        return 0.95 if (task.type is TaskType.LOGIC and self._answer(task)) else 0.0
+
+    def handle(self, task: Task):
+        ans = self._answer(task)
+        return self._propose(ans, kind=ProposalKind.ANSWER, confidence=1.0,
+                             rationale="categorical syllogism by transitive closure",
+                             source=SourceType.TOOL)
+
+
+# --------------------------------------------------------------------------- #
+# Transitive comparisons — "Tom is taller than Sam …; who is shortest?" (exact ordering)
+# --------------------------------------------------------------------------- #
+# A chain of "X is <adj>er than Y" defines a strict order on one scale; the superlative is its
+# unique extremum. We pin each adjective to a (scale, polarity) so "taller" and "shortest" are
+# understood as opposite ends of *height*. We fire only when every comparison shares one scale
+# and the extremum is unique — otherwise we defer.
+_ADJ: Dict[str, Tuple[str, int]] = {
+    "tall": ("height", 1), "short": ("height", -1),
+    "big": ("size", 1), "large": ("size", 1), "small": ("size", -1), "little": ("size", -1),
+    "old": ("age", 1), "young": ("age", -1),
+    "fast": ("speed", 1), "quick": ("speed", 1), "slow": ("speed", -1),
+    "heavy": ("weight", 1), "light": ("weight", -1),
+    "strong": ("strength", 1), "weak": ("strength", -1),
+    "rich": ("wealth", 1), "poor": ("wealth", -1),
+    "long": ("length", 1),
+    "high": ("elevation", 1), "low": ("elevation", -1),
+    "hot": ("temperature", 1), "cold": ("temperature", -1),
+    "wide": ("width", 1), "narrow": ("width", -1),
+    "deep": ("depth", 1), "shallow": ("depth", -1),
+}
+_CMP_STMT = re.compile(r"\b([A-Za-z][\w]*)\s+(?:is|was)\s+(?:much\s+|far\s+|a\s+bit\s+)?"
+                       r"([a-z]+er)\s+than\s+([A-Za-z][\w]*)", re.I)
+_CMP_QUESTION = re.compile(r"\bwho\s+(?:is|was)\s+(?:the\s+)?([a-z]+est)\b", re.I)
+
+
+def _adj_info(word: str) -> Optional[Tuple[str, int]]:
+    """Map a comparative/superlative adjective to its (scale, polarity), or None."""
+    w = re.sub(r"[^a-z]", "", word.lower())
+    base = w[:-3] if w.endswith("est") else (w[:-2] if w.endswith("er") else w)
+    cands = {base, base + "e"}
+    if len(base) >= 2 and base[-1] == base[-2]:
+        cands.add(base[:-1])                       # bigg -> big
+    for c in cands:
+        if c in _ADJ:
+            return _ADJ[c]
+    return None
+
+
+def solve_comparative(text: str) -> Optional[str]:
+    """Answer 'who is the most/least …' from a chain of comparisons, or None to defer.
+
+    Builds a strict order on a single scale ('X is taller than Y' → X > Y), then returns the
+    unique top (for a '+' superlative like tallest) or bottom (for a '-' one like shortest).
+    Conservative: one scale only, and a unique extremum, or it defers."""
+    qm = _CMP_QUESTION.search(text or "")
+    if qm is None:
+        return None
+    q_info = _adj_info(qm.group(1))
+    if q_info is None:
+        return None
+    q_scale, q_pol = q_info
+
+    greater: Dict[str, Set[str]] = {}              # canonical "is greater than" edges
+    display: Dict[str, str] = {}
+    nodes: Set[str] = set()
+    found = False
+    for x, adj, y in _CMP_STMT.findall(text or ""):
+        info = _adj_info(adj)
+        if info is None or info[0] != q_scale:     # unknown adj or a different scale → defer
+            return None
+        found = True
+        _, pol = info
+        hi, lo = (x, y) if pol == 1 else (y, x)
+        hk, lk = hi.lower(), lo.lower()
+        greater.setdefault(hk, set()).add(lk)
+        display.setdefault(hk, hi); display.setdefault(lk, lo)
+        nodes.update((hk, lk))
+    if not found or len(nodes) < 2:
+        return None
+
+    closure = {n: _reachable(greater, n) for n in nodes}
+    if q_pol == 1:                                  # want the maximum: greater than all others
+        tops = [n for n in nodes if closure[n] == nodes - {n}]
+    else:                                           # want the minimum: below all others
+        tops = [n for n in nodes if all(n in closure[m] for m in nodes if m != n)]
+    return display[tops[0]] if len(tops) == 1 else None
+
+
+class ComparativeFaculty(Faculty):
+    """Transitive comparison ordering — the superlative is the order's unique extremum."""
+
+    name = "comparison"
+    handles = frozenset({TaskType.LOGIC})
+    verifiable = True
+    reliability = 1.0
+    cost = 0.3
+
+    def _answer(self, task: Task) -> Optional[str]:
+        return solve_comparative(task.description or str(task.payload or ""))
+
+    def suitability(self, task: Task) -> float:
+        return 0.95 if (task.type is TaskType.LOGIC and self._answer(task)) else 0.0
+
+    def handle(self, task: Task):
+        ans = self._answer(task)
+        return self._propose(ans, kind=ProposalKind.ANSWER, confidence=1.0,
+                             rationale="transitive ordering over a single scale",
+                             source=SourceType.TOOL)
+
+
+# --------------------------------------------------------------------------- #
 # Default registry + the router entry point
 # --------------------------------------------------------------------------- #
 def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, FacultySelector]:
@@ -381,6 +564,8 @@ def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, Facult
     reg.register(MathFaculty())
     reg.register(WordProblemFaculty())
     reg.register(LogicFaculty())
+    reg.register(SyllogismFaculty())
+    reg.register(ComparativeFaculty())
     if llm is not None:
         from nyxara.mind.faculties import LLMFaculty
         reg.register(LLMFaculty(llm))
