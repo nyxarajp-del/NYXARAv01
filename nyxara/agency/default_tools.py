@@ -272,6 +272,24 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("generations", "int", required=False, default=1)],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
 
+        # ---- distil the teacher LLM into her own supervised corpus (Master-gated) ---- #
+        def _distill_from_teacher(count: int = 0) -> Dict[str, Any]:
+            from nyxara.growth.distill import Distiller
+            d = Distiller()
+            if not d.available():
+                return {"available": False, "added": 0,
+                        "note": "no real teacher LLM configured (set a provider API key)"}
+            exs = d.distill_default(n=count if count and count > 0 else None)
+            return {"available": True, "added": len(exs), "store_size": d.count(),
+                    "store": str(d.store_path)}
+
+        _add(ToolSpec("distill_from_teacher", handler=_distill_from_teacher,
+                      description="teach NYXARA's OWN model by distilling the configured teacher "
+                                  "LLM into supervised examples in her voice (feeds the foundry "
+                                  "corpus; no weights change until train_self_model runs)",
+                      params=[ToolParam("count", "int", required=False, default=0)],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
+
     # ---- knowledge base: grounded ingest + retrieval (backed by the store) ---- #
     kb = knowledge
     if kb is None and memory is not None:

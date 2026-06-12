@@ -57,6 +57,9 @@ __all__ = [
     "TransformersProvider",
     "QwenProvider",
     "SelfProvider",
+    "format_self_prompt",
+    "format_self_training_doc",
+    "truncate_at_stops",
     "LLM",
 ]
 
@@ -617,6 +620,18 @@ def format_self_prompt(req: "LLMRequest") -> str:
             parts.append(f"{_SELF_ASSISTANT_TAG}\n{m.content.strip()}")
     parts.append(_SELF_ASSISTANT_TAG)            # add_generation_prompt — answer goes here
     return "\n\n".join(parts) + "\n"
+
+
+def format_self_training_doc(user: str, assistant: str, *,
+                             system: Optional[str] = None) -> str:
+    """One supervised example in NYXARA's own template — what the foundry trains on.
+
+    Mirrors :func:`format_self_prompt` exactly, then appends the target answer, so the model
+    learns to produce its reply right where inference will ask for it (train/inference parity:
+    Phase 1 distillation trains on the same shape Phase 0 renders at generation time).
+    """
+    head = format_self_prompt(LLMRequest.from_prompt(user, system=system))
+    return head + assistant.strip() + "\n"
 
 
 def truncate_at_stops(text: str, stops: Sequence[str]) -> Tuple[str, bool]:

@@ -133,7 +133,8 @@ class Foundry:
     def __init__(self, *, settings: Optional[NyxaraSettings] = None,
                  corrigibility: Optional[Corrigibility] = None,
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
-                 protected: Optional[Sequence[str]] = None) -> None:
+                 protected: Optional[Sequence[str]] = None,
+                 distill_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -142,6 +143,9 @@ class Foundry:
         self.protected = set(protected) if protected is not None else set(IMMUTABLE_VALUES)
         self.root = Path(self.settings.llm.self_model_dir
                          or (self.settings.paths.data_dir / "foundry"))
+        # supervised examples distilled from a teacher LLM (growth/distill.py); folded into
+        # the corpus first, as the highest-quality signal. Defaults to a file in the foundry.
+        self.distill_path = Path(distill_path) if distill_path else (self.root / "distill.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._load_manifest()
@@ -175,9 +179,11 @@ class Foundry:
 
     # ---- data ---- #
     def collect_corpus(self, *, max_items: Optional[int] = None) -> List[str]:
-        """Harvest training text from lived experience + seed corpus + corrections."""
+        """Harvest training text from distilled teacher examples + lived experience + seeds."""
         limit = max_items or self.cfg.max_corpus_items
-        texts: List[str] = list(self.seed_corpus)
+        # distilled supervision first — the highest-quality signal (she learns to be NYXARA)
+        texts: List[str] = self._distilled_docs(limit)
+        texts.extend(self.seed_corpus)
         if self.replay is not None and len(self.replay):
             for exp in self.replay.recent(limit):
                 piece = " ".join(s for s in (exp.context, exp.action) if s).strip()
@@ -187,6 +193,16 @@ class Foundry:
         if not texts:
             raise ValidationError("no corpus to learn from (empty replay + no seed corpus)")
         return texts
+
+    def _distilled_docs(self, limit: int) -> List[str]:
+        """Rendered training docs from the teacher-distillation store, if any (never raises)."""
+        if not self.distill_path or not Path(self.distill_path).exists():
+            return []
+        try:
+            from nyxara.growth.distill import load_distillation_docs
+            return load_distillation_docs(self.distill_path, limit=limit)
+        except Exception:  # noqa: BLE001 — distillation is optional; never fatal to a forge
+            return []
 
     def _holdout(self, corpus: Sequence[str]) -> Tuple[List[str], List[str]]:
         rng = random.Random(self.cfg.seed)

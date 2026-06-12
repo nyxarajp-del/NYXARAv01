@@ -305,3 +305,14 @@ def test_self_provider_unavailable_without_promoted_model(tmp_path):
     settings = NyxaraSettings.for_profile(Profile.TEST)
     settings.llm.self_model_dir = tmp_path / "foundry"   # empty -> no active model
     assert SelfProvider(settings).available() is False
+
+
+def test_format_self_training_doc_appends_answer():
+    from nyxara.mind.llm import (format_self_prompt, format_self_training_doc,
+                                 _SELF_ASSISTANT_TAG)
+    head = format_self_prompt(LLMRequest.from_prompt("2+2?", system="be NYXARA"))
+    doc = format_self_training_doc("2+2?", "It is 4.", system="be NYXARA")
+    # the training doc is the inference head plus the target answer (train/inference parity)
+    assert doc.startswith(head)
+    assert doc.endswith("It is 4.\n")
+    assert f"{_SELF_ASSISTANT_TAG}\nIt is 4." in doc
