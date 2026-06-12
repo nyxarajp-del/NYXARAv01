@@ -36,7 +36,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 
 def _clamp01(x: float) -> float:
@@ -551,7 +551,8 @@ class NyxaraCore:
 
     # ---- the cognitive cycle ---- #
     def process(self, stimulus: str, *, authority: Authority = Authority.OWNER,
-                trust: Optional[TrustLevel] = None) -> CycleResult:
+                trust: Optional[TrustLevel] = None,
+                media: Optional[Sequence[Any]] = None) -> CycleResult:
         cid = uuid.uuid4().hex[:8]
         thoughts: List[str] = []
         gates: Dict[str, str] = {}
@@ -593,6 +594,10 @@ class NyxaraCore:
         self._note_interaction(safe_text, authority)
         # free-energy read-out: fold prediction error over the percept into how she feels
         self._predictive_tick(percept)
+        # multimodal grounding: bind any attached image/audio/document percepts into the
+        # *same* frame so attention and association span modalities, not text alone
+        if media:
+            self._bind_media(media, authority, thoughts)
 
         # 2. ATTEND
         focus = self.binder.frame.most_salient()
@@ -909,6 +914,87 @@ class NyxaraCore:
             self.affect.note_threat(level, cause=cause)
         except Exception:  # noqa: BLE001 — feeling is best-effort, never fatal
             pass
+
+    # ---- multimodal grounding ---- #
+    def _bind_media(self, media: Sequence[Any], authority: Authority,
+                    thoughts: List[str]) -> None:
+        """Bind attached non-text inputs (images, audio, documents, extra text) into the
+        current perceptual frame, then note what — if anything — ties the modalities
+        together. Percepts are bound as *data*: they inform attention, never act."""
+        bound: List[Any] = []
+        for item in media:
+            try:
+                p = self._coerce_percept(item, authority)
+                if p is None:
+                    continue
+                b, _ = self.binder.perceive(p)
+                bound.append(b)
+            except Exception:  # noqa: BLE001 — a bad attachment is skipped, never fatal
+                continue
+        if not bound:
+            return
+        mods = sorted({b.modality.value for b in bound})
+        m_t = self.mind.record(
+            ThoughtKind.PERCEPTION,
+            f"bound {len(bound)} percept(s) across {', '.join(mods)}"[:80],
+            salience=max((b.salience for b in bound), default=0.3))
+        thoughts.append(m_t)
+        # cross-modal binding: surface the strongest tie spanning two modalities
+        try:
+            cross = [a for a in self.binder.frame.associations() if a.cross_modal]
+            if cross:
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"cross-modal tie: {', '.join(cross[0].shared)}"[:80],
+                                 salience=0.5)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _coerce_percept(self, item: Any, authority: Authority) -> Any:
+        """Turn a media item — a ready Percept, a sense analysis, or a simple spec dict
+        ({"text"|"image"|"audio"|"document": …}) — into a bound-able Percept."""
+        from nyxara.senses.binding import Percept
+        if isinstance(item, Percept):
+            return item
+        if not isinstance(item, dict):
+            return None
+        source = item.get("source") or authority.value
+        if "text" in item:
+            return Percept.from_text(str(item["text"]), source=source,
+                                     tags=list(item.get("tags", ())))
+        if "image" in item:
+            return self._image_percept(item["image"], source)
+        if "audio" in item:
+            return self._audio_percept(item["audio"], source)
+        if item.get("document") is not None:
+            return Percept.from_document(item["document"])
+        return None
+
+    def _image_percept(self, image: Any, source: str) -> Any:
+        """An image percept from a ready ImageAnalysis, else by analysing a file path via
+        the vision sense (optional heavy deps), degrading to a note if unavailable."""
+        from nyxara.senses.binding import Percept
+        if hasattr(image, "perceptual_hash") or hasattr(image, "average_hash"):
+            return Percept.from_image(image, source=source)
+        try:
+            from nyxara.senses.vision import Vision
+            return Percept.from_image(Vision().analyze(str(image), ocr=True), source=source)
+        except Exception:  # noqa: BLE001 — vision unavailable: bind a placeholder, don't crash
+            return Percept.from_text(f"[image: {source}]", source=source,
+                                     tags=["image", "unavailable"])
+
+    def _audio_percept(self, audio: Any, source: str) -> Any:
+        """An audio percept from a ready AudioAnalysis, else by analysing a file path via
+        the audio sense (optional heavy deps), degrading to a note if unavailable."""
+        from nyxara.senses.binding import Percept
+        if hasattr(audio, "fingerprint") or hasattr(audio, "silence_ratio"):
+            return Percept.from_audio(audio, source=source)
+        try:
+            from nyxara.senses.audio import Audio
+            return Percept.from_audio(Audio().analyze(str(audio), transcribe=True),
+                                      source=source)
+        except Exception:  # noqa: BLE001 — audio unavailable: bind a placeholder, don't crash
+            return Percept.from_text(f"[audio: {source}]", source=source,
+                                     tags=["audio", "unavailable"])
 
     def _note_interaction(self, stimulus: str, authority: Authority) -> None:
         """Fold a fresh percept into affect, theory-of-mind, and the idle stream."""
