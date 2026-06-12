@@ -51,6 +51,7 @@ __all__ = [
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
+    "ServerConfig",
     "ObservabilityConfig",
     "PathsConfig",
     "NyxaraSettings",
@@ -356,6 +357,34 @@ class AgencyConfig(BaseModel):
     new_tool_trust: Literal["zero", "scoped"] = "zero"  # least-privilege default
 
 
+class ServerConfig(BaseModel):
+    """HTTP/WebSocket API server settings (nyxara/server/app.py).
+
+    The server lets NYXARA be reached from an app, phone, or the web instead of only the
+    local console. It is a thin, authenticated transport over the *same* sovereign loop —
+    every request still flows through ``NyxaraCore.process`` and every gate; the network
+    is just another mouth, never a way around the control law.
+
+    Auth is a single bearer token (the Master's credential, this being a single-Master
+    system). When ``api_token`` is set, every ``/v1`` route requires it. PROD additionally
+    *requires* a token to exist at all (fail-closed) and keeps the sovereign control routes
+    (pause/resume/scram) enabled.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    host: str = "127.0.0.1"          # bind localhost by default; set 0.0.0.0 to expose
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_token: Optional[SecretStr] = None
+    # CORS allow-list for browser clients. Empty -> no cross-origin browser access.
+    cors_origins: List[str] = Field(default_factory=list)
+    # Expose the sovereign control routes (pause/resume/scram) over HTTP.
+    enable_control: bool = True
+    # Cap multi-step agent runs requested over the wire.
+    max_agent_steps: int = Field(default=8, ge=1, le=64)
+    request_timeout_s: float = Field(default=120.0, gt=0)
+
+
 class ObservabilityConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -446,6 +475,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
 

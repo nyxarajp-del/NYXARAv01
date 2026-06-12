@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 nyxara = "nyxara.__main__:main"
+nyxara-serve = "nyxara.server.__main__:main"
 
 [project.optional-dependencies]
 # Reasoning / math / data
@@ -37,6 +38,8 @@ generate = ["diffusers>=0.27", "torch>=2.2", "pyttsx3>=2.90"]
 security = ["cryptography>=42.0"]
 # Observability
 observe = ["structlog>=24.1"]
+# HTTP/WebSocket API server (reach NYXARA from an app/phone/web, not only the console)
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 # Senses (heavy ML — optional, graceful fallback when absent)
 senses = [
     "torch>=2.2", "openai-whisper>=20231117", "pillow>=10.0",

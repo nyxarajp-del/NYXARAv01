@@ -145,6 +145,38 @@ print(result.response)        # NYXARA's reply
 print(result.disposition)     # act / escalate / refuse / halt
 ```
 
+## Serve over HTTP / WebSocket
+
+Reach NYXARA from an app, a phone, or the web instead of only the local console. The server
+is a thin, authenticated transport over the **same** sovereign loop — every request runs
+`NyxaraCore.process` end to end, through every gate. The network is just another mouth,
+never a way around the control law.
+
+```bash
+pip install -e ".[server]"                  # FastAPI + uvicorn
+export NYXARA_SERVER__API_TOKEN=change-me    # the Master's bearer credential
+nyxara-serve                                 # or: python -m nyxara.server
+```
+
+| Route | Method | Effect |
+| -------------------------- | ---- | ------------------------------------------ |
+| `/health`                  | GET  | liveness (unauthenticated)                 |
+| `/v1/report`               | GET  | a calibrated status report                 |
+| `/v1/chat`                 | POST | one turn — `{message}` → the disposed reply |
+| `/v1/agent`                | POST | a multi-step gated goal — `{goal, max_steps?}` |
+| `/v1/control/{pause\|resume\|scram}` | POST | sovereign control (opt-in)       |
+| `/v1/memory/{save\|load}`  | POST | persist / restore long-term memory (Rule 7) |
+| `/v1/ws`                   | WS   | a streaming chat socket (`?token=`)        |
+
+Every `/v1` route requires `Authorization: Bearer <token>` once a token is set; **prod
+refuses to start without one** (fail-closed). Run it in a container:
+
+```bash
+docker build -t nyxara .
+docker run -p 8000:8000 -e NYXARA_SERVER__API_TOKEN=change-me \
+  -e NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-... -v nyxara-data:/data nyxara
+```
+
 ## LLM providers (optional)
 
 Out of the box NYXARA uses a built-in deterministic reasoner — **no API keys
