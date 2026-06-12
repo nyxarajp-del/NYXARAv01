@@ -19,6 +19,7 @@ methods the Master would call programmatically:
     /pause             pause the loop (the Master may resume)
     /scram [reason]    emergency stop — the loop HALTs until resumed
     /resume            restore the loop after a pause/scram
+    /wander [n]        let the idle mind wander n ticks and show the thoughts
     /save              persist long-term memory to disk now
     /quit              leave the console (Ctrl-D / Ctrl-C also work)
 
@@ -53,6 +54,7 @@ commands:
   /pause             pause the loop
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
+  /wander [n]        let the idle mind wander n ticks and show the thoughts
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -102,6 +104,17 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "resume":
         core.resume()
         print("loop restored ✓")
+    elif cmd == "wander":
+        try:
+            n = int(arg) if arg else 5
+        except ValueError:
+            n = 5
+        lines = core.wander(n)
+        if lines:
+            for ln in lines:
+                print(f"  …{ln}")
+        else:
+            print("  (the mind is quiet just now)")
     elif cmd == "save":
         path = core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")
@@ -124,13 +137,23 @@ def main(argv: list[str] | None = None) -> int:
     if restored:
         print(f"continuity          : restored {restored} memories from a prior session ✓")
 
+    # Layer 5 — continuous cognition: the mind wanders in the background while idle.
+    if core.start_cognition():
+        print("cognition           : default-mode stream running (idle thoughts surface) ✓")
+
+    def _surface_insights() -> None:
+        for text in core.drain_insights():
+            print(f"\nNYXARA (idle thought): {text}")
+
     def _shutdown() -> None:
+        core.stop_cognition()
         path = core.save_state()
         if path:
             print(f"memory persisted → {path}")
         print("until next time, Master.")
 
     while True:
+        _surface_insights()   # show anything the idle mind turned up since the last prompt
         try:
             line = input("\nMaster> ").strip()
         except (EOFError, KeyboardInterrupt):

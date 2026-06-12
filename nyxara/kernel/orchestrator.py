@@ -199,6 +199,11 @@ class NyxaraCore:
             self._build_stream() if enable_growth else None)
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
+        # background default-mode cognition (Layer 5): off until started
+        self._engaged = False
+        self._cognition_thread: Any = None
+        self._cognition_stop: Any = None
+        self._insight_q: Any = None
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -344,6 +349,7 @@ class NyxaraCore:
         cid = uuid.uuid4().hex[:8]
         thoughts: List[str] = []
         gates: Dict[str, str] = {}
+        self._engaged = True   # the default-mode stream goes quiet while a turn runs
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
         if not self.oversight.gate():
@@ -635,6 +641,57 @@ class NyxaraCore:
             pass
         return lines
 
+    def start_cognition(self, *, interval: float = 2.0) -> bool:
+        """Start the default-mode stream on a background thread (Layer 5: concurrent
+        cognition). It wanders/incubates while idle and goes quiet while a turn runs,
+        queuing any surfaced insights for :meth:`drain_insights`. Idempotent."""
+        if self.stream is None:
+            return False
+        import queue
+        import threading
+        if self._cognition_thread is not None and self._cognition_thread.is_alive():
+            return True
+        self._insight_q = queue.Queue()
+        self._cognition_stop = threading.Event()
+
+        def _loop() -> None:
+            while not self._cognition_stop.wait(interval):
+                try:
+                    engagement = 0.95 if self._engaged else 0.0
+                    for t in self.stream.tick(engagement=engagement):
+                        if t.type.value == "insight":
+                            self._insight_q.put(t.text)
+                except Exception:  # noqa: BLE001 — idle cognition never crashes the system
+                    pass
+
+        self._cognition_thread = threading.Thread(
+            target=_loop, name="nyxara-default-mode", daemon=True)
+        self._cognition_thread.start()
+        return True
+
+    def stop_cognition(self) -> None:
+        """Stop the background default-mode stream (best-effort, joins briefly)."""
+        if self._cognition_stop is not None:
+            self._cognition_stop.set()
+        if self._cognition_thread is not None:
+            try:
+                self._cognition_thread.join(timeout=1.0)
+            except Exception:  # noqa: BLE001
+                pass
+        self._cognition_thread = None
+
+    def drain_insights(self) -> List[str]:
+        """Return (and clear) any insights the background stream surfaced since last call."""
+        out: List[str] = []
+        if self._insight_q is None:
+            return out
+        try:
+            while True:
+                out.append(self._insight_q.get_nowait())
+        except Exception:  # noqa: BLE001 — queue.Empty (and anything else) ends the drain
+            pass
+        return out
+
     def oversight_record(self, c: Candidate) -> None:
         # mark the auto-approved oversight item as executed
         for p in self.oversight.pending():
@@ -658,6 +715,7 @@ class NyxaraCore:
 
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:
+        self._engaged = False   # the turn is done; idle cognition may resume
         return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                            candidate=candidate, gates=gates, thoughts=thoughts,
                            action_id=action_id, tool=tool, tool_value=tool_value)

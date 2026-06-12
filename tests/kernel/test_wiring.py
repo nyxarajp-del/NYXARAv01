@@ -106,6 +106,34 @@ def test_stream_is_wired_and_wanders():
     assert isinstance(lines, list)
 
 
+# -------------------- continuous cognition: background loop (Layer 5) -------------------- #
+def test_background_cognition_runs_and_stops():
+    import time
+    nyx = NyxaraCore()
+    nyx.stream.seeds.add_text("the Master's safety", category="goal")
+    assert nyx.start_cognition(interval=0.02) is True
+    assert nyx.start_cognition() is True   # idempotent — does not spawn a second thread
+    time.sleep(0.3)
+    assert nyx.stream.metrics.thoughts > 0  # the idle mind produced thoughts
+    nyx.stop_cognition()
+    assert nyx._cognition_thread is None
+    # insights queue drains cleanly even when empty
+    assert isinstance(nyx.drain_insights(), list)
+
+
+def test_engagement_quiets_the_stream():
+    nyx = NyxaraCore()
+    # while a turn is mid-flight the stream is engaged; after _finish it is idle again
+    nyx.process("hello", authority=Authority.OWNER)
+    assert nyx._engaged is False
+
+
+def test_start_cognition_noop_without_stream():
+    nyx = NyxaraCore(enable_growth=False)
+    assert nyx.stream is None
+    assert nyx.start_cognition() is False
+
+
 # -------------------- faculties never override the control law -------------------- #
 def test_faculties_do_not_change_dispositions():
     # a benign owner turn still acts; a risky autonomous one still escalates/refuses
