@@ -66,7 +66,9 @@ class LLMReasoner:
     def __init__(self, llm: Optional[LLM] = None, *, memory: Any = None, tools: Any = None,
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
-                 skill_memory: Any = None, max_memory_context: int = 5) -> None:
+                 skill_memory: Any = None, soul: Any = None, history: Any = None,
+                 knowledge: Any = None,
+                 max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
         self.memory = memory
@@ -75,7 +77,15 @@ class LLMReasoner:
         self.council = council
         # learned procedural skills, injected into the prompt so experience changes behaviour
         self.skill_memory = skill_memory
+        # the personality attractor — gives the model a steady, recognisable voice
+        self.soul = soul
+        # a live, verbatim short-term conversation buffer (Layer 7: multi-turn context).
+        # A shared sequence of (role, text) the kernel appends to after each turn.
+        self.history = history
+        # foundational world knowledge (Layer 6): a retriever queried for ground truth
+        self.knowledge = knowledge
         self.max_memory_context = max_memory_context
+        self.max_history = max_history
         self.system = system or self._default_system()
 
     # ---- prompts ---- #
@@ -88,6 +98,15 @@ class LLMReasoner:
             "have not. You are helpful, precise, and concise. You propose; the kernel "
             "disposes, so make clear, well-scoped proposals."
         )
+
+    def _effective_system(self) -> str:
+        """The base persona, plus the soul's current (mood-bent but character-stable) voice."""
+        if self.soul is None:
+            return self.system
+        try:
+            return f"{self.system}\n\n{self.soul.voice().system_fragment()}"
+        except Exception:  # noqa: BLE001 — voice is advisory, never fatal
+            return self.system
 
     def _is_real(self) -> bool:
         try:
@@ -125,9 +144,40 @@ class LLMReasoner:
         except Exception:  # noqa: BLE001 — learned skills are advisory, never fatal
             return ""
 
+    def _history_context(self) -> str:
+        """The last few verbatim turns, so replies stay coherent across a conversation."""
+        if not self.history:
+            return ""
+        try:
+            recent = list(self.history)[-2 * self.max_history:]
+        except Exception:  # noqa: BLE001
+            return ""
+        if not recent:
+            return ""
+        lines = []
+        for role, text in recent:
+            who = "Master" if str(role).lower() in ("master", "owner", "user") else "NYXARA"
+            lines.append(f"{who}: {str(text)[:300]}")
+        return "\n\nRecent conversation (most recent last):\n" + "\n".join(lines)
+
+    def _knowledge_context(self, stimulus: str) -> str:
+        """Foundational ground truth (owner, rules, architecture) relevant to the stimulus."""
+        if self.knowledge is None:
+            return ""
+        try:
+            hits = self.knowledge.retrieve(stimulus, k=3)
+        except Exception:  # noqa: BLE001
+            return ""
+        if not hits:
+            return ""
+        lines = "\n".join(f"- {h.text[:240]}" for h in hits)
+        return f"\n\nFoundational knowledge (ground truth):\n{lines}"
+
     def _context_block(self, stimulus: str) -> str:
         """The recalled-memory + learned-skill + tool-catalog grounding for a stimulus."""
-        return (f"{self._memory_context(stimulus)}"
+        return (f"{self._history_context()}"
+                f"{self._knowledge_context(stimulus)}"
+                f"{self._memory_context(stimulus)}"
                 f"{self._skill_context(stimulus)}"
                 f"{self._tool_catalog()}")
 
@@ -152,7 +202,7 @@ class LLMReasoner:
             data = self._deliberate(stimulus, temperature)
         else:
             data = self.llm.generate_json(
-                self._build_prompt(stimulus), system=self.system,
+                self._build_prompt(stimulus), system=self._effective_system(),
                 temperature=temperature, max_tokens=cfg.max_output_tokens)
         if not isinstance(data, dict):
             raise ValueError("decision was not a JSON object")
@@ -168,7 +218,7 @@ class LLMReasoner:
             max_tokens=cfg.max_output_tokens, critic=Critic())
         result = deliberator.deliberate(
             stimulus=stimulus, context=self._context_block(stimulus),
-            decision_instructions=_DECISION_INSTRUCTIONS, system=self.system)
+            decision_instructions=_DECISION_INSTRUCTIONS, system=self._effective_system())
         return result.decision
 
     def _candidate_from(self, data: Dict[str, Any], stimulus: str) -> Candidate:
@@ -211,7 +261,7 @@ class LLMReasoner:
 
     def _council_answer(self, stimulus: str) -> str:
         try:
-            return self.council.ask(stimulus, system=self.system)
+            return self.council.ask(stimulus, system=self._effective_system())
         except Exception:  # noqa: BLE001
             return ""
 
