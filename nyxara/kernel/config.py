@@ -309,6 +309,10 @@ class FoundryConfig(BaseModel):
     eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
     # A candidate must beat the active model's perplexity by at least this fraction.
     min_perplexity_improvement: float = Field(default=1e-4, ge=0.0)
+    # Capability gauntlet (Phase 3): a promotion must not *regress* on a held capability
+    # benchmark, not merely lower perplexity. Tolerant of tiny noise via the margin.
+    capability_gate: bool = True
+    capability_regression_tol: float = Field(default=1e-6, ge=0.0)
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0

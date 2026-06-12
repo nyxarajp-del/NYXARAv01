@@ -290,6 +290,18 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("count", "int", required=False, default=0)],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
 
+        # ---- curiosity self-play: invent hard questions, distil answers (Master-gated) ---- #
+        def _self_play(n: int = 6) -> Dict[str, Any]:
+            from nyxara.growth.selfplay import SelfPlay
+            return SelfPlay().play(max(1, n))
+
+        _add(ToolSpec("self_play", handler=_self_play,
+                      description="curiosity round: NYXARA invents hard questions, the teacher "
+                                  "answers them in her voice, and the pairs feed the foundry "
+                                  "corpus (grows her own training data; no weights change yet)",
+                      params=[ToolParam("n", "int", required=False, default=6)],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
+
     # ---- knowledge base: grounded ingest + retrieval (backed by the store) ---- #
     kb = knowledge
     if kb is None and memory is not None:

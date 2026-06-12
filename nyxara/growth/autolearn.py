@@ -41,13 +41,14 @@ class GrowthReport:
     replayed: int = 0
     abstractions: int = 0
     forgotten: int = 0
+    selfplay: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
                 "lessons_stored": self.lessons_stored, "replayed": self.replayed,
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
-                "foundry": self.foundry}
+                "selfplay": self.selfplay, "foundry": self.foundry}
 
 
 class GrowthEngine:
@@ -56,7 +57,9 @@ class GrowthEngine:
     def __init__(self, *, memory: Any = None, journal: Any = None,
                  settings: Optional[NyxaraSettings] = None, reflector: Any = None,
                  consolidator: Any = None, foundry: Any = None,
-                 enable_foundry: Optional[bool] = None) -> None:
+                 enable_foundry: Optional[bool] = None,
+                 enable_selfplay: bool = False, selfplay_n: int = 6,
+                 selfplay: Any = None) -> None:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
@@ -65,6 +68,10 @@ class GrowthEngine:
         self._foundry = foundry
         self.enable_foundry = (self.settings.foundry.enabled
                                if enable_foundry is None else enable_foundry)
+        # Phase 3: curiosity-driven self-play manufactures fresh training data before forging.
+        self.enable_selfplay = enable_selfplay
+        self.selfplay_n = max(1, selfplay_n)
+        self._selfplay = selfplay
         self._seen_action_seqs: set = set()
         self._stored_lessons: set = set()
 
@@ -169,6 +176,17 @@ class GrowthEngine:
             return []
         return texts[:max_items]
 
+    # ---- self-play (opt-in, manufactures fresh corpus before forging) ---- #
+    def self_play(self, *, n: Optional[int] = None) -> Optional[dict]:
+        """Run one curiosity round — invent questions, distil the teacher, grow the corpus."""
+        try:
+            if self._selfplay is None:
+                from nyxara.growth.selfplay import SelfPlay
+                self._selfplay = SelfPlay(settings=self.settings)
+            return self._selfplay.play(n or self.selfplay_n)
+        except Exception:  # noqa: BLE001 — self-play is best-effort, never fatal
+            return None
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
@@ -200,6 +218,9 @@ class GrowthEngine:
 
         run_foundry = self.enable_foundry if do_foundry is None else do_foundry
         if run_foundry:
+            # manufacture fresh training data first, so the forge learns something new
+            if self.enable_selfplay:
+                report.selfplay = self.self_play()
             results = self.improve_self()
             report.foundry = [r.to_dict() for r in results]
         return report
