@@ -168,7 +168,7 @@ class NyxaraCore:
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
-                 history_turns: int = 6,
+                 history_turns: int = 6, parallel_hypotheses: int = 3,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -233,6 +233,10 @@ class NyxaraCore:
         self.knowledge = self._build_knowledge() if enable_memory else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
+        # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
+        # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
+        # threads whose winner still passes the one gate (the control law is preserved).
+        self.parallel_hypotheses = max(1, int(parallel_hypotheses))
         # the last dual-process arbitration (which process ran, and why) — read by growth
         self._last_arbitration: Any = None
         # short-term conversation buffer (Layer 7): verbatim recent turns the reasoner
@@ -753,18 +757,105 @@ class NyxaraCore:
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
-        """Call the reason step, handing it the recalled memories when it accepts them.
-
-        A dual-process arbitration then reflects on whether this turn was a 'trust the
-        gut' or a 'think it through' one and records the choice. The existing reasoner
-        remains the source of the candidate — the kernel still disposes."""
-        try:
-            candidate = self.reasoner(stimulus, focus, memories=memories)  # type: ignore[call-arg]
-        except TypeError:
-            # a legacy two-arg reasoner (e.g. the deterministic stand-in)
-            candidate = self.reasoner(stimulus, focus)
+        """The reason step. Several hypotheses are reasoned *in parallel* — each over a
+        different cognitive context (grounded in recall, unprimed, narrowly focused) — and
+        the most-supported one is selected. A dual-process arbitration then reflects on
+        whether this was a 'trust the gut' or 'think it through' turn. The selected
+        candidate is still a *proposal*: the kernel disposes (the control law holds)."""
+        candidate = self._reason_parallel(stimulus, focus, memories)
         self._arbitrate(stimulus, candidate, memories)
         return candidate
+
+    def _reason_once(self, stimulus: str, focus: Optional[Percept],
+                     memories: List[Any]) -> Candidate:
+        try:
+            return self.reasoner(stimulus, focus, memories=memories)  # type: ignore[call-arg]
+        except TypeError:
+            # a legacy two-arg reasoner (e.g. the deterministic stand-in)
+            return self.reasoner(stimulus, focus)
+
+    def _hypothesis_framings(self, memories: List[Any]) -> List[tuple]:
+        """The distinct cognitive contexts to reason from, in priority order. Each is a
+        (name, memories) pair handed to an independent thought thread."""
+        framings: List[tuple] = [("grounded", memories)]
+        if self.parallel_hypotheses > 1:
+            framings.append(("unprimed", []))             # a fresh take, free of recall
+            framings.append(("focused", memories[:1]))    # only the single strongest cue
+        return framings[: self.parallel_hypotheses]
+
+    def _reasoner_parallelizable(self) -> bool:
+        """Only reasoners that take a per-call ``memories`` context benefit from — and are
+        safe under — parallel framings. A plain two-arg reasoner (the deterministic
+        stand-in, stateful test doubles) is context-free and may be stateful, so it runs
+        exactly once. Cached after the first probe."""
+        cached = getattr(self, "_reasoner_par", None)
+        if cached is not None:
+            return cached
+        ok = False
+        try:
+            import inspect
+            params = inspect.signature(self.reasoner).parameters
+            ok = ("memories" in params
+                  or any(p.kind is p.VAR_KEYWORD for p in params.values()))
+        except (TypeError, ValueError):  # un-inspectable callable -> stay safe
+            ok = False
+        self._reasoner_par = ok
+        return ok
+
+    def _reason_parallel(self, stimulus: str, focus: Optional[Percept],
+                         memories: List[Any]) -> Candidate:
+        """Run the hypothesis framings concurrently and select the winner. Falls back to a
+        single pass when parallelism is off, the reasoner is context-free, or only one
+        framing is viable."""
+        framings = self._hypothesis_framings(memories)
+        if (self.parallel_hypotheses <= 1 or len(framings) <= 1
+                or not self._reasoner_parallelizable()):
+            return self._reason_once(stimulus, focus, memories)
+        import concurrent.futures as _cf
+        results: List[tuple] = []
+        try:
+            with _cf.ThreadPoolExecutor(max_workers=len(framings)) as ex:
+                futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
+                        for name, mem in framings}
+                for fut in _cf.as_completed(futs):
+                    try:
+                        results.append((futs[fut], fut.result()))
+                    except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
+                        pass
+        except Exception:  # noqa: BLE001 — never let concurrency break the turn
+            return self._reason_once(stimulus, focus, memories)
+        if not results:
+            return self._reason_once(stimulus, focus, memories)
+        chosen_name, chosen = self._select_hypothesis(results)
+        self._record_hypotheses(results, chosen_name)
+        return chosen
+
+    @staticmethod
+    def _hypothesis_signature(c: Candidate) -> tuple:
+        return (c.kind, getattr(c, "tool", None), (c.text or "")[:120])
+
+    def _select_hypothesis(self, results: List[tuple]) -> tuple:
+        """Pick the candidate the threads most agree on (consensus). Ties favour the
+        grounded hypothesis, then the most confident. Selection never reaches past the
+        gate — it only chooses which proposal to submit to it."""
+        from collections import Counter
+        votes = Counter(self._hypothesis_signature(c) for _, c in results)
+        best: Optional[tuple] = None
+        for name, c in results:
+            key = (votes[self._hypothesis_signature(c)],
+                   1 if name == "grounded" else 0, float(c.confidence))
+            if best is None or key > best[0]:
+                best = (key, name, c)
+        return best[1], best[2]
+
+    def _record_hypotheses(self, results: List[tuple], chosen_name: str) -> None:
+        """Make the parallel thought threads auditable in the MindScope."""
+        for name, c in results:
+            mark = "*" if name == chosen_name else "-"
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"hypothesis[{name}] {mark} conf={c.confidence:.2f}: {(c.text or '')[:32]}"[:80],
+                salience=0.45, confidence=c.confidence)
 
     def _arbitrate(self, stimulus: str, candidate: Candidate, memories: List[Any]) -> None:
         """Metacognition: decide fast-vs-deliberate for this turn and record it. Colour
