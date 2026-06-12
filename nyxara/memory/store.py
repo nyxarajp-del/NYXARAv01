@@ -56,6 +56,7 @@ __all__ = [
     "make_embedder",
     "VectorIndex",
     "FaissVectorIndex",
+    "QdrantVectorIndex",
     "make_vector_index",
     "MemoryStore",
     "has_numpy",
@@ -315,12 +316,122 @@ class FaissVectorIndex:
         return out
 
 
+class QdrantVectorIndex:
+    """A Qdrant-backed index with the same interface as :class:`VectorIndex`, for real scale.
+
+    Qdrant is a managed/embeddable vector database: this lets NYXARA's associative memory
+    grow beyond a single process's RAM and persist independently of the JSON snapshot. The
+    same store works three ways with no code change — set ``qdrant_url`` for a managed
+    cluster, ``qdrant_path`` for an embedded on-disk store, or neither for an in-memory one.
+
+    Cosine distance; point ids are derived deterministically from ``mem_id`` (uuid5) so the
+    same memory maps to the same point across restarts. The real ``mem_id`` rides in the
+    point payload, so any id string is supported, not just UUIDs. Reached only via
+    :func:`make_vector_index` when ``qdrant-client`` is importable, so it never blocks a
+    bare machine.
+    """
+
+    _NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # uuid5 namespace for point ids
+
+    def __init__(self, dim: int, *, url: str = "", api_key: Optional[str] = None,
+                 path: str = "", collection: str = "nyxara_memory") -> None:
+        from qdrant_client import QdrantClient  # optional dep; gated by .available()
+        from qdrant_client.models import Distance, VectorParams
+        self.dim = dim
+        self.collection = collection
+        if url:
+            self._client = QdrantClient(url=url, api_key=api_key)
+        elif path:
+            self._client = QdrantClient(path=path)
+        else:
+            self._client = QdrantClient(location=":memory:")
+        # Create the collection only if absent or dimensioned differently (preserve data).
+        try:
+            exists = self._client.collection_exists(collection)
+        except Exception:  # noqa: BLE001 — older clients lack the helper
+            exists = collection in {c.name for c in self._client.get_collections().collections}
+        if exists:
+            info = self._client.get_collection(collection)
+            current = info.config.params.vectors.size
+            if current != dim:
+                self._client.delete_collection(collection)
+                self._client.create_collection(
+                    collection, vectors_config=VectorParams(size=dim, distance=Distance.COSINE))
+        else:
+            self._client.create_collection(
+                collection, vectors_config=VectorParams(size=dim, distance=Distance.COSINE))
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            import qdrant_client  # noqa: F401
+            return True
+        except Exception:  # pragma: no cover - depends on install
+            return False
+
+    def _pid(self, mem_id: str) -> str:
+        return str(uuid.uuid5(self._NS, mem_id))
+
+    def add(self, mem_id: str, vec: Sequence[float]) -> None:
+        if len(vec) != self.dim:
+            raise MemoryError_("embedding dim mismatch",
+                               context={"expected": self.dim, "got": len(vec)})
+        from qdrant_client.models import PointStruct
+        self._client.upsert(self.collection, points=[PointStruct(
+            id=self._pid(mem_id), vector=list(vec), payload={"mem_id": mem_id})])
+
+    def remove(self, mem_id: str) -> None:
+        from qdrant_client.models import PointIdsList
+        try:
+            self._client.delete(self.collection,
+                                points_selector=PointIdsList(points=[self._pid(mem_id)]))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def __len__(self) -> int:
+        try:
+            return int(self._client.count(self.collection, exact=True).count)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def search(self, query: Sequence[float], k: int = 10,
+               allowed: Optional[Iterable[str]] = None) -> List[Tuple[str, float]]:
+        allow = set(allowed) if allowed is not None else None
+        # over-fetch when filtering so the post-filter still returns k
+        limit = max(k, k * 4) if allow is not None else k
+        try:
+            # query_points is the current API; .search() is the pre-1.12 spelling.
+            try:
+                hits = self._client.query_points(
+                    self.collection, query=list(query), limit=limit).points
+            except AttributeError:  # pragma: no cover - depends on client version
+                hits = self._client.search(
+                    self.collection, query_vector=list(query), limit=limit)
+        except Exception:  # noqa: BLE001 — a query failure degrades to no recall, never a crash
+            return []
+        out: List[Tuple[str, float]] = []
+        for h in hits:
+            mem_id = (h.payload or {}).get("mem_id")
+            if mem_id is None or (allow is not None and mem_id not in allow):
+                continue
+            out.append((mem_id, float(h.score)))
+            if len(out) >= k:
+                break
+        return out
+
+
 def make_vector_index(dim: int, settings: Optional[NyxaraSettings] = None) -> Any:
-    """Build the configured vector index: faiss when selected & available, else exact numpy."""
+    """Build the configured vector index: qdrant/faiss when selected & available, else numpy."""
     s = settings or get_settings()
     try:
         from nyxara.kernel.config import VectorBackend
-        if s.memory.vector_backend is VectorBackend.FAISS and FaissVectorIndex.available():
+        backend = s.memory.vector_backend
+        if backend is VectorBackend.QDRANT and QdrantVectorIndex.available():
+            mc = s.memory
+            key = mc.qdrant_api_key.get_secret_value() if mc.qdrant_api_key else None
+            return QdrantVectorIndex(dim, url=mc.qdrant_url, api_key=key,
+                                     path=mc.qdrant_path, collection=mc.qdrant_collection)
+        if backend is VectorBackend.FAISS and FaissVectorIndex.available():
             return FaissVectorIndex(dim)
     except Exception:  # noqa: BLE001 — any issue -> the always-available exact index
         pass
@@ -670,10 +781,30 @@ class MemoryStore:
                 half_life_days=d["half_life_days"], embedding=d.get("embedding"),
             )
             self._kv[rec.mem_id] = rec
-            if rec.embedding:
-                self._index.add(rec.mem_id, rec.embedding)
+            self._index_record(rec)
             count += 1
         return count
+
+    def _index_record(self, rec: MemoryRecord) -> None:
+        """Index a loaded record, migrating across an embedder change safely.
+
+        Memory may have been saved under a different embedder (e.g. hashing → learned
+        semantic), so a stored vector's dimension can differ from the current index. Rather
+        than crash, re-embed the record's text into the current space; if even that fails,
+        keep the record (still retrievable by id/type/tags) but skip the vector index.
+        """
+        want = self._index.dim
+        vec = rec.embedding if (rec.embedding and len(rec.embedding) == want) else None
+        if vec is None:
+            try:
+                vec = self.embedder.embed(rec.text())
+                rec.embedding = vec            # migrate the stored vector into the new space
+            except Exception:  # noqa: BLE001 — embedding is best-effort on load
+                return
+        try:
+            self._index.add(rec.mem_id, vec)
+        except Exception:  # noqa: BLE001 — never let one bad vector abort a restore
+            pass
 
     def stats(self) -> Dict[str, Any]:
         by_type = {t.value: len(self.by_type(t)) for t in MemoryType}

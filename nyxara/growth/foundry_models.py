@@ -39,15 +39,32 @@ try:  # optional, never required — the n-gram backend always works without it
 except Exception:  # noqa: BLE001
     _HAS_TORCH = False
 
+
+def _has_lora() -> bool:
+    """True iff the LoRA stack (torch + transformers + peft) is importable."""
+    if not _HAS_TORCH:
+        return False
+    try:
+        import peft  # noqa: F401
+        import transformers  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_HAS_LORA = _has_lora()
+
 __all__ = [
     "ModelSpec",
     "TrainStats",
     "BaseLanguageModel",
     "NgramByteLM",
     "NanoGPTModel",
+    "LoRAModel",
     "build_model",
     "load_active_model",
     "_HAS_TORCH",
+    "_HAS_LORA",
 ]
 
 _VOCAB = 256          # byte-level: every model speaks raw bytes
@@ -65,18 +82,30 @@ class ModelSpec:
     value. The foundry's gauntlet refuses any spec that tries to smuggle an immutable-core
     name in here (see :meth:`growth.foundry.Foundry._gauntlet`)."""
 
-    kind: str = "auto"          # "auto" | "ngram" | "nanogpt"
+    kind: str = "auto"          # "auto" | "ngram" | "nanogpt" | "lora"
     ngram_order: int = 3
     block_size: int = 64
     n_layer: int = 2
     n_head: int = 2
     n_embd: int = 64
     seed: int = 0
+    # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
+    base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
+    lora_r: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.05
+    lora_lr: float = 2e-4
+    max_seq_len: int = 256
+    device: str = ""            # "" -> auto (cuda if available, else cpu)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "ngram_order": self.ngram_order,
                 "block_size": self.block_size, "n_layer": self.n_layer,
-                "n_head": self.n_head, "n_embd": self.n_embd, "seed": self.seed}
+                "n_head": self.n_head, "n_embd": self.n_embd, "seed": self.seed,
+                "base_model": self.base_model, "lora_r": self.lora_r,
+                "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
+                "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
+                "device": self.device}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ModelSpec":
@@ -387,17 +416,151 @@ class NanoGPTModel(BaseLanguageModel):
 
 
 # --------------------------------------------------------------------------- #
+# Optional backend: LoRA fine-tuning of a pretrained model (torch+transformers+peft)
+# --------------------------------------------------------------------------- #
+class LoRAModel(BaseLanguageModel):
+    """Adapt a *pretrained* model to NYXARA's lived experience via LoRA.
+
+    Unlike the from-scratch n-gram / nano-GPT backends, this stands on the shoulders of a
+    real pretrained base (``spec.base_model``) and learns only a small **low-rank adapter**
+    on top — the path to genuine capability, since the base already speaks the language and
+    the foundry just teaches it *NYXARA's* voice, facts, and corrections from her own memory.
+    Only the adapter weights (a tiny fraction of the parameters) are trained, so it is cheap
+    enough to run repeatedly, and the gauntlet still gates every promotion.
+
+    Token-level (the base's tokenizer), so its perplexity is in token space — compare a LoRA
+    candidate against a LoRA active, not across backends. Requires ``.[foundry]`` (torch +
+    transformers + peft); constructing it without them raises a clearly-caught error so
+    :func:`build_model` falls back to the always-on n-gram backend.
+    """
+
+    kind = "lora"
+
+    def __init__(self, spec: Optional[ModelSpec] = None) -> None:
+        if not _HAS_LORA:
+            raise RuntimeError("LoRAModel requires torch+transformers+peft "
+                               "(pip install -e .[foundry])")
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        self.spec = spec or ModelSpec(kind="lora")
+        torch.manual_seed(self.spec.seed)
+        self.device = self.spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.spec.base_model)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token or self.tokenizer.unk_token
+        base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
+        self.net = self._apply_lora(base).to(self.device)
+
+    def _apply_lora(self, base: Any) -> Any:
+        from peft import LoraConfig, TaskType, get_peft_model
+        common = dict(r=self.spec.lora_r, lora_alpha=self.spec.lora_alpha,
+                      lora_dropout=self.spec.lora_dropout, task_type=TaskType.CAUSAL_LM)
+        try:
+            # Let peft infer target modules from the architecture (gpt2->c_attn, llama->q/v…).
+            return get_peft_model(base, LoraConfig(**common))
+        except Exception:  # noqa: BLE001 — unknown arch: target every linear layer instead
+            return get_peft_model(base, LoraConfig(target_modules="all-linear", **common))
+
+    def _attach(self, peft_model: Any) -> None:
+        self.net = peft_model.to(self.device)
+
+    # ---- training (adapter weights only) ---- #
+    def _windows(self, corpus: Sequence[str]) -> List[List[int]]:
+        ids = self.tokenizer("\n".join(corpus)).input_ids
+        n = max(8, int(self.spec.max_seq_len))
+        if len(ids) <= 1:
+            return []
+        return [ids[i:i + n] for i in range(0, len(ids), n) if len(ids[i:i + n]) >= 2]
+
+    def train_on(self, corpus: Sequence[str], *, steps: int = 100, seed: int = 0) -> TrainStats:
+        import time
+        start = time.monotonic()
+        windows = self._windows(corpus)
+        if not windows:
+            return TrainStats(steps=0, final_loss=0.0, seconds=0.0, tokens=0)
+        params = [p for p in self.net.parameters() if p.requires_grad]
+        opt = torch.optim.AdamW(params, lr=self.spec.lora_lr)
+        rng = random.Random(seed or self.spec.seed)
+        self.net.train()
+        last, tokens = 0.0, 0
+        for _ in range(max(1, steps)):
+            window = windows[rng.randrange(len(windows))]
+            ids = torch.tensor([window], dtype=torch.long, device=self.device)
+            out = self.net(input_ids=ids, labels=ids)
+            opt.zero_grad(); out.loss.backward(); opt.step()
+            last = float(out.loss.item()); tokens += len(window)
+        return TrainStats(steps=max(1, steps), final_loss=last,
+                          seconds=time.monotonic() - start, tokens=tokens)
+
+    def perplexity(self, text: str) -> float:
+        self.net.eval()
+        ids_all = self.tokenizer(text).input_ids
+        n = max(8, int(self.spec.max_seq_len))
+        if len(ids_all) < 2:
+            return float("inf")
+        total, count = 0.0, 0
+        with torch.no_grad():
+            for i in range(0, len(ids_all), n):
+                chunk = ids_all[i:i + n]
+                if len(chunk) < 2:
+                    break
+                ids = torch.tensor([chunk], dtype=torch.long, device=self.device)
+                loss = float(self.net(input_ids=ids, labels=ids).loss.item())
+                total += loss * (len(chunk) - 1); count += len(chunk) - 1
+        ce = total / count if count else float("inf")
+        return math.exp(ce) if ce < 700 else float("inf")
+
+    def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
+        self.net.eval()
+        torch.manual_seed(self.spec.seed)
+        enc = self.tokenizer(prompt or "\n", return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            out = self.net.generate(**enc, max_new_tokens=max_tokens, do_sample=False,
+                                    pad_token_id=self.tokenizer.pad_token_id)
+        new = out[0][enc["input_ids"].shape[1]:]
+        return self.tokenizer.decode(new, skip_special_tokens=True)
+
+    def param_count(self) -> int:
+        """LoRA-adapter parameters — the part NYXARA actually learns.
+
+        Counted by name so it is stable whether the adapter is in training mode (requires
+        grad) or freshly loaded for inference (frozen)."""
+        n = sum(p.numel() for name, p in self.net.named_parameters() if "lora_" in name)
+        return n or sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+
+    def save(self, directory: Path) -> None:
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "spec.json").write_text(json.dumps(self.spec.to_dict()), encoding="utf-8")
+        self.net.save_pretrained(str(directory / "adapter"))   # adapter weights only
+        self.tokenizer.save_pretrained(str(directory / "adapter"))
+
+    def load(self, directory: Path) -> None:
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM
+        directory = Path(directory)
+        self.spec = ModelSpec.from_dict(
+            json.loads((directory / "spec.json").read_text(encoding="utf-8")))
+        base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
+        self._attach(PeftModel.from_pretrained(base, str(directory / "adapter")))
+
+
+# --------------------------------------------------------------------------- #
 # Factory & active-model loader
 # --------------------------------------------------------------------------- #
 def build_model(spec: ModelSpec) -> BaseLanguageModel:
     """Build a model for ``spec`` — NEVER raises for missing deps (degrades to n-gram)."""
     want = spec.kind
+    if want == "lora" and _HAS_LORA:
+        try:
+            return LoRAModel(spec)
+        except Exception:  # noqa: BLE001 — deps present but base load failed; fall back
+            pass
     if want in ("auto", "nanogpt") and _HAS_TORCH:
         try:
             return NanoGPTModel(spec)
         except Exception:  # noqa: BLE001 — torch present but model build failed; fall back
             pass
-    # "ngram", "auto" without torch, or a failed nanogpt build -> the always-on backend
+    # "ngram", "auto"/"lora" without deps, or a failed build -> the always-on backend
     return NgramByteLM(order=spec.ngram_order, seed=spec.seed)
 
 

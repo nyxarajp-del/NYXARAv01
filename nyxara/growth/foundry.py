@@ -219,7 +219,10 @@ class Foundry:
         spec = spec or ModelSpec(kind=self.cfg.backend, ngram_order=self.cfg.ngram_order,
                                  block_size=self.cfg.block_size, n_layer=self.cfg.n_layer,
                                  n_head=self.cfg.n_head, n_embd=self.cfg.n_embd,
-                                 seed=self.cfg.seed)
+                                 seed=self.cfg.seed, base_model=self.cfg.base_model,
+                                 lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
+                                 lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
+                                 max_seq_len=self.cfg.max_seq_len)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
         model = build_model(spec)

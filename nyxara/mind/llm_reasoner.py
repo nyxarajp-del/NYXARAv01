@@ -125,11 +125,15 @@ class LLMReasoner:
         except Exception:  # noqa: BLE001 — learned skills are advisory, never fatal
             return ""
 
-    def _build_prompt(self, stimulus: str) -> str:
-        return (f"The Master says:\n{stimulus}"
-                f"{self._memory_context(stimulus)}"
+    def _context_block(self, stimulus: str) -> str:
+        """The recalled-memory + learned-skill + tool-catalog grounding for a stimulus."""
+        return (f"{self._memory_context(stimulus)}"
                 f"{self._skill_context(stimulus)}"
-                f"{self._tool_catalog()}\n\n{_DECISION_INSTRUCTIONS}")
+                f"{self._tool_catalog()}")
+
+    def _build_prompt(self, stimulus: str) -> str:
+        return (f"The Master says:\n{stimulus}{self._context_block(stimulus)}"
+                f"\n\n{_DECISION_INSTRUCTIONS}")
 
     # ---- the reasoning act ---- #
     def __call__(self, stimulus: str, focus: Any = None) -> Candidate:
@@ -141,14 +145,31 @@ class LLMReasoner:
             return _default_reasoner(stimulus, focus)
 
     def _reason(self, stimulus: str, focus: Any) -> Candidate:
-        prompt = self._build_prompt(stimulus)
-        data = self.llm.generate_json(
-            prompt, system=self.system,
-            temperature=min(self.settings.llm.temperature, 0.5),
-            max_tokens=self.settings.llm.max_output_tokens)
+        cfg = self.settings.llm
+        temperature = min(cfg.temperature, 0.5)
+        # Deliberate (think -> decide -> critique) when configured; else a single shot.
+        if cfg.reasoning_passes > 1 or cfg.reasoning_samples > 1:
+            data = self._deliberate(stimulus, temperature)
+        else:
+            data = self.llm.generate_json(
+                self._build_prompt(stimulus), system=self.system,
+                temperature=temperature, max_tokens=cfg.max_output_tokens)
         if not isinstance(data, dict):
             raise ValueError("decision was not a JSON object")
         return self._candidate_from(data, stimulus)
+
+    def _deliberate(self, stimulus: str, temperature: float) -> Any:
+        from nyxara.mind.critique import Critic
+        from nyxara.mind.deliberate import DeliberativeReasoner
+        cfg = self.settings.llm
+        deliberator = DeliberativeReasoner(
+            self.llm, passes=cfg.reasoning_passes, samples=cfg.reasoning_samples,
+            think_tokens=cfg.reasoning_think_tokens, temperature=temperature,
+            max_tokens=cfg.max_output_tokens, critic=Critic())
+        result = deliberator.deliberate(
+            stimulus=stimulus, context=self._context_block(stimulus),
+            decision_instructions=_DECISION_INSTRUCTIONS, system=self.system)
+        return result.decision
 
     def _candidate_from(self, data: Dict[str, Any], stimulus: str) -> Candidate:
         kind = "act" if str(data.get("kind", "respond")).lower() == "act" else "respond"

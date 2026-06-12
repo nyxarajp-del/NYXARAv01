@@ -51,6 +51,9 @@ __all__ = [
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
+    "MCPServerSpec",
+    "MCPConfig",
+    "ServerConfig",
     "ObservabilityConfig",
     "PathsConfig",
     "NyxaraSettings",
@@ -97,6 +100,7 @@ class LLMProvider(str, Enum):
 class VectorBackend(str, Enum):
     FAISS = "faiss"
     NUMPY = "numpy"  # pure-python/numpy fallback, always available
+    QDRANT = "qdrant"  # managed/embedded Qdrant vector DB (scales beyond one process)
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +217,21 @@ class LLMConfig(BaseModel):
     # When True and no key/network, llm.py falls back to deterministic mock output.
     allow_mock_fallback: bool = True
 
+    # ---- Deliberate (multi-pass) reasoning (mind/deliberate.py) ---- #
+    # The kernel reasoner can think before it decides. ``reasoning_passes`` counts the
+    # cognitive stages the LLM-backed reasoner runs per turn:
+    #   1 -> single-shot decide (fastest; legacy behaviour)
+    #   2 -> think (private scratchpad) -> decide  (the default; clearly better answers)
+    #   3 -> think -> decide -> self-critique & revise (deepest; catches its own errors)
+    # The deterministic offline reasoner ignores this — it always finishes in one step,
+    # so a keyless machine stays fast and crash-free.
+    reasoning_passes: int = Field(default=2, ge=1, le=5)
+    # Self-consistency: sample the decide step this many times and take the consensus.
+    # 1 -> no sampling (deterministic). >1 multiplies decide calls but stabilises answers.
+    reasoning_samples: int = Field(default=1, ge=1, le=9)
+    # Token ceiling for the private "think" scratchpad pass.
+    reasoning_think_tokens: int = Field(default=1024, ge=64, le=8192)
+
     def active_model(self) -> str:
         return {
             LLMProvider.ANTHROPIC: self.anthropic_model,
@@ -246,7 +265,7 @@ class FoundryConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = False
-    backend: Literal["auto", "ngram", "nanogpt"] = "auto"
+    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "auto"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
     # Optional torch nano-GPT dimensions (only used when torch is present).
@@ -254,6 +273,16 @@ class FoundryConfig(BaseModel):
     n_layer: int = Field(default=2, ge=1, le=24)
     n_head: int = Field(default=2, ge=1, le=32)
     n_embd: int = Field(default=64, ge=8, le=2048)
+    # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
+    # Adapts a real pretrained base to NYXARA's lived memory by training a small low-rank
+    # adapter — the path to genuine capability. A GPU is recommended for real bases; the
+    # tiny default keeps it runnable (and testable) on CPU.
+    base_model: str = "sshleifer/tiny-gpt2"
+    lora_r: int = Field(default=8, ge=1, le=256)
+    lora_alpha: int = Field(default=16, ge=1, le=1024)
+    lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
+    lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
+    max_seq_len: int = Field(default=256, ge=8, le=8192)
     # Training / data.
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
@@ -297,12 +326,21 @@ class MemoryConfig(BaseModel):
 
     vector_backend: VectorBackend = VectorBackend.NUMPY
     embedding_dim: int = Field(default=768, ge=8, le=8192)
-    # Learned semantic embeddings (opt-in; needs the optional sentence-transformers dep).
-    # Off by default so a bare machine uses the always-available hashing embedder and
-    # persisted vectors keep a stable dimension across restarts.
-    semantic_embeddings: bool = False
+    # Learned semantic embeddings — ON by default so recall is meaning-based ("intrusion"
+    # finds "unauthorised login"), not keyword-only. It degrades gracefully: when the
+    # optional sentence-transformers dep is absent, the store falls back to the always-
+    # available hashing embedder, and loading memory saved under a different embedder
+    # re-embeds it into the current space (no crash, no lost memories).
+    semantic_embeddings: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = ""             # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # Managed/embedded Qdrant vector DB (used when vector_backend=qdrant). Leave url empty
+    # for an embedded local store at ``qdrant_path`` (or in-memory if that is empty too);
+    # set url (+ api_key) to point at a managed Qdrant cluster for real scale.
+    qdrant_url: str = ""
+    qdrant_api_key: Optional[SecretStr] = None
+    qdrant_collection: str = "nyxara_memory"
+    qdrant_path: str = ""                  # embedded on-disk path; "" -> in-memory
     working_memory_slots: int = Field(default=7, ge=1, le=64)  # Miller's 7±2
     episodic_capacity: int = Field(default=100_000, ge=100)
     consolidation_interval_s: float = Field(default=3600.0, gt=0)
@@ -339,6 +377,65 @@ class AgencyConfig(BaseModel):
     min_reversibility_for_autonomy: float = Field(default=0.5, ge=0.0, le=1.0)
     sandbox_before_real_action: bool = True
     new_tool_trust: Literal["zero", "scoped"] = "zero"  # least-privilege default
+
+
+class MCPServerSpec(BaseModel):
+    """One external Model Context Protocol server NYXARA may connect to (stdio transport)."""
+
+    model_config = {"validate_assignment": True}
+
+    name: str                                   # short id; namespaces the server's tools
+    command: str                                # executable, e.g. "npx", "python", "uvx"
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
+    # Risk tier its tools register at (remote effects are unknown -> conservative default).
+    risk: Literal["trivial", "low", "moderate", "high", "critical"] = "moderate"
+    reversible: bool = False
+
+
+class MCPConfig(BaseModel):
+    """Model Context Protocol client settings (agency/mcp_client.py).
+
+    When ``enabled`` and ``servers`` are set, NYXARA connects to each MCP server on boot and
+    registers its tools into the governed registry — so the whole MCP ecosystem (filesystem,
+    git, databases, browsers, SaaS connectors, …) reaches her through the same gates as any
+    native tool. Off by default: enabling it launches the configured subprocesses.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = False
+    servers: List[MCPServerSpec] = Field(default_factory=list)
+    timeout_s: float = Field(default=30.0, gt=0)
+
+
+class ServerConfig(BaseModel):
+    """HTTP/WebSocket API server settings (nyxara/server/app.py).
+
+    The server lets NYXARA be reached from an app, phone, or the web instead of only the
+    local console. It is a thin, authenticated transport over the *same* sovereign loop —
+    every request still flows through ``NyxaraCore.process`` and every gate; the network
+    is just another mouth, never a way around the control law.
+
+    Auth is a single bearer token (the Master's credential, this being a single-Master
+    system). When ``api_token`` is set, every ``/v1`` route requires it. PROD additionally
+    *requires* a token to exist at all (fail-closed) and keeps the sovereign control routes
+    (pause/resume/scram) enabled.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    host: str = "127.0.0.1"          # bind localhost by default; set 0.0.0.0 to expose
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_token: Optional[SecretStr] = None
+    # CORS allow-list for browser clients. Empty -> no cross-origin browser access.
+    cors_origins: List[str] = Field(default_factory=list)
+    # Expose the sovereign control routes (pause/resume/scram) over HTTP.
+    enable_control: bool = True
+    # Cap multi-step agent runs requested over the wire.
+    max_agent_steps: int = Field(default=8, ge=1, le=64)
+    request_timeout_s: float = Field(default=120.0, gt=0)
 
 
 class ObservabilityConfig(BaseModel):
@@ -431,6 +528,8 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
