@@ -153,10 +153,11 @@ class NyxaraCore:
                  binder: Optional[Binder] = None, mindscope: Optional[MindScope] = None,
                  honesty: Optional[HonestyGuard] = None, journal: Optional[Journal] = None,
                  reporter: Optional[SelfReporter] = None, reasoner: Optional[Reasoner] = None,
-                 llm: Any = None, memory: Any = None, tools: Any = None,
+                 llm: Any = None, memory: Any = None, retriever: Any = None, tools: Any = None,
                  skills: Any = None, use_council: Optional[bool] = None,
                  soul: Any = None, affect: Any = None, goals: Any = None, tom: Any = None,
-                 learner: Any = None, reflector: Any = None, stream: Any = None,
+                 learner: Any = None, reflector: Any = None, world_model: Any = None,
+                 stream: Any = None,
                  enable_tools: bool = True, enable_memory: bool = True,
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
@@ -176,6 +177,9 @@ class NyxaraCore:
         self.reporter = reporter or SelfReporter(honesty=self.honesty)
         # long-term memory (read for grounding, written each turn) — optional, lazy
         self.memory = memory if memory is not None else (self._build_memory() if enable_memory else None)
+        # associative recall — context-cued retrieval over memory (queried before reasoning)
+        self.retriever = retriever if retriever is not None else (
+            self._build_retriever(self.memory) if enable_memory else None)
         # the governed, executable toolset shares the kernel's policy + governor
         self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
         # learned procedural skills (experiential learning) — persisted via memory
@@ -195,6 +199,9 @@ class NyxaraCore:
             self._build_learner() if enable_growth else None)
         self.reflector = reflector if reflector is not None else (
             self._build_reflector() if enable_growth else None)
+        # world model — learned dynamics for counterfactual rollouts (action planning)
+        self.world_model = world_model if world_model is not None else (
+            self._build_world_model() if enable_growth else None)
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
@@ -236,6 +243,15 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — memory is a capability, never a hard dependency
             return None
 
+    def _build_retriever(self, memory: Any) -> Any:
+        if memory is None:
+            return None
+        try:
+            from nyxara.memory.retrieval import AssociativeRetriever
+            return AssociativeRetriever(memory)
+        except Exception:  # noqa: BLE001 — recall is a capability, never a hard dependency
+            return None
+
     def _build_tools(self) -> Any:
         try:
             from nyxara.agency.default_tools import build_default_tools
@@ -269,22 +285,38 @@ class NyxaraCore:
 
     def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
                         soul: Any = None) -> Reasoner:
+        # the LLM is shared between the council and both reasoners (one stateless facade)
+        from nyxara.mind.llm import LLM
+        llm = llm or LLM()
+        council = None
+        if use_council:
+            try:
+                from nyxara.mind.council import LLMCouncil
+                council = LLMCouncil(llm)
+            except Exception:  # noqa: BLE001
+                council = None
+        # the tool-aware, real-LLM JSON decider — kept as the generation engine that the
+        # integrated reasoner delegates to when a genuine provider is present.
+        base: Reasoner
         try:
             from nyxara.mind.llm_reasoner import LLMReasoner
-            council = None
-            if use_council:
-                try:
-                    from nyxara.mind.council import LLMCouncil
-                    from nyxara.mind.llm import LLM
-                    council = LLMCouncil(llm or LLM())
-                except Exception:  # noqa: BLE001
-                    council = None
-            return LLMReasoner(llm, memory=self.memory, tools=self.tools,
+            base = LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
                                skill_memory=skills, soul=soul, history=self.history,
                                knowledge=self.knowledge)
         except Exception:  # noqa: BLE001 — always have a working mind
-            return _default_reasoner
+            base = _default_reasoner
+        # wrap it in the integrated mind: memory recall + dual-process routing +
+        # world-model action planning + the council + the soul's voice (the cognitive cycle
+        # finally convenes the faculties it was built with).
+        try:
+            from nyxara.mind.nyxara_reasoner import NyxaraReasoner
+            return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
+                                  retriever=self.retriever, soul=soul,
+                                  world_model=self.world_model, tools=self.tools,
+                                  llm_reasoner=base, use_council=use_council)
+        except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
+            return base
 
     def _build_soul(self) -> Any:
         try:
@@ -337,6 +369,13 @@ class NyxaraCore:
             from nyxara.growth.reflect import Reflector
             return Reflector()
         except Exception:  # noqa: BLE001
+            return None
+
+    def _build_world_model(self) -> Any:
+        try:
+            from nyxara.mind.world_model import WorldModel
+            return WorldModel()
+        except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
             return None
 
     def _build_stream(self) -> Any:
@@ -443,8 +482,9 @@ class NyxaraCore:
                                causes=[p_t], salience=0.5)
         thoughts.append(a_t)
 
-        # 3. REASON — the probabilistic proposal
-        candidate = self.reasoner(safe_text, focus)
+        # 3. REASON — the probabilistic proposal, grounded in associative recall
+        recalled = self._recall_for(safe_text)
+        candidate = self._invoke_reasoner(safe_text, focus, recalled)
         r_t = self.mind.record(ThoughtKind.INFERENCE, candidate.rationale or candidate.text,
                                causes=[a_t], salience=0.6, confidence=candidate.confidence)
         thoughts.append(r_t)
@@ -576,6 +616,26 @@ class NyxaraCore:
             return Disposition.ESCALATE, "oversight: awaiting your approval"
         return Disposition.ACT, "cleared"
 
+    # ---- recall & reasoning ---- #
+    def _recall_for(self, stimulus: str) -> List[Any]:
+        """Associative recall cued by the stimulus, fed into the reason step for grounding."""
+        if self.retriever is None:
+            return []
+        try:
+            from nyxara.memory.retrieval import RetrievalContext
+            return self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+        except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
+            return []
+
+    def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
+                         memories: List[Any]) -> Candidate:
+        """Call the reason step, handing it the recalled memories when it accepts them."""
+        try:
+            return self.reasoner(stimulus, focus, memories=memories)  # type: ignore[call-arg]
+        except TypeError:
+            # a legacy two-arg reasoner (e.g. the deterministic stand-in)
+            return self.reasoner(stimulus, focus)
+
     # ---- tool dispatch & memory ---- #
     def _dispatch_tool(self, candidate: Candidate, authority: Authority):
         """Run the candidate's named tool through the governed registry, if any."""
@@ -602,19 +662,25 @@ class NyxaraCore:
             pass
 
     def _remember_turn(self, stimulus: str, response: str, authority: Authority) -> None:
-        """Persist the exchange to long-term memory so turns accrete into continuity."""
+        """Persist the exchange to long-term memory so turns accrete into continuity.
+
+        The Master's words and NYXARA's reply are stored as *separate* episodic memories so
+        each is independently recallable (a question can resurface without its answer)."""
         if self.memory is None:
             return
         try:
             from nyxara.memory.provenance import Provenance, SourceType
             from nyxara.memory.store import MemoryType
-            source = SourceType.OWNER if authority is Authority.OWNER else SourceType.SELF_REFLECTION
+            owner = authority is Authority.OWNER
+            stim_source = SourceType.OWNER if owner else SourceType.SELF_REFLECTION
             self.memory.remember(
-                f"Master said: {stimulus[:300]} | NYXARA: {response[:300]}",
-                mem_type=MemoryType.EPISODIC,
-                provenance=Provenance(source, confidence=0.9 if authority is Authority.OWNER else 0.6),
-                importance=0.6 if authority is Authority.OWNER else 0.4,
-                tags=["conversation"])
+                f"Master said: {stimulus[:300]}", mem_type=MemoryType.EPISODIC,
+                provenance=Provenance(stim_source, confidence=0.9 if owner else 0.6),
+                importance=0.6 if owner else 0.4, tags=["conversation", "stimulus"])
+            self.memory.remember(
+                f"NYXARA replied: {response[:300]}", mem_type=MemoryType.EPISODIC,
+                provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.7),
+                importance=0.5 if owner else 0.35, tags=["conversation", "response"])
         except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
             pass
 
@@ -777,9 +843,29 @@ class NyxaraCore:
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:
         self._engaged = False   # the turn is done; idle cognition may resume
+        self._apply_affect(disp)
         return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                            candidate=candidate, gates=gates, thoughts=thoughts,
                            action_id=action_id, tool=tool, tool_value=tool_value)
+
+    def _apply_affect(self, disp: Disposition) -> None:
+        """Colour the soul's transient mood by the turn's outcome, then relax toward the
+        anchor (homeostasis). A clean act lifts the mood; a refusal/halt darkens it. Style
+        only — core character traits are locked and never move (Rule 4)."""
+        if self.soul is None:
+            return
+        # (valence ∈ [-1,1], arousal ∈ [0,1]) per disposition
+        valence, arousal = {
+            Disposition.ACT: (0.3, 0.2),
+            Disposition.ESCALATE: (0.0, 0.3),
+            Disposition.REFUSE: (-0.3, 0.4),
+            Disposition.HALT: (-0.2, 0.1),
+        }.get(disp, (0.0, 0.1))
+        try:
+            self.soul.apply_mood(valence, arousal)
+            self.soul.relax(rate=0.1)   # homeostatic pull back toward the stable self
+        except Exception:  # noqa: BLE001 — feeling is best-effort, never fatal
+            pass
 
     # ---- the Master's controls (delegated to oversight) ---- #
     def pause(self) -> None:
@@ -815,6 +901,8 @@ class NyxaraCore:
             rep["learned_steps"] = self.learner.report()["steps"]
         if self.reflector is not None:
             rep["episodes"] = len(self.reflector)
+        if self.world_model is not None:
+            rep["world_transitions"] = len(self.world_model)
         if self.knowledge is not None:
             rep["knowledge_chunks"] = len(self.knowledge)
         try:
