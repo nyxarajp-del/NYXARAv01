@@ -213,6 +213,16 @@ class NyxaraReasoner:
     # ------------------------------------------------------------------ #
     def _respond_candidate(self, stimulus: str, mems: List[str], outcome: Any) -> Candidate:
         process = self._process_label(outcome)
+        # neuro-symbolic short-circuit: an exact, verifiable answer (math / logic) beats any
+        # neural guess — so NYXARA computes it herself, with or without an LLM present. This is
+        # "verifiable > probabilistic" applied to the *whole loop*, not only the router.
+        fac = self._faculty_answer(stimulus)
+        if fac is not None:
+            text, conf = fac
+            return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
+                             risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
+                             rationale=f"{process} via a verifiable faculty (exact computation, "
+                                       f"no guessing); {len(mems)} memories recalled")
         if not self._real_llm():
             cand = _default_reasoner(stimulus, None)
             cand.rationale = (f"{process} via deterministic faculty reasoner "
@@ -229,6 +239,15 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    @staticmethod
+    def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
+        """Exact answer from a verifiable faculty, or None to defer to the neural mind."""
+        try:
+            from nyxara.mind.reasoning_faculties import solve_with_faculties
+            return solve_with_faculties(stimulus)
+        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            return None
 
     def _deliberate_council(self, stimulus: str, system: str,
                             mems: List[str]) -> Tuple[str, float, str]:

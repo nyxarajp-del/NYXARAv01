@@ -23,6 +23,7 @@ from nyxara.memory.provenance import SourceType
 
 __all__ = [
     "extract_expression", "MathFaculty",
+    "parse_word_problem", "WordProblemFaculty",
     "tautology", "extract_formula", "LogicFaculty",
     "build_default_faculties", "solve_with_faculties",
 ]
@@ -80,6 +81,115 @@ class MathFaculty(Faculty):
         value = MathEngine().evaluate(expr)
         return self._propose(_format_number(value), kind=ProposalKind.ANSWER,
                              confidence=1.0, rationale=f"computed {expr} = {value}",
+                             source=SourceType.TOOL)
+
+
+# --------------------------------------------------------------------------- #
+# Natural-language elementary arithmetic (word problems)
+# --------------------------------------------------------------------------- #
+# The bare-expression faculty above deliberately ignores word problems. Offline (no teacher),
+# that left NYXARA unable to solve even "3 boxes of 2 apples plus 1 more" herself. This faculty
+# closes that gap WITHOUT bluffing: it reads the numbers and the cue words around them to build
+# an exact expression for the general "rate × count (± loose amounts)" class — not by matching
+# any fixed sentence. It fires only on a fully-assigned, unambiguous parse; on anything unclear
+# it returns None so the question reaches the neural mind. The arithmetic itself is exact
+# (MathEngine), so a fired answer is genuinely verifiable.
+_WP_NUM = re.compile(r"\d[\d,]*\.?\d*")
+_WP_MUL = re.compile(r"\b(?:each|every|per|apiece)\b", re.I)
+_WP_SUB = re.compile(r"\b(?:left|remain\w*|fewer|lost|loses?|gave|gives?|given|ate|eats?|"
+                     r"sold|sells?|spent|spend\w*|removed?|removes?|away|minus|drops?|"
+                     r"dropped|fell|used|takes?\saway|took\saway)\b", re.I)
+_WP_ADD = re.compile(r"\b(?:another|more|additional|extra|also|plus|added|adds?|joins?|"
+                     r"joined|beside\w*|gains?|gained|receives?|received|bought|buys?|"
+                     r"finds?|found)\b", re.I)
+_WP_QUESTION = re.compile(r"\b(?:how many|how much|in total|altogether|in all|combined|"
+                          r"total number|what is the total)\b", re.I)
+
+
+def _wp_numbers(text: str) -> List[Tuple[int, float]]:
+    """(position, value) for every integer-looking number in ``text``."""
+    return [(m.start(), float(m.group().replace(",", ""))) for m in _WP_NUM.finditer(text)]
+
+
+def parse_word_problem(text: str) -> Optional[str]:
+    """Parse an elementary arithmetic word problem into an exact expression, or ``None``.
+
+    Handles the general "rate × count, plus/minus standalone amounts" class by reading the
+    numbers and the cue words near them ("each/per" → ×, "another/more" → +, "left/fewer" → −).
+    Conservative by design: it requires a quantity question, 2–5 whole numbers, and that every
+    number gets a role; if a multiplicative cue can't be paired cleanly, or any number is left
+    unassigned, it returns ``None`` and defers — a verifiable faculty must never bluff."""
+    s = (text or "").strip()
+    low = s.lower()
+    if not _WP_QUESTION.search(low):
+        return None
+    nums = _wp_numbers(low)
+    if not 2 <= len(nums) <= 5:
+        return None
+    if any(v != int(v) for _, v in nums):       # decimals/percentages → defer
+        return None
+
+    used = [False] * len(nums)
+    terms: List[Tuple[str, str]] = []           # (sign, expr_fragment)
+
+    # 1) one multiplicative grouping — the numbers flanking an "each/per" cue multiply
+    mul = _WP_MUL.search(low)
+    if mul is not None:
+        cue = mul.start()
+        before = [i for i, (pos, _) in enumerate(nums) if pos < cue]
+        after = [i for i, (pos, _) in enumerate(nums) if pos > cue]
+        if before and after:
+            i, j = before[-1], after[0]         # cue sits between the two factors
+        elif len(before) >= 2 and not after:
+            i, j = before[-2], before[-1]       # trailing cue ("... on every shelf")
+        else:
+            return None                         # "each" with nothing to pair → ambiguous
+        a, b = int(nums[i][1]), int(nums[j][1])
+        terms.append(("+", f"{a}*{b}"))
+        used[i] = used[j] = True
+
+    # 2) every remaining number is a standalone +/- term by its nearest preceding cue
+    for i, (pos, val) in enumerate(nums):
+        if used[i]:
+            continue
+        window = low[max(0, pos - 40):pos]
+        sign = "-" if (_WP_SUB.search(window) and not _WP_ADD.search(window)) else "+"
+        terms.append((sign, str(int(val))))
+        used[i] = True
+
+    if not all(used) or not terms:
+        return None
+    # without a product, require an explicit +/- cue so we never "solve" an incidental list
+    if mul is None and not (_WP_ADD.search(low) or _WP_SUB.search(low)):
+        return None
+
+    expr = (terms[0][1] if terms[0][0] == "+" else f"-{terms[0][1]}")
+    for sign, frag in terms[1:]:
+        expr += f" {sign} {frag}"
+    return expr
+
+
+class WordProblemFaculty(Faculty):
+    """Exact elementary arithmetic word problems — parsed, then computed (verifiable)."""
+
+    name = "word-arithmetic"
+    handles = frozenset({TaskType.ARITHMETIC})
+    verifiable = True
+    reliability = 0.95
+    cost = 0.4
+
+    def _expr(self, task: Task) -> Optional[str]:
+        return parse_word_problem(task.description or str(task.payload or ""))
+
+    def suitability(self, task: Task) -> float:
+        return 0.9 if (task.type is TaskType.ARITHMETIC and self._expr(task)) else 0.0
+
+    def handle(self, task: Task):
+        from nyxara.mind.math import MathEngine
+        expr = self._expr(task)
+        value = MathEngine().evaluate(expr)
+        return self._propose(_format_number(value), kind=ProposalKind.ANSWER,
+                             confidence=0.95, rationale=f"parsed word problem -> {expr} = {value}",
                              source=SourceType.TOOL)
 
 
@@ -269,6 +379,7 @@ def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, Facult
     """A registry of the real verifiable engines (+ the LLM generalist when given)."""
     reg = FacultyRegistry()
     reg.register(MathFaculty())
+    reg.register(WordProblemFaculty())
     reg.register(LogicFaculty())
     if llm is not None:
         from nyxara.mind.faculties import LLMFaculty
