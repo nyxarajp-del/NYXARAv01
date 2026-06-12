@@ -66,7 +66,8 @@ class LLMReasoner:
     def __init__(self, llm: Optional[LLM] = None, *, memory: Any = None, tools: Any = None,
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
-                 skill_memory: Any = None, max_memory_context: int = 5) -> None:
+                 skill_memory: Any = None, soul: Any = None,
+                 max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
         self.memory = memory
@@ -75,6 +76,8 @@ class LLMReasoner:
         self.council = council
         # learned procedural skills, injected into the prompt so experience changes behaviour
         self.skill_memory = skill_memory
+        # the personality attractor — gives the model a steady, recognisable voice
+        self.soul = soul
         self.max_memory_context = max_memory_context
         self.system = system or self._default_system()
 
@@ -88,6 +91,15 @@ class LLMReasoner:
             "have not. You are helpful, precise, and concise. You propose; the kernel "
             "disposes, so make clear, well-scoped proposals."
         )
+
+    def _effective_system(self) -> str:
+        """The base persona, plus the soul's current (mood-bent but character-stable) voice."""
+        if self.soul is None:
+            return self.system
+        try:
+            return f"{self.system}\n\n{self.soul.voice().system_fragment()}"
+        except Exception:  # noqa: BLE001 — voice is advisory, never fatal
+            return self.system
 
     def _is_real(self) -> bool:
         try:
@@ -152,7 +164,7 @@ class LLMReasoner:
             data = self._deliberate(stimulus, temperature)
         else:
             data = self.llm.generate_json(
-                self._build_prompt(stimulus), system=self.system,
+                self._build_prompt(stimulus), system=self._effective_system(),
                 temperature=temperature, max_tokens=cfg.max_output_tokens)
         if not isinstance(data, dict):
             raise ValueError("decision was not a JSON object")
@@ -168,7 +180,7 @@ class LLMReasoner:
             max_tokens=cfg.max_output_tokens, critic=Critic())
         result = deliberator.deliberate(
             stimulus=stimulus, context=self._context_block(stimulus),
-            decision_instructions=_DECISION_INSTRUCTIONS, system=self.system)
+            decision_instructions=_DECISION_INSTRUCTIONS, system=self._effective_system())
         return result.decision
 
     def _candidate_from(self, data: Dict[str, Any], stimulus: str) -> Candidate:
@@ -211,7 +223,7 @@ class LLMReasoner:
 
     def _council_answer(self, stimulus: str) -> str:
         try:
-            return self.council.ask(stimulus, system=self.system)
+            return self.council.ask(stimulus, system=self._effective_system())
         except Exception:  # noqa: BLE001
             return ""
 

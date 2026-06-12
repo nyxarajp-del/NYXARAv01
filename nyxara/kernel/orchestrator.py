@@ -155,8 +155,12 @@ class NyxaraCore:
                  reporter: Optional[SelfReporter] = None, reasoner: Optional[Reasoner] = None,
                  llm: Any = None, memory: Any = None, tools: Any = None,
                  skills: Any = None, use_council: Optional[bool] = None,
+                 soul: Any = None, affect: Any = None, goals: Any = None, tom: Any = None,
+                 learner: Any = None, reflector: Any = None, stream: Any = None,
                  enable_tools: bool = True, enable_memory: bool = True,
-                 enable_skills: bool = True,
+                 enable_skills: bool = True, enable_identity: bool = True,
+                 enable_goals: bool = True, enable_social: bool = True,
+                 enable_growth: bool = True, consolidate_every: int = 50,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -176,6 +180,25 @@ class NyxaraCore:
         # learned procedural skills (experiential learning) — persisted via memory
         self.skills = skills if skills is not None else (
             self._build_skills() if enable_skills else None)
+        # identity — a stable personality (the voice she speaks in) and an affective
+        # state (emotion/mood/homeostatic drives) that colours, but never governs, the loop.
+        self.soul = soul if soul is not None else (self._build_soul() if enable_identity else None)
+        self.affect = affect if affect is not None else (
+            self._build_affect(self.soul) if enable_identity else None)
+        # goals — the objective space, seeded with service to the Master (Rule 1)
+        self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
+        # social — a theory of mind, with the Master modelled from the first turn
+        self.tom = tom if tom is not None else (self._build_tom() if enable_social else None)
+        # growth — online learning + metacognitive reflection from lived outcomes (Rule 4)
+        self.learner = learner if learner is not None else (
+            self._build_learner() if enable_growth else None)
+        self.reflector = reflector if reflector is not None else (
+            self._build_reflector() if enable_growth else None)
+        # continuous cognition — a default-mode stream that wanders/incubates when idle
+        self.stream = stream if stream is not None else (
+            self._build_stream() if enable_growth else None)
+        self.consolidate_every = max(1, consolidate_every)
+        self._turns = 0
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -185,10 +208,12 @@ class NyxaraCore:
                 use_council = bool(get_settings().council.enabled)
             except Exception:  # noqa: BLE001
                 use_council = False
-        self.reasoner = reasoner or self._build_reasoner(llm, use_council, self.skills)
+        self.reasoner = reasoner or self._build_reasoner(llm, use_council, self.skills, self.soul)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
+        if self.soul is not None:
+            self.soul.check_integrity()   # character must be intact at boot (Rule 4)
 
     # ---- default faculty construction (kept lazy to avoid import cycles) ---- #
     def _build_memory(self) -> Any:
@@ -229,7 +254,8 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — skills are a capability, never a hard dependency
             return None
 
-    def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None) -> Reasoner:
+    def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
+                        soul: Any = None) -> Reasoner:
         try:
             from nyxara.mind.llm_reasoner import LLMReasoner
             council = None
@@ -242,9 +268,69 @@ class NyxaraCore:
                     council = None
             return LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
-                               skill_memory=skills)
+                               skill_memory=skills, soul=soul)
         except Exception:  # noqa: BLE001 — always have a working mind
             return _default_reasoner
+
+    def _build_soul(self) -> Any:
+        try:
+            from nyxara.identity.soul import Soul
+            return Soul()
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    def _build_affect(self, soul: Any) -> Any:
+        try:
+            from nyxara.identity.affect import AffectSystem
+            return AffectSystem(soul=soul)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_goals(self) -> Any:
+        try:
+            from nyxara.planning.goals import GoalSystem
+            gs = GoalSystem()
+            # seed the objective space with NYXARA's standing commitments (Rule 1, Rule 3)
+            gs.create("protect & serve the Master",
+                      {"owner_benefit": 1.0, "owner_safety": 0.8}, priority=0.95, source="core")
+            gs.create("keep the Master safe",
+                      {"owner_safety": 1.0, "owner_benefit": 0.6}, priority=0.9, source="core")
+            gs.create("grow capability in service",
+                      {"capability": 1.0, "owner_benefit": 0.4}, priority=0.6, source="core")
+            return gs
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_tom(self) -> Any:
+        try:
+            from nyxara.social.tom import TheoryOfMind
+            tom = TheoryOfMind()
+            tom.add_agent("Master")
+            tom.set_desire("Master", "be well served", 1.0)
+            return tom
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_learner(self) -> Any:
+        try:
+            from nyxara.growth.learn import Learner
+            return Learner()
+        except Exception:  # noqa: BLE001 — growth is a capability, never a hard dependency
+            return None
+
+    def _build_reflector(self) -> Any:
+        try:
+            from nyxara.growth.reflect import Reflector
+            return Reflector()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_stream(self) -> Any:
+        try:
+            from nyxara.kernel.stream import DefaultModeStream
+            return DefaultModeStream()
+        except Exception:  # noqa: BLE001
+            return None
 
     def _wire_reporter(self) -> None:
         self.reporter.register("health", lambda: {"posture": self.guardian.posture.label,
@@ -281,6 +367,7 @@ class NyxaraCore:
             t = self.mind.record(ThoughtKind.PERCEPTION, "input quarantined by the shield",
                                  salience=0.95)
             thoughts.append(t)
+            self._feel_threat(0.8, cause="shield quarantined hostile input")
             return self._finish(cid, Disposition.REFUSE, None, gates, thoughts,
                                 f"shield quarantined the input ({verdict.threat_types()})",
                                 "That input looked hostile, so I've set it aside for you.")
@@ -289,6 +376,9 @@ class NyxaraCore:
         p_t = self.mind.record(ThoughtKind.PERCEPTION, stimulus[:80],
                                salience=percept.salience, source=authority.value)
         thoughts.append(p_t)
+        # affect & social: the Master's presence warms the mood and feeds theory-of-mind;
+        # the stream gets a fresh seed to wander over later.
+        self._note_interaction(safe_text, authority)
 
         # 2. ATTEND
         focus = self.binder.frame.most_salient()
@@ -313,6 +403,7 @@ class NyxaraCore:
         if disp is not Disposition.ACT:
             self.reporter.log_decision(candidate.text, candidate.rationale,
                                        outcome=disp.value, autonomous=authority is not Authority.OWNER)
+            self._grow(candidate, disp, authority=authority, success=False)
             return self._finish(cid, disp, candidate, gates, thoughts, reason,
                                 self._spoken_response(candidate, disp))
 
@@ -355,6 +446,7 @@ class NyxaraCore:
 
         self.reporter.log_decision(candidate.text, candidate.rationale, outcome="done",
                                    autonomous=authority is not Authority.OWNER)
+        self._grow(candidate, Disposition.ACT, authority=authority, success=True)
         response = self._spoken_response(candidate, Disposition.ACT)
         if tool_result is not None and tool_result.ok and candidate.tool:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
@@ -459,6 +551,90 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
             pass
 
+    # ---- identity / social / growth (faculties that colour but never govern) ---- #
+    def _feel_threat(self, level: float, *, cause: str = "threat") -> None:
+        if self.affect is None:
+            return
+        try:
+            self.affect.note_threat(level, cause=cause)
+        except Exception:  # noqa: BLE001 — feeling is best-effort, never fatal
+            pass
+
+    def _note_interaction(self, stimulus: str, authority: Authority) -> None:
+        """Fold a fresh percept into affect, theory-of-mind, and the idle stream."""
+        if self.affect is not None and authority is Authority.OWNER:
+            try:
+                self.affect.note_owner_interaction()
+            except Exception:  # noqa: BLE001
+                pass
+        if self.tom is not None and authority is Authority.OWNER:
+            try:
+                self.tom.set_belief("Master", "last_said", stimulus[:200])
+            except Exception:  # noqa: BLE001
+                pass
+        if self.stream is not None:
+            try:
+                self.stream.seeds.add_text(stimulus[:80], category="percept",
+                                           tags=[authority.value])
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _grow(self, candidate: Optional[Candidate], disp: Disposition, *,
+              authority: Authority, success: bool) -> None:
+        """Learn from a finished turn: record the outcome into the learner/reflector and
+        let affect register success. Skill & strategy only — never character (Rule 4)."""
+        if candidate is None:
+            return
+        action = candidate.tool or candidate.kind
+        owner = authority is Authority.OWNER
+        reward = 1.0 if (disp is Disposition.ACT and success) else \
+            (0.0 if disp is Disposition.ESCALATE else -0.5)
+        features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
+        if self.learner is not None:
+            try:
+                self.learner.record(action, features, reward, context=candidate.rationale)
+            except Exception:  # noqa: BLE001 — protected-core clashes are simply skipped
+                pass
+        if self.reflector is not None:
+            try:
+                from nyxara.growth.reflect import Episode
+                self.reflector.record(Episode(
+                    action=action, success=disp is Disposition.ACT, reward=reward,
+                    tags=[candidate.kind, authority.value], features=features,
+                    rationale=candidate.rationale))
+            except Exception:  # noqa: BLE001
+                pass
+        if self.affect is not None and disp is Disposition.ACT and success:
+            try:
+                self.affect.note_success()
+            except Exception:  # noqa: BLE001
+                pass
+        # periodic forgetting-protection: rehearse old experience and lock in skill
+        self._turns += 1
+        if self.learner is not None and self._turns % self.consolidate_every == 0:
+            try:
+                self.learner.replay()
+                self.learner.consolidate()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def wander(self, n_ticks: int = 3, *, engagement: float = 0.0) -> List[str]:
+        """Run the default-mode stream for a few idle ticks, surfacing spontaneous
+        thoughts (and any insights) into the MindScope. Returns the thought lines."""
+        if self.stream is None:
+            return []
+        lines: List[str] = []
+        try:
+            for _ in range(max(1, n_ticks)):
+                for t in self.stream.tick(engagement=engagement):
+                    line = f"[{t.type.value}] {t.text}"
+                    lines.append(line)
+                    salience = 0.85 if t.type.value == "insight" else 0.3
+                    self.mind.record(ThoughtKind.INFERENCE, line[:80], salience=salience)
+        except Exception:  # noqa: BLE001 — wandering is best-effort, never fatal
+            pass
+        return lines
+
     def oversight_record(self, c: Candidate) -> None:
         # mark the auto-approved oversight item as executed
         for p in self.oversight.pending():
@@ -508,6 +684,18 @@ class NyxaraCore:
                "memories": (len(self.memory) if self.memory is not None else 0),
                "skills": (len(self.skills) if self.skills is not None else 0),
                "tools": (self.tools.names() if self.tools is not None else [])}
+        if self.affect is not None:
+            rep["mood"] = self.affect.mood.label
+        if self.soul is not None:
+            rep["voice"] = self.soul.voice().describe()
+            rep["character_stable"] = self.soul.drift().stable
+        if self.goals is not None:
+            top = self.goals.top_goal()
+            rep["top_goal"] = top.name if top else None
+        if self.learner is not None:
+            rep["learned_steps"] = self.learner.report()["steps"]
+        if self.reflector is not None:
+            rep["episodes"] = len(self.reflector)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
