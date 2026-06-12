@@ -1,5 +1,7 @@
 # NYXARA
 
+[![CI](https://github.com/nyxarajp-del/NYXARAv01/actions/workflows/ci.yml/badge.svg)](https://github.com/nyxarajp-del/NYXARAv01/actions/workflows/ci.yml)
+
 > Sovereign cognitive architecture. Owner: **Jaypal Khoja (JP)**.
 >
 > *The mind proposes; the kernel disposes; the Master is sovereign.*
