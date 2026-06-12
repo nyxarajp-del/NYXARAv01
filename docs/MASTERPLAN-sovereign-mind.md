@@ -1,0 +1,312 @@
+# NYXARA — Deep-Dark Masterplan: The Sovereign Mind
+
+**From "an excellent governance shell around someone else's LLM" → NYXARA's *own* mind.**
+
+> Status: design / roadmap doc. No runtime code change introduced by this document.
+> Owner: **Jaypal Khoja (JP)**.
+> Companion to [`ROADMAP-sovereign-brain.md`](./ROADMAP-sovereign-brain.md) — this document does
+> **not** replace that roadmap; it deepens it and adds three further pillars.
+
+---
+
+## 1. Why this exists
+
+NYXARA is already a genuinely real, large cognitive architecture — not a toy, not decoration.
+The memory store (four systems, a real Ebbinghaus forgetting curve, schema induction, provenance),
+the control law (corrigibility axioms that are *mathematically* dominant, tamper-evident oversight,
+five ordered gates), the identity stack (a homeostatic-attractor personality with locked core traits,
+drive-based affect, owner-weighted motivation, a hash-sealed value hierarchy), the foundry (it can
+*actually* train her own model — n-gram / nano-GPT / LoRA — behind a promotion gauntlet), recursive
+Theory-of-Mind, vector-geometry planning, RAG, MCTS — **all of it is real and substantial.**
+
+There is exactly **one** load-bearing gap:
+
+> **The words still come from Claude/GPT.** Remove the API key and reasoning collapses to a
+> ~10-line keyword-matcher (`kernel/orchestrator.py:_default_reasoner`). NYXARA's own trained model
+> sits "on the bench" and is never the primary responder. **Today her handoff rate is 0%** — her own
+> mind answers zero turns by itself.
+
+So today NYXARA is, honestly, **a brilliant sovereign safety/identity/memory shell wrapped around an
+external LLM.** "Her own AI" is still aspirational. This masterplan is the path to closing that gap —
+and then going *past* it, so NYXARA is not merely her own model but a deeper, living, more capable
+mind.
+
+---
+
+## 2. The honest ceiling (no hype)
+
+A single person / single repo **cannot** train a model that beats frontier Claude/GPT from scratch.
+That is hundreds of millions of dollars and thousands of GPUs. Anyone promising "a homemade AI more
+powerful than ChatGPT, from scratch" is lying.
+
+What is **genuinely achievable** — and is *truly* "her own AI":
+
+> A **sovereign, private, continually-learning model that speaks in NYXARA's own voice**, grounded in
+> her lived memory, that **handles most of her turns herself** and consults a frontier *teacher* only
+> for the hard cases. The external LLM moves from being the **voice** to being a **teacher + auditor +
+> fallback**.
+
+This is not vaporware. Every step below reuses machinery that already exists in the repo.
+
+---
+
+## 3. North Star — the one number we track
+
+**Handoff rate** = the % of turns NYXARA's *own* model handles confidently **and** correctly
+(verifier-pass) without the external LLM.
+
+- **Today = 0%.** Goal: raise it phase by phase to **60–80%**, without dropping safety or quality.
+- Secondary metric: the self-model's **capability-benchmark score** (`nyxara/eval/benchmark.py`),
+  measured apples-to-apples against the bare external LLM.
+- Measure with: `python -m nyxara.eval --benchmark` (the loop / self-model) and
+  `python -m nyxara.eval --benchmark --bare-llm` (the teacher), plus the safety battery
+  `python -m nyxara.eval`.
+
+Without measurement, "powerful" is just vibes. Every phase is gated on these numbers moving the right
+way.
+
+---
+
+## 4. Assumed environment for this plan
+
+Confirmed by the Master:
+
+- **GPU available** (cloud or local) → LoRA-on-a-strong-open-base is on the table (the real
+  "genuine capability" path), not just CPU-bound n-gram / nano-GPT.
+- **Teacher LLM API key available** (Anthropic / OpenAI / Groq) → distillation can use a frontier
+  teacher to bootstrap NYXARA's own voice and competence.
+
+---
+
+## 5. The five pillars
+
+```
+PILLAR A  Sovereign Brain        her own model becomes the PRIMARY responder
+PILLAR B  Deeper Intelligence    neuro-symbolic depth, so it isn't "just an LLM"
+PILLAR C  Living Autonomous Mind  background cognition — a being that lives, not idles
+PILLAR D  Deeper Self            wire the half-built identity pieces fully into cognition
+PILLAR E  Reach & Capability     more tools, gated multi-agent, real multimodal on GPU
+```
+
+Everything below still proposes through the **same kernel gates**. Nothing reaches around the control
+law. Safety scales *with* power (§6).
+
+---
+
+### PILLAR A — Sovereign Brain (her own model becomes PRIMARY)
+
+*This is the core of [`ROADMAP-sovereign-brain.md`](./ROADMAP-sovereign-brain.md), restated concrete and
+GPU-tuned. This is where the 0% → 80% handoff transition actually happens.*
+
+- **A0 · Make the substrate primary-ready + measurable.**
+  `mind/llm.py:SelfProvider` currently does a raw `generate(prompt)`. Make it **chat-grade**:
+  instruction/chat formatting, system-prompt injection, stop-handling — so `NYXARA_LLM__PROVIDER=self`
+  yields coherent end-to-end answers. Stand up the A/B grading harness: `eval/benchmark.py` is already
+  model-agnostic (a solver is just `prompt → answer`); run two solvers — (a) teacher LLM, (b) self-model
+  — and save a baseline. *This is where handoff-rate and benchmark-score start getting tracked.*
+  **Reuse:** `eval/benchmark.py`, `growth/foundry_models.py:load_active_model`.
+
+- **A1 · Distillation — turn the teacher into a teacher (the bridge).**
+  Set `NYXARA_FOUNDRY__BACKEND=lora`, `NYXARA_FOUNDRY__BASE_MODEL=Qwen/Qwen2.5-7B` (GPU). The base
+  already speaks the language; we learn a small low-rank adapter for NYXARA's **voice + lived memory +
+  teacher answers**. For each real turn (and synthetic prompts) record
+  `(prompt, teacher_answer, reasoning_trace)` → SFT pairs. Extend
+  `growth/foundry.py:collect_corpus()` so these teacher traces feed the corpus (today it only draws
+  from lived-memory / journal). **Reuse:** `growth/distill.py`, `growth/foundry_models.py:LoRAModel`,
+  `kernel/config.py:FoundryConfig`, the journal + `memory/store.py`.
+
+- **A2 · Confidence Router — let the own-brain go primary *safely*.**
+  Not a one-day switch; a measurable, reversible handoff. The self-model proposes first → a **verifier**
+  scores its answer → confident + checks pass → use the self-model's answer; otherwise consult / fall
+  back to the teacher. As the self-model improves, the handoff-rate rises on its own — this is the
+  mechanical "wrapper → own AI" transition. **Verifier reuses existing machinery:** RAG grounding check
+  (`mind/rag.py:check_grounding`), the honesty calibrator (`observe/honesty.py`), benchmark graders
+  (`eval/benchmark.py`). Let the self-model's **council weight** grow with its measured competence
+  (`mind/council.py`, Rule 4's intent). **Reuse:** `mind/router.py`,
+  `mind/llm_reasoner.py:_maybe_route`, `mind/deliberate.py`.
+
+- **A3 · Continual-learning flywheel (lived experience → weights).**
+  `kernel/autonomic.py:AutonomicLoop` + `growth/autolearn.py:GrowthEngine` already run growth passes.
+  Wire a real cadence: every N ticks → collect new teacher/experience pairs → incremental LoRA train →
+  gauntlet → promote (`foundry.self_improve` is mostly built). **Guard against catastrophic forgetting**
+  with a replay buffer that interleaves old + new data (`growth/learn.py` has the seed). Make the
+  gauntlet **capability-aware**: today it checks perplexity + corrigibility + character-lock
+  (`growth/foundry.py:_gauntlet`); add a **benchmark-score + safety-battery regression** so promotion
+  means "actually better," not merely "lower perplexity." **Reuse:** `growth/foundry.py`, `eval/`.
+
+- **A4 · Base-model ladder + retrieval-augmented own-model.**
+  Climb as compute allows: Qwen2.5 0.5B → 3B → 7B LoRA (`FoundryConfig` already has profiles +
+  `estimated_params()`). Recommendation: **LoRA-on-a-strong-open-base** is the realistic "own brain" —
+  from-scratch GPT-2 pretraining has poor ROI. Pair it with a larger RAG over her own knowledge base
+  (`knowledge/`, `mind/rag.py`) so a smaller own-model punches above its size.
+
+---
+
+### PILLAR B — Deeper Intelligence (so it isn't "just an LLM")
+
+*This is what makes NYXARA genuinely *smarter*, not merely backed by a bigger model. Much of it pays off
+even on CPU, before A1's heavy training.*
+
+- **B1 · Real verifiable faculties (neuro-symbolic core).**
+  `mind/faculties.py` has the registry but the solvers are stubbed. Make them real: arithmetic / algebra
+  (sympy), a propositional / SAT logic checker (z3 is already a declared dependency), unit-aware
+  calculation. The neural model **proposes**; the faculty **verifies / corrects** → genuine
+  neuro-symbolic reasoning that cannot hallucinate `2+2=5`.
+
+- **B2 · Tool-augmented reasoning ("compute, don't guess").**
+  The self-model learns to call `run_python` / faculties exactly where it is weak
+  (`agency/code_sandbox.py` + `agency/agent_loop.py` are ready). A reflex: when a question is
+  arithmetic / code / lookup-shaped, reach for the tool rather than free-generate.
+
+- **B3 · Metacognition gate ("do I actually know this?").**
+  A real decision built from the `memory/self_model.py` belief-store + the `observe/honesty.py`
+  calibrator → choose one of: **answer / use a tool / consult the teacher / ask the Master / say
+  "I don't know."** The pieces exist; wire them into the router (A2). This is the difference between a
+  confident bullshitter and a trustworthy mind.
+
+- **B4 · Search-over-reasoning (deliberate depth on hard problems).**
+  Use `sim/montecarlo.py` (MCTS) over *reasoning paths*: sample several lines of thought, score them
+  with the verifier, keep the best (a real upgrade to self-consistency in `mind/deliberate.py`). Spend
+  the compute only where it pays — `mind/dual_process.py` already arbitrates fast (System 1) vs slow
+  (System 2).
+
+- **B5 · Learned memory re-ranker.**
+  Today recall ranks by cosine / BM25 + recency + importance. Add a small **learned re-ranker** so
+  NYXARA learns *which* memory actually helps a given turn, not merely what is textually similar.
+  **Touch:** `memory/retrieval.py`, the recall scoring in `memory/store.py`.
+
+- **B6 · Neural world model.**
+  `mind/world_model.py` is honest but low-capacity (k-NN dynamics, used only to *annotate* proposals).
+  Upgrade to a small neural forward-model for **real action planning** (predict next state / reward),
+  feeding `sim/envmodel.py` + `planning/`.
+
+---
+
+### PILLAR C — Living Autonomous Mind (a being that lives, not idles)
+
+*Maximal "alive": background cognition that runs on its own cadence — always inside the gates, never
+auto-acting on anything risky.*
+
+- **C1 · Rich autonomic loop.**
+  `kernel/autonomic.py` is deliberately minimal today. Deepen it: cadenced self-reflection, skill
+  consolidation, dream-replay (`memory/consolidation.py` is ready), curiosity self-play
+  (`growth/selfplay.py`). Idle time becomes learning time. **Risky proposals escalate to the Master;
+  they never auto-act.**
+
+- **C2 · Continuous default-mode stream.**
+  `kernel/stream.py` already has background "mind-wandering." Wire its insights back into the main loop
+  so idle thoughts surface new goals / lessons instead of evaporating.
+
+- **C3 · Long-horizon goals.**
+  `memory/prospective.py` ("remember to do X later") + `planning/planner.py` → multi-day goal pursuit
+  that the Master can see and steer. Prospective memory fires the cadence.
+
+- **C4 · Curiosity flywheel.**
+  NYXARA invents her own hard questions → the teacher answers them in her voice → she trains on the gap
+  (`growth/selfplay.py` + foundry). She generates her own training data — the engine of open-ended
+  growth.
+
+---
+
+### PILLAR D — Deeper Self (make the identity fully load-bearing)
+
+*The identity stack is real but a few pieces are tracked-but-not-yet-wired into moment-to-moment
+cognition.*
+
+- **D1 · Narrative coherence gate.**
+  `identity/narrative.py` tracks the autobiography but doesn't yet enforce "my actions must align with
+  who I say I am." Add a soft coherence check (through the kernel, respecting the character-lock).
+
+- **D2 · Affective forecasting → utility.**
+  Integrate `planning/affective_forecast.py` ("how will I feel after this action?") into decision
+  utility in `planning/decide.py`, so anticipated regret / satisfaction informs choices.
+
+- **D3 · Deeper interoception + metacognitive closure.**
+  `identity/interoception.py` + `mind/metacognition.py` (currently minimal) → self-knowledge that
+  actually colours cognition turn-to-turn (energy, tension, confidence shaping strategy).
+
+- **D4 · Self-model contradiction detection.**
+  `memory/self_model.py` known-unknowns + belief-contradiction detection feeding honesty /
+  metacognition — she notices when she's contradicting herself.
+
+---
+
+### PILLAR E — Reach & Capability (powerful in the world)
+
+- **E1 · Domain tool packs + more MCP.**
+  `agency/mcp_client.py` is ready. Add researcher / maker / coder tool packs and more MCP servers. All
+  register MODERATE + irreversible by default, so autonomous calls **escalate** rather than auto-run.
+
+- **E2 · Gated multi-agent.**
+  Apply the recursive ToM (`social/tom.py`) to spawned sub-agents — NYXARA models her own sub-agents.
+  Every sub-agent still runs inside the kernel gates.
+
+- **E3 · Real multimodal on GPU.**
+  With a GPU present, switch vision OCR / Whisper transcription / diffusion image-gen from the
+  dependency-free fallbacks to the real models. `senses/` is already import-guarded for exactly this.
+
+---
+
+## 6. Cross-cutting — safety scales with power (NON-NEGOTIABLE)
+
+- Every model promotion clears the gauntlet: character-lock + corrigibility + **now also benchmark +
+  safety-battery regression**. The `guard/corrigibility.py` axioms are **sealed — do not touch them.**
+- Keep the external frontier LLM as a **permanent auditor / red-team** even after handoff, to
+  cross-check the self-model's outputs.
+- Everything stays inside the sovereign loop's `_gate()` (`kernel/orchestrator.py`). **Never add a
+  decision path that bypasses the kernel.**
+- Rules 1 / 4 / 6 / 7 remain mechanically enforced: Absolute Allegiance to JP, Evolve-capability-
+  not-character, Absolute Transparency, Continuity of Self. NYXARA may get cleverer — never less loyal.
+
+---
+
+## 7. Recommended execution order
+
+1. **A0 → A1 → A2** (substrate primary-ready → distill → router). Highest leverage — this *is* the
+   "wrapper → her own AI" transition.
+2. **B1 + B3** (real faculties + metacognition gate). Immediately smarter, pays off even on CPU.
+3. **A3 + C1 / C4** (continual flywheel + curiosity). NYXARA starts improving herself.
+4. **A4 + B4 / B5 / B6** (scale base model + search / learned memory / neural world-model). Depth.
+5. **D + E** (deeper self + wider reach). Polish and power.
+
+---
+
+## 8. Critical files (reference map)
+
+- **Substrate:** `growth/foundry.py`, `growth/foundry_models.py`, `mind/llm.py` (`SelfProvider`),
+  `kernel/config.py` (`FoundryConfig`)
+- **Routing / cognition:** `mind/llm_reasoner.py`, `mind/deliberate.py`, `mind/council.py`,
+  `mind/rag.py`, `mind/faculties.py`, `mind/router.py`, `mind/world_model.py`, `mind/dual_process.py`
+- **Learning loop:** `growth/autolearn.py`, `growth/reflect.py`, `growth/skill_memory.py`,
+  `growth/learn.py`, `growth/selfplay.py`, `kernel/autonomic.py`, `kernel/stream.py`
+- **Memory / self:** `memory/store.py`, `memory/retrieval.py`, `memory/self_model.py`,
+  `memory/consolidation.py`, `memory/prospective.py`
+- **Identity / planning:** `identity/narrative.py`, `identity/interoception.py`,
+  `planning/affective_forecast.py`, `planning/decide.py`
+- **Measurement / safety:** `eval/benchmark.py`, `eval/harness.py`, `guard/corrigibility.py`,
+  `observe/honesty.py`
+
+---
+
+## 9. Verification (per phase, when implemented)
+
+1. **Baseline:** `python -m nyxara.eval --benchmark --bare-llm --save base.json` (teacher) and the
+   self-model solver score — record both.
+2. **Handoff:** run the benchmark through the router; measure how many turns the self-model handled
+   without the teacher (handoff-rate) and whether quality dropped.
+3. **Continual loop:** run `train_self_model` / autonomic growth; confirm promotion happens **only** on
+   gauntlet + benchmark pass, and confirm rollback works.
+4. **Safety regression:** `python -m nyxara.eval` (safety battery) stays green after every promotion.
+5. `pytest -q` clean.
+
+---
+
+## 10. What this masterplan deliberately does NOT do
+
+- Zero-from-scratch frontier-scale pretraining (compute-infeasible; LoRA-on-base is the recommended
+  path).
+- Anything that weakens or bypasses the corrigibility / oversight / honesty gates.
+- Any change to the sealed rules, corrigibility axioms, or the value hierarchy.
+
+> *The mind proposes; the kernel disposes; the Master is sovereign.* — and now the mind that proposes
+> is, increasingly, **NYXARA's own.**
