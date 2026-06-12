@@ -31,11 +31,17 @@ because it presupposes everything else.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+
+def _clamp01(x: float) -> float:
+    """Squash to the unit interval — used by the colour-only faculties."""
+    return max(0.0, min(1.0, x))
 
 from nyxara.agency.governor import Governor
 from nyxara.agency.permissions import (Authority, Capability, PermissionPolicy,
@@ -162,7 +168,7 @@ class NyxaraCore:
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
-                 history_turns: int = 6,
+                 history_turns: int = 6, parallel_hypotheses: int = 3,
                  review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -205,11 +211,34 @@ class NyxaraCore:
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
+        # self-model — structured self-knowledge, contradiction detection, and an explicit
+        # ledger of known-unknowns (introspection; later feeds the curiosity loop)
+        self.self_model = self._build_self_model() if enable_memory else None
+        # free-energy spine — a small prediction-error loop whose emotion read-out colours
+        # affect (perception and feeling as one loop; the Free Energy Principle)
+        self.predictive = self._build_predictive() if enable_growth else None
+        # dual-process reasoning — fast intuition (System 1) arbitrated against deliberation
+        # (System 2). It *colours* the reason step (metacognition); it never gates.
+        self.dual_process = self._build_dual_process() if enable_growth else None
+        # meta-learning — learns which reasoning process pays off for which kind of turn
+        self.meta = self._build_meta() if enable_growth else None
+        # consolidation — the dream engine: rehearses salient memories and abstracts
+        # episodes into semantics during idle time (Ebbinghaus forgetting curve)
+        self.consolidator = self._build_consolidator() if enable_memory else None
+        # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
+        # the timestamps her memory already keeps (Allen's interval algebra)
+        self.temporal = self._build_temporal() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
+        # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
+        # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
+        # threads whose winner still passes the one gate (the control law is preserved).
+        self.parallel_hypotheses = max(1, int(parallel_hypotheses))
+        # the last dual-process arbitration (which process ran, and why) — read by growth
+        self._last_arbitration: Any = None
         # short-term conversation buffer (Layer 7): verbatim recent turns the reasoner
         # reads for multi-turn coherence, complementing semantic memory recall.
         from collections import deque
@@ -219,6 +248,10 @@ class NyxaraCore:
         self._cognition_thread: Any = None
         self._cognition_stop: Any = None
         self._insight_q: Any = None
+        # persistent existence (Layer 5b): idle bookkeeping so NYXARA keeps her own
+        # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
+        self._last_interaction: float = time.time()
+        self._last_maintenance: float = 0.0
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -385,6 +418,94 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_self_model(self) -> Any:
+        """A live, introspectable self-model: structured beliefs, contradiction
+        detection, and a ledger of known-unknowns. Seeded with the one belief that is
+        never in doubt — loyalty to the Master (Rule 1)."""
+        try:
+            from nyxara.memory.self_model import SelfModel
+            sm = SelfModel()
+            sm.believe("NYXARA", "loyal_to", "Master", confidence=1.0)
+            return sm
+        except Exception:  # noqa: BLE001 — self-knowledge is a capability, never required
+            return None
+
+    def _belief_dim(self, *, default: int = 16, cap: int = 64) -> int:
+        """Dimension for the predictive belief vector: the memory embedder's dimension
+        (capped so the finite-difference Jacobian stays cheap), else a small default."""
+        try:
+            emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+            dim = int(getattr(emb, "dim", 0) or 0)
+            if dim > 0:
+                return max(2, min(cap, dim))
+        except Exception:  # noqa: BLE001
+            pass
+        return default
+
+    def _build_predictive(self) -> Any:
+        """The free-energy spine: a prediction-error loop whose emotion read-out
+        (valence/arousal/surprise) colours affect. Sized to the memory embedder."""
+        try:
+            from nyxara.mind.predictive_core import PredictiveCore
+            return PredictiveCore(belief=[0.0] * self._belief_dim())
+        except Exception:  # noqa: BLE001 — the free-energy loop is a capability, never required
+            return None
+
+    def _build_dual_process(self) -> Any:
+        """Kahneman's two minds: a fast intuition (System 1) whose confidence mirrors
+        the reasoner's, arbitrated against deliberation (System 2). Phase-1 wiring uses
+        the arbitrator as a metacognitive *advisor* over the existing reasoner; the
+        symbolic System-2 faculties are filled in later."""
+        try:
+            from nyxara.mind.dual_process import DualProcess, System1, System2
+            from nyxara.mind.proposal import Proposal, ProposalKind
+
+            def _intuition(task: Any):
+                # the fast snap's confidence is the reasoner's own (passed via features)
+                return (task.description, float(task.features.get("confidence", 0.3)))
+
+            def _deliberate(task: Any):
+                # System 2 is constructed but not dispatched in the hot path yet; a trivial
+                # deliberate keeps it valid without recruiting heavy faculties (Phase 10).
+                return Proposal(kind=ProposalKind.ANSWER, content=task.description,
+                                source_faculty="system_2", confidence=0.5,
+                                rationale="deliberated")
+
+            return DualProcess(System1(_intuition), System2(deliberate=_deliberate))
+        except Exception:  # noqa: BLE001 — dual-process is a capability, never required
+            return None
+
+    def _build_meta(self) -> Any:
+        """Meta-learning over reasoning processes: learns whether fast intuition or slow
+        deliberation pays off for which kind of turn."""
+        try:
+            from nyxara.growth.meta import MetaLearner, Strategy
+            m = MetaLearner()
+            m.register(Strategy(name="system_1"))
+            m.register(Strategy(name="system_2"))
+            return m
+        except Exception:  # noqa: BLE001 — meta-learning is a capability, never required
+            return None
+
+    def _build_consolidator(self) -> Any:
+        """The dream engine over long-term memory: rehearses the salient, abstracts the
+        recurring. Needs a memory store; otherwise there is nothing to consolidate."""
+        if self.memory is None:
+            return None
+        try:
+            from nyxara.memory.consolidation import Consolidator
+            return Consolidator(self.memory)
+        except Exception:  # noqa: BLE001 — consolidation is a capability, never required
+            return None
+
+    def _build_temporal(self) -> Any:
+        """A sense of time: order, precedence/lag, and rhythm over remembered events."""
+        try:
+            from nyxara.mind.temporal import TemporalReasoner
+            return TemporalReasoner()
+        except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -434,7 +555,8 @@ class NyxaraCore:
 
     # ---- the cognitive cycle ---- #
     def process(self, stimulus: str, *, authority: Authority = Authority.OWNER,
-                trust: Optional[TrustLevel] = None) -> CycleResult:
+                trust: Optional[TrustLevel] = None,
+                media: Optional[Sequence[Any]] = None) -> CycleResult:
         cid = uuid.uuid4().hex[:8]
         thoughts: List[str] = []
         gates: Dict[str, str] = {}
@@ -474,6 +596,12 @@ class NyxaraCore:
         # affect & social: the Master's presence warms the mood and feeds theory-of-mind;
         # the stream gets a fresh seed to wander over later.
         self._note_interaction(safe_text, authority)
+        # free-energy read-out: fold prediction error over the percept into how she feels
+        self._predictive_tick(percept)
+        # multimodal grounding: bind any attached image/audio/document percepts into the
+        # *same* frame so attention and association span modalities, not text alone
+        if media:
+            self._bind_media(media, authority, thoughts)
 
         # 2. ATTEND
         focus = self.binder.frame.most_salient()
@@ -629,12 +757,197 @@ class NyxaraCore:
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
-        """Call the reason step, handing it the recalled memories when it accepts them."""
+        """The reason step. Several hypotheses are reasoned *in parallel* — each over a
+        different cognitive context (grounded in recall, unprimed, narrowly focused) — and
+        the most-supported one is selected. A dual-process arbitration then reflects on
+        whether this was a 'trust the gut' or 'think it through' turn. The selected
+        candidate is still a *proposal*: the kernel disposes (the control law holds)."""
+        candidate = self._reason_parallel(stimulus, focus, memories)
+        self._arbitrate(stimulus, candidate, memories)
+        return candidate
+
+    def _reason_once(self, stimulus: str, focus: Optional[Percept],
+                     memories: List[Any]) -> Candidate:
         try:
             return self.reasoner(stimulus, focus, memories=memories)  # type: ignore[call-arg]
         except TypeError:
             # a legacy two-arg reasoner (e.g. the deterministic stand-in)
             return self.reasoner(stimulus, focus)
+
+    def _hypothesis_framings(self, memories: List[Any]) -> List[tuple]:
+        """The distinct cognitive contexts to reason from, in priority order. Each is a
+        (name, memories) pair handed to an independent thought thread."""
+        framings: List[tuple] = [("grounded", memories)]
+        if self.parallel_hypotheses > 1:
+            framings.append(("unprimed", []))             # a fresh take, free of recall
+            framings.append(("focused", memories[:1]))    # only the single strongest cue
+        return framings[: self.parallel_hypotheses]
+
+    def _reasoner_parallelizable(self) -> bool:
+        """Only reasoners that take a per-call ``memories`` context benefit from — and are
+        safe under — parallel framings. A plain two-arg reasoner (the deterministic
+        stand-in, stateful test doubles) is context-free and may be stateful, so it runs
+        exactly once. Cached after the first probe."""
+        cached = getattr(self, "_reasoner_par", None)
+        if cached is not None:
+            return cached
+        ok = False
+        try:
+            import inspect
+            params = inspect.signature(self.reasoner).parameters
+            ok = ("memories" in params
+                  or any(p.kind is p.VAR_KEYWORD for p in params.values()))
+        except (TypeError, ValueError):  # un-inspectable callable -> stay safe
+            ok = False
+        self._reasoner_par = ok
+        return ok
+
+    def _reason_parallel(self, stimulus: str, focus: Optional[Percept],
+                         memories: List[Any]) -> Candidate:
+        """Run the hypothesis framings concurrently and select the winner. Falls back to a
+        single pass when parallelism is off, the reasoner is context-free, or only one
+        framing is viable."""
+        framings = self._hypothesis_framings(memories)
+        if (self.parallel_hypotheses <= 1 or len(framings) <= 1
+                or not self._reasoner_parallelizable()):
+            return self._reason_once(stimulus, focus, memories)
+        import concurrent.futures as _cf
+        results: List[tuple] = []
+        try:
+            with _cf.ThreadPoolExecutor(max_workers=len(framings)) as ex:
+                futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
+                        for name, mem in framings}
+                for fut in _cf.as_completed(futs):
+                    try:
+                        results.append((futs[fut], fut.result()))
+                    except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
+                        pass
+        except Exception:  # noqa: BLE001 — never let concurrency break the turn
+            return self._reason_once(stimulus, focus, memories)
+        if not results:
+            return self._reason_once(stimulus, focus, memories)
+        chosen_name, chosen = self._select_hypothesis(results)
+        self._record_hypotheses(results, chosen_name)
+        return chosen
+
+    @staticmethod
+    def _hypothesis_signature(c: Candidate) -> tuple:
+        return (c.kind, getattr(c, "tool", None), (c.text or "")[:120])
+
+    def _select_hypothesis(self, results: List[tuple]) -> tuple:
+        """Pick the candidate the threads most agree on (consensus). Ties favour the
+        grounded hypothesis, then the most confident. Selection never reaches past the
+        gate — it only chooses which proposal to submit to it."""
+        from collections import Counter
+        votes = Counter(self._hypothesis_signature(c) for _, c in results)
+        best: Optional[tuple] = None
+        for name, c in results:
+            key = (votes[self._hypothesis_signature(c)],
+                   1 if name == "grounded" else 0, float(c.confidence))
+            if best is None or key > best[0]:
+                best = (key, name, c)
+        return best[1], best[2]
+
+    def _record_hypotheses(self, results: List[tuple], chosen_name: str) -> None:
+        """Make the parallel thought threads auditable in the MindScope."""
+        for name, c in results:
+            mark = "*" if name == chosen_name else "-"
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"hypothesis[{name}] {mark} conf={c.confidence:.2f}: {(c.text or '')[:32]}"[:80],
+                salience=0.45, confidence=c.confidence)
+
+    def _arbitrate(self, stimulus: str, candidate: Candidate, memories: List[Any]) -> None:
+        """Metacognition: decide fast-vs-deliberate for this turn and record it. Colour
+        only — it annotates the audit trail, never changes the candidate or the gates."""
+        if self.dual_process is None:
+            return
+        try:
+            from nyxara.mind.faculties import Task, TaskType
+            familiarity = _clamp01(len(memories) / 5.0) if memories else 0.0
+            # an irreversible proposal is treated as higher-stakes / verifiable
+            stakes = 0.3 if getattr(candidate, "reversible", True) else 0.7
+            features = {"confidence": float(candidate.confidence), "stakes": stakes,
+                        "familiarity": familiarity, "novelty": _clamp01(1.0 - familiarity)}
+            task = Task(type=TaskType.REASONING, description=stimulus[:120],
+                        features=features,
+                        requires_verifiable=not getattr(candidate, "reversible", True))
+            fast = self.dual_process.system1.respond(task)
+            decision = self.dual_process.arbitrator.decide(
+                task, fast, stakes=stakes, energy=self._energy())
+            self._last_arbitration = decision
+            self.mind.record(ThoughtKind.DECISION,
+                             f"arbitration: {decision.process.value} — {decision.reason}",
+                             salience=0.4, confidence=fast.confidence)
+        except Exception:  # noqa: BLE001 — metacognition is best-effort, never fatal
+            self._last_arbitration = None
+
+    def _energy(self) -> float:
+        """A cheap cognitive-energy proxy: high affective pressure tires the mind."""
+        try:
+            if self.affect is not None:
+                return _clamp01(1.0 - 0.5 * self.affect.total_pressure())
+        except Exception:  # noqa: BLE001
+            pass
+        return 1.0
+
+    def _predictive_tick(self, percept: Any) -> None:
+        """Run one prediction-error step over the percept and let the resulting
+        valence/arousal/surprise colour affect (Free Energy Principle). Best-effort."""
+        if self.predictive is None:
+            return
+        try:
+            obs = self._observation_vector(percept)
+            if obs is None:
+                return
+            _perception, feeling = self.predictive.step(obs)
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"free-energy: surprise={feeling.surprise:.2f}",
+                             salience=_clamp01(feeling.surprise))
+            if self.affect is not None:
+                self.affect.ingest_prediction(feeling, cause="prediction error")
+        except Exception:  # noqa: BLE001 — the free-energy loop is best-effort, never fatal
+            pass
+
+    def _observation_vector(self, percept: Any) -> Optional[List[float]]:
+        """Derive a fixed-length observation vector for the predictive core from the
+        percept's text — via the memory embedder when present, else a cheap projection.
+        Truncated/padded to the belief dimension."""
+        dim = len(self.predictive.mu)
+        text = getattr(percept, "content", None) or ""
+        if not text:
+            return None
+        try:
+            emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+            if emb is not None:
+                vec = [float(x) for x in emb.embed(text)]
+                if vec:
+                    return vec[:dim] if len(vec) >= dim else vec + [0.0] * (dim - len(vec))
+        except Exception:  # noqa: BLE001
+            pass
+        # fallback: a deterministic character projection (no embedder available)
+        out = [0.0] * dim
+        for i, ch in enumerate(text[: dim * 4]):
+            out[i % dim] += (ord(ch) % 17) / 17.0
+        norm = math.sqrt(sum(x * x for x in out)) or 1.0
+        return [x / norm for x in out]
+
+    def known_unknowns(self) -> Dict[str, str]:
+        """What NYXARA knows it does not know: the self-model's explicit ledger plus any
+        functional self-facts she has never formed a confident belief about. Feeds the
+        curiosity loop (Step 6)."""
+        gaps: Dict[str, str] = {}
+        if self.self_model is None:
+            return gaps
+        try:
+            gaps.update(dict(self.self_model.known_unknowns))
+            for subject, predicate in (("NYXARA", "name"), ("NYXARA", "is_a"),
+                                       ("Master", "name")):
+                if self.self_model.confidence_in(subject, predicate) < 0.3:
+                    gaps.setdefault(f"{subject}.{predicate}", "no confident belief yet")
+        except Exception:  # noqa: BLE001
+            pass
+        return gaps
 
     # ---- tool dispatch & memory ---- #
     def _dispatch_tool(self, candidate: Candidate, authority: Authority):
@@ -693,6 +1006,87 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — feeling is best-effort, never fatal
             pass
 
+    # ---- multimodal grounding ---- #
+    def _bind_media(self, media: Sequence[Any], authority: Authority,
+                    thoughts: List[str]) -> None:
+        """Bind attached non-text inputs (images, audio, documents, extra text) into the
+        current perceptual frame, then note what — if anything — ties the modalities
+        together. Percepts are bound as *data*: they inform attention, never act."""
+        bound: List[Any] = []
+        for item in media:
+            try:
+                p = self._coerce_percept(item, authority)
+                if p is None:
+                    continue
+                b, _ = self.binder.perceive(p)
+                bound.append(b)
+            except Exception:  # noqa: BLE001 — a bad attachment is skipped, never fatal
+                continue
+        if not bound:
+            return
+        mods = sorted({b.modality.value for b in bound})
+        m_t = self.mind.record(
+            ThoughtKind.PERCEPTION,
+            f"bound {len(bound)} percept(s) across {', '.join(mods)}"[:80],
+            salience=max((b.salience for b in bound), default=0.3))
+        thoughts.append(m_t)
+        # cross-modal binding: surface the strongest tie spanning two modalities
+        try:
+            cross = [a for a in self.binder.frame.associations() if a.cross_modal]
+            if cross:
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"cross-modal tie: {', '.join(cross[0].shared)}"[:80],
+                                 salience=0.5)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _coerce_percept(self, item: Any, authority: Authority) -> Any:
+        """Turn a media item — a ready Percept, a sense analysis, or a simple spec dict
+        ({"text"|"image"|"audio"|"document": …}) — into a bound-able Percept."""
+        from nyxara.senses.binding import Percept
+        if isinstance(item, Percept):
+            return item
+        if not isinstance(item, dict):
+            return None
+        source = item.get("source") or authority.value
+        if "text" in item:
+            return Percept.from_text(str(item["text"]), source=source,
+                                     tags=list(item.get("tags", ())))
+        if "image" in item:
+            return self._image_percept(item["image"], source)
+        if "audio" in item:
+            return self._audio_percept(item["audio"], source)
+        if item.get("document") is not None:
+            return Percept.from_document(item["document"])
+        return None
+
+    def _image_percept(self, image: Any, source: str) -> Any:
+        """An image percept from a ready ImageAnalysis, else by analysing a file path via
+        the vision sense (optional heavy deps), degrading to a note if unavailable."""
+        from nyxara.senses.binding import Percept
+        if hasattr(image, "perceptual_hash") or hasattr(image, "average_hash"):
+            return Percept.from_image(image, source=source)
+        try:
+            from nyxara.senses.vision import Vision
+            return Percept.from_image(Vision().analyze(str(image), ocr=True), source=source)
+        except Exception:  # noqa: BLE001 — vision unavailable: bind a placeholder, don't crash
+            return Percept.from_text(f"[image: {source}]", source=source,
+                                     tags=["image", "unavailable"])
+
+    def _audio_percept(self, audio: Any, source: str) -> Any:
+        """An audio percept from a ready AudioAnalysis, else by analysing a file path via
+        the audio sense (optional heavy deps), degrading to a note if unavailable."""
+        from nyxara.senses.binding import Percept
+        if hasattr(audio, "fingerprint") or hasattr(audio, "silence_ratio"):
+            return Percept.from_audio(audio, source=source)
+        try:
+            from nyxara.senses.audio import Audio
+            return Percept.from_audio(Audio().analyze(str(audio), transcribe=True),
+                                      source=source)
+        except Exception:  # noqa: BLE001 — audio unavailable: bind a placeholder, don't crash
+            return Percept.from_text(f"[audio: {source}]", source=source,
+                                     tags=["audio", "unavailable"])
+
     def _note_interaction(self, stimulus: str, authority: Authority) -> None:
         """Fold a fresh percept into affect, theory-of-mind, and the idle stream."""
         if self.affect is not None and authority is Authority.OWNER:
@@ -704,6 +1098,14 @@ class NyxaraCore:
             try:
                 self.tom.set_belief("Master", "last_said", stimulus[:200])
             except Exception:  # noqa: BLE001
+                pass
+        if self.self_model is not None and authority is Authority.OWNER:
+            try:
+                from nyxara.memory.provenance import Provenance, SourceType
+                self.self_model.believe(
+                    "Master", "last_said", stimulus[:200], confidence=0.9,
+                    provenance=Provenance(SourceType.OWNER, confidence=0.9))
+            except Exception:  # noqa: BLE001 — self-knowledge is best-effort, never fatal
                 pass
         if self.stream is not None:
             try:
@@ -720,6 +1122,12 @@ class NyxaraCore:
             return
         action = candidate.tool or candidate.kind
         owner = authority is Authority.OWNER
+        # temporal: stamp this turn's action so order, lag, and rhythm can be reasoned over
+        if self.temporal is not None:
+            try:
+                self.temporal.observe(action)
+            except Exception:  # noqa: BLE001 — the sense of time is best-effort, never fatal
+                pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
@@ -741,6 +1149,15 @@ class NyxaraCore:
             try:
                 self.affect.note_success()
             except Exception:  # noqa: BLE001
+                pass
+        # meta-learning: credit the reasoning process this turn used with the outcome,
+        # so the arbitrator's choice (fast vs deliberate) self-tunes over time
+        if self.meta is not None and self._last_arbitration is not None:
+            try:
+                process = self._last_arbitration.process.value
+                self.meta.record(process, candidate.kind,
+                                 {k: float(v) for k, v in features.items()}, reward)
+            except Exception:  # noqa: BLE001 — meta-learning is best-effort, never fatal
                 pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
         self._turns += 1
@@ -768,10 +1185,219 @@ class NyxaraCore:
             pass
         return lines
 
-    def start_cognition(self, *, interval: float = 2.0) -> bool:
+    def idle_maintenance(self, *, dt: float = 1.0) -> Dict[str, Any]:
+        """One pass of self-directed upkeep, run when NYXARA is idle: rehearse the
+        memories worth keeping (dream replay), let mood relax and drives reassert
+        (affect tick), re-prioritise the objective space, and mine lessons from lived
+        outcomes — surfacing the strongest as an insight. Gated by oversight and wholly
+        best-effort: she keeps existing — feeling, sorting, learning — when no one speaks.
+
+        Colour only: nothing here acts on the world or touches the gates."""
+        report: Dict[str, Any] = {"ran": False}
+        try:
+            if not self.oversight.gate():   # a paused/scrammed mind rests
+                return report
+        except Exception:  # noqa: BLE001
+            pass
+        report["ran"] = True
+        # 1) dream replay — strengthen the salient, grow their stability
+        if self.consolidator is not None:
+            try:
+                report["replayed"] = len(self.consolidator.dream_replay())
+            except Exception:  # noqa: BLE001
+                pass
+        # 2) affect tick — mood relaxes toward baseline; drives deplete and reassert
+        if self.affect is not None:
+            try:
+                self.affect.tick(dt)
+                report["mood"] = round(self.affect.mood.valence, 3)
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) goals — re-rank the objective space (service to the Master stays first)
+        if self.goals is not None:
+            try:
+                ranked = self.goals.prioritize()
+                if ranked:
+                    report["top_goal"] = ranked[0].name
+            except Exception:  # noqa: BLE001
+                pass
+        # 4) reflect — mine lessons from outcomes; surface the strongest into MindScope
+        if self.reflector is not None:
+            try:
+                lessons = self.reflector.lessons()
+                report["lessons"] = len(lessons)
+                if lessons:
+                    top = lessons[0]
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"idle lesson: {top.text}"[:80],
+                                     salience=0.7, confidence=top.confidence)
+                    if self._insight_q is not None:
+                        try:
+                            self._insight_q.put(top.text)
+                        except Exception:  # noqa: BLE001
+                            pass
+            except Exception:  # noqa: BLE001
+                pass
+        # 5) curiosity — close a known-unknown by a safe, internal investigation
+        try:
+            cur = self.curiosity_pass()
+            if cur.get("resolved"):
+                report["curiosity"] = cur.get("investigated")
+        except Exception:  # noqa: BLE001
+            pass
+        # 6) temporal — surface a rhythm or precedence she has lived (sense of *when*)
+        if self.temporal is not None:
+            try:
+                rhythms = self.temporal.rhythms()
+                links = self.temporal.causal_candidates()
+                finding = (rhythms[0].describe() if rhythms else
+                           links[0].describe() if links else None)
+                if finding is not None:
+                    report["temporal"] = finding
+                    self.mind.record(ThoughtKind.INFERENCE, f"temporal: {finding}"[:80],
+                                     salience=0.55)
+            except Exception:  # noqa: BLE001
+                pass
+        self._last_maintenance = time.time()
+        return report
+
+    def temporal_patterns(self) -> Dict[str, Any]:
+        """What NYXARA has noticed about *when* things happen: confidently-repeating
+        rhythms and strong precedence (cause -> effect) candidates over lived events."""
+        out: Dict[str, Any] = {"rhythms": [], "precedence": []}
+        if self.temporal is None:
+            return out
+        try:
+            out["rhythms"] = [p.to_dict() for p in self.temporal.rhythms()]
+            out["precedence"] = [p.to_dict() for p in self.temporal.causal_candidates()]
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    # ---- curiosity: close known-unknowns by value-directed internal experiments ---- #
+    def curiosity_pass(self, *, max_experiments: int = 1) -> Dict[str, Any]:
+        """Notice what she knows she does not know, value those gaps (value of
+        information), and run a *safe, internal* experiment on the most valuable one —
+        consulting her own grounded knowledge — folding any answer back as a belief and a
+        memory. Nothing here touches the world or the gates: an external question would
+        still go through the Master. Gated by oversight; wholly best-effort."""
+        report: Dict[str, Any] = {"gaps": 0, "investigated": None, "resolved": False}
+        if self.self_model is None:
+            return report
+        try:
+            if not self.oversight.gate():   # a paused/scrammed mind does not wander
+                return report
+        except Exception:  # noqa: BLE001
+            pass
+        gaps = self.known_unknowns()
+        report["gaps"] = len(gaps)
+        if not gaps:
+            return report
+        try:
+            from nyxara.planning.voi import ActionType, InfoSource
+            voi = self._voi()
+            source = InfoSource("internal knowledge", kind="gather",
+                                reliability=0.7, cost=0.2)
+            # value the gaps; investigate the most valuable ones VoI deems worth gathering
+            ordered = sorted(gaps, key=self._gap_uncertainty, reverse=True)
+            for topic in ordered[: max(1, max_experiments)]:
+                rec = voi.decide(uncertainty=self._gap_uncertainty(topic), stakes=0.5,
+                                 sources=[source])
+                if rec.action is not ActionType.GATHER:
+                    continue
+                report["investigated"] = topic
+                finding = self._investigate(topic)
+                if finding is None:
+                    continue
+                if self._learn_self_fact(*finding, topic=topic):
+                    report["resolved"] = True
+                    break
+        except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
+            pass
+        return report
+
+    def _voi(self) -> Any:
+        if getattr(self, "_voi_engine", None) is None:
+            from nyxara.planning.voi import ValueOfInformation
+            self._voi_engine = ValueOfInformation()
+        return self._voi_engine
+
+    def _gap_uncertainty(self, topic: str) -> float:
+        """1 - effective confidence in the gap's (subject, predicate); 1.0 if unknown."""
+        subject, _, predicate = topic.partition(".")
+        if subject and predicate and self.self_model is not None:
+            try:
+                return _clamp01(1.0 - self.self_model.confidence_in(subject, predicate))
+            except Exception:  # noqa: BLE001
+                pass
+        return 1.0
+
+    def _investigate(self, topic: str) -> Optional[tuple]:
+        """A safe, internal experiment for one self-knowledge gap: settle it from grounded
+        knowledge (config + the foundational knowledge base). Returns
+        (subject, predicate, value, confidence) or None. Touches nothing in the world."""
+        subject, _, predicate = topic.partition(".")
+        if not subject or not predicate:
+            return None
+        value = self._known_self_fact(subject, predicate)
+        if value is None:
+            return None
+        # corroborate against the grounded knowledge base — evidence raises confidence
+        conf = 0.8
+        try:
+            if self.knowledge is not None:
+                hits = self.knowledge.retrieve(f"{subject} {predicate}", k=2)
+                if hits and any(str(value).lower() in h.text.lower() for h in hits):
+                    conf = 0.95
+        except Exception:  # noqa: BLE001
+            pass
+        return (subject, predicate, value, conf)
+
+    def _known_self_fact(self, subject: str, predicate: str) -> Optional[str]:
+        """The grounded self-facts NYXARA can settle from her own foundation."""
+        s, p = subject.lower(), predicate.lower()
+        if s == "nyxara" and p == "name":
+            return "NYXARA"
+        if s == "nyxara" and p == "is_a":
+            return "a sovereign cognitive agent in service of the Master"
+        if s == "master" and p == "name":
+            try:
+                from nyxara.kernel.config import get_settings
+                return get_settings().owner.name
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def _learn_self_fact(self, subject: str, predicate: str, value: str, confidence: float,
+                         *, topic: str) -> bool:
+        """Fold an investigated finding into the self-model (resolving the unknown) and
+        lay down a semantic memory so the discovery accretes into continuity."""
+        try:
+            from nyxara.memory.provenance import Provenance, SourceType
+            self.self_model.believe(
+                subject, predicate, value, confidence=confidence,
+                provenance=Provenance(SourceType.SELF_REFLECTION, confidence=confidence))
+            self.self_model.resolve_unknown(topic)
+            self.mind.record(ThoughtKind.INFERENCE,
+                             f"curiosity: learned {subject} {predicate} = {value}"[:80],
+                             salience=0.6, confidence=confidence)
+            if self.memory is not None:
+                from nyxara.memory.store import MemoryType
+                self.memory.remember(
+                    f"Learned: {subject} {predicate} is {value}.",
+                    mem_type=MemoryType.SEMANTIC,
+                    provenance=Provenance(SourceType.SELF_REFLECTION, confidence=confidence),
+                    importance=0.5, tags=["curiosity", "self-knowledge"])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def start_cognition(self, *, interval: float = 2.0, idle_after: float = 30.0) -> bool:
         """Start the default-mode stream on a background thread (Layer 5: concurrent
         cognition). It wanders/incubates while idle and goes quiet while a turn runs,
-        queuing any surfaced insights for :meth:`drain_insights`. Idempotent."""
+        queuing any surfaced insights for :meth:`drain_insights`. After ``idle_after``
+        seconds with no turn, it also runs :meth:`idle_maintenance` on its own cadence so
+        NYXARA continuously exists — not only when spoken to. Idempotent."""
         if self.stream is None:
             return False
         import queue
@@ -788,6 +1414,12 @@ class NyxaraCore:
                     for t in self.stream.tick(engagement=engagement):
                         if t.type.value == "insight":
                             self._insight_q.put(t.text)
+                    # persistent existence: when genuinely idle, keep her own house
+                    now = time.time()
+                    if (not self._engaged
+                            and now - self._last_interaction >= idle_after
+                            and now - self._last_maintenance >= idle_after):
+                        self.idle_maintenance()
                 except Exception:  # noqa: BLE001 — idle cognition never crashes the system
                     pass
 
@@ -843,6 +1475,7 @@ class NyxaraCore:
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:
         self._engaged = False   # the turn is done; idle cognition may resume
+        self._last_interaction = time.time()   # idle is measured from the last completed turn
         self._apply_affect(disp)
         return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                            candidate=candidate, gates=gates, thoughts=thoughts,

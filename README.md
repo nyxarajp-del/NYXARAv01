@@ -151,6 +151,12 @@ around the control law.
   them learned rather than the always-available hashing fallback; loading memory saved under
   a different embedder **re-embeds it into the current space**, so the upgrade is lossless.
   Set `NYXARA_MEMORY__SEMANTIC_EMBEDDINGS=false` to force the dependency-free hashing embedder.
+* **Model scale** — the foundry's transformer size is a named **profile**. The default
+  `custom` keeps the tiny, CPU-/CI-runnable model; `NYXARA_FOUNDRY__PROFILE=gpt2` selects the
+  canonical **GPT-2 architecture (~124M params)** and `gpt2-medium` (~355M) — genuine neural
+  substrate. Heavy profiles require the `[foundry]` extra (torch) and `NYXARA_FOUNDRY__ENABLED=true`;
+  without torch the foundry degrades to the dependency-free n-gram backend, so CI stays hermetic.
+  `FoundryConfig.estimated_params()` reports the scale without importing torch.
 
   ```python
   from nyxara import NyxaraCore, AutonomicLoop

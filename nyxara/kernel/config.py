@@ -254,21 +254,41 @@ class LLMConfig(BaseModel):
         return None
 
 
+# Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
+# (n_layer, n_head, n_embd, block_size) tuple; "gpt2" is the canonical 124M-parameter
+# GPT-2 architecture (the requested minimum-GPT-2-scale substrate), reachable only when
+# torch is installed and the foundry is explicitly enabled. "custom" uses the explicit
+# fields verbatim, preserving the tiny, CPU-runnable default for tests/CI.
+_FOUNDRY_PROFILES: Dict[str, Dict[str, int]] = {
+    "tiny":        {"n_layer": 2,  "n_head": 2,  "n_embd": 64,   "block_size": 64},
+    "small":       {"n_layer": 4,  "n_head": 4,  "n_embd": 128,  "block_size": 128},
+    "gpt2":        {"n_layer": 12, "n_head": 12, "n_embd": 768,  "block_size": 1024},
+    "gpt2-medium": {"n_layer": 24, "n_head": 16, "n_embd": 1024, "block_size": 1024},
+}
+
+
 class FoundryConfig(BaseModel):
     """NYXARA's self-built-model foundry settings (growth/foundry.py).
 
     Off by default (heavy & self-modifying, like vision/audio). The default backend is
     ``auto`` which uses the optional torch nano-GPT when torch is installed and falls
     back to the always-available pure-stdlib n-gram model otherwise.
+
+    ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
+    dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
+    GPT-2 scale (~124M params). Heavy profiles still require torch and ``enabled=True``.
     """
 
     model_config = {"validate_assignment": True}
 
     enabled: bool = False
     backend: Literal["auto", "ngram", "nanogpt", "lora"] = "auto"
+    # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
+    profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
-    # Optional torch nano-GPT dimensions (only used when torch is present).
+    # Optional torch nano-GPT dimensions (only used when torch is present, and only when
+    # profile == "custom"; a named profile overrides these).
     block_size: int = Field(default=64, ge=8, le=1024)
     n_layer: int = Field(default=2, ge=1, le=24)
     n_head: int = Field(default=2, ge=1, le=32)
@@ -292,6 +312,26 @@ class FoundryConfig(BaseModel):
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0
+
+    def resolved_dims(self) -> Dict[str, int]:
+        """The (n_layer, n_head, n_embd, block_size) the foundry should build with.
+
+        A named ``profile`` overrides the explicit fields; ``custom`` uses them verbatim.
+        ``gpt2`` and above reach genuine GPT-2 scale (real neural substrate, opt-in)."""
+        if self.profile == "custom":
+            return {"n_layer": self.n_layer, "n_head": self.n_head,
+                    "n_embd": self.n_embd, "block_size": self.block_size}
+        return dict(_FOUNDRY_PROFILES[self.profile])
+
+    def estimated_params(self, *, vocab_size: int = 50257) -> int:
+        """A standard estimate of the transformer's parameter count from the resolved
+        dimensions — lets us assert "GPT-2 scale" without importing torch. For the
+        ``gpt2`` profile this returns ~124M."""
+        d = self.resolved_dims()
+        n_embd, n_layer, block = d["n_embd"], d["n_layer"], d["block_size"]
+        embeddings = vocab_size * n_embd + block * n_embd          # token + positional
+        per_block = 12 * n_embd * n_embd + 13 * n_embd             # attn + MLP + norms
+        return int(embeddings + n_layer * per_block + n_embd)      # + final layernorm
 
 
 class CouncilConfig(BaseModel):

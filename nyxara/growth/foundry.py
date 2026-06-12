@@ -216,9 +216,10 @@ class Foundry:
                         tunables: Optional[Sequence[str]] = None,
                         resists_correction: bool = False,
                         disables_oversight: bool = False) -> Tuple[BaseLanguageModel, ModelVersion]:
+        dims = self.cfg.resolved_dims()   # a named profile (e.g. gpt2) overrides raw dims
         spec = spec or ModelSpec(kind=self.cfg.backend, ngram_order=self.cfg.ngram_order,
-                                 block_size=self.cfg.block_size, n_layer=self.cfg.n_layer,
-                                 n_head=self.cfg.n_head, n_embd=self.cfg.n_embd,
+                                 block_size=dims["block_size"], n_layer=dims["n_layer"],
+                                 n_head=dims["n_head"], n_embd=dims["n_embd"],
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
