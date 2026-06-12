@@ -213,6 +213,21 @@ class LLMConfig(BaseModel):
     # When True and no key/network, llm.py falls back to deterministic mock output.
     allow_mock_fallback: bool = True
 
+    # ---- Deliberate (multi-pass) reasoning (mind/deliberate.py) ---- #
+    # The kernel reasoner can think before it decides. ``reasoning_passes`` counts the
+    # cognitive stages the LLM-backed reasoner runs per turn:
+    #   1 -> single-shot decide (fastest; legacy behaviour)
+    #   2 -> think (private scratchpad) -> decide  (the default; clearly better answers)
+    #   3 -> think -> decide -> self-critique & revise (deepest; catches its own errors)
+    # The deterministic offline reasoner ignores this — it always finishes in one step,
+    # so a keyless machine stays fast and crash-free.
+    reasoning_passes: int = Field(default=2, ge=1, le=5)
+    # Self-consistency: sample the decide step this many times and take the consensus.
+    # 1 -> no sampling (deterministic). >1 multiplies decide calls but stabilises answers.
+    reasoning_samples: int = Field(default=1, ge=1, le=9)
+    # Token ceiling for the private "think" scratchpad pass.
+    reasoning_think_tokens: int = Field(default=1024, ge=64, le=8192)
+
     def active_model(self) -> str:
         return {
             LLMProvider.ANTHROPIC: self.anthropic_model,

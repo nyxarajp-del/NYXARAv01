@@ -67,7 +67,11 @@ The sovereign cycle is fully wired end to end:
 * **Reason** — an LLM-backed reasoner (`mind/llm_reasoner.py`) proposes the candidate when
   a real provider is configured, and falls back to a deterministic stand-in on a keyless
   machine (so behaviour is identical and crash-free out of the box). The mind proposes; the
-  kernel still disposes.
+  kernel still disposes. With a real provider it **deliberates** (`mind/deliberate.py`)
+  instead of answering in one shot — *think (a private scratchpad) → decide → self-critique
+  & revise* — which measurably lifts answer quality. Tune the depth with
+  `NYXARA_LLM__REASONING_PASSES` (1 = single shot, 2 = think→decide *(default)*, 3 = add a
+  self-critique pass) and `NYXARA_LLM__REASONING_SAMPLES` (>1 votes by self-consistency).
 * **Act** — cleared action candidates dispatch to a **governed, executable toolset**
   (`agency/default_tools.py`) through the registry's full safety pipeline — real effects,
   not recorded intents. Defaults include time, arithmetic, file read/write/list, a
