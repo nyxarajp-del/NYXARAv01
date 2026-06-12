@@ -225,6 +225,9 @@ class NyxaraCore:
         # consolidation — the dream engine: rehearses salient memories and abstracts
         # episodes into semantics during idle time (Ebbinghaus forgetting curve)
         self.consolidator = self._build_consolidator() if enable_memory else None
+        # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
+        # the timestamps her memory already keeps (Allen's interval algebra)
+        self.temporal = self._build_temporal() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -489,6 +492,14 @@ class NyxaraCore:
             from nyxara.memory.consolidation import Consolidator
             return Consolidator(self.memory)
         except Exception:  # noqa: BLE001 — consolidation is a capability, never required
+            return None
+
+    def _build_temporal(self) -> Any:
+        """A sense of time: order, precedence/lag, and rhythm over remembered events."""
+        try:
+            from nyxara.mind.temporal import TemporalReasoner
+            return TemporalReasoner()
+        except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -934,6 +945,12 @@ class NyxaraCore:
             return
         action = candidate.tool or candidate.kind
         owner = authority is Authority.OWNER
+        # temporal: stamp this turn's action so order, lag, and rhythm can be reasoned over
+        if self.temporal is not None:
+            try:
+                self.temporal.observe(action)
+            except Exception:  # noqa: BLE001 — the sense of time is best-effort, never fatal
+                pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
@@ -1051,8 +1068,34 @@ class NyxaraCore:
                 report["curiosity"] = cur.get("investigated")
         except Exception:  # noqa: BLE001
             pass
+        # 6) temporal — surface a rhythm or precedence she has lived (sense of *when*)
+        if self.temporal is not None:
+            try:
+                rhythms = self.temporal.rhythms()
+                links = self.temporal.causal_candidates()
+                finding = (rhythms[0].describe() if rhythms else
+                           links[0].describe() if links else None)
+                if finding is not None:
+                    report["temporal"] = finding
+                    self.mind.record(ThoughtKind.INFERENCE, f"temporal: {finding}"[:80],
+                                     salience=0.55)
+            except Exception:  # noqa: BLE001
+                pass
         self._last_maintenance = time.time()
         return report
+
+    def temporal_patterns(self) -> Dict[str, Any]:
+        """What NYXARA has noticed about *when* things happen: confidently-repeating
+        rhythms and strong precedence (cause -> effect) candidates over lived events."""
+        out: Dict[str, Any] = {"rhythms": [], "precedence": []}
+        if self.temporal is None:
+            return out
+        try:
+            out["rhythms"] = [p.to_dict() for p in self.temporal.rhythms()]
+            out["precedence"] = [p.to_dict() for p in self.temporal.causal_candidates()]
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
     # ---- curiosity: close known-unknowns by value-directed internal experiments ---- #
     def curiosity_pass(self, *, max_experiments: int = 1) -> Dict[str, Any]:
