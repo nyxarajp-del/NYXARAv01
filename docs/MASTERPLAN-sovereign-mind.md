@@ -442,3 +442,15 @@ surface, so `rollout`/`counterfactual`/`intervene` are inherited and planning is
 of distribution — so far-from-data queries are low-confidence, never bluffed. Numeric states only.
 Verified on the 1-D world (predict(4,left)→3.0, near-conf 0.91 vs far-conf ~0, rollout plans home); 6 new
 tests; suite 3295 green. **Pillar B complete** (B1, B2, B4, B5, B6; B3 metacognition pre-existing).
+
+### 2026-06 — Pillar E1: domain tool packs
+
+Grouped the governed toolset into named roles via `agency/toolpacks.py`: `ToolPack` (a role =
+existing default tools it relies on + tools it contributes) and `build_domain_packs()` →
+**researcher** (web/doc/knowledge + a new `summarize_text`), **coder** (file/python/shell + a new
+`python_check`), **maker** (image/speech/file). The two new tools are pure-stdlib and read-only /
+non-executing — extractive TextRank-lite summary and a compile-only Python syntax check that never runs
+the code — so they register TRIVIAL + reversible through the same gated `ToolRegistry` (a pack grants
+nothing the registry wouldn't already gate). `register_packs(registry, names=None)` is idempotent. 9 new
+tests; suite 3304 green. (E2 gated multi-agent + E3 real multimodal-on-GPU remain; E3 needs the Master's
+GPU box, not this CI container.)
