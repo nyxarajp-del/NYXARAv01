@@ -168,3 +168,49 @@ def test_reasoner_falls_back_when_deliberation_unparseable():
     # deliberation raises -> __call__ falls back to the deterministic reasoner, never crashes
     cand = r("delete everything", None)
     assert cand.kind == "act"       # the deterministic reasoner classifies a command
+
+
+# --------------------------------------------------------------------------- #
+# Search-over-reasoning (Pillar B4): pick the best sample by an INDEPENDENT verifier
+# --------------------------------------------------------------------------- #
+class _MultiLLM:
+    """Returns several same-shape 'respond' drafts: a confident-but-empty one and a good one."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, prompt, *, system=None, **kw):
+        return "think: answer the Master clearly."
+
+    def generate_json(self, prompt, *, system=None, **kw):
+        self.calls += 1
+        if self.calls == 1:
+            # loudly confident, but a near-empty / degenerate answer
+            return {"kind": "respond", "text": "idk", "confidence": 0.99}
+        return {"kind": "respond",
+                "text": "The capital of France is Paris, Master — a clear, complete answer.",
+                "confidence": 0.55}
+
+
+def test_verifier_selects_quality_over_self_confidence():
+    from nyxara.mind.deliberate import DeliberativeReasoner
+    from nyxara.mind.router import default_verifier
+
+    d = DeliberativeReasoner(_MultiLLM(), passes=2, samples=2,
+                             verifier=default_verifier())
+    out = d.deliberate(stimulus="What is the capital of France?",
+                       context="", decision_instructions="(spec)")
+    assert out.verifier_selected
+    assert "Paris" in out.decision["text"]          # the good answer wins, not the 0.99 'idk'
+    assert "verifier-scored best-of" in out.trace()
+
+
+def test_without_verifier_self_confidence_still_wins():
+    # default (no verifier) keeps the original self-consistency behaviour: 0.99 'idk' wins
+    from nyxara.mind.deliberate import DeliberativeReasoner
+
+    d = DeliberativeReasoner(_MultiLLM(), passes=2, samples=2)
+    out = d.deliberate(stimulus="What is the capital of France?",
+                       context="", decision_instructions="(spec)")
+    assert not out.verifier_selected
+    assert out.decision["text"] == "idk"

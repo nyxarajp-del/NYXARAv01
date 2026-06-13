@@ -33,9 +33,14 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 __all__ = ["Deliberation", "DeliberativeReasoner"]
+
+# An independent answer-quality verifier: (prompt, answer_text) -> score in [0,1]. Used to pick
+# the best of several sampled reasoning paths on the answer's *own* merits, rather than trusting
+# the model's self-reported confidence.
+Verifier = Callable[[str, str], float]
 
 
 # --------------------------------------------------------------------------- #
@@ -51,12 +56,15 @@ class Deliberation:
     samples: List[Dict[str, Any]] = field(default_factory=list)
     critique: str = ""
     revised: bool = False
+    verifier_selected: bool = False
 
     def trace(self) -> str:
         """A short, human-readable note on how the decision was reached (for /explain)."""
         bits = [f"{self.passes}-pass deliberation"]
         if len(self.samples) > 1:
-            bits.append(f"{len(self.samples)} self-consistency samples")
+            how = ("verifier-scored best-of" if self.verifier_selected
+                   else "self-consistency over")
+            bits.append(f"{how} {len(self.samples)} samples")
         if self.revised:
             bits.append("self-critique revised the draft")
         return "; ".join(bits)
@@ -78,7 +86,8 @@ class DeliberativeReasoner:
 
     def __init__(self, llm: Any, *, passes: int = 2, samples: int = 1,
                  think_tokens: int = 1024, temperature: float = 0.5,
-                 max_tokens: int = 4096, critic: Any = None) -> None:
+                 max_tokens: int = 4096, critic: Any = None,
+                 verifier: Optional[Verifier] = None) -> None:
         self.llm = llm
         self.passes = max(1, int(passes))
         self.samples = max(1, int(samples))
@@ -86,6 +95,7 @@ class DeliberativeReasoner:
         self.temperature = max(0.0, float(temperature))
         self.max_tokens = max(1, int(max_tokens))
         self.critic = critic
+        self.verifier = verifier
 
     # ---- public entry point ---- #
     def deliberate(self, *, stimulus: str, context: str, decision_instructions: str,
@@ -99,10 +109,11 @@ class DeliberativeReasoner:
             # The decide stage produced nothing parseable — signal failure to the caller,
             # which falls back to its own single-shot / deterministic path.
             raise ValueError("deliberation produced no parseable decision")
-        decision = _vote(samples)
+        decision = self._select(samples, stimulus)
 
         result = Deliberation(decision=decision, passes=self.passes,
-                              scratchpad=scratchpad, samples=samples)
+                              scratchpad=scratchpad, samples=samples,
+                              verifier_selected=bool(self.verifier and len(samples) > 1))
 
         if self.passes >= 3:
             revised = self._critique_and_revise(
@@ -192,6 +203,25 @@ class DeliberativeReasoner:
         except Exception:  # noqa: BLE001 — probes are advisory
             return []
 
+    # ---- selection: consensus shape, then the best answer within it ---- #
+    def _select(self, samples: List[Dict[str, Any]], stimulus: str) -> Dict[str, Any]:
+        """Pick the winning decision from the samples (search-over-reasoning, Pillar B4).
+
+        The (kind, tool) *shape* — what the kernel would actually do — is decided by majority
+        (self-consistency). Within that consensus, the *answer* is chosen by an independent
+        verifier of the text's quality when one is configured (best-of-N on merit), falling back
+        to the model's own stated confidence otherwise."""
+        if len(samples) == 1:
+            return samples[0]
+        bucket = _consensus_bucket(samples)
+        if self.verifier is not None:
+            try:
+                return max(bucket, key=lambda d: float(
+                    self.verifier(stimulus, str(d.get("text", "")))))
+            except Exception:  # noqa: BLE001 — a verifier error falls back to self-confidence
+                pass
+        return max(bucket, key=lambda d: _as_float(d.get("confidence"), 0.0))
+
     # ---- trace ---- #
     def _annotate(self, result: Deliberation) -> None:
         try:
@@ -217,6 +247,20 @@ def _risk_to_float(v: Any) -> float:
             "high": 0.8, "critical": 0.95}.get(str(v).lower(), 0.2)
 
 
+def _shape(d: Dict[str, Any]) -> tuple:
+    kind = "act" if str(d.get("kind", "respond")).lower() == "act" else "respond"
+    tool = str(d.get("tool") or "").strip().lower() if kind == "act" else ""
+    return (kind, tool)
+
+
+def _consensus_bucket(samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The samples whose (kind, tool) shape won the majority vote — what the kernel would do."""
+    counts = Counter(_shape(d) for d in samples)
+    top = counts.most_common(1)[0][1]
+    winners = {sh for sh, c in counts.items() if c == top}
+    return [d for d in samples if _shape(d) in winners]
+
+
 def _vote(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Self-consistency: pick the consensus action *shape*, then its most-confident member.
 
@@ -226,16 +270,7 @@ def _vote(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     if len(samples) == 1:
         return samples[0]
-
-    def shape(d: Dict[str, Any]) -> tuple:
-        kind = "act" if str(d.get("kind", "respond")).lower() == "act" else "respond"
-        tool = str(d.get("tool") or "").strip().lower() if kind == "act" else ""
-        return (kind, tool)
-
-    counts = Counter(shape(d) for d in samples)
-    top = counts.most_common(1)[0][1]
-    winners = {sh for sh, c in counts.items() if c == top}
-    bucket = [d for d in samples if shape(d) in winners]
+    bucket = _consensus_bucket(samples)
     # Tie-break (and within-bucket pick): highest stated confidence.
     return max(bucket, key=lambda d: _as_float(d.get("confidence"), 0.0))
 

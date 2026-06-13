@@ -242,11 +242,15 @@ class LLMReasoner:
     def _deliberate(self, stimulus: str, temperature: float) -> Any:
         from nyxara.mind.critique import Critic
         from nyxara.mind.deliberate import DeliberativeReasoner
+        from nyxara.mind.router import default_verifier
         cfg = self.settings.llm
+        # when sampling several reasoning paths, pick the best by an INDEPENDENT answer-quality
+        # verifier (search-over-reasoning, B4) rather than the model's own stated confidence.
+        verifier = default_verifier() if cfg.reasoning_samples > 1 else None
         deliberator = DeliberativeReasoner(
             self.llm, passes=cfg.reasoning_passes, samples=cfg.reasoning_samples,
             think_tokens=cfg.reasoning_think_tokens, temperature=temperature,
-            max_tokens=cfg.max_output_tokens, critic=Critic())
+            max_tokens=cfg.max_output_tokens, critic=Critic(), verifier=verifier)
         result = deliberator.deliberate(
             stimulus=stimulus, context=self._context_block(stimulus),
             decision_instructions=_DECISION_INSTRUCTIONS, system=self._effective_system())
