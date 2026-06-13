@@ -311,6 +311,8 @@ class NyxaraCore:
         # Level 10 — Autonomous Researcher: self-directed web research on triggered topics.
         self.researcher = self._build_researcher() if enable_memory else None
         self._research_queue: List[str] = []   # topics to research on next idle tick
+        # Level 11 — AutoForge: automated model training pipeline.
+        self.autoforge = self._build_autoforge() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -735,6 +737,19 @@ class NyxaraCore:
                 sandbox=getattr(self, "sandbox_runner", None),
             )
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
+            return None
+
+    def _build_autoforge(self) -> Any:
+        """Level 11 — AutoForge: automated Distill→Train→Benchmark→Promote pipeline."""
+        try:
+            from nyxara.growth.autoforge import AutoForge
+            from nyxara.growth.foundry import Foundry
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            min_ex = getattr(settings, "foundry_min_examples", 10)
+            foundry = Foundry()
+            return AutoForge(foundry=foundry, distiller=None, min_examples=min_ex)
+        except Exception:  # noqa: BLE001 — autoforge is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -1684,6 +1699,18 @@ class NyxaraCore:
                                          salience=0.65)
             except Exception:  # noqa: BLE001
                 pass
+        # 4e) Level 11 — autoforge: run training cycle if data threshold is met
+        if self.autoforge is not None:
+            try:
+                forge_result = self.autoforge.run_cycle()
+                if forge_result.trained:
+                    report["forge_cycles"] = len(self.autoforge.all_cycles())
+                    action = "promoted" if forge_result.promoted else "rolled back"
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"autoforge: {action} — {forge_result.reason}"[:80],
+                                     salience=0.7)
+            except Exception:  # noqa: BLE001
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -2028,6 +2055,8 @@ class NyxaraCore:
             rep["civilization_agents"] = len(self.civilization.agents)
         if self.researcher is not None:
             rep["research_reports"] = len(self.researcher.all_reports())
+        if self.autoforge is not None:
+            rep["forge_cycles"] = len(self.autoforge.all_cycles())
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
