@@ -55,6 +55,7 @@ from nyxara.observe.mindscope import MindScope, ThoughtKind
 from nyxara.observe.self_report import SelfReporter
 from nyxara.planning.journal import ActionStatus, Journal
 from nyxara.senses.binding import Binder, Percept
+from nyxara.kernel.workspace import GlobalWorkspace
 
 __all__ = [
     "Disposition",
@@ -127,6 +128,19 @@ class CycleResult:
 
 # a reasoner turns a (stimulus, focus) into a candidate
 Reasoner = Callable[[str, Optional[Percept]], Candidate]
+
+
+class _WorkspaceThought:
+    """Thin wrapper so a workspace broadcast winner looks like a memory record to the
+    reasoner's _memory_text() helper — it just needs a callable .text() method."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def text(self) -> str:
+        return self._text
 
 
 def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
@@ -230,6 +244,11 @@ class NyxaraCore:
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
+        # Level 1 — Real Brain Core: the Global Workspace (GWT bottleneck) + thought
+        # generator that submits candidate thoughts from all active sources, runs one
+        # arbitration cycle, and surfaces the top-N winners to the reason step.
+        self.workspace = self._build_workspace()
+        self.thought_gen = self._build_thought_gen()
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -529,6 +548,26 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
             return None
 
+    def _build_workspace(self) -> Any:
+        """Level 1 — the Global Workspace bottleneck: thoughts compete; only the most
+        salient win and enter the reason step (Baars / Dehaene GWT)."""
+        try:
+            return GlobalWorkspace(capacity=3, access_threshold=0.5,
+                                   decay=0.8, coalition_synergy=0.3, history=128)
+        except Exception:  # noqa: BLE001 — workspace is a capability, never required
+            return None
+
+    def _build_thought_gen(self) -> Any:
+        """Level 1 — the thought generator that populates the Global Workspace each turn."""
+        if self.workspace is None:
+            return None
+        try:
+            from nyxara.mind.thought_generator import ThoughtGenerator
+            return ThoughtGenerator(workspace=self.workspace, top_n=3,
+                                    max_from_memories=20)
+        except Exception:  # noqa: BLE001 — thought generation is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -780,14 +819,44 @@ class NyxaraCore:
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
-        """The reason step. Several hypotheses are reasoned *in parallel* — each over a
-        different cognitive context (grounded in recall, unprimed, narrowly focused) — and
-        the most-supported one is selected. A dual-process arbitration then reflects on
-        whether this was a 'trust the gut' or 'think it through' turn. The selected
-        candidate is still a *proposal*: the kernel disposes (the control law holds)."""
-        candidate = self._reason_parallel(stimulus, focus, memories)
-        self._arbitrate(stimulus, candidate, memories)
+        """The reason step. Level-1 (Cognitive Workspace): all active sources submit
+        candidate thoughts to the Global Workspace bottleneck; the top-3 broadcast
+        winners enrich the memory context before reasoning begins. Several hypotheses
+        are then reasoned in parallel and the most-supported one is selected. A
+        dual-process arbitration reflects on whether this was fast or deliberate.
+        The selected candidate is still a *proposal*: the kernel disposes."""
+        # Level 1 — run the Global Workspace cycle: thoughts compete, winners enrich context
+        enriched = self._run_thought_workspace(stimulus, focus, memories)
+        candidate = self._reason_parallel(stimulus, focus, enriched)
+        self._arbitrate(stimulus, candidate, enriched)
         return candidate
+
+    def _run_thought_workspace(self, stimulus: str, focus: Optional[Percept],
+                                memories: List[Any]) -> List[Any]:
+        """Run one Global Workspace arbitration cycle.  Winner payloads are prepended
+        to the memory list so the reasoner sees the highest-salience thoughts first.
+        Falls back to the original memories list if anything fails."""
+        if self.thought_gen is None:
+            return memories
+        try:
+            from nyxara.mind.thought_generator import ThoughtContext
+            ctx = ThoughtContext(stimulus=stimulus, memories=memories,
+                                 goals=self.goals, affect=self.affect, percept=focus)
+            winners = self.thought_gen.generate(ctx)
+            # record the workspace broadcast in the audit trail
+            if winners:
+                self.mind.record(
+                    ThoughtKind.ATTENTION,
+                    f"workspace: {len(winners)} thought(s) broadcast — "
+                    f"{winners[0][:60]!r}",
+                    salience=0.55)
+            # workspace winner strings are prepended as synthetic memory items so the
+            # reasoner naturally reads the most salient context first.
+            synthetic: List[Any] = [_WorkspaceThought(w) for w in winners
+                                    if w and w not in (stimulus,)]
+            return synthetic + list(memories)
+        except Exception:  # noqa: BLE001 — workspace is advisory, never fatal
+            return memories
 
     def _reason_once(self, stimulus: str, focus: Optional[Percept],
                      memories: List[Any]) -> Candidate:
@@ -1584,6 +1653,9 @@ class NyxaraCore:
             rep["world_transitions"] = len(self.world_model)
         if self.knowledge is not None:
             rep["knowledge_chunks"] = len(self.knowledge)
+        if self.thought_gen is not None:
+            rep["workspace_broadcasts"] = self.thought_gen.workspace_metrics().get(
+                "broadcasts", 0)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
