@@ -418,3 +418,15 @@ verifier of the text's quality (`mind/router.py:answer_quality` — non-degenera
 unchanged. `/explain` shows when best-of-N was used. 2 new tests (verifier picks quality over a 0.99
 "idk"; default unchanged); suite 3285 green. (MCTS-over-tokens via `sim/montecarlo.py` is intentionally
 left out — verifier best-of-N is the form of "search over reasoning" that actually pays here.)
+
+### 2026-06 — Pillar B5: learned memory re-ranker
+
+Recall fused six signals (semantic, context, emotion, temporal, graph, goal) with *fixed*
+`FusionWeights` — it answered "what is similar?", never "what actually helps?". Added
+`LearnedReranker` (a pure-stdlib logistic model over the same six signals, seeded from the hand-tuned
+weights, persistent). `AssociativeRetriever(reranker=…)` scores candidates by learned usefulness;
+`record_feedback(results, useful_ids)` reinforces the memories that helped and pushes down the rest, so
+the mind learns its *own* signal mix. Defaults to off (fixed weights unchanged). Verified: after
+feedback favouring a goal-aligned memory over a textually-similar one, the re-ranker raises the goal
+weight, lowers semantic, and re-orders recall. 4 new tests; suite 3289 green. (Live feedback wiring from
+successful turns is the optional next step.)
