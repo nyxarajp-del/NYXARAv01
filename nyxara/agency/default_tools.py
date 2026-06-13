@@ -302,6 +302,69 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("n", "int", required=False, default=6)],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
 
+        # ---- recursive self-improvement: review / architecture / benchmark / weakness ---- #
+        def _rsi(**kw: Any):
+            from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
+            return RecursiveSelfImprovement(memory=memory, **kw)
+
+        def _self_review_code() -> Dict[str, Any]:
+            try:
+                return _rsi().review_code().to_dict()
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        _add(ToolSpec("self_review_code", handler=_self_review_code,
+                      description="review NYXARA's own source (real AST static analysis: "
+                                  "complexity, bare excepts, missing docstrings, long functions)",
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _self_analyze_architecture() -> Dict[str, Any]:
+            try:
+                return _rsi().analyze_architecture().to_dict()
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        _add(ToolSpec("self_analyze_architecture", handler=_self_analyze_architecture,
+                      description="analyse NYXARA's own architecture: import graph, cycles, "
+                                  "layering violations, god-modules",
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _self_run_benchmarks(category: str = "") -> Dict[str, Any]:
+            try:
+                return _rsi().run_benchmarks(category=category or None)
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        _add(ToolSpec("self_run_benchmarks", handler=_self_run_benchmarks,
+                      description="run NYXARA's capability benchmark on herself and report "
+                                  "accuracy, per-category scores, failures and handoff",
+                      params=[ToolParam("category", "str", required=False, default="")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.MODERATE))
+
+        def _self_detect_weaknesses() -> Dict[str, Any]:
+            try:
+                return _rsi().detect_weaknesses().to_dict()
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        _add(ToolSpec("self_detect_weaknesses", handler=_self_detect_weaknesses,
+                      description="synthesise code-review + architecture + benchmark into a "
+                                  "ranked list of NYXARA's own weaknesses with remediations",
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _self_optimize(enact: bool = False) -> Dict[str, Any]:
+            try:
+                return _rsi().run(enact=bool(enact)).to_dict()
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        _add(ToolSpec("self_optimize", handler=_self_optimize,
+                      description="run the full recursive self-improvement cycle; with enact=true "
+                                  "auto-applies gauntlet-gated source fixes (verify-or-rollback, "
+                                  "reversible) — owner-gated self-modification",
+                      params=[ToolParam("enact", "bool", required=False, default=False)],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
+
     # ---- knowledge base: grounded ingest + retrieval (backed by the store) ---- #
     kb = knowledge
     if kb is None and memory is not None:
