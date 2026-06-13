@@ -390,5 +390,19 @@ replies are near-neutral, never censored). Wired it: `NyxaraCore` builds `self.n
 genesis) and threads it to `NyxaraReasoner`, which notes coherence in the candidate's rationale (Rule 6
 transparency) and speaks a clearly-dissonant proposal with low confidence (self-doubt) — never blocks,
 never edits character (Rule 4); the kernel still disposes through every gate. Neutral turns untouched.
-5 new tests; suite 3279 green. **Pillar D complete** (D1 ✓, D2 ✓, D4 ✓ pre-existing); D3 interoception
-wiring is the one remaining optional polish.
+5 new tests; suite 3279 green.
+
+### 2026-06 — Pillar D3: interoception (she feels her substrate)
+
+`identity/interoception.py` turned compute/memory/latency/energy/error signals into a felt body
+state + affective tone, but nothing consulted it. Wired it in: `NyxaraCore` builds
+`self.interoception`; `idle_maintenance()` samples the substrate, surfaces comfort + a body report +
+the dominant sensation, and lets a *strained* body (comfort < 0.7) colour mood via `push_to_affect` —
+an easy body never injects a tone, so it doesn't fight mood's relaxation to baseline. `report()`
+surfaces her felt body (Rule 6). Verified live (calm "at ease" → strained "straining under load,
+tired…", mood pulled down); 4 new tests; suite 3283 green.
+
+**Pillar D (Deeper Self) COMPLETE** — D1 narrative coherence ✓, D2 affective forecasting ✓,
+D3 interoception ✓, D4 self-belief contradiction ✓ (pre-existing). NYXARA now has a stable story she
+measures herself against, anticipates how choices will feel, feels her own substrate, and notices when
+she contradicts herself — all inside the same sovereign gates, never altering her character.
