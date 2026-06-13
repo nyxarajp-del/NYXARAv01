@@ -310,3 +310,42 @@ cognition.*
 
 > *The mind proposes; the kernel disposes; the Master is sovereign.* — and now the mind that proposes
 > is, increasingly, **NYXARA's own.**
+
+---
+
+## 11. Progress log (live)
+
+A running, honest record of what has actually been built + measured (not aspiration).
+
+### 2026-06 — Pillar B1/B2: verifiable reasoning made primary in the whole loop
+
+**What we found first (honest reconciliation):** much of the Pillar-A/B *plumbing* was already
+implemented and far ahead of the older `ROADMAP-sovereign-brain.md` claims — `SelfProvider` is already
+chat-grade (`format_self_prompt` + `truncate_at_stops`), the confidence **router** exists
+(`mind/router.py`) with a metacognition gate + honest abstention (B3), the A/B + handoff measurement is
+wired into the CLI (`python -m nyxara.eval --benchmark --ab|--router|--self`), and the verifiable math
++ logic faculties existed (`mind/reasoning_faculties.py`). Full suite was green (3247 tests).
+
+**The real gap measured:** offline (no LLM), the capability benchmark scored **0%** — the math faculty
+only fired on bare expressions (`2+3*4`) and the main sovereign loop never consulted the faculties at
+all (it fell to the keyword-stub `_default_reasoner`).
+
+**What we shipped:**
+- `parse_word_problem()` + `WordProblemFaculty` — exact natural-language arithmetic for the general
+  "rate × count (± loose amounts)" class; conservative, defers on any ambiguous parse.
+- `solve_syllogism()` + `SyllogismFaculty` — categorical syllogisms by transitive closure ("all X are Y").
+- `solve_comparative()` + `ComparativeFaculty` — "who is the most/least …" by a single-scale strict order.
+- Wired `solve_with_faculties()` into `NyxaraReasoner._respond_candidate()` so the **whole loop** (not
+  just the router) answers verifiable math/logic itself, with or without an LLM ("verifiable > probabilistic").
+
+**Measured result (offline, no LLM):** capability benchmark **0% → 88%** (arithmetic 12/12 exact;
+logic 2/4 — syllogism + comparison solved; the algebra-trick and semantic odd-one-out items correctly
+**defer** to the neural mind — a verifiable faculty never bluffs). Full suite **3262 passed, 14 skipped**.
+
+**Ceiling reached here (honest):** the remaining benchmark items genuinely need a neural mind
+(algebra-from-prose, semantic categorization) — not more rule-based faculties, which would risk
+confidently-wrong "exact" answers. Further capability now comes from Pillar A (the trained self-model),
+which needs GPU/torch + a teacher key — to be run on the Master's GPU box, not this CI container.
+
+**Next frontier:** A1 (distillation corpus → `foundry.collect_corpus()`) + LoRA-on-Qwen config + a
+"train" entry point — scaffolded as code + tests here, executed on GPU by the Master.
