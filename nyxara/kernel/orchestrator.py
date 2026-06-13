@@ -306,6 +306,8 @@ class NyxaraCore:
         self.skill_factory = self._build_skill_factory() if enable_skills else None
         # Level 8 — Cycle Reflector: daily/weekly/monthly structured reflection cycles.
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
+        # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
+        self.civilization = self._build_civilization()
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -706,6 +708,15 @@ class NyxaraCore:
             return CycleReflector(reflector=self.reflector, memory=self.memory,
                                   goals=self.goals)
         except Exception:  # noqa: BLE001 — cycle reflection is a capability, never required
+            return None
+
+    def _build_civilization(self) -> Any:
+        """Level 9 — MicroAgentCivilization: 7 specialized background agents."""
+        try:
+            from nyxara.agency.civilization import MicroAgentCivilization
+            event_bus = getattr(self, "bus", None)
+            return MicroAgentCivilization(core=self, event_bus=event_bus)
+        except Exception:  # noqa: BLE001 — civilization is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -1626,6 +1637,18 @@ class NyxaraCore:
                             pass
             except Exception:  # noqa: BLE001
                 pass
+        # 4c) Level 9 — civilization: fold any recent micro-agent reports into MindScope
+        if self.civilization is not None:
+            try:
+                recent = self.civilization.recent_reports(n=3)
+                for cr in recent:
+                    if cr.findings:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"[{cr.agent_name}] {cr.findings[0]}"[:80],
+                                         salience=0.4)
+                report["civilization_agents"] = len(self.civilization.agents)
+            except Exception:  # noqa: BLE001
+                pass
         # 4b) Level 8 — cycle reflection: run any overdue daily/weekly/monthly cycles
         if self.cycle_reflector is not None:
             try:
@@ -1826,6 +1849,12 @@ class NyxaraCore:
         self._cognition_thread = threading.Thread(
             target=_loop, name="nyxara-default-mode", daemon=True)
         self._cognition_thread.start()
+        # Level 9 — also start the micro-agent civilization
+        if self.civilization is not None:
+            try:
+                self.civilization.start()
+            except Exception:  # noqa: BLE001
+                pass
         return True
 
     def stop_cognition(self) -> None:
@@ -1838,6 +1867,12 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
         self._cognition_thread = None
+        # Level 9 — also stop the civilization
+        if self.civilization is not None:
+            try:
+                self.civilization.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
     def drain_insights(self) -> List[str]:
         """Return (and clear) any insights the background stream surfaced since last call."""
@@ -1955,6 +1990,8 @@ class NyxaraCore:
             rep["skills_created"] = len(self.skill_factory._created_goals)
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
+        if self.civilization is not None:
+            rep["civilization_agents"] = len(self.civilization.agents)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
