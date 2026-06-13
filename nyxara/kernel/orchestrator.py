@@ -315,6 +315,8 @@ class NyxaraCore:
         self.autoforge = self._build_autoforge() if enable_growth else None
         # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
         self.dream_session = self._build_dream_session() if enable_memory else None
+        # Level 13 — Prediction Engine: calibrated probability + confidence interval.
+        self.prediction_engine = self._build_prediction_engine() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -741,6 +743,18 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
             return None
 
+    def _build_prediction_engine(self) -> Any:
+        """Level 13 — PredictionEngine: calibrated probability from world-model + surprise."""
+        try:
+            from nyxara.mind.prediction_engine import PredictionEngine
+            return PredictionEngine(
+                world_model=self.world_model,
+                predictive=self.predictive,
+                voi=self.voi if hasattr(self, "voi") else None,
+            )
+        except Exception:  # noqa: BLE001 — prediction engine is a capability, never required
+            return None
+
     def _build_dream_session(self) -> Any:
         """Level 12 — DreamSession: four-pass replay (memory/skill/reasoning/failure)."""
         try:
@@ -1055,6 +1069,9 @@ class NyxaraCore:
         # Level 3 — recursive self-improvement: run N critique+revise iterations on
         # "respond" candidates, returning the highest-quality version.
         candidate = self._recursive_improve(stimulus, candidate)
+        # Level 13 — attach a PredictionResult to "respond" candidates so the
+        # HonestyGuard and spoken response can include calibrated confidence.
+        candidate = self._attach_prediction(stimulus, candidate)
         self._arbitrate(stimulus, candidate, enriched)
         return candidate
 
@@ -1169,6 +1186,30 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _attach_prediction(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Level 13 — for 'respond' candidates, attach a PredictionResult so confidence
+        is calibrated and HonestyGuard can read it. Best-effort."""
+        if self.prediction_engine is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            pred = self.prediction_engine.predict(
+                getattr(candidate, "text", stimulus) or stimulus)
+            # store on the candidate; HonestyGuard and _spoken_response can read it
+            candidate.prediction_result = pred  # type: ignore[attr-defined]
+            # calibrate: blend prediction probability into candidate confidence
+            current_conf = float(getattr(candidate, "confidence", 0.7) or 0.7)
+            blended = 0.7 * current_conf + 0.3 * pred.probability
+            candidate.confidence = round(blended, 3)
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"prediction: p={pred.probability:.2f} ci={pred.confidence_interval}",
+                salience=0.4, confidence=pred.probability)
+        except Exception:  # noqa: BLE001 — prediction is advisory, never fatal
+            pass
+        return candidate
 
     def _simulate_action_candidate(self, candidate: Candidate) -> Candidate:
         """Level 5 — run a world-simulation pass on action candidates. If the simulator
@@ -2086,6 +2127,8 @@ class NyxaraCore:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
+        if self.prediction_engine is not None:
+            rep["predictions_made"] = self.prediction_engine.predictions_count
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
