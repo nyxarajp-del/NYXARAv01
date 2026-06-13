@@ -41,6 +41,7 @@ __all__ = [
     "Capability",
     "SelfSnapshot",
     "ContinuityReport",
+    "SelfKnowledgeReport",
     "SelfModel",
 ]
 
@@ -372,6 +373,60 @@ class SelfModel:
                 "Self-model integrity breach — character/loyalty drift (Rule 4)",
                 context=report.to_dict())
 
+    # ---- Level 2 — structured self-knowledge for the reasoning step ---- #
+    def self_report(self, *, goals: Any = None, tools: Any = None,
+                    memory: Any = None, control_state: str = "running",
+                    mood: str = "neutral", turns: int = 0,
+                    now: Optional[float] = None) -> "SelfKnowledgeReport":
+        """Build a SelfKnowledgeReport from live self-model state plus optional
+        cross-module context (goals, tools, memory) provided by the orchestrator."""
+        now = now or time.time()
+        # identity
+        owner_b = self.beliefs.best("NYXARA", "loyal_to", now)
+        owner_name = (str(owner_b.object) if owner_b else
+                      str(self.state.get("owner", "the Master")))
+        identity = (f"NYXARA — a sovereign cognitive agent loyal to {owner_name}. "
+                    f"Control: {control_state}. Mood: {mood}.")
+        # capabilities (top-5 by level) and limitations (bottom-5 + known unknowns)
+        caps_sorted = sorted(self.capabilities.values(), key=lambda c: c.level, reverse=True)
+        capabilities = [f"{c.name} ({c.level:.0%})" for c in caps_sorted[:5]]
+        weak = [f"{c.name} ({c.level:.0%})" for c in caps_sorted[-3:]
+                if c.level < 0.4]
+        unknowns = [f"unknown: {k}" for k in list(self.known_unknowns)[:3]]
+        limitations = weak + unknowns
+        # current state (mood + control)
+        current_state = f"mood={mood}, control={control_state}, turns_processed={turns}"
+        # resources
+        mem_count = 0
+        if memory is not None:
+            try:
+                mem_count = len(memory)
+            except Exception:  # noqa: BLE001
+                pass
+        tool_names: List[str] = []
+        if tools is not None:
+            try:
+                tool_names = list(tools.names()) if hasattr(tools, "names") else []
+            except Exception:  # noqa: BLE001
+                pass
+        resources = f"memories={mem_count}, tools={len(tool_names)}"
+        # active goals
+        goal_names: List[str] = []
+        if goals is not None:
+            try:
+                ranked = goals.prioritize()
+                goal_names = [g.name for g in ranked[:5]]
+            except Exception:  # noqa: BLE001
+                pass
+        return SelfKnowledgeReport(
+            identity=identity,
+            capabilities=capabilities,
+            limitations=limitations,
+            current_state=current_state,
+            resources=resources,
+            active_goals=goal_names,
+        )
+
     # ---- transparency / reporting ---- #
     def contradiction_report(self) -> List[Dict[str, Any]]:
         return [c.to_dict() for c in self.beliefs.unresolved_contradictions()]
@@ -389,6 +444,36 @@ class SelfModel:
             "snapshots": len(self.snapshots),
             "continuity_stable": self.check_continuity().stable,
         }
+
+
+# --------------------------------------------------------------------------- #
+# Level 2 — Self-Knowledge Report
+# --------------------------------------------------------------------------- #
+@dataclass
+class SelfKnowledgeReport:
+    """A structured snapshot of who NYXARA is right now, injected into each turn's
+    reasoning context so the LLM always speaks from a grounded self-model."""
+
+    identity: str
+    capabilities: List[str]      # what NYXARA can do (top capabilities by level)
+    limitations: List[str]       # things she cannot do well + known unknowns
+    current_state: str           # mood / control / health in one line
+    resources: str               # memory count, tool count, turns processed
+    active_goals: List[str]      # names of current active goals (top-5)
+
+    def to_prompt_text(self) -> str:
+        caps = "; ".join(self.capabilities) or "general reasoning"
+        lims = "; ".join(self.limitations) or "none declared"
+        goals = "; ".join(self.active_goals) or "serve the Master"
+        return (
+            f"[Self-model]\n"
+            f"Identity : {self.identity}\n"
+            f"Can do   : {caps}\n"
+            f"Limits   : {lims}\n"
+            f"State    : {self.current_state}\n"
+            f"Resources: {self.resources}\n"
+            f"Goals    : {goals}"
+        )
 
 
 # --------------------------------------------------------------------------- #

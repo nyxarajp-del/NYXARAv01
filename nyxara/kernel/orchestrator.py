@@ -143,6 +143,22 @@ class _WorkspaceThought:
         return self._text
 
 
+class _SelfKnowledgeEntry:
+    """Level 2 — wraps a SelfKnowledgeReport as a high-priority memory item so the
+    reasoner always sees a formatted self-model summary at the top of its context."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, report: Any) -> None:
+        try:
+            self._text = report.to_prompt_text()
+        except Exception:  # noqa: BLE001
+            self._text = "[Self-model: unavailable]"
+
+    def text(self) -> str:
+        return self._text
+
+
 def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
     """A deterministic stand-in for the LLM: command-like input -> an action proposal,
     otherwise a conversational response. Real deployments inject an LLM-backed reasoner."""
@@ -827,6 +843,9 @@ class NyxaraCore:
         The selected candidate is still a *proposal*: the kernel disposes."""
         # Level 1 — run the Global Workspace cycle: thoughts compete, winners enrich context
         enriched = self._run_thought_workspace(stimulus, focus, memories)
+        # Level 2 — prepend the live self-knowledge report so the reasoner always knows
+        # who NYXARA is, what she can do, and what her current state and goals are.
+        enriched = self._inject_self_knowledge(enriched)
         candidate = self._reason_parallel(stimulus, focus, enriched)
         self._arbitrate(stimulus, candidate, enriched)
         return candidate
@@ -921,6 +940,27 @@ class NyxaraCore:
         chosen_name, chosen = self._select_hypothesis(results)
         self._record_hypotheses(results, chosen_name)
         return chosen
+
+    def _inject_self_knowledge(self, memories: List[Any]) -> List[Any]:
+        """Level 2 — prepend a SelfKnowledgeReport to the memory context so the
+        reasoner always has an up-to-date self-model summary at the top of its context.
+        Best-effort: falls back to the original list if anything fails."""
+        if self.self_model is None:
+            return memories
+        try:
+            mood = "neutral"
+            if self.affect is not None:
+                try:
+                    mood = self.affect.mood.label
+                except Exception:  # noqa: BLE001
+                    pass
+            report = self.self_model.self_report(
+                goals=self.goals, tools=self.tools, memory=self.memory,
+                control_state=self.oversight.state.value,
+                mood=mood, turns=self._turns)
+            return [_SelfKnowledgeEntry(report)] + list(memories)
+        except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
+            return memories
 
     @staticmethod
     def _hypothesis_signature(c: Candidate) -> tuple:
@@ -1656,6 +1696,8 @@ class NyxaraCore:
         if self.thought_gen is not None:
             rep["workspace_broadcasts"] = self.thought_gen.workspace_metrics().get(
                 "broadcasts", 0)
+        if self.self_model is not None:
+            rep["self_knowledge"] = self.self_model.self_description()
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
