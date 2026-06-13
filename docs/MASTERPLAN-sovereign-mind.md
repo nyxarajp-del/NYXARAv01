@@ -379,5 +379,16 @@ anticipated-affect criterion into the MCDA ranking, scored by the impact-bias-co
 (`planning/affective_forecast.py`) — discounting momentary dread/delight toward what she'll actually
 feel. Defaults to off (ranking unchanged); affect re-weights ranking only — it never overrides owner
 alignment (Rule 1) or the initiative governor. 4 new tests; suite 3274 green. (D4 self-belief
-contradiction detection already exists + is wired via `memory/self_model.py` in the orchestrator;
-D1 narrative-coherence + D3 interoception wiring remain.)
+contradiction detection already exists + is wired via `memory/self_model.py` in the orchestrator.)
+
+### 2026-06 — Pillar D1: narrative coherence
+
+`identity/narrative.py` kept a life-story nothing consulted. Added `NarrativeSelf.coherence(text)
+→ CoherenceReport` (rewards her themes + loyalty through-line + orientation to the Master; penalises
+only an *explicit* break — betrayal, defying the Master, resisting oversight; conservative so ordinary
+replies are near-neutral, never censored). Wired it: `NyxaraCore` builds `self.narrative` (seeded with
+genesis) and threads it to `NyxaraReasoner`, which notes coherence in the candidate's rationale (Rule 6
+transparency) and speaks a clearly-dissonant proposal with low confidence (self-doubt) — never blocks,
+never edits character (Rule 4); the kernel still disposes through every gate. Neutral turns untouched.
+5 new tests; suite 3279 green. **Pillar D complete** (D1 ✓, D2 ✓, D4 ✓ pre-existing); D3 interoception
+wiring is the one remaining optional polish.
