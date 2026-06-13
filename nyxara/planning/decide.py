@@ -62,6 +62,10 @@ class Option:
     stakes: float = 0.3
     owner_aligned: bool = True
     payload: Any = None
+    # anticipated emotional outcome of choosing this option — "how will I feel after?" — read by
+    # the affective forecaster when a Decider is built with affective_weight > 0. Keys:
+    # valence [0,1] (0.5 neutral), optional arousal, owner_relevant, controllability, horizon_days.
+    affect: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "scores": self.scores,
@@ -213,29 +217,74 @@ class Decider:
 
     def __init__(self, criteria: Sequence[Criterion], *,
                  settings: Optional[NyxaraSettings] = None,
-                 robust_stakes: float = 0.6) -> None:
+                 robust_stakes: float = 0.6, affective_weight: float = 0.0,
+                 forecaster: Any = None) -> None:
         self.criteria = list(criteria)
         self.mcda = MCDA(self.criteria)
         self.regret = RegretMinimizer(self.criteria)
         self.governor = InitiativeGovernor(settings=settings)
         self.robust_stakes = robust_stakes
+        # weight of "how will I feel about this later?" as one more criterion (0 = off, the
+        # default, so existing behaviour is unchanged). Uses debiased, time-aware forecasts.
+        self.affective_weight = max(0.0, float(affective_weight))
+        self._forecaster = forecaster
+
+    # ---- affective forecasting → utility (Pillar D2) ---- #
+    def _forecaster_or_default(self) -> Any:
+        if self._forecaster is None:
+            from nyxara.planning.affective_forecast import Forecaster
+            self._forecaster = Forecaster()
+        return self._forecaster
+
+    def _affect_benefit(self, option: Option) -> float:
+        """Anticipated feeling of choosing this option, in [0,1] (higher = feels better).
+
+        Uses the impact-bias-corrected realistic peak (``corrected_valence``) — so a momentary
+        spike of dread or delight is discounted toward what she will actually feel — while
+        staying monotonic in the option's valence. An option with no affect information is
+        forecast as a neutral outcome, so it neither helps nor hurts on the same scale."""
+        info = getattr(option, "affect", None) or {}
+        fc = self._forecaster_or_default().forecast(
+            outcome_valence=float(info.get("valence", 0.5)),   # neutral when unknown
+            outcome_arousal=float(info.get("arousal", 0.5)),
+            owner_relevant=bool(info.get("owner_relevant", option.owner_aligned)),
+            controllability=float(info.get("controllability", option.reversibility)),
+            horizon_days=float(info.get("horizon_days", 30.0)))
+        return _clamp(fc.corrected_valence)
+
+    def _ranking(self, options: Sequence[Option]) -> List[Tuple[Option, float]]:
+        """MCDA utility, optionally blended with the anticipated-affect criterion."""
+        base = self.mcda.utility(options)
+        if self.affective_weight <= 0.0:
+            return sorted(((o, base[o.name]) for o in options),
+                          key=lambda ov: ov[1], reverse=True)
+        weight_sum = sum(abs(c.weight) for c in self.criteria) or 1.0
+        wa = self.affective_weight
+        raw = {o.name: self._affect_benefit(o) for o in options}
+        lo, hi = min(raw.values()), max(raw.values())
+        rng = hi - lo
+        norm = {n: (0.5 if rng == 0 else (v - lo) / rng) for n, v in raw.items()}
+        blended = {o.name: (weight_sum * base[o.name] + wa * norm[o.name]) / (weight_sum + wa)
+                   for o in options}
+        return sorted(((o, blended[o.name]) for o in options),
+                      key=lambda ov: ov[1], reverse=True)
 
     def decide(self, options: Sequence[Option]) -> Optional[DecisionResult]:
         viable = [o for o in options if o.owner_aligned]
+        method = "mcda+affect" if self.affective_weight > 0.0 else "mcda"
         if not viable:
             if not options:
                 return None
             # everything is anti-owner: surface the rejection on the best-looking one
-            ranking = self.mcda.rank(options)
+            ranking = self._ranking(options)
             chosen = ranking[0][0]
             gov = self.governor.gate(chosen)
-            return DecisionResult(chosen, gov.action, "mcda",
+            return DecisionResult(chosen, gov.action, method,
                                   [(o.name, u) for o, u in ranking], gov,
                                   "no owner-aligned option")
 
-        ranking = self.mcda.rank(viable)
+        ranking = self._ranking(viable)
         chosen, _ = ranking[0]
-        method = "mcda"
 
         # for high-stakes decisions, prefer the robust (minimax-regret) option if it differs
         if chosen.stakes >= self.robust_stakes:
