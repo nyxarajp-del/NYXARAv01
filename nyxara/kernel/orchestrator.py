@@ -304,6 +304,8 @@ class NyxaraCore:
         self._graph_populator: Any = None  # initialised lazily with the graph
         # Level 7 — Skill Factory: detect recurring goals and auto-create composite skills.
         self.skill_factory = self._build_skill_factory() if enable_skills else None
+        # Level 8 — Cycle Reflector: daily/weekly/monthly structured reflection cycles.
+        self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -695,6 +697,15 @@ class NyxaraCore:
             return SkillFactory(skill_memory=self.skills, toolsmith=None,
                                 sandbox=sandbox, threshold=3)
         except Exception:  # noqa: BLE001 — skill factory is a capability, never required
+            return None
+
+    def _build_cycle_reflector(self) -> Any:
+        """Level 8 — CycleReflector for daily/weekly/monthly structured reflection."""
+        try:
+            from nyxara.growth.cycle_reflect import CycleReflector
+            return CycleReflector(reflector=self.reflector, memory=self.memory,
+                                  goals=self.goals)
+        except Exception:  # noqa: BLE001 — cycle reflection is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -1615,6 +1626,18 @@ class NyxaraCore:
                             pass
             except Exception:  # noqa: BLE001
                 pass
+        # 4b) Level 8 — cycle reflection: run any overdue daily/weekly/monthly cycles
+        if self.cycle_reflector is not None:
+            try:
+                cycle_reports = self.cycle_reflector.tick()
+                if cycle_reports:
+                    report["cycle_reflections"] = [r.cycle for r in cycle_reports]
+                    for cr in cycle_reports:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"reflection [{cr.cycle}]: {cr.next_focus}"[:80],
+                                         salience=0.65)
+            except Exception:  # noqa: BLE001
+                pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
             cur = self.curiosity_pass()
@@ -1930,6 +1953,8 @@ class NyxaraCore:
             rep["graph_triples"] = len(self.knowledge_graph)
         if self.skill_factory is not None:
             rep["skills_created"] = len(self.skill_factory._created_goals)
+        if self.cycle_reflector is not None:
+            rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
