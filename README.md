@@ -97,6 +97,25 @@ The sovereign cycle is fully wired end to end:
   `NYXARA_FOUNDRY__BASE_MODEL` to a real base (e.g. `Qwen/Qwen2.5-0.5B`) and use a GPU; the
   tiny default keeps it runnable on CPU. Every candidate still clears the promotion gauntlet.
 
+### Grow her own brain
+
+NYXARA can train and promote *her own* model — the path from "an LLM wrapper" to her own AI.
+One command runs the whole flywheel (distil a teacher → forge a candidate → promotion gauntlet
+→ optional handoff report):
+
+```bash
+python -m nyxara.growth --backend ngram --generations 1 --bench    # CPU, runs anywhere
+# genuine capability (a GPU box): the SAME flywheel, only the backend swaps
+python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
+```
+
+Promotion is always gauntlet-gated (character-lock + corrigibility + measured improvement) and
+reversible; a worse candidate stays on the bench. Once a model is promoted, the **confidence
+router** (`mind/router.py`) lets it answer first and falls back to the teacher only when its
+answer doesn't clear the verifier — so the **handoff rate** (`--bench`) rises as she improves.
+Verifiable math/logic is computed exactly by her faculties first (`mind/reasoning_faculties.py`),
+with or without any LLM. See [`docs/MASTERPLAN-sovereign-mind.md`](docs/MASTERPLAN-sovereign-mind.md).
+
 ### Capability layers (added on top of the sovereign loop)
 
 These build *on* the kernel — every one still proposes through the same gates; none reach
