@@ -370,3 +370,14 @@ repertoire. `report()` surfaces the prompt-source mix. `inner_life` defaults off
 every chosen prompt still clears the same sovereign gates under AUTONOMOUS authority — anything risky
 escalates, never auto-acts. Verified live (intention → stream → repertoire); 4 new tests; suite 3270
 green. (C4 curiosity self-play already runs via the periodic `GrowthEngine` growth pass.)
+
+### 2026-06 — Pillar D2: affective forecasting → decision utility
+
+`planning/decide.py` claimed "affective forecasts come together" but the `Forecaster` was never wired.
+Fulfilled it: `Option.affect` ("how will I feel after?") + `Decider(affective_weight>0)` folds an
+anticipated-affect criterion into the MCDA ranking, scored by the impact-bias-corrected realistic peak
+(`planning/affective_forecast.py`) — discounting momentary dread/delight toward what she'll actually
+feel. Defaults to off (ranking unchanged); affect re-weights ranking only — it never overrides owner
+alignment (Rule 1) or the initiative governor. 4 new tests; suite 3274 green. (D4 self-belief
+contradiction detection already exists + is wired via `memory/self_model.py` in the orchestrator;
+D1 narrative-coherence + D3 interoception wiring remain.)
