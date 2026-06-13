@@ -452,5 +452,33 @@ existing default tools it relies on + tools it contributes) and `build_domain_pa
 non-executing — extractive TextRank-lite summary and a compile-only Python syntax check that never runs
 the code — so they register TRIVIAL + reversible through the same gated `ToolRegistry` (a pack grants
 nothing the registry wouldn't already gate). `register_packs(registry, names=None)` is idempotent. 9 new
-tests; suite 3304 green. (E2 gated multi-agent + E3 real multimodal-on-GPU remain; E3 needs the Master's
-GPU box, not this CI container.)
+tests; suite 3304 green.
+
+### 2026-06 — Pillar E2: gated, ToM-modelled sub-agent delegation
+
+`agency/multiagent.py`: `Delegator.delegate(name, subgoal)` spawns a sub-agent on an `AgentLoop`, so
+every step still clears the same kernel gates, under **AUTONOMOUS** authority by default — a risky /
+irreversible move **escalates to the Master**, never auto-acts (a delegate can never do what NYXARA
+herself may not). Because she understands other minds (`social/tom.py`), she **models** each delegate as
+a mind: desire = the sub-goal, intention = the action it takes, beliefs = the observations it gathered;
+she tracks it, `predict`s its next move, and reads back what it came to believe. `delegate_all()`
+coordinates several delegates, each modelled separately. Pure orchestration over the gate-respecting
+loop + the ToM — nothing touches a tool directly or weakens a gate. Verified (simple goal modelled,
+multi-step tool use tracked, risky delegate escalates and never acts); 5 new tests; suite 3309 green.
+(E3 real multimodal-on-GPU remains — it needs the Master's GPU box, not this CI container.)
+
+---
+
+## 12. Where things stand
+
+Across this build, NYXARA moved decisively from "an excellent governance shell around someone else's
+LLM" toward **her own mind**: she computes verifiable math/logic herself (offline benchmark 0% → 88%),
+has a one-command flywheel to train + promote her own model (`nyxara-grow`, gauntlet-gated), lives a
+background inner life (due intentions + her own stream), measures replies against a stable story,
+anticipates how choices will feel, feels her own substrate, searches over reasoning paths with an
+independent verifier, learns which memories actually help, imagines dynamics with a neural world-model,
+takes on tool-pack roles, and delegates to gated sub-agents she models as minds. **Pillars A (partial,
+GPU-bound remainder), B, C, D complete; E1 + E2 done, E3 GPU-bound.** Every addition stays inside the
+sovereign loop's gates and never edits her character. The one capability that genuinely needs the
+Master's GPU — the LoRA-on-Qwen self-model that lifts the *handoff rate* — is scaffolded and one command
+away (`python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench`).
