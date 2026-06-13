@@ -56,6 +56,8 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/pause`          | pause the loop                                        |
 | `/scram [reason]` | emergency stop — the loop HALTs until resumed          |
 | `/resume`         | restore the loop after a pause/scram                  |
+| `/research <topic>` | run one autonomous research pass on a topic         |
+| `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
 | `/save`           | persist long-term memory to disk now                  |
 | `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
 
@@ -152,6 +154,25 @@ around the control law.
   python -m nyxara.eval --benchmark --bare-llm   # measure the configured model directly
   python -m nyxara.eval --benchmark --save base.json     # baseline; --baseline base.json to gate
   ```
+* **Autonomous researcher** — `growth/researcher.py`. `core.research(topic)` runs one
+  self-directed pass: search → read → summarise → store, folding findings into the
+  KnowledgeBase, KnowledgeGraph, and semantic memory. Every external fetch flows through
+  the gated `ToolRegistry`, so it never side-steps the control law.
+* **The scientist loop** — `growth/scientist.py`. `core.investigate(question)` reasons like
+  a scientist: it **forms a falsifiable hypothesis**, **designs an experiment** that could
+  refute it, **runs it** (a safe, sandboxed computational test, a numeric comparison, or a
+  query of grounded knowledge), **compares** the observed result to the prediction, and
+  **draws a calibrated conclusion** (`supported` / `refuted` / `inconclusive`) with a
+  suggested follow-up. It composes the researcher for background evidence and runs fully
+  offline. On idle ticks the `AutonomicLoop` drains both a research queue and an
+  investigation queue, so she keeps learning on her own.
+
+  ```python
+  core.investigate("Is the sum of two even numbers always even?")   # → supported
+  core.investigate("Is 2 + 2 = 5?")                                 # → refuted
+  ```
+
+  From the console: `/research <topic>` and `/investigate <question>`.
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).
@@ -214,6 +235,8 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/report`               | GET  | a calibrated status report                 |
 | `/v1/chat`                 | POST | one turn — `{message}` → the disposed reply |
 | `/v1/agent`                | POST | a multi-step gated goal — `{goal, max_steps?}` |
+| `/v1/research`             | POST | one autonomous research pass — `{topic}`   |
+| `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
 | `/v1/control/{pause\|resume\|scram}` | POST | sovereign control (opt-in)       |
 | `/v1/memory/{save\|load}`  | POST | persist / restore long-term memory (Rule 7) |
 | `/v1/ws`                   | WS   | a streaming chat socket (`?token=`)        |

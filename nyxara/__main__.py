@@ -80,6 +80,8 @@ commands:
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
   /wander [n]        let the idle mind wander n ticks and show the thoughts
+  /research <topic>  run one autonomous research pass on a topic
+  /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -140,6 +142,16 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
                 print(f"  …{ln}")
         else:
             print("  (the mind is quiet just now)")
+    elif cmd == "research":
+        if not arg:
+            print("usage: /research <topic>")
+        else:
+            print(json.dumps(core.research(arg), indent=2, default=str))
+    elif cmd == "investigate":
+        if not arg:
+            print("usage: /investigate <question>")
+        else:
+            print(json.dumps(core.investigate(arg), indent=2, default=str))
     elif cmd == "save":
         path = _save_session_memory(core) or core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")

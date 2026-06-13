@@ -6,6 +6,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``GET  /v1/report``            — a calibrated status report.
 * ``POST /v1/chat``              — one turn: ``{message}`` → the disposed response.
 * ``POST /v1/agent``             — a multi-step gated goal: ``{goal, max_steps?}``.
+* ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
+* ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
 * ``POST /v1/memory/save|load``  — persist / restore long-term memory (Rule 7 continuity).
 * ``WS   /v1/ws``                — a streaming chat socket (token via ``?token=``).
@@ -39,6 +41,14 @@ class AgentRequest(BaseModel):
     # No upper bound here — the server clamps to ``server.max_agent_steps``.
     max_steps: Optional[int] = Field(default=None, ge=1)
     authority: str = "owner"
+
+
+class ResearchRequest(BaseModel):
+    topic: str = Field(..., min_length=1)
+
+
+class InvestigateRequest(BaseModel):
+    question: str = Field(..., min_length=1)
 
 
 class ControlRequest(BaseModel):
@@ -136,6 +146,14 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
         run = core.agent(req.goal, authority=_authority(req.authority), max_steps=steps)
         return run.to_dict()
+
+    @app.post("/v1/research", dependencies=auth)
+    def research(req: ResearchRequest) -> dict:
+        return core.research(req.topic)
+
+    @app.post("/v1/investigate", dependencies=auth)
+    def investigate(req: InvestigateRequest) -> dict:
+        return core.investigate(req.question)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)

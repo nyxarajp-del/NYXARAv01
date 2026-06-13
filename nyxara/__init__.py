@@ -20,6 +20,14 @@ from __future__ import annotations
 from nyxara.agency.agent_loop import AgentLoop, AgentRun
 from nyxara.agency.permissions import Authority
 from nyxara.eval import EvalSuite, build_default_suite
+from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
+from nyxara.growth.scientist import (
+    Conclusion,
+    Hypothesis,
+    InvestigationReport,
+    Scientist,
+    Verdict,
+)
 from nyxara.growth.skill_memory import SkillMemory
 from nyxara.kernel.autonomic import AutonomicLoop
 from nyxara.kernel.compute import compute_report
@@ -47,6 +55,14 @@ __all__ = [
     "AgentLoop",
     "AgentRun",
     "SkillMemory",
+    # autonomous research + the scientist loop
+    "AutonomousResearcher",
+    "ResearchReport",
+    "Scientist",
+    "Hypothesis",
+    "Conclusion",
+    "InvestigationReport",
+    "Verdict",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",

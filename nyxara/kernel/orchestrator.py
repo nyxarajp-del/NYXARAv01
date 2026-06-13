@@ -319,9 +319,16 @@ class NyxaraCore:
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
+        # a shared, isolated sandbox the researcher and scientist run experiments in —
+        # every rehearsal is captured and rolled back, never touching the world.
+        self.sandbox_runner = self._build_sandbox_runner()
         # Level 10 — Autonomous Researcher: built after knowledge so it has access to kb.
         self.researcher = self._build_researcher() if enable_memory else None
         self._research_queue: List[str] = []   # topics to research on next idle tick
+        # Level 10b — Scientist: hypothesis → experiment → compare → conclusion. Built
+        # after the researcher so it can reuse it for background evidence.
+        self.scientist = self._build_scientist() if enable_memory else None
+        self._investigation_queue: List[str] = []  # questions to investigate on idle
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -775,6 +782,30 @@ class NyxaraCore:
                 sandbox=getattr(self, "sandbox_runner", None),
             )
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
+            return None
+
+    def _build_sandbox_runner(self) -> Any:
+        """A shared isolated Sandbox for safe internal experiments (never required)."""
+        try:
+            from nyxara.sim.sandbox import Sandbox
+            return Sandbox()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_scientist(self) -> Any:
+        """Level 10b — Scientist: reason like a scientist (hypothesis→experiment→conclusion)."""
+        try:
+            from nyxara.growth.scientist import Scientist
+            reasoner = getattr(self, "reasoner", None)
+            return Scientist(
+                researcher=getattr(self, "researcher", None),
+                sandbox=getattr(self, "sandbox_runner", None),
+                knowledge=getattr(self, "knowledge", None),
+                knowledge_graph=getattr(self, "knowledge_graph", None),
+                memory=getattr(self, "memory", None),
+                llm=getattr(reasoner, "llm", None) if reasoner else None,
+            )
+        except Exception:  # noqa: BLE001 — scientist is a capability, never required
             return None
 
     def _build_meta_intelligence(self) -> Any:
@@ -1878,6 +1909,19 @@ class NyxaraCore:
                                  salience=0.55)
             except Exception:  # noqa: BLE001
                 pass
+        # 4e) Level 10b — scientist: investigate a queued question like a scientist
+        if self.scientist is not None and self._investigation_queue:
+            try:
+                question = self._investigation_queue.pop(0)
+                inv = self.scientist.investigate(question)
+                report["investigations"] = len(self.scientist.all_investigations())
+                if inv.conclusion is not None:
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        f"experiment [{question[:25]}]: {inv.conclusion.verdict.value}",
+                        salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
             cur = self.curiosity_pass()
@@ -1955,6 +1999,34 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
             pass
         return report
+
+    def research(self, topic: str) -> Dict[str, Any]:
+        """Run one autonomous web-research pass on ``topic`` (best-effort).
+
+        Gathers sources, summarises, and folds findings into knowledge/memory. An
+        external fetch still flows through the gated ToolRegistry; nothing here
+        side-steps the control law. Returns the report as a dict.
+        """
+        if self.researcher is None:
+            return {"topic": topic, "error": "researcher unavailable"}
+        try:
+            return self.researcher.research(topic).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"topic": topic, "error": str(exc)}
+
+    def investigate(self, question: str) -> Dict[str, Any]:
+        """Reason about ``question`` like a scientist (best-effort).
+
+        Forms a falsifiable hypothesis, designs and runs a *safe* internal
+        experiment (sandboxed; nothing touches the world), compares the result to the
+        prediction, and draws a calibrated conclusion. Returns the report as a dict.
+        """
+        if self.scientist is None:
+            return {"question": question, "error": "scientist unavailable"}
+        try:
+            return self.scientist.investigate(question).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"question": question, "error": str(exc)}
 
     def _voi(self) -> Any:
         if getattr(self, "_voi_engine", None) is None:
@@ -2230,6 +2302,8 @@ class NyxaraCore:
             rep["civilization_agents"] = len(self.civilization.agents)
         if self.researcher is not None:
             rep["research_reports"] = len(self.researcher.all_reports())
+        if self.scientist is not None:
+            rep["investigations"] = len(self.scientist.all_investigations())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
         if self.dream_session is not None:
