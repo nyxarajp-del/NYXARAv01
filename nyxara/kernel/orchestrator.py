@@ -194,6 +194,7 @@ class NyxaraCore:
         # identity — a stable personality (the voice she speaks in) and an affective
         # state (emotion/mood/homeostatic drives) that colours, but never governs, the loop.
         self.soul = soul if soul is not None else (self._build_soul() if enable_identity else None)
+        self.narrative = self._build_narrative() if enable_identity else None
         self.affect = affect if affect is not None else (
             self._build_affect(self.soul) if enable_identity else None)
         # goals — the objective space, seeded with service to the Master (Rule 1)
@@ -261,7 +262,8 @@ class NyxaraCore:
                 use_council = bool(get_settings().council.enabled)
             except Exception:  # noqa: BLE001
                 use_council = False
-        self.reasoner = reasoner or self._build_reasoner(llm, use_council, self.skills, self.soul)
+        self.reasoner = reasoner or self._build_reasoner(
+            llm, use_council, self.skills, self.soul, self.narrative)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
@@ -317,7 +319,7 @@ class NyxaraCore:
             return None
 
     def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
-                        soul: Any = None) -> Reasoner:
+                        soul: Any = None, narrative: Any = None) -> Reasoner:
         # the LLM is shared between the council and both reasoners (one stateless facade)
         from nyxara.mind.llm import LLM
         llm = llm or LLM()
@@ -345,7 +347,7 @@ class NyxaraCore:
         try:
             from nyxara.mind.nyxara_reasoner import NyxaraReasoner
             return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
-                                  retriever=self.retriever, soul=soul,
+                                  retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
@@ -355,6 +357,18 @@ class NyxaraCore:
         try:
             from nyxara.identity.soul import Soul
             return Soul()
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    def _build_narrative(self) -> Any:
+        """Her autobiographical self — seeded with genesis so a coherence signal exists at boot."""
+        try:
+            from nyxara.identity.narrative import NarrativeSelf
+            from nyxara.kernel.config import OWNER
+            owner = getattr(OWNER, "name", None) or getattr(OWNER, "short_name", None) or "JP"
+            narrative = NarrativeSelf(owner_name=str(owner))
+            narrative.genesis()
+            return narrative
         except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
             return None
 

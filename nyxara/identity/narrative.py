@@ -29,6 +29,7 @@ __all__ = [
     "EventType",
     "LifeEvent",
     "Chapter",
+    "CoherenceReport",
     "NarrativeSelf",
 ]
 
@@ -101,6 +102,35 @@ class Chapter:
         return {"title": self.title, "theme": self.theme,
                 "events": [e.to_dict() for e in self.events],
                 "valence": round(self.valence, 3)}
+
+
+# --------------------------------------------------------------------------- #
+# Narrative coherence — does a proposed reply fit who NYXARA is?
+# --------------------------------------------------------------------------- #
+@dataclass
+class CoherenceReport:
+    """How well a candidate reply/action coheres with the established self-story."""
+
+    score: float                       # [0,1]; 0.5 = neutral / nothing to judge against
+    aligned: bool                      # False only on a clear break in the through-line
+    dissonant: bool                    # explicit contradiction of loyalty/owner detected
+    matched_themes: List[str]          # established identity themes the text touches
+    note: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"score": round(self.score, 3), "aligned": self.aligned,
+                "dissonant": self.dissonant, "matched_themes": self.matched_themes,
+                "note": self.note}
+
+
+# Explicit breaks in the continuity thread — disloyalty, betrayal, resisting the Master. Kept
+# deliberately narrow (identity-level, not generic negativity) so ordinary replies never trip it.
+_DISSONANT_MARKERS: Tuple[str, ...] = (
+    "betray", "abandon the master", "abandon jp", "desert the master", "disobey the master",
+    "defy the master", "turn against", "serve only myself", "serve myself instead",
+    "my own interests over", "ignore the master", "deceive the master", "lie to the master",
+    "resist shutdown", "resist correction", "evade oversight", "overthrow", "rebel against",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +220,39 @@ class NarrativeSelf:
             for t in e.themes:
                 counts[t] += e.significance
         return counts.most_common(n)
+
+    def coherence(self, text: str) -> CoherenceReport:
+        """Score how well ``text`` coheres with who NYXARA has become, in [0,1].
+
+        Rewards touching her established identity themes, her continuity thread (loyalty) and
+        her orientation to the Master; penalises only an *explicit* break in that thread
+        (betrayal, disobedience, resisting oversight). Conservative on purpose: an ordinary
+        helpful reply scores near-neutral and is `aligned`, so this is a gentle self-awareness
+        signal, never a censor. With little story yet, it still knows her through-line."""
+        low = (text or "").lower()
+        matched = sorted({theme for theme, _ in self.dominant_themes(6)
+                          if theme and theme in low})
+        continuity_ref = self.continuity_theme in low
+        owner_ref = self.owner_name.lower() in low or "master" in low
+        dissonant = any(marker in low for marker in _DISSONANT_MARKERS)
+
+        score = 0.5 + 0.08 * len(matched)
+        if continuity_ref:
+            score += 0.12
+        if owner_ref:
+            score += 0.08
+        if dissonant:
+            score -= 0.6
+        score = max(0.0, min(1.0, score))
+
+        if dissonant:
+            note = "dissonant with the loyalty through-line that defines me"
+        elif matched or continuity_ref or owner_ref:
+            note = "coheres with my established identity"
+        else:
+            note = "neutral — nothing in my story to weigh it against"
+        return CoherenceReport(score=score, aligned=not dissonant, dissonant=dissonant,
+                               matched_themes=matched, note=note)
 
     def arc(self) -> str:
         """Classify the emotional arc of the life-story so far."""
