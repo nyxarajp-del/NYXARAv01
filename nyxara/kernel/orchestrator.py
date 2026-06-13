@@ -302,6 +302,8 @@ class NyxaraCore:
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
+        # Level 7 — Skill Factory: detect recurring goals and auto-create composite skills.
+        self.skill_factory = self._build_skill_factory() if enable_skills else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -683,6 +685,16 @@ class NyxaraCore:
             self._graph_populator = GraphPopulator(self.knowledge_graph, provenance=prov)
             return self._graph_populator
         except Exception:  # noqa: BLE001
+            return None
+
+    def _build_skill_factory(self) -> Any:
+        """Level 7 — SkillFactory that auto-creates composite skills after repeated goals."""
+        try:
+            from nyxara.growth.skill_factory import SkillFactory
+            sandbox = getattr(self, "sandbox_runner", None)
+            return SkillFactory(skill_memory=self.skills, toolsmith=None,
+                                sandbox=sandbox, threshold=3)
+        except Exception:  # noqa: BLE001 — skill factory is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -1499,6 +1511,14 @@ class NyxaraCore:
                                  {k: float(v) for k, v in features.items()}, reward)
             except Exception:  # noqa: BLE001 — meta-learning is best-effort, never fatal
                 pass
+        # Level 7 — SkillFactory: on successful ACT, check if this goal type recurs
+        # enough to warrant auto-creating a composite skill for reuse.
+        if (self.skill_factory is not None and disp is Disposition.ACT and success):
+            try:
+                goal_text = candidate.tool or candidate.text or candidate.kind
+                self.skill_factory.maybe_create_skill(goal_text, episode=candidate)
+            except Exception:  # noqa: BLE001 — skill factory is best-effort, never fatal
+                pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
         self._turns += 1
         if self.learner is not None and self._turns % self.consolidate_every == 0:
@@ -1908,6 +1928,8 @@ class NyxaraCore:
             rep["self_knowledge"] = self.self_model.self_description()
         if self.knowledge_graph is not None:
             rep["graph_triples"] = len(self.knowledge_graph)
+        if self.skill_factory is not None:
+            rep["skills_created"] = len(self.skill_factory._created_goals)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
