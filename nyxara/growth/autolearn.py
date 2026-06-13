@@ -43,12 +43,14 @@ class GrowthReport:
     forgotten: int = 0
     selfplay: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
+    self_improvement: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
                 "lessons_stored": self.lessons_stored, "replayed": self.replayed,
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
-                "selfplay": self.selfplay, "foundry": self.foundry}
+                "selfplay": self.selfplay, "foundry": self.foundry,
+                "self_improvement": self.self_improvement}
 
 
 class GrowthEngine:
@@ -59,7 +61,9 @@ class GrowthEngine:
                  consolidator: Any = None, foundry: Any = None,
                  enable_foundry: Optional[bool] = None,
                  enable_selfplay: bool = False, selfplay_n: int = 6,
-                 selfplay: Any = None) -> None:
+                 selfplay: Any = None, enable_self_improvement: Optional[bool] = None,
+                 self_improvement_every: Optional[int] = None,
+                 self_improver: Any = None) -> None:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
@@ -72,6 +76,16 @@ class GrowthEngine:
         self.enable_selfplay = enable_selfplay
         self.selfplay_n = max(1, selfplay_n)
         self._selfplay = selfplay
+        # Recursive self-improvement: review/architecture/benchmark/weakness/optimise, throttled
+        # to run only every N growth passes (it is heavier than reflection).
+        self.enable_self_improvement = (self.settings.self_improvement.enabled
+                                        if enable_self_improvement is None
+                                        else enable_self_improvement)
+        self.self_improvement_every = max(1, int(
+            self.settings.self_improvement.self_improvement_every
+            if self_improvement_every is None else self_improvement_every))
+        self._self_improver = self_improver
+        self._growth_passes = 0
         self._seen_action_seqs: set = set()
         self._stored_lessons: set = set()
 
@@ -202,6 +216,24 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — forging is heavy/optional; never fatal
             return []
 
+    # ---- recursive self-improvement (review → architecture → benchmark → weakness → optimise) ---- #
+    def _rsi_obj(self):
+        if self._self_improver is None:
+            from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
+            self._self_improver = RecursiveSelfImprovement(
+                memory=self.memory, journal=self.journal, settings=self.settings,
+                growth_engine=self)
+        return self._self_improver
+
+    def improve_system(self) -> Optional[Dict[str, Any]]:
+        """Run one full recursive self-improvement cycle; return its report dict (best-effort)."""
+        if not self.enable_self_improvement:
+            return None
+        try:
+            return self._rsi_obj().run().to_dict()
+        except Exception:  # noqa: BLE001 — self-improvement is best-effort, never fatal
+            return None
+
     # ---- the full pass ---- #
     def run(self, *, do_foundry: Optional[bool] = None) -> GrowthReport:
         report = GrowthReport()
@@ -223,6 +255,13 @@ class GrowthEngine:
                 report.selfplay = self.self_play()
             results = self.improve_self()
             report.foundry = [r.to_dict() for r in results]
+
+        # Recursive self-improvement runs on its own (slower) cadence — only every
+        # `self_improvement_every` growth passes, since it benchmarks the whole loop.
+        self._growth_passes += 1
+        if self.enable_self_improvement and \
+                self._growth_passes % self.self_improvement_every == 0:
+            report.self_improvement = self.improve_system()
         return report
 
 

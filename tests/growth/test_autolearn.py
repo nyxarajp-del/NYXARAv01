@@ -52,6 +52,34 @@ def test_foundry_off_by_default():
     assert rep.foundry == []
 
 
+def test_self_improvement_runs_on_cadence():
+    core = _core_with_experience(2)
+    engine = GrowthEngine.from_core(core, enable_self_improvement=True,
+                                    self_improvement_every=1)
+    rep = engine.run()
+    assert rep.self_improvement is not None
+    # the cycle reports the five faculties' output
+    assert "weaknesses" in rep.self_improvement
+    assert rep.self_improvement["enacted"] is False     # config default: no auto-enact
+
+
+def test_self_improvement_off_by_flag():
+    core = _core_with_experience(2)
+    engine = GrowthEngine.from_core(core, enable_self_improvement=False)
+    rep = engine.run()
+    assert rep.self_improvement is None
+
+
+def test_self_improvement_throttled_between_passes():
+    core = _core_with_experience(2)
+    engine = GrowthEngine.from_core(core, enable_self_improvement=True,
+                                    self_improvement_every=3)
+    # pass 1 and 2 skip RSI; pass 3 runs it
+    assert engine.run().self_improvement is None
+    assert engine.run().self_improvement is None
+    assert engine.run().self_improvement is not None
+
+
 def test_lessons_stored_into_memory():
     # contrasting outcomes so the reflector can actually mine a lesson
     core = NyxaraCore()

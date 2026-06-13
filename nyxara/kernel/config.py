@@ -50,6 +50,7 @@ __all__ = [
     "CouncilConfig",
     "RoleCouncilConfig",
     "MemoryConfig",
+    "SelfImprovementConfig",
     "GuardConfig",
     "AgencyConfig",
     "MCPServerSpec",
@@ -407,6 +408,36 @@ class RoleCouncilConfig(BaseModel):
     timeout_s: float = Field(default=30.0, gt=0)
 
 
+class SelfImprovementConfig(BaseModel):
+    """Recursive self-improvement settings (growth/recursive_improvement.py).
+
+    NYXARA reviews her own code, maps her architecture, benchmarks her capability, detects her
+    weaknesses, and (when authorised) *auto-applies* source fixes — each behind a reversible
+    verify-or-rollback gauntlet. The read-only analysis is safe and on by default; the
+    self-modifying enactment is OFF until the Master sets ``autonomous_enact`` (the standing
+    authorisation for background self-modification). The background loop runs this cycle every
+    ``self_improvement_every`` growth passes (it is heavier than reflection).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                       # read-only analysis is safe → on by default
+    self_improvement_every: int = Field(default=5, ge=1)   # every N growth passes
+    enable_llm_enrichment: bool = True         # only fires when a real provider is configured
+    benchmark_in_cycle: bool = True            # include the capability benchmark each cycle
+    # --- enactment (self-modification) — OFF until the Master authorises it --- #
+    autonomous_enact: bool = False             # auto-apply source edits + safe tuning
+    allow_tuning: bool = False                 # may tune recursive_improvement_iterations
+    max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
+    run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
+    # --- code-review thresholds --- #
+    max_function_length: int = Field(default=60, ge=10)
+    max_complexity: int = Field(default=10, ge=1)
+    max_args: int = Field(default=6, ge=1)
+    # --- weakness gate (CI) --- #
+    weakness_fail_severity: float = Field(default=0.9, ge=0.0, le=1.0)
+
+
 class MemoryConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -614,6 +645,7 @@ class NyxaraSettings(BaseSettings):
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
