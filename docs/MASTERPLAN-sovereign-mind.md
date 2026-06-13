@@ -406,3 +406,15 @@ tired…", mood pulled down); 4 new tests; suite 3283 green.
 D3 interoception ✓, D4 self-belief contradiction ✓ (pre-existing). NYXARA now has a stable story she
 measures herself against, anticipates how choices will feel, feels her own substrate, and notices when
 she contradicts herself — all inside the same sovereign gates, never altering her character.
+
+### 2026-06 — Pillar B4: verifier-scored search-over-reasoning
+
+Deliberation sampled several reasoning paths but chose among them by the model's *own* stated
+confidence — so a loud, wrong "idk" (confidence 0.99) could beat a correct, modest answer. Added
+independent best-of-N: `DeliberativeReasoner(verifier=…)` keeps the (kind, tool) shape by majority
+self-consistency (what the kernel does) but picks the *answer* within that consensus by an independent
+verifier of the text's quality (`mind/router.py:answer_quality` — non-degeneracy, coherence, non-echo);
+`llm_reasoner` wires it whenever `reasoning_samples > 1`. Defaults to off, so single-sample behaviour is
+unchanged. `/explain` shows when best-of-N was used. 2 new tests (verifier picks quality over a 0.99
+"idk"; default unchanged); suite 3285 green. (MCTS-over-tokens via `sim/montecarlo.py` is intentionally
+left out — verifier best-of-N is the form of "search over reasoning" that actually pays here.)
