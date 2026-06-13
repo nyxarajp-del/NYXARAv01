@@ -313,6 +313,8 @@ class NyxaraCore:
         self._research_queue: List[str] = []   # topics to research on next idle tick
         # Level 11 — AutoForge: automated model training pipeline.
         self.autoforge = self._build_autoforge() if enable_growth else None
+        # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
+        self.dream_session = self._build_dream_session() if enable_memory else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -737,6 +739,20 @@ class NyxaraCore:
                 sandbox=getattr(self, "sandbox_runner", None),
             )
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
+            return None
+
+    def _build_dream_session(self) -> Any:
+        """Level 12 — DreamSession: four-pass replay (memory/skill/reasoning/failure)."""
+        try:
+            from nyxara.memory.dream import DreamSession
+            return DreamSession(
+                consolidator=self.consolidator,
+                skill_memory=self.skills,
+                mind=self.mind,
+                journal=self.journal,
+                reflector=self.reflector,
+            )
+        except Exception:  # noqa: BLE001 — dreaming is a capability, never required
             return None
 
     def _build_autoforge(self) -> Any:
@@ -1620,8 +1636,19 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             pass
         report["ran"] = True
-        # 1) dream replay — strengthen the salient, grow their stability
-        if self.consolidator is not None:
+        # 1) dream replay — Level 12: four-pass dream session (memory/skill/reasoning/failure)
+        if self.dream_session is not None:
+            try:
+                dream_rep = self.dream_session.dream(duration_s=10.0)
+                report["replayed"] = dream_rep.memory_replayed
+                report["dream_sessions"] = self.dream_session.sessions_count
+                if dream_rep.insights:
+                    for ins in dream_rep.insights[:2]:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"[dream] {ins}"[:80], salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
+        elif self.consolidator is not None:
             try:
                 report["replayed"] = len(self.consolidator.dream_replay())
             except Exception:  # noqa: BLE001
@@ -2057,6 +2084,8 @@ class NyxaraCore:
             rep["research_reports"] = len(self.researcher.all_reports())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
+        if self.dream_session is not None:
+            rep["dream_sessions"] = self.dream_session.sessions_count
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
