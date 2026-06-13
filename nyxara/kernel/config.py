@@ -48,6 +48,7 @@ __all__ = [
     "LLMConfig",
     "FoundryConfig",
     "CouncilConfig",
+    "RoleCouncilConfig",
     "MemoryConfig",
     "GuardConfig",
     "AgencyConfig",
@@ -231,6 +232,9 @@ class LLMConfig(BaseModel):
     reasoning_samples: int = Field(default=1, ge=1, le=9)
     # Token ceiling for the private "think" scratchpad pass.
     reasoning_think_tokens: int = Field(default=1024, ge=64, le=8192)
+    # Level 3 — Recursive Self Improvement: iterations of critique+revise per respond turn.
+    # 1 = off (single pass); 5–20 = active recursive improvement.
+    recursive_improvement_iterations: int = Field(default=5, ge=1, le=20)
 
     def active_model(self) -> str:
         return {
@@ -390,6 +394,17 @@ class RouterConfig(BaseModel):
     use_faculties: bool = True
     # With no teacher to consult, an own answer this weak is declined honestly ("I don't know").
     abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
+
+
+class RoleCouncilConfig(BaseModel):
+    """Level 4 — Internal Role Council settings (mind/role_council.py).
+    Six role personas examine significant turns; NYXARA synthesises and judges."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    max_tokens_per_role: int = Field(default=256, ge=32, le=2048)
+    timeout_s: float = Field(default=30.0, gt=0)
 
 
 class MemoryConfig(BaseModel):
@@ -596,6 +611,7 @@ class NyxaraSettings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
+    role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)

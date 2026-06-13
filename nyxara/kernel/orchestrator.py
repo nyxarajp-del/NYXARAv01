@@ -55,6 +55,7 @@ from nyxara.observe.mindscope import MindScope, ThoughtKind
 from nyxara.observe.self_report import SelfReporter
 from nyxara.planning.journal import ActionStatus, Journal
 from nyxara.senses.binding import Binder, Percept
+from nyxara.kernel.workspace import GlobalWorkspace
 
 __all__ = [
     "Disposition",
@@ -127,6 +128,59 @@ class CycleResult:
 
 # a reasoner turns a (stimulus, focus) into a candidate
 Reasoner = Callable[[str, Optional[Percept]], Candidate]
+
+
+def _str_to_risk_tier(tier_label: str) -> Optional[Any]:
+    """Map a risk-tier string label to its RiskTier enum value, or None."""
+    try:
+        from nyxara.agency.permissions import RiskTier
+        return {"trivial": RiskTier.TRIVIAL, "low": RiskTier.LOW,
+                "moderate": RiskTier.MODERATE, "high": RiskTier.HIGH,
+                "critical": RiskTier.CRITICAL}.get(tier_label.lower())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class _WorkspaceThought:
+    """Thin wrapper so a workspace broadcast winner looks like a memory record to the
+    reasoner's _memory_text() helper — it just needs a callable .text() method."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def text(self) -> str:
+        return self._text
+
+
+class _GraphFact:
+    """Level 6 — wraps a knowledge-graph triple text as a memory item the reasoner
+    can consume via .text() — same interface as MemoryRecord."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = f"[graph] {text}"
+
+    def text(self) -> str:
+        return self._text
+
+
+class _SelfKnowledgeEntry:
+    """Level 2 — wraps a SelfKnowledgeReport as a high-priority memory item so the
+    reasoner always sees a formatted self-model summary at the top of its context."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, report: Any) -> None:
+        try:
+            self._text = report.to_prompt_text()
+        except Exception:  # noqa: BLE001
+            self._text = "[Self-model: unavailable]"
+
+    def text(self) -> str:
+        return self._text
 
 
 def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
@@ -230,9 +284,44 @@ class NyxaraCore:
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
+        # Level 1 — Real Brain Core: the Global Workspace (GWT bottleneck) + thought
+        # generator that submits candidate thoughts from all active sources, runs one
+        # arbitration cycle, and surfaces the top-N winners to the reason step.
+        self.workspace = self._build_workspace()
+        self.thought_gen = self._build_thought_gen()
+        # Level 3 — Recursive Self Improvement: after the initial candidate is proposed,
+        # run N iterations of critique→improve→re-score and return the best answer.
+        self.recursive_improver = self._build_recursive_improver()
+        # Level 4 — Internal Role Council: six role-personas (Scientist, Engineer,
+        # Strategist, Critic, Security Officer, Philosopher) each examine significant
+        # turns independently; their synthesis competes with the base hypothesis.
+        self.role_council = self._build_role_council()
+        # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
+        # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
+        self.world_simulator = self._build_world_simulator()
+        # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
+        self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
+        self._graph_populator: Any = None  # initialised lazily with the graph
+        # Level 7 — Skill Factory: detect recurring goals and auto-create composite skills.
+        self.skill_factory = self._build_skill_factory() if enable_skills else None
+        # Level 8 — Cycle Reflector: daily/weekly/monthly structured reflection cycles.
+        self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
+        # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
+        self.civilization = self._build_civilization()
+        # Level 11 — AutoForge: automated model training pipeline.
+        self.autoforge = self._build_autoforge() if enable_growth else None
+        # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
+        self.dream_session = self._build_dream_session() if enable_memory else None
+        # Level 13 — Prediction Engine: calibrated probability + confidence interval.
+        self.prediction_engine = self._build_prediction_engine() if enable_growth else None
+        # Level 14 — Meta Intelligence: post-turn reasoning quality evaluation.
+        self.meta_intelligence = self._build_meta_intelligence() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
+        # Level 10 — Autonomous Researcher: built after knowledge so it has access to kb.
+        self.researcher = self._build_researcher() if enable_memory else None
+        self._research_queue: List[str] = []   # topics to research on next idle tick
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -529,6 +618,187 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
             return None
 
+    def _build_workspace(self) -> Any:
+        """Level 1 — the Global Workspace bottleneck: thoughts compete; only the most
+        salient win and enter the reason step (Baars / Dehaene GWT)."""
+        try:
+            return GlobalWorkspace(capacity=3, access_threshold=0.5,
+                                   decay=0.8, coalition_synergy=0.3, history=128)
+        except Exception:  # noqa: BLE001 — workspace is a capability, never required
+            return None
+
+    def _build_thought_gen(self) -> Any:
+        """Level 1 — the thought generator that populates the Global Workspace each turn."""
+        if self.workspace is None:
+            return None
+        try:
+            from nyxara.mind.thought_generator import ThoughtGenerator
+            return ThoughtGenerator(workspace=self.workspace, top_n=3,
+                                    max_from_memories=20)
+        except Exception:  # noqa: BLE001 — thought generation is a capability, never required
+            return None
+
+    def _build_recursive_improver(self) -> Any:
+        """Level 3 — the recursive self-improvement engine (N critique+revise iterations)."""
+        try:
+            from nyxara.mind.recursive_improver import RecursiveImprover
+            from nyxara.kernel.config import get_settings
+            n = getattr(get_settings().llm, "recursive_improvement_iterations", 5)
+            llm = getattr(self.reasoner, "llm", None)
+            return RecursiveImprover(llm=llm, n_iterations=n)
+        except Exception:  # noqa: BLE001 — recursive improvement is a capability, never required
+            return None
+
+    def _build_role_council(self) -> Any:
+        """Level 4 — the six-role internal council (Scientist/Engineer/Strategist/
+        Critic/Security Officer/Philosopher) that examines significant turns."""
+        try:
+            from nyxara.mind.role_council import RoleCouncil
+            llm = getattr(self.reasoner, "llm", None)
+            return RoleCouncil(llm=llm, max_tokens=256, timeout_s=30.0)
+        except Exception:  # noqa: BLE001 — role council is a capability, never required
+            return None
+
+    def _build_world_simulator(self) -> Any:
+        """Level 5 — the world simulator (sandbox + world-model + heuristics) that
+        imagines action consequences before the gate sees the candidate."""
+        try:
+            from nyxara.mind.world_simulator import WorldSimulator
+            return WorldSimulator(world_model=self.world_model,
+                                  predictive=self.predictive, rollout_steps=3)
+        except Exception:  # noqa: BLE001 — world simulation is a capability, never required
+            return None
+
+    def _build_knowledge_graph(self) -> Any:
+        """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
+        accumulates structured triples as conversations proceed."""
+        try:
+            from nyxara.memory.graph import KnowledgeGraph, _configure_standard_relations
+            from nyxara.memory.provenance import Provenance, SourceType
+            g = KnowledgeGraph()
+            _configure_standard_relations(g)
+            # seed core identity triples
+            prov = Provenance(SourceType.OWNER, confidence=1.0)
+            g.add_triple("nyxara", "is_a", "sovereign_cognitive_agent",
+                         confidence=1.0, provenance=prov)
+            g.add_triple("nyxara", "owned_by", "master",
+                         confidence=1.0, provenance=prov)
+            return g
+        except Exception:  # noqa: BLE001 — knowledge graph is a capability, never required
+            return None
+
+    def _get_graph_populator(self) -> Any:
+        """Lazily build the GraphPopulator once both the graph is ready."""
+        if self._graph_populator is not None:
+            return self._graph_populator
+        if self.knowledge_graph is None:
+            return None
+        try:
+            from nyxara.memory.graph import GraphPopulator
+            from nyxara.memory.provenance import Provenance, SourceType
+            prov = Provenance(SourceType.SELF_REFLECTION, confidence=0.7)
+            self._graph_populator = GraphPopulator(self.knowledge_graph, provenance=prov)
+            return self._graph_populator
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_skill_factory(self) -> Any:
+        """Level 7 — SkillFactory that auto-creates composite skills after repeated goals."""
+        try:
+            from nyxara.growth.skill_factory import SkillFactory
+            sandbox = getattr(self, "sandbox_runner", None)
+            return SkillFactory(skill_memory=self.skills, toolsmith=None,
+                                sandbox=sandbox, threshold=3)
+        except Exception:  # noqa: BLE001 — skill factory is a capability, never required
+            return None
+
+    def _build_cycle_reflector(self) -> Any:
+        """Level 8 — CycleReflector for daily/weekly/monthly structured reflection."""
+        try:
+            from nyxara.growth.cycle_reflect import CycleReflector
+            return CycleReflector(reflector=self.reflector, memory=self.memory,
+                                  goals=self.goals)
+        except Exception:  # noqa: BLE001 — cycle reflection is a capability, never required
+            return None
+
+    def _build_civilization(self) -> Any:
+        """Level 9 — MicroAgentCivilization: 7 specialized background agents."""
+        try:
+            from nyxara.agency.civilization import MicroAgentCivilization
+            event_bus = getattr(self, "bus", None)
+            return MicroAgentCivilization(core=self, event_bus=event_bus)
+        except Exception:  # noqa: BLE001 — civilization is a capability, never required
+            return None
+
+    def _build_researcher(self) -> Any:
+        """Level 10 — AutonomousResearcher for self-directed web research."""
+        try:
+            from nyxara.growth.researcher import AutonomousResearcher
+            reasoner = getattr(self, "reasoner", None)
+            return AutonomousResearcher(
+                tools=getattr(self, "tools", None),
+                knowledge=getattr(self, "knowledge", None),
+                knowledge_graph=getattr(self, "knowledge_graph", None),
+                llm=getattr(reasoner, "llm", None) if reasoner else None,
+                memory=getattr(self, "memory", None),
+                sandbox=getattr(self, "sandbox_runner", None),
+            )
+        except Exception:  # noqa: BLE001 — researcher is a capability, never required
+            return None
+
+    def _build_meta_intelligence(self) -> Any:
+        """Level 14 — MetaIntelligence: post-turn reasoning quality evaluation."""
+        try:
+            from nyxara.mind.meta_intelligence import MetaIntelligence
+            return MetaIntelligence(
+                meta_learner=self.meta,
+                dual_process=self.dual_process,
+                reflector=self.reflector,
+                memory=self.memory,
+                goals=self.goals,
+            )
+        except Exception:  # noqa: BLE001 — meta-intelligence is a capability, never required
+            return None
+
+    def _build_prediction_engine(self) -> Any:
+        """Level 13 — PredictionEngine: calibrated probability from world-model + surprise."""
+        try:
+            from nyxara.mind.prediction_engine import PredictionEngine
+            return PredictionEngine(
+                world_model=self.world_model,
+                predictive=self.predictive,
+                voi=self.voi if hasattr(self, "voi") else None,
+            )
+        except Exception:  # noqa: BLE001 — prediction engine is a capability, never required
+            return None
+
+    def _build_dream_session(self) -> Any:
+        """Level 12 — DreamSession: four-pass replay (memory/skill/reasoning/failure)."""
+        try:
+            from nyxara.memory.dream import DreamSession
+            return DreamSession(
+                consolidator=self.consolidator,
+                skill_memory=self.skills,
+                mind=self.mind,
+                journal=self.journal,
+                reflector=self.reflector,
+            )
+        except Exception:  # noqa: BLE001 — dreaming is a capability, never required
+            return None
+
+    def _build_autoforge(self) -> Any:
+        """Level 11 — AutoForge: automated Distill→Train→Benchmark→Promote pipeline."""
+        try:
+            from nyxara.growth.autoforge import AutoForge
+            from nyxara.growth.foundry import Foundry
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            min_ex = getattr(settings, "foundry_min_examples", 10)
+            foundry = Foundry()
+            return AutoForge(foundry=foundry, distiller=None, min_examples=min_ex)
+        except Exception:  # noqa: BLE001 — autoforge is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -769,25 +1039,85 @@ class NyxaraCore:
 
     # ---- recall & reasoning ---- #
     def _recall_for(self, stimulus: str) -> List[Any]:
-        """Associative recall cued by the stimulus, fed into the reason step for grounding."""
-        if self.retriever is None:
-            return []
-        try:
-            from nyxara.memory.retrieval import RetrievalContext
-            return self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
-        except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
-            return []
+        """Associative recall cued by the stimulus. Level 6: combines vector retrieval
+        with knowledge-graph traversal so multi-hop structured facts complement
+        the raw similarity search."""
+        results: List[Any] = []
+        if self.retriever is not None:
+            try:
+                from nyxara.memory.retrieval import RetrievalContext
+                results = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+            except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
+                pass
+        # Level 6 — graph traversal: extract entity mentions and find related triples
+        if self.knowledge_graph is not None:
+            try:
+                answer = self.knowledge_graph.ask(stimulus)
+                if answer.triples:
+                    # convert graph triples to lightweight wrapper objects the reasoner
+                    # can consume via .text() — same interface as memory records
+                    for triple in answer.triples[:3]:
+                        subj = self.knowledge_graph.get_entity(triple.subject).name
+                        obj_ = self.knowledge_graph.get_entity(triple.object).name
+                        fact_text = f"{subj} {triple.predicate} {obj_}"
+                        results.append(_GraphFact(fact_text))
+            except Exception:  # noqa: BLE001 — graph recall is best-effort
+                pass
+        return results
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
-        """The reason step. Several hypotheses are reasoned *in parallel* — each over a
-        different cognitive context (grounded in recall, unprimed, narrowly focused) — and
-        the most-supported one is selected. A dual-process arbitration then reflects on
-        whether this was a 'trust the gut' or 'think it through' turn. The selected
-        candidate is still a *proposal*: the kernel disposes (the control law holds)."""
-        candidate = self._reason_parallel(stimulus, focus, memories)
-        self._arbitrate(stimulus, candidate, memories)
+        """The reason step. Level-1 (Cognitive Workspace): all active sources submit
+        candidate thoughts to the Global Workspace bottleneck; the top-3 broadcast
+        winners enrich the memory context before reasoning begins. Several hypotheses
+        are then reasoned in parallel and the most-supported one is selected. A
+        dual-process arbitration reflects on whether this was fast or deliberate.
+        The selected candidate is still a *proposal*: the kernel disposes."""
+        # Level 1 — run the Global Workspace cycle: thoughts compete, winners enrich context
+        enriched = self._run_thought_workspace(stimulus, focus, memories)
+        # Level 2 — prepend the live self-knowledge report so the reasoner always knows
+        # who NYXARA is, what she can do, and what her current state and goals are.
+        enriched = self._inject_self_knowledge(enriched)
+        # Level 4 — run the base reasoner + role council as competing hypotheses;
+        # the orchestrator picks the more confident, better-supported candidate.
+        candidate = self._compete_with_role_council(stimulus, focus, enriched)
+        # Level 5 — simulate consequences for action candidates and upgrade risk if needed.
+        candidate = self._simulate_action_candidate(candidate)
+        # Level 3 — recursive self-improvement: run N critique+revise iterations on
+        # "respond" candidates, returning the highest-quality version.
+        candidate = self._recursive_improve(stimulus, candidate)
+        # Level 13 — attach a PredictionResult to "respond" candidates so the
+        # HonestyGuard and spoken response can include calibrated confidence.
+        candidate = self._attach_prediction(stimulus, candidate)
+        self._arbitrate(stimulus, candidate, enriched)
         return candidate
+
+    def _run_thought_workspace(self, stimulus: str, focus: Optional[Percept],
+                                memories: List[Any]) -> List[Any]:
+        """Run one Global Workspace arbitration cycle.  Winner payloads are prepended
+        to the memory list so the reasoner sees the highest-salience thoughts first.
+        Falls back to the original memories list if anything fails."""
+        if self.thought_gen is None:
+            return memories
+        try:
+            from nyxara.mind.thought_generator import ThoughtContext
+            ctx = ThoughtContext(stimulus=stimulus, memories=memories,
+                                 goals=self.goals, affect=self.affect, percept=focus)
+            winners = self.thought_gen.generate(ctx)
+            # record the workspace broadcast in the audit trail
+            if winners:
+                self.mind.record(
+                    ThoughtKind.ATTENTION,
+                    f"workspace: {len(winners)} thought(s) broadcast — "
+                    f"{winners[0][:60]!r}",
+                    salience=0.55)
+            # workspace winner strings are prepended as synthetic memory items so the
+            # reasoner naturally reads the most salient context first.
+            synthetic: List[Any] = [_WorkspaceThought(w) for w in winners
+                                    if w and w not in (stimulus,)]
+            return synthetic + list(memories)
+        except Exception:  # noqa: BLE001 — workspace is advisory, never fatal
+            return memories
 
     def _reason_once(self, stimulus: str, focus: Optional[Percept],
                      memories: List[Any]) -> Candidate:
@@ -852,6 +1182,125 @@ class NyxaraCore:
         chosen_name, chosen = self._select_hypothesis(results)
         self._record_hypotheses(results, chosen_name)
         return chosen
+
+    def _inject_self_knowledge(self, memories: List[Any]) -> List[Any]:
+        """Level 2 — prepend a SelfKnowledgeReport to the memory context so the
+        reasoner always has an up-to-date self-model summary at the top of its context.
+        Best-effort: falls back to the original list if anything fails."""
+        if self.self_model is None:
+            return memories
+        try:
+            mood = "neutral"
+            if self.affect is not None:
+                try:
+                    mood = self.affect.mood.label
+                except Exception:  # noqa: BLE001
+                    pass
+            report = self.self_model.self_report(
+                goals=self.goals, tools=self.tools, memory=self.memory,
+                control_state=self.oversight.state.value,
+                mood=mood, turns=self._turns)
+            return [_SelfKnowledgeEntry(report)] + list(memories)
+        except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
+            return memories
+
+    def _attach_prediction(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Level 13 — for 'respond' candidates, attach a PredictionResult so confidence
+        is calibrated and HonestyGuard can read it. Best-effort."""
+        if self.prediction_engine is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            pred = self.prediction_engine.predict(
+                getattr(candidate, "text", stimulus) or stimulus)
+            # store on the candidate; HonestyGuard and _spoken_response can read it
+            candidate.prediction_result = pred  # type: ignore[attr-defined]
+            # calibrate: blend prediction probability into candidate confidence
+            current_conf = float(getattr(candidate, "confidence", 0.7) or 0.7)
+            blended = 0.7 * current_conf + 0.3 * pred.probability
+            candidate.confidence = round(blended, 3)
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"prediction: p={pred.probability:.2f} ci={pred.confidence_interval}",
+                salience=0.4, confidence=pred.probability)
+        except Exception:  # noqa: BLE001 — prediction is advisory, never fatal
+            pass
+        return candidate
+
+    def _simulate_action_candidate(self, candidate: Candidate) -> Candidate:
+        """Level 5 — run a world-simulation pass on action candidates. If the simulator
+        finds a higher risk tier than what the reasoner declared, upgrade the candidate's
+        risk tier so the gate always sees the more conservative estimate. Best-effort."""
+        if self.world_simulator is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "act":
+            return candidate
+        # Only simulate when a specific tool is named; free-form action text has
+        # too much noise for token-based heuristics to be reliable.
+        tool_name = getattr(candidate, "tool", "") or ""
+        if not tool_name:
+            return candidate
+        try:
+            from nyxara.agency.permissions import RiskTier
+            sim = self.world_simulator.simulate(
+                candidate.text,
+                tool=tool_name,
+                tool_args=dict(getattr(candidate, "tool_args", {}) or {}),
+                reversible=getattr(candidate, "reversible", True),
+            )
+            # record simulation in audit trail
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"simulation: risk={sim.risk_tier()} rollback={sim.rollback_possible} "
+                f"effects={sim.side_effects}",
+                salience=0.6, confidence=sim.confidence)
+            # risk tier can only be upgraded, never downgraded
+            sim_tier = _str_to_risk_tier(sim.risk_tier())
+            if sim_tier is not None and sim_tier.value > candidate.risk.value:
+                candidate.risk = sim_tier
+            # if the simulation says not rollback-possible, mark reversible=False
+            if not sim.rollback_possible:
+                candidate.reversible = False
+        except Exception:  # noqa: BLE001 — simulation is advisory, never fatal
+            pass
+        return candidate
+
+    def _compete_with_role_council(self, stimulus: str, focus: Optional[Percept],
+                                    memories: List[Any]) -> Candidate:
+        """Level 4 — run base reasoning and the role council as parallel hypotheses,
+        then pick the winner via _select_hypothesis.  Best-effort: falls back to
+        base-only if role council fails or turn is an action (not a conversation)."""
+        base = self._reason_parallel(stimulus, focus, memories)
+        if self.role_council is None or getattr(base, "kind", "respond") != "respond":
+            return base
+        council_cand: Optional[Candidate] = None
+        try:
+            council_cand = self.role_council.convene(stimulus)
+        except Exception:  # noqa: BLE001 — council is advisory, never fatal
+            pass
+        if council_cand is None:
+            return base
+        results = [("base", base), ("role_council", council_cand)]
+        _, winner = self._select_hypothesis(results)
+        self._record_hypotheses(results, "role_council" if winner is council_cand else "base")
+        return winner
+
+    def _recursive_improve(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Level 3 — run N critique+revise iterations on the candidate and return the
+        highest-quality version.  Only applied to 'respond' turns (not tool actions);
+        best-effort: returns the original on any failure."""
+        if self.recursive_improver is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            improved = self.recursive_improver.improve(stimulus, candidate)
+            if improved is not None:
+                return improved
+        except Exception:  # noqa: BLE001 — improvement is advisory, never fatal
+            pass
+        return candidate
 
     @staticmethod
     def _hypothesis_signature(c: Candidate) -> tuple:
@@ -1001,7 +1450,8 @@ class NyxaraCore:
         """Persist the exchange to long-term memory so turns accrete into continuity.
 
         The Master's words and NYXARA's reply are stored as *separate* episodic memories so
-        each is independently recallable (a question can resurface without its answer)."""
+        each is independently recallable (a question can resurface without its answer).
+        Level 6: also auto-populates the KnowledgeGraph with triples extracted from the turn."""
         if self.memory is None:
             return
         try:
@@ -1018,6 +1468,14 @@ class NyxaraCore:
                 provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.7),
                 importance=0.5 if owner else 0.35, tags=["conversation", "response"])
         except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
+            pass
+        # Level 6 — auto-populate the knowledge graph from the conversation turn
+        try:
+            populator = self._get_graph_populator()
+            if populator is not None:
+                populator.from_conversation_turn(stimulus, response,
+                                                 confidence=0.8 if authority is Authority.OWNER else 0.6)
+        except Exception:  # noqa: BLE001 — graph population is best-effort
             pass
 
     # ---- identity / social / growth (faculties that colour but never govern) ---- #
@@ -1182,6 +1640,39 @@ class NyxaraCore:
                                  {k: float(v) for k, v in features.items()}, reward)
             except Exception:  # noqa: BLE001 — meta-learning is best-effort, never fatal
                 pass
+        # Level 14 — MetaIntelligence: evaluate reasoning quality post-turn and
+        # push improvement suggestions as soft goals.
+        if self.meta_intelligence is not None:
+            try:
+                # create a minimal result proxy with disposition info
+                class _R:
+                    def __init__(self, d): self.disposition = d.value
+                meta_eval = self.meta_intelligence.evaluate_turn(
+                    stimulus=getattr(candidate, "text", ""),
+                    candidate=candidate,
+                    result=_R(disp),
+                    arbitration=self._last_arbitration,
+                )
+                if meta_eval.improvement_suggestion:
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        f"meta: {meta_eval.improvement_suggestion[:60]}",
+                        salience=0.5, confidence=meta_eval.quality_score)
+            except Exception:  # noqa: BLE001 — meta-intelligence is advisory, never fatal
+                pass
+        # Level 7 — SkillFactory: on successful ACT, check if this goal type recurs
+        # enough to warrant auto-creating a composite skill for reuse.
+        if (self.skill_factory is not None and disp is Disposition.ACT and success):
+            try:
+                goal_text = candidate.tool or candidate.text or candidate.kind
+                factory_result = self.skill_factory.maybe_create_skill(goal_text,
+                                                                        episode=candidate)
+                # Level 10 — queue a research pass on the new skill's domain
+                if (factory_result.skill_created and self.researcher is not None
+                        and goal_text not in self._research_queue):
+                    self._research_queue.append(goal_text[:60])
+            except Exception:  # noqa: BLE001 — skill factory is best-effort, never fatal
+                pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
         self._turns += 1
         if self.learner is not None and self._turns % self.consolidate_every == 0:
@@ -1223,8 +1714,19 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             pass
         report["ran"] = True
-        # 1) dream replay — strengthen the salient, grow their stability
-        if self.consolidator is not None:
+        # 1) dream replay — Level 12: four-pass dream session (memory/skill/reasoning/failure)
+        if self.dream_session is not None:
+            try:
+                dream_rep = self.dream_session.dream(duration_s=10.0)
+                report["replayed"] = dream_rep.memory_replayed
+                report["dream_sessions"] = self.dream_session.sessions_count
+                if dream_rep.insights:
+                    for ins in dream_rep.insights[:2]:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"[dream] {ins}"[:80], salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
+        elif self.consolidator is not None:
             try:
                 report["replayed"] = len(self.consolidator.dream_replay())
             except Exception:  # noqa: BLE001
@@ -1276,6 +1778,53 @@ class NyxaraCore:
                             self._insight_q.put(top.text)
                         except Exception:  # noqa: BLE001
                             pass
+            except Exception:  # noqa: BLE001
+                pass
+        # 4c) Level 9 — civilization: fold any recent micro-agent reports into MindScope
+        if self.civilization is not None:
+            try:
+                recent = self.civilization.recent_reports(n=3)
+                for cr in recent:
+                    if cr.findings:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"[{cr.agent_name}] {cr.findings[0]}"[:80],
+                                         salience=0.4)
+                report["civilization_agents"] = len(self.civilization.agents)
+            except Exception:  # noqa: BLE001
+                pass
+        # 4b) Level 8 — cycle reflection: run any overdue daily/weekly/monthly cycles
+        if self.cycle_reflector is not None:
+            try:
+                cycle_reports = self.cycle_reflector.tick()
+                if cycle_reports:
+                    report["cycle_reflections"] = [r.cycle for r in cycle_reports]
+                    for cr in cycle_reports:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"reflection [{cr.cycle}]: {cr.next_focus}"[:80],
+                                         salience=0.65)
+            except Exception:  # noqa: BLE001
+                pass
+        # 4e) Level 11 — autoforge: run training cycle if data threshold is met
+        if self.autoforge is not None:
+            try:
+                forge_result = self.autoforge.run_cycle()
+                if forge_result.trained:
+                    report["forge_cycles"] = len(self.autoforge.all_cycles())
+                    action = "promoted" if forge_result.promoted else "rolled back"
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"autoforge: {action} — {forge_result.reason}"[:80],
+                                     salience=0.7)
+            except Exception:  # noqa: BLE001
+                pass
+        # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
+        if self.researcher is not None and self._research_queue:
+            try:
+                topic = self._research_queue.pop(0)
+                research_report = self.researcher.research(topic)
+                report["research_reports"] = len(self.researcher.all_reports())
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"research [{topic[:30]}]: {research_report.summary[:50]}",
+                                 salience=0.55)
             except Exception:  # noqa: BLE001
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
@@ -1466,6 +2015,12 @@ class NyxaraCore:
         self._cognition_thread = threading.Thread(
             target=_loop, name="nyxara-default-mode", daemon=True)
         self._cognition_thread.start()
+        # Level 9 — also start the micro-agent civilization
+        if self.civilization is not None:
+            try:
+                self.civilization.start()
+            except Exception:  # noqa: BLE001
+                pass
         return True
 
     def stop_cognition(self) -> None:
@@ -1478,6 +2033,12 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
         self._cognition_thread = None
+        # Level 9 — also stop the civilization
+        if self.civilization is not None:
+            try:
+                self.civilization.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
     def drain_insights(self) -> List[str]:
         """Return (and clear) any insights the background stream surfaced since last call."""
@@ -1584,6 +2145,29 @@ class NyxaraCore:
             rep["world_transitions"] = len(self.world_model)
         if self.knowledge is not None:
             rep["knowledge_chunks"] = len(self.knowledge)
+        if self.thought_gen is not None:
+            rep["workspace_broadcasts"] = self.thought_gen.workspace_metrics().get(
+                "broadcasts", 0)
+        if self.self_model is not None:
+            rep["self_knowledge"] = self.self_model.self_description()
+        if self.knowledge_graph is not None:
+            rep["graph_triples"] = len(self.knowledge_graph)
+        if self.skill_factory is not None:
+            rep["skills_created"] = len(self.skill_factory._created_goals)
+        if self.cycle_reflector is not None:
+            rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
+        if self.civilization is not None:
+            rep["civilization_agents"] = len(self.civilization.agents)
+        if self.researcher is not None:
+            rep["research_reports"] = len(self.researcher.all_reports())
+        if self.autoforge is not None:
+            rep["forge_cycles"] = len(self.autoforge.all_cycles())
+        if self.dream_session is not None:
+            rep["dream_sessions"] = self.dream_session.sessions_count
+        if self.prediction_engine is not None:
+            rep["predictions_made"] = self.prediction_engine.predictions_count
+        if self.meta_intelligence is not None:
+            rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
