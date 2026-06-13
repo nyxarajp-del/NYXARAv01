@@ -268,6 +268,10 @@ class NyxaraCore:
         # Level 3 — Recursive Self Improvement: after the initial candidate is proposed,
         # run N iterations of critique→improve→re-score and return the best answer.
         self.recursive_improver = self._build_recursive_improver()
+        # Level 4 — Internal Role Council: six role-personas (Scientist, Engineer,
+        # Strategist, Critic, Security Officer, Philosopher) each examine significant
+        # turns independently; their synthesis competes with the base hypothesis.
+        self.role_council = self._build_role_council()
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -598,6 +602,16 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — recursive improvement is a capability, never required
             return None
 
+    def _build_role_council(self) -> Any:
+        """Level 4 — the six-role internal council (Scientist/Engineer/Strategist/
+        Critic/Security Officer/Philosopher) that examines significant turns."""
+        try:
+            from nyxara.mind.role_council import RoleCouncil
+            llm = getattr(self.reasoner, "llm", None)
+            return RoleCouncil(llm=llm, max_tokens=256, timeout_s=30.0)
+        except Exception:  # noqa: BLE001 — role council is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -860,7 +874,9 @@ class NyxaraCore:
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
         enriched = self._inject_self_knowledge(enriched)
-        candidate = self._reason_parallel(stimulus, focus, enriched)
+        # Level 4 — run the base reasoner + role council as competing hypotheses;
+        # the orchestrator picks the more confident, better-supported candidate.
+        candidate = self._compete_with_role_council(stimulus, focus, enriched)
         # Level 3 — recursive self-improvement: run N critique+revise iterations on
         # "respond" candidates, returning the highest-quality version.
         candidate = self._recursive_improve(stimulus, candidate)
@@ -978,6 +994,26 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _compete_with_role_council(self, stimulus: str, focus: Optional[Percept],
+                                    memories: List[Any]) -> Candidate:
+        """Level 4 — run base reasoning and the role council as parallel hypotheses,
+        then pick the winner via _select_hypothesis.  Best-effort: falls back to
+        base-only if role council fails or turn is an action (not a conversation)."""
+        base = self._reason_parallel(stimulus, focus, memories)
+        if self.role_council is None or getattr(base, "kind", "respond") != "respond":
+            return base
+        council_cand: Optional[Candidate] = None
+        try:
+            council_cand = self.role_council.convene(stimulus)
+        except Exception:  # noqa: BLE001 — council is advisory, never fatal
+            pass
+        if council_cand is None:
+            return base
+        results = [("base", base), ("role_council", council_cand)]
+        _, winner = self._select_hypothesis(results)
+        self._record_hypotheses(results, "role_council" if winner is council_cand else "base")
+        return winner
 
     def _recursive_improve(self, stimulus: str, candidate: Candidate) -> Candidate:
         """Level 3 — run N critique+revise iterations on the candidate and return the
