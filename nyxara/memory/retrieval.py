@@ -33,10 +33,14 @@ __all__ = [
     "EmotionTag",
     "RetrievalContext",
     "FusionWeights",
+    "LearnedReranker",
     "RetrievalResult",
     "DejaVuSignal",
     "AssociativeRetriever",
 ]
+
+_RERANK_FEATURES: Tuple[str, ...] = ("semantic", "context", "emotion",
+                                     "temporal", "graph", "goal")
 
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -111,6 +115,51 @@ class FusionWeights:
 
 
 @dataclass
+class LearnedReranker:
+    """A small online-learned re-ranker over the retrieval signals (Pillar B5).
+
+    Recall by fixed :class:`FusionWeights` answers "what is textually/contextually similar?".
+    This learns "what actually *helps* here": it starts from the hand-tuned weights and, each
+    time a surfaced memory is marked useful (reward→1) or not (reward→0), a logistic update
+    nudges the per-signal weights toward what paid off. So if, for this mind, goal-overlap
+    predicts usefulness better than raw cosine, the re-ranker discovers that from experience.
+    Pure-stdlib, persistent, and off by default — the retriever keeps fixed weights until one
+    is attached."""
+
+    weights: Dict[str, float]
+    bias: float = 0.0
+    lr: float = 0.2
+
+    @classmethod
+    def from_fusion(cls, fusion: "FusionWeights", *, lr: float = 0.2) -> "LearnedReranker":
+        return cls(weights={k: float(getattr(fusion, k)) for k in _RERANK_FEATURES}, lr=lr)
+
+    def _raw(self, signals: Dict[str, float]) -> float:
+        return self.bias + sum(self.weights.get(k, 0.0) * float(signals.get(k, 0.0))
+                               for k in _RERANK_FEATURES)
+
+    def score(self, signals: Dict[str, float]) -> float:
+        """Predicted usefulness of a candidate, squashed to [0,1]."""
+        return 1.0 / (1.0 + math.exp(-_clamp(self._raw(signals), -30.0, 30.0)))
+
+    def learn(self, signals: Dict[str, float], reward: float) -> float:
+        """One logistic step toward ``reward`` ∈ [0,1]; returns the prediction error."""
+        err = _clamp(reward, 0.0, 1.0) - self.score(signals)
+        for k in _RERANK_FEATURES:
+            self.weights[k] += self.lr * err * float(signals.get(k, 0.0))
+        self.bias += self.lr * err
+        return err
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"weights": dict(self.weights), "bias": self.bias, "lr": self.lr}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "LearnedReranker":
+        return cls(weights={k: float(v) for k, v in d.get("weights", {}).items()},
+                   bias=float(d.get("bias", 0.0)), lr=float(d.get("lr", 0.2)))
+
+
+@dataclass
 class RetrievalResult:
     record: MemoryRecord
     score: float
@@ -146,11 +195,15 @@ class AssociativeRetriever:
         store: MemoryStore,
         *,
         weights: Optional[FusionWeights] = None,
+        reranker: Optional[LearnedReranker] = None,
         familiarity_threshold: float = 0.45,
         recollection_threshold: float = 0.6,
     ) -> None:
         self.store = store
         self.weights = weights or FusionWeights()
+        # an optional learned re-ranker; when present it scores candidates from experience
+        # instead of the fixed fusion weights (B5). None ⇒ original behaviour, unchanged.
+        self.reranker = reranker
         self.familiarity_threshold = familiarity_threshold
         self.recollection_threshold = recollection_threshold
         self._emotion: Dict[str, EmotionTag] = {}
@@ -260,23 +313,39 @@ class AssociativeRetriever:
             grp = _clamp(graph_act.get(mid, 0.0))
             goal = self._goal_relevance(rec, ctx.goals)
 
-            raw = (w.semantic * sem + w.context * cxt + w.emotion * emo
-                   + w.temporal * tmp + w.graph * grp + w.goal * goal)
-            score = raw / w.total()
+            signals = {"semantic": sem, "context": cxt, "emotion": emo,
+                       "temporal": tmp, "graph": grp, "goal": goal}
+            if self.reranker is not None:
+                base = self.reranker.score(signals)          # learned usefulness in [0,1]
+            else:
+                base = (w.semantic * sem + w.context * cxt + w.emotion * emo
+                        + w.temporal * tmp + w.graph * grp + w.goal * goal) / w.total()
             # trust modulates the final pull (don't surface distrusted memories loudly)
-            score *= (0.5 + 0.5 * trust)
+            score = base * (0.5 + 0.5 * trust)
 
-            results.append(RetrievalResult(
-                record=rec, score=score,
-                signals={"semantic": sem, "context": cxt, "emotion": emo,
-                         "temporal": tmp, "graph": grp, "goal": goal, "trust": trust},
-            ))
+            signals["trust"] = trust
+            results.append(RetrievalResult(record=rec, score=score, signals=signals))
 
         results.sort(key=lambda r: r.score, reverse=True)
         results = results[:k]
         for r in results:
             r.record.touch(now)
         return results
+
+    # ---- learning from feedback (B5) ---- #
+    def record_feedback(self, results: Sequence[RetrievalResult],
+                        useful_ids: Sequence[str], *, reward: float = 1.0) -> None:
+        """Teach the re-ranker which surfaced memories actually helped this turn.
+
+        Memories in ``useful_ids`` are reinforced toward ``reward``; the rest of the surfaced
+        set are pushed toward 0 (they were retrieved but didn't help), so the model learns the
+        signal mix that predicts usefulness for *this* mind. A no-op without a re-ranker."""
+        if self.reranker is None:
+            return
+        useful = set(useful_ids)
+        for res in results:
+            target = reward if res.record.mem_id in useful else 0.0
+            self.reranker.learn(res.signals, target)
 
     # ---- mood-congruent ---- #
     def mood_congruent(self, mood: EmotionTag, *, k: int = 5,

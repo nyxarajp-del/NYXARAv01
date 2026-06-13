@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 nyxara = "nyxara.__main__:main"
 nyxara-serve = "nyxara.server.__main__:main"
+nyxara-grow = "nyxara.growth.__main__:main"
 
 [project.optional-dependencies]
 # Reasoning / math / data

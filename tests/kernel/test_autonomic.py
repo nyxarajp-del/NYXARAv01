@@ -81,6 +81,53 @@ def test_no_growth_when_disabled():
     assert loop.report()["growth_passes"] == 0
 
 
+def test_inner_life_off_uses_repertoire():
+    # default behaviour is unchanged: prompts come from the static reflective repertoire
+    loop = _loop()
+    loop.tick_once()
+    assert loop.prompt_sources[-1] == "repertoire"
+    assert loop.report()["sources"] == {"repertoire": 1}
+
+
+def test_inner_life_prefers_a_due_intention():
+    from nyxara.memory.prospective import ProspectiveMemory
+    pm = ProspectiveMemory()
+    pm.remind_at(when=1.0, description="follow up on the Master's deployment request")
+    loop = _loop(inner_life=True, prospective=pm)
+    r = loop.tick_once()
+    assert r is not None
+    # a due standing intention is the most time-sensitive thing to think about
+    assert loop.prompt_sources[-1] == "intention"
+
+
+def test_due_intentions_are_queued_not_dropped():
+    from nyxara.memory.prospective import ProspectiveMemory
+    pm = ProspectiveMemory()
+    pm.remind_at(when=1.0, description="first standing intention")
+    pm.remind_at(when=1.0, description="second standing intention")
+    loop = _loop(inner_life=True, prospective=pm)
+    loop.run_for(2)
+    # both due intentions each became their own turn — neither was silently consumed
+    assert loop.prompt_sources[:2] == ["intention", "intention"]
+
+
+def test_inner_life_falls_back_to_stream_then_repertoire():
+    class _Thought:
+        text = "loyalty and protection reinforce each other"
+
+    class _Stream:
+        def __init__(self):
+            self.calls = 0
+
+        def tick(self, engagement: float = 0.0, now=None):
+            self.calls += 1
+            return [_Thought()] if self.calls == 1 else []   # one thought, then quiet
+
+    loop = _loop(inner_life=True, stream=_Stream())
+    loop.run_for(2)
+    assert loop.prompt_sources == ["stream", "repertoire"]   # stream first, then the steady list
+
+
 def test_aprocess_matches_process():
     core = NyxaraCore()
 

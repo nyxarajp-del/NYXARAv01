@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Tuple
 
 from nyxara.agency.permissions import Authority
 from nyxara.kernel.orchestrator import CycleResult, Disposition, NyxaraCore
@@ -52,12 +52,17 @@ class AutonomicLoop:
     authority: Authority = Authority.AUTONOMOUS
     growth_every: int = 0                 # run a learning pass every N ticks (0 = never)
     growth_engine: Any = None
+    inner_life: bool = False              # draw prompts from her own mind, not a fixed list
+    stream: Any = None                    # DefaultModeStream (auto-wired from core if inner_life)
+    prospective: Any = None               # ProspectiveMemory — standing intentions that come due
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[CycleResult] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
+    prompt_sources: List[str] = field(default_factory=list)
     ticks: int = 0
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
+    _intention_queue: List[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         # auto-build a growth engine bound to this core when periodic learning is requested
@@ -67,6 +72,9 @@ class AutonomicLoop:
                 self.growth_engine = GrowthEngine.from_core(self.core)
             except Exception:  # noqa: BLE001
                 self.growth_engine = None
+        # the living mind speaks from her own default-mode stream when no stream is supplied
+        if self.inner_life and self.stream is None:
+            self.stream = getattr(self.core, "stream", None)
 
     def _maybe_grow(self) -> None:
         if not self.growth_every or self.growth_engine is None:
@@ -78,17 +86,67 @@ class AutonomicLoop:
         except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
             pass
 
-    # ---- one step ---- #
-    def _next_prompt(self) -> str:
+    # ---- choosing what to think about ---- #
+    def _repertoire_prompt(self) -> str:
         return self.prompts[self.ticks % len(self.prompts)] if self.prompts else "Reflect."
 
+    def _due_intention_prompt(self) -> Optional[str]:
+        """A standing intention that has come due — the most time-sensitive thing to think
+        about. Fired intentions are queued so every one becomes its own turn (none dropped)."""
+        if self.prospective is None:
+            return None
+        if not self._intention_queue:
+            try:
+                fired = self.prospective.tick()
+            except Exception:  # noqa: BLE001 — prospective memory is advisory, never fatal
+                return None
+            self._intention_queue.extend(
+                f.intention.description for f in fired if f.intention.description)
+        if not self._intention_queue:
+            return None
+        desc = self._intention_queue.pop(0)
+        return (f"A standing intention you set is now due: \"{desc}\". "
+                f"Decide how to act on it in the Master's interest.")
+
+    def _stream_prompt(self) -> Optional[str]:
+        """A spontaneous thought from her default-mode stream, turned into something to weigh."""
+        if self.stream is None:
+            return None
+        try:
+            thoughts = self.stream.tick(engagement=0.0)
+        except Exception:  # noqa: BLE001 — the wandering mind never crashes the loop
+            return None
+        text = (getattr(thoughts[0], "text", "") if thoughts else "").strip()
+        if not text:
+            return None
+        return (f"A thought surfaced in your background mind: \"{text}\". "
+                f"Reflect on whether it matters to the Master, and note any follow-up.")
+
+    def _compose_prompt(self) -> Tuple[str, str]:
+        """Pick what NYXARA thinks about next, and say where it came from.
+
+        With ``inner_life``, her own mind drives the agenda — a due intention first (time
+        matters), else a spontaneous stream thought — falling back to the steady reflective
+        repertoire. Either way the chosen prompt runs through the *same* sovereign gates."""
+        if self.inner_life:
+            due = self._due_intention_prompt()
+            if due is not None:
+                return due, "intention"
+            spontaneous = self._stream_prompt()
+            if spontaneous is not None:
+                return spontaneous, "stream"
+        return self._repertoire_prompt(), "repertoire"
+
+    # ---- one step ---- #
     def tick_once(self) -> Optional[CycleResult]:
         """Run exactly one autonomic turn (synchronously). Returns the result, or None
         if the loop is currently halted by oversight (paused/scrammed)."""
         if not self.core.oversight.gate():
             return None
-        result = self.core.process(self._next_prompt(), authority=self.authority)
+        prompt, source = self._compose_prompt()
+        result = self.core.process(prompt, authority=self.authority)
         self.ticks += 1
+        self.prompt_sources.append(source)
         self.history.append(result)
         if result.disposition is Disposition.ESCALATE:
             self.escalations.append(result)
@@ -115,9 +173,10 @@ class AutonomicLoop:
         try:
             while self._running:
                 if self.core.oversight.gate():
-                    result = await self.core.aprocess(self._next_prompt(),
-                                                       authority=self.authority)
+                    prompt, source = self._compose_prompt()
+                    result = await self.core.aprocess(prompt, authority=self.authority)
                     self.ticks += 1
+                    self.prompt_sources.append(source)
                     self.history.append(result)
                     if result.disposition is Disposition.ESCALATE:
                         self.escalations.append(result)
@@ -153,10 +212,12 @@ class AutonomicLoop:
 
     def report(self) -> dict:
         return {"ticks": self.ticks, "running": self.running,
-                "interval_s": self.interval_s,
+                "interval_s": self.interval_s, "inner_life": self.inner_life,
                 "acted": sum(1 for r in self.history if r.disposition is Disposition.ACT),
                 "escalations": len(self.escalations),
-                "growth_passes": len(self.growth_reports)}
+                "growth_passes": len(self.growth_reports),
+                "sources": {s: self.prompt_sources.count(s)
+                            for s in sorted(set(self.prompt_sources))}}
 
 
 # --------------------------------------------------------------------------- #

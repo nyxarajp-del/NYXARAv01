@@ -56,7 +56,7 @@ class NyxaraReasoner:
     def __init__(self, *, llm: Any = None, council: Any = None, memory: Any = None,
                  retriever: Any = None, soul: Any = None, world_model: Any = None,
                  tools: Any = None, llm_reasoner: Any = None, use_council: bool = False,
-                 settings: Optional[NyxaraSettings] = None,
+                 settings: Optional[NyxaraSettings] = None, narrative: Any = None,
                  max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
@@ -64,6 +64,7 @@ class NyxaraReasoner:
         self.memory = memory
         self.retriever = retriever
         self.soul = soul
+        self.narrative = narrative
         self.world_model = world_model
         self.tools = tools
         # the tool-aware, real-LLM JSON decider (mind/llm_reasoner.py); used as the
@@ -87,8 +88,34 @@ class NyxaraReasoner:
         mems = self._gather_memories(stimulus, memories)
         outcome = self._route(stimulus, mems)
         if self._looks_like_action(stimulus):
-            return self._action_candidate(stimulus, mems, outcome)
-        return self._respond_candidate(stimulus, mems, outcome)
+            candidate = self._action_candidate(stimulus, mems, outcome)
+        else:
+            candidate = self._respond_candidate(stimulus, mems, outcome)
+        return self._apply_narrative_coherence(candidate)
+
+    def _apply_narrative_coherence(self, candidate: Candidate) -> Candidate:
+        """Weigh the proposal against who NYXARA is (identity/narrative.py, Pillar D1).
+
+        Advisory and gentle: a proposal that *coheres* with her identity is noted; one that
+        *breaks her loyalty through-line* (betrayal, defying the Master, resisting oversight)
+        is spoken with low confidence — a self-doubt signal, never a block. The kernel still
+        disposes through every gate, and her character is never edited (Rule 4 character-lock)."""
+        if self.narrative is None or candidate is None:
+            return candidate
+        try:
+            report = self.narrative.coherence(getattr(candidate, "text", "") or "")
+        except Exception:  # noqa: BLE001 — the narrative self is advisory, never fatal
+            return candidate
+        if report.dissonant:
+            candidate.confidence = min(getattr(candidate, "confidence", 0.7), 0.2)
+            candidate.belief = min(getattr(candidate, "belief", candidate.confidence), 0.2)
+            candidate.rationale = (f"{getattr(candidate, 'rationale', '')} "
+                                   f"[narrative: {report.note}]").strip()
+        elif report.matched_themes:
+            themes = ", ".join(report.matched_themes)
+            candidate.rationale = (f"{getattr(candidate, 'rationale', '')} "
+                                   f"[narrative: coheres with my {themes}]").strip()
+        return candidate
 
     # ------------------------------------------------------------------ #
     # 1. Memory recall before reasoning
@@ -213,6 +240,16 @@ class NyxaraReasoner:
     # ------------------------------------------------------------------ #
     def _respond_candidate(self, stimulus: str, mems: List[str], outcome: Any) -> Candidate:
         process = self._process_label(outcome)
+        # neuro-symbolic short-circuit: an exact, verifiable answer (math / logic) beats any
+        # neural guess — so NYXARA computes it herself, with or without an LLM present. This is
+        # "verifiable > probabilistic" applied to the *whole loop*, not only the router.
+        fac = self._faculty_answer(stimulus)
+        if fac is not None:
+            text, conf = fac
+            return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
+                             risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
+                             rationale=f"{process} via a verifiable faculty (exact computation, "
+                                       f"no guessing); {len(mems)} memories recalled")
         if not self._real_llm():
             cand = _default_reasoner(stimulus, None)
             cand.rationale = (f"{process} via deterministic faculty reasoner "
@@ -229,6 +266,15 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    @staticmethod
+    def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
+        """Exact answer from a verifiable faculty, or None to defer to the neural mind."""
+        try:
+            from nyxara.mind.reasoning_faculties import solve_with_faculties
+            return solve_with_faculties(stimulus)
+        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            return None
 
     def _deliberate_council(self, stimulus: str, system: str,
                             mems: List[str]) -> Tuple[str, float, str]:

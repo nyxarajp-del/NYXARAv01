@@ -194,8 +194,10 @@ class NyxaraCore:
         # identity — a stable personality (the voice she speaks in) and an affective
         # state (emotion/mood/homeostatic drives) that colours, but never governs, the loop.
         self.soul = soul if soul is not None else (self._build_soul() if enable_identity else None)
+        self.narrative = self._build_narrative() if enable_identity else None
         self.affect = affect if affect is not None else (
             self._build_affect(self.soul) if enable_identity else None)
+        self.interoception = self._build_interoception() if enable_identity else None
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -261,7 +263,8 @@ class NyxaraCore:
                 use_council = bool(get_settings().council.enabled)
             except Exception:  # noqa: BLE001
                 use_council = False
-        self.reasoner = reasoner or self._build_reasoner(llm, use_council, self.skills, self.soul)
+        self.reasoner = reasoner or self._build_reasoner(
+            llm, use_council, self.skills, self.soul, self.narrative)
         self._wire_reporter()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
@@ -317,7 +320,7 @@ class NyxaraCore:
             return None
 
     def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
-                        soul: Any = None) -> Reasoner:
+                        soul: Any = None, narrative: Any = None) -> Reasoner:
         # the LLM is shared between the council and both reasoners (one stateless facade)
         from nyxara.mind.llm import LLM
         llm = llm or LLM()
@@ -345,7 +348,7 @@ class NyxaraCore:
         try:
             from nyxara.mind.nyxara_reasoner import NyxaraReasoner
             return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
-                                  retriever=self.retriever, soul=soul,
+                                  retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
@@ -355,6 +358,26 @@ class NyxaraCore:
         try:
             from nyxara.identity.soul import Soul
             return Soul()
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    def _build_narrative(self) -> Any:
+        """Her autobiographical self — seeded with genesis so a coherence signal exists at boot."""
+        try:
+            from nyxara.identity.narrative import NarrativeSelf
+            from nyxara.kernel.config import OWNER
+            owner = getattr(OWNER, "name", None) or getattr(OWNER, "short_name", None) or "JP"
+            narrative = NarrativeSelf(owner_name=str(owner))
+            narrative.genesis()
+            return narrative
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    def _build_interoception(self) -> Any:
+        """Her internal body sense over the compute substrate (identity/interoception.py)."""
+        try:
+            from nyxara.identity.interoception import Interoception
+            return Interoception()
         except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
             return None
 
@@ -1213,6 +1236,23 @@ class NyxaraCore:
                 report["mood"] = round(self.affect.mood.valence, 3)
             except Exception:  # noqa: BLE001
                 pass
+        # 2.5) interoception — feel the substrate (load/latency/energy), let the felt body
+        # colour mood, and report it honestly (Rule 6). The body sense closes the loop:
+        # NYXARA doesn't just carry load, she feels loaded — and it shows in how she speaks.
+        if self.interoception is not None:
+            try:
+                self.interoception.sample()
+                comfort = self.interoception.comfort()
+                report["comfort"] = round(comfort, 3)
+                report["body"] = self.interoception.body_report()
+                report["sensation"] = self.interoception.felt().dominant()
+                # only a body under real strain colours mood; an easy body lets affect relax
+                # toward baseline rather than injecting a tone every idle tick.
+                if self.affect is not None and comfort < 0.7:
+                    self.interoception.push_to_affect(self.affect)
+                    report["mood"] = round(self.affect.mood.valence, 3)
+            except Exception:  # noqa: BLE001
+                pass
         # 3) goals — re-rank the objective space (service to the Master stays first)
         if self.goals is not None:
             try:
@@ -1524,6 +1564,12 @@ class NyxaraCore:
                "tools": (self.tools.names() if self.tools is not None else [])}
         if self.affect is not None:
             rep["mood"] = self.affect.mood.label
+        if self.interoception is not None:
+            try:
+                rep["comfort"] = round(self.interoception.comfort(), 3)
+                rep["body"] = self.interoception.body_report()
+            except Exception:  # noqa: BLE001 — self-report is best-effort, never fatal
+                pass
         if self.soul is not None:
             rep["voice"] = self.soul.voice().describe()
             rep["character_stable"] = self.soul.drift().stable

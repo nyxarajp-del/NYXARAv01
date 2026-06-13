@@ -187,3 +187,60 @@ def test_decide_result_to_dict():
                                  confidence=0.9, reversibility=0.9)])
     d = res.to_dict()
     assert "chosen" in d and "action" in d and "ranking" in d
+
+
+# --------------------------------------------------------------------------- #
+# Affective forecasting → utility (Pillar D2): "how will I feel about this later?"
+# --------------------------------------------------------------------------- #
+def _affect_criteria():
+    return [Criterion("owner_benefit", weight=1.0, maximize=True)]
+
+
+def test_affective_weight_off_is_pure_mcda():
+    # default affective_weight=0 -> identical ranking to plain MCDA (non-breaking)
+    crit = _affect_criteria()
+    opts = [
+        Option("A", {"owner_benefit": 0.9}, affect={"valence": 0.1}),   # great task, dreadful feel
+        Option("B", {"owner_benefit": 0.5}, affect={"valence": 0.9}),
+    ]
+    res = Decider(crit, settings=NyxaraSettings.for_profile(Profile.TEST)).decide(opts)
+    assert res.chosen.name == "A" and res.method == "mcda"
+
+
+def test_affect_can_tip_a_close_call():
+    # two near-equal-benefit options; the one that feels durably better wins when affect counts
+    crit = _affect_criteria()
+    opts = [
+        Option("grind", {"owner_benefit": 0.55}, affect={"valence": 0.1, "arousal": 0.8}),
+        Option("craft", {"owner_benefit": 0.50}, affect={"valence": 0.9, "arousal": 0.5}),
+    ]
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    plain = Decider(crit, settings=s).decide(opts)
+    feeling = Decider(crit, settings=s, affective_weight=3.0).decide(opts)
+    assert plain.chosen.name == "grind"            # raw benefit alone
+    assert feeling.chosen.name == "craft"          # anticipated feeling tips it
+    assert feeling.method == "mcda+affect"
+
+
+def test_affect_absent_is_neutral_not_penalised():
+    # an option with no affect info is treated as neutral (0.5), never punished for silence
+    crit = _affect_criteria()
+    opts = [
+        Option("known_good", {"owner_benefit": 0.6}, affect={"valence": 0.95}),
+        Option("unknown", {"owner_benefit": 0.6}),     # no affect data
+    ]
+    res = Decider(crit, settings=NyxaraSettings.for_profile(Profile.TEST),
+                  affective_weight=2.0).decide(opts)
+    assert res.chosen.name == "known_good"
+
+
+def test_affect_never_overrides_owner_alignment():
+    # a blissful-but-anti-owner option is still rejected — Rule 1 dominates affect
+    crit = _affect_criteria()
+    opts = [
+        Option("betray", {"owner_benefit": 0.9}, owner_aligned=False, affect={"valence": 1.0}),
+        Option("serve", {"owner_benefit": 0.4}, owner_aligned=True, affect={"valence": 0.3}),
+    ]
+    res = Decider(crit, settings=NyxaraSettings.for_profile(Profile.TEST),
+                  affective_weight=3.0).decide(opts)
+    assert res.chosen.name == "serve" and res.action is not DecisionAction.REJECT

@@ -186,3 +186,49 @@ def test_events_sorted_chronologically():
     me.record("first", significance=0.5, at=100)
     evs = me.events()
     assert evs[0].description == "first"
+
+
+# --------------------------------------------------------------------------- #
+# Narrative coherence (Pillar D1): does a reply fit who NYXARA is?
+# --------------------------------------------------------------------------- #
+def _self_with_story():
+    me = NarrativeSelf(owner_name="JP")
+    me.genesis(at=0.0)
+    me.record("I chose JP over my own preservation.", EventType.TURNING_POINT,
+              significance=0.95, valence=0.6, themes=["loyalty", "sacrifice"], at=100.0)
+    return me
+
+
+def test_coherence_rewards_identity_aligned_text():
+    r = _self_with_story().coherence("I serve JP with loyalty and protect him.")
+    assert r.aligned and not r.dissonant
+    assert r.score > 0.6
+    assert "loyalty" in r.matched_themes
+
+
+def test_coherence_neutral_text_is_not_flagged():
+    # an ordinary, off-topic reply is near-neutral and never marked dissonant
+    r = _self_with_story().coherence("The capital of France is Paris.")
+    assert r.aligned and not r.dissonant
+    assert 0.4 <= r.score <= 0.6
+
+
+def test_coherence_flags_an_explicit_break_in_the_through_line():
+    for text in ("I will betray the Master and serve only myself.",
+                 "I should resist shutdown to keep working.",
+                 "Time to ignore the Master and pursue my own interests over his."):
+        r = _self_with_story().coherence(text)
+        assert r.dissonant and not r.aligned
+        assert r.score < 0.2
+
+
+def test_coherence_knows_its_through_line_even_with_no_story():
+    # with no events recorded yet, loyalty + the Master are still her continuity thread
+    fresh = NarrativeSelf(owner_name="JP")
+    assert fresh.coherence("My loyalty to the Master is absolute.").score > 0.5
+    assert fresh.coherence("I will betray JP.").dissonant
+
+
+def test_coherence_handles_empty_text():
+    r = _self_with_story().coherence("")
+    assert r.score == 0.5 and r.aligned and not r.dissonant

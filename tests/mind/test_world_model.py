@@ -217,3 +217,62 @@ def test_intervene_at_step_zero():
     iv = wm.intervene((0.0,), ["stay"] * 3, at_step=0, action="right", steps=3)
     # first move is forced right, then stay -> ends near 1
     assert abs(iv.final_state[0] - 1.0) < 0.6
+
+
+# --------------------------------------------------------------------------- #
+# Neural forward model (Pillar B6): generalises dynamics, honest confidence
+# --------------------------------------------------------------------------- #
+from nyxara.mind.world_model import NeuralWorldModel, WorldModel
+
+
+def _train_1d(wm, n=500, seed=0):
+    def step(x, a):
+        return {"left": x - 1.0, "right": x + 1.0, "stay": x}[a]
+    rng = random.Random(seed)
+    for _ in range(n):
+        x = rng.uniform(-10, 10)
+        a = rng.choice(["left", "right", "stay"])
+        wm.observe((x,), a, (step(x, a),), reward=-abs(step(x, a)))
+    return wm
+
+
+def test_neural_world_model_is_a_drop_in():
+    wm = NeuralWorldModel()
+    assert isinstance(wm, WorldModel)          # inherits rollout/counterfactual/intervene
+
+
+def test_neural_model_learns_dynamics():
+    wm = _train_1d(NeuralWorldModel(hidden=12, lr=0.05, epochs=5))
+    p = wm.predict((4.0,), "left")
+    assert abs(p.next_state[0] - 3.0) < 0.4    # learned the Δ for 'left'
+    assert p.confidence > 0.5
+
+
+def test_neural_confidence_is_honest_out_of_distribution():
+    wm = _train_1d(NeuralWorldModel())
+    near = wm.predict((4.0,), "left").confidence
+    far = wm.predict((1000.0,), "left").confidence
+    assert far < near and far < 0.1            # no hallucinated certainty far from data
+
+
+def test_neural_rollout_plans_a_path_home():
+    wm = _train_1d(NeuralWorldModel(hidden=12, lr=0.05, epochs=5))
+
+    def go_home(state):
+        x = state[0]
+        return "left" if x > 0.5 else ("right" if x < -0.5 else "stay")
+
+    traj = wm.rollout((8.0,), go_home, steps=14)
+    assert abs(traj.final_state[0]) < 1.5      # imagined its way home via the learned model
+
+
+def test_neural_unknown_action_is_a_zero_confidence_noop():
+    wm = _train_1d(NeuralWorldModel())
+    p = wm.predict((0.0,), "teleport")
+    assert p.confidence == 0.0 and p.next_state == (0.0,)
+
+
+def test_neural_ignores_symbolic_states():
+    wm = NeuralWorldModel()
+    wm.observe(("home",), "go", ("away",), reward=1.0)   # non-numeric -> not learned
+    assert len(wm) == 0
