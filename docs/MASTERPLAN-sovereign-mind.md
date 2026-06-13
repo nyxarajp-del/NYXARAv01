@@ -430,3 +430,15 @@ the mind learns its *own* signal mix. Defaults to off (fixed weights unchanged).
 feedback favouring a goal-aligned memory over a textually-similar one, the re-ranker raises the goal
 weight, lowers semantic, and re-orders recall. 4 new tests; suite 3289 green. (Live feedback wiring from
 successful turns is the optional next step.)
+
+### 2026-06 — Pillar B6: neural forward world-model
+
+The world model was kNN-only — honest but interpolation-bound (it blends stored transitions, never
+generalises the dynamics). Added `NeuralWorldModel`, a drop-in `WorldModel` subclass backed by
+`_ForwardNet`: a tiny pure-Python 1-hidden-layer tanh MLP per action (no torch/numpy) trained by online
+SGD with running input standardisation, mapping state → (Δstate, reward). It keeps the `observe`/`predict`
+surface, so `rollout`/`counterfactual`/`intervene` are inherited and planning is unchanged. It
+*generalises* the dynamics while confidence stays honest — grows with experience + low error, decays out
+of distribution — so far-from-data queries are low-confidence, never bluffed. Numeric states only.
+Verified on the 1-D world (predict(4,left)→3.0, near-conf 0.91 vs far-conf ~0, rollout plans home); 6 new
+tests; suite 3295 green. **Pillar B complete** (B1, B2, B4, B5, B6; B3 metacognition pre-existing).
