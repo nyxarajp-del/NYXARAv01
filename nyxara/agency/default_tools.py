@@ -432,6 +432,24 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
                       target_param="url"))
 
+        # ---- self-extension: forge a brand-new tool for a missing capability ---- #
+        # Gated at SELF_MODIFY/HIGH so invoking it through the loop escalates to the
+        # Master (autonomous-max for self.modify is TRIVIAL). The tools it *produces*
+        # are clamped to tool.call/low and run sandboxed per call.
+        def _forge_capability(need: str) -> Dict[str, Any]:
+            from nyxara.agency.permissions import Authority
+            from nyxara.growth.capability_foundry import CapabilityFoundry
+            foundry = CapabilityFoundry(registry=registry)
+            return foundry.forge(need, authority=Authority.OWNER).to_dict()
+
+        _add(ToolSpec("forge_capability", handler=_forge_capability,
+                      description="forge a brand-new runnable, tested, registered tool for a "
+                                  "missing capability (plan→code→test→benchmark→deploy); "
+                                  "owner-gated self-extension",
+                      params=[ToolParam("need", "str",
+                                        description="the capability gap, e.g. 'sha256 hash'")],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH, reversible=False))
+
     return registry
 
 

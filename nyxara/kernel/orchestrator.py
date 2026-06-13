@@ -355,6 +355,14 @@ class NyxaraCore:
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative)
         self._wire_reporter()
+        # Level 15 — Capability Foundry: when a capability is missing entirely, design a
+        # brand-new tool for herself (plan -> code -> test -> benchmark -> deploy). Built
+        # after the reasoner so it can use the live LLM for code generation. Off when growth
+        # is disabled or config disables it.
+        self.capability_foundry = (
+            self._build_capability_foundry() if enable_growth else None)
+        # gaps already attempted this session — never re-forge the same missing tool in a loop
+        self._capability_gaps_seen: set = set()
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -710,6 +718,29 @@ class NyxaraCore:
             return SkillFactory(skill_memory=self.skills, toolsmith=None,
                                 sandbox=sandbox, threshold=3)
         except Exception:  # noqa: BLE001 — skill factory is a capability, never required
+            return None
+
+    def _build_capability_foundry(self) -> Any:
+        """Level 15 — CapabilityFoundry: forge brand-new runnable tools from capability gaps."""
+        try:
+            from nyxara.growth.capability_foundry import CapabilityFoundry
+            if self.tools is None:
+                return None
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().capability_foundry
+            if not cfg.enabled:
+                return None
+            reasoner = getattr(self, "reasoner", None)
+            llm = getattr(reasoner, "llm", None) if reasoner else None
+            return CapabilityFoundry(
+                registry=self.tools,
+                capability_registry=getattr(self, "capability_registry", None),
+                llm=(llm if cfg.use_llm else None),
+                test_timeout_s=cfg.test_timeout_s,
+                allow_autonomous_deploy=cfg.allow_autonomous_deploy,
+                benchmark_min_score=cfg.benchmark_min_score,
+                benchmark_repeats=cfg.benchmark_repeats)
+        except Exception:  # noqa: BLE001 — the foundry is a capability, never required
             return None
 
     def _build_cycle_reflector(self) -> Any:
@@ -1673,6 +1704,26 @@ class NyxaraCore:
                     self._research_queue.append(goal_text[:60])
             except Exception:  # noqa: BLE001 — skill factory is best-effort, never fatal
                 pass
+        # Level 15 — Capability Foundry: NYXARA proposed a tool that does not exist yet.
+        # That is a capability gap — autonomously design, write, test, benchmark and deploy
+        # a brand-new tool so the capability exists next time. Clamped to safe-tier tools by
+        # the gauntlet (privileged/sovereign-core forges still require the Master).
+        if (self.capability_foundry is not None and candidate.kind == "act"
+                and candidate.tool and self.tools is not None
+                and self.tools.get(candidate.tool) is None
+                and candidate.tool not in self._capability_gaps_seen):
+            self._capability_gaps_seen.add(candidate.tool)
+            try:
+                from nyxara.agency.permissions import Authority as _Authority
+                forge = self.capability_foundry.forge(candidate.tool,
+                                                       authority=_Authority.AUTONOMOUS)
+                if forge.deployed:
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        f"forged a new capability: {forge.tool_name}",
+                        salience=0.7, confidence=forge.benchmark_score)
+            except Exception:  # noqa: BLE001 — forging is best-effort, never fatal
+                pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
         self._turns += 1
         if self.learner is not None and self._turns % self.consolidate_every == 0:
@@ -2116,6 +2167,23 @@ class NyxaraCore:
         decisions = self.mind.by_kind(ThoughtKind.DECISION)
         return self.mind.explain(decisions[-1].id) if decisions else "no decision yet"
 
+    def forge_capability(self, need: str, *,
+                         authority: Authority = Authority.OWNER) -> Dict[str, Any]:
+        """Master-facing: forge a brand-new runnable tool for a missing capability.
+
+        Runs the full Capability Foundry pipeline (plan → write code → test → benchmark →
+        deploy) and returns the :class:`ForgeResult` as a dict. Defaults to the Master's
+        authority so even a privileged forge is permitted when *you* ask for it; NYXARA's
+        own autonomous forging (the post-act hook) runs under AUTONOMOUS authority and is
+        clamped to safe-tier tools by the gauntlet."""
+        if self.capability_foundry is None:
+            return {"ok": False, "deployed": False, "reason": "capability foundry not enabled"}
+        try:
+            return self.capability_foundry.forge(need, authority=authority).to_dict()
+        except Exception as exc:  # noqa: BLE001 — forging never crashes the caller
+            return {"ok": False, "deployed": False,
+                    "reason": f"{type(exc).__name__}: {exc}"}
+
     def report(self) -> Dict[str, Any]:
         rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
@@ -2154,6 +2222,8 @@ class NyxaraCore:
             rep["graph_triples"] = len(self.knowledge_graph)
         if self.skill_factory is not None:
             rep["skills_created"] = len(self.skill_factory._created_goals)
+        if self.capability_foundry is not None:
+            rep["capabilities_forged"] = len(self.capability_foundry.forged)
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
         if self.civilization is not None:
