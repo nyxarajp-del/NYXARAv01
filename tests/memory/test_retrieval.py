@@ -199,3 +199,67 @@ def test_empty_query_signals_zero():
     assert r.familiarity(ctx) == 0.0
     assert r.recollection(ctx) == 0.0
     assert r.deja_vu(ctx).is_deja_vu is False
+
+
+# --------------------------------------------------------------------------- #
+# Learned re-ranker (Pillar B5): recall adapts from feedback, not just similarity
+# --------------------------------------------------------------------------- #
+from nyxara.memory.retrieval import LearnedReranker, RetrievalContext
+from nyxara.memory.store import MemoryStore, MemoryType
+
+
+def test_reranker_learns_toward_reward():
+    rr = LearnedReranker.from_fusion(FusionWeights())
+    sig = {"semantic": 0.1, "goal": 1.0}
+    before = rr.score(sig)
+    for _ in range(50):
+        rr.learn(sig, reward=1.0)            # this signal mix kept being useful
+    after = rr.score(sig)
+    assert after > before
+    # and the feature that was present gets up-weighted
+    assert rr.weights["goal"] > FusionWeights().goal
+
+
+def test_reranker_roundtrips():
+    rr = LearnedReranker.from_fusion(FusionWeights(), lr=0.15)
+    rr.learn({"semantic": 0.5, "goal": 0.5}, reward=1.0)
+    rr2 = LearnedReranker.from_dict(rr.to_dict())
+    assert rr2.weights == rr.weights and rr2.bias == rr.bias and rr2.lr == rr.lr
+
+
+def test_feedback_reshapes_retrieval_ranking():
+    store = MemoryStore()
+    # A: a strong textual/semantic match to the query, but unrelated to the mission goal
+    a = store.remember("alpha beta gamma delta", mem_type=MemoryType.SEMANTIC, tags=["text"])
+    # B: a weak textual match, but tagged with the active mission goal
+    b = store.remember("totally different wording here", mem_type=MemoryType.SEMANTIC,
+                       tags=["mission"])
+    rr = LearnedReranker.from_fusion(FusionWeights())
+    sem_w0, goal_w0 = rr.weights["semantic"], rr.weights["goal"]
+    retr = AssociativeRetriever(store, reranker=rr)
+    ctx = RetrievalContext(query="alpha beta gamma", goals={"mission": 1.0})
+
+    def lead_for_b() -> float:
+        s = {r.record.mem_id: r.score for r in retr.retrieve(ctx, k=2)}
+        return s[b.mem_id] - s[a.mem_id]
+
+    before = lead_for_b()
+    # experience teaches that the goal-tagged memory is the one that actually helps
+    for _ in range(60):
+        retr.record_feedback(retr.retrieve(ctx, k=2), useful_ids=[b.mem_id], reward=1.0)
+
+    assert lead_for_b() > before                      # learned to favour what helps
+    assert retr.retrieve(ctx, k=2)[0].record.mem_id == b.mem_id
+    # it discovered goal-overlap matters more than raw similarity for this mind
+    assert rr.weights["goal"] > goal_w0 and rr.weights["semantic"] < sem_w0
+
+
+def test_no_reranker_is_unchanged_behaviour():
+    store = MemoryStore()
+    store.remember("alpha beta gamma", mem_type=MemoryType.SEMANTIC)
+    retr = AssociativeRetriever(store)               # no reranker
+    assert retr.reranker is None
+    out = retr.retrieve(RetrievalContext(query="alpha beta"), k=1)
+    assert out and 0.0 <= out[0].score <= 1.0
+    # feedback is a safe no-op without a reranker
+    retr.record_feedback(out, useful_ids=[out[0].record.mem_id])
