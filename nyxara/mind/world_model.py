@@ -25,6 +25,7 @@ prediction-error loop) and feeds :mod:`planning`.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import (
     Any, Callable, Dict, Hashable, List, Optional, Sequence, Tuple, Union,
@@ -37,6 +38,7 @@ __all__ = [
     "Trajectory",
     "CounterfactualResult",
     "WorldModel",
+    "NeuralWorldModel",
 ]
 
 State = Tuple[Any, ...]
@@ -278,6 +280,159 @@ class WorldModel:
         return {"transitions": self._count,
                 "actions": {str(a): len(ts) for a, ts in self._by_action.items()},
                 "k": self.k}
+
+
+# --------------------------------------------------------------------------- #
+# Neural forward model (Pillar B6) — a small MLP that generalises dynamics
+# --------------------------------------------------------------------------- #
+class _ForwardNet:
+    """A tiny 1-hidden-layer MLP (tanh) mapping a state to (state_delta, reward).
+
+    Pure-Python online SGD, with running input standardisation for stability. Per-action, so
+    its input is just the state (no action encoding), mirroring the kNN's action partitioning.
+    It also keeps a running error EMA and the training mean/spread, which let the world model
+    report *honest* confidence — high near seen states, decaying out of distribution."""
+
+    def __init__(self, in_dim: int, *, hidden: int = 12, lr: float = 0.05, seed: int = 0) -> None:
+        self.in_dim = in_dim
+        self.h = max(1, hidden)
+        self.out = in_dim + 1
+        self.lr = lr
+        rng = random.Random(seed)
+        s1 = 1.0 / math.sqrt(in_dim + 1)
+        s2 = 1.0 / math.sqrt(self.h + 1)
+        self.W1 = [[rng.uniform(-s1, s1) for _ in range(in_dim)] for _ in range(self.h)]
+        self.b1 = [0.0] * self.h
+        self.W2 = [[rng.uniform(-s2, s2) for _ in range(self.h)] for _ in range(self.out)]
+        self.b2 = [0.0] * self.out
+        self.n = 0
+        self.mean = [0.0] * in_dim
+        self._M2 = [0.0] * in_dim
+        self.err_ema = 1.0
+        self.samples = 0
+
+    def _std(self) -> List[float]:
+        return [math.sqrt(self._M2[i] / self.n) if self.n > 1 and self._M2[i] > 1e-12 else 1.0
+                for i in range(self.in_dim)]
+
+    def _standardize(self, x: Sequence[float]) -> List[float]:
+        std = self._std()
+        return [(x[i] - self.mean[i]) / std[i] for i in range(self.in_dim)]
+
+    def _forward(self, z: Sequence[float]) -> Tuple[List[float], List[float]]:
+        h = [math.tanh(sum(self.W1[j][i] * z[i] for i in range(self.in_dim)) + self.b1[j])
+             for j in range(self.h)]
+        out = [sum(self.W2[k][j] * h[j] for j in range(self.h)) + self.b2[k]
+               for k in range(self.out)]
+        return h, out
+
+    def deviation(self, x: Sequence[float]) -> float:
+        """Mean absolute standardised distance of ``x`` from the training centre (OOD signal)."""
+        z = self._standardize(x)
+        return sum(abs(v) for v in z) / max(1, self.in_dim)
+
+    def predict(self, x: Sequence[float]) -> List[float]:
+        _, out = self._forward(self._standardize(x))
+        return out
+
+    def train(self, x: Sequence[float], target: Sequence[float]) -> float:
+        # Welford running mean/variance for input standardisation
+        self.n += 1
+        for i in range(self.in_dim):
+            d = x[i] - self.mean[i]
+            self.mean[i] += d / self.n
+            self._M2[i] += d * (x[i] - self.mean[i])
+        z = self._standardize(x)
+        h, out = self._forward(z)
+        d_out = [out[k] - target[k] for k in range(self.out)]
+        mse = sum(e * e for e in d_out) / self.out
+        self.err_ema = 0.97 * self.err_ema + 0.03 * mse
+        self.samples += 1
+        # hidden deltas use the CURRENT W2 (before the update)
+        d_h = [sum(d_out[k] * self.W2[k][j] for k in range(self.out)) * (1.0 - h[j] * h[j])
+               for j in range(self.h)]
+        for k in range(self.out):
+            for j in range(self.h):
+                self.W2[k][j] -= self.lr * d_out[k] * h[j]
+            self.b2[k] -= self.lr * d_out[k]
+        for j in range(self.h):
+            for i in range(self.in_dim):
+                self.W1[j][i] -= self.lr * d_h[j] * z[i]
+            self.b1[j] -= self.lr * d_h[j]
+        return mse
+
+
+class NeuralWorldModel(WorldModel):
+    """A neural drop-in for :class:`WorldModel`: a per-action MLP learns (state → Δstate, reward).
+
+    Same surface as the kNN model — ``observe`` then ``predict`` — so it inherits ``rollout`` /
+    ``counterfactual`` / ``intervene`` unchanged and plugs straight into planning. Unlike the kNN
+    (which only interpolates among stored points), the MLP *generalises* the dynamics, while
+    confidence stays honest: it climbs with experience and low error, and decays out of the
+    region it has seen. Numeric states only; a symbolic state yields a zero-confidence no-op."""
+
+    def __init__(self, *, hidden: int = 12, lr: float = 0.05, epochs: int = 4,
+                 seed: int = 0, ood_tolerance: float = 2.5,
+                 max_transitions: int = 50_000) -> None:
+        self.hidden = max(1, hidden)
+        self.lr = lr
+        self.epochs = max(1, epochs)
+        self.seed = seed
+        self.ood_tolerance = ood_tolerance
+        self.max_transitions = max_transitions
+        self._nets: Dict[Action, _ForwardNet] = {}
+        self._state_dim: Optional[int] = None
+        self._count = 0
+
+    def __len__(self) -> int:
+        return self._count
+
+    def actions(self) -> List[Action]:
+        return list(self._nets.keys())
+
+    @staticmethod
+    def _numeric(state: Sequence[Any]) -> bool:
+        return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in state)
+
+    def observe(self, state: Sequence[Any], action: Action,
+                next_state: Sequence[Any], reward: float = 0.0) -> None:
+        state = tuple(state)
+        next_state = tuple(next_state)
+        if not self._numeric(state) or not self._numeric(next_state):
+            return                               # neural dynamics are for numeric states
+        if self._state_dim is None:
+            self._state_dim = len(state)
+        if len(state) != self._state_dim or len(next_state) != self._state_dim:
+            return
+        net = self._nets.get(action)
+        if net is None:
+            net = _ForwardNet(self._state_dim, hidden=self.hidden, lr=self.lr,
+                              seed=self.seed + len(self._nets))
+            self._nets[action] = net
+        target = [next_state[i] - state[i] for i in range(self._state_dim)] + [float(reward)]
+        for _ in range(self.epochs):
+            net.train(list(state), target)
+        self._count += 1
+
+    def predict(self, state: Sequence[Any], action: Action) -> Prediction:
+        state = tuple(state)
+        net = self._nets.get(action)
+        if net is None or self._state_dim != len(state) or not self._numeric(state):
+            return Prediction(next_state=state, reward=0.0, confidence=0.0, neighbors=0)
+        out = net.predict(list(state))
+        delta, reward = out[: self._state_dim], out[self._state_dim]
+        next_state: State = tuple(state[i] + delta[i] for i in range(self._state_dim))
+        # honest confidence: grows with experience + low error, decays out of distribution
+        experience = min(1.0, net.samples / 20.0)
+        fit = 1.0 / (1.0 + net.err_ema)
+        ood = math.exp(-max(0.0, net.deviation(state) - self.ood_tolerance))
+        conf = max(0.0, min(1.0, experience * fit * ood))
+        return Prediction(next_state=next_state, reward=reward,
+                          confidence=conf, neighbors=net.samples)
+
+    def stats(self) -> Dict[str, Any]:
+        return {"transitions": self._count, "backend": "neural-mlp", "hidden": self.hidden,
+                "actions": {str(a): n.samples for a, n in self._nets.items()}}
 
 
 # --------------------------------------------------------------------------- #
