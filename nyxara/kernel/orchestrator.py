@@ -130,6 +130,17 @@ class CycleResult:
 Reasoner = Callable[[str, Optional[Percept]], Candidate]
 
 
+def _str_to_risk_tier(tier_label: str) -> Optional[Any]:
+    """Map a risk-tier string label to its RiskTier enum value, or None."""
+    try:
+        from nyxara.agency.permissions import RiskTier
+        return {"trivial": RiskTier.TRIVIAL, "low": RiskTier.LOW,
+                "moderate": RiskTier.MODERATE, "high": RiskTier.HIGH,
+                "critical": RiskTier.CRITICAL}.get(tier_label.lower())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class _WorkspaceThought:
     """Thin wrapper so a workspace broadcast winner looks like a memory record to the
     reasoner's _memory_text() helper — it just needs a callable .text() method."""
@@ -272,6 +283,9 @@ class NyxaraCore:
         # Strategist, Critic, Security Officer, Philosopher) each examine significant
         # turns independently; their synthesis competes with the base hypothesis.
         self.role_council = self._build_role_council()
+        # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
+        # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
+        self.world_simulator = self._build_world_simulator()
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -612,6 +626,16 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — role council is a capability, never required
             return None
 
+    def _build_world_simulator(self) -> Any:
+        """Level 5 — the world simulator (sandbox + world-model + heuristics) that
+        imagines action consequences before the gate sees the candidate."""
+        try:
+            from nyxara.mind.world_simulator import WorldSimulator
+            return WorldSimulator(world_model=self.world_model,
+                                  predictive=self.predictive, rollout_steps=3)
+        except Exception:  # noqa: BLE001 — world simulation is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -877,6 +901,8 @@ class NyxaraCore:
         # Level 4 — run the base reasoner + role council as competing hypotheses;
         # the orchestrator picks the more confident, better-supported candidate.
         candidate = self._compete_with_role_council(stimulus, focus, enriched)
+        # Level 5 — simulate consequences for action candidates and upgrade risk if needed.
+        candidate = self._simulate_action_candidate(candidate)
         # Level 3 — recursive self-improvement: run N critique+revise iterations on
         # "respond" candidates, returning the highest-quality version.
         candidate = self._recursive_improve(stimulus, candidate)
@@ -994,6 +1020,44 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _simulate_action_candidate(self, candidate: Candidate) -> Candidate:
+        """Level 5 — run a world-simulation pass on action candidates. If the simulator
+        finds a higher risk tier than what the reasoner declared, upgrade the candidate's
+        risk tier so the gate always sees the more conservative estimate. Best-effort."""
+        if self.world_simulator is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "act":
+            return candidate
+        # Only simulate when a specific tool is named; free-form action text has
+        # too much noise for token-based heuristics to be reliable.
+        tool_name = getattr(candidate, "tool", "") or ""
+        if not tool_name:
+            return candidate
+        try:
+            from nyxara.agency.permissions import RiskTier
+            sim = self.world_simulator.simulate(
+                candidate.text,
+                tool=tool_name,
+                tool_args=dict(getattr(candidate, "tool_args", {}) or {}),
+                reversible=getattr(candidate, "reversible", True),
+            )
+            # record simulation in audit trail
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"simulation: risk={sim.risk_tier()} rollback={sim.rollback_possible} "
+                f"effects={sim.side_effects}",
+                salience=0.6, confidence=sim.confidence)
+            # risk tier can only be upgraded, never downgraded
+            sim_tier = _str_to_risk_tier(sim.risk_tier())
+            if sim_tier is not None and sim_tier.value > candidate.risk.value:
+                candidate.risk = sim_tier
+            # if the simulation says not rollback-possible, mark reversible=False
+            if not sim.rollback_possible:
+                candidate.reversible = False
+        except Exception:  # noqa: BLE001 — simulation is advisory, never fatal
+            pass
+        return candidate
 
     def _compete_with_role_council(self, stimulus: str, focus: Optional[Percept],
                                     memories: List[Any]) -> Candidate:
