@@ -231,6 +231,9 @@ class LLMConfig(BaseModel):
     reasoning_samples: int = Field(default=1, ge=1, le=9)
     # Token ceiling for the private "think" scratchpad pass.
     reasoning_think_tokens: int = Field(default=1024, ge=64, le=8192)
+    # Level 3 — Recursive Self Improvement: iterations of critique+revise per respond turn.
+    # 1 = off (single pass); 5–20 = active recursive improvement.
+    recursive_improvement_iterations: int = Field(default=5, ge=1, le=20)
 
     def active_model(self) -> str:
         return {

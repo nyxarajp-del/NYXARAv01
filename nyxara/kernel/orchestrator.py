@@ -265,6 +265,9 @@ class NyxaraCore:
         # arbitration cycle, and surfaces the top-N winners to the reason step.
         self.workspace = self._build_workspace()
         self.thought_gen = self._build_thought_gen()
+        # Level 3 — Recursive Self Improvement: after the initial candidate is proposed,
+        # run N iterations of critique→improve→re-score and return the best answer.
+        self.recursive_improver = self._build_recursive_improver()
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -584,6 +587,17 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — thought generation is a capability, never required
             return None
 
+    def _build_recursive_improver(self) -> Any:
+        """Level 3 — the recursive self-improvement engine (N critique+revise iterations)."""
+        try:
+            from nyxara.mind.recursive_improver import RecursiveImprover
+            from nyxara.kernel.config import get_settings
+            n = getattr(get_settings().llm, "recursive_improvement_iterations", 5)
+            llm = getattr(self.reasoner, "llm", None)
+            return RecursiveImprover(llm=llm, n_iterations=n)
+        except Exception:  # noqa: BLE001 — recursive improvement is a capability, never required
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -847,6 +861,9 @@ class NyxaraCore:
         # who NYXARA is, what she can do, and what her current state and goals are.
         enriched = self._inject_self_knowledge(enriched)
         candidate = self._reason_parallel(stimulus, focus, enriched)
+        # Level 3 — recursive self-improvement: run N critique+revise iterations on
+        # "respond" candidates, returning the highest-quality version.
+        candidate = self._recursive_improve(stimulus, candidate)
         self._arbitrate(stimulus, candidate, enriched)
         return candidate
 
@@ -961,6 +978,22 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _recursive_improve(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Level 3 — run N critique+revise iterations on the candidate and return the
+        highest-quality version.  Only applied to 'respond' turns (not tool actions);
+        best-effort: returns the original on any failure."""
+        if self.recursive_improver is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            improved = self.recursive_improver.improve(stimulus, candidate)
+            if improved is not None:
+                return improved
+        except Exception:  # noqa: BLE001 — improvement is advisory, never fatal
+            pass
+        return candidate
 
     @staticmethod
     def _hypothesis_signature(c: Candidate) -> tuple:
