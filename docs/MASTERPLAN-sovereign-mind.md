@@ -349,3 +349,24 @@ which needs GPU/torch + a teacher key — to be run on the Master's GPU box, not
 
 **Next frontier:** A1 (distillation corpus → `foundry.collect_corpus()`) + LoRA-on-Qwen config + a
 "train" entry point — scaffolded as code + tests here, executed on GPU by the Master.
+
+### 2026-06 — `nyxara-grow`: the flywheel as one command + verified end to end
+
+`collect_corpus()` already folds in distilled teacher docs, so A1's corpus wiring was done. We
+verified the **whole self-model flywheel runs on CPU** (n-gram backend): distil → forge → gauntlet →
+promote → `SelfProvider` serves the result. Packaged it as a Master-facing command —
+`nyxara/growth/__main__.py` (console script **`nyxara-grow`**): `python -m nyxara.growth --backend
+ngram --generations 1 --bench` runs anywhere; `--distill --backend lora --base-model Qwen/Qwen2.5-7B`
+scales the *same* flywheel on a GPU box. Works on a deep settings copy (no global mutation); promotion
+stays gauntlet-gated + reversible. 4 tests; README documents it.
+
+### 2026-06 — Pillar C1/C2/C3: a living autonomic mind
+
+The background `AutonomicLoop` cycled a fixed 4-prompt list. Gave it an inner life:
+`AutonomicLoop(core, inner_life=True)` now chooses each self-directed turn herself — a **due standing
+intention** (`memory/prospective.py`, queued so none are dropped) first, else a **spontaneous thought**
+from her default-mode stream (`kernel/stream.py`, auto-wired from the core), else the steady
+repertoire. `report()` surfaces the prompt-source mix. `inner_life` defaults off (behaviour unchanged);
+every chosen prompt still clears the same sovereign gates under AUTONOMOUS authority — anything risky
+escalates, never auto-acts. Verified live (intention → stream → repertoire); 4 new tests; suite 3270
+green. (C4 curiosity self-play already runs via the periodic `GrowthEngine` growth pass.)
