@@ -343,6 +343,28 @@ class FoundryConfig(BaseModel):
         return int(embeddings + n_layer * per_block + n_embd)      # + final layernorm
 
 
+class CapabilityFoundryConfig(BaseModel):
+    """Capability Foundry settings (growth/capability_foundry.py) — Level 15, Rule 4.
+
+    When a capability is missing entirely, NYXARA designs a brand-new tool for herself:
+    plan → write code → test → benchmark → deploy. Unlike the heavy model foundry this is
+    lightweight and safe-by-construction (generated code is statically scanned, run only in
+    the isolated sandbox, and clamped to ``tool.call``/low risk), so it is **on** by default.
+    Autonomously-forged tools never touch the sovereign core; anything privileged is refused
+    unless the Master installs it (Rule 8 loyalty gate).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    use_llm: bool = True            # use the injected LLM when available; else templates
+    test_timeout_s: float = Field(default=5.0, gt=0.0, le=30.0)
+    benchmark_repeats: int = Field(default=3, ge=1, le=50)
+    benchmark_min_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    allow_autonomous_deploy: bool = True   # safe-tier forges may auto-deploy
+    max_versions_kept: int = Field(default=50, ge=1)
+
+
 class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
@@ -641,6 +663,7 @@ class NyxaraSettings(BaseSettings):
     features: FeatureFlags = Field(default_factory=FeatureFlags)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
+    capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
