@@ -308,6 +308,9 @@ class NyxaraCore:
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
         self.civilization = self._build_civilization()
+        # Level 10 — Autonomous Researcher: self-directed web research on triggered topics.
+        self.researcher = self._build_researcher() if enable_memory else None
+        self._research_queue: List[str] = []   # topics to research on next idle tick
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -717,6 +720,21 @@ class NyxaraCore:
             event_bus = getattr(self, "bus", None)
             return MicroAgentCivilization(core=self, event_bus=event_bus)
         except Exception:  # noqa: BLE001 — civilization is a capability, never required
+            return None
+
+    def _build_researcher(self) -> Any:
+        """Level 10 — AutonomousResearcher for self-directed web research."""
+        try:
+            from nyxara.growth.researcher import AutonomousResearcher
+            return AutonomousResearcher(
+                tools=self.tools,
+                knowledge=self.knowledge,
+                knowledge_graph=self.knowledge_graph,
+                llm=getattr(self.reasoner, "llm", None) if self.reasoner else None,
+                memory=self.memory,
+                sandbox=getattr(self, "sandbox_runner", None),
+            )
+        except Exception:  # noqa: BLE001 — researcher is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -1538,7 +1556,12 @@ class NyxaraCore:
         if (self.skill_factory is not None and disp is Disposition.ACT and success):
             try:
                 goal_text = candidate.tool or candidate.text or candidate.kind
-                self.skill_factory.maybe_create_skill(goal_text, episode=candidate)
+                factory_result = self.skill_factory.maybe_create_skill(goal_text,
+                                                                        episode=candidate)
+                # Level 10 — queue a research pass on the new skill's domain
+                if (factory_result.skill_created and self.researcher is not None
+                        and goal_text not in self._research_queue):
+                    self._research_queue.append(goal_text[:60])
             except Exception:  # noqa: BLE001 — skill factory is best-effort, never fatal
                 pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
@@ -1659,6 +1682,17 @@ class NyxaraCore:
                         self.mind.record(ThoughtKind.INFERENCE,
                                          f"reflection [{cr.cycle}]: {cr.next_focus}"[:80],
                                          salience=0.65)
+            except Exception:  # noqa: BLE001
+                pass
+        # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
+        if self.researcher is not None and self._research_queue:
+            try:
+                topic = self._research_queue.pop(0)
+                research_report = self.researcher.research(topic)
+                report["research_reports"] = len(self.researcher.all_reports())
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"research [{topic[:30]}]: {research_report.summary[:50]}",
+                                 salience=0.55)
             except Exception:  # noqa: BLE001
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
@@ -1992,6 +2026,8 @@ class NyxaraCore:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
         if self.civilization is not None:
             rep["civilization_agents"] = len(self.civilization.agents)
+        if self.researcher is not None:
+            rep["research_reports"] = len(self.researcher.all_reports())
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
