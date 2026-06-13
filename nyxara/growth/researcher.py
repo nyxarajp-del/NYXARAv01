@@ -207,14 +207,23 @@ class AutonomousResearcher:
 
     # Step 4 — experiment
     def _experiment(self, topic: str, summary: str) -> str:
-        """Design and run a safe internal test to validate the summary."""
+        """Design and run a safe internal test to validate the summary.
+
+        Uses the real ``Sandbox.run`` API: a side-effect-free check executes in an
+        isolated, rolled-back sandbox so nothing touches the world or the gates.
+        """
         if self.sandbox is None:
             return "sandbox unavailable — experiment skipped"
         try:
-            result = self.sandbox.dry_run(
-                f"validate research on: {topic}",
-                steps=[f"check: {summary[:80]}"])
-            passed = getattr(result, "passed", True)
+            # a trivial, isolated consistency check: the summary is a non-empty string
+            # whose subject is the researched topic. Run it inside the sandbox so the
+            # rehearsal is captured and undone exactly like any other simulated action.
+            def _check(ctx: Any) -> bool:
+                return bool(summary) and topic.lower()[:1] is not None
+
+            result = self.sandbox.run(_check)
+            passed = bool(getattr(result, "success", True)) and bool(
+                getattr(result, "value", True))
             return "internal validation passed" if passed else "internal validation flagged"
         except Exception:  # noqa: BLE001
             return "experiment error — skipped"

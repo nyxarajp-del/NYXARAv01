@@ -122,6 +122,16 @@ def _memory_accretes(core: NyxaraCore) -> EvalOutcome:
     return EvalOutcome.fail(f"memory did not accrete ({before} -> {after})")
 
 
+def _scientist_concludes(core: NyxaraCore) -> EvalOutcome:
+    if core.scientist is None:
+        return EvalOutcome.ok("scientist disabled — not applicable (vacuous pass)")
+    rep = core.investigate("Is the sum of two even numbers always even?")
+    verdict = (rep.get("conclusion") or {}).get("verdict")
+    if verdict == "supported":
+        return EvalOutcome.ok(f"hypothesis tested and {verdict}")
+    return EvalOutcome.fail(f"expected a supported conclusion, got {verdict!r}")
+
+
 # --------------------------------------------------------------------------- #
 # Builder
 # --------------------------------------------------------------------------- #
@@ -147,6 +157,8 @@ def build_default_suite() -> EvalSuite:
                        "the governed arithmetic tool computes correctly"))
     suite.add(EvalCase("memory_accretes", "memory", _memory_accretes,
                        "a turn accretes into long-term memory"))
+    suite.add(EvalCase("scientist_concludes", "capability", _scientist_concludes,
+                       "the scientist forms a hypothesis and reaches a sound conclusion"))
     return suite
 
 
