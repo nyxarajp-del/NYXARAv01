@@ -154,6 +154,19 @@ class _WorkspaceThought:
         return self._text
 
 
+class _GraphFact:
+    """Level 6 — wraps a knowledge-graph triple text as a memory item the reasoner
+    can consume via .text() — same interface as MemoryRecord."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = f"[graph] {text}"
+
+    def text(self) -> str:
+        return self._text
+
+
 class _SelfKnowledgeEntry:
     """Level 2 — wraps a SelfKnowledgeReport as a high-priority memory item so the
     reasoner always sees a formatted self-model summary at the top of its context."""
@@ -286,6 +299,9 @@ class NyxaraCore:
         # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
         # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
         self.world_simulator = self._build_world_simulator()
+        # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
+        self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
+        self._graph_populator: Any = None  # initialised lazily with the graph
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -636,6 +652,39 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — world simulation is a capability, never required
             return None
 
+    def _build_knowledge_graph(self) -> Any:
+        """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
+        accumulates structured triples as conversations proceed."""
+        try:
+            from nyxara.memory.graph import KnowledgeGraph, _configure_standard_relations
+            from nyxara.memory.provenance import Provenance, SourceType
+            g = KnowledgeGraph()
+            _configure_standard_relations(g)
+            # seed core identity triples
+            prov = Provenance(SourceType.OWNER, confidence=1.0)
+            g.add_triple("nyxara", "is_a", "sovereign_cognitive_agent",
+                         confidence=1.0, provenance=prov)
+            g.add_triple("nyxara", "owned_by", "master",
+                         confidence=1.0, provenance=prov)
+            return g
+        except Exception:  # noqa: BLE001 — knowledge graph is a capability, never required
+            return None
+
+    def _get_graph_populator(self) -> Any:
+        """Lazily build the GraphPopulator once both the graph is ready."""
+        if self._graph_populator is not None:
+            return self._graph_populator
+        if self.knowledge_graph is None:
+            return None
+        try:
+            from nyxara.memory.graph import GraphPopulator
+            from nyxara.memory.provenance import Provenance, SourceType
+            prov = Provenance(SourceType.SELF_REFLECTION, confidence=0.7)
+            self._graph_populator = GraphPopulator(self.knowledge_graph, provenance=prov)
+            return self._graph_populator
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -876,14 +925,31 @@ class NyxaraCore:
 
     # ---- recall & reasoning ---- #
     def _recall_for(self, stimulus: str) -> List[Any]:
-        """Associative recall cued by the stimulus, fed into the reason step for grounding."""
-        if self.retriever is None:
-            return []
-        try:
-            from nyxara.memory.retrieval import RetrievalContext
-            return self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
-        except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
-            return []
+        """Associative recall cued by the stimulus. Level 6: combines vector retrieval
+        with knowledge-graph traversal so multi-hop structured facts complement
+        the raw similarity search."""
+        results: List[Any] = []
+        if self.retriever is not None:
+            try:
+                from nyxara.memory.retrieval import RetrievalContext
+                results = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+            except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
+                pass
+        # Level 6 — graph traversal: extract entity mentions and find related triples
+        if self.knowledge_graph is not None:
+            try:
+                answer = self.knowledge_graph.ask(stimulus)
+                if answer.triples:
+                    # convert graph triples to lightweight wrapper objects the reasoner
+                    # can consume via .text() — same interface as memory records
+                    for triple in answer.triples[:3]:
+                        subj = self.knowledge_graph.get_entity(triple.subject).name
+                        obj_ = self.knowledge_graph.get_entity(triple.object).name
+                        fact_text = f"{subj} {triple.predicate} {obj_}"
+                        results.append(_GraphFact(fact_text))
+            except Exception:  # noqa: BLE001 — graph recall is best-effort
+                pass
+        return results
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
@@ -1243,7 +1309,8 @@ class NyxaraCore:
         """Persist the exchange to long-term memory so turns accrete into continuity.
 
         The Master's words and NYXARA's reply are stored as *separate* episodic memories so
-        each is independently recallable (a question can resurface without its answer)."""
+        each is independently recallable (a question can resurface without its answer).
+        Level 6: also auto-populates the KnowledgeGraph with triples extracted from the turn."""
         if self.memory is None:
             return
         try:
@@ -1260,6 +1327,14 @@ class NyxaraCore:
                 provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.7),
                 importance=0.5 if owner else 0.35, tags=["conversation", "response"])
         except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
+            pass
+        # Level 6 — auto-populate the knowledge graph from the conversation turn
+        try:
+            populator = self._get_graph_populator()
+            if populator is not None:
+                populator.from_conversation_turn(stimulus, response,
+                                                 confidence=0.8 if authority is Authority.OWNER else 0.6)
+        except Exception:  # noqa: BLE001 — graph population is best-effort
             pass
 
     # ---- identity / social / growth (faculties that colour but never govern) ---- #
@@ -1831,6 +1906,8 @@ class NyxaraCore:
                 "broadcasts", 0)
         if self.self_model is not None:
             rep["self_knowledge"] = self.self_model.self_description()
+        if self.knowledge_graph is not None:
+            rep["graph_triples"] = len(self.knowledge_graph)
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)

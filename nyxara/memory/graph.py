@@ -49,6 +49,8 @@ __all__ = [
     "GraphAnswer",
     "KnowledgeGraph",
     "has_networkx",
+    "Relation",
+    "GraphPopulator",
 ]
 
 
@@ -472,6 +474,138 @@ class KnowledgeGraph:
             preds[t.predicate] = preds.get(t.predicate, 0) + 1
         return {"entities": len(self._entities), "triples": len(self._triples),
                 "predicates": preds, "networkx": has_networkx()}
+
+
+# --------------------------------------------------------------------------- #
+# Standard relation vocabulary (Level 6)
+# --------------------------------------------------------------------------- #
+class Relation(str):
+    """Standard predicate constants — use these instead of bare strings."""
+    CAUSES = "causes"
+    OWNS = "owns"
+    DEPENDS_ON = "depends_on"
+    CREATED_BY = "created_by"
+    LEARNED_FROM = "learned_from"
+    PART_OF = "part_of"
+    ENABLES = "enables"
+    BLOCKS = "blocks"
+    RELATED_TO = "related_to"
+    IS_A = "is_a"
+    HAS_PROPERTY = "has_property"
+    SAID = "said"
+    REPLIED = "replied"
+
+
+def _configure_standard_relations(graph: KnowledgeGraph) -> None:
+    """Register standard inverse, transitive, and symmetric relations."""
+    graph.register_inverse(Relation.OWNS, "owned_by")
+    graph.register_inverse(Relation.CREATED_BY, "created")
+    graph.register_inverse(Relation.DEPENDS_ON, "required_by")
+    graph.register_inverse(Relation.ENABLES, "enabled_by")
+    graph.register_inverse(Relation.BLOCKS, "blocked_by")
+    graph.register_transitive(Relation.PART_OF)
+    graph.register_transitive(Relation.IS_A)
+    graph.register_transitive(Relation.CAUSES)
+    graph.register_symmetric(Relation.RELATED_TO)
+    # synonym shortcuts for the NL parser
+    for word in ("causes", "cause", "led"):
+        graph.add_synonym(word, Relation.CAUSES)
+    for word in ("depends", "requires", "needs"):
+        graph.add_synonym(word, Relation.DEPENDS_ON)
+    for word in ("enables", "allow", "allows"):
+        graph.add_synonym(word, Relation.ENABLES)
+    for word in ("part", "component", "module"):
+        graph.add_synonym(word, Relation.PART_OF)
+    for word in ("learned", "learned from", "from"):
+        graph.add_synonym(word, Relation.LEARNED_FROM)
+
+
+class GraphPopulator:
+    """Extract subject–predicate–object triples from memory records and text.
+
+    Used by Level 6 to auto-populate the KnowledgeGraph every turn from episodic
+    and semantic memories, so the graph accumulates structured knowledge organically.
+    """
+
+    def __init__(self, graph: KnowledgeGraph,
+                 provenance: Optional[Provenance] = None) -> None:
+        self.graph = graph
+        self.default_prov = provenance
+
+    def from_memory_record(self, record: Any) -> int:
+        """Extract triples from a MemoryRecord (or any object with a .text() method).
+
+        Uses simple heuristics to identify subject-verb-object patterns in the text.
+        Returns the number of triples added.
+        """
+        try:
+            text = record.text() if callable(getattr(record, "text", None)) else str(
+                getattr(record, "content", record))
+            text = str(text).strip()
+            if not text:
+                return 0
+            return self._parse_and_add(text)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def from_conversation_turn(self, stimulus: str, response: str,
+                                confidence: float = 0.7) -> int:
+        """Add triples from a conversation turn (stimulus + response pair)."""
+        added = 0
+        prov = self.default_prov
+        # "Master said X" → (master, said, X[:40])
+        s_short = stimulus[:60].strip()
+        r_short = response[:60].strip()
+        if s_short:
+            try:
+                self.graph.add_triple("master", Relation.SAID, s_short,
+                                      confidence=confidence, provenance=prov)
+                added += 1
+            except Exception:  # noqa: BLE001
+                pass
+        if r_short:
+            try:
+                self.graph.add_triple("nyxara", Relation.REPLIED, r_short,
+                                      confidence=confidence * 0.9, provenance=prov)
+                added += 1
+            except Exception:  # noqa: BLE001
+                pass
+        # extract any "X is Y" / "X has Y" patterns from stimulus
+        added += self._parse_and_add(stimulus, confidence=confidence * 0.8)
+        return added
+
+    def _parse_and_add(self, text: str, confidence: float = 0.65) -> int:
+        """Heuristic triple extraction from free text."""
+        added = 0
+        prov = self.default_prov
+        lower = text.lower()
+        # "X is a Y" / "X is Y"
+        for m in re.finditer(r"(\b[\w\s]{2,30}?)\s+is\s+(?:a\s+|an\s+)?([\w\s]{2,30}?\b)",
+                             lower):
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            if 2 <= len(subj) <= 30 and 2 <= len(obj) <= 30:
+                try:
+                    self.graph.add_triple(subj, Relation.IS_A, obj,
+                                          confidence=confidence, provenance=prov)
+                    added += 1
+                    if added >= 5:
+                        return added
+                except Exception:  # noqa: BLE001
+                    pass
+        # "X has Y" / "X owns Y"
+        for m in re.finditer(r"(\b[\w\s]{2,20}?)\s+(?:has|owns|have)\s+([\w\s]{2,20}?\b)",
+                             lower):
+            subj, obj = m.group(1).strip(), m.group(2).strip()
+            if 2 <= len(subj) <= 20 and 2 <= len(obj) <= 20:
+                try:
+                    self.graph.add_triple(subj, Relation.HAS_PROPERTY, obj,
+                                          confidence=confidence * 0.8, provenance=prov)
+                    added += 1
+                    if added >= 5:
+                        return added
+                except Exception:  # noqa: BLE001
+                    pass
+        return added
 
 
 def _swap(t: Triple, as_predicate: str) -> Triple:
