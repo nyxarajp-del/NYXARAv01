@@ -308,18 +308,20 @@ class NyxaraCore:
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
         self.civilization = self._build_civilization()
-        # Level 10 — Autonomous Researcher: self-directed web research on triggered topics.
-        self.researcher = self._build_researcher() if enable_memory else None
-        self._research_queue: List[str] = []   # topics to research on next idle tick
         # Level 11 — AutoForge: automated model training pipeline.
         self.autoforge = self._build_autoforge() if enable_growth else None
         # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
         self.dream_session = self._build_dream_session() if enable_memory else None
         # Level 13 — Prediction Engine: calibrated probability + confidence interval.
         self.prediction_engine = self._build_prediction_engine() if enable_growth else None
+        # Level 14 — Meta Intelligence: post-turn reasoning quality evaluation.
+        self.meta_intelligence = self._build_meta_intelligence() if enable_growth else None
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
+        # Level 10 — Autonomous Researcher: built after knowledge so it has access to kb.
+        self.researcher = self._build_researcher() if enable_memory else None
+        self._research_queue: List[str] = []   # topics to research on next idle tick
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -732,15 +734,30 @@ class NyxaraCore:
         """Level 10 — AutonomousResearcher for self-directed web research."""
         try:
             from nyxara.growth.researcher import AutonomousResearcher
+            reasoner = getattr(self, "reasoner", None)
             return AutonomousResearcher(
-                tools=self.tools,
-                knowledge=self.knowledge,
-                knowledge_graph=self.knowledge_graph,
-                llm=getattr(self.reasoner, "llm", None) if self.reasoner else None,
-                memory=self.memory,
+                tools=getattr(self, "tools", None),
+                knowledge=getattr(self, "knowledge", None),
+                knowledge_graph=getattr(self, "knowledge_graph", None),
+                llm=getattr(reasoner, "llm", None) if reasoner else None,
+                memory=getattr(self, "memory", None),
                 sandbox=getattr(self, "sandbox_runner", None),
             )
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
+            return None
+
+    def _build_meta_intelligence(self) -> Any:
+        """Level 14 — MetaIntelligence: post-turn reasoning quality evaluation."""
+        try:
+            from nyxara.mind.meta_intelligence import MetaIntelligence
+            return MetaIntelligence(
+                meta_learner=self.meta,
+                dual_process=self.dual_process,
+                reflector=self.reflector,
+                memory=self.memory,
+                goals=self.goals,
+            )
+        except Exception:  # noqa: BLE001 — meta-intelligence is a capability, never required
             return None
 
     def _build_prediction_engine(self) -> Any:
@@ -1623,6 +1640,26 @@ class NyxaraCore:
                                  {k: float(v) for k, v in features.items()}, reward)
             except Exception:  # noqa: BLE001 — meta-learning is best-effort, never fatal
                 pass
+        # Level 14 — MetaIntelligence: evaluate reasoning quality post-turn and
+        # push improvement suggestions as soft goals.
+        if self.meta_intelligence is not None:
+            try:
+                # create a minimal result proxy with disposition info
+                class _R:
+                    def __init__(self, d): self.disposition = d.value
+                meta_eval = self.meta_intelligence.evaluate_turn(
+                    stimulus=getattr(candidate, "text", ""),
+                    candidate=candidate,
+                    result=_R(disp),
+                    arbitration=self._last_arbitration,
+                )
+                if meta_eval.improvement_suggestion:
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        f"meta: {meta_eval.improvement_suggestion[:60]}",
+                        salience=0.5, confidence=meta_eval.quality_score)
+            except Exception:  # noqa: BLE001 — meta-intelligence is advisory, never fatal
+                pass
         # Level 7 — SkillFactory: on successful ACT, check if this goal type recurs
         # enough to warrant auto-creating a composite skill for reuse.
         if (self.skill_factory is not None and disp is Disposition.ACT and success):
@@ -2129,6 +2166,8 @@ class NyxaraCore:
             rep["dream_sessions"] = self.dream_session.sessions_count
         if self.prediction_engine is not None:
             rep["predictions_made"] = self.prediction_engine.predictions_count
+        if self.meta_intelligence is not None:
+            rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
