@@ -95,6 +95,41 @@ def test_unknown_question_without_knowledge_is_inconclusive():
     assert rep.conclusion.verdict is Verdict.INCONCLUSIVE
 
 
+def test_unrelated_knowledge_does_not_falsely_affirm():
+    """A KB holding only unrelated facts must NOT make the verdict 'supported'.
+    Retrieval similarity is not affirmation — only genuine term overlap counts."""
+    kb = KnowledgeBase(name="unrelated")
+    kb.ingest_text("The Eiffel Tower is in Paris and is made of iron.", source="x")
+    rep = Scientist(knowledge=kb).investigate("Does the moon emit its own light?")
+    assert rep.experiment.kind is ExperimentKind.KNOWLEDGE
+    assert rep.observation.value == 0
+    assert rep.conclusion.verdict is Verdict.INCONCLUSIVE
+
+
+def test_affirming_knowledge_supports_the_hypothesis():
+    """A KB whose content genuinely overlaps the claim does ground a 'supported'."""
+    kb = KnowledgeBase(name="related")
+    kb.ingest_text(
+        "The moon does not emit its own light; it reflects sunlight.", source="x")
+    rep = Scientist(knowledge=kb).investigate("Does the moon reflect sunlight?")
+    assert rep.experiment.kind is ExperimentKind.KNOWLEDGE
+    assert rep.observation.value >= 1
+    assert rep.conclusion.verdict is Verdict.SUPPORTED
+
+
+def test_knowledge_experiment_uses_current_question_not_previous():
+    """Regression: the knowledge experiment must retrieve for the question under
+    test, not the previously investigated one."""
+    kb = KnowledgeBase(name="ordering")
+    kb.ingest_text("Photosynthesis converts light into chemical energy in plants.",
+                   source="bio")
+    sci = Scientist(knowledge=kb)
+    sci.investigate("Is photosynthesis a real biological process?")  # primes history
+    rep = sci.investigate("Do volcanoes erupt molten lava?")  # unrelated to the KB
+    assert rep.observation.value == 0
+    assert rep.conclusion.verdict is Verdict.INCONCLUSIVE
+
+
 def test_conclusion_suggests_next_hypothesis():
     rep = Scientist().investigate("Is the sum of two even numbers always even?")
     assert rep.conclusion.next_hypothesis

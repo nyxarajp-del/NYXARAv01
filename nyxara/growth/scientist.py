@@ -213,7 +213,8 @@ class Scientist:
                                                          report.background_claims)
 
             # 3. run + compare
-            report.observation = self._run_experiment(report.experiment)
+            report.observation = self._run_experiment(
+                report.experiment, question, primary)
 
             # 4. conclude
             report.conclusion = self._conclude(primary, report.experiment,
@@ -405,9 +406,10 @@ class Scientist:
     # ---------------------------------------------------------------------- #
     # Step 3 — run + compare
     # ---------------------------------------------------------------------- #
-    def _run_experiment(self, exp: Experiment) -> Observation:
+    def _run_experiment(self, exp: Experiment, question: str = "",
+                        hypothesis: Optional[Hypothesis] = None) -> Observation:
         if exp.kind is ExperimentKind.KNOWLEDGE:
-            return self._run_knowledge_experiment()
+            return self._run_knowledge_experiment(question, hypothesis)
 
         # COMPUTATIONAL / NUMERIC both execute their procedure in the sandbox so the
         # run is isolated and any (simulated) effects are captured, never enacted.
@@ -430,17 +432,31 @@ class Scientist:
         except Exception as exc:  # noqa: BLE001
             return Observation(value=None, detail=f"{exc}", success=False)
 
-    def _run_knowledge_experiment(self) -> Observation:
-        """Count grounded claims that affirm the hypothesis (the 'measurement')."""
-        hits = 0
-        detail = "no knowledge source available"
-        if self.knowledge is not None:
-            try:
-                chunks = self.knowledge.retrieve(self._last_question(), k=4)
-                hits = len(chunks)
-                detail = f"{hits} grounding chunk(s) retrieved"
-            except Exception:  # noqa: BLE001
-                pass
+    def _run_knowledge_experiment(self, question: str = "",
+                                  hypothesis: Optional[Hypothesis] = None) -> Observation:
+        """Measure how many retrieved chunks *actually affirm* the hypothesis.
+
+        Retrieval similarity alone is not evidence: a chunk that merely comes back
+        for a query says nothing about whether it supports the claim. So we retrieve
+        for the *current* question and then count only the chunks whose content
+        genuinely overlaps the hypothesis's key terms — an unrelated chunk affirms
+        nothing, and the verdict stays honest (INCONCLUSIVE) rather than falsely
+        SUPPORTED.
+        """
+        if self.knowledge is None:
+            return Observation(value=0, detail="no knowledge source available",
+                               success=True)
+        try:
+            chunks = self.knowledge.retrieve(question, k=4)
+        except Exception:  # noqa: BLE001
+            return Observation(value=0, detail="retrieval failed", success=True)
+
+        statement = hypothesis.statement if hypothesis is not None else question
+        terms = _key_terms(statement)
+        affirming = [c for c in chunks if _chunk_affirms(c, terms)]
+        hits = len(affirming)
+        detail = (f"{len(chunks)} chunk(s) retrieved, {hits} affirm the hypothesis"
+                  if chunks else "no grounding chunks retrieved")
         return Observation(value=hits, detail=detail, success=True)
 
     # ---------------------------------------------------------------------- #
@@ -560,9 +576,6 @@ class Scientist:
                 self._sandbox = None
         return self._sandbox
 
-    def _last_question(self) -> str:
-        return self._investigations[-1].question if self._investigations else ""
-
     def _llm_available(self) -> bool:
         if self.llm is None:
             return False
@@ -575,6 +588,35 @@ class Scientist:
 # --------------------------------------------------------------------------- #
 # Pure helpers (stdlib only — safe to run in or out of the sandbox)
 # --------------------------------------------------------------------------- #
+_STOPWORDS = frozenset({
+    "evidence", "supports", "support", "does", "do", "did", "is", "are", "was",
+    "were", "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "not",
+    "that", "this", "it", "its", "be", "been", "has", "have", "had", "with",
+    "always", "ever", "than", "then", "as", "by", "at", "from", "can", "will",
+    "would", "should", "could", "may", "might", "own", "more", "most", "any",
+})
+
+
+def _key_terms(statement: str) -> List[str]:
+    """Content words of a hypothesis statement — the terms a chunk must mention
+    to count as affirming it (stopwords and short tokens dropped)."""
+    words = re.findall(r"[A-Za-z][A-Za-z'-]+", statement.lower())
+    return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
+
+
+def _chunk_affirms(chunk: Any, terms: List[str]) -> bool:
+    """A chunk affirms the hypothesis only if its text genuinely overlaps the
+    hypothesis's key terms. With no key terms there is nothing to affirm."""
+    if not terms:
+        return False
+    text = (getattr(chunk, "text", "") or "").lower()
+    matched = sum(1 for t in set(terms) if t in text)
+    # require a real overlap: at least half the key terms (min 1, cap at 2 so a
+    # long claim isn't impossible to ground), never zero.
+    needed = max(1, min(2, (len(set(terms)) + 1) // 2))
+    return matched >= needed
+
+
 def _is_prime(n: int) -> bool:
     if n < 2:
         return False
