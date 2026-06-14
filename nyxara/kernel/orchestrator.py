@@ -332,6 +332,11 @@ class NyxaraCore:
         # after the researcher so it can reuse it for background evidence.
         self.scientist = self._build_scientist() if enable_memory else None
         self._investigation_queue: List[str] = []  # questions to investigate on idle
+        # Level 10c — Autonomous Scientist: the self-driven discovery loop. Built after the
+        # scientist (composed for hypothesis/experiment/result) so each idle tick can advance one
+        # Observe → Hypothesis → Experiment → Result → Update-model cycle.
+        self.autonomous_scientist = (
+            self._build_autonomous_scientist() if enable_memory else None)
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -892,6 +897,26 @@ class NyxaraCore:
                 llm=getattr(reasoner, "llm", None) if reasoner else None,
             )
         except Exception:  # noqa: BLE001 — scientist is a capability, never required
+            return None
+
+    def _build_autonomous_scientist(self) -> Any:
+        """Level 10c — AutonomousScientist: the self-driven discovery loop.
+
+        Observe → Hypothesis → Experiment → Result → Update model. Built after the Scientist
+        (which it composes for hypothesis/experiment/result) and the world model (which it folds
+        results into). She poses her own questions — seeding from her self-knowledge gaps — so the
+        loop runs with no external prompting, creating information rather than only learning it.
+        """
+        try:
+            from nyxara.growth.autonomous_scientist import AutonomousScientist
+            return AutonomousScientist(
+                scientist=getattr(self, "scientist", None),
+                world_model=getattr(self, "world_model", None),
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                gap_source=self.known_unknowns,
+            )
+        except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
             return None
 
     def _build_meta_intelligence(self) -> Any:
@@ -2042,6 +2067,24 @@ class NyxaraCore:
                         salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f) Level 10c — autonomous scientist: advance one self-driven discovery cycle on idle
+        #     (she poses her own question, tests it, and updates her model). Gated by oversight —
+        #     a paused/scrammed mind does not run experiments of its own accord.
+        if self.autonomous_scientist is not None:
+            try:
+                if self.oversight.gate():
+                    cycle = self.autonomous_scientist.step()
+                    if cycle is not None:
+                        report["discoveries"] = len(self.autonomous_scientist.all_cycles())
+                        verdict = (getattr(getattr(getattr(cycle.report, "conclusion", None),
+                                                   "verdict", None), "value", "?")
+                                   if cycle.report is not None else "?")
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"discovery [{cycle.question[:25]}]: {verdict}",
+                            salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
             cur = self.curiosity_pass()
@@ -2150,6 +2193,21 @@ class NyxaraCore:
             return self.scientist.investigate(question).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"question": question, "error": str(exc)}
+
+    def discover(self, cycles: int = 3) -> Dict[str, Any]:
+        """Run the autonomous discovery loop for ``cycles`` turns (best-effort).
+
+        Each turn: she *observes* (poses her own next question), forms a hypothesis, runs a
+        *safe* sandboxed experiment, reads the result, and *updates her model* — folding the
+        finding into an evolving belief model and the world model, and spawning the next question.
+        Nothing here touches the world or side-steps the control law. Returns the report as a dict.
+        """
+        if self.autonomous_scientist is None:
+            return {"cycles": cycles, "error": "autonomous_scientist unavailable"}
+        try:
+            return self.autonomous_scientist.discover(cycles).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"cycles": cycles, "error": str(exc)}
 
     def _voi(self) -> Any:
         if getattr(self, "_voi_engine", None) is None:
@@ -2445,6 +2503,9 @@ class NyxaraCore:
             rep["research_reports"] = len(self.researcher.all_reports())
         if self.scientist is not None:
             rep["investigations"] = len(self.scientist.all_investigations())
+        if self.autonomous_scientist is not None:
+            rep["discoveries"] = len(self.autonomous_scientist.all_cycles())
+            rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
         if self.dream_session is not None:

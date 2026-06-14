@@ -58,6 +58,7 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/resume`         | restore the loop after a pause/scram                  |
 | `/research <topic>` | run one autonomous research pass on a topic         |
 | `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
+| `/discover [n]`   | autonomous discovery: `n` self-driven observe→…→update-model cycles |
 | `/save`           | persist long-term memory to disk now                  |
 | `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
 
@@ -173,6 +174,27 @@ around the control law.
   ```
 
   From the console: `/research <topic>` and `/investigate <question>`.
+* **The autonomous scientist** — `growth/autonomous_scientist.py`. Next-level intelligence is
+  not *learning* information — it is **creating** it. `core.discover(cycles)` closes the
+  scientific loop and drives it herself:
+
+  > **Observe → Hypothesis → Experiment → Result → Update model**
+
+  Each cycle she **observes** (poses her *own* next question — a follow-up harvested from the
+  last conclusion, a gap in her self-knowledge, or a fresh self-generated testable
+  proposition), then composes the scientist loop for **hypothesis / experiment / result**, then
+  **updates her model**: the finding is folded into an evolving `BeliefModel` (revised, not
+  duplicated, on repeat evidence) and into the `WorldModel` as a real transition, while the
+  conclusion's suggested follow-up is pushed onto the frontier so the *next* observation builds
+  on the last. No one hands her the questions — she generates and verifies new propositions on
+  her own, fully offline, and every experiment is sandboxed so nothing touches the world or the
+  gates. On idle ticks the `AutonomicLoop` advances one discovery cycle (gated by oversight).
+
+  ```python
+  report = core.discover(cycles=5)   # 5 self-driven observe→…→update-model cycles
+  ```
+
+  From the console: `/discover [n]`.
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).
@@ -237,6 +259,7 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/agent`                | POST | a multi-step gated goal — `{goal, max_steps?}` |
 | `/v1/research`             | POST | one autonomous research pass — `{topic}`   |
 | `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
+| `/v1/discover`             | POST | the autonomous discovery loop — `{cycles?}` → belief updates |
 | `/v1/control/{pause\|resume\|scram}` | POST | sovereign control (opt-in)       |
 | `/v1/memory/{save\|load}`  | POST | persist / restore long-term memory (Rule 7) |
 | `/v1/ws`                   | WS   | a streaming chat socket (`?token=`)        |

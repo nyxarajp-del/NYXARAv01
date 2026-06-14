@@ -7,10 +7,22 @@ Public surface for the autonomous research faculties:
 * :class:`~nyxara.growth.scientist.Scientist` — the scientific method: form a
   falsifiable hypothesis, design and run a safe experiment, compare the result to
   the prediction, and draw a calibrated conclusion.
+* :class:`~nyxara.growth.autonomous_scientist.AutonomousScientist` — the self-driven
+  discovery loop: Observe → Hypothesis → Experiment → Result → Update model. She poses
+  her *own* questions and folds each result back into an evolving belief model, *creating*
+  information rather than merely learning it.
 """
 
 from __future__ import annotations
 
+from nyxara.growth.autonomous_scientist import (
+    AutonomousScientist,
+    Belief,
+    BeliefModel,
+    DiscoveryCycle,
+    DiscoveryReport,
+    QuestionOrigin,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -34,4 +46,10 @@ __all__ = [
     "InvestigationReport",
     "Verdict",
     "ExperimentKind",
+    "AutonomousScientist",
+    "DiscoveryReport",
+    "DiscoveryCycle",
+    "BeliefModel",
+    "Belief",
+    "QuestionOrigin",
 ]

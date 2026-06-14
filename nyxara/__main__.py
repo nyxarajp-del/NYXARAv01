@@ -83,6 +83,7 @@ commands:
   /wander [n]        let the idle mind wander n ticks and show the thoughts
   /research <topic>  run one autonomous research pass on a topic
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
+  /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -155,6 +156,12 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /investigate <question>")
         else:
             print(json.dumps(core.investigate(arg), indent=2, default=str))
+    elif cmd == "discover":
+        try:
+            n = int(arg) if arg else 3
+        except ValueError:
+            n = 3
+        print(json.dumps(core.discover(n), indent=2, default=str))
     elif cmd == "save":
         path = _save_session_memory(core) or core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")
