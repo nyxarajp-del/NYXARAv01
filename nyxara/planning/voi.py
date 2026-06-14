@@ -23,7 +23,7 @@ Depends on :mod:`mind.uncertainty` conceptually; pure standard library.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence
 

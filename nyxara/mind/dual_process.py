@@ -27,7 +27,7 @@ Depends on :mod:`mind.faculties`, :mod:`mind.proposal`, :mod:`memory.provenance`
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Tuple
 

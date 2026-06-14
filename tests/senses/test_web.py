@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from nyxara.agency.governor import Governor
 from nyxara.kernel.config import ResourceLimits
-from nyxara.senses.web import (FetchResult, HTMLExtractor, InjectionReport,
-                               InjectionScanner, Web, WebFetcher, WebPage)
+from nyxara.senses.web import (FetchResult, HTMLExtractor, InjectionScanner, Web, WebFetcher, WebPage)
 
 
 SAMPLE = """<html><head><title>Test Page</title>

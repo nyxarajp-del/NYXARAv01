@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.guard.shield import (Shield, ShieldAction, ShieldVerdict, ThreatFinding,
+from nyxara.guard.shield import (Shield, ShieldAction, ThreatFinding,
                                  ThreatType, TrustLevel)
 from nyxara.kernel.errors import AuthorizationError, InvariantViolation
 

@@ -391,7 +391,7 @@ if __name__ == "__main__":  # pragma: no cover
     # Rule 6 report
     rep = store.report(derived.prov_id,
                        required_sources=[SourceType.OWNER, SourceType.SENSOR, SourceType.WEB])
-    print(f"\nRule-6 report:")
+    print("\nRule-6 report:")
     print(f"  trust={rep['trust']}  eff_conf={rep['effective_confidence']}")
     print(f"  completeness={rep['completeness']} (2 of 3 required sources present)")
     print(f"  root_sources={rep['root_sources']}")

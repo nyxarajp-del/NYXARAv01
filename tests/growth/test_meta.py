@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nyxara.growth.meta import MetaLearner, Strategy, Trial
+from nyxara.growth.meta import MetaLearner, Strategy
 
 
 def _ml():

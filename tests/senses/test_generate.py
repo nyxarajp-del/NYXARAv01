@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nyxara.senses.generate import (ImageGenerator, SpeechSynthesizer, identicon_rows,
                                      write_png)
+
+# These cases pin the dependency-free identicon fallback (deterministic, offline). With
+# diffusers+torch installed the real diffusion backend takes over — non-deterministic and
+# engine != "identicon" — so the fallback contract isn't exercised; skip it there.
+_skip_if_diffusion = pytest.mark.skipif(
+    ImageGenerator.diffusion_available(),
+    reason="diffusers installed — the identicon fallback path is not exercised")
 
 
 def test_write_png_is_valid(tmp_path):
@@ -13,6 +22,7 @@ def test_write_png_is_valid(tmp_path):
     assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+@_skip_if_diffusion
 def test_image_generate_fallback(tmp_path):
     p = tmp_path / "art.png"
     res = ImageGenerator().generate("a teal sovereign mind", str(p), size=64)
@@ -22,6 +32,7 @@ def test_image_generate_fallback(tmp_path):
     assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+@_skip_if_diffusion
 def test_image_is_deterministic(tmp_path):
     a = ImageGenerator().generate("same prompt", str(tmp_path / "a.png"), size=64)
     b = ImageGenerator().generate("same prompt", str(tmp_path / "b.png"), size=64)

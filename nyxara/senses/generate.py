@@ -26,7 +26,7 @@ import struct
 import wave
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 __all__ = ["GenerationResult", "ImageGenerator", "SpeechSynthesizer",
            "write_png", "identicon_rows"]

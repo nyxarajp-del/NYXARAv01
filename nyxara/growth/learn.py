@@ -23,7 +23,6 @@ standard library.
 
 from __future__ import annotations
 
-import math
 import random
 import time
 from collections import defaultdict, deque
@@ -282,7 +281,7 @@ if __name__ == "__main__":  # pragma: no cover
         rep.replay(8)                 # rehearse old experiences
     rep_forgot = err_on(rep, A, 1.0)
 
-    print(f"\nforgetting (error on A after learning B):")
+    print("\nforgetting (error on A after learning B):")
     print(f"  plain (no protection) : {plain_forgot:.3f}")
     print(f"  EWC-anchored          : {ewc_forgot:.3f}")
     print(f"  replay-rehearsed      : {rep_forgot:.3f}")

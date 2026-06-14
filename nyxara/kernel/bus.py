@@ -49,7 +49,6 @@ from typing import (
 from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.errors import (
     LEDGER,
-    ErrorCategory,
     NyxaraError,
     RetryPolicy,
     classify,

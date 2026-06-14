@@ -6,7 +6,6 @@ import asyncio
 
 from nyxara.kernel.workspace import (
     Broadcast,
-    Coalition,
     Content,
     GlobalWorkspace,
     SalienceWeights,
@@ -172,7 +171,7 @@ def test_conscious_and_stream():
 
 
 def test_bus_integration_publishes():
-    from nyxara.kernel.bus import EventBus, Event
+    from nyxara.kernel.bus import EventBus
 
     async def go():
         bus = EventBus(workers=1)

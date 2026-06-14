@@ -22,7 +22,7 @@ import ast
 import operator
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec

@@ -5,7 +5,6 @@ intrinsic verifier, the own-first / teacher-fallback decision, and the honest em
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.kernel.config import NyxaraSettings, Profile
 from nyxara.mind.router import Router, RouterResult, answer_quality, default_verifier

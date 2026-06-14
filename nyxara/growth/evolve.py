@@ -273,7 +273,7 @@ if __name__ == "__main__":  # pragma: no cover
     traj = ev.evolve(generations=30, population=10)
     f1 = ev.current_fitness()
     print(f"\nfitness             : {f0:.3f} -> {f1:.3f} over {len(traj)-1} generations")
-    print(f"evolved genome      : {{k: round(v,2) for k,v in ev.genome.items()}}".replace(
+    print("evolved genome      : {k: round(v,2) for k,v in ev.genome.items()}".replace(
         "{k: round(v,2) for k,v in ev.genome.items()}", str({k: round(v, 2) for k, v in ev.genome.items()})))
     assert f1 > f0                        # it climbed
     assert ev.genome["caution"] > genome["caution"]   # learned to be more cautious
@@ -324,7 +324,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     # rollback to an earlier self
     ev.rollback(steps=2)
-    print(f"\nrollback            : reverted to an earlier genome ✓")
+    print("\nrollback            : reverted to an earlier genome ✓")
 
     print(f"\nreport              : {ev.report()}")
     print("\nALL SELF-TESTS PASSED ✓")

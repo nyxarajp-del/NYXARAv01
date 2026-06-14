@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from nyxara.agency.permissions import Capability, RiskTier, build_default_policy
-from nyxara.agency.proactive import (Initiative, ProactiveEngine, ProposalDecision,
-                                     TriggerKind, Verdict)
+from nyxara.agency.proactive import (Initiative, ProactiveEngine, TriggerKind, Verdict)
 from nyxara.agency.scheduler import Priority, Scheduler, TaskState
 from nyxara.kernel.config import AgencyConfig
 from nyxara.planning.goals import GoalSystem

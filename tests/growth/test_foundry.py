@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
 from nyxara.growth.foundry import Foundry, FoundryDecision
-from nyxara.growth.foundry_models import ModelSpec
 from nyxara.growth.learn import Experience, ReplayBuffer
 from nyxara.kernel.config import NyxaraSettings, Profile
 from nyxara.kernel.errors import CorrigibilityError, ValidationError

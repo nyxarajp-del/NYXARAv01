@@ -412,7 +412,7 @@ if __name__ == "__main__":  # pragma: no cover
     # proofs (z3)
     x = MathEngine.real("x")
     assert m.prove(x + 1 > 1, assumptions=[x > 0])
-    print(f"\nprove x>0 ⊢ x+1>1   : True")
+    print("\nprove x>0 ⊢ x+1>1   : True")
     sat, model = m.satisfiable([x > 5, x < 3])
     assert not sat
     print(f"sat(x>5 ∧ x<3)      : {sat}")

@@ -413,7 +413,7 @@ if __name__ == "__main__":  # pragma: no cover
     vis = Vision(dup_threshold=6)
     assert vis.is_duplicate(ah, ah2)                  # a near-duplicate
     assert not vis.is_duplicate(ah, ah3)              # not the inverted image
-    print(f"\ndedup verdict       : near=dup ✓, inverted=not-dup ✓")
+    print("\ndedup verdict       : near=dup ✓, inverted=not-dup ✓")
 
     # difference hash sanity
     dh, dh2 = difference_hash(grad), difference_hash(near)

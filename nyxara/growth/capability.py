@@ -321,7 +321,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     # GAPS toward a goal that needs the still-locked autonomous capability
     gaps = reg.gaps(["autonomous_repair", "summarize_text"])
-    print(f"\ngaps:")
+    print("\ngaps:")
     for g in gaps:
         print(f"  {g['capability']:18s} {g['status']} — {g.get('missing') or g.get('missing_skills')}")
     assert any(g["capability"] == "autonomous_repair" for g in gaps)

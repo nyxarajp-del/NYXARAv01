@@ -35,7 +35,6 @@ Depends on :mod:`config`; optionally emits onto :mod:`bus`.
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple

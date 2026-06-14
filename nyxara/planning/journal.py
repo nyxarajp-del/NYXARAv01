@@ -234,7 +234,8 @@ class Journal:
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
-    import tempfile, os
+    import tempfile
+    import os
 
     print("=" * 70)
     print("NYXARA action-journal self-test")

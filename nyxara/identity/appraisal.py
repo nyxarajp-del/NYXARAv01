@@ -254,13 +254,13 @@ if __name__ == "__main__":  # pragma: no cover
     assert ap.appraise(evb).emotion == "fears_confirmed"
     evb.dims.confirmed = False
     assert ap.appraise(evb).emotion == "relief"
-    print(f"prospect (bad)      : fear → fears_confirmed / relief ✓")
+    print("prospect (bad)      : fear → fears_confirmed / relief ✓")
 
     # irrelevant event -> indifference
     irrelevant = AppraisalEvent("a leaf fell somewhere",
                                 AppraisalDimensions(goal_relevance=0.02))
     assert ap.appraise(irrelevant).emotion == "indifference"
-    print(f"irrelevant event    : indifference ✓")
+    print("irrelevant event    : indifference ✓")
 
     # intensity scales with relevance & desirability magnitude
     weak = ap.appraise(AppraisalEvent("minor", AppraisalDimensions(

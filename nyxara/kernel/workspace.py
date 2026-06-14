@@ -27,7 +27,6 @@ Depends on :mod:`config`; optionally integrates with :mod:`bus`.
 
 from __future__ import annotations
 
-import math
 import time
 import uuid
 from collections import deque
@@ -41,7 +40,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
 )
 
 __all__ = [

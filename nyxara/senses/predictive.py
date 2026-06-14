@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Sequence
 
 from nyxara.senses.binding import Modality, Percept

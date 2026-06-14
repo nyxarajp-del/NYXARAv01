@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.growth.skilltree import (Mastery, Skill, SkillState, SkillTree,
+from nyxara.growth.skilltree import (Mastery, Skill, SkillTree,
                                      build_default_skilltree)
 from nyxara.kernel.errors import InvariantViolation
 

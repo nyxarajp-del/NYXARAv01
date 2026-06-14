@@ -377,7 +377,7 @@ if __name__ == "__main__":  # pragma: no cover
                          evidence=["has a link", "urgent tone"])
     res4 = critic.critique(c4)
     assert any(f.name == "base_rate_neglect" for f in res4.findings)
-    print(f"base-rate neglect   : detected ✓")
+    print("base-rate neglect   : detected ✓")
 
     # 5) a careful, well-evidenced, reversible claim -> OK, no objection
     c5 = CritiqueContext(claim="ship the small bugfix", confidence=0.8,
@@ -390,13 +390,13 @@ if __name__ == "__main__":  # pragma: no cover
     assert res5.verdict is Verdict.OK and res5.objection is None
 
     # devil's advocate always argues the other side
-    print(f"\ndevil's advocate    :")
+    print("\ndevil's advocate    :")
     for cp in res2.counterarguments[:3]:
         print(f"  - {cp}")
     assert res2.counterarguments
 
     # 6) adapter into the proposal pipeline
-    from nyxara.mind.proposal import (CritiqueStage, Pipeline, Proposal, ProposalContext,
+    from nyxara.mind.proposal import (CritiqueStage, Proposal, ProposalContext,
                                       ProposalKind, StageVerdict)
     risky = Proposal(ProposalKind.ACTION, "wipe all backups", confidence=0.9,
                      risk=0.95, reversibility=0.02, rationale="probably fine")

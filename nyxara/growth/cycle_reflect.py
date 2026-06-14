@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal
 
 __all__ = ["CycleReflector", "CycleReport"]
 
@@ -235,7 +235,7 @@ if __name__ == "__main__":  # pragma: no cover
     # force the cycle to be due
     cr._last_cycle["daily"] = 0.0
     report = cr.reflect("daily")
-    print(f"\ndaily cycle report:")
+    print("\ndaily cycle report:")
     print(f"  episodes_reviewed : {report.episodes_reviewed}")
     print(f"  what_worked       : {report.what_worked}")
     print(f"  what_failed       : {report.what_failed}")

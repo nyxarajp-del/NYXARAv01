@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.identity.affect import AffectSystem
 from nyxara.social.empathy import EmpathyResponse, EmpathySystem, InferredEmotion

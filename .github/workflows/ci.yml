@@ -36,6 +36,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,reasoning,server]" "httpx>=0.27"
 
+      - name: Lint (ruff)
+        # Correctness-focused rules (pyflakes + a pycodestyle subset); config in pyproject.
+        run: ruff check nyxara tests
+
       - name: Run tests
         # Hermetic by construction: no provider API keys are set in CI, so the LLM
         # faculty falls back to the offline mock and never reaches the network.

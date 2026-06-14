@@ -20,8 +20,8 @@ Depends on :mod:`kernel.errors`.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
 from nyxara.kernel.errors import InvariantViolation, Severity
 

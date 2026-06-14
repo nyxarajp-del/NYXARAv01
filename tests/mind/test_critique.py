@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from nyxara.mind.critique import (
     Critic,
-    Critique,
     CritiqueContext,
     Finding,
     FindingKind,

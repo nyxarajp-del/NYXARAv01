@@ -6,7 +6,7 @@ import random
 
 import pytest
 
-from nyxara.observe.honesty import Claim, HonestyGuard, HonestyIssue, HonestyVerdict
+from nyxara.observe.honesty import Claim, HonestyGuard, HonestyIssue
 from nyxara.kernel.errors import InvariantViolation
 
 

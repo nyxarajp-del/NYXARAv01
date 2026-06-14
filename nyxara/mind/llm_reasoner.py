@@ -28,13 +28,12 @@ Stateless per call, like the faculty it sits on.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, Optional
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.orchestrator import Candidate, _default_reasoner
-from nyxara.mind.llm import LLM, LLMRequest
+from nyxara.mind.llm import LLM
 
 __all__ = ["LLMReasoner"]
 

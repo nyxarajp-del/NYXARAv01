@@ -376,7 +376,7 @@ if __name__ == "__main__":  # pragma: no cover
     # irony
     imp3 = dm.implicature.analyze("Oh great, another security alert.")
     assert any(i.type is ImplicatureType.QUALITY for i in imp3)
-    print(f"irony detected      : meant negatively ✓")
+    print("irony detected      : meant negatively ✓")
 
     # subtext: indirect request + politeness + hedging
     st = dm.subtext.detect("Could you maybe, if you have a moment, check the logs please?")
@@ -386,7 +386,7 @@ if __name__ == "__main__":  # pragma: no cover
     # sarcasm
     sarc = dm.subtext.detect("Yeah right, that'll work.")
     assert sarc.sarcasm
-    print(f"sarcasm             : detected ✓")
+    print("sarcasm             : detected ✓")
 
     # emotional subtext
     emo = dm.subtext.detect("I'm really worried about the breach.")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.growth.distill import Distiller
 from nyxara.growth.selfplay import CURIOSITY_SEEDS, SelfPlay, _parse_questions

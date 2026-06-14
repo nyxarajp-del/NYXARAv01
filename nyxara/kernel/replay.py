@@ -42,7 +42,7 @@ import random as _random
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, TypeVar
 
@@ -398,7 +398,8 @@ class Recorder:
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
-    import tempfile, os
+    import tempfile
+    import os
 
     print("=" * 70)
     print("NYXARA replay self-test")

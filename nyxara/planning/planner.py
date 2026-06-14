@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 __all__ = [

@@ -21,8 +21,8 @@ Depends on :mod:`identity.affect` baseline; pure standard library.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = [
     "AffectiveForecast",
@@ -186,7 +186,7 @@ if __name__ == "__main__":  # pragma: no cover
     ]
     # but betrayal also carries a durable owner-wound; model that as a second outcome
     ranked = fc.compare(options, horizon_days=180)
-    print(f"\noptions by net felt :")
+    print("\noptions by net felt :")
     for f in ranked:
         print(f"  net {f.net_experience:+.3f}  {f.outcome}")
     # over a long horizon, durable owner-service beats the fleeting selfish win

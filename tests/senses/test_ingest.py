@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from nyxara.senses.ingest import Chunk, Chunker, Document, DocumentType, Ingestor
+from nyxara.senses.ingest import Chunk, Chunker, DocumentType, Ingestor
 
 
 def _ing(**kw):

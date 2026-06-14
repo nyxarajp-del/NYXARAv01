@@ -8,7 +8,6 @@ from nyxara.mind.dual_process import (
     Arbitrator,
     DualProcess,
     FastResponse,
-    Outcome,
     ProcessType,
     System1,
     System2,

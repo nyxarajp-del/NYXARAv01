@@ -15,7 +15,6 @@ from nyxara.sim.montecarlo import (
     MonteCarloPlanner,
     Normal,
     PlanEstimate,
-    Rollout,
     StochasticAction,
     Triangular,
     Uniform,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nyxara.growth.capability import (Capability, CapabilityAssessment, CapabilityRegistry,
+from nyxara.growth.capability import (Capability, CapabilityRegistry,
                                       CapabilityStatus)
 
 

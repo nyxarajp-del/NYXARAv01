@@ -240,7 +240,7 @@ if __name__ == "__main__":  # pragma: no cover
     planner = ScenarioPlanner()
     ss = planner.generate("deploy the hardened firewall", base_value=0.6,
                           upside=0.3, downside=0.7)
-    print(f"\nscenarios for plan  :")
+    print("\nscenarios for plan  :")
     for t, s in ss.scenarios.items():
         print(f"  {t.value:11} p={s.probability:.2f} v={s.value:+.2f}  {s.narrative}")
     print(f"\nexpected value      : {ss.expected_value:+.3f}")
@@ -266,7 +266,7 @@ if __name__ == "__main__":  # pragma: no cover
                        factors=[{"cause": "config typo bricks the network",
                                  "likelihood": 0.5, "severity": 0.9,
                                  "mitigation": "dry-run in sandbox, staged rollout"}])
-    print(f"\npre-mortem top risks:")
+    print("\npre-mortem top risks:")
     for m in risks[:4]:
         print(f"  risk {m.risk:.2f}  {m.cause}\n        -> {m.mitigation}")
     assert risks[0].risk >= risks[-1].risk         # sorted by risk

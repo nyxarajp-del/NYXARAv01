@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import nyxara.guard.value_learning as vlmod
 from nyxara.growth.verify import (CheckCategory, CheckResult, VerificationReport, Verifier,
                                   build_default_verifier)
 from nyxara.guard.value_learning import IMMUTABLE_VALUES

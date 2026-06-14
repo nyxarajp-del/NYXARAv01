@@ -35,9 +35,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from nyxara.kernel.errors import InvariantViolation
 from nyxara.kernel.invariants import SystemState, guard as invariant_guard
-from nyxara.memory.provenance import Provenance, SourceType
+from nyxara.memory.provenance import Provenance
 
 __all__ = [
     "ProposalKind",
@@ -431,7 +430,7 @@ if __name__ == "__main__":  # pragma: no cover
     assert not d2.approved and res2 is None
     print(f"\nkernel acted on     : {executed} (injection blocked from executing)")
 
-    print(f"\nfull trail (risky)  :")
+    print("\nfull trail (risky)  :")
     for r in pipe.dispose(risky).trail:
         print(f"  {r.stage:11} -> {r.verdict.value}")
 

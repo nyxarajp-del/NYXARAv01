@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from nyxara.agency.agent_loop import AgentLoop
-from nyxara.agency.permissions import Authority, Capability, RiskTier
-from nyxara.kernel.orchestrator import Candidate, Disposition, NyxaraCore
+from nyxara.agency.permissions import Capability, RiskTier
+from nyxara.kernel.orchestrator import Candidate, NyxaraCore
 
 
 def test_offline_conversational_goal_completes_in_one_step():

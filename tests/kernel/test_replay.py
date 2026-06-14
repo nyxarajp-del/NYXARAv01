@@ -11,9 +11,7 @@ import pytest
 from nyxara.kernel.replay import (
     Mode,
     Recorder,
-    RecordEntry,
     ReplayDivergence,
-    ReplayExhausted,
     StepKind,
 )
 

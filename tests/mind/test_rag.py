@@ -7,7 +7,6 @@ import json
 from nyxara.mind.proposal import Proposal
 from nyxara.mind.rag import (
     DocumentRetriever,
-    GroundingReport,
     MemoryRetriever,
     RAGPipeline,
     RAGResult,

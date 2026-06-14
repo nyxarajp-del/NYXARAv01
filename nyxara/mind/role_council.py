@@ -20,8 +20,8 @@ NYXARA holds the gavel (Rule 4): she synthesises and judges; she never cedes con
 from __future__ import annotations
 
 import concurrent.futures as _cf
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
 
 __all__ = ["RoleMember", "RoleVote", "RoleCouncil"]
 
@@ -254,7 +254,7 @@ if __name__ == "__main__":  # pragma: no cover
     # offline (stub) mode — always works
     council = RoleCouncil(llm=None)
     cand = council.convene("What is the capital of France?")
-    print(f"\n6-role council (offline)")
+    print("\n6-role council (offline)")
     print(f"  kind       : {cand.kind}")
     print(f"  confidence : {cand.confidence}")
     print(f"  rationale  : {cand.rationale}")

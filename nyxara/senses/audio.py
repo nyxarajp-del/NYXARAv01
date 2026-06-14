@@ -29,7 +29,7 @@ import array
 import math
 import struct
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.senses.vision import hamming, hex_hash

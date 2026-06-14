@@ -9,7 +9,6 @@ from nyxara.kernel.stream import (
     ConceptGraph,
     DefaultModeStream,
     OpenProblem,
-    Seed,
     SeedPool,
     Thought,
     ThoughtType,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.guard.containment import (Component, ComponentState, Containment,
-                                      ContainmentAction, ContainmentLevel)
+from nyxara.guard.containment import (ComponentState, Containment,
+                                      ContainmentLevel)
 from nyxara.kernel.errors import AuthorizationError, InvariantViolation
 
 
