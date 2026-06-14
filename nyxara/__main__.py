@@ -75,6 +75,7 @@ _HELP = """\
 commands:
   /help              show this help
   /report            a calibrated status report
+  /self              her self-model: what she knows / doesn't / is weak at / can hallucinate
   /explain           why NYXARA disposed of the last turn that way
   /pause             pause the loop
   /scram [reason]    emergency stop — the loop HALTs until resumed
@@ -120,6 +121,8 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(_HELP)
     elif cmd == "report":
         print(json.dumps(core.report(), indent=2, default=str))
+    elif cmd in ("self", "selfmodel"):
+        print(json.dumps(core.self_knowledge(), indent=2, default=str))
     elif cmd == "explain":
         print(core.explain_last())
     elif cmd == "pause":

@@ -59,6 +59,60 @@ def test_known_unknowns_is_a_dict():
     assert isinstance(gaps, dict)
 
 
+# -------------------- self-model is seeded and surfaced -------------------- #
+def test_boot_seeds_capabilities_and_hallucination_zones():
+    nyx = _core()
+    # capabilities are actually populated now (not just declared in the self-test)
+    assert nyx.self_model.capabilities
+    # 'where I am weak' is truthful and non-empty (honest low capabilities)
+    assert nyx.self_model.where_i_am_weak()
+    # 'where I can hallucinate' is populated
+    assert nyx.self_model.where_i_can_hallucinate()
+
+
+def test_self_knowledge_exposes_four_pillars():
+    nyx = _core()
+    sk = nyx.self_knowledge()
+    assert sk["available"] is True
+    for k in ("what_i_know", "what_i_dont_know", "where_i_am_weak",
+              "where_i_can_hallucinate"):
+        assert k in sk
+    assert nyx.report()["self_knowledge"]  # report() carries it too
+
+
+def test_self_model_introspection_tool_registered():
+    nyx = _core()
+    if nyx.tools is not None:
+        assert nyx.tools.get("self_model") is not None
+
+
+def test_hallucination_caution_lowers_confidence_on_risky_query():
+    nyx = _core()
+    nyx.process("what year did it happen and cite the exact source verbatim?",
+                authority=Authority.OWNER)
+    infs = nyx.mind.by_kind(ThoughtKind.INFERENCE)
+    assert any("hallucination caution" in t.content for t in infs)
+
+
+def test_neutral_query_does_not_trigger_caution():
+    nyx = _core()
+    nyx.process("hello, how are you?", authority=Authority.OWNER)
+    infs = nyx.mind.by_kind(ThoughtKind.INFERENCE)
+    assert not any("hallucination caution" in t.content for t in infs)
+
+
+def test_self_model_persists_across_save_load(tmp_path):
+    nyx = _core()
+    nyx.self_model.declare_unknown("a brand new gap", "for the test")
+    nyx.self_model.set_capability("test_skill", 0.9)
+    nyx.save_state(str(tmp_path / "longterm.json"))
+    # a fresh core restores the learned facets from the sidecar file
+    nyx2 = _core()
+    nyx2.load_state(str(tmp_path / "longterm.json"))
+    assert "a brand new gap" in nyx2.self_model.known_unknowns
+    assert nyx2.self_model.can("test_skill")
+
+
 # -------------------- predictive core colours affect -------------------- #
 def test_turn_folds_prediction_error_into_affect():
     nyx = _core()
