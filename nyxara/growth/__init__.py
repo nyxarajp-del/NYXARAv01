@@ -23,6 +23,13 @@ from nyxara.growth.autonomous_scientist import (
     DiscoveryReport,
     QuestionOrigin,
 )
+from nyxara.growth.meta_engine import (
+    MetaDimension,
+    MetaImprovement,
+    MetaLearningEngine,
+    MetaReport,
+    MetaSample,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -52,4 +59,9 @@ __all__ = [
     "BeliefModel",
     "Belief",
     "QuestionOrigin",
+    "MetaLearningEngine",
+    "MetaDimension",
+    "MetaSample",
+    "MetaImprovement",
+    "MetaReport",
 ]
