@@ -319,6 +319,11 @@ class NyxaraCore:
         self.prediction_engine = self._build_prediction_engine() if enable_growth else None
         # Level 14 — Meta Intelligence: post-turn reasoning quality evaluation.
         self.meta_intelligence = self._build_meta_intelligence() if enable_growth else None
+        # Meta-Learning Engine — learns *how* to learn: tracks the trend of learning,
+        # reasoning, memory and prediction over time and feeds bounded, advisory tuning
+        # back into those subsystems. Built after its dependencies; advisory, never gates.
+        self.meta_learning_engine = (
+            self._build_meta_learning_engine() if enable_growth else None)
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -931,6 +936,24 @@ class NyxaraCore:
                 goals=self.goals,
             )
         except Exception:  # noqa: BLE001 — meta-intelligence is a capability, never required
+            return None
+
+    def _build_meta_learning_engine(self) -> Any:
+        """Meta-Learning Engine: learns *how* NYXARA learns, reasons, remembers and predicts —
+        watching each faculty's trend over time and feeding bounded, advisory tuning back into
+        the live subsystems. Built after its dependencies (meta, meta_intelligence, learner,
+        prediction_engine, consolidator) exist."""
+        try:
+            from nyxara.growth.meta_engine import MetaLearningEngine
+            return MetaLearningEngine(
+                meta_learner=self.meta,
+                meta_intelligence=self.meta_intelligence,
+                learner=self.learner,
+                prediction_engine=self.prediction_engine,
+                memory=self.memory,
+                consolidator=self.consolidator,
+            )
+        except Exception:  # noqa: BLE001 — the meta-learning engine is a capability, never required
             return None
 
     def _build_prediction_engine(self) -> Any:
@@ -1849,6 +1872,7 @@ class NyxaraCore:
                 pass
         # Level 14 — MetaIntelligence: evaluate reasoning quality post-turn and
         # push improvement suggestions as soft goals.
+        reasoning_quality: Optional[float] = None
         if self.meta_intelligence is not None:
             try:
                 # create a minimal result proxy with disposition info
@@ -1860,12 +1884,37 @@ class NyxaraCore:
                     result=_R(disp),
                     arbitration=self._last_arbitration,
                 )
+                reasoning_quality = meta_eval.quality_score
                 if meta_eval.improvement_suggestion:
                     self.mind.record(
                         ThoughtKind.INFERENCE,
                         f"meta: {meta_eval.improvement_suggestion[:60]}",
                         salience=0.5, confidence=meta_eval.quality_score)
             except Exception:  # noqa: BLE001 — meta-intelligence is advisory, never fatal
+                pass
+        # Meta-Learning Engine — learn *how* to learn: observe this turn's performance on
+        # each faculty (learning / reasoning / memory / prediction), and periodically feed
+        # bounded, advisory tuning back into the subsystems. Advisory only; never gates.
+        if self.meta_learning_engine is not None:
+            try:
+                from nyxara.growth.meta_engine import MetaDimension
+                # LEARNING — the per-turn reward, normalised from [-0.5, 1.0] into [0, 1]
+                self.meta_learning_engine.observe(
+                    MetaDimension.LEARNING, (reward + 0.5) / 1.5,
+                    {k: float(v) for k, v in features.items()})
+                # REASONING — the meta-intelligence quality score when available
+                if reasoning_quality is not None:
+                    self.meta_learning_engine.observe(
+                        MetaDimension.REASONING, reasoning_quality)
+                # MEMORY — recall health: a non-empty store that was queried this turn
+                if self.memory is not None:
+                    self.meta_learning_engine.observe(
+                        MetaDimension.MEMORY,
+                        1.0 if getattr(candidate, "rationale", "") else 0.6)
+                # PREDICTION — confidence as a proxy for calibration this turn
+                conf = float(getattr(candidate, "confidence", 0.7) or 0.7)
+                self.meta_learning_engine.observe(MetaDimension.PREDICTION, conf)
+            except Exception:  # noqa: BLE001 — meta-learning observation is best-effort, never fatal
                 pass
         # Level 7 — SkillFactory: on successful ACT, check if this goal type recurs
         # enough to warrant auto-creating a composite skill for reuse.
@@ -1907,6 +1956,15 @@ class NyxaraCore:
                 self.learner.replay()
                 self.learner.consolidate()
             except Exception:  # noqa: BLE001
+                pass
+        # periodic meta-learning: on the same cadence, decide how to learn/reason/remember/
+        # predict *better* and softly apply those bounded tunings to the live subsystems.
+        if (self.meta_learning_engine is not None
+                and self._turns % self.consolidate_every == 0):
+            try:
+                self.meta_learning_engine.recommend()
+                self.meta_learning_engine.apply(self)
+            except Exception:  # noqa: BLE001 — meta-tuning is advisory, never fatal
                 pass
 
     def wander(self, n_ticks: int = 3, *, engagement: float = 0.0) -> List[str]:
@@ -2514,6 +2572,11 @@ class NyxaraCore:
             rep["predictions_made"] = self.prediction_engine.predictions_count
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
+        if self.meta_learning_engine is not None:
+            try:
+                rep["meta_learning"] = self.meta_learning_engine.summary()
+            except Exception:  # noqa: BLE001 — meta-learning report is best-effort, never fatal
+                pass
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
                 else getattr(self.reasoner, "__name__", type(self.reasoner).__name__)
