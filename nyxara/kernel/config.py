@@ -419,6 +419,43 @@ class RouterConfig(BaseModel):
     abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
+class SelfModelRouterConfig(BaseModel):
+    """Primary self-model router (mind/self_model_router.py) — the UPFRONT triage.
+
+    Where the confidence router (``RouterConfig``) is *reactive* — draft-then-fall-back —
+    this router decides *before* generation which mind should handle a prompt at all, by
+    reading NYXARA's introspectable self-model: her own model when she is competent here and
+    not prone to confabulate, the external teacher when she is weak / unsure / knowledge-heavy,
+    and — for action prompts — a verify-before-act gate that requires the proposal to clear an
+    intrinsic verifier before it may act. On by default, but advisory and fail-open: with no
+    self-model, no forged model, or any error it degrades to the normal path and never crashes
+    a turn. It only chooses *which mind drafts*; it reaches around no downstream gate.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Minimum self-model competence (0..1) to let her OWN model handle a prompt.
+    competence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # At/above this hallucination risk for the prompt's domain, route to the teacher.
+    hallucination_ceiling: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Competence assumed when nothing in the prompt maps to a known capability (kept below
+    # ``competence_threshold`` so ambiguous prompts bias toward consulting the teacher).
+    default_competence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Verify-before-act: minimum intrinsic-verifier score to allow an action proposal.
+    verify_before_act: float = Field(default=0.5, ge=0.0, le=1.0)
+    # A stricter floor for HIGH/CRITICAL-risk actions.
+    verify_before_act_high: float = Field(default=0.7, ge=0.0, le=1.0)
+    # An action below this stated confidence is demoted regardless of verifier score.
+    act_min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
+    # Risk tier (by label) at/above which a respond candidate is also verify-gated.
+    verify_risk_floor: str = "moderate"
+    # Consult verifiable faculties (exact math / logic) before any neural triage.
+    use_faculties: bool = True
+    # Topic-keyword -> capability-name map, so prompts route to the right self-rating.
+    domain_capabilities: Dict[str, str] = Field(default_factory=dict)
+
+
 class RoleCouncilConfig(BaseModel):
     """Level 4 — Internal Role Council settings (mind/role_council.py).
     Six role personas examine significant turns; NYXARA synthesises and judges."""
@@ -667,6 +704,7 @@ class NyxaraSettings(BaseSettings):
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
+    self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
