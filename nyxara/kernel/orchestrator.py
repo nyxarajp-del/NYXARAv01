@@ -375,6 +375,13 @@ class NyxaraCore:
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative)
         self._wire_reporter()
+        # Strategic Intelligence — a structured analytical faculty: any problem is
+        # reasoned through a fixed six-part framework (direct answer → reality check →
+        # weaknesses → root cause → optimised solution → execution steps). Built after the
+        # reasoner (so it can borrow the live LLM) and composes the scientist (to
+        # stress-test premises) and the role council (for adversarial lenses). Pure
+        # analysis — it proposes structured reasoning and never reaches around the gates.
+        self.strategic_intelligence = self._build_strategic_intelligence()
         # Level 15 — Capability Foundry: when a capability is missing entirely, design a
         # brand-new tool for herself (plan -> code -> test -> benchmark -> deploy). Built
         # after the reasoner so it can use the live LLM for code generation. Off when growth
@@ -922,6 +929,25 @@ class NyxaraCore:
                 gap_source=self.known_unknowns,
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
+            return None
+
+    def _build_strategic_intelligence(self) -> Any:
+        """Strategic Intelligence: reason any problem through the six-part framework.
+
+        Built after the reasoner so it can borrow the live LLM, and composes the scientist
+        (premise stress-test) and role council (adversarial lenses). Pure analysis: never
+        required, never gated, fully offline-capable.
+        """
+        try:
+            from nyxara.mind.strategic import StrategicIntelligence
+            return StrategicIntelligence(
+                reasoner=getattr(self, "reasoner", None),
+                council=getattr(self, "role_council", None),
+                scientist=getattr(self, "scientist", None),
+                world_model=getattr(self, "world_model", None),
+                self_model=getattr(self, "self_model", None),
+            )
+        except Exception:  # noqa: BLE001 — strategic analysis is a capability, never required
             return None
 
     def _build_meta_intelligence(self) -> Any:
@@ -2267,6 +2293,22 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"cycles": cycles, "error": str(exc)}
 
+    def strategize(self, problem: str) -> Dict[str, Any]:
+        """Analyse ``problem`` as a strategist (best-effort).
+
+        Returns a structured six-part analysis — direct answer, reality check (the premise
+        stress-tested by the scientist), key weaknesses (the council's adversarial lenses),
+        root cause, optimised solution, and concrete execution steps — with a calibrated,
+        never-certain confidence. Pure analysis; nothing here touches the world or the gates.
+        Returns the analysis as a dict.
+        """
+        if self.strategic_intelligence is None:
+            return {"problem": problem, "error": "strategic_intelligence unavailable"}
+        try:
+            return self.strategic_intelligence.analyze(problem).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"problem": problem, "error": str(exc)}
+
     def _voi(self) -> Any:
         if getattr(self, "_voi_engine", None) is None:
             from nyxara.planning.voi import ValueOfInformation
@@ -2564,6 +2606,8 @@ class NyxaraCore:
         if self.autonomous_scientist is not None:
             rep["discoveries"] = len(self.autonomous_scientist.all_cycles())
             rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
+        if self.strategic_intelligence is not None:
+            rep["strategic_analyses"] = len(self.strategic_intelligence.all_analyses())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
         if self.dream_session is not None:

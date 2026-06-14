@@ -9,6 +9,7 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
 * ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
+* ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
 * ``POST /v1/memory/save|load``  — persist / restore long-term memory (Rule 7 continuity).
 * ``WS   /v1/ws``                — a streaming chat socket (token via ``?token=``).
@@ -55,6 +56,10 @@ class InvestigateRequest(BaseModel):
 class DiscoverRequest(BaseModel):
     # How many self-driven discovery cycles to run; the server keeps this bounded.
     cycles: int = Field(default=3, ge=1, le=50)
+
+
+class StrategizeRequest(BaseModel):
+    problem: str = Field(..., min_length=1)
 
 
 class ControlRequest(BaseModel):
@@ -164,6 +169,10 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/discover", dependencies=auth)
     def discover(req: DiscoverRequest) -> dict:
         return core.discover(req.cycles)
+
+    @app.post("/v1/strategize", dependencies=auth)
+    def strategize(req: StrategizeRequest) -> dict:
+        return core.strategize(req.problem)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)
