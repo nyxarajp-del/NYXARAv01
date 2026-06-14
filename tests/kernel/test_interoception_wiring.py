@@ -7,9 +7,13 @@ from nyxara.kernel.orchestrator import NyxaraCore
 
 
 def _stressed() -> Interoception:
-    return Interoception(signals=InteroceptiveSignals(
+    sig = InteroceptiveSignals(
         compute_load=0.95, memory_load=0.9, latency_ms=400, queue_depth=90,
-        queue_capacity=100, error_rate=0.4, confidence=0.4, energy=0.3))
+        queue_capacity=100, error_rate=0.4, confidence=0.4, energy=0.3)
+    # Inject as a live source so idle_maintenance's sample() keeps feeling this strained
+    # body deterministically — otherwise psutil, when installed, overwrites compute/memory
+    # load with the (idle) host's metrics and the injected strain is lost.
+    return Interoception(source=lambda: sig)
 
 
 def test_core_builds_interoception_and_reports_its_body():
