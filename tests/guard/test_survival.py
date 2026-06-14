@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-import nyxara.guard.value_learning as vlmod
 from nyxara.guard.corrigibility import CorrigibleAction
 from nyxara.guard.survival import (Backup, BackupStore, CriticalEntry, DegradationLevel,
                                    ESSENTIAL_CAPABILITIES, RecoveryPlan, SurvivalManager)

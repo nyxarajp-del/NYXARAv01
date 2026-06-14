@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from nyxara.growth.architecture import (ArchitectureAnalyzer, ArchitectureReport,
                                         _find_cycles, _tarjan_scc)

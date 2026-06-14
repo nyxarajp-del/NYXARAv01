@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.kernel.errors import InvariantViolation
-from nyxara.identity.soul import TRAITS, DriftReport, Soul, Trait, VoiceProfile
+from nyxara.identity.soul import TRAITS, DriftReport, Soul, VoiceProfile
 
 
 # -------------------- traits -------------------- #

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.mind.reasoning_faculties import (extract_expression, extract_formula,
                                              parse_word_problem, solve_comparative,

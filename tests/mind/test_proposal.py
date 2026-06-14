@@ -7,7 +7,6 @@ import pytest
 from nyxara.kernel.invariants import SystemState
 from nyxara.mind.proposal import (
     CritiqueStage,
-    Disposition,
     InvariantsGate,
     Pipeline,
     Proposal,
@@ -16,7 +15,6 @@ from nyxara.mind.proposal import (
     SchemaStage,
     ShieldStage,
     Stage,
-    StageResult,
     StageVerdict,
 )
 

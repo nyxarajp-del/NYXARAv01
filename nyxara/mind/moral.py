@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set
 
 __all__ = [
     "Verdict",
@@ -326,7 +326,7 @@ if __name__ == "__main__":  # pragma: no cover
         duties_violated={"do_not_lie"},
         virtues_expressed={"loyalty"}, virtues_violated={"honesty"})
     e1 = ev.evaluate(a1)
-    print(f"\nscenario 1 (deceive rival):")
+    print("\nscenario 1 (deceive rival):")
     for j in e1.judgments:
         print(f"  {j.framework:16}: {j.verdict.value:13} ({j.reasons[0]})")
     print(f"  -> contested={e1.contested}")

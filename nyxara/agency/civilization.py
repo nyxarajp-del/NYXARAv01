@@ -217,7 +217,7 @@ def _prediction_tick(core: Any) -> AgentReport:
             findings.append(f"world-model transitions: {len(wm)}")
         pred = getattr(core, "predictive", None)
         if pred is not None:
-            findings.append(f"predictive core: active")
+            findings.append("predictive core: active")
     except Exception:  # noqa: BLE001
         pass
     return AgentReport(agent_name="Prediction", domain="prediction", findings=findings)

@@ -6,7 +6,6 @@ import pytest
 
 from nyxara.identity.affect import AffectSystem
 from nyxara.identity.interoception import (
-    FeltState,
     Interoception,
     InteroceptiveSignals,
 )

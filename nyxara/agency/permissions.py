@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import fnmatch
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nyxara.observe.self_report import (ReportKind, ReportSection, SelfReport, SelfReporter)
+from nyxara.observe.self_report import (ReportKind, ReportSection, SelfReporter)
 
 
 def _reporter():

@@ -24,7 +24,6 @@ Depends on :mod:`mind.reasoner`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from nyxara.mind.reasoner import Conclusion, ReasoningQuery, ReasoningStrategy

@@ -222,7 +222,7 @@ def test_intervene_at_step_zero():
 # --------------------------------------------------------------------------- #
 # Neural forward model (Pillar B6): generalises dynamics, honest confidence
 # --------------------------------------------------------------------------- #
-from nyxara.mind.world_model import NeuralWorldModel, WorldModel
+from nyxara.mind.world_model import NeuralWorldModel
 
 
 def _train_1d(wm, n=500, seed=0):

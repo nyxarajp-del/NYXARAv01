@@ -204,8 +204,7 @@ def test_empty_query_signals_zero():
 # --------------------------------------------------------------------------- #
 # Learned re-ranker (Pillar B5): recall adapts from feedback, not just similarity
 # --------------------------------------------------------------------------- #
-from nyxara.memory.retrieval import LearnedReranker, RetrievalContext
-from nyxara.memory.store import MemoryStore, MemoryType
+from nyxara.memory.retrieval import LearnedReranker
 
 
 def test_reranker_learns_toward_reward():

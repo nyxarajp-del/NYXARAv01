@@ -25,9 +25,8 @@ All simulation is internal: no real I/O, no gate bypass.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 __all__ = ["SimResult", "WorldSimulator"]
 
@@ -206,7 +205,6 @@ class WorldSimulator:
     def _world_model_eval(self, tool: str) -> tuple:
         """Run a short rollout and return (expected_reward, mean_confidence)."""
         try:
-            from nyxara.mind.world_model import WorldModel
             traj = self.world_model.rollout(
                 (0.0,), [tool] * self.rollout_steps, steps=self.rollout_steps)
             return traj.total_reward, traj.mean_confidence
@@ -251,7 +249,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     r1 = sim.simulate("delete_files", tool="run_shell",
                       tool_args={"cmd": "rm -rf /tmp/test"})
-    print(f"\nrun_shell / delete")
+    print("\nrun_shell / delete")
     print(f"  risk_score  : {r1.risk_score}")
     print(f"  risk_tier   : {r1.risk_tier()}")
     print(f"  rollback    : {r1.rollback_possible}")
@@ -261,14 +259,14 @@ if __name__ == "__main__":  # pragma: no cover
 
     r2 = sim.simulate("web_search", tool="web_search",
                       tool_args={"query": "Python tutorials"})
-    print(f"\nweb_search")
+    print("\nweb_search")
     print(f"  risk_score  : {r2.risk_score}")
     print(f"  risk_tier   : {r2.risk_tier()}")
     assert r2.risk_score < r1.risk_score
 
     r3 = sim.simulate("read_file", tool="read_file",
                       tool_args={"path": "/tmp/data.txt"}, reversible=True)
-    print(f"\nread_file")
+    print("\nread_file")
     print(f"  risk_score  : {r3.risk_score}")
     print(f"  rollback    : {r3.rollback_possible}")
 

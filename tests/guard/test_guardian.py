@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.permissions import Authority, RiskTier
-from nyxara.guard.guardian import (DefensiveAction, Guardian, Posture, ResponsePlan,
-                                   ThreatAssessment, ThreatCategory, ThreatEvent,
+from nyxara.guard.guardian import (DefensiveAction, Guardian, Posture, ThreatCategory, ThreatEvent,
                                    ThreatLevel)
 from nyxara.guard.shield import TrustLevel
 from nyxara.kernel.errors import InvariantViolation

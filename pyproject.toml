@@ -52,12 +52,35 @@ senses = [
 ]
 # Self-built-model foundry (heavy ML — optional; the n-gram backend works without these)
 foundry = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "tokenizers>=0.15"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+
+[tool.ruff]
+# Match the codebase's prevailing style; correctness rules over cosmetics.
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Ruff's default set (pyflakes F + a subset of pycodestyle E/W) catches the bugs
+# that matter — undefined names, unused imports, redefinitions — without churning
+# the existing, deliberate style.
+ignore = [
+    "E402",  # imports after code: NYXARA guards heavy/optional deps behind runtime checks
+    "E741",  # ambiguous names (l/I/O): used deliberately in a few math/loop contexts
+    "E731",  # lambda assignment: a couple of terse, intentional one-liners
+    "E702",  # multiple statements on a line (semicolons): used in compact test setups
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py files curate the public API by re-exporting names — those imports
+# look "unused" to the linter but are the package's surface.
+"__init__.py" = ["F401"]
+# Tests occasionally bind throwaway locals for clarity; that's fine in fixtures.
+"tests/*" = ["F841"]
 
 [tool.setuptools.packages.find]
 include = ["nyxara*"]

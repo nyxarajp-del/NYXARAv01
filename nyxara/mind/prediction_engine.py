@@ -225,7 +225,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     # tautology → high probability
     r1 = engine.predict("2+2=4")
-    print(f"\ntautology '2+2=4':")
+    print("\ntautology '2+2=4':")
     print(f"  probability  : {r1.probability}")
     print(f"  CI           : {r1.confidence_interval}")
     print(f"  prediction   : {r1.prediction}")
@@ -233,13 +233,13 @@ if __name__ == "__main__":  # pragma: no cover
 
     # uncertainty → ~0.5
     r2 = engine.predict("stock market will crash tomorrow")
-    print(f"\nuncertain claim:")
+    print("\nuncertain claim:")
     print(f"  probability  : {r2.probability}")
     assert 0.1 <= r2.probability <= 0.9
 
     # near-impossibility → low
     r3 = engine.predict("this is impossible and always fails")
-    print(f"\nnear-impossible claim:")
+    print("\nnear-impossible claim:")
     print(f"  probability  : {r3.probability}")
     assert r3.probability <= 0.3
 

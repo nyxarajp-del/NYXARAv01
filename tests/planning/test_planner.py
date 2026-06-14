@@ -5,7 +5,6 @@ from __future__ import annotations
 from nyxara.planning.planner import (
     Action,
     DependencyGraph,
-    Plan,
     Planner,
     ResourceScheduler,
     STRIPSProblem,

@@ -6,11 +6,9 @@ guard, and that the foundry folds distilled docs into its corpus."""
 
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 
-from nyxara.growth.distill import (DEFAULT_NYXARA_SYSTEM, DistillationExample, Distiller,
+from nyxara.growth.distill import (DistillationExample, Distiller,
                                    default_distill_prompts, load_distillation_docs)
 from nyxara.kernel.config import NyxaraSettings, Profile
 

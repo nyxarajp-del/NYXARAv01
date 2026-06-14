@@ -816,7 +816,8 @@ class MemoryStore:
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
-    import tempfile, os
+    import tempfile
+    import os
     print("=" * 70)
     print("NYXARA memory-store self-test")
     print("=" * 70)

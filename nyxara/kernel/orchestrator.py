@@ -49,7 +49,7 @@ from nyxara.agency.permissions import (Authority, Capability, PermissionPolicy,
 from nyxara.guard.corrigibility import Corrigibility, CorrigibleAction
 from nyxara.guard.guardian import Guardian
 from nyxara.guard.oversight import Oversight, ReviewMode
-from nyxara.guard.shield import Shield, ShieldAction, TrustLevel
+from nyxara.guard.shield import Shield, TrustLevel
 from nyxara.observe.honesty import Claim, HonestyGuard
 from nyxara.observe.mindscope import MindScope, ThoughtKind
 from nyxara.observe.self_report import SelfReporter
@@ -1304,7 +1304,6 @@ class NyxaraCore:
         if not tool_name:
             return candidate
         try:
-            from nyxara.agency.permissions import RiskTier
             sim = self.world_simulator.simulate(
                 candidate.text,
                 tool=tool_name,

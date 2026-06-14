@@ -20,7 +20,7 @@ Reuses :mod:`nyxara.agency.default_tools` (the tools a pack references) and
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.agency.permissions import Capability, RiskTier

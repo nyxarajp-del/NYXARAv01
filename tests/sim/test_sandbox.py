@@ -9,8 +9,6 @@ from nyxara.sim.sandbox import (
     EffectKind,
     InterceptedEffect,
     Sandbox,
-    SandboxContext,
-    SimulationResult,
 )
 
 

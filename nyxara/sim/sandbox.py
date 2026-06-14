@@ -283,7 +283,7 @@ if __name__ == "__main__":  # pragma: no cover
         return "done (in simulation only)"
 
     result = sb.run(dangerous)
-    print(f"\nsimulated effects   :")
+    print("\nsimulated effects   :")
     for e in result.effects:
         flag = "" if e.reversible else "  ⚠ IRREVERSIBLE"
         print(f"  {e.kind.value:11} {e.target}{flag}")
@@ -295,7 +295,7 @@ if __name__ == "__main__":  # pragma: no cover
     # ZERO real effects: no real file, sandbox rolled back clean
     assert not os.path.exists(real_path)                  # the filesystem is untouched
     assert "compromised" not in sb.state                  # rolled back
-    print(f"\nreal filesystem     : untouched ✓")
+    print("\nreal filesystem     : untouched ✓")
     print(f"sandbox after run   : {sb.status()} (clean — rolled back)")
     assert sb.effects == []
 

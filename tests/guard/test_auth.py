@@ -5,9 +5,8 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.permissions import Authority
-from nyxara.guard.auth import (AuthGuard, AuthResult, Challenge, ContinuityToken, Factor,
-                               FactorEvidence, Session)
-from nyxara.kernel.config import OWNER
+from nyxara.guard.auth import (AuthGuard, Challenge, ContinuityToken, Factor,
+                               FactorEvidence)
 from nyxara.kernel.errors import AuthorizationError
 
 

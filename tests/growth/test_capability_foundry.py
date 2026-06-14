@@ -13,8 +13,7 @@ import pytest
 
 from nyxara.agency.permissions import Authority, Capability, RiskTier
 from nyxara.agency.tools import ToolRegistry
-from nyxara.growth.capability_foundry import (CapabilityFoundry, CapabilityPlan,
-                                              ForgeStage)
+from nyxara.growth.capability_foundry import (CapabilityFoundry, ForgeStage)
 from nyxara.kernel.errors import AuthorizationError
 
 

@@ -10,7 +10,6 @@ from nyxara.planning.scenario import (
     Scenario,
     ScenarioAnalysis,
     ScenarioPlanner,
-    ScenarioSet,
     ScenarioType,
 )
 

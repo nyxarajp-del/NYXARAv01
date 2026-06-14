@@ -18,7 +18,7 @@ model. Nothing here touches a tool directly or weakens a gate.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from nyxara.agency.agent_loop import AgentLoop, AgentRun

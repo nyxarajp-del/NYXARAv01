@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 __all__ = ["DreamSession", "DreamReport"]
 
@@ -223,7 +223,7 @@ if __name__ == "__main__":  # pragma: no cover
     # Run with no subsystems — all passes degrade gracefully
     ds = DreamSession()
     report = ds.dream(duration_s=1.0)
-    print(f"\nno subsystems:")
+    print("\nno subsystems:")
     print(f"  memory_replayed    : {report.memory_replayed}")
     print(f"  skills_replayed    : {report.skills_replayed}")
     print(f"  reasoning_replayed : {report.reasoning_replayed}")
@@ -244,7 +244,7 @@ if __name__ == "__main__":  # pragma: no cover
     for a in sm.all():
         a.uses = 0  # reset
     report2 = ds2.dream()
-    print(f"\nwith skill_memory:")
+    print("\nwith skill_memory:")
     print(f"  skills_replayed : {report2.skills_replayed}")
     assert report2.skills_replayed == 2
     # reinforce incremented uses

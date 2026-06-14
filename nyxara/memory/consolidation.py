@@ -26,7 +26,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.memory.provenance import Provenance, SourceType
 from nyxara.memory.schema import SchemaLibrary, episode_from_record

@@ -31,7 +31,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 from dataclasses import dataclass, field, fields
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nyxara.kernel.config import OWNER, NyxaraSettings

@@ -67,7 +67,6 @@ def test_build_model_nanogpt_never_raises_on_bare_machine():
 def test_load_active_model_reads_promoted_version(tmp_path):
     # write a version dir + spec.json + active pointer the way the foundry would
     import json
-    from pathlib import Path
 
     from nyxara.kernel.config import NyxaraSettings, Profile
     settings = NyxaraSettings.for_profile(Profile.TEST)

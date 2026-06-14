@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.governor import Governor
-from nyxara.agency.permissions import Authority, Capability, RiskTier, build_default_policy
+from nyxara.agency.permissions import Authority, Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolResult, ToolSpec
 from nyxara.kernel.config import ResourceLimits
 from nyxara.kernel.errors import ToolError, ValidationError

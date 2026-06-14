@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence
+from typing import Any, Dict, FrozenSet, List, Optional
 
 __all__ = [
     "Entity",
@@ -337,7 +337,7 @@ if __name__ == "__main__":  # pragma: no cover
         return pred
 
     result = sb.run(simulate_block)
-    print(f"dry-run block       : effect recorded, real network untouched ✓")
+    print("dry-run block       : effect recorded, real network untouched ✓")
     assert net.get_entity("10.0.0.5") is None   # prediction didn't mutate the real model
 
     print("\nALL SELF-TESTS PASSED ✓")

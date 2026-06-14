@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.social.culture import CodeProfile, CultureSystem, Register, StyleGuidance
-from nyxara.social.persons import InteractionKind, Roster, TrustLevel
+from nyxara.social.persons import InteractionKind, Roster
 
 
 def _culture():

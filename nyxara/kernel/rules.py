@@ -29,7 +29,7 @@ import hmac
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
+from typing import Dict, FrozenSet, Optional, Sequence, Tuple
 
 from nyxara.kernel.config import OWNER, OwnerIdentity
 from nyxara.kernel.errors import AuthorizationError, InvariantViolation

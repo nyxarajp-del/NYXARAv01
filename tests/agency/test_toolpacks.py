@@ -6,7 +6,6 @@ from nyxara.agency.default_tools import build_default_tools
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.agency.tools import ToolRegistry
 from nyxara.agency.toolpacks import (
-    ToolPack,
     build_domain_packs,
     python_check,
     register_packs,

@@ -264,7 +264,7 @@ if __name__ == "__main__":  # pragma: no cover
     imp = RecursiveImprover(llm=None, n_iterations=10)
     c0 = _Cand("The capital of France is Paris.", confidence=0.99, rationale="")
     c1 = imp.improve("What is the capital of France?", c0)
-    print(f"\nrule-based (10 iters)")
+    print("\nrule-based (10 iters)")
     print(f"  initial conf   : {c0.confidence}")
     print(f"  final conf     : {c1.confidence:.3f}")
     print(f"  rationale      : {c1.rationale}")

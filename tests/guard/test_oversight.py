@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.permissions import RiskTier
-from nyxara.guard.oversight import (ActionStatus, ControlState, Oversight, OversightDecision,
-                                    PendingAction, ReviewMode)
+from nyxara.guard.oversight import (ActionStatus, ControlState, Oversight, ReviewMode)
 from nyxara.kernel.errors import AuthorizationError, InvariantViolation
 
 

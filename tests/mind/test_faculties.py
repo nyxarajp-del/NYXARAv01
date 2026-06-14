@@ -16,7 +16,7 @@ from nyxara.mind.faculties import (
     TaskType,
 )
 from nyxara.mind.llm import LLM
-from nyxara.mind.proposal import Proposal, ProposalKind
+from nyxara.mind.proposal import Proposal
 
 
 def _math():

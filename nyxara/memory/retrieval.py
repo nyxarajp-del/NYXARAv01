@@ -350,7 +350,6 @@ class AssociativeRetriever:
     # ---- mood-congruent ---- #
     def mood_congruent(self, mood: EmotionTag, *, k: int = 5,
                        now: Optional[float] = None) -> List[RetrievalResult]:
-        ctx = RetrievalContext(mood=mood, now=now)
         scored: List[RetrievalResult] = []
         for mid, rec in self.store._kv.items():
             cong = self.emotion_of(mid).congruence(mood)
@@ -464,7 +463,7 @@ if __name__ == "__main__":  # pragma: no cover
         mood=anxious,
     )
     fused = r.retrieve(ctx, k=3)
-    print(f"\nfused retrieval         :")
+    print("\nfused retrieval         :")
     for res in fused:
         print(f"  {res.score:.3f}  {res.record.text()[:34]:36} "
               f"sem={res.signals['semantic']:.2f} ctx={res.signals['context']:.2f} "

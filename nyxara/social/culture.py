@@ -23,7 +23,7 @@ renders the actual words. Pure standard library; optional :mod:`social.persons`.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -262,7 +262,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     # mirroring: the Master writes Hinglish -> NYXARA replies in Hinglish
     g = culture.adapt(person="JP", text="kal ka kaam ready hai kya?")
-    print(f"\nadapt (JP, hinglish):")
+    print("\nadapt (JP, hinglish):")
     print(f"  {g.fragment}")
     assert g.language == "hinglish"
     assert g.honorific == "Master"

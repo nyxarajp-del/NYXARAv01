@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.governor import Governor
-from nyxara.agency.scheduler import Priority, Scheduler, Task, TaskState
+from nyxara.agency.scheduler import Priority, Scheduler, TaskState
 from nyxara.kernel.config import ResourceLimits
 
 

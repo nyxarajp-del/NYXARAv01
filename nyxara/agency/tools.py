@@ -31,11 +31,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nyxara.agency.governor import Governor
-from nyxara.agency.permissions import (Authority, Capability, PermissionDecision,
-                                       PermissionPolicy, PermissionRequest, RiskTier,
+from nyxara.agency.permissions import (Authority, Capability, PermissionPolicy, PermissionRequest, RiskTier,
                                        build_default_policy)
 from nyxara.kernel.errors import ToolError, ValidationError
 from nyxara.sim.sandbox import Sandbox, SandboxContext

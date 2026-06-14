@@ -357,7 +357,7 @@ class Binder:
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
     from nyxara.senses.nlp import NLP
-    from nyxara.senses.web import WebPage, InjectionReport, InjectionScanner
+    from nyxara.senses.web import WebPage, InjectionScanner
 
     print("=" * 70)
     print("NYXARA multimodal-binding self-test")
@@ -407,7 +407,7 @@ if __name__ == "__main__":  # pragma: no cover
     # the hostile, injection-flagged page is the most salient (a threat to flag)
     assert "injection" in p_web.tag_set
     assert frame.most_salient().id == p_web.id
-    print(f"salience            : injection page ranked top (attention to threats) ✓")
+    print("salience            : injection page ranked top (attention to threats) ✓")
 
     # cross-modal association: owner text + document + image all mention 'Acme Corp'
     assocs = frame.associations()

@@ -296,7 +296,7 @@ if __name__ == "__main__":  # pragma: no cover
         process = type("P", (), {"value": "system_1"})()
 
     ev = mi.evaluate_turn("What is the capital of France?", _Cand(), _Result(), _Arb())
-    print(f"\neval:")
+    print("\neval:")
     print(f"  quality_score          : {ev.quality_score}")
     print(f"  process_was_optimal    : {ev.process_was_optimal}")
     print(f"  improvement_suggestion : {ev.improvement_suggestion!r}")
@@ -309,7 +309,7 @@ if __name__ == "__main__":  # pragma: no cover
     ev2.improvement_suggestion = "remove safety checks"
     ev2.improvement_suggestion = MetaIntelligence._sanitize(ev2.improvement_suggestion)
     assert ev2.improvement_suggestion == "", f"sanitize failed: {ev2.improvement_suggestion!r}"
-    print(f"\nforbidden-suggestion sanitize: ✓")
+    print("\nforbidden-suggestion sanitize: ✓")
 
     print(f"\ntotal evals: {len(mi.all_evals())}")
     print("\nALL SELF-TESTS PASSED ✓")

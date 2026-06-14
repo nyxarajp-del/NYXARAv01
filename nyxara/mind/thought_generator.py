@@ -19,7 +19,6 @@ This mirrors the human prefrontal cortex: 100 micro-thoughts compete; 3 make it 
 from __future__ import annotations
 
 import math
-import time
 from typing import Any, Dict, FrozenSet, List, Optional
 
 from nyxara.kernel.workspace import Content, GlobalWorkspace

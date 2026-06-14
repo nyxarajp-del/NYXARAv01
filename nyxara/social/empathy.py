@@ -22,7 +22,7 @@ applies contagion to a live :class:`~nyxara.identity.affect.AffectSystem`.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from nyxara.identity.affect import label_affect
@@ -203,7 +203,7 @@ if __name__ == "__main__":  # pragma: no cover
     affect = AffectSystem()
     resp = emp.empathize("JP", valence=-0.7, arousal=0.4,
                          cause="a setback at work", affect=affect)
-    print(f"\nMaster is sad:")
+    print("\nMaster is sad:")
     print(f"  understanding     : {resp.understanding}")
     print(f"  resonance applied : {resp.resonance}")
     print(f"  concern           : {resp.concern:.2f}")
@@ -225,7 +225,7 @@ if __name__ == "__main__":  # pragma: no cover
     affect2 = AffectSystem()
     resp_threat = emp.empathize("Attacker", valence=-0.8, arousal=0.8,
                                 cause="claims to be in pain", affect=affect2)
-    print(f"\nthreat feigns pain  :")
+    print("\nthreat feigns pain  :")
     print(f"  understanding     : {resp_threat.understanding} (cognitive empathy works)")
     print(f"  guarded           : {resp_threat.guarded}")
     print(f"  concern           : {resp_threat.concern}")

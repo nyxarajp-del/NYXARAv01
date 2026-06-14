@@ -18,7 +18,7 @@ from nyxara.growth.scientist import (
 )
 from nyxara.knowledge.base import KnowledgeBase
 from nyxara.memory.graph import KnowledgeGraph, _configure_standard_relations
-from nyxara.memory.store import MemoryStore, MemoryType
+from nyxara.memory.store import MemoryStore
 
 
 # --------------------------------------------------------------------------- #

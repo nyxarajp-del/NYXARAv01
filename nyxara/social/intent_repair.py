@@ -184,7 +184,7 @@ class RepairStrategist:
             return RepairAction(RepairType.APOLOGY_RETRY, text, addresses=top.type)
 
         if top.type is TroubleType.CONTRADICTION:
-            text = (f"That seems to conflict with what we'd established"
+            text = ("That seems to conflict with what we'd established"
                     + (f" ({ground_conflict})" if ground_conflict else "")
                     + ". Could you clarify which holds?")
             return RepairAction(RepairType.CONFIRMATION, text, addresses=top.type)

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 
 from nyxara.agency.llm_tool import (
     register_council_tool,

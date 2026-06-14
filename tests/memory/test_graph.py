@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.kernel.errors import MemoryError_
-from nyxara.memory.graph import Entity, GraphQuery, KnowledgeGraph, Triple
+from nyxara.memory.graph import Entity, GraphQuery, KnowledgeGraph
 from nyxara.memory.provenance import Provenance, SourceType
 
 

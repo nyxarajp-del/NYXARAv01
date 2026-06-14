@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from nyxara.memory.provenance import Provenance, SourceType
 from nyxara.mind.proposal import Proposal, ProposalKind
@@ -273,14 +273,14 @@ if __name__ == "__main__":  # pragma: no cover
 
     # lateral thinking
     lat = eng.lateral("threat detection")
-    print(f"\nlateral:")
+    print("\nlateral:")
     for i in lat:
         print(f"  [{i.technique}] {i.content[:70]}…")
     assert any(i.technique == "provocation" for i in lat)
 
     # analogy generation imports structure from other domains
     ana = eng.analogies("autonomous defense", n=3)
-    print(f"\nanalogies:")
+    print("\nanalogies:")
     for i in ana:
         print(f"  {i.content}")
     assert len(ana) == 3

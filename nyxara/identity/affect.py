@@ -270,7 +270,7 @@ if __name__ == "__main__":  # pragma: no cover
     assert label_affect(-0.6, 0.85) == "fear"
     assert label_affect(0.7, 0.6) == "joy"
     assert label_affect(0.4, 0.15) in ("calm", "content")
-    print(f"\nlabels              : fear/joy/calm map correctly")
+    print("\nlabels              : fear/joy/calm map correctly")
 
     soul = Soul()
     affect = AffectSystem(soul=soul)

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     Any, Callable, Dict, Hashable, List, Optional, Sequence, Tuple, Union,
 )

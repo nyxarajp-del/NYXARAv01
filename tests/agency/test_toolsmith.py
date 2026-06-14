@@ -6,7 +6,7 @@ import pytest
 
 from nyxara.agency.permissions import Authority, Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
-from nyxara.agency.toolsmith import (ArgBinding, CompositeTool, ToolStep, Toolsmith,
+from nyxara.agency.toolsmith import (ArgBinding, ToolStep, Toolsmith,
                                      ValidationReport)
 from nyxara.kernel.errors import AuthorizationError, ToolError, ValidationError
 

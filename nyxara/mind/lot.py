@@ -23,7 +23,7 @@ Pure standard library.
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
 __all__ = [

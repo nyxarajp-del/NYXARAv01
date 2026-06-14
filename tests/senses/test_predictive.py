@@ -6,7 +6,7 @@ import pytest
 
 from nyxara.senses.binding import Modality, Percept, Provenance
 from nyxara.senses.predictive import (PerceptSurprise, PerceptualPredictor, SensoryPredictor,
-                                      SurpriseResult, SymbolPredictor, SymbolSurprise,
+                                      SymbolPredictor, SymbolSurprise,
                                       percept_features)
 
 

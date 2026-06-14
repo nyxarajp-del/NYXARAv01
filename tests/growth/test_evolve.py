@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.growth.evolve import (EvolutionDecision, EvolutionResult, Evolver, Mutation,
+from nyxara.growth.evolve import (EvolutionDecision, Evolver, Mutation,
                                   MutationKind)
 from nyxara.guard.value_learning import IMMUTABLE_VALUES
 from nyxara.kernel.errors import CorrigibilityError, ValidationError
