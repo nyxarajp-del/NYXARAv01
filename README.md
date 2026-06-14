@@ -59,6 +59,7 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/research <topic>` | run one autonomous research pass on a topic         |
 | `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
 | `/discover [n]`   | autonomous discovery: `n` self-driven observe→…→update-model cycles |
+| `/strategize <p>` | strategic analysis: direct answer → reality check → weaknesses → solution |
 | `/save`           | persist long-term memory to disk now                  |
 | `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
 
@@ -195,6 +196,28 @@ around the control law.
   ```
 
   From the console: `/discover [n]`.
+* **Strategic intelligence** — `mind/strategic.py`. `core.strategize(problem)` reasons like a
+  strategist, not a chatbot: truth over comfort, first principles over surface patterns. It
+  returns one structured analysis in a fixed six-part framework —
+
+  > **Direct Answer → Reality Check → Key Weaknesses → Root Cause → Optimized Solution → Execution Steps**
+
+  It *composes* existing faculties rather than duplicating them: the `Scientist`
+  stress-tests any testable premise (so the reality check is grounded, not asserted) and the
+  `RoleCouncil`'s Critic / Security / Engineer / Strategist lenses surface the weaknesses,
+  each categorised (logic / scalability / real-world-constraint / failure-scenario /
+  unintended-consequence) and severity-scored. The `SelfModel` keeps it honest — where she
+  is weak or could hallucinate, confidence drops and the gap is surfaced, never hidden, and
+  it never claims certainty. Pure analysis: it proposes structured reasoning and takes no
+  world actions, so it runs fully offline and never reaches around the control law.
+
+  ```python
+  report = core.strategize("Should we rewrite the kernel in Rust?")
+  print(report["direct_answer"])      # the core judgment, first
+  print(report["key_weaknesses"])     # categorised, severity-scored
+  ```
+
+  From the console: `/strategize <problem>`.
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).
@@ -260,6 +283,7 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/research`             | POST | one autonomous research pass — `{topic}`   |
 | `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
 | `/v1/discover`             | POST | the autonomous discovery loop — `{cycles?}` → belief updates |
+| `/v1/strategize`           | POST | strategic analysis — `{problem}` → the six-part framework |
 | `/v1/control/{pause\|resume\|scram}` | POST | sovereign control (opt-in)       |
 | `/v1/memory/{save\|load}`  | POST | persist / restore long-term memory (Rule 7) |
 | `/v1/ws`                   | WS   | a streaming chat socket (`?token=`)        |

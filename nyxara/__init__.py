@@ -41,6 +41,7 @@ from nyxara.kernel.orchestrator import (
 )
 from nyxara.knowledge import KnowledgeBase
 from nyxara.mind.cost import UsageLedger
+from nyxara.mind.strategic import StrategicAnalysis, StrategicIntelligence
 
 __version__ = "0.1.0"
 
@@ -67,6 +68,9 @@ __all__ = [
     # the self-driven discovery loop (observe → hypothesis → experiment → result → update)
     "AutonomousScientist",
     "DiscoveryReport",
+    # the strategic intelligence faculty (six-part analytical framework)
+    "StrategicIntelligence",
+    "StrategicAnalysis",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",
