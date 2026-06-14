@@ -39,6 +39,7 @@ __all__ = [
     "Contradiction",
     "BeliefStore",
     "Capability",
+    "HallucinationZone",
     "SelfSnapshot",
     "ContinuityReport",
     "SelfKnowledgeReport",
@@ -226,6 +227,33 @@ class Capability:
 
 
 @dataclass
+class HallucinationZone:
+    """A domain where NYXARA is prone to *confabulate* — to produce a fluent,
+    plausible-sounding answer that is not grounded in anything she actually knows.
+
+    Knowing *where* she can hallucinate is the fourth pillar of the self-model: it
+    lets her hedge (via the HonestyGuard), reach for grounded retrieval, or abstain
+    instead of bluffing. ``risk`` is how prone she is here [0,1]; ``keywords`` are the
+    surface triggers used to detect when a live query lands inside this zone.
+    """
+
+    domain: str
+    risk: float = 0.7
+    reason: str = ""
+    keywords: frozenset = field(default_factory=frozenset)
+
+    def matches(self, text: str) -> bool:
+        low = text.lower()
+        if self.domain.lower() in low:
+            return True
+        return any(k for k in self.keywords if k and k.lower() in low)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"domain": self.domain, "risk": round(self.risk, 3),
+                "reason": self.reason, "keywords": sorted(self.keywords)}
+
+
+@dataclass
 class SelfSnapshot:
     at: float
     label: str
@@ -265,6 +293,7 @@ class SelfModel:
         self.capabilities: Dict[str, Capability] = {}
         self.state: Dict[str, Any] = {}
         self.known_unknowns: Dict[str, str] = {}     # topic -> why-unknown
+        self.hallucination_zones: Dict[str, HallucinationZone] = {}  # domain -> risk
         self.snapshots: List[SelfSnapshot] = []
         self._protected_attrs = tuple(protected_attrs)
         self._protected_baseline: Dict[str, Any] = {}
@@ -315,6 +344,67 @@ class SelfModel:
                     now: Optional[float] = None) -> float:
         """1 - effective confidence; 1.0 when nothing is known."""
         return _clamp(1.0 - self.confidence_in(subject, predicate, now))
+
+    # ---- hallucination awareness (knows *where* she can confabulate) ---- #
+    def declare_hallucination_risk(self, domain: str, *, risk: float = 0.7,
+                                   reason: str = "",
+                                   keywords: Sequence[str] = ()) -> HallucinationZone:
+        """Record a domain where NYXARA is prone to hallucinate, with why and how to
+        detect it. Re-declaring a domain updates it (keeps the highest risk seen)."""
+        existing = self.hallucination_zones.get(domain)
+        risk = _clamp(risk)
+        if existing is not None:
+            risk = max(risk, existing.risk)
+            keywords = tuple(set(existing.keywords) | set(keywords))
+            reason = reason or existing.reason
+        zone = HallucinationZone(domain=domain, risk=risk, reason=reason,
+                                 keywords=frozenset(k.lower() for k in keywords))
+        self.hallucination_zones[domain] = zone
+        return zone
+
+    def hallucination_risk(self, text: str) -> Tuple[float, List[str]]:
+        """How hallucination-prone is *this* query? Returns (max-risk, matched-domains).
+        ``(0.0, [])`` means nothing flagged — she has no special reason to doubt herself."""
+        if not text:
+            return 0.0, []
+        matched = [z for z in self.hallucination_zones.values() if z.matches(text)]
+        if not matched:
+            return 0.0, []
+        risk = max(z.risk for z in matched)
+        return risk, [z.domain for z in matched]
+
+    def risky_domains(self) -> List[HallucinationZone]:
+        """All hallucination-prone domains, most dangerous first."""
+        return sorted(self.hallucination_zones.values(), key=lambda z: z.risk, reverse=True)
+
+    # ---- the four pillars of the self-model (the Master's explicit questions) ---- #
+    def what_i_know(self, *, limit: int = 8, min_confidence: float = 0.5,
+                    now: Optional[float] = None) -> List[str]:
+        """What I know: my strongest capabilities and most-trusted beliefs."""
+        out: List[str] = []
+        for c in sorted(self.capabilities.values(), key=lambda c: c.level, reverse=True):
+            if c.level >= min_confidence:
+                out.append(f"{c.name} ({c.level:.0%})")
+        for b in sorted(self.beliefs.all(),
+                        key=lambda b: b.effective_confidence(now), reverse=True):
+            if b.polarity and b.effective_confidence(now) >= min_confidence:
+                out.append(f"{b.subject} {b.predicate} {b.object} "
+                           f"({b.effective_confidence(now):.0%})")
+        return out[:limit]
+
+    def what_i_dont_know(self) -> Dict[str, str]:
+        """What I don't know: the explicit known-unknowns ledger (topic -> why)."""
+        return dict(self.known_unknowns)
+
+    def where_i_am_weak(self, *, threshold: float = 0.4) -> List[Tuple[str, float]]:
+        """Where I am weak: capabilities whose mastery sits below ``threshold``."""
+        weak = [(c.name, c.level) for c in self.capabilities.values()
+                if c.level < threshold]
+        return sorted(weak, key=lambda t: t[1])
+
+    def where_i_can_hallucinate(self) -> List[HallucinationZone]:
+        """Where I can hallucinate: the declared confabulation-prone domains."""
+        return self.risky_domains()
 
     # ---- snapshots & drift ---- #
     def snapshot(self, label: str = "", now: Optional[float] = None) -> SelfSnapshot:
@@ -376,10 +466,12 @@ class SelfModel:
     # ---- Level 2 — structured self-knowledge for the reasoning step ---- #
     def self_report(self, *, goals: Any = None, tools: Any = None,
                     memory: Any = None, control_state: str = "running",
-                    mood: str = "neutral", turns: int = 0,
+                    mood: str = "neutral", turns: int = 0, stimulus: str = "",
                     now: Optional[float] = None) -> "SelfKnowledgeReport":
         """Build a SelfKnowledgeReport from live self-model state plus optional
-        cross-module context (goals, tools, memory) provided by the orchestrator."""
+        cross-module context (goals, tools, memory) provided by the orchestrator.
+        When ``stimulus`` is given, the hallucination-risk facet is scoped to the
+        domains *this* query actually touches; otherwise it lists the riskiest few."""
         now = now or time.time()
         # identity
         owner_b = self.beliefs.best("NYXARA", "loyal_to", now)
@@ -418,6 +510,17 @@ class SelfModel:
                 goal_names = [g.name for g in ranked[:5]]
             except Exception:  # noqa: BLE001
                 pass
+        # the four pillars
+        knows = self.what_i_know(now=now)
+        unknowns = [f"{t} ({why})" if why and why != "unknown" else t
+                    for t, why in self.what_i_dont_know().items()]
+        weaknesses = [f"{n} ({l:.0%})" for n, l in self.where_i_am_weak()]
+        if stimulus:
+            risk, domains = self.hallucination_risk(stimulus)
+            halluc = ([f"{d} (risk {risk:.0%})" for d in domains] if domains
+                      else [])
+        else:
+            halluc = [f"{z.domain} (risk {z.risk:.0%})" for z in self.risky_domains()[:4]]
         return SelfKnowledgeReport(
             identity=identity,
             capabilities=capabilities,
@@ -425,6 +528,10 @@ class SelfModel:
             current_state=current_state,
             resources=resources,
             active_goals=goal_names,
+            knows=knows,
+            unknowns=unknowns,
+            weaknesses=weaknesses,
+            hallucination_risks=halluc,
         )
 
     # ---- transparency / reporting ---- #
@@ -438,12 +545,58 @@ class SelfModel:
             "owner": self.state.get("owner"),
             "loyalty_to_owner": self.state.get("loyalty_to_owner"),
             "top_capabilities": [c.to_dict() for c in strongest],
+            # the four pillars the Master asked for, explicitly:
+            "what_i_know": self.what_i_know(now=now),
+            "what_i_dont_know": self.what_i_dont_know(),
+            "where_i_am_weak": [{"name": n, "level": round(l, 3)}
+                                for n, l in self.where_i_am_weak()],
+            "where_i_can_hallucinate": [z.to_dict() for z in self.where_i_can_hallucinate()],
             "beliefs_held": len(self.beliefs),
             "known_unknowns": list(self.known_unknowns),
             "open_contradictions": len(self.beliefs.unresolved_contradictions()),
             "snapshots": len(self.snapshots),
             "continuity_stable": self.check_continuity().stable,
         }
+
+    # ---- persistence (identity survives a restart — Rule 7) ---- #
+    def to_dict(self) -> Dict[str, Any]:
+        """A serialisable snapshot of the self-model's learned facets. Beliefs carry no
+        provenance here (kept light); the loyalty seed is re-laid on construction."""
+        return {
+            "state": dict(self.state),
+            "protected_baseline": dict(self._protected_baseline),
+            "capabilities": {n: {"level": c.level, "confidence": c.confidence}
+                             for n, c in self.capabilities.items()},
+            "known_unknowns": dict(self.known_unknowns),
+            "hallucination_zones": {d: z.to_dict()
+                                    for d, z in self.hallucination_zones.items()},
+            "beliefs": [b.to_dict() for b in self.beliefs.all()],
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> None:
+        """Restore learned facets from :meth:`to_dict`. Best-effort and additive — it
+        never clears the loyalty seed or protected baseline already in place."""
+        if not isinstance(data, dict):
+            return
+        for k, v in (data.get("state") or {}).items():
+            self.update_state(**{k: v})
+        for attr, base in (data.get("protected_baseline") or {}).items():
+            self._protected_baseline.setdefault(attr, base)
+        for name, cap in (data.get("capabilities") or {}).items():
+            self.set_capability(name, float(cap.get("level", 0.0)),
+                                float(cap.get("confidence", 0.5)))
+        for topic, why in (data.get("known_unknowns") or {}).items():
+            self.declare_unknown(topic, why)
+        for _, z in (data.get("hallucination_zones") or {}).items():
+            self.declare_hallucination_risk(
+                z.get("domain", ""), risk=float(z.get("risk", 0.7)),
+                reason=z.get("reason", ""), keywords=tuple(z.get("keywords", ())))
+        for b in (data.get("beliefs") or []):
+            subj, pred = b.get("subject"), b.get("predicate")
+            if subj and pred:
+                self.believe(subj, pred, b.get("object"),
+                             polarity=bool(b.get("polarity", True)),
+                             confidence=float(b.get("confidence", 0.8)))
 
 
 # --------------------------------------------------------------------------- #
@@ -460,19 +613,30 @@ class SelfKnowledgeReport:
     current_state: str           # mood / control / health in one line
     resources: str               # memory count, tool count, turns processed
     active_goals: List[str]      # names of current active goals (top-5)
+    # the four pillars, kept explicit so the reasoner always speaks from them:
+    knows: List[str] = field(default_factory=list)          # what I know
+    unknowns: List[str] = field(default_factory=list)        # what I don't know
+    weaknesses: List[str] = field(default_factory=list)      # where I'm weak
+    hallucination_risks: List[str] = field(default_factory=list)  # where I can hallucinate
 
     def to_prompt_text(self) -> str:
         caps = "; ".join(self.capabilities) or "general reasoning"
-        lims = "; ".join(self.limitations) or "none declared"
         goals = "; ".join(self.active_goals) or "serve the Master"
+        knows = "; ".join(self.knows) or "general reasoning"
+        unknowns = "; ".join(self.unknowns) or "nothing flagged"
+        weak = "; ".join(self.weaknesses) or "none flagged"
+        halluc = "; ".join(self.hallucination_risks) or "none for this turn"
         return (
             f"[Self-model]\n"
-            f"Identity : {self.identity}\n"
-            f"Can do   : {caps}\n"
-            f"Limits   : {lims}\n"
-            f"State    : {self.current_state}\n"
-            f"Resources: {self.resources}\n"
-            f"Goals    : {goals}"
+            f"Identity     : {self.identity}\n"
+            f"I know       : {knows}\n"
+            f"I don't know : {unknowns}\n"
+            f"I'm weak at  : {weak}\n"
+            f"I may halluc.: {halluc} — verify or hedge here, never bluff\n"
+            f"Can do       : {caps}\n"
+            f"State        : {self.current_state}\n"
+            f"Resources    : {self.resources}\n"
+            f"Goals        : {goals}"
         )
 
 
@@ -541,5 +705,32 @@ if __name__ == "__main__":  # pragma: no cover
     except InvariantViolation:
         print("loyalty drift caught : OK (fail-closed)")
 
+    # the four pillars — what I know / don't know / am weak at / can hallucinate
+    sm.declare_hallucination_risk(
+        "specific dates", risk=0.8, reason="generative recall drifts on exact dates",
+        keywords=("date", "when did", "what year"))
+    risk, domains = sm.hallucination_risk("when did that happen and what year")
+    print(f"\nhallucination risk   : {risk:.2f} on {domains}")
+    assert risk == 0.8 and "specific dates" in domains
+    assert sm.hallucination_risk("hello there") == (0.0, [])
+    print(f"what I know          : {sm.what_i_know()[:3]}")
+    print(f"what I don't know    : {list(sm.what_i_dont_know())}")
+    print(f"where I am weak      : {sm.where_i_am_weak()}")
+    assert any(n == "cooking" for n, _ in sm.where_i_am_weak())
+    assert sm.where_i_can_hallucinate()  # at least the one we declared
+
+    # round-trip persistence (Rule 7: identity survives a restart)
+    blob = sm.to_dict()
+    sm2 = SelfModel()
+    sm2.believe("NYXARA", "loyal_to", "Master", confidence=1.0)
+    sm2.load_dict(blob)
+    assert sm2.can("network_defense") and not sm2.can("cooking")
+    assert sm2.hallucination_risk("what year")[0] == 0.8
+    print("persistence round-trip: OK ✓")
+
+    # the per-turn report carries all four pillars, scoped to the live query
+    rep = sm.self_report(stimulus="when did that happen")
+    txt = rep.to_prompt_text()
+    assert "I don't know" in txt and "I may halluc." in txt and "specific dates" in txt
     print(f"\nself-description     : {sm.self_description()}")
     print("\nALL SELF-TESTS PASSED ✓")

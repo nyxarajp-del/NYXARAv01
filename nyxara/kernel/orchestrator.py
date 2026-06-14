@@ -270,6 +270,9 @@ class NyxaraCore:
         # self-model — structured self-knowledge, contradiction detection, and an explicit
         # ledger of known-unknowns (introspection; later feeds the curiosity loop)
         self.self_model = self._build_self_model() if enable_memory else None
+        # expose the self-model as a read-only introspection tool so NYXARA can consult
+        # "what do I know / not know / am weak at / can hallucinate" inside her own answers
+        self._wire_self_model_tool()
         # free-energy spine — a small prediction-error loop whose emotion read-out colours
         # affect (perception and feeling as one loop; the Free Energy Principle)
         self.predictive = self._build_predictive() if enable_growth else None
@@ -547,15 +550,98 @@ class NyxaraCore:
 
     def _build_self_model(self) -> Any:
         """A live, introspectable self-model: structured beliefs, contradiction
-        detection, and a ledger of known-unknowns. Seeded with the one belief that is
-        never in doubt — loyalty to the Master (Rule 1)."""
+        detection, a ledger of known-unknowns, capability self-ratings and the domains
+        where she can hallucinate. Seeded with the one belief that is never in doubt —
+        loyalty to the Master (Rule 1) — and with honest self-knowledge (see
+        :meth:`_seed_self_model`)."""
         try:
             from nyxara.memory.self_model import SelfModel
             sm = SelfModel()
             sm.believe("NYXARA", "loyal_to", "Master", confidence=1.0)
+            self._seed_self_model(sm)
             return sm
         except Exception:  # noqa: BLE001 — self-knowledge is a capability, never required
             return None
+
+    def _wire_self_model_tool(self) -> None:
+        """Register a read-only ``self_model`` tool so the act stage can introspect the
+        four pillars. The handler closes over the core, so it always reflects live state.
+        Best-effort — a missing registry or tool API never blocks construction."""
+        if self.tools is None or self.self_model is None:
+            return
+        try:
+            from nyxara.agency.permissions import Capability as _Cap, RiskTier as _Risk
+            from nyxara.agency.tools import ToolSpec
+            if self.tools.get("self_model") is not None:
+                return
+            self.tools.register(ToolSpec(
+                "self_model", handler=lambda: self.self_knowledge(),
+                description="introspect NYXARA's own self-model — what she knows, does "
+                            "not know, is weak at, and can hallucinate",
+                capability=_Cap.TOOL_CALL, risk=_Risk.TRIVIAL))
+        except Exception:  # noqa: BLE001 — the tool is a convenience, never required
+            pass
+
+    def _seed_self_model(self, sm: Any) -> None:
+        """Seed honest self-knowledge so the four pillars are populated and *truthful*:
+        capability ratings keyed off the faculties actually present (so 'where I am weak'
+        reflects reality), and the domains where a language-model mind is prone to
+        confabulate. Best-effort — a failure here never blocks construction."""
+        try:
+            # --- capabilities: rate against the faculties actually wired in ---
+            def has(attr: str) -> bool:
+                return getattr(self, attr, None) is not None
+
+            # strong, always-present cognitive core (keeps planning/foresight happy too)
+            sm.set_capability("reasoning", 0.82, confidence=0.7)
+            sm.set_capability("planning", 0.75, confidence=0.65)
+            sm.set_capability("self_reflection", 0.8, confidence=0.7)
+            sm.set_capability("memory_recall", 0.7 if has("memory") else 0.2,
+                              confidence=0.6)
+            sm.set_capability("grounded_knowledge", 0.7 if has("knowledge") else 0.2,
+                              confidence=0.55)
+            sm.set_capability("tool_use", 0.7 if has("tools") else 0.15, confidence=0.6)
+            sm.set_capability("world_modeling", 0.6 if has("world_model") else 0.25,
+                              confidence=0.5)
+            sm.set_capability("math_and_logic", 0.75 if has("reasoner") else 0.5,
+                              confidence=0.6)
+            # honest LOW capabilities — these *are* the weaknesses she should admit
+            sm.set_capability("real_time_information", 0.1, confidence=0.85)
+            sm.set_capability("precise_numeric_recall", 0.3, confidence=0.7)
+            sm.set_capability("private_personal_data", 0.2, confidence=0.8)
+
+            # --- where she can hallucinate (confabulation-prone domains) ---
+            sm.declare_hallucination_risk(
+                "specific dates and numbers", risk=0.75,
+                reason="generative recall drifts on exact dates, counts and figures",
+                keywords=("what year", "when did", "how many", "exact date",
+                          "what date", "how much"))
+            sm.declare_hallucination_risk(
+                "citations and sources", risk=0.85,
+                reason="tends to invent plausible-looking references, URLs and quotes",
+                keywords=("cite", "citation", "source", "reference", "url", "doi",
+                          "link to", "according to"))
+            sm.declare_hallucination_risk(
+                "real-time or recent events", risk=0.8,
+                reason="no live data unless a tool or retrieval grounds the answer",
+                keywords=("today", "right now", "latest", "current price",
+                          "breaking", "this week", "just happened"))
+            sm.declare_hallucination_risk(
+                "obscure or niche facts", risk=0.7,
+                reason="sparse training coverage makes confident-sounding guesses likely",
+                keywords=("obscure", "rare", "little-known", "exact specification"))
+            sm.declare_hallucination_risk(
+                "verbatim quotes", risk=0.8,
+                reason="exact wording of quotes and passages is reconstructed, not stored",
+                keywords=("exact quote", "word for word", "verbatim", "quote the"))
+
+            # --- a couple of honest known-unknowns to anchor the ledger ---
+            sm.declare_unknown("the Master's private real-world details",
+                               "only what the Master tells me, nothing more")
+            sm.declare_unknown("events after my knowledge was last updated",
+                               "no live feed without a grounding tool")
+        except Exception:  # noqa: BLE001 — seeding is best-effort
+            pass
 
     def _belief_dim(self, *, default: int = 16, cap: int = 64) -> int:
         """Dimension for the predictive belief vector: the memory embedder's dimension
@@ -1139,7 +1225,7 @@ class NyxaraCore:
         enriched = self._run_thought_workspace(stimulus, focus, memories)
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
-        enriched = self._inject_self_knowledge(enriched)
+        enriched = self._inject_self_knowledge(enriched, stimulus)
         # Level 4 — run the base reasoner + role council as competing hypotheses;
         # the orchestrator picks the more confident, better-supported candidate.
         candidate = self._compete_with_role_council(stimulus, focus, enriched)
@@ -1151,6 +1237,9 @@ class NyxaraCore:
         # Level 13 — attach a PredictionResult to "respond" candidates so the
         # HonestyGuard and spoken response can include calibrated confidence.
         candidate = self._attach_prediction(stimulus, candidate)
+        # Self-model facet #4 — if this query lands in a hallucination-prone domain,
+        # lower confidence so the HonestyGuard hedges instead of bluffing.
+        candidate = self._apply_hallucination_caution(stimulus, candidate)
         self._arbitrate(stimulus, candidate, enriched)
         return candidate
 
@@ -1245,10 +1334,11 @@ class NyxaraCore:
         self._record_hypotheses(results, chosen_name)
         return chosen
 
-    def _inject_self_knowledge(self, memories: List[Any]) -> List[Any]:
+    def _inject_self_knowledge(self, memories: List[Any], stimulus: str = "") -> List[Any]:
         """Level 2 — prepend a SelfKnowledgeReport to the memory context so the
-        reasoner always has an up-to-date self-model summary at the top of its context.
-        Best-effort: falls back to the original list if anything fails."""
+        reasoner always has an up-to-date self-model summary at the top of its context:
+        what she knows, what she does not, where she is weak, and — scoped to *this*
+        query — where she might hallucinate. Best-effort: falls back on any failure."""
         if self.self_model is None:
             return memories
         try:
@@ -1261,10 +1351,41 @@ class NyxaraCore:
             report = self.self_model.self_report(
                 goals=self.goals, tools=self.tools, memory=self.memory,
                 control_state=self.oversight.state.value,
-                mood=mood, turns=self._turns)
+                mood=mood, turns=self._turns, stimulus=stimulus)
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _apply_hallucination_caution(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Self-model facet #4 — *knowing where she can hallucinate.* If the query lands
+        in a declared hallucination-prone domain, dampen the candidate's confidence (and
+        belief) in proportion to the risk so the downstream HonestyGuard speaks with an
+        honest qualifier ('I suspect, though I'm not sure…') or abstains, rather than
+        confabulating fluently. Action candidates are left untouched. Best-effort."""
+        if self.self_model is None:
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            text = stimulus or getattr(candidate, "text", "") or ""
+            risk, domains = self.self_model.hallucination_risk(text)
+            if risk <= 0.0 or not domains:
+                return candidate
+            # scale confidence down toward (1 - risk); the riskier the zone, the lower
+            current = float(getattr(candidate, "confidence", 0.7) or 0.7)
+            damped = round(_clamp01(current * (1.0 - 0.6 * risk)), 3)
+            candidate.confidence = damped
+            belief = getattr(candidate, "belief", None)
+            if belief is not None:
+                candidate.belief = round(_clamp01(min(float(belief), 1.0 - 0.5 * risk)), 3)
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"hallucination caution: {', '.join(domains)} (risk {risk:.0%}) — "
+                f"confidence {current:.2f}→{damped:.2f}, will hedge",
+                salience=0.5, confidence=damped)
+        except Exception:  # noqa: BLE001 — caution is advisory, never fatal
+            return candidate
+        return candidate
 
     def _attach_prediction(self, stimulus: str, candidate: Candidate) -> Candidate:
         """Level 13 — for 'respond' candidates, attach a PredictionResult so confidence
@@ -1981,8 +2102,11 @@ class NyxaraCore:
             voi = self._voi()
             source = InfoSource("internal knowledge", kind="gather",
                                 reliability=0.7, cost=0.2)
-            # value the gaps; investigate the most valuable ones VoI deems worth gathering
-            ordered = sorted(gaps, key=self._gap_uncertainty, reverse=True)
+            # value the gaps; investigate the most valuable ones VoI deems worth gathering.
+            # Prefer gaps shaped 'subject.predicate' (a grounded self-fact she can actually
+            # settle) so permanent epistemic limits in the ledger never starve the loop.
+            ordered = sorted(gaps, key=lambda t: ("." in t, self._gap_uncertainty(t)),
+                             reverse=True)
             for topic in ordered[: max(1, max_experiments)]:
                 rec = voi.decide(uncertainty=self._gap_uncertainty(topic), stakes=0.5,
                                  sources=[source])
@@ -2238,6 +2362,24 @@ class NyxaraCore:
         decisions = self.mind.by_kind(ThoughtKind.DECISION)
         return self.mind.explain(decisions[-1].id) if decisions else "no decision yet"
 
+    def self_knowledge(self) -> Dict[str, Any]:
+        """Master-facing: the four pillars of NYXARA's self-model — what she knows,
+        what she does not, where she is weak, and where she can hallucinate."""
+        if self.self_model is None:
+            return {"available": False,
+                    "reason": "self-model not enabled (memory faculty off)"}
+        desc = self.self_model.self_description()
+        return {
+            "available": True,
+            "identity": desc.get("loyalty_to_owner"),
+            "what_i_know": desc.get("what_i_know", []),
+            "what_i_dont_know": desc.get("what_i_dont_know", {}),
+            "where_i_am_weak": desc.get("where_i_am_weak", []),
+            "where_i_can_hallucinate": desc.get("where_i_can_hallucinate", []),
+            "open_contradictions": desc.get("open_contradictions", 0),
+            "continuity_stable": desc.get("continuity_stable"),
+        }
+
     def forge_capability(self, need: str, *,
                          authority: Authority = Authority.OWNER) -> Dict[str, Any]:
         """Master-facing: forge a brand-new runnable tool for a missing capability.
@@ -2320,29 +2462,67 @@ class NyxaraCore:
 
     # ---- cross-session continuity (Rule 7) ---- #
     def save_state(self, path: Optional[str] = None) -> Optional[str]:
-        """Persist long-term memory so identity survives a process restart."""
+        """Persist long-term memory so identity survives a process restart. The
+        self-model's learned facets (capabilities, known-unknowns, hallucination zones)
+        are persisted alongside it so self-knowledge accretes across restarts (Rule 7)."""
         if self.memory is None:
             return None
         target = path or self._default_memory_path()
         try:
             import os
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            return self.memory.save(target)
+            saved = self.memory.save(target)
+            self._save_self_model(target)
+            return saved
         except Exception:  # noqa: BLE001
             return None
 
     def load_state(self, path: Optional[str] = None) -> int:
-        """Restore long-term memory from disk (best-effort). Returns records loaded."""
+        """Restore long-term memory from disk (best-effort). Returns records loaded.
+        Also restores the self-model's learned facets if a sidecar file exists."""
         if self.memory is None:
             return 0
         target = path or self._default_memory_path()
         try:
             import os
+            self._load_self_model(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
         except Exception:  # noqa: BLE001
             return 0
+
+    def _self_model_path(self, memory_target: str) -> str:
+        """The self-model sidecar lives next to the long-term memory file."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "self_model.json")
+
+    def _save_self_model(self, memory_target: str) -> None:
+        if self.self_model is None:
+            return
+        try:
+            import json
+            import os
+            path = self._self_model_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(self.self_model.to_dict(), fh, indent=2, default=str)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_self_model(self, memory_target: str) -> None:
+        if self.self_model is None:
+            return
+        try:
+            import json
+            import os
+            path = self._self_model_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                self.self_model.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — restore is best-effort, never fatal
+            pass
 
     def _default_memory_path(self) -> str:
         from nyxara.kernel.config import get_settings

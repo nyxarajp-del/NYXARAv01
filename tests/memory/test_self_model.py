@@ -9,6 +9,7 @@ from nyxara.memory.provenance import Provenance, SourceType
 from nyxara.memory.self_model import (
     BeliefStore,
     ContradictionPolicy,
+    HallucinationZone,
     SelfBelief,
     SelfModel,
 )
@@ -237,6 +238,90 @@ def test_self_description_keys():
     sm.declare_unknown("x")
     desc = sm.self_description()
     for k in ("owner", "loyalty_to_owner", "top_capabilities", "beliefs_held",
-              "known_unknowns", "continuity_stable"):
+              "known_unknowns", "continuity_stable",
+              "what_i_know", "what_i_dont_know", "where_i_am_weak",
+              "where_i_can_hallucinate"):
         assert k in desc
     assert desc["owner"] == "JP"
+
+
+# -------------------- hallucination zones (facet #4) -------------------- #
+def test_hallucination_zone_matches_domain_and_keywords():
+    z = HallucinationZone("specific dates", risk=0.8, keywords=frozenset({"what year"}))
+    assert z.matches("tell me about specific dates")
+    assert z.matches("WHAT YEAR was it")
+    assert not z.matches("a calm greeting")
+
+
+def test_declare_and_assess_hallucination_risk():
+    sm = SelfModel()
+    sm.declare_hallucination_risk("citations", risk=0.85, reason="invents sources",
+                                  keywords=("cite", "source"))
+    risk, domains = sm.hallucination_risk("can you cite the source")
+    assert risk == 0.85 and "citations" in domains
+    assert sm.hallucination_risk("hello there") == (0.0, [])
+
+
+def test_hallucination_risk_takes_max_across_zones():
+    sm = SelfModel()
+    sm.declare_hallucination_risk("dates", risk=0.6, keywords=("year",))
+    sm.declare_hallucination_risk("quotes", risk=0.9, keywords=("verbatim",))
+    risk, domains = sm.hallucination_risk("the exact year, quoted verbatim")
+    assert risk == 0.9
+    assert set(domains) == {"dates", "quotes"}
+
+
+def test_declare_hallucination_risk_keeps_highest():
+    sm = SelfModel()
+    sm.declare_hallucination_risk("d", risk=0.5, keywords=("a",))
+    z = sm.declare_hallucination_risk("d", risk=0.3, keywords=("b",))
+    assert z.risk == 0.5  # never lowered
+    assert {"a", "b"} <= set(z.keywords)  # keywords merged
+
+
+# -------------------- the four pillars -------------------- #
+def test_four_pillar_accessors():
+    sm = SelfModel()
+    sm.set_capability("reasoning", 0.8)
+    sm.set_capability("cooking", 0.05)
+    sm.believe("nyxara", "owner", "JP", confidence=1.0)
+    sm.declare_unknown("the future", "unpredictable")
+    sm.declare_hallucination_risk("dates", risk=0.7, keywords=("year",))
+
+    assert any("reasoning" in s for s in sm.what_i_know())
+    assert "the future" in sm.what_i_dont_know()
+    weak_names = [n for n, _ in sm.where_i_am_weak()]
+    assert "cooking" in weak_names and "reasoning" not in weak_names
+    assert any(z.domain == "dates" for z in sm.where_i_can_hallucinate())
+
+
+def test_self_report_carries_four_pillars_scoped_to_query():
+    sm = SelfModel()
+    sm.set_capability("reasoning", 0.8)
+    sm.declare_unknown("the future")
+    sm.declare_hallucination_risk("dates", risk=0.8, keywords=("year",))
+    rep = sm.self_report(stimulus="what year was it")
+    assert rep.unknowns and rep.hallucination_risks
+    txt = rep.to_prompt_text()
+    assert "I don't know" in txt and "I may halluc." in txt and "dates" in txt
+    # a query that touches no zone yields no hallucination flag for the turn
+    rep2 = sm.self_report(stimulus="hello")
+    assert rep2.hallucination_risks == []
+
+
+# -------------------- persistence (Rule 7) -------------------- #
+def test_to_dict_load_dict_round_trip():
+    sm = SelfModel()
+    sm.update_state(owner="JP", loyalty_to_owner=True)
+    sm.set_capability("network_defense", 0.9, 0.85)
+    sm.declare_unknown("the future", "unpredictable")
+    sm.declare_hallucination_risk("dates", risk=0.8, keywords=("year",))
+    sm.believe("nyxara", "is_a", "agent", confidence=0.9)
+
+    blob = sm.to_dict()
+    restored = SelfModel()
+    restored.load_dict(blob)
+    assert restored.can("network_defense")
+    assert "the future" in restored.known_unknowns
+    assert restored.hallucination_risk("what year")[0] == 0.8
+    assert restored.knows("nyxara", "is_a")
