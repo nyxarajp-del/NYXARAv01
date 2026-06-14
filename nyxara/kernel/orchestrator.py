@@ -373,7 +373,8 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 use_council = False
         self.reasoner = reasoner or self._build_reasoner(
-            llm, use_council, self.skills, self.soul, self.narrative)
+            llm, use_council, self.skills, self.soul, self.narrative,
+            self_model=getattr(self, "self_model", None))
         self._wire_reporter()
         # Strategic Intelligence — a structured analytical faculty: any problem is
         # reasoned through a fixed six-part framework (direct answer → reality check →
@@ -444,7 +445,8 @@ class NyxaraCore:
             return None
 
     def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
-                        soul: Any = None, narrative: Any = None) -> Reasoner:
+                        soul: Any = None, narrative: Any = None,
+                        self_model: Any = None) -> Reasoner:
         # the LLM is shared between the council and both reasoners (one stateless facade)
         from nyxara.mind.llm import LLM
         llm = llm or LLM()
@@ -463,7 +465,7 @@ class NyxaraCore:
             base = LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
                                skill_memory=skills, soul=soul, history=self.history,
-                               knowledge=self.knowledge)
+                               knowledge=self.knowledge, self_model=self_model)
         except Exception:  # noqa: BLE001 — always have a working mind
             base = _default_reasoner
         # wrap it in the integrated mind: memory recall + dual-process routing +

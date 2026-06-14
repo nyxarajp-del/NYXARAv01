@@ -118,7 +118,15 @@ reversible; a worse candidate stays on the bench. Once a model is promoted, the 
 router** (`mind/router.py`) lets it answer first and falls back to the teacher only when its
 answer doesn't clear the verifier — so the **handoff rate** (`--bench`) rises as she improves.
 Verifiable math/logic is computed exactly by her faculties first (`mind/reasoning_faculties.py`),
-with or without any LLM. See [`docs/MASTERPLAN-sovereign-mind.md`](docs/MASTERPLAN-sovereign-mind.md).
+with or without any LLM. Above that sits the **primary self-model router**
+(`mind/self_model_router.py`): an *upfront* triage that — before a token is generated — reads her
+introspectable self-model to decide which prompts her **own model** handles, which go to the
+**teacher**, and which are **actions that must clear a verifier before they may act**
+(verify-before-act). It only chooses *which mind drafts*; the kernel still disposes every reply
+through corrigibility / honesty / permission / guardian / oversight. On by default, advisory and
+fail-open (`NYXARA_SELF_MODEL_ROUTER__ENABLED=false` to disable;
+`competence_threshold` / `hallucination_ceiling` / `verify_before_act` tune it).
+See [`docs/MASTERPLAN-sovereign-mind.md`](docs/MASTERPLAN-sovereign-mind.md).
 
 ### Capability layers (added on top of the sovereign loop)
 

@@ -66,7 +66,7 @@ class LLMReasoner:
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
                  skill_memory: Any = None, soul: Any = None, history: Any = None,
-                 knowledge: Any = None,
+                 knowledge: Any = None, self_model: Any = None,
                  max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
@@ -83,10 +83,14 @@ class LLMReasoner:
         self.history = history
         # foundational world knowledge (Layer 6): a retriever queried for ground truth
         self.knowledge = knowledge
+        # NYXARA's introspectable self-model — drives the PRIMARY self-model router's upfront
+        # triage (which mind handles a prompt) and the verify-before-act gate on actions.
+        self.self_model = self_model
         self.max_memory_context = max_memory_context
         self.max_history = max_history
         self.system = system or self._default_system()
         self._router = None      # Phase 2: lazily built when the confidence router is enabled
+        self._smrouter = None    # Phase 2+: the primary self-model router (upfront triage)
 
     # ---- prompts ---- #
     def _default_system(self) -> str:
@@ -194,24 +198,47 @@ class LLMReasoner:
         except Exception:  # noqa: BLE001 — never let the mind crash the loop
             return _default_reasoner(stimulus, focus)
 
+    def _ensure_smrouter(self) -> Any:
+        """Lazily build the PRIMARY self-model router, reusing the shared confidence router."""
+        if self._smrouter is None:
+            from nyxara.mind.router import Router
+            from nyxara.mind.self_model_router import PrimarySelfModelRouter
+            if self._router is None:
+                self._router = Router(self.llm, settings=self.settings)
+            self._smrouter = PrimarySelfModelRouter(
+                self_model=self.self_model, router=self._router, settings=self.settings)
+        return self._smrouter
+
+    def _smrouter_enabled(self) -> bool:
+        cfg = getattr(self.settings, "self_model_router", None)
+        return bool(cfg is not None and cfg.enabled and self.self_model is not None)
+
     def _maybe_route(self, stimulus: str) -> Optional[Candidate]:
         """Phase 2: let NYXARA's OWN model answer first when the router is enabled & confident.
 
-        Returns a conversational :class:`Candidate` only on a verified handoff; otherwise
-        ``None`` so the normal teacher path runs. The reply is still gated downstream like any
-        other — the router decides *which mind drafts*, never whether the words may be spoken.
+        With the primary self-model router enabled (and a self-model present) the upfront
+        triage chooses which mind drafts; otherwise the reactive confidence router runs as
+        before. Either way this returns a conversational :class:`Candidate` only on a verified
+        handoff; otherwise ``None`` so the normal teacher path runs. The reply is still gated
+        downstream like any other — the router decides *which mind drafts*, never whether the
+        words may be spoken.
         """
+        primary = self._smrouter_enabled()
         rcfg = getattr(self.settings, "router", None)
-        if rcfg is None or not rcfg.enabled:
+        if not primary and (rcfg is None or not rcfg.enabled):
             return None
         try:
-            if self._router is None:
-                from nyxara.mind.router import Router
-                self._router = Router(self.llm, settings=self.settings)
-            if not self._router.self_available():
-                return None
-            res = self._router.draft(stimulus, system=self._effective_system())
-            if res.source == "self" and res.handed_off and res.text:
+            if primary:
+                res = self._ensure_smrouter().route_respond(
+                    stimulus, system=self._effective_system())
+            else:
+                if self._router is None:
+                    from nyxara.mind.router import Router
+                    self._router = Router(self.llm, settings=self.settings)
+                if not self._router.self_available():
+                    return None
+                res = self._router.draft(stimulus, system=self._effective_system())
+            if res.source in ("self", "faculty") and res.handed_off and res.text:
                 return Candidate(
                     text=res.text, kind="respond", capability=Capability.MESSAGE_SEND,
                     target="", risk=RiskTier.LOW, reversible=True,
@@ -287,11 +314,39 @@ class LLMReasoner:
         if kind == "respond" and self.use_council and self.council is not None:
             text = self._council_answer(stimulus) or text
 
-        return Candidate(
+        candidate = Candidate(
             text=text, kind=kind, capability=capability, target=target, risk=risk,
             reversible=reversible, confidence=confidence, belief=confidence,
             rationale=rationale or ("a tool call" if kind == "act" else "a reply"),
             tool=tool, tool_args=dict(tool_args))
+
+        # Verify-before-act: an action must clear the intrinsic verifier before it may act.
+        # A proposal that fails is demoted to an honest reply *here*, before it reaches any
+        # gate — so every downstream gate still runs on whatever survives; this only narrows
+        # what may act, never widens it. Advisory and fail-open.
+        if candidate.kind == "act" and self._smrouter_enabled():
+            candidate = self._verify_before_act(stimulus, candidate)
+
+        return candidate
+
+    def _verify_before_act(self, stimulus: str, candidate: Candidate) -> Candidate:
+        """Gate an action on the pre-action verifier; demote to a respond if it fails."""
+        try:
+            cleared, plan = self._ensure_smrouter().verify_action(stimulus, candidate)
+            if cleared:
+                return candidate
+            score = plan.verifier_score if plan.verifier_score is not None else 0.0
+            return Candidate(
+                text=(f"I won't act on that yet, Master — my pre-action verifier wasn't "
+                      f"confident the plan is sound (score {score:.2f}). Let me explain or "
+                      f"refine it before I act."),
+                kind="respond", capability=Capability.MESSAGE_SEND, target="",
+                risk=RiskTier.LOW, reversible=True,
+                confidence=candidate.confidence, belief=candidate.confidence,
+                rationale="action demoted — failed the pre-action verifier",
+                tool="", tool_args={})
+        except Exception:  # noqa: BLE001 — verify-before-act is advisory; never crash a turn
+            return candidate
 
     def _council_answer(self, stimulus: str) -> str:
         try:
