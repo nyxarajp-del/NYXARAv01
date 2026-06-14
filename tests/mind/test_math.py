@@ -18,6 +18,7 @@ def test_evaluate_arithmetic(m):
     assert m.evaluate("(1+2)*3") == 9
 
 
+@pytest.mark.skipif(not has_sympy(), reason="sympy not installed")
 def test_evaluate_exact_rational(m):
     import sympy
     assert m.evaluate("1/3") == sympy.Rational(1, 3)

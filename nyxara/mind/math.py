@@ -131,7 +131,12 @@ class MathEngine:
                 return _pyify(_sp.sympify(expr))
             except Exception as e:
                 raise MathError(f"cannot evaluate {expr!r}: {e}")
-        return _safe_arith(ast.parse(expr, mode="eval"))
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except (SyntaxError, ValueError) as e:
+            # keyless / no-sympy fallback must fail as data, not crash the loop
+            raise MathError(f"cannot evaluate {expr!r}: {e}")
+        return _safe_arith(tree)
 
     def simplify(self, expr: str) -> str:
         self._require_sympy()
