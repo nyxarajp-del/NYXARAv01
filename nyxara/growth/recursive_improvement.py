@@ -44,6 +44,11 @@ class SelfImprovementReport:
     kept: int = 0
     rolled_back: int = 0
     enacted: bool = False
+    # --- intelligence index: I_(t+1) = f(I_t, C_available) --- #
+    intelligence_index: Optional[float] = None
+    intelligence_t: Optional[int] = None
+    compute: Optional[Dict[str, Any]] = None
+    effort_budget: Optional[Dict[str, Any]] = None
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -51,7 +56,9 @@ class SelfImprovementReport:
                 "benchmark": self.benchmark, "weaknesses": self.weaknesses,
                 "optimizations": self.optimizations, "lessons_stored": self.lessons_stored,
                 "tuned": self.tuned, "kept": self.kept, "rolled_back": self.rolled_back,
-                "enacted": self.enacted, "at": self.at}
+                "enacted": self.enacted, "intelligence_index": self.intelligence_index,
+                "intelligence_t": self.intelligence_t, "compute": self.compute,
+                "effort_budget": self.effort_budget, "at": self.at}
 
     def summary(self) -> str:
         n_weak = (self.weaknesses or {}).get("n_weaknesses", 0)
@@ -66,6 +73,11 @@ class SelfImprovementReport:
                  f"weaknesses      : {n_weak}",
                  f"optimisation    : enacted={self.enacted}, kept={self.kept}, "
                  f"rolled_back={self.rolled_back}, lessons={self.lessons_stored}"]
+        if self.intelligence_index is not None:
+            lines.append(f"intelligence    : I_{self.intelligence_t} = "
+                         f"{self.intelligence_index:.4f}")
+        if self.effort_budget is not None:
+            lines.append(f"effort budget   : {self.effort_budget}")
         if self.tuned:
             lines.append(f"tuned           : {self.tuned}")
         return "\n".join(lines)
@@ -76,7 +88,7 @@ class RecursiveSelfImprovement:
 
     def __init__(self, *, core: Any = None, memory: Any = None, settings: Any = None,
                  llm: Any = None, root: Any = None, growth_engine: Any = None,
-                 journal: Any = None) -> None:
+                 journal: Any = None, intelligence: Any = None) -> None:
         from nyxara.kernel.config import get_settings
         self.settings = settings or get_settings()
         self.core = core
@@ -85,10 +97,29 @@ class RecursiveSelfImprovement:
         self.growth_engine = growth_engine
         self.root = root
         self._llm = llm
+        self._intelligence = intelligence
         # per-cycle caches
         self._code = None
         self._arch = None
         self._bench = None
+        self._compute = None
+        self._effort: Optional[Dict[str, Any]] = None
+
+    # ---- intelligence index: I_(t+1) = f(I_t, C_available) ---- #
+    def _intel(self) -> Any:
+        if self._intelligence is None:
+            from nyxara.growth.intelligence import IntelligenceIndex
+            self._intelligence = IntelligenceIndex(memory=self.memory, settings=self.settings)
+        return self._intelligence
+
+    def _compute_report(self) -> Any:
+        if self._compute is None:
+            try:
+                from nyxara.kernel.compute import compute_report
+                self._compute = compute_report()
+            except Exception:  # noqa: BLE001 — compute introspection is best-effort
+                self._compute = None
+        return self._compute
 
     @classmethod
     def from_core(cls, core: Any, **kw: Any) -> "RecursiveSelfImprovement":
@@ -174,15 +205,22 @@ class RecursiveSelfImprovement:
         report.lessons_stored = self._store_lessons(wreport, enact=enact)
         report.tuned = self._maybe_tune(wreport, enact=enact)
 
+        # --- compute the effort budget (I_t × compute) BEFORE attempting edits --- #
+        self._compute_effort_budget(report)
+
         # --- auto-apply source edits under the gauntlet --- #
         if enact:
             self._apply_source_edits(wreport, report)
+
+        # --- update the intelligence index: I_(t+1) = f(I_t, C_available) --- #
+        self._update_intelligence(report)
         return report
 
     # ---- the full cycle ---- #
     def run(self, *, enact: Optional[bool] = None,
             category: Optional[str] = None) -> SelfImprovementReport:
         self._code = self._arch = self._bench = None
+        self._compute = self._effort = None
         self.review_code()
         self.analyze_architecture()
         if self.settings.self_improvement.benchmark_in_cycle:
@@ -237,6 +275,40 @@ class RecursiveSelfImprovement:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
+    def _compute_effort_budget(self, report: SelfImprovementReport) -> None:
+        """Scale this cycle's improvement effort by the index and the compute available."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "intelligence_index_enabled", True)):
+            return
+        try:
+            intel = self._intel()
+            compute = self._compute_report()
+            state = intel.load()
+            self._effort = intel.effort_budget(state, compute)
+            report.effort_budget = dict(self._effort)
+            report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
+        except Exception:  # noqa: BLE001 — effort scaling is advisory, never fatal
+            self._effort = None
+
+    def _update_intelligence(self, report: SelfImprovementReport) -> None:
+        """Fold this cycle's signals + compute into the index and persist it (best-effort)."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "intelligence_index_enabled", True)):
+            return
+        try:
+            intel = self._intel()
+            compute = self._compute_report()
+            prior = intel.load()
+            signals = intel.compute_signals(report)
+            state = intel.update(prior, signals, compute)
+            intel.save(state)
+            report.intelligence_index = round(float(state.index), 6)
+            report.intelligence_t = int(state.t)
+            if report.compute is None:
+                report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
+        except Exception:  # noqa: BLE001 — the index is a measurement, never fatal
+            pass
+
     def _apply_source_edits(self, wreport: Any, report: SelfImprovementReport) -> None:
         from nyxara.growth.self_optimize import EditGenerator, Optimizer
         cfg = self.settings.self_improvement
@@ -246,6 +318,10 @@ class RecursiveSelfImprovement:
                               permissions=getattr(self.core, "permissions", None))
         try:
             budget = int(getattr(cfg, "max_edits_per_cycle", 3))
+            # compute scales the budget: a weaker machine attempts fewer self-edits (the index
+            # never raises the ceiling above the config max — only lowers it).
+            if self._effort is not None:
+                budget = min(budget, int(self._effort.get("max_edits_per_cycle", budget)))
             edits_done = 0
             for w in wreport.ranked():
                 if edits_done >= budget:
@@ -287,5 +363,12 @@ if __name__ == "__main__":  # pragma: no cover
     assert "handoff" in report.benchmark
     assert report.kept == 0 and report.rolled_back == 0 and not report.enacted
     assert not report.optimizations, "dry-run must apply no source edits"
+
+    # the intelligence index is measured every cycle: I_(t+1) = f(I_t, C_available)
+    assert report.intelligence_index is not None and 0.0 <= report.intelligence_index <= 1.0
+    assert report.intelligence_t is not None and report.intelligence_t >= 1
+    assert report.effort_budget is not None and "max_edits_per_cycle" in report.effort_budget
+    assert report.compute is not None and "recommended_device" in report.compute
+    print(f"\nintelligence index  : I_{report.intelligence_t} = {report.intelligence_index:.4f}")
 
     print("\nALL SELF-TESTS PASSED ✓")

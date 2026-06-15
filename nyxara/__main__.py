@@ -84,6 +84,8 @@ commands:
   /research <topic>  run one autonomous research pass on a topic
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
+  /meta-discover <t> meta-research: invent → sandbox-test → (gated) integrate new theories
+  /dream             enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
   /save              persist long-term memory to disk now
   /quit              leave the console"""
@@ -163,6 +165,17 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 3
         print(json.dumps(core.discover(n), indent=2, default=str))
+    elif cmd in ("meta-discover", "metadiscover", "invent"):
+        if not arg:
+            print("usage: /meta-discover <topic>")
+        else:
+            print(json.dumps(core.meta_discover(arg), indent=2, default=str))
+    elif cmd == "dream":
+        if core.dream_session is None:
+            print("dream session unavailable.")
+        else:
+            print(json.dumps(core.dream_session.dream_state(deep=True).to_dict(),
+                             indent=2, default=str))
     elif cmd == "strategize":
         if not arg:
             print("usage: /strategize <problem>")

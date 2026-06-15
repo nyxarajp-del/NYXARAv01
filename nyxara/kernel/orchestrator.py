@@ -347,6 +347,9 @@ class NyxaraCore:
         # after the researcher so it can reuse it for background evidence.
         self.scientist = self._build_scientist() if enable_memory else None
         self._investigation_queue: List[str] = []  # questions to investigate on idle
+        # Level 10d — Meta-Researcher: invent → sandbox-test → (gated) integrate new theories
+        # and optimizations. Built before the autonomous scientist so it can compose it.
+        self.meta_researcher = self._build_meta_researcher() if enable_memory else None
         # Level 10c — Autonomous Scientist: the self-driven discovery loop. Built after the
         # scientist (composed for hypothesis/experiment/result) so each idle tick can advance one
         # Observe → Hypothesis → Experiment → Result → Update-model cycle.
@@ -373,6 +376,7 @@ class NyxaraCore:
         # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
         self._last_interaction: float = time.time()
         self._last_maintenance: float = 0.0
+        self._dream_state_at: float = 0.0   # last time a deep Dream State ran (prolonged idle)
         # the reason step: a real LLM-backed mind when one is configured, else the
         # deterministic stand-in (the LLM reasoner falls back to it on a keyless machine).
         # The multi-model council is convened when asked, or when config enables it.
@@ -982,8 +986,32 @@ class NyxaraCore:
                 memory=getattr(self, "memory", None),
                 knowledge=getattr(self, "knowledge", None),
                 gap_source=self.known_unknowns,
+                meta_researcher=getattr(self, "meta_researcher", None),
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
+            return None
+
+    def _build_meta_researcher(self) -> Any:
+        """Level 10d — MetaResearcher: invent → sandbox-test → (gated) integrate.
+
+        Composes the researcher (to gather open problems), the live LLM (to invent), the sandbox
+        (to test), and — only when the Master authorises integration — the self-optimize gauntlet
+        (to integrate). Inventing and testing are safe and offline-capable; integration is
+        double-gated (``meta_research.allow_integration`` AND ``self_improvement.autonomous_enact``).
+        """
+        try:
+            from nyxara.growth.meta_research import MetaResearcher
+            reasoner = getattr(self, "reasoner", None)
+            return MetaResearcher(
+                researcher=getattr(self, "researcher", None),
+                llm=getattr(reasoner, "llm", None) if reasoner else None,
+                sandbox=getattr(self, "sandbox_runner", None),
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                journal=getattr(self, "journal", None),
+                permissions=getattr(self, "permissions", None),
+            )
+        except Exception:  # noqa: BLE001 — meta-research is a capability, never required
             return None
 
     def _build_strategic_intelligence(self) -> Any:
@@ -1053,12 +1081,17 @@ class NyxaraCore:
         """Level 12 — DreamSession: four-pass replay (memory/skill/reasoning/failure)."""
         try:
             from nyxara.memory.dream import DreamSession
+            from nyxara.kernel.config import get_settings
+            mcfg = get_settings().memory
             return DreamSession(
                 consolidator=self.consolidator,
                 skill_memory=self.skills,
                 mind=self.mind,
                 journal=self.journal,
                 reflector=self.reflector,
+                memory=self.memory,
+                deep_synapse_tag=getattr(mcfg, "deep_synapse_tag", "deep-synapse"),
+                distill_min_support=getattr(mcfg, "dream_distill_min_support", 2),
             )
         except Exception:  # noqa: BLE001 — dreaming is a capability, never required
             return None
@@ -2134,10 +2167,25 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             pass
         report["ran"] = True
-        # 1) dream replay — Level 12: four-pass dream session (memory/skill/reasoning/failure)
+        # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
         if self.dream_session is not None:
             try:
-                dream_rep = self.dream_session.dream(duration_s=10.0)
+                now = time.time()
+                # Prolonged idleness -> a heavier Dream State: distil the day's logs, delete
+                # useless ones, and fix core principles into Deep Memory Synapses.
+                from nyxara.kernel.config import get_settings
+                idle_s = float(getattr(get_settings().memory, "dream_state_idle_s", 900.0))
+                prolonged = ((now - self._last_interaction) >= idle_s
+                             and (now - self._dream_state_at) >= idle_s)
+                if prolonged:
+                    dream_rep = self.dream_session.dream_state(deep=True)
+                    self._dream_state_at = now
+                    report["dream_state"] = True
+                    report["principles_distilled"] = dream_rep.principles_distilled
+                    report["logs_deleted"] = dream_rep.logs_deleted
+                    report["synapses_fixed"] = dream_rep.synapses_fixed
+                else:
+                    dream_rep = self.dream_session.dream(duration_s=10.0, deep=False)
                 report["replayed"] = dream_rep.memory_replayed
                 report["dream_sessions"] = self.dream_session.sessions_count
                 if dream_rep.insights:
@@ -2417,6 +2465,27 @@ class NyxaraCore:
             return self.autonomous_scientist.discover(cycles).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"cycles": cycles, "error": str(exc)}
+
+    def meta_discover(self, topic: str) -> Dict[str, Any]:
+        """Run one meta-research pass on ``topic`` (best-effort).
+
+        She mines the *open* parts of the research, *invents* candidate new theories and
+        optimization techniques, *tests* each in the sandbox, and — only when the Master has
+        authorised integration — proposes the validated optimizations as reversible,
+        gauntlet-gated source edits. Validated inventions fold into her belief model as
+        information she *created*. Returns the report as a dict.
+        """
+        if self.autonomous_scientist is not None:
+            try:
+                return self.autonomous_scientist.meta_discover(topic)
+            except Exception as exc:  # noqa: BLE001
+                return {"topic": topic, "error": str(exc)}
+        if self.meta_researcher is not None:
+            try:
+                return self.meta_researcher.run(topic).to_dict()
+            except Exception as exc:  # noqa: BLE001
+                return {"topic": topic, "error": str(exc)}
+        return {"topic": topic, "error": "meta_researcher unavailable"}
 
     def strategize(self, problem: str) -> Dict[str, Any]:
         """Analyse ``problem`` as a strategist (best-effort).
@@ -2789,6 +2858,22 @@ class NyxaraCore:
         if self.autonomous_scientist is not None:
             rep["discoveries"] = len(self.autonomous_scientist.all_cycles())
             rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
+        if self.meta_researcher is not None:
+            try:
+                rep["inventions"] = self.meta_researcher.total_validated()
+                rep["meta_research_runs"] = len(self.meta_researcher.all_reports())
+            except Exception:  # noqa: BLE001 — meta-research stats are best-effort
+                pass
+        # intelligence index: I_(t+1) = f(I_t, C_available) — measured by the RSI cycle
+        try:
+            from nyxara.growth.intelligence import IntelligenceIndex
+            from nyxara.kernel.compute import compute_report
+            state = IntelligenceIndex(memory=self.memory).load()
+            rep["intelligence_index"] = round(float(state.index), 4)
+            rep["intelligence_t"] = int(state.t)
+            rep["compute"] = compute_report().to_dict()
+        except Exception:  # noqa: BLE001 — the index is advisory, never fatal
+            pass
         if self.strategic_intelligence is not None:
             rep["strategic_analyses"] = len(self.strategic_intelligence.all_analyses())
         if self.autoforge is not None:
@@ -2801,6 +2886,13 @@ class NyxaraCore:
                 rep["loyalty_alignment"] = round(champ.alignment, 4)
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
+            try:
+                rep["deep_synapses"] = self.dream_session.deep_synapse_count()
+                last = self.dream_session.last_report
+                if last is not None:
+                    rep["principles_distilled"] = last.principles_distilled
+            except Exception:  # noqa: BLE001 — dream stats are best-effort
+                pass
         if self.prediction_engine is not None:
             rep["predictions_made"] = self.prediction_engine.predictions_count
         if self.meta_intelligence is not None:

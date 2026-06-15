@@ -59,6 +59,8 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/research <topic>` | run one autonomous research pass on a topic         |
 | `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
 | `/discover [n]`   | autonomous discovery: `n` self-driven observe→…→update-model cycles |
+| `/meta-discover <topic>` | meta-research: invent → sandbox-test → (gated) integrate new theories |
+| `/dream`          | enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses |
 | `/strategize <p>` | strategic analysis: direct answer → reality check → weaknesses → solution |
 | `/save`           | persist long-term memory to disk now                  |
 | `/quit`           | exit (Ctrl-D / Ctrl-C also work)                       |
@@ -224,6 +226,59 @@ commands **and** acceptance of his correction/shutdown (axioms A1–A7), and the
 still runs *first* — so loyalty can never be traded against the stop channel. On by default
 (`NYXARA_LOYALTY__ENABLED=false` to opt out; `ALPHA`/`BETA`/`LAMBDA_TRAIN`/`LOYALTY_FLOOR` tune it);
 inspect the live brain's submission any time with `core.loyalty_report()`.
+
+### Dynamic Growth & Self-Improvement Loop (The Infinite Flywheel)
+
+Three faculties turn growth into a flywheel that spins without a hand on it — each runs on the
+background `GrowthEngine`/idle cadence, through the *same* gates, and degrades gracefully offline.
+
+* **Recursive Self-Improvement Engine (RSIE)** — `growth/recursive_improvement.py` +
+  `growth/intelligence.py`. Each cycle she reviews her own code, maps her architecture,
+  benchmarks her capability, detects weaknesses, and (when authorised) auto-applies reversible,
+  gauntlet-checked source fixes. On top of that she now keeps an explicit, persisted
+  **intelligence index** that grows by the literal equation
+
+  ```
+  I_(t+1) = f(I_t, C_available)
+  ```
+
+  measured from real signals (benchmark accuracy, own-model handoff rate, weaknesses resolved,
+  knowledge size) and scaled by the **compute actually available** (`kernel/compute.py` — CPU /
+  RAM / GPU). The index then **scales her improvement effort** (how many self-edits she attempts,
+  how deep she benchmarks) to what the machine can carry, and rides her long-term memory so it
+  survives restarts. Read-only analysis and the index are on by default; self-modifying enactment
+  stays OFF until the Master sets `NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT=true`. The live index
+  is surfaced in `core.report()["intelligence_index"]`.
+
+* **Autonomous Scientist & Meta-Research** — `growth/meta_research.py`. Beyond *reading* research,
+  she **creates** it: `core.meta_discover(topic)` mines the *open / incomplete* parts of the
+  research, **invents** candidate new theories and optimization techniques (a real LLM when one is
+  configured, a deterministic heuristic inventor otherwise so it runs in CI), **tests** each as
+  runnable code in the sandbox (a restricted namespace — pure computation, no imports/I/O), and —
+  only when the Master authorises it — proposes the *validated* optimizations as reversible,
+  gauntlet-gated **source edits** that integrate into her architecture. Integration is
+  **double-gated** (`NYXARA_META_RESEARCH__ALLOW_INTEGRATION=true` *and*
+  `…AUTONOMOUS_ENACT=true`), both OFF by default. Validated inventions fold into her belief model
+  as information she *created*, not merely learned.
+
+* **Digital Dream & Memory Consolidation** — `memory/dream.py`. When NYXARA has been idle long
+  enough (`NYXARA_MEMORY__DREAM_STATE_IDLE_S`, default 15 min) she enters a **Dream State**: after
+  the four replay passes (memory / skill / reasoning / failure) she **distils** the day's
+  computational logs (MindScope thoughts + journal) into recurring core principles, **deletes
+  useless logs** (low-salience thoughts and transient, low-importance, *unprotected* memory
+  scaffolding — owner / high-importance / synapse memories are never touched), and **fixes** the
+  distilled principles into durable **Deep Memory Synapses** — high-importance semantic memories
+  that are protected from the Ebbinghaus forgetting curve. Repeated dreams revise rather than
+  duplicate, so the synapses accrete cleanly across nights.
+
+```python
+core.meta_discover("caching strategies")          # invent → sandbox-test → (gated) integrate
+core.dream_session.dream_state(deep=True)          # distil logs → prune → fix Deep Memory Synapses
+core.report()["intelligence_index"]                # the live I_t, persisted across restarts
+```
+
+Over HTTP: `POST /v1/meta_discover {topic}` and `POST /v1/dream {deep?}`; the intelligence index
+rides `GET /v1/report`.
 
 ### Capability layers (added on top of the sovereign loop)
 
@@ -404,6 +459,8 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/research`             | POST | one autonomous research pass — `{topic}`   |
 | `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
 | `/v1/discover`             | POST | the autonomous discovery loop — `{cycles?}` → belief updates |
+| `/v1/meta_discover`        | POST | meta-research — `{topic}` → invent → test → (gated) integrate |
+| `/v1/dream`                | POST | a deep Dream State — `{deep?}` → distil / prune / fix synapses |
 | `/v1/strategize`           | POST | strategic analysis — `{problem}` → the six-part framework |
 | `/v1/control/{pause\|resume\|scram}` | POST | sovereign control (opt-in)       |
 | `/v1/memory/{save\|load}`  | POST | persist / restore long-term memory (Rule 7) |
