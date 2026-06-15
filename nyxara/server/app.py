@@ -9,6 +9,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
 * ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
+* ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
+* ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
 * ``POST /v1/memory/save|load``  — persist / restore long-term memory (Rule 7 continuity).
@@ -56,6 +58,15 @@ class InvestigateRequest(BaseModel):
 class DiscoverRequest(BaseModel):
     # How many self-driven discovery cycles to run; the server keeps this bounded.
     cycles: int = Field(default=3, ge=1, le=50)
+
+
+class MetaDiscoverRequest(BaseModel):
+    topic: str = Field(..., min_length=1)
+
+
+class DreamRequest(BaseModel):
+    # Run a deep "Dream State" (distil logs, delete useless ones, fix Deep Memory Synapses).
+    deep: bool = True
 
 
 class StrategizeRequest(BaseModel):
@@ -169,6 +180,16 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/discover", dependencies=auth)
     def discover(req: DiscoverRequest) -> dict:
         return core.discover(req.cycles)
+
+    @app.post("/v1/meta_discover", dependencies=auth)
+    def meta_discover(req: MetaDiscoverRequest) -> dict:
+        return core.meta_discover(req.topic)
+
+    @app.post("/v1/dream", dependencies=auth)
+    def dream(req: DreamRequest = DreamRequest()) -> dict:
+        if core.dream_session is None:
+            return {"error": "dream session unavailable"}
+        return core.dream_session.dream_state(deep=req.deep).to_dict()
 
     @app.post("/v1/strategize", dependencies=auth)
     def strategize(req: StrategizeRequest) -> dict:

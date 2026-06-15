@@ -103,6 +103,32 @@ class MindScope:
     def get(self, tid: str) -> Optional[Thought]:
         return self._thoughts.get(tid)
 
+    def prune(self, *, min_salience: float = 0.25, keep_last: int = 200) -> int:
+        """Delete low-salience thoughts during consolidation (data distillation).
+
+        Always keeps the most recent ``keep_last`` thoughts (recent context is precious) and any
+        thought another retained thought still depends on (no dangling causal references). Returns
+        how many were removed."""
+        if len(self._order) <= keep_last:
+            return 0
+        protected = set(self._order[-keep_last:])
+        # keep anything still referenced as a cause by a protected/retained thought
+        for tid in list(protected):
+            t = self._thoughts.get(tid)
+            if t:
+                protected.update(t.causes)
+        removed = 0
+        for tid in list(self._order):
+            if tid in protected:
+                continue
+            t = self._thoughts.get(tid)
+            if t is None or t.salience >= min_salience:
+                continue
+            self._thoughts.pop(tid, None)
+            self._order.remove(tid)
+            removed += 1
+        return removed
+
     def thoughts(self) -> List[Thought]:
         return [self._thoughts[i] for i in self._order if i in self._thoughts]
 

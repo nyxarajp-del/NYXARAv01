@@ -44,13 +44,15 @@ class GrowthReport:
     selfplay: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
+    meta_research: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
                 "lessons_stored": self.lessons_stored, "replayed": self.replayed,
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
                 "selfplay": self.selfplay, "foundry": self.foundry,
-                "self_improvement": self.self_improvement}
+                "self_improvement": self.self_improvement,
+                "meta_research": self.meta_research}
 
 
 class GrowthEngine:
@@ -63,7 +65,9 @@ class GrowthEngine:
                  enable_selfplay: bool = False, selfplay_n: int = 6,
                  selfplay: Any = None, enable_self_improvement: Optional[bool] = None,
                  self_improvement_every: Optional[int] = None,
-                 self_improver: Any = None) -> None:
+                 self_improver: Any = None, enable_meta_research: Optional[bool] = None,
+                 meta_research_every: Optional[int] = None,
+                 meta_researcher: Any = None) -> None:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
@@ -85,9 +89,17 @@ class GrowthEngine:
             self.settings.self_improvement.self_improvement_every
             if self_improvement_every is None else self_improvement_every))
         self._self_improver = self_improver
+        # Meta-research: invent → test → (gated) integrate, on its own (slow) cadence.
+        self.enable_meta_research = (self.settings.meta_research.enabled
+                                     if enable_meta_research is None else enable_meta_research)
+        self.meta_research_every = max(1, int(
+            self.settings.meta_research.meta_research_every
+            if meta_research_every is None else meta_research_every))
+        self._meta_researcher = meta_researcher
         self._growth_passes = 0
         self._seen_action_seqs: set = set()
         self._stored_lessons: set = set()
+        self._meta_topic_n = 0
 
     @classmethod
     def from_core(cls, core: Any, **kw: Any) -> "GrowthEngine":
@@ -234,6 +246,25 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — self-improvement is best-effort, never fatal
             return None
 
+    # ---- meta-research (invent → test → (gated) integrate) ---- #
+    def _meta_obj(self):
+        if self._meta_researcher is None:
+            from nyxara.growth.meta_research import MetaResearcher
+            self._meta_researcher = MetaResearcher(memory=self.memory, settings=self.settings)
+        return self._meta_researcher
+
+    def meta_research(self, topic: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Run one meta-research pass on a rotating default topic (best-effort)."""
+        if not self.enable_meta_research:
+            return None
+        try:
+            topics = list(self.settings.meta_research.default_topics) or ["algorithm optimization"]
+            topic = topic or topics[self._meta_topic_n % len(topics)]
+            self._meta_topic_n += 1
+            return self._meta_obj().run(topic).to_dict()
+        except Exception:  # noqa: BLE001 — meta-research is best-effort, never fatal
+            return None
+
     # ---- the full pass ---- #
     def run(self, *, do_foundry: Optional[bool] = None) -> GrowthReport:
         report = GrowthReport()
@@ -262,6 +293,11 @@ class GrowthEngine:
         if self.enable_self_improvement and \
                 self._growth_passes % self.self_improvement_every == 0:
             report.self_improvement = self.improve_system()
+
+        # Meta-research runs on its own (slow) cadence — invent + sandbox-test new theories.
+        if self.enable_meta_research and \
+                self._growth_passes % self.meta_research_every == 0:
+            report.meta_research = self.meta_research()
         return report
 
 

@@ -116,7 +116,7 @@ class Consolidator:
         prune_consolidated: bool = False,
         prune_importance: float = 0.3,
         grace_days: float = 0.0,
-        protected_tags: Sequence[str] = ("pinned", "core", "owner"),
+        protected_tags: Sequence[str] = ("pinned", "core", "owner", "deep-synapse"),
     ) -> None:
         self.store = store
         self.replay_top_k = replay_top_k

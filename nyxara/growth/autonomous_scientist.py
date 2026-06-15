@@ -54,6 +54,7 @@ class QuestionOrigin(str, Enum):
     FOLLOW_UP = "follow_up"   # spawned by a previous conclusion's next hypothesis
     GAP = "gap"               # a known-unknown surfaced from self-knowledge
     SEED = "seed"             # self-generated, genuinely testable proposition
+    INVENTION = "invention"   # a theory/optimization she invented via meta-research
 
 
 # --------------------------------------------------------------------------- #
@@ -218,12 +219,13 @@ class AutonomousScientist:
     def __init__(self, *, scientist: Any = None, world_model: Any = None,
                  memory: Any = None, knowledge: Any = None,
                  gap_source: Optional[Callable[[], Any]] = None,
-                 max_frontier: int = 64) -> None:
+                 meta_researcher: Any = None, max_frontier: int = 64) -> None:
         self.scientist = scientist
         self.world_model = world_model
         self.memory = memory
         self.knowledge = knowledge
         self.gap_source = gap_source
+        self.meta_researcher = meta_researcher
         self.model = BeliefModel()
         self._frontier: Deque[tuple] = deque(maxlen=max(8, int(max_frontier)))
         self._seen: set = set()           # questions already observed (no churn on repeats)
@@ -279,6 +281,48 @@ class AutonomousScientist:
 
     def belief_model(self) -> BeliefModel:
         return self.model
+
+    # ---------------------------------------------------------------------- #
+    # Meta-research: invent → test → (gated) integrate, then fold into beliefs
+    # ---------------------------------------------------------------------- #
+    def meta_discover(self, topic: str) -> Dict[str, Any]:
+        """Run one meta-research pass: invent new theories/optimizations, verify them in the
+        sandbox, (when authorised) integrate them — and fold each validated invention into the
+        belief model as genuinely *created* information. Always returns a dict."""
+        mr = self._ensure_meta_researcher()
+        if mr is None:
+            return {"error": "meta-researcher unavailable", "topic": topic}
+        report = mr.run(topic)
+        # fold each validated invention into the belief model (origin = INVENTION)
+        for cand in report.candidates:
+            if not cand.validated:
+                continue
+            variable = f"invention:{cand.title}"[:120]
+            if variable in self.model.beliefs:
+                continue
+            self.model.beliefs[variable] = Belief(
+                variable=variable, statement=cand.title, verdict="supported",
+                confidence=0.7, evidence_count=1,
+                last_reasoning=cand.experiment_result)
+            cycle = DiscoveryCycle(index=self._cycle_count, question=cand.title,
+                                   origin=QuestionOrigin.INVENTION,
+                                   belief_delta={"changed": True, "new": True},
+                                   created_information=True)
+            self._cycle_count += 1
+            self._cycles.append(cycle)
+        d = report.to_dict()
+        d["beliefs_held"] = len(self.model)
+        return d
+
+    def _ensure_meta_researcher(self) -> Any:
+        if self.meta_researcher is None:
+            try:
+                from nyxara.growth.meta_research import MetaResearcher
+                self.meta_researcher = MetaResearcher(memory=self.memory,
+                                                      knowledge=self.knowledge)
+            except Exception:  # noqa: BLE001 — meta-research is a capability, never required
+                return None
+        return self.meta_researcher
 
     # ---------------------------------------------------------------------- #
     # Stage 1 — Observe: choose the next question (create the inquiry)

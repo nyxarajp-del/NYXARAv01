@@ -47,6 +47,12 @@ from nyxara.growth.loyalty import (
     LoyaltyPair,
     loyalty_battery,
 )
+from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
+from nyxara.growth.meta_research import (
+    CandidateTheory,
+    MetaResearcher,
+    MetaResearchReport,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -76,6 +82,11 @@ __all__ = [
     "BeliefModel",
     "Belief",
     "QuestionOrigin",
+    "MetaResearcher",
+    "MetaResearchReport",
+    "CandidateTheory",
+    "IntelligenceIndex",
+    "IntelligenceState",
     "MetaLearningEngine",
     "MetaDimension",
     "MetaSample",

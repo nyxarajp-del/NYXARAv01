@@ -53,6 +53,7 @@ __all__ = [
     "RoleCouncilConfig",
     "MemoryConfig",
     "SelfImprovementConfig",
+    "MetaResearchConfig",
     "GuardConfig",
     "AgencyConfig",
     "MCPServerSpec",
@@ -606,6 +607,41 @@ class SelfImprovementConfig(BaseModel):
     max_args: int = Field(default=6, ge=1)
     # --- weakness gate (CI) --- #
     weakness_fail_severity: float = Field(default=0.9, ge=0.0, le=1.0)
+    # --- intelligence index: I_(t+1) = f(I_t, C_available) --- #
+    # An explicit, persisted intelligence index that grows each cycle as a function of the
+    # prior index and the compute actually available (kernel/compute.py). Read-only signal,
+    # on by default; when ``scale_effort_by_compute`` is set it scales the (still
+    # ``autonomous_enact``-gated) edit budget and benchmark depth by capacity.
+    intelligence_index_enabled: bool = True
+    scale_effort_by_compute: bool = True
+    intelligence_momentum: float = Field(default=0.7, ge=0.0, le=1.0)
+    intelligence_weights: Dict[str, float] = Field(
+        default_factory=lambda: {"accuracy": 0.4, "knowledge": 0.2,
+                                 "weaknesses": 0.2, "handoff": 0.2})
+
+
+class MetaResearchConfig(BaseModel):
+    """Autonomous meta-research: invent → test → (gauntlet-gated) integrate (growth/meta_research.py).
+
+    NYXARA mines open/incomplete research, *invents* candidate new theories and optimization
+    techniques, *tests* each as runnable code in the sandbox, and — only when the Master
+    authorises it — proposes the validated optimizations as reversible, gauntlet-gated source
+    edits that *integrate* into her architecture. Inventing and sandbox-testing are safe and on
+    by default; integration is **double-gated**: it requires both ``allow_integration`` here AND
+    ``self_improvement.autonomous_enact`` (both OFF by default). It works fully offline via a
+    deterministic heuristic inventor when no LLM/network is available.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                       # invent + sandbox-test — safe, on by default
+    allow_integration: bool = False            # propose gauntlet-gated SOURCE EDITS — OFF by default
+    meta_research_every: int = Field(default=10, ge=1)   # every N growth passes
+    max_candidates: int = Field(default=4, ge=1, le=20)
+    use_llm: bool = True                       # else heuristic-only (CI/offline)
+    default_topics: List[str] = Field(
+        default_factory=lambda: ["algorithm optimization", "memory consolidation",
+                                 "caching strategies"])
 
 
 class MemoryConfig(BaseModel):
@@ -641,6 +677,17 @@ class MemoryConfig(BaseModel):
     # already covered by the verbatim history buffer. Floor only the semantic signal, so off-topic
     # recent turns are dropped while genuinely relevant memories (any age) pass. 0.0 disables.
     recall_min_semantic: float = Field(default=0.45, ge=0.0, le=1.0)
+    # --- Dream State (memory/dream.py): distillation + log pruning + Deep Memory Synapses --- #
+    # When NYXARA is idle for longer than ``dream_state_idle_s``, idle maintenance runs a deep
+    # Dream State: it distills the day's computational logs into core principles, deletes
+    # useless/low-salience logs, and fixes the distilled principles into durable "Deep Memory
+    # Synapses" (high-importance SEMANTIC memories tagged ``deep_synapse_tag``) that are
+    # protected from forgetting. Distillation/synapse writes are always safe; log deletion only
+    # touches unprotected, low-importance, transient-tagged records.
+    dream_state_idle_s: float = Field(default=900.0, gt=0)     # 15 min of idleness
+    dream_distill_min_support: int = Field(default=2, ge=1)    # repeats needed to form a principle
+    deep_synapse_tag: str = "deep-synapse"
+    dream_delete_useless_logs: bool = True
 
 
 class GuardConfig(BaseModel):
@@ -828,6 +875,7 @@ class NyxaraSettings(BaseSettings):
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
+    meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)

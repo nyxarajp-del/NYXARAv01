@@ -21,6 +21,8 @@ from nyxara.agency.agent_loop import AgentLoop, AgentRun
 from nyxara.agency.permissions import Authority
 from nyxara.eval import EvalSuite, build_default_suite
 from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryReport
+from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
+from nyxara.growth.meta_research import MetaResearcher, MetaResearchReport
 from nyxara.growth.genesis import (
     ArchitectureGenome,
     GenesisModel,
@@ -80,6 +82,10 @@ __all__ = [
     # the self-driven discovery loop (observe → hypothesis → experiment → result → update)
     "AutonomousScientist",
     "DiscoveryReport",
+    "MetaResearcher",
+    "MetaResearchReport",
+    "IntelligenceIndex",
+    "IntelligenceState",
     # the Genesis Protocol — she designs her OWN neural architectures (Neural Architecture Search)
     "NeuralArchitectureSearch",
     "ArchitectureGenome",
