@@ -31,6 +31,14 @@ from nyxara.growth.meta_engine import (
     MetaSample,
 )
 from nyxara.growth.flywheel import DataFlywheel, FlywheelDecision
+from nyxara.growth.genesis import (
+    ArchitectureGenome,
+    Candidate,
+    GenesisModel,
+    GenesisReport,
+    LayerGene,
+    NeuralArchitectureSearch,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -67,4 +75,10 @@ __all__ = [
     "MetaReport",
     "DataFlywheel",
     "FlywheelDecision",
+    "NeuralArchitectureSearch",
+    "ArchitectureGenome",
+    "LayerGene",
+    "GenesisModel",
+    "GenesisReport",
+    "Candidate",
 ]

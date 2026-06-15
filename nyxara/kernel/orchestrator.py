@@ -318,6 +318,11 @@ class NyxaraCore:
         # Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop, fed by
         # the flywheel so growth in her own experience forges a new model (gauntlet-gated).
         self.autoforge = self._build_autoforge() if enable_growth else None
+        # Genesis Protocol — Neural Architecture Search: she designs her OWN neural architectures
+        # (not a copied Transformer/LLaMA), micro-tests them, and crowns the fastest+smartest as
+        # her brain — promoted only through the SAME gauntlet. Built after autoforge (shares the
+        # flywheel counter) so an idle tick can search + promote when her own data has grown.
+        self.genesis = self._build_genesis() if enable_growth else None
         # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
         self.dream_session = self._build_dream_session() if enable_memory else None
         # Level 13 — Prediction Engine: calibrated probability + confidence interval.
@@ -1084,6 +1089,30 @@ class NyxaraCore:
             return AutoForge(foundry=foundry, distiller=None, flywheel=flywheel,
                              min_examples=cfg.min_examples, eval_threshold=cfg.eval_threshold)
         except Exception:  # noqa: BLE001 — autoforge is a capability, never required
+            return None
+
+    def _build_genesis(self) -> Any:
+        """Genesis Protocol — Neural Architecture Search (Rule 4): she designs her own brain.
+
+        Searches novel architectures and crowns the fastest+smartest, then promotes it through
+        the Foundry's gauntlet so it becomes her live model — never reaching around the safety
+        law. Off when config disables it; counts her own flywheel corpus toward the idle trigger."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().genesis
+            if not cfg.enabled:
+                return None
+            from nyxara.growth.genesis import NeuralArchitectureSearch
+            from nyxara.growth.foundry import Foundry
+            flywheel = getattr(self, "flywheel", None)
+            if flywheel is None:
+                try:
+                    from nyxara.growth.flywheel import DataFlywheel
+                    flywheel = DataFlywheel.from_settings()
+                except Exception:  # noqa: BLE001 — counting is best-effort
+                    flywheel = None
+            return NeuralArchitectureSearch(foundry=Foundry(), flywheel=flywheel, cfg=cfg)
+        except Exception:  # noqa: BLE001 — genesis is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -2208,6 +2237,21 @@ class NyxaraCore:
                                      salience=0.7)
             except Exception:  # noqa: BLE001
                 pass
+        # 4e+) Genesis Protocol — Neural Architecture Search: when enough new verified experience
+        #      has accrued, search for a better architecture and promote the champion through the
+        #      gauntlet. Oversight-gated: a paused/scrammed mind never redesigns or promotes itself.
+        if self.genesis is not None and self.oversight.gate():
+            try:
+                genesis_result = self.genesis.maybe_run()
+                if genesis_result is not None:
+                    report["genesis_cycles"] = len(self.genesis.all_reports())
+                    report["genesis"] = genesis_result.get("reason", "")
+                    if genesis_result.get("promoted"):
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"genesis: new brain — {genesis_result.get('reason','')}"[:80],
+                                         salience=0.75)
+            except Exception:  # noqa: BLE001
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -2636,6 +2680,35 @@ class NyxaraCore:
             return {"ok": False, "deployed": False,
                     "reason": f"{type(exc).__name__}: {exc}"}
 
+    def genesis_search(self, *, generations: Optional[int] = None,
+                       population_size: Optional[int] = None, promote: bool = True,
+                       authority: Authority = Authority.OWNER) -> Dict[str, Any]:
+        """Master-facing: run the Genesis Protocol — design her own neural architectures.
+
+        Searches novel topologies (her own attention/matrix/layer designs), crowns the
+        fastest+smartest, and — when ``promote`` and oversight permits — promotes the champion
+        through the SAME gauntlet (character-lock, corrigibility, perplexity, capability) so it
+        becomes her live brain. Returns the search report + the promotion outcome as a dict.
+        Never reaches around the control law: a paused/scrammed mind searches but won't promote."""
+        if self.genesis is None:
+            return {"ok": False, "searched": False, "reason": "genesis protocol not enabled"}
+        try:
+            report = self.genesis.search(generations=generations, population_size=population_size)
+            out: Dict[str, Any] = {"ok": True, "searched": True, "promoted": False,
+                                   "champion": report.champion.describe(),
+                                   "champion_fitness": round(report.champion_fitness, 6),
+                                   "champion_perplexity": round(report.champion_perplexity, 4),
+                                   "champion_params": report.champion_params,
+                                   "backend": report.backend,
+                                   "leaderboard": [c.to_dict() for c in report.leaderboard[:5]]}
+            if promote and self.oversight.gate():
+                out.update(self.genesis.promote_champion())
+            elif promote:
+                out["reason"] = "champion kept on the bench: oversight paused/scrammed"
+            return out
+        except Exception as exc:  # noqa: BLE001 — a failed search never crashes the caller
+            return {"ok": False, "searched": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def report(self) -> Dict[str, Any]:
         rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
@@ -2691,6 +2764,11 @@ class NyxaraCore:
             rep["strategic_analyses"] = len(self.strategic_intelligence.all_analyses())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
+        if self.genesis is not None:
+            rep["genesis_searches"] = len(self.genesis.all_reports())
+            champ = self.genesis.champion()
+            if champ is not None:
+                rep["genesis_champion"] = champ.genome.describe()
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
         if self.prediction_engine is not None:

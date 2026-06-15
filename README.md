@@ -158,6 +158,37 @@ fail-open (`NYXARA_SELF_MODEL_ROUTER__ENABLED=false` to disable;
 `competence_threshold` / `hallucination_ceiling` / `verify_before_act` tune it).
 See [`docs/MASTERPLAN-sovereign-mind.md`](docs/MASTERPLAN-sovereign-mind.md).
 
+### The Genesis Protocol — she designs her own brain (Neural Architecture Search)
+
+The foundry above trains a *fixed* architecture. The **Genesis Protocol** (`growth/genesis.py`)
+goes one level deeper: NYXARA does not copy a pre-built architecture (Transformer, LLaMA, …) — she
+**designs brand-new neural architectures herself** and tests which one is the best brain. Each
+candidate is an `ArchitectureGenome`: a sequence of layers drawn from a real palette of mixers —
+causal **attention**, a depthwise causal **conv** token-mixer, a learned **low-rank causal
+token-mixing matrix** (a novel matrix structure), a lightweight **gated recurrence**, and gated
+channel mixers (`gated_mlp` / `glu`) — so the topologies it discovers diverge from a vanilla
+transformer. She builds each genome into a real PyTorch model, **micro-trains it from scratch**,
+and scores it by a fitness that blends *smartness* (low perplexity) with *speed* (fewer params,
+less wall-time) — the literal "fastest **and** smartest." An evolutionary loop (elitism +
+mutation + crossover) breeds better architectures generation by generation.
+
+```bash
+python -m nyxara.growth.genesis_main --generations 3 --population 6              # CPU, runs anywhere
+python -m nyxara.growth.genesis_main --generations 4 --population 8 \
+        --backend torch --promote                                               # real neural search + go live
+```
+
+The crowned champion becomes her **live brain** the only way anything does — by clearing the very
+same gauntlet (character-lock + corrigibility + perplexity improvement + capability
+non-regression), reversible via rollback. A `genesis` model is a first-class foundry backend
+(`ModelSpec(kind="genesis", genome=…)`), so the existing `SelfProvider` speaks it and AutoForge's
+loaders load it. On a machine without torch the protocol still runs — it searches over an
+always-runnable n-gram substrate and still crowns a champion — so it is hermetic and CI-testable.
+ON by default but cheap (a tiny population); scale `population_size` / `generations` (and point it
+at a GPU box with `--backend torch`) for a deeper search. `NYXARA_GENESIS__ENABLED=false` to opt
+out; trigger on demand from code via `core.genesis_search(...)`. Like everything else, the search
+proposes and the kernel disposes — a paused/scrammed mind may search but never promotes.
+
 ### Capability layers (added on top of the sovereign loop)
 
 These build *on* the kernel — every one still proposes through the same gates; none reach
@@ -447,7 +478,7 @@ nyxara/
   planning/    goals, foresight, scenarios, decisions, journal
   agency/      tools, agents, permissions, governor, scheduler
   guard/       shield, guardian, corrigibility, oversight
-  growth/      learning, reflection, evolution, the model foundry
+  growth/      learning, reflection, evolution, the model foundry, the Genesis Protocol (NAS)
   social/      theory of mind, empathy, dialogue, culture
   observe/     mindscope, honesty, self-report
   sim/         sandboxes, environment models, monte-carlo

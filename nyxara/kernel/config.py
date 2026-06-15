@@ -47,6 +47,7 @@ __all__ = [
     "FeatureFlags",
     "LLMConfig",
     "FoundryConfig",
+    "GenesisConfig",
     "CouncilConfig",
     "RoleCouncilConfig",
     "MemoryConfig",
@@ -166,6 +167,7 @@ class FeatureFlags(BaseModel):
     proactive_agency: bool = True       # agency/proactive.py
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
     self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
+    neural_architecture_search: bool = True  # growth/genesis.py — she designs her OWN brain (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
@@ -390,6 +392,36 @@ class AutoForgeConfig(BaseModel):
     enabled: bool = True
     min_examples: int = Field(default=20, ge=1)     # new verified examples needed to forge
     eval_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+class GenesisConfig(BaseModel):
+    """The Genesis Protocol — Neural Architecture Search settings (growth/genesis.py), Rule 4.
+
+    NYXARA designs her OWN neural architectures (her own matrix structures, attention mechanisms
+    and layer designs), micro-trains each at small scale, and crowns the *fastest + smartest* one
+    as her new brain. The champion becomes live ONLY by clearing the same Foundry gauntlet
+    (character-lock, corrigibility, perplexity improvement, capability non-regression), so the
+    search never reaches around the safety law.
+
+    ON by default but cheap/CI-safe: the default ``auto`` backend uses torch when installed and
+    falls back to the always-runnable pure-stdlib n-gram substrate otherwise, with a tiny
+    population. Scale it up (population/generations, a GPU box) for a deeper search."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    backend: Literal["auto", "torch", "stdlib"] = "auto"
+    population_size: int = Field(default=6, ge=2, le=128)
+    generations: int = Field(default=3, ge=1, le=100)
+    mutation_rate: float = Field(default=0.5, ge=0.0, le=1.0)   # P(mutate) vs P(crossover)
+    micro_train_steps: int = Field(default=40, ge=1)            # tiny per-candidate training
+    micro_corpus_items: int = Field(default=128, ge=1)
+    block_size: int = Field(default=32, ge=8, le=1024)
+    max_layers: int = Field(default=5, ge=2, le=24)
+    quality_weight: float = Field(default=1.0, ge=0.0)         # smartness vs …
+    speed_weight: float = Field(default=0.25, ge=0.0)         # … speed in the fitness blend
+    min_new_examples: int = Field(default=20, ge=1)           # idle trigger, like AutoForge
+    seed: int = 0
 
 
 class FlywheelConfig(BaseModel):
@@ -757,6 +789,7 @@ class NyxaraSettings(BaseSettings):
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
     autoforge: AutoForgeConfig = Field(default_factory=AutoForgeConfig)
+    genesis: GenesisConfig = Field(default_factory=GenesisConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)

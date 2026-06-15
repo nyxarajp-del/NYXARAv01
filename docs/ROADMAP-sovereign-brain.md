@@ -136,6 +136,12 @@ neural model calls / cross-checks against:
   has poor ROI.
 - **Retrieval-augmented own-model.** A larger RAG + her own knowledge-base (`knowledge/`,
   `mind/rag.py`) so a smaller own-model punches above its size.
+- **The Genesis Protocol — design the architecture, not just train it** (`growth/genesis.py`).
+  Neural Architecture Search: NYXARA generates novel architectures herself (attention / conv /
+  low-rank token-mixing / gated-recurrence / gated-MLP layers), micro-trains each, and crowns the
+  fastest+smartest as a `genesis` foundry backend (`ModelSpec(kind="genesis", genome=…)`). The
+  champion still becomes live only through the same gauntlet — NAS *feeds* the foundry, it never
+  bypasses it.
 
 ## Cross-cutting — safety scales with power (non-negotiable; already strong)
 
