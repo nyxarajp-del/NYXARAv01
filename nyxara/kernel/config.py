@@ -365,6 +365,28 @@ class CapabilityFoundryConfig(BaseModel):
     max_versions_kept: int = Field(default=50, ge=1)
 
 
+class FlywheelConfig(BaseModel):
+    """Data-flywheel settings (growth/flywheel.py) — Rule 4, the path to her OWN model.
+
+    Every turn that clears all the gates *and* a quality bar is captured as a supervised
+    ``(prompt → answer)`` pair, in the *same* JSONL format the foundry already consumes — so
+    NYXARA's own lived, verified experience becomes training data for her own model. This is
+    the moat: a corpus no one else has, grown from her own use. Gather-only — it never trains,
+    never acts, and only ever appends to a local file. On by default once growth is enabled, so
+    the flywheel turns from turn one; set ``enabled=false`` to opt out.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)   # below this, a turn is not kept
+    min_chars: int = Field(default=8, ge=1)                      # too-short answers are noise
+    max_chars: int = Field(default=8000, ge=1)                   # cap a runaway answer
+    owner_only: bool = True          # only collect Master-authored turns (trusted supervision)
+    respond_only: bool = True        # collect conversational/reasoning answers, not tool effects
+    store_path: Optional[Path] = None   # None -> foundry_root/flywheel.jsonl
+
+
 class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
@@ -701,6 +723,7 @@ class NyxaraSettings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
+    flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)

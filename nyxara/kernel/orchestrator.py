@@ -391,6 +391,9 @@ class NyxaraCore:
             self._build_capability_foundry() if enable_growth else None)
         # gaps already attempted this session — never re-forge the same missing tool in a loop
         self._capability_gaps_seen: set = set()
+        # data flywheel — capture verified-good lived turns into a foundry-ready corpus, so her
+        # own experience becomes training data for her own model (Rule 4). Gather-only.
+        self.flywheel = self._build_flywheel() if enable_growth else None
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -855,6 +858,49 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the foundry is a capability, never required
             return None
 
+    def _build_flywheel(self) -> Any:
+        """The data flywheel: collect verified-good lived turns into the foundry corpus.
+
+        Off when config disables it. A reasoning-faculty verifier is wired in when present, so a
+        turn with a checkable (math/logic) answer is only kept when it actually verifies —
+        otherwise the confidence floor and gate-clearance carry the quality bar."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().flywheel
+            if not cfg.enabled:
+                return None
+            from nyxara.growth.flywheel import DataFlywheel
+            self._flywheel_owner_only = bool(cfg.owner_only)
+            self._flywheel_respond_only = bool(cfg.respond_only)
+            return DataFlywheel.from_settings(verifier=self._flywheel_verifier())
+        except Exception:  # noqa: BLE001 — the flywheel is a capability, never required
+            return None
+
+    def _flywheel_verifier(self) -> Any:
+        """An optional ``(prompt, answer) -> Optional[bool]`` check the flywheel applies before
+        keeping a pair (True confirms, False rejects, None = un-checkable so don't reject).
+
+        None today: the quality bar rests on gate-clearance + the confidence floor + length +
+        dedup, which is honest and sufficient. The hook stays so a faculty- or verifier-backed
+        check can be injected later (a math/logic turn confirmed exactly before it is kept)
+        without touching the collection path."""
+        return None
+
+    def _feed_flywheel(self, prompt: str, response: str, candidate: "Candidate",
+                       authority: Authority) -> None:
+        """Offer one fully-cleared turn to the data flywheel (best-effort, never raises)."""
+        fw = getattr(self, "flywheel", None)
+        if fw is None:
+            return
+        try:
+            if getattr(self, "_flywheel_owner_only", True) and authority is not Authority.OWNER:
+                return
+            if getattr(self, "_flywheel_respond_only", True) and candidate.kind != "respond":
+                return
+            fw.consider(prompt, response, confidence=float(candidate.confidence))
+        except Exception:  # noqa: BLE001 — collection is best-effort, never blocks a turn
+            pass
+
     def _build_cycle_reflector(self) -> Any:
         """Level 8 — CycleReflector for daily/weekly/monthly structured reflection."""
         try:
@@ -1194,6 +1240,7 @@ class NyxaraCore:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
         self._record_history(safe_text, response, authority)
         self._remember_turn(safe_text, response, authority)
+        self._feed_flywheel(safe_text, response, candidate, authority)
         tool_value = tool_result.value if (tool_result is not None and tool_result.ok) else None
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
                             "cleared every gate", response, action_id=aid,

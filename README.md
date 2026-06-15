@@ -113,6 +113,16 @@ python -m nyxara.growth --backend ngram --generations 1 --bench    # CPU, runs a
 python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
 ```
 
+The teacher's canned battery is only the seed corpus. The real fuel is the **data flywheel**
+(`growth/flywheel.py`): every turn that clears **all the gates** *and* a quality bar (a genuine
+answer, a confidence floor, length bounds, an optional verifier, and dedup) is captured as a
+supervised `(prompt → answer)` pair — in the *same* JSONL the foundry already consumes — so
+NYXARA's own lived, verified experience becomes training data for her own model. It is the moat:
+a corpus no one else has, grown from her own use. Gather-only (it never trains or acts, only
+appends to a local file); on by default once growth is enabled (`NYXARA_FLYWHEEL__ENABLED=false`
+to opt out, `min_confidence` / `owner_only` / `respond_only` / `store_path` to tune it). Promotion
+of any model trained on it still clears the full gauntlet below.
+
 Promotion is always gauntlet-gated (character-lock + corrigibility + measured improvement) and
 reversible; a worse candidate stays on the bench. Once a model is promoted, the **confidence
 router** (`mind/router.py`) lets it answer first and falls back to the teacher only when its
