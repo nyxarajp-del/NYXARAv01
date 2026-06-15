@@ -289,7 +289,12 @@ class Foundry:
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
-                                 max_seq_len=self.cfg.max_seq_len)
+                                 max_seq_len=self.cfg.max_seq_len,
+                                 load_in_4bit=self.cfg.load_in_4bit,
+                                 bnb_4bit_quant_type=self.cfg.bnb_4bit_quant_type,
+                                 bnb_4bit_compute_dtype=self.cfg.bnb_4bit_compute_dtype,
+                                 bnb_4bit_use_double_quant=self.cfg.bnb_4bit_use_double_quant,
+                                 gradient_checkpointing=self.cfg.gradient_checkpointing)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
         model = build_model(spec)

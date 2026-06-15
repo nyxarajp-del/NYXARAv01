@@ -111,7 +111,17 @@ One command runs the whole flywheel (distil a teacher → forge a candidate → 
 python -m nyxara.growth --backend ngram --generations 1 --bench    # CPU, runs anywhere
 # genuine capability (a GPU box): the SAME flywheel, only the backend swaps
 python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
+# QLoRA — fine-tune a 7B+ base on ONE consumer GPU by loading it in 4-bit:
+python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B \
+                        --load-in-4bit --bench
 ```
+
+`--load-in-4bit` (QLoRA) loads the frozen base quantized to 4-bit (NF4) and trains only the
+small adapter on top — the technique that makes a 7B+ base fit and fine-tune on a single
+consumer GPU. It needs `bitsandbytes` + CUDA (in `.[foundry]`); on a CPU/CI machine the LoRA
+backend degrades to a full-precision load instead of crashing, so the same command stays safe
+everywhere. Tune it via `NYXARA_FOUNDRY__LOAD_IN_4BIT` / `BNB_4BIT_QUANT_TYPE` /
+`BNB_4BIT_COMPUTE_DTYPE` / `GRADIENT_CHECKPOINTING`.
 
 The teacher's canned battery is only the seed corpus. The real fuel is the **data flywheel**
 (`growth/flywheel.py`): every turn that clears **all the gates** *and* a quality bar (a genuine

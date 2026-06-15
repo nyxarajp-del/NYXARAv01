@@ -308,6 +308,14 @@ class FoundryConfig(BaseModel):
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
+    # QLoRA: load the frozen base in 4-bit so a 7B+ base fine-tunes on a single consumer GPU.
+    # Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades to full-precision
+    # LoRA (no crash). Set load_in_4bit=true with backend="lora" and a real base for genuine scale.
+    load_in_4bit: bool = False
+    bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
+    bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
+    bnb_4bit_use_double_quant: bool = True
+    gradient_checkpointing: bool = True
     # Training / data.
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)

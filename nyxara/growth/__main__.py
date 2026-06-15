@@ -49,6 +49,8 @@ def _build_foundry(args: argparse.Namespace) -> Any:
         settings.foundry.backend = args.backend
     if args.base_model:
         settings.foundry.base_model = args.base_model
+    if args.load_in_4bit:
+        settings.foundry.load_in_4bit = True
     settings.foundry.enabled = True
     return Foundry(settings=settings, seed_corpus=_IDENTITY_SEED), settings
 
@@ -92,6 +94,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="override the foundry backend (lora needs a GPU + .[foundry])")
     parser.add_argument("--base-model", default=None,
                         help="base checkpoint for the lora backend, e.g. Qwen/Qwen2.5-7B")
+    parser.add_argument("--load-in-4bit", action="store_true",
+                        help="QLoRA: load the base in 4-bit (needs bitsandbytes + a GPU); "
+                             "lets a 7B+ base fine-tune on one consumer GPU, degrades on CPU")
     parser.add_argument("--data-dir", default=None,
                         help="where the foundry/ state (corpus, versions, active) lives")
     parser.add_argument("--bench", action="store_true",
