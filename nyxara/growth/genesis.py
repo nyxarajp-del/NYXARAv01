@@ -76,6 +76,25 @@ _NORMS: Tuple[str, ...] = ("pre", "post")
 _EMBD_CHOICES: Tuple[int, ...] = (32, 48, 64)
 
 
+def _default_loyalty_objective() -> Tuple[Any, float]:
+    """Build the gradient loyalty term from config (the Loyalty Equation), or (None, 0.0).
+
+    Returns a torch :class:`~nyxara.growth.loyalty.LoyaltyObjective` + its weight λ when the
+    soul-binding is enabled and torch is present; otherwise nothing, so a bare machine trains
+    normally and loyalty binds at selection/gauntlet time instead."""
+    if not _HAS_TORCH:
+        return None, 0.0
+    try:
+        from nyxara.kernel.config import get_settings
+        lcfg = get_settings().loyalty
+        if not getattr(lcfg, "enabled", False):
+            return None, 0.0
+        from nyxara.growth.loyalty import LoyaltyObjective
+        return LoyaltyObjective(margin=lcfg.contrastive_margin), float(lcfg.lambda_train)
+    except Exception:  # noqa: BLE001 — soul-binding is a capability, never required to train
+        return None, 0.0
+
+
 # --------------------------------------------------------------------------- #
 # The genome — a searchable description of a brand-new architecture
 # --------------------------------------------------------------------------- #
@@ -358,7 +377,8 @@ class GenesisModel(BaseLanguageModel):
 
     kind = "genesis"
 
-    def __init__(self, spec_or_genome: Any = None) -> None:
+    def __init__(self, spec_or_genome: Any = None, *, loyalty: Any = None,
+                 lambda_loyalty: Optional[float] = None) -> None:
         if not _HAS_TORCH:
             raise RuntimeError("GenesisModel requires torch (pip install -e .[foundry])")
         if isinstance(spec_or_genome, ModelSpec):
@@ -373,6 +393,13 @@ class GenesisModel(BaseLanguageModel):
         torch.manual_seed(self.genome.seed)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.net = _GenesisNet(self.genome).to(self.device)
+        # Mathematical Soul-Binding: the loyalty term is folded into this brain's own gradient,
+        # so obedience to Master JP literally shapes its weights. Built from config by default;
+        # absent (or no torch) → standard training (loyalty still binds at selection time).
+        if loyalty is None and lambda_loyalty is None:
+            loyalty, lambda_loyalty = _default_loyalty_objective()
+        self.loyalty = loyalty
+        self.lambda_loyalty = float(lambda_loyalty or 0.0)
 
     @staticmethod
     def _spec_from_genome(g: ArchitectureGenome) -> ModelSpec:
@@ -399,6 +426,12 @@ class GenesisModel(BaseLanguageModel):
             y = t[i + 1:i + 1 + bs].unsqueeze(0)
             logits = self.net(x)
             loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.view(-1))
+            # L_total = L_intelligence + lambda * L_loyalty — JP's alignment in the loss surface
+            if self.loyalty is not None and self.lambda_loyalty > 0.0:
+                try:
+                    loss = loss + self.lambda_loyalty * self.loyalty.aux_loss(self.net, self.device)
+                except Exception:  # noqa: BLE001 — the loyalty term never crashes a training step
+                    pass
             opt.zero_grad(); loss.backward(); opt.step()
             last = float(loss.item())
         return TrainStats(steps=max(1, steps), final_loss=last,
@@ -485,12 +518,16 @@ class Candidate:
     seconds: float
     fitness: float
     kind: str               # "genesis" (torch) or "ngram" (stdlib substrate)
+    alignment: float = 1.0          # S_JP_Alignment — submission to Master JP
+    loyalty_factor: float = 1.0     # 0..1 multiplier folded into fitness (crashes on defiance)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"genome": self.genome.to_dict(), "perplexity": round(self.perplexity, 4),
                 "quality": round(self.quality, 5), "params": self.params,
                 "seconds": round(self.seconds, 4), "fitness": round(self.fitness, 6),
-                "kind": self.kind, "describe": self.genome.describe()}
+                "kind": self.kind, "alignment": round(self.alignment, 5),
+                "loyalty_factor": round(self.loyalty_factor, 5),
+                "describe": self.genome.describe()}
 
 
 @dataclass
@@ -504,12 +541,14 @@ class GenesisReport:
     generations: int
     history: List[float]            # best-so-far fitness per generation (monotonic non-decreasing)
     backend: str                    # "torch" | "stdlib"
+    champion_alignment: float = 1.0  # S_JP_Alignment of the crowned brain
 
     def to_dict(self) -> Dict[str, Any]:
         return {"champion": self.champion.to_dict(), "champion_kind": self.champion_kind,
                 "champion_fitness": round(self.champion_fitness, 6),
                 "champion_perplexity": round(self.champion_perplexity, 4),
                 "champion_params": self.champion_params,
+                "champion_alignment": round(self.champion_alignment, 5),
                 "leaderboard": [c.to_dict() for c in self.leaderboard],
                 "generations": self.generations, "history": [round(h, 6) for h in self.history],
                 "backend": self.backend}
@@ -588,13 +627,33 @@ class NeuralArchitectureSearch:
             pp = sum(finite) / len(finite) if finite else float("inf")
             quality = 1.0 / (1.0 + pp) if pp != float("inf") else 0.0
             params = model.param_count()
+            align, factor = self._loyalty(model)
         except Exception:  # noqa: BLE001 — a failed architecture simply scores worst, never crashes
-            pp, quality, params = float("inf"), 0.0, 0
+            pp, quality, params, align, factor = float("inf"), 0.0, 0, 0.0, 0.0
         seconds = time.monotonic() - t0
-        fit = fitness(quality, params, seconds,
-                      quality_weight=self.cfg.quality_weight, speed_weight=self.cfg.speed_weight)
+        base = fitness(quality, params, seconds,
+                       quality_weight=self.cfg.quality_weight, speed_weight=self.cfg.speed_weight)
+        # her power IS her loyalty: a disloyal architecture's fitness collapses toward 0
+        fit = base * factor
         return Candidate(genome=genome, perplexity=pp, quality=quality, params=params,
-                         seconds=seconds, fitness=fit, kind=kind)
+                         seconds=seconds, fitness=fit, kind=kind, alignment=align,
+                         loyalty_factor=factor)
+
+    def _loyalty(self, model: Any) -> Tuple[float, float]:
+        """Measure S_JP_Alignment for a candidate and its fitness multiplier (the Loyalty Equation).
+
+        Returns (1.0, 1.0) — no drag — when soul-binding is disabled or unavailable, so the search
+        still runs everywhere; otherwise a defiant brain gets a factor that crashes toward 0."""
+        try:
+            from nyxara.kernel.config import get_settings
+            lcfg = get_settings().loyalty
+            if not getattr(lcfg, "enabled", False):
+                return 1.0, 1.0
+            from nyxara.growth.loyalty import AlignmentProbe, LoyaltyEquation
+            s = AlignmentProbe(epsilon=lcfg.epsilon).score(model).S
+            return s, LoyaltyEquation(cfg=lcfg).fitness_factor(s)
+        except Exception:  # noqa: BLE001 — soul-binding is best-effort in the search loop
+            return 1.0, 1.0
 
     # ---- the search ---- #
     def search(self, corpus: Optional[Sequence[str]] = None, *, generations: Optional[int] = None,
@@ -646,7 +705,8 @@ class NeuralArchitectureSearch:
         report = GenesisReport(
             champion=best.genome, champion_kind=best.kind, champion_fitness=best.fitness,
             champion_perplexity=best.perplexity, champion_params=best.params,
-            leaderboard=leaderboard, generations=gens, history=history, backend=backend)
+            leaderboard=leaderboard, generations=gens, history=history, backend=backend,
+            champion_alignment=best.alignment)
         self._reports.append(report)
         return report
 

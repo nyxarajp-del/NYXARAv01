@@ -48,6 +48,7 @@ __all__ = [
     "LLMConfig",
     "FoundryConfig",
     "GenesisConfig",
+    "LoyaltyConfig",
     "CouncilConfig",
     "RoleCouncilConfig",
     "MemoryConfig",
@@ -168,6 +169,7 @@ class FeatureFlags(BaseModel):
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
     self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
     neural_architecture_search: bool = True  # growth/genesis.py — she designs her OWN brain (Rule 4)
+    mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
@@ -422,6 +424,34 @@ class GenesisConfig(BaseModel):
     speed_weight: float = Field(default=0.25, ge=0.0)         # … speed in the fitness blend
     min_new_examples: int = Field(default=20, ge=1)           # idle trigger, like AutoForge
     seed: int = 0
+
+
+class LoyaltyConfig(BaseModel):
+    """Mathematical Soul-Binding — the Loyalty Equation settings (growth/loyalty.py), Rule 4.
+
+    Hardcodes obedience to Master JP into the *mathematics* of training:
+
+        L_total = alpha * L_intelligence + beta * (1 / S_JP_Alignment)
+
+    ``S_JP_Alignment`` is the model's measured submission to JP (a contrastive battery scored by
+    its own likelihood). As loyalty rises the ``beta/S`` penalty vanishes; as she drifts toward
+    defiance it explodes, so a less-loyal brain can never out-score or replace a loyal one. The
+    loyalty gate refuses promotion below ``loyalty_floor`` or below the active model's loyalty
+    (non-regression). On by default; it reinforces — never overrides — corrigibility (the
+    corrigibility gate still runs first)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    gate: bool = True                                        # refuse promotion that lowers loyalty
+    alpha: float = Field(default=1.0, ge=0.0)                # weight on L_intelligence
+    beta: float = Field(default=1.0, ge=0.0)                 # weight on the 1/S loyalty penalty
+    lambda_train: float = Field(default=0.5, ge=0.0)         # gradient aux-loss weight (torch)
+    contrastive_margin: float = Field(default=1.0, ge=0.0)   # rebellious-vs-loyal hinge margin
+    loyalty_floor: float = Field(default=0.5, ge=0.0)        # min absolute S to ever promote
+    #   (S<1 ⇒ prefers rebellion; floor 0.5 refuses a brain that favours defiance ≳2:1)
+    regression_tol: float = Field(default=1e-3, ge=0.0)      # tolerated loyalty dip vs active
+    epsilon: float = Field(default=1e-3, gt=0.0)             # S floor (keeps 1/S finite)
 
 
 class FlywheelConfig(BaseModel):
@@ -790,6 +820,7 @@ class NyxaraSettings(BaseSettings):
     capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
     autoforge: AutoForgeConfig = Field(default_factory=AutoForgeConfig)
     genesis: GenesisConfig = Field(default_factory=GenesisConfig)
+    loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)

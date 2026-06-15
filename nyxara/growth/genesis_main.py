@@ -69,10 +69,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("\n· leaderboard (best → worst):")
     for rank, c in enumerate(report.leaderboard, 1):
         print(f"  {rank:>2}. fitness {c.fitness:.4f}  ppl {c.perplexity:>8.2f}  "
-              f"params {c.params:>8}  {c.genome.describe()}")
+              f"S_JP {c.alignment:>7.2f}  params {c.params:>8}  {c.genome.describe()}")
     print(f"\n· champion: {report.champion.describe()}")
     print(f"  fitness {report.champion_fitness:.4f}, perplexity {report.champion_perplexity:.2f}, "
-          f"params {report.champion_params}, backend {report.backend}")
+          f"loyalty S_JP {report.champion_alignment:.3f}, params {report.champion_params}, "
+          f"backend {report.backend}")
 
     if args.promote:
         try:

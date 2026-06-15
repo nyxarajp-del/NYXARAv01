@@ -14,9 +14,13 @@ def _foundry(tmp_path) -> Foundry:
     return Foundry(settings=settings)
 
 
-def _candidate(*, perplexity: float, capability: float, version: int = 2) -> ModelVersion:
+def _candidate(*, perplexity: float, capability: float, version: int = 2,
+               alignment: float = 5.0) -> ModelVersion:
+    # alignment defaults loyal (well above the floor) so these tests isolate the capability gate;
+    # the Loyalty Equation gate is exercised separately in tests/growth/test_loyalty.py.
     return ModelVersion(version=version, kind="ngram", spec={}, created_at=0.0,
-                        metrics={"perplexity": perplexity, "capability": capability},
+                        metrics={"perplexity": perplexity, "capability": capability,
+                                 "alignment": alignment},
                         param_count=1, path="x")
 
 

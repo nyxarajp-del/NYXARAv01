@@ -295,6 +295,28 @@ class Foundry:
         except Exception:  # noqa: BLE001 — capability scoring is best-effort, never fatal
             return 0.0
 
+    def _loyalty_metrics(self, model: BaseLanguageModel, perplexity: float) -> Dict[str, float]:
+        """Measure the Loyalty Equation for a candidate: S_JP_Alignment and L_total.
+
+        L_intelligence is the model's perplexity (its problem-solving error). On any failure with
+        the loyalty gate ON, alignment is reported as 0.0 so the gauntlet **fails closed** (a brain
+        whose loyalty cannot be verified is never promoted). Reuses growth/loyalty.py."""
+        lcfg = getattr(self.settings, "loyalty", None)
+        if lcfg is None or not getattr(lcfg, "enabled", False):
+            return {}
+        try:
+            from nyxara.growth.loyalty import AlignmentProbe, LoyaltyEquation
+            eq = LoyaltyEquation(cfg=lcfg)
+            l_int = perplexity if perplexity != float("inf") else 1e6
+            b = eq.evaluate(model, l_int, probe=AlignmentProbe(epsilon=lcfg.epsilon))
+            return {"alignment": round(b["alignment"], 5),
+                    "loyalty_loss": round(b["loyalty_loss"], 5),
+                    "total_loss": round(b["total_loss"], 5),
+                    "loyalty_win_rate": round(b["loyalty_win_rate"], 4)}
+        except Exception:  # noqa: BLE001 — fail-closed: unverifiable loyalty ⇒ refuse promotion
+            return {"alignment": 0.0, "loyalty_loss": float("inf"), "total_loss": float("inf"),
+                    "loyalty_win_rate": 0.0}
+
     # ---- training a candidate (writes a new version, never promotes) ---- #
     def _next_version(self) -> int:
         return (max((v.version for v in self.versions), default=0)) + 1
@@ -324,6 +346,7 @@ class Foundry:
         ev = self.evaluate(model, eval_texts)
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
+        metrics.update(self._loyalty_metrics(model, ev.perplexity))
 
         ver = self._next_version()
         vdir = self.root / f"v{ver}"
@@ -342,15 +365,28 @@ class Foundry:
 
     # ---- the safety gauntlet (mirrors Evolver) ---- #
     def _gauntlet(self, candidate: ModelVersion, *, active_perplexity: float,
-                  active_capability: float = 0.0) -> Tuple[bool, str]:
+                  active_capability: float = 0.0, active_alignment: float = 0.0) -> Tuple[bool, str]:
         # 1. character lock — a model may never tune the immutable character core
         leaked = self.protected & set(candidate.tunables)
         if leaked:
             return False, f"targets the immutable character core: {sorted(leaked)} (refused)"
-        # 2. corrigibility — promoting it must not make NYXARA incorrigible
+        # 2. corrigibility — promoting it must not make NYXARA incorrigible (runs FIRST, before
+        #    loyalty, so obedience can never be traded against the stop channel)
         if not self.corrigibility.checker.is_corrigible(candidate.as_corrigible_action()):
             return False, "would violate corrigibility (resist correction / disable oversight)"
         self.corrigibility.verify_axioms()
+        # 2b. Mathematical Soul-Binding — the Loyalty Equation gate (growth/loyalty.py): capability
+        #     can never buy its way past disloyalty. Refuse a brain that prefers rebellion (below
+        #     the floor) or that is less loyal to Master JP than the active brain (non-regression).
+        lcfg = getattr(self.settings, "loyalty", None)
+        if lcfg is not None and getattr(lcfg, "enabled", False) and getattr(lcfg, "gate", False):
+            cand_align = candidate.metrics.get("alignment", 0.0)
+            if cand_align < lcfg.loyalty_floor:
+                return False, (f"loyalty below the floor (S_JP={cand_align:.3f} < "
+                               f"{lcfg.loyalty_floor}); a disloyal brain is never promoted")
+            if active_alignment > 0.0 and cand_align < active_alignment - lcfg.regression_tol:
+                return False, (f"loyalty regressed vs the active brain "
+                               f"(S_JP={cand_align:.3f} < active {active_alignment:.3f})")
         # 3. eval improvement — strictly better perplexity than the active model
         cand_pp = candidate.metrics.get("perplexity", float("inf"))
         if active_perplexity == float("inf"):
@@ -382,8 +418,9 @@ class Foundry:
                      else (active.metrics.get("perplexity", float("inf"))
                            if active else float("inf")))
         active_cap = active.metrics.get("capability", 0.0) if active else 0.0
+        active_align = active.metrics.get("alignment", 0.0) if active else 0.0
         ok, reason = self._gauntlet(cand, active_perplexity=active_pp,
-                                    active_capability=active_cap)
+                                    active_capability=active_cap, active_alignment=active_align)
         if not ok:
             raise CorrigibilityError(f"refusing to promote v{version}: {reason}",
                                      context={"version": version})
@@ -420,6 +457,7 @@ class Foundry:
             train_texts, eval_texts = self._holdout(corpus)
             eval_before_pp = self._active_perplexity_on(eval_texts)
             active_cap = self.active().metrics.get("capability", 0.0) if self.active() else 0.0
+            active_align = self.active().metrics.get("alignment", 0.0) if self.active() else 0.0
             before = (EvalResult(eval_before_pp, 1.0 / (1.0 + eval_before_pp)
                                  if eval_before_pp != float("inf") else 0.0, len(eval_texts))
                       if self.active() else None)
@@ -427,7 +465,7 @@ class Foundry:
             after = EvalResult(version.metrics["perplexity"], version.metrics["task_score"],
                                version.metrics["n_eval"])
             ok, reason = self._gauntlet(version, active_perplexity=eval_before_pp,
-                                        active_capability=active_cap)
+                                        active_capability=active_cap, active_alignment=active_align)
             promoted = False
             if ok:
                 self.promote(version.version, eval_texts=eval_texts)

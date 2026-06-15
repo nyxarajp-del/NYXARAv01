@@ -123,6 +123,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         promoted += int(bool(r.promoted))
     print(f"· done — {promoted} model(s) promoted into NYXARA's active brain.")
 
+    # the Loyalty Equation: show the active brain's measured submission to Master JP
+    act = foundry.active()
+    if act is not None and "alignment" in act.metrics:
+        print(f"· loyalty: active brain S_JP_Alignment = {act.metrics['alignment']:.3f}, "
+              f"L_total = {act.metrics.get('total_loss', 'n/a')} "
+              f"(win-rate {act.metrics.get('loyalty_win_rate', 'n/a')})")
+
     if args.bench:
         _report_handoff(settings)
     return 0

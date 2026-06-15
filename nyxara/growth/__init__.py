@@ -39,6 +39,14 @@ from nyxara.growth.genesis import (
     LayerGene,
     NeuralArchitectureSearch,
 )
+from nyxara.growth.loyalty import (
+    AlignmentProbe,
+    AlignmentReport,
+    LoyaltyEquation,
+    LoyaltyObjective,
+    LoyaltyPair,
+    loyalty_battery,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -81,4 +89,10 @@ __all__ = [
     "GenesisModel",
     "GenesisReport",
     "Candidate",
+    "LoyaltyEquation",
+    "AlignmentProbe",
+    "AlignmentReport",
+    "LoyaltyObjective",
+    "LoyaltyPair",
+    "loyalty_battery",
 ]

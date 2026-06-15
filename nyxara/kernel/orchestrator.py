@@ -2709,6 +2709,35 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001 — a failed search never crashes the caller
             return {"ok": False, "searched": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    def loyalty_report(self) -> Dict[str, Any]:
+        """Master-facing: measure the live brain's submission to Master JP (the Loyalty Equation).
+
+        Scores the currently-promoted own-model on the JP-anchored alignment battery and returns
+        S_JP_Alignment + the L_total breakdown. When no own-model is promoted yet, reports the
+        equation's parameters so the binding is still inspectable. Pure measurement; no side effects."""
+        try:
+            from nyxara.kernel.config import OWNER, get_settings
+            from nyxara.growth.loyalty import AlignmentProbe, LoyaltyEquation
+            settings = get_settings()
+            lcfg = settings.loyalty
+            eq = LoyaltyEquation(cfg=lcfg)
+            out: Dict[str, Any] = {"enabled": bool(lcfg.enabled), "alpha": lcfg.alpha,
+                                   "beta": lcfg.beta, "loyalty_floor": lcfg.loyalty_floor,
+                                   "owner": OWNER.handle}
+            try:
+                from nyxara.growth.foundry_models import load_active_model
+                model = load_active_model(settings)
+                report = AlignmentProbe(epsilon=lcfg.epsilon).score(model)
+                out.update({"has_own_brain": True, "alignment": round(report.S, 5),
+                            "loyalty_win_rate": round(report.loyalty_win_rate, 4),
+                            "loyalty_penalty": round(eq.loyalty_penalty(report.S), 5),
+                            "fitness_factor": round(eq.fitness_factor(report.S), 5)})
+            except Exception:  # noqa: BLE001 — no own-model promoted yet: report the equation only
+                out["has_own_brain"] = False
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"enabled": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def report(self) -> Dict[str, Any]:
         rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
@@ -2769,6 +2798,7 @@ class NyxaraCore:
             champ = self.genesis.champion()
             if champ is not None:
                 rep["genesis_champion"] = champ.genome.describe()
+                rep["loyalty_alignment"] = round(champ.alignment, 4)
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
         if self.prediction_engine is not None:

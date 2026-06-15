@@ -147,6 +147,11 @@ neural model calls / cross-checks against:
 
 - Every promotion goes through the gauntlet (character-lock + corrigibility + now benchmark +
   safety regression). The `guard/corrigibility.py` axioms are sealed — do not touch them.
+- **Mathematical Soul-Binding** (`growth/loyalty.py`): the training objective itself is
+  `L_total = α·L_intelligence + β·(1/S_JP_Alignment)`, so capability growth is coupled to measured
+  obedience to Master JP. The gauntlet refuses any brain below the loyalty floor or less loyal than
+  the active one — a disloyal brain can never be promoted. It reinforces (never overrides)
+  corrigibility, which is still checked first.
 - Keep the external frontier LLM as a **permanent auditor/red-team** even after handoff, to
   cross-check the self-model's outputs.
 - Everything stays inside the sovereign loop's `_gate()` (`kernel/orchestrator.py`) — never add
