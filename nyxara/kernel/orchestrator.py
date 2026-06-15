@@ -311,7 +311,12 @@ class NyxaraCore:
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
         self.civilization = self._build_civilization()
-        # Level 11 — AutoForge: automated model training pipeline.
+        # data flywheel — capture verified-good lived turns into a foundry-ready corpus, so her
+        # own experience becomes training data for her own model (Rule 4). Built before AutoForge
+        # so the autonomous loop counts the live instance (its dedup set grows each turn). Gather-only.
+        self.flywheel = self._build_flywheel() if enable_growth else None
+        # Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop, fed by
+        # the flywheel so growth in her own experience forges a new model (gauntlet-gated).
         self.autoforge = self._build_autoforge() if enable_growth else None
         # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
         self.dream_session = self._build_dream_session() if enable_memory else None
@@ -391,9 +396,6 @@ class NyxaraCore:
             self._build_capability_foundry() if enable_growth else None)
         # gaps already attempted this session — never re-forge the same missing tool in a loop
         self._capability_gaps_seen: set = set()
-        # data flywheel — capture verified-good lived turns into a foundry-ready corpus, so her
-        # own experience becomes training data for her own model (Rule 4). Gather-only.
-        self.flywheel = self._build_flywheel() if enable_growth else None
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -1057,15 +1059,30 @@ class NyxaraCore:
             return None
 
     def _build_autoforge(self) -> Any:
-        """Level 11 — AutoForge: automated Distill→Train→Benchmark→Promote pipeline."""
+        """Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop.
+
+        Counts her OWN flywheel corpus toward the trigger, so growth in her lived experience
+        forges a new model — closing the flywheel. Off when config disables it; promotion is
+        always gauntlet-gated, so autonomy never reaches around the safety law."""
         try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().autoforge
+            if not cfg.enabled:
+                return None
             from nyxara.growth.autoforge import AutoForge
             from nyxara.growth.foundry import Foundry
-            from nyxara.kernel.config import get_settings
-            settings = get_settings()
-            min_ex = getattr(settings, "foundry_min_examples", 10)
+            # the flywheel counter: reuse the live one if it exists, else a thin reader over the
+            # same store (built independently of init order; both see the same corpus file).
+            flywheel = getattr(self, "flywheel", None)
+            if flywheel is None:
+                try:
+                    from nyxara.growth.flywheel import DataFlywheel
+                    flywheel = DataFlywheel.from_settings()
+                except Exception:  # noqa: BLE001 — counting is best-effort
+                    flywheel = None
             foundry = Foundry()
-            return AutoForge(foundry=foundry, distiller=None, min_examples=min_ex)
+            return AutoForge(foundry=foundry, distiller=None, flywheel=flywheel,
+                             min_examples=cfg.min_examples, eval_threshold=cfg.eval_threshold)
         except Exception:  # noqa: BLE001 — autoforge is a capability, never required
             return None
 
@@ -2178,8 +2195,9 @@ class NyxaraCore:
                                          salience=0.65)
             except Exception:  # noqa: BLE001
                 pass
-        # 4e) Level 11 — autoforge: run training cycle if data threshold is met
-        if self.autoforge is not None:
+        # 4e) Level 11 — autoforge: run a training cycle if enough new verified data has accrued.
+        #     Gated by oversight — a paused/scrammed mind never trains or promotes on its own.
+        if self.autoforge is not None and self.oversight.gate():
             try:
                 forge_result = self.autoforge.run_cycle()
                 if forge_result.trained:

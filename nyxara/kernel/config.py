@@ -373,6 +373,25 @@ class CapabilityFoundryConfig(BaseModel):
     max_versions_kept: int = Field(default=50, ge=1)
 
 
+class AutoForgeConfig(BaseModel):
+    """Autonomous training loop settings (growth/autoforge.py) — Level 11, Rule 4.
+
+    AutoForge closes the flywheel: on idle ticks it checks whether enough *new* verified
+    experience has accrued (her flywheel corpus + any teacher distillation), and if so runs one
+    Collect → Train → Benchmark → Gate → Promote/Rollback cycle — fully gauntlet-gated, so a
+    worse or character-violating candidate is never promoted. On by default with the cheap,
+    always-runnable backend; heavy backends (lora/QLoRA) still require ``foundry.enabled``. It
+    only ever forges from her own gate-cleared data, never trains while paused/scrammed, and
+    every promotion clears the same safety gauntlet — so autonomy never reaches around the law.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    min_examples: int = Field(default=20, ge=1)     # new verified examples needed to forge
+    eval_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
 class FlywheelConfig(BaseModel):
     """Data-flywheel settings (growth/flywheel.py) — Rule 4, the path to her OWN model.
 
@@ -737,6 +756,7 @@ class NyxaraSettings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
+    autoforge: AutoForgeConfig = Field(default_factory=AutoForgeConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)

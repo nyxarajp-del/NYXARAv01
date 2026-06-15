@@ -133,6 +133,16 @@ appends to a local file); on by default once growth is enabled (`NYXARA_FLYWHEEL
 to opt out, `min_confidence` / `owner_only` / `respond_only` / `store_path` to tune it). Promotion
 of any model trained on it still clears the full gauntlet below.
 
+**AutoForge closes the loop autonomously** (`growth/autoforge.py`). On idle ticks NYXARA checks
+whether enough *new* verified experience has accrued (her flywheel corpus + any teacher
+distillation); once it passes `NYXARA_AUTOFORGE__MIN_EXAMPLES` she runs one
+Collect → Train → Gate → Promote/Discard cycle on her own — delegated to the same gauntlet, so a
+worse or character-violating candidate is never promoted, and she never trains while
+paused/scrammed. So the whole flywheel turns by itself: she talks, collects, forges a better
+model from her own lived experience, and the better model talks next — measured every step by the
+hard benchmark. On by default with growth; heavy backends (lora/QLoRA) still require
+`foundry.enabled`. `NYXARA_AUTOFORGE__ENABLED=false` to opt out.
+
 Promotion is always gauntlet-gated (character-lock + corrigibility + measured improvement) and
 reversible; a worse candidate stays on the bench. Once a model is promoted, the **confidence
 router** (`mind/router.py`) lets it answer first and falls back to the teacher only when its
