@@ -96,13 +96,19 @@ class ModelSpec:
     value. The foundry's gauntlet refuses any spec that tries to smuggle an immutable-core
     name in here (see :meth:`growth.foundry.Foundry._gauntlet`)."""
 
-    kind: str = "auto"          # "auto" | "ngram" | "nanogpt" | "lora"
+    kind: str = "auto"          # "auto" | "ngram" | "nanogpt" | "lora" | "genesis"
     ngram_order: int = 3
+    ngram_k: float = 1.0        # add-k smoothing (n-gram / genesis-stdlib substrate)
     block_size: int = 64
     n_layer: int = 2
     n_head: int = 2
     n_embd: int = 64
     seed: int = 0
+    # ---- Genesis architecture (kind="genesis"; the searched topology, growth/genesis.py) ---- #
+    # The serialized ArchitectureGenome the Genesis Protocol crowned. When present (and torch is
+    # installed) build_model assembles a brand-new neural net from it; otherwise it degrades to
+    # the always-on n-gram substrate (using ngram_order / ngram_k), never raising.
+    genome: Optional[Dict[str, Any]] = None
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
     lora_r: int = 8
@@ -124,8 +130,9 @@ class ModelSpec:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "ngram_order": self.ngram_order,
-                "block_size": self.block_size, "n_layer": self.n_layer,
-                "n_head": self.n_head, "n_embd": self.n_embd, "seed": self.seed,
+                "ngram_k": self.ngram_k, "block_size": self.block_size,
+                "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
+                "seed": self.seed, "genome": self.genome,
                 "base_model": self.base_model, "lora_r": self.lora_r,
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
                 "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
@@ -648,13 +655,19 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
             return LoRAModel(spec)
         except Exception:  # noqa: BLE001 — deps present but base load failed; fall back
             pass
+    if want == "genesis" and _HAS_TORCH and spec.genome:
+        try:
+            from nyxara.growth.genesis import GenesisModel   # lazy: avoid an import cycle
+            return GenesisModel(spec)
+        except Exception:  # noqa: BLE001 — torch present but the searched net failed; fall back
+            pass
     if want in ("auto", "nanogpt") and _HAS_TORCH:
         try:
             return NanoGPTModel(spec)
         except Exception:  # noqa: BLE001 — torch present but model build failed; fall back
             pass
-    # "ngram", "auto"/"lora" without deps, or a failed build -> the always-on backend
-    return NgramByteLM(order=spec.ngram_order, seed=spec.seed)
+    # "ngram", "genesis"/"auto"/"lora" without deps, or a failed build -> the always-on backend
+    return NgramByteLM(order=spec.ngram_order, k=spec.ngram_k, seed=spec.seed)
 
 
 def _foundry_root(settings: Any) -> Path:
