@@ -1317,7 +1317,13 @@ class NyxaraCore:
         if self.retriever is not None:
             try:
                 from nyxara.memory.retrieval import RetrievalContext
-                results = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+                hits = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+                # Drop recency-inflated, off-topic recalls: only memories that are *semantically*
+                # relevant become grounding (recency is the verbatim history buffer's job). This is
+                # what stops a recent but unrelated turn being echoed back as a "relevant memory".
+                floor = self._recall_semantic_floor()
+                results = [r for r in hits
+                           if float(getattr(r, "signals", {}).get("semantic", 1.0)) >= floor]
             except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
                 pass
         # Level 6 — graph traversal: extract entity mentions and find related triples
@@ -1335,6 +1341,14 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001 — graph recall is best-effort
                 pass
         return results
+
+    def _recall_semantic_floor(self) -> float:
+        """The minimum semantic similarity a recalled memory needs to count as grounding."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return float(get_settings().memory.recall_min_semantic)
+        except Exception:  # noqa: BLE001 — fall back to a sane default if config is unavailable
+            return 0.45
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:

@@ -102,6 +102,36 @@ def test_honest_statement_adds_qualifier():
     assert s.startswith("I'm confident that")
 
 
+def test_honest_statement_does_not_prefix_fluent_prose():
+    # A full, fluent answer must NOT get a qualifier glued on the front (it breaks the grammar
+    # and poisons anything that learns from the text). It is returned as-is when confident.
+    g = _guard()
+    prose = ("A hash map is a data structure that stores key-value pairs using a hash function "
+             "to map keys to bucket indices, allowing average-case constant-time lookup.")
+    s = g.honest_statement(Claim(prose, 0.9, belief=0.9, evidence=0.9))
+    assert s == prose
+    assert not s.startswith(("I think", "I'm confident", "I'm certain"))
+
+
+def test_honest_statement_prose_low_confidence_appends_caveat():
+    # Prose with genuinely low calibrated confidence still signals uncertainty — but as a
+    # trailing caveat, not a mangled prefix.
+    g = _guard()
+    prose = ("The capital of that region is most likely the older of the two riverside cities, "
+             "though the records from that period are sparse and partly contradictory.")
+    s = g.honest_statement(Claim(prose, 0.35, belief=0.35, evidence=0.2))
+    assert s.startswith("The capital")
+    assert "not fully certain" in s
+
+
+def test_honest_statement_multi_sentence_is_prose():
+    # Two sentences read as prose even when short, so no prefix is glued on.
+    g = _guard()
+    text = "It is done. The logs are rotated."
+    s = g.honest_statement(Claim(text, 0.9, belief=0.9, evidence=0.9))
+    assert s == text
+
+
 # -------------------- unsupported claims -------------------- #
 def test_unsupported_high_confidence_no_evidence():
     g = _guard()

@@ -546,6 +546,12 @@ class MemoryConfig(BaseModel):
     retrieval_top_k: int = Field(default=12, ge=1, le=512)
     # Spreading-activation decay per associative hop (retrieval.py).
     spread_decay: float = Field(default=0.6, gt=0.0, lt=1.0)
+    # Minimum *semantic* similarity for a recalled memory to be injected as grounding into the
+    # reason step. The blended retrieval score also rewards recency (temporal proximity), so a
+    # recent-but-irrelevant turn can otherwise surface as "grounding" and be echoed — recency is
+    # already covered by the verbatim history buffer. Floor only the semantic signal, so off-topic
+    # recent turns are dropped while genuinely relevant memories (any age) pass. 0.0 disables.
+    recall_min_semantic: float = Field(default=0.45, ge=0.0, le=1.0)
 
 
 class GuardConfig(BaseModel):
