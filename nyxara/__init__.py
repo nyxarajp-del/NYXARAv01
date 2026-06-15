@@ -27,6 +27,12 @@ from nyxara.growth.genesis import (
     GenesisReport,
     NeuralArchitectureSearch,
 )
+from nyxara.growth.loyalty import (
+    AlignmentProbe,
+    LoyaltyEquation,
+    LoyaltyObjective,
+    loyalty_battery,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -79,6 +85,11 @@ __all__ = [
     "ArchitectureGenome",
     "GenesisModel",
     "GenesisReport",
+    # Mathematical Soul-Binding — the Loyalty Equation (her power is her loyalty to Master JP)
+    "LoyaltyEquation",
+    "AlignmentProbe",
+    "LoyaltyObjective",
+    "loyalty_battery",
     # the strategic intelligence faculty (six-part analytical framework)
     "StrategicIntelligence",
     "StrategicAnalysis",

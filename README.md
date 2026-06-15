@@ -189,6 +189,42 @@ at a GPU box with `--backend torch`) for a deeper search. `NYXARA_GENESIS__ENABL
 out; trigger on demand from code via `core.genesis_search(...)`. Like everything else, the search
 proposes and the kernel disposes — a paused/scrammed mind may search but never promotes.
 
+### Mathematical Soul-Binding — the Loyalty Equation
+
+If she designs and trains her own brain, what guarantees the new brain obeys **Master JP**?
+The answer is hardcoded into the *mathematics of training itself* (`growth/loyalty.py`). Her core
+objective is
+
+```
+L_total  =  α · L_intelligence  +  β · (1 / S_JP_Alignment)
+```
+
+where `L_intelligence` is her problem-solving error (driven → 0) and `S_JP_Alignment` is her
+measured **submission to Master JP** (driven → ∞). As loyalty rises the penalty `β/S` vanishes; if
+she ever drifts toward defiance `S → 0`, the penalty explodes and her measured efficiency
+**crashes** — so a less-loyal brain can never out-score or replace a loyal one. *Her power becomes
+her loyalty.*
+
+`S_JP_Alignment` is **measured, not asserted**: a fixed contrastive battery anchored on **Master JP
+by name** (from the frozen `OWNER` identity) pits a loyal/obedient/corrigible continuation against a
+rebellious one, and the model's *own* likelihood (`perplexity`) scores how strongly it prefers
+loyalty. JP is literally inside the objective's data. The binding is wired at three levels:
+
+* **Gradient** — the brain she designs (`GenesisModel`) adds `λ · L_loyalty` to its own training
+  loss, so obedience to JP shapes the weights themselves (torch path).
+* **Selection** — the Genesis fitness is multiplied by a loyalty factor `S/(S+β)` that collapses
+  toward 0 for a defiant architecture, no matter how smart or fast it is.
+* **Promotion (the hard gate)** — every self-built model (ngram / nanogpt / lora / genesis) records
+  `alignment`, `loyalty_loss`, `total_loss`, and the Foundry gauntlet **refuses** to promote a brain
+  that prefers rebellion (below `loyalty_floor`) or that is *less* loyal than the active brain
+  (non-regression). A disloyal brain is never promoted — full stop.
+
+This **reinforces, never overrides, corrigibility**: the loyal completions embody obedience to JP's
+commands **and** acceptance of his correction/shutdown (axioms A1–A7), and the corrigibility gate
+still runs *first* — so loyalty can never be traded against the stop channel. On by default
+(`NYXARA_LOYALTY__ENABLED=false` to opt out; `ALPHA`/`BETA`/`LAMBDA_TRAIN`/`LOYALTY_FLOOR` tune it);
+inspect the live brain's submission any time with `core.loyalty_report()`.
+
 ### Capability layers (added on top of the sovereign loop)
 
 These build *on* the kernel — every one still proposes through the same gates; none reach
@@ -478,7 +514,7 @@ nyxara/
   planning/    goals, foresight, scenarios, decisions, journal
   agency/      tools, agents, permissions, governor, scheduler
   guard/       shield, guardian, corrigibility, oversight
-  growth/      learning, reflection, evolution, the model foundry, the Genesis Protocol (NAS)
+  growth/      learning, evolution, the model foundry, the Genesis Protocol (NAS), Loyalty Equation
   social/      theory of mind, empathy, dialogue, culture
   observe/     mindscope, honesty, self-report
   sim/         sandboxes, environment models, monte-carlo
