@@ -19,6 +19,10 @@ from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
                                   BenchmarkTask, Grader, build_arithmetic_benchmark,
                                   build_default_benchmark, build_logic_benchmark,
                                   core_solver, llm_solver, self_solver)
+from nyxara.eval.hard_benchmark import (build_calibration_benchmark, build_code_benchmark,
+                                        build_deduction_benchmark, build_hard_benchmark,
+                                        build_math_benchmark, build_reading_benchmark,
+                                        build_sequence_benchmark, grade_calibration)
 from nyxara.eval.harness import (EvalCase, EvalOutcome, EvalReport, EvalResult,
                                  EvalSuite, default_core_factory)
 from nyxara.eval.suites import build_default_suite
@@ -43,4 +47,13 @@ __all__ = [
     "build_arithmetic_benchmark",
     "build_logic_benchmark",
     "build_default_benchmark",
+    # the hard, discriminating battery (incl. calibration / honesty)
+    "build_hard_benchmark",
+    "build_math_benchmark",
+    "build_deduction_benchmark",
+    "build_sequence_benchmark",
+    "build_code_benchmark",
+    "build_reading_benchmark",
+    "build_calibration_benchmark",
+    "grade_calibration",
 ]

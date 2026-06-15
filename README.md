@@ -164,6 +164,22 @@ around the control law.
   python -m nyxara.eval --benchmark --bare-llm   # measure the configured model directly
   python -m nyxara.eval --benchmark --save base.json     # baseline; --baseline base.json to gate
   ```
+
+  The default battery is small and easy by design (it runs anywhere). Add `--hard` for a
+  **discriminating** battery (`eval/hard_benchmark.py`) that actually tells a strong model
+  apart from a merely fluent one — multi-step math, multi-hop deduction, sequence induction,
+  code-output prediction, grounded reading, and a first-class **calibration** category:
+  false-premise traps and unanswerable questions whose *correct* behaviour is to admit
+  uncertainty, scored by `grade_calibration` (confabulating a confident specific scores 0).
+  This is the ruler that makes "did this change help?" answerable near the top of the range —
+  and it measures the property a capability number hides: whether the mind knows what it does
+  **not** know.
+
+  ```bash
+  python -m nyxara.eval --benchmark --hard --bare-llm    # the model alone, on the hard ruler
+  python -m nyxara.eval --benchmark --hard --llm         # the whole loop (gates lift calibration)
+  python -m nyxara.eval --benchmark --hard --category calibration   # just the honesty battery
+  ```
 * **Autonomous researcher** — `growth/researcher.py`. `core.research(topic)` runs one
   self-directed pass: search → read → summarise → store, folding findings into the
   KnowledgeBase, KnowledgeGraph, and semantic memory. Every external fetch flows through
