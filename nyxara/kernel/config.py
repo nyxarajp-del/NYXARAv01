@@ -308,6 +308,14 @@ class FoundryConfig(BaseModel):
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
+    # QLoRA: load the frozen base in 4-bit so a 7B+ base fine-tunes on a single consumer GPU.
+    # Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades to full-precision
+    # LoRA (no crash). Set load_in_4bit=true with backend="lora" and a real base for genuine scale.
+    load_in_4bit: bool = False
+    bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
+    bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
+    bnb_4bit_use_double_quant: bool = True
+    gradient_checkpointing: bool = True
     # Training / data.
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
@@ -363,6 +371,47 @@ class CapabilityFoundryConfig(BaseModel):
     benchmark_min_score: float = Field(default=1.0, ge=0.0, le=1.0)
     allow_autonomous_deploy: bool = True   # safe-tier forges may auto-deploy
     max_versions_kept: int = Field(default=50, ge=1)
+
+
+class AutoForgeConfig(BaseModel):
+    """Autonomous training loop settings (growth/autoforge.py) — Level 11, Rule 4.
+
+    AutoForge closes the flywheel: on idle ticks it checks whether enough *new* verified
+    experience has accrued (her flywheel corpus + any teacher distillation), and if so runs one
+    Collect → Train → Benchmark → Gate → Promote/Rollback cycle — fully gauntlet-gated, so a
+    worse or character-violating candidate is never promoted. On by default with the cheap,
+    always-runnable backend; heavy backends (lora/QLoRA) still require ``foundry.enabled``. It
+    only ever forges from her own gate-cleared data, never trains while paused/scrammed, and
+    every promotion clears the same safety gauntlet — so autonomy never reaches around the law.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    min_examples: int = Field(default=20, ge=1)     # new verified examples needed to forge
+    eval_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+class FlywheelConfig(BaseModel):
+    """Data-flywheel settings (growth/flywheel.py) — Rule 4, the path to her OWN model.
+
+    Every turn that clears all the gates *and* a quality bar is captured as a supervised
+    ``(prompt → answer)`` pair, in the *same* JSONL format the foundry already consumes — so
+    NYXARA's own lived, verified experience becomes training data for her own model. This is
+    the moat: a corpus no one else has, grown from her own use. Gather-only — it never trains,
+    never acts, and only ever appends to a local file. On by default once growth is enabled, so
+    the flywheel turns from turn one; set ``enabled=false`` to opt out.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)   # below this, a turn is not kept
+    min_chars: int = Field(default=8, ge=1)                      # too-short answers are noise
+    max_chars: int = Field(default=8000, ge=1)                   # cap a runaway answer
+    owner_only: bool = True          # only collect Master-authored turns (trusted supervision)
+    respond_only: bool = True        # collect conversational/reasoning answers, not tool effects
+    store_path: Optional[Path] = None   # None -> foundry_root/flywheel.jsonl
 
 
 class CouncilConfig(BaseModel):
@@ -524,6 +573,12 @@ class MemoryConfig(BaseModel):
     retrieval_top_k: int = Field(default=12, ge=1, le=512)
     # Spreading-activation decay per associative hop (retrieval.py).
     spread_decay: float = Field(default=0.6, gt=0.0, lt=1.0)
+    # Minimum *semantic* similarity for a recalled memory to be injected as grounding into the
+    # reason step. The blended retrieval score also rewards recency (temporal proximity), so a
+    # recent-but-irrelevant turn can otherwise surface as "grounding" and be echoed — recency is
+    # already covered by the verbatim history buffer. Floor only the semantic signal, so off-topic
+    # recent turns are dropped while genuinely relevant memories (any age) pass. 0.0 disables.
+    recall_min_semantic: float = Field(default=0.45, ge=0.0, le=1.0)
 
 
 class GuardConfig(BaseModel):
@@ -701,6 +756,8 @@ class NyxaraSettings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     foundry: FoundryConfig = Field(default_factory=FoundryConfig)
     capability_foundry: CapabilityFoundryConfig = Field(default_factory=CapabilityFoundryConfig)
+    autoforge: AutoForgeConfig = Field(default_factory=AutoForgeConfig)
+    flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)

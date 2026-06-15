@@ -45,6 +45,53 @@ def test_build_model_lora_never_raises_for_missing_deps():
 
 
 # --------------------------------------------------------------------------- #
+# QLoRA (4-bit) — pure decision/config logic, no GPU or deps needed
+# --------------------------------------------------------------------------- #
+def test_spec_roundtrips_qlora_fields():
+    spec = ModelSpec(kind="lora", base_model="Qwen/Qwen2.5-7B", load_in_4bit=True,
+                     bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16",
+                     bnb_4bit_use_double_quant=False, gradient_checkpointing=False)
+    again = ModelSpec.from_dict(spec.to_dict())
+    assert again == spec
+    assert again.load_in_4bit and again.bnb_4bit_quant_type == "nf4"
+
+
+def test_spec_from_dict_tolerates_missing_qlora_fields():
+    # a spec persisted before QLoRA must still load, defaulting the new knobs to off/safe
+    spec = ModelSpec.from_dict({"kind": "lora", "base_model": "x/y"})
+    assert spec.load_in_4bit is False and spec.gradient_checkpointing is True
+
+
+def test_should_quantize_requires_request_bnb_and_cuda():
+    from nyxara.growth.foundry_models import _should_quantize
+    on = ModelSpec(kind="lora", load_in_4bit=True)
+    off = ModelSpec(kind="lora", load_in_4bit=False)
+    # requested + both capabilities present -> quantize
+    assert _should_quantize(on, has_bnb=True, has_cuda=True) is True
+    # never quantize when not requested, even if capable
+    assert _should_quantize(off, has_bnb=True, has_cuda=True) is False
+    # requested but a capability missing -> degrade to full precision (no crash path)
+    assert _should_quantize(on, has_bnb=False, has_cuda=True) is False
+    assert _should_quantize(on, has_bnb=True, has_cuda=False) is False
+
+
+def test_quant_kwargs_reflects_spec():
+    from nyxara.growth.foundry_models import _quant_kwargs
+    spec = ModelSpec(kind="lora", load_in_4bit=True, bnb_4bit_quant_type="fp4",
+                     bnb_4bit_compute_dtype="float16", bnb_4bit_use_double_quant=False)
+    kw = _quant_kwargs(spec)
+    assert kw == {"load_in_4bit": True, "bnb_4bit_quant_type": "fp4",
+                  "bnb_4bit_compute_dtype": "float16", "bnb_4bit_use_double_quant": False}
+
+
+def test_qlora_degrades_on_cpu_machine():
+    # On this (CPU/CI) box _should_quantize must be False even when 4-bit is requested,
+    # so the LoRA backend would load full-precision rather than attempt an impossible 4-bit load.
+    from nyxara.growth.foundry_models import _should_quantize
+    assert _should_quantize(ModelSpec(kind="lora", load_in_4bit=True)) is False
+
+
+# --------------------------------------------------------------------------- #
 # Real end-to-end LoRA (deps + network gated)
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")

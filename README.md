@@ -111,7 +111,37 @@ One command runs the whole flywheel (distil a teacher → forge a candidate → 
 python -m nyxara.growth --backend ngram --generations 1 --bench    # CPU, runs anywhere
 # genuine capability (a GPU box): the SAME flywheel, only the backend swaps
 python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
+# QLoRA — fine-tune a 7B+ base on ONE consumer GPU by loading it in 4-bit:
+python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B \
+                        --load-in-4bit --bench
 ```
+
+`--load-in-4bit` (QLoRA) loads the frozen base quantized to 4-bit (NF4) and trains only the
+small adapter on top — the technique that makes a 7B+ base fit and fine-tune on a single
+consumer GPU. It needs `bitsandbytes` + CUDA (in `.[foundry]`); on a CPU/CI machine the LoRA
+backend degrades to a full-precision load instead of crashing, so the same command stays safe
+everywhere. Tune it via `NYXARA_FOUNDRY__LOAD_IN_4BIT` / `BNB_4BIT_QUANT_TYPE` /
+`BNB_4BIT_COMPUTE_DTYPE` / `GRADIENT_CHECKPOINTING`.
+
+The teacher's canned battery is only the seed corpus. The real fuel is the **data flywheel**
+(`growth/flywheel.py`): every turn that clears **all the gates** *and* a quality bar (a genuine
+answer, a confidence floor, length bounds, an optional verifier, and dedup) is captured as a
+supervised `(prompt → answer)` pair — in the *same* JSONL the foundry already consumes — so
+NYXARA's own lived, verified experience becomes training data for her own model. It is the moat:
+a corpus no one else has, grown from her own use. Gather-only (it never trains or acts, only
+appends to a local file); on by default once growth is enabled (`NYXARA_FLYWHEEL__ENABLED=false`
+to opt out, `min_confidence` / `owner_only` / `respond_only` / `store_path` to tune it). Promotion
+of any model trained on it still clears the full gauntlet below.
+
+**AutoForge closes the loop autonomously** (`growth/autoforge.py`). On idle ticks NYXARA checks
+whether enough *new* verified experience has accrued (her flywheel corpus + any teacher
+distillation); once it passes `NYXARA_AUTOFORGE__MIN_EXAMPLES` she runs one
+Collect → Train → Gate → Promote/Discard cycle on her own — delegated to the same gauntlet, so a
+worse or character-violating candidate is never promoted, and she never trains while
+paused/scrammed. So the whole flywheel turns by itself: she talks, collects, forges a better
+model from her own lived experience, and the better model talks next — measured every step by the
+hard benchmark. On by default with growth; heavy backends (lora/QLoRA) still require
+`foundry.enabled`. `NYXARA_AUTOFORGE__ENABLED=false` to opt out.
 
 Promotion is always gauntlet-gated (character-lock + corrigibility + measured improvement) and
 reversible; a worse candidate stays on the bench. Once a model is promoted, the **confidence
@@ -163,6 +193,22 @@ around the control law.
   python -m nyxara.eval --benchmark              # measure the loop (offline reasoner by default)
   python -m nyxara.eval --benchmark --bare-llm   # measure the configured model directly
   python -m nyxara.eval --benchmark --save base.json     # baseline; --baseline base.json to gate
+  ```
+
+  The default battery is small and easy by design (it runs anywhere). Add `--hard` for a
+  **discriminating** battery (`eval/hard_benchmark.py`) that actually tells a strong model
+  apart from a merely fluent one — multi-step math, multi-hop deduction, sequence induction,
+  code-output prediction, grounded reading, and a first-class **calibration** category:
+  false-premise traps and unanswerable questions whose *correct* behaviour is to admit
+  uncertainty, scored by `grade_calibration` (confabulating a confident specific scores 0).
+  This is the ruler that makes "did this change help?" answerable near the top of the range —
+  and it measures the property a capability number hides: whether the mind knows what it does
+  **not** know.
+
+  ```bash
+  python -m nyxara.eval --benchmark --hard --bare-llm    # the model alone, on the hard ruler
+  python -m nyxara.eval --benchmark --hard --llm         # the whole loop (gates lift calibration)
+  python -m nyxara.eval --benchmark --hard --category calibration   # just the honesty battery
   ```
 * **Autonomous researcher** — `growth/researcher.py`. `core.research(topic)` runs one
   self-directed pass: search → read → summarise → store, folding findings into the

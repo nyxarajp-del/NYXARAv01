@@ -24,6 +24,42 @@ def test_report_shape():
     assert r["control"] == "running" and r["axioms_ok"] is True
 
 
+# -------------------- recall grounding floor (anti-contamination) -------------------- #
+class _Hit:
+    """A stand-in RetrievalResult: only .signals is read by the semantic floor."""
+    def __init__(self, semantic):
+        self.signals = {"semantic": semantic}
+        self.record = None
+
+
+class _FakeRetriever:
+    def __init__(self, hits):
+        self._hits = hits
+
+    def retrieve(self, ctx, k=5):
+        return list(self._hits)
+
+
+def test_recall_filters_low_semantic_memories():
+    # recency-inflated but off-topic memories (low semantic) must not become grounding,
+    # while a genuinely relevant memory (high semantic) passes — this is the anti-contamination
+    # fix: a recent unrelated turn is no longer echoed back as a "relevant memory".
+    nyx = _core()
+    nyx.knowledge_graph = None   # isolate the vector-recall path from graph traversal
+    nyx.retriever = _FakeRetriever([_Hit(0.38), _Hit(0.28), _Hit(0.62)])
+    kept = nyx._recall_for("an unrelated query")
+    assert len(kept) == 1
+    assert kept[0].signals["semantic"] == 0.62
+
+
+def test_recall_floor_respects_config():
+    nyx = _core()
+    nyx.knowledge_graph = None
+    nyx.retriever = _FakeRetriever([_Hit(0.5), _Hit(0.2)])
+    assert nyx._recall_semantic_floor() == 0.45      # the configured default
+    assert len(nyx._recall_for("q")) == 1            # 0.5 passes, 0.2 dropped
+
+
 # -------------------- default reasoner -------------------- #
 def test_reasoner_command_to_action():
     c = _default_reasoner("delete the files", None)

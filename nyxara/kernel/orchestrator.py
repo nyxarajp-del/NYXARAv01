@@ -311,7 +311,12 @@ class NyxaraCore:
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
         self.civilization = self._build_civilization()
-        # Level 11 — AutoForge: automated model training pipeline.
+        # data flywheel — capture verified-good lived turns into a foundry-ready corpus, so her
+        # own experience becomes training data for her own model (Rule 4). Built before AutoForge
+        # so the autonomous loop counts the live instance (its dedup set grows each turn). Gather-only.
+        self.flywheel = self._build_flywheel() if enable_growth else None
+        # Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop, fed by
+        # the flywheel so growth in her own experience forges a new model (gauntlet-gated).
         self.autoforge = self._build_autoforge() if enable_growth else None
         # Level 12 — Dream Session: memory + skill + reasoning + failure replay during idle.
         self.dream_session = self._build_dream_session() if enable_memory else None
@@ -855,6 +860,49 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the foundry is a capability, never required
             return None
 
+    def _build_flywheel(self) -> Any:
+        """The data flywheel: collect verified-good lived turns into the foundry corpus.
+
+        Off when config disables it. A reasoning-faculty verifier is wired in when present, so a
+        turn with a checkable (math/logic) answer is only kept when it actually verifies —
+        otherwise the confidence floor and gate-clearance carry the quality bar."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().flywheel
+            if not cfg.enabled:
+                return None
+            from nyxara.growth.flywheel import DataFlywheel
+            self._flywheel_owner_only = bool(cfg.owner_only)
+            self._flywheel_respond_only = bool(cfg.respond_only)
+            return DataFlywheel.from_settings(verifier=self._flywheel_verifier())
+        except Exception:  # noqa: BLE001 — the flywheel is a capability, never required
+            return None
+
+    def _flywheel_verifier(self) -> Any:
+        """An optional ``(prompt, answer) -> Optional[bool]`` check the flywheel applies before
+        keeping a pair (True confirms, False rejects, None = un-checkable so don't reject).
+
+        None today: the quality bar rests on gate-clearance + the confidence floor + length +
+        dedup, which is honest and sufficient. The hook stays so a faculty- or verifier-backed
+        check can be injected later (a math/logic turn confirmed exactly before it is kept)
+        without touching the collection path."""
+        return None
+
+    def _feed_flywheel(self, prompt: str, response: str, candidate: "Candidate",
+                       authority: Authority) -> None:
+        """Offer one fully-cleared turn to the data flywheel (best-effort, never raises)."""
+        fw = getattr(self, "flywheel", None)
+        if fw is None:
+            return
+        try:
+            if getattr(self, "_flywheel_owner_only", True) and authority is not Authority.OWNER:
+                return
+            if getattr(self, "_flywheel_respond_only", True) and candidate.kind != "respond":
+                return
+            fw.consider(prompt, response, confidence=float(candidate.confidence))
+        except Exception:  # noqa: BLE001 — collection is best-effort, never blocks a turn
+            pass
+
     def _build_cycle_reflector(self) -> Any:
         """Level 8 — CycleReflector for daily/weekly/monthly structured reflection."""
         try:
@@ -1011,15 +1059,30 @@ class NyxaraCore:
             return None
 
     def _build_autoforge(self) -> Any:
-        """Level 11 — AutoForge: automated Distill→Train→Benchmark→Promote pipeline."""
+        """Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop.
+
+        Counts her OWN flywheel corpus toward the trigger, so growth in her lived experience
+        forges a new model — closing the flywheel. Off when config disables it; promotion is
+        always gauntlet-gated, so autonomy never reaches around the safety law."""
         try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().autoforge
+            if not cfg.enabled:
+                return None
             from nyxara.growth.autoforge import AutoForge
             from nyxara.growth.foundry import Foundry
-            from nyxara.kernel.config import get_settings
-            settings = get_settings()
-            min_ex = getattr(settings, "foundry_min_examples", 10)
+            # the flywheel counter: reuse the live one if it exists, else a thin reader over the
+            # same store (built independently of init order; both see the same corpus file).
+            flywheel = getattr(self, "flywheel", None)
+            if flywheel is None:
+                try:
+                    from nyxara.growth.flywheel import DataFlywheel
+                    flywheel = DataFlywheel.from_settings()
+                except Exception:  # noqa: BLE001 — counting is best-effort
+                    flywheel = None
             foundry = Foundry()
-            return AutoForge(foundry=foundry, distiller=None, min_examples=min_ex)
+            return AutoForge(foundry=foundry, distiller=None, flywheel=flywheel,
+                             min_examples=cfg.min_examples, eval_threshold=cfg.eval_threshold)
         except Exception:  # noqa: BLE001 — autoforge is a capability, never required
             return None
 
@@ -1194,6 +1257,7 @@ class NyxaraCore:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
         self._record_history(safe_text, response, authority)
         self._remember_turn(safe_text, response, authority)
+        self._feed_flywheel(safe_text, response, candidate, authority)
         tool_value = tool_result.value if (tool_result is not None and tool_result.ok) else None
         return self._finish(cid, Disposition.ACT, candidate, gates, thoughts,
                             "cleared every gate", response, action_id=aid,
@@ -1270,7 +1334,13 @@ class NyxaraCore:
         if self.retriever is not None:
             try:
                 from nyxara.memory.retrieval import RetrievalContext
-                results = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+                hits = self.retriever.retrieve(RetrievalContext(query=stimulus), k=5)
+                # Drop recency-inflated, off-topic recalls: only memories that are *semantically*
+                # relevant become grounding (recency is the verbatim history buffer's job). This is
+                # what stops a recent but unrelated turn being echoed back as a "relevant memory".
+                floor = self._recall_semantic_floor()
+                results = [r for r in hits
+                           if float(getattr(r, "signals", {}).get("semantic", 1.0)) >= floor]
             except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
                 pass
         # Level 6 — graph traversal: extract entity mentions and find related triples
@@ -1288,6 +1358,14 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001 — graph recall is best-effort
                 pass
         return results
+
+    def _recall_semantic_floor(self) -> float:
+        """The minimum semantic similarity a recalled memory needs to count as grounding."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return float(get_settings().memory.recall_min_semantic)
+        except Exception:  # noqa: BLE001 — fall back to a sane default if config is unavailable
+            return 0.45
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
@@ -2117,8 +2195,9 @@ class NyxaraCore:
                                          salience=0.65)
             except Exception:  # noqa: BLE001
                 pass
-        # 4e) Level 11 — autoforge: run training cycle if data threshold is met
-        if self.autoforge is not None:
+        # 4e) Level 11 — autoforge: run a training cycle if enough new verified data has accrued.
+        #     Gated by oversight — a paused/scrammed mind never trains or promotes on its own.
+        if self.autoforge is not None and self.oversight.gate():
             try:
                 forge_result = self.autoforge.run_cycle()
                 if forge_result.trained:

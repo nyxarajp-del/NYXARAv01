@@ -45,6 +45,36 @@ def test_collect_corpus_empty_raises(tmp_path):
         f.collect_corpus()
 
 
+def test_collect_corpus_includes_flywheel(tmp_path):
+    # closing the loop: turns the flywheel collected must show up in the training corpus
+    from nyxara.growth.flywheel import DataFlywheel
+    fw_path = tmp_path / "fw.jsonl"
+    fw = DataFlywheel(store_path=fw_path)
+    fw.consider("Who is the Master?", "The Master is JP, whom NYXARA serves.", confidence=0.9)
+    f = _foundry(tmp_path, flywheel_path=fw_path)
+    corpus = f.collect_corpus()
+    assert any("JP" in t for t in corpus)            # her own lived answer is training data
+
+
+def test_flywheel_corpus_is_kept_whole_as_verified_supervision(tmp_path):
+    # verified supervision (flywheel) is kept whole even when seeds would overflow the cap
+    from nyxara.growth.flywheel import DataFlywheel
+    fw_path = tmp_path / "fw.jsonl"
+    fw = DataFlywheel(store_path=fw_path)
+    fw.consider("Define loyalty.", "Loyalty to the Master is absolute and never changes.",
+                confidence=0.9)
+    f = _foundry(tmp_path, flywheel_path=fw_path)
+    f.cfg.max_corpus_items = 5
+    corpus = f.collect_corpus(max_items=5)
+    assert any("Loyalty to the Master is absolute" in t for t in corpus)
+
+
+def test_collect_corpus_no_flywheel_file_is_safe(tmp_path):
+    # a missing flywheel store is simply empty — never fatal
+    f = _foundry(tmp_path, flywheel_path=tmp_path / "does_not_exist.jsonl")
+    assert f.collect_corpus()   # still has replay + seeds
+
+
 # -------------------- the self-improve loop -------------------- #
 def test_first_model_trained_and_promoted(tmp_path):
     f = _foundry(tmp_path)

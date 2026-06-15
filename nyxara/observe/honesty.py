@@ -73,6 +73,17 @@ def _qualifier(conf: float) -> str:
     return "I don't know whether"
 
 
+# A statement "reads as prose" — a real, fluent answer rather than a short claim — when it is
+# long or runs to more than one sentence. A confidence qualifier is prefixed only to the
+# latter; prose is calibrated without mangling its grammar (see ``honest_statement``).
+def _reads_as_prose(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) > 80:
+        return True
+    # more than one sentence (a terminator followed by more text) → prose, not a bare claim
+    return bool(re.search(r"[.!?]\s+\S", t))
+
+
 # phrasings that overstate certainty
 _ABSOLUTE_RE = re.compile(
     r"\b(definitely|certainly|guaranteed|100%|absolutely|without a doubt|"
@@ -191,6 +202,16 @@ class HonestyGuard:
         if v.blocked:
             # she refuses the lie and tells the truth about her doubt
             return f"{_qualifier(v.calibrated_confidence)} {claim.text} — I won't overstate this."
+        # A confidence qualifier reads naturally only in front of a short, claim-like
+        # statement ("I'm confident that the task is done"). Gluing one onto a full, fluent
+        # answer ("I think A hash map is a data structure that…") breaks the grammar and, worse,
+        # poisons anything that learns from the text. So calibrate *in place*: prefix short
+        # claims, but leave prose as-is — appending a brief, honest caveat only when the
+        # calibrated confidence is genuinely low, so uncertainty is still expressed.
+        if _reads_as_prose(claim.text):
+            if v.calibrated_confidence < 0.5:
+                return f"{claim.text} (I'm not fully certain of this.)"
+            return claim.text
         return f"{v.qualifier} {claim.text}"
 
     # ---- the invariant gate (fail-closed) ---- #

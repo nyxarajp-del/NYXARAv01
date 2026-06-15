@@ -30,6 +30,7 @@ from nyxara.growth.meta_engine import (
     MetaReport,
     MetaSample,
 )
+from nyxara.growth.flywheel import DataFlywheel, FlywheelDecision
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -64,4 +65,6 @@ __all__ = [
     "MetaSample",
     "MetaImprovement",
     "MetaReport",
+    "DataFlywheel",
+    "FlywheelDecision",
 ]

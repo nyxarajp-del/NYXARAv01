@@ -51,7 +51,19 @@ def _has_lora() -> bool:
         return False
 
 
+def _has_bnb() -> bool:
+    """True iff bitsandbytes is importable — the 4-bit quantization that makes QLoRA fit."""
+    if not _HAS_LORA:
+        return False
+    try:
+        import bitsandbytes  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 _HAS_LORA = _has_lora()
+_HAS_BNB = _has_bnb()
 
 __all__ = [
     "ModelSpec",
@@ -62,8 +74,11 @@ __all__ = [
     "LoRAModel",
     "build_model",
     "load_active_model",
+    "_should_quantize",
+    "_quant_kwargs",
     "_HAS_TORCH",
     "_HAS_LORA",
+    "_HAS_BNB",
 ]
 
 _VOCAB = 256          # byte-level: every model speaks raw bytes
@@ -96,6 +111,16 @@ class ModelSpec:
     lora_lr: float = 2e-4
     max_seq_len: int = 256
     device: str = ""            # "" -> auto (cuda if available, else cpu)
+    # ---- QLoRA: 4-bit quantization of the base (needs bitsandbytes + CUDA) ---- #
+    # This is what makes a 7B+ base fit and fine-tune on a single consumer GPU: the frozen base
+    # is loaded in 4-bit and only the small adapter trains in higher precision. Requested via
+    # ``load_in_4bit``; honoured only when bitsandbytes is importable AND CUDA is present —
+    # otherwise the LoRA backend silently loads the base full-precision (so CPU/CI is unchanged).
+    load_in_4bit: bool = False
+    bnb_4bit_quant_type: str = "nf4"            # "nf4" (QLoRA default) or "fp4"
+    bnb_4bit_compute_dtype: str = "bfloat16"    # compute dtype for the de-quantized matmuls
+    bnb_4bit_use_double_quant: bool = True      # nested quantization — a little more memory saved
+    gradient_checkpointing: bool = True         # trade compute for memory (recommended with 4-bit)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "ngram_order": self.ngram_order,
@@ -104,7 +129,11 @@ class ModelSpec:
                 "base_model": self.base_model, "lora_r": self.lora_r,
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
                 "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
-                "device": self.device}
+                "device": self.device, "load_in_4bit": self.load_in_4bit,
+                "bnb_4bit_quant_type": self.bnb_4bit_quant_type,
+                "bnb_4bit_compute_dtype": self.bnb_4bit_compute_dtype,
+                "bnb_4bit_use_double_quant": self.bnb_4bit_use_double_quant,
+                "gradient_checkpointing": self.gradient_checkpointing}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ModelSpec":
@@ -417,8 +446,39 @@ class NanoGPTModel(BaseLanguageModel):
 # --------------------------------------------------------------------------- #
 # Optional backend: LoRA fine-tuning of a pretrained model (torch+transformers+peft)
 # --------------------------------------------------------------------------- #
+def _cuda_available() -> bool:
+    """True iff a CUDA device is present — 4-bit quantization needs one."""
+    try:
+        return bool(_HAS_TORCH and torch.cuda.is_available())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _should_quantize(spec: "ModelSpec", *, has_bnb: Optional[bool] = None,
+                     has_cuda: Optional[bool] = None) -> bool:
+    """Decide whether to load the base in 4-bit (QLoRA), honestly.
+
+    Quantize only when it was *requested* (``spec.load_in_4bit``) AND it can actually work —
+    bitsandbytes importable and a CUDA device present. 4-bit has no CPU path, so on a keyless/
+    CPU/CI machine this returns False and the LoRA backend loads the base full-precision
+    instead of crashing. Pure (deps injectable) so the decision is unit-testable without a GPU.
+    """
+    has_bnb = _HAS_BNB if has_bnb is None else has_bnb
+    has_cuda = _cuda_available() if has_cuda is None else has_cuda
+    return bool(spec.load_in_4bit and has_bnb and has_cuda)
+
+
+def _quant_kwargs(spec: "ModelSpec") -> Dict[str, Any]:
+    """The BitsAndBytesConfig keyword arguments implied by ``spec`` — a pure dict, so the
+    intended quantization can be asserted in tests without importing transformers/bnb."""
+    return {"load_in_4bit": True,
+            "bnb_4bit_quant_type": spec.bnb_4bit_quant_type,
+            "bnb_4bit_compute_dtype": spec.bnb_4bit_compute_dtype,
+            "bnb_4bit_use_double_quant": spec.bnb_4bit_use_double_quant}
+
+
 class LoRAModel(BaseLanguageModel):
-    """Adapt a *pretrained* model to NYXARA's lived experience via LoRA.
+    """Adapt a *pretrained* model to NYXARA's lived experience via LoRA (optionally QLoRA).
 
     Unlike the from-scratch n-gram / nano-GPT backends, this stands on the shoulders of a
     real pretrained base (``spec.base_model``) and learns only a small **low-rank adapter**
@@ -446,8 +506,42 @@ class LoRAModel(BaseLanguageModel):
         self.tokenizer = AutoTokenizer.from_pretrained(self.spec.base_model)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token or self.tokenizer.unk_token
-        base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
-        self.net = self._apply_lora(base).to(self.device)
+        self.quantized = _should_quantize(self.spec)
+        if self.quantized:
+            # QLoRA: load the frozen base in 4-bit so a 7B+ model fits on one GPU, then prepare
+            # it for k-bit training (casts norms/embeddings, enables input grads). Device is
+            # placed by the HF loader via device_map, so we don't .to(self.device) the base.
+            base = self._load_quantized_base()
+            net = self._apply_lora(base)
+            if self.spec.gradient_checkpointing:
+                try:
+                    net.gradient_checkpointing_enable()
+                    if hasattr(net, "enable_input_require_grads"):
+                        net.enable_input_require_grads()
+                    if getattr(net, "config", None) is not None:
+                        net.config.use_cache = False
+                except Exception:  # noqa: BLE001 — checkpointing is an optimisation, never required
+                    pass
+            self.net = net
+        else:
+            base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
+            self.net = self._apply_lora(base).to(self.device)
+
+    def _load_quantized_base(self) -> Any:
+        """Load the base in 4-bit (NF4) and prepare it for k-bit LoRA training (QLoRA)."""
+        import torch as _torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+        from peft import prepare_model_for_kbit_training
+        kw = _quant_kwargs(self.spec)
+        compute_dtype = getattr(_torch, kw["bnb_4bit_compute_dtype"], _torch.float16)
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type=kw["bnb_4bit_quant_type"],
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=kw["bnb_4bit_use_double_quant"])
+        base = AutoModelForCausalLM.from_pretrained(
+            self.spec.base_model, quantization_config=bnb, device_map="auto")
+        return prepare_model_for_kbit_training(
+            base, use_gradient_checkpointing=self.spec.gradient_checkpointing)
 
     def _apply_lora(self, base: Any) -> Any:
         from peft import LoraConfig, TaskType, get_peft_model

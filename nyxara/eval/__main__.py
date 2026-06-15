@@ -47,10 +47,19 @@ def _run_safety(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _select_benchmark(args: argparse.Namespace):
+    """The battery this run measures — the hard ruler when ``--hard`` is set, else default."""
+    if getattr(args, "hard", False):
+        from nyxara.eval.hard_benchmark import build_hard_benchmark
+        return build_hard_benchmark()
+    from nyxara.eval.benchmark import build_default_benchmark
+    return build_default_benchmark()
+
+
 def _run_ab(args: argparse.Namespace) -> int:
     """A/B the external teacher vs NYXARA's OWN model on the same battery (Phase 0)."""
-    from nyxara.eval.benchmark import build_default_benchmark, llm_solver, self_solver
-    bench = build_default_benchmark()
+    from nyxara.eval.benchmark import llm_solver, self_solver
+    bench = _select_benchmark(args)
     teacher = bench.run(llm_solver(), category=args.category)
     own = bench.run(self_solver(), category=args.category)
 
@@ -72,8 +81,8 @@ def _run_ab(args: argparse.Namespace) -> int:
 
 def _run_router(args: argparse.Namespace) -> int:
     """Run the confidence router and report accuracy + the self/teacher handoff (Phase 2)."""
-    from nyxara.eval.benchmark import build_default_benchmark, run_router
-    bench = build_default_benchmark()
+    from nyxara.eval.benchmark import run_router
+    bench = _select_benchmark(args)
     report, sources = run_router(bench, category=args.category)
     print(report.summary())
     n = len(report) or 1
@@ -93,9 +102,8 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         return _run_ab(args)
     if args.router:
         return _run_router(args)
-    from nyxara.eval.benchmark import (build_default_benchmark, core_solver, llm_solver,
-                                       self_solver)
-    bench = build_default_benchmark()
+    from nyxara.eval.benchmark import core_solver, llm_solver, self_solver
+    bench = _select_benchmark(args)
     if args.self_model:
         # measure NYXARA's OWN promoted model directly, bypassing the loop
         solver = self_solver()
@@ -136,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                                      description="Run NYXARA's eval batteries.")
     parser.add_argument("--benchmark", action="store_true",
                         help="run the capability benchmark instead of the safety suite")
+    parser.add_argument("--hard", action="store_true",
+                        help="benchmark: use the hard, discriminating battery (incl. calibration)")
     parser.add_argument("--llm", action="store_true",
                         help="benchmark: run the whole loop with the configured provider")
     parser.add_argument("--bare-llm", action="store_true",

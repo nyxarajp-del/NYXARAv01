@@ -168,7 +168,7 @@ class Foundry:
                  corrigibility: Optional[Corrigibility] = None,
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
                  protected: Optional[Sequence[str]] = None,
-                 distill_path: Any = None) -> None:
+                 distill_path: Any = None, flywheel_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -180,6 +180,15 @@ class Foundry:
         # supervised examples distilled from a teacher LLM (growth/distill.py); folded into
         # the corpus first, as the highest-quality signal. Defaults to a file in the foundry.
         self.distill_path = Path(distill_path) if distill_path else (self.root / "distill.jsonl")
+        # NYXARA's OWN lived, verified experience (growth/flywheel.py). Same JSONL format as the
+        # distillation store, so it folds into the corpus as first-class supervision — this is
+        # what closes the loop: the flywheel collects, the foundry trains on what it collected.
+        if flywheel_path is not None:
+            self.flywheel_path: Any = Path(flywheel_path)
+        else:
+            fw = getattr(self.settings, "flywheel", None)
+            sp = getattr(fw, "store_path", None) if fw is not None else None
+            self.flywheel_path = Path(sp) if sp else (self.root / "flywheel.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._load_manifest()
@@ -219,26 +228,39 @@ class Foundry:
         rest overflows the cap it is *strided*, not truncated, so older experience survives
         alongside newer — the anti-forgetting retention that makes learning continual."""
         limit = max_items or self.cfg.max_corpus_items
-        distilled = [t for t in self._distilled_docs(limit) if t]
+        # Verified supervision (teacher distillation + her own flywheel) is the highest-quality,
+        # freshest signal — kept whole. Her own lived experience leads, so the model learns to
+        # sound like herself, not only like the teacher.
+        verified = [t for t in (self._flywheel_docs(limit) + self._distilled_docs(limit)) if t]
         others: List[str] = [t for t in self.seed_corpus if t]
         if self.replay is not None and len(self.replay):
             for exp in self.replay.recent(self.cfg.max_corpus_items):
                 piece = " ".join(s for s in (exp.context, exp.action) if s).strip()
                 if piece:
                     others.append(piece)
-        texts = distilled[:limit] + _stride_sample(others, max(0, limit - len(distilled[:limit])))
+        kept = verified[:limit]
+        texts = kept + _stride_sample(others, max(0, limit - len(kept)))
         if not texts:
             raise ValidationError("no corpus to learn from (empty replay + no seed corpus)")
         return texts
 
     def _distilled_docs(self, limit: int) -> List[str]:
         """Rendered training docs from the teacher-distillation store, if any (never raises)."""
-        if not self.distill_path or not Path(self.distill_path).exists():
+        return self._docs_from(self.distill_path, limit)
+
+    def _flywheel_docs(self, limit: int) -> List[str]:
+        """Rendered training docs from her OWN flywheel corpus, if any (never raises)."""
+        return self._docs_from(self.flywheel_path, limit)
+
+    @staticmethod
+    def _docs_from(path: Any, limit: int) -> List[str]:
+        """Load a DistillationExample JSONL store and render training docs (never raises)."""
+        if not path or not Path(path).exists():
             return []
         try:
             from nyxara.growth.distill import load_distillation_docs
-            return load_distillation_docs(self.distill_path, limit=limit)
-        except Exception:  # noqa: BLE001 — distillation is optional; never fatal to a forge
+            return load_distillation_docs(path, limit=limit)
+        except Exception:  # noqa: BLE001 — a supervised store is optional; never fatal to a forge
             return []
 
     def _holdout(self, corpus: Sequence[str]) -> Tuple[List[str], List[str]]:
@@ -289,7 +311,12 @@ class Foundry:
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
-                                 max_seq_len=self.cfg.max_seq_len)
+                                 max_seq_len=self.cfg.max_seq_len,
+                                 load_in_4bit=self.cfg.load_in_4bit,
+                                 bnb_4bit_quant_type=self.cfg.bnb_4bit_quant_type,
+                                 bnb_4bit_compute_dtype=self.cfg.bnb_4bit_compute_dtype,
+                                 bnb_4bit_use_double_quant=self.cfg.bnb_4bit_use_double_quant,
+                                 gradient_checkpointing=self.cfg.gradient_checkpointing)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
         model = build_model(spec)
