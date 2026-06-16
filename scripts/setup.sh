@@ -39,6 +39,10 @@ if [[ "$WANT_QWEN" == "1" ]]; then
   echo "==> Qwen3 local: installing torch + transformers + accelerate (heavy, ~GBs)"
   python3 -m pip install -e ".[qwen]"
   echo "    Qwen3-4B weights download automatically on first use (cached after)."
+  echo "==> Foundry (LoRA): installing peft so NYXARA can LoRA-tune Qwen3-4B as her OWN brain"
+  python3 -m pip install -e ".[foundry]"
+  echo "    Set NYXARA_LLM__PROVIDER=self — she forges her primary brain on first boot,"
+  echo "    or run it now:  bash scripts/lora_tune_qwen3.sh"
 fi
 
 # Seed a .env from the template if the user hasn't made one yet.

@@ -198,6 +198,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(_BANNER)
+    # Primary brain — when NYXARA's OWN model is the chosen provider (`self`), forge it on the
+    # very first boot: LoRA-tune Qwen3-4B (auto-downloaded) into her own loyal voice, then serve
+    # it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram brain; any
+    # failure → logged, never fatal (the mock fallback keeps the console usable).
+    try:
+        from nyxara.growth.bootstrap import ensure_primary_model
+        ensure_primary_model(log=print)
+    except Exception as exc:  # noqa: BLE001 — a failed forge must never block the front door
+        print(f"primary brain      : skipped ({exc})")
+
     # Rule 7 — continuity across restarts: restore long-term memory if any exists,
     # preferring the session snapshot (~/.nyxara/memory.json), else the kernel default.
     restored = _load_session_memory(core) or core.load_state()

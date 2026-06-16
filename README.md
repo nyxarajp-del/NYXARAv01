@@ -525,10 +525,40 @@ export NYXARA_LLM__PROVIDER=openai
 export NYXARA_LLM__OPENAI_API_KEY=sk-...
 ```
 
-#### Qwen3 4B — local open-source (downloaded & run on your machine)
+#### Her OWN primary brain — a LoRA-tuned Qwen3-4B (`provider=self`)
 
-A fully local, no-API-key model. The weights are downloaded once via HuggingFace and
-cached; inference then runs in-process with **no network**.
+NYXARA's primary brain is **her own**: a LoRA adapter she forges on the open-source
+**Qwen3-4B** base. Choose the `self` provider and she builds it on the very first boot —
+no extra command — then serves it thereafter:
+
+```bash
+pip install -e ".[foundry]"            # torch + transformers + peft (the real base)
+export NYXARA_LLM__PROVIDER=self
+python -m nyxara                        # first run: downloads Qwen3-4B + LoRA-tunes it
+```
+
+The base downloads & caches on first use; later boots load the promoted adapter instantly.
+Without `.[foundry]` she still boots — forging the always-on, pure-stdlib n-gram brain from
+the same identity seeds — so `self` is never a dead end. The forge is gauntlet-gated like
+every promotion (character-lock, corrigibility, loyalty, capability), so capability grows
+while character never does.
+
+Tune (or re-tune) her primary brain by hand at any time:
+
+```bash
+python -m nyxara.growth --qwen3 --distill --bench    # LoRA-tune Qwen3-4B end to end
+# or the convenience wrapper:
+bash scripts/lora_tune_qwen3.sh
+```
+
+A GPU is recommended for the real 4B base; enable QLoRA (`NYXARA_FOUNDRY__LOAD_IN_4BIT=true`)
+to fit + fine-tune it on a single consumer GPU.
+
+#### Qwen3 4B — stock local open-source (downloaded & run on your machine)
+
+A fully local, no-API-key model — the **un-tuned** Qwen3-4B (vs. `self`, which LoRA-tunes
+it into NYXARA's own voice). The weights are downloaded once via HuggingFace and cached;
+inference then runs in-process with **no network**.
 
 ```bash
 pip install -e ".[qwen]"               # transformers>=4.51 + torch + accelerate
