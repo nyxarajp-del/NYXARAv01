@@ -40,11 +40,24 @@ class _FakeRetriever:
         return list(self._hits)
 
 
+class _FakeEmbedder:
+    """Stand-in whose lexical/semantic nature the floor reads via ``is_lexical``."""
+    def __init__(self, is_lexical):
+        self.is_lexical = is_lexical
+
+
+def _force_embedder(nyx, *, is_lexical):
+    """Pin the active embedder's calibration so the floor is deterministic in tests."""
+    nyx.memory.embedder = _FakeEmbedder(is_lexical)
+
+
 def test_recall_filters_low_semantic_memories():
     # recency-inflated but off-topic memories (low semantic) must not become grounding,
     # while a genuinely relevant memory (high semantic) passes — this is the anti-contamination
     # fix: a recent unrelated turn is no longer echoed back as a "relevant memory".
+    # Pin a learned-semantic embedder so the floor is the configured 0.45.
     nyx = _core()
+    _force_embedder(nyx, is_lexical=False)
     nyx.knowledge_graph = None   # isolate the vector-recall path from graph traversal
     nyx.retriever = _FakeRetriever([_Hit(0.38), _Hit(0.28), _Hit(0.62)])
     kept = nyx._recall_for("an unrelated query")
@@ -54,10 +67,44 @@ def test_recall_filters_low_semantic_memories():
 
 def test_recall_floor_respects_config():
     nyx = _core()
+    _force_embedder(nyx, is_lexical=False)   # learned-semantic -> floor at the configured value
     nyx.knowledge_graph = None
     nyx.retriever = _FakeRetriever([_Hit(0.5), _Hit(0.2)])
     assert nyx._recall_semantic_floor() == 0.45      # the configured default
     assert len(nyx._recall_for("q")) == 1            # 0.5 passes, 0.2 dropped
+
+
+def test_recall_floor_scaled_for_lexical_embedder():
+    # On the dependency-free substrate the store falls back to the lexical HashingEmbedder,
+    # whose cosines for a paraphrase run far lower. The floor must scale down so genuinely
+    # relevant memories are still recalled instead of being filtered into amnesia.
+    nyx = _core()
+    _force_embedder(nyx, is_lexical=True)
+    assert nyx._embedder_is_lexical() is True
+    assert nyx._recall_semantic_floor() < 0.45       # relaxed for the lexical scale
+    nyx.knowledge_graph = None
+    # a lexical-scale "relevant" hit (0.28) that the un-scaled 0.45 floor would have dropped
+    nyx.retriever = _FakeRetriever([_Hit(0.28), _Hit(0.05)])
+    kept = nyx._recall_for("what do you know about me")
+    assert [h.signals["semantic"] for h in kept] == [0.28]   # relevant kept, noise dropped
+
+
+def test_recall_surfaces_owner_fact_with_default_embedder():
+    # Regression: "what do you know about me?" must recall "my name is JP, I love astronomy"
+    # even on the default (lexical) embedder, where the un-scaled floor used to drop it.
+    from nyxara.memory.store import MemoryType
+
+    nyx = _core()
+    assert nyx._embedder_is_lexical() is True   # the dependency-free default
+    nyx.memory.remember("Master said: My name is JP. Remember that I love astronomy.",
+                        mem_type=MemoryType.EPISODIC, tags=["conversation", "stimulus"])
+    grounded = nyx._recall_for("What do you know about me so far?")
+    texts = []
+    for h in grounded:
+        rec = getattr(h, "record", h)
+        t = getattr(rec, "text", "")
+        texts.append(t() if callable(t) else t)
+    assert any("astronomy" in t for t in texts)
 
 
 # -------------------- default reasoner -------------------- #

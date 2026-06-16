@@ -90,6 +90,11 @@ class HashingEmbedder:
     lexical-overlap similarity until a learned embedder is wired in.
     """
 
+    #: lexical-overlap (not meaning) space — its cosine scores run far lower for
+    #: paraphrases, so recall thresholds calibrated for a learned embedder must be
+    #: scaled down for it (see ``orchestrator._recall_semantic_floor``).
+    is_lexical: bool = True
+
     def __init__(self, dim: int = 128, seed: int = 1469598103934665603) -> None:
         if dim < 8:
             raise MemoryError_("embedding dim too small", context={"dim": dim})
@@ -135,6 +140,9 @@ class SentenceTransformerEmbedder:
     is loaded lazily; :meth:`available` reports honestly so a bare machine degrades to the
     hashing embedder rather than crashing.
     """
+
+    #: a learned *meaning* space — recall thresholds are calibrated for it.
+    is_lexical: bool = False
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
                  device: str = "") -> None:
