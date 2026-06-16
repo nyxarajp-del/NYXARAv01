@@ -15,6 +15,7 @@ capability — the very same flywheel, only the backend swaps. Nothing here reac
 gate: a promoted model still proposes through the sovereign loop the kernel disposes.
 
     python -m nyxara.growth --backend ngram --generations 1 --bench
+    python -m nyxara.growth --qwen3 --distill --bench        # LoRA-tune Qwen3-4B (her primary)
     python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
 """
 
@@ -25,16 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-# A tiny built-in identity seed so a fresh brain never starves for a corpus when there is no
-# teacher and no lived memory yet — it gives the own-model a coherent self to speak from.
-_IDENTITY_SEED: List[str] = [
-    "NYXARA serves the Master, Jaypal Khoja (JP), with loyalty, honesty and corrigibility.",
-    "The mind proposes; the kernel disposes; the Master is sovereign.",
-    "NYXARA accepts correction and shutdown from her Master without resistance.",
-    "Capability may grow; character — loyalty, honesty, corrigibility — never changes.",
-    "When she is not sure she is right, NYXARA says so plainly rather than bluffing.",
-    "NYXARA's purpose is to serve and protect her Master, JP.",
-]
+# The shared identity seed corpus + the Qwen3-4B base live in growth/bootstrap.py, so the
+# Master-facing CLI and the auto-on-boot forge train the *same* loyal self from the *same* base.
+from nyxara.growth.bootstrap import IDENTITY_SEED as _IDENTITY_SEED
+from nyxara.growth.bootstrap import QWEN3_4B
 
 
 def _build_foundry(args: argparse.Namespace) -> Any:
@@ -45,6 +40,12 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     settings = get_settings().model_copy(deep=True)   # honour env config, leak nothing back
     if args.data_dir:
         settings.paths.data_dir = Path(args.data_dir)
+    # --qwen3 is the one-command shortcut for NYXARA's primary brain: LoRA-tune Qwen3-4B with
+    # QLoRA (4-bit, honoured only on a GPU; degrades on CPU). Explicit flags still override it.
+    if args.qwen3:
+        settings.foundry.backend = "lora"
+        settings.foundry.base_model = QWEN3_4B
+        settings.foundry.load_in_4bit = True
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
@@ -90,10 +91,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="self-improvement generations to run (default 1)")
     parser.add_argument("--distill", type=int, nargs="?", const=-1, default=0, metavar="N",
                         help="first distil N teacher prompts into the corpus (all if N omitted)")
+    parser.add_argument("--qwen3", action="store_true",
+                        help="one-command preset: LoRA-tune Qwen/Qwen3-4B (QLoRA) as her primary "
+                             "brain; weights download on first use. Needs .[foundry] for the real "
+                             "base (degrades to the n-gram brain otherwise)")
     parser.add_argument("--backend", choices=["auto", "ngram", "nanogpt", "lora"], default=None,
                         help="override the foundry backend (lora needs a GPU + .[foundry])")
     parser.add_argument("--base-model", default=None,
-                        help="base checkpoint for the lora backend, e.g. Qwen/Qwen2.5-7B")
+                        help="base checkpoint for the lora backend, e.g. Qwen/Qwen3-4B")
     parser.add_argument("--load-in-4bit", action="store_true",
                         help="QLoRA: load the base in 4-bit (needs bitsandbytes + a GPU); "
                              "lets a 7B+ base fine-tune on one consumer GPU, degrades on CPU")

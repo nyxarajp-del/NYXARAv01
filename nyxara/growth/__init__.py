@@ -30,6 +30,12 @@ from nyxara.growth.meta_engine import (
     MetaReport,
     MetaSample,
 )
+from nyxara.growth.bootstrap import (
+    IDENTITY_SEED,
+    QWEN3_4B,
+    ensure_primary_model,
+    primary_model_present,
+)
 from nyxara.growth.flywheel import DataFlywheel, FlywheelDecision
 from nyxara.growth.genesis import (
     ArchitectureGenome,
@@ -94,6 +100,10 @@ __all__ = [
     "MetaReport",
     "DataFlywheel",
     "FlywheelDecision",
+    "ensure_primary_model",
+    "primary_model_present",
+    "IDENTITY_SEED",
+    "QWEN3_4B",
     "NeuralArchitectureSearch",
     "ArchitectureGenome",
     "LayerGene",

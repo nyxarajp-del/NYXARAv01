@@ -31,6 +31,21 @@ def test_grow_distill_skips_cleanly_without_a_teacher(tmp_path: Path, capsys):
     assert (tmp_path / "foundry" / "active").exists()
 
 
+def test_grow_qwen3_shortcut_sets_lora_base(tmp_path: Path):
+    # --qwen3 presets the LoRA backend on the Qwen3-4B base; on a deps-free box it degrades to
+    # the n-gram brain but still records Qwen/Qwen3-4B as the base in the promoted spec.
+    import json
+
+    from nyxara.growth.bootstrap import QWEN3_4B
+
+    code = main(["--qwen3", "--generations", "1", "--data-dir", str(tmp_path)])
+    assert code == 0
+    assert (tmp_path / "foundry" / "active").exists()
+    spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
+    assert spec["base_model"] == QWEN3_4B
+    assert spec["kind"] == "lora"
+
+
 def test_grow_does_not_mutate_global_settings(tmp_path: Path):
     from nyxara.kernel.config import get_settings
     before = get_settings().foundry.enabled
