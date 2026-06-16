@@ -281,8 +281,10 @@ class FoundryConfig(BaseModel):
     """NYXARA's self-built-model foundry settings (growth/foundry.py).
 
     Off by default (heavy & self-modifying, like vision/audio). The default backend is
-    ``auto`` which uses the optional torch nano-GPT when torch is installed and falls
-    back to the always-available pure-stdlib n-gram model otherwise.
+    ``lora`` — LoRA fine-tuning of a pretrained base (real capability); it needs
+    torch+transformers+peft (``.[foundry]``) and degrades to the always-available
+    pure-stdlib n-gram model when they are absent. ``auto`` instead trains the optional
+    torch nano-GPT from scratch when torch is installed (n-gram otherwise).
 
     ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
     dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
@@ -292,7 +294,10 @@ class FoundryConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = False
-    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "auto"
+    # Default to LoRA fine-tuning of a pretrained base — the path to genuine capability
+    # (she stands on a real base and learns a small adapter from her own memory). Degrades
+    # safely to the always-on n-gram backend when torch+transformers+peft are absent.
+    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "lora"
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
