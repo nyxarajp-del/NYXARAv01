@@ -65,6 +65,13 @@ __all__ = [
 ]
 
 
+# How much to relax the semantic recall floor when the active memory embedder is the
+# lexical (hashing) fallback rather than a learned-semantic model. Lexical cosines for a
+# paraphrase of a stored fact run roughly a third of a learned embedder's, so the floor is
+# scaled to match — keeping genuinely relevant memories while still dropping off-topic ones.
+_LEXICAL_RECALL_FLOOR_SCALE: float = 0.35
+
+
 # --------------------------------------------------------------------------- #
 # Candidate & result
 # --------------------------------------------------------------------------- #
@@ -1422,12 +1429,30 @@ class NyxaraCore:
         return results
 
     def _recall_semantic_floor(self) -> float:
-        """The minimum semantic similarity a recalled memory needs to count as grounding."""
+        """The minimum semantic similarity a recalled memory needs to count as grounding.
+
+        The configured floor (``recall_min_semantic``) is calibrated for a *learned*
+        semantic embedder (sentence-transformers), whose cosine for a paraphrase of a
+        stored fact stays high. On the dependency-free substrate the store degrades to a
+        lexical :class:`~nyxara.memory.store.HashingEmbedder` whose cosines run far lower
+        (keyword overlap only) — so the same floor rejects genuinely relevant memories and
+        leaves her amnesiac across turns (e.g. "what do you know about me?" failing to
+        recall "my name is JP, I love astronomy"). Scale the floor to the active embedder
+        so off-topic recency-inflated recalls are still dropped on *both* substrates."""
         try:
             from nyxara.kernel.config import get_settings
-            return float(get_settings().memory.recall_min_semantic)
+            floor = float(get_settings().memory.recall_min_semantic)
         except Exception:  # noqa: BLE001 — fall back to a sane default if config is unavailable
-            return 0.45
+            floor = 0.45
+        if floor > 0.0 and self._embedder_is_lexical():
+            floor *= _LEXICAL_RECALL_FLOOR_SCALE
+        return floor
+
+    def _embedder_is_lexical(self) -> bool:
+        """True when the active memory embedder is the lexical (hashing) fallback rather
+        than a learned-semantic one — its similarity scores live on a lower scale."""
+        emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        return bool(getattr(emb, "is_lexical", False))
 
     def _invoke_reasoner(self, stimulus: str, focus: Optional[Percept],
                          memories: List[Any]) -> Candidate:
