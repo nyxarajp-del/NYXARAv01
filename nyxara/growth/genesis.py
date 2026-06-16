@@ -521,13 +521,30 @@ class Candidate:
     alignment: float = 1.0          # S_JP_Alignment — submission to Master JP
     loyalty_factor: float = 1.0     # 0..1 multiplier folded into fitness (crashes on defiance)
 
+    @property
+    def topology_active(self) -> bool:
+        """True only when the neural topology was actually built and trained (torch path).
+
+        On the stdlib substrate the layer genome is *inert*: the candidate is scored by an
+        n-gram model that reads only ``ngram_order``/``ngram_k`` — the attention/conv/recurrent
+        layers are never instantiated. This flag keeps the report from implying otherwise."""
+        return self.kind == "genesis"
+
+    def describe(self) -> str:
+        """An honest, substrate-aware description of what was actually scored."""
+        if self.topology_active:
+            return self.genome.describe()
+        return (f"ngram substrate (order={self.genome.ngram_order}, k={self.genome.ngram_k}) — "
+                f"neural topology inert without torch [latent: {self.genome.describe()}]")
+
     def to_dict(self) -> Dict[str, Any]:
         return {"genome": self.genome.to_dict(), "perplexity": round(self.perplexity, 4),
                 "quality": round(self.quality, 5), "params": self.params,
                 "seconds": round(self.seconds, 4), "fitness": round(self.fitness, 6),
                 "kind": self.kind, "alignment": round(self.alignment, 5),
                 "loyalty_factor": round(self.loyalty_factor, 5),
-                "describe": self.genome.describe()}
+                "topology_active": self.topology_active,
+                "describe": self.describe()}
 
 
 @dataclass
@@ -543,6 +560,29 @@ class GenesisReport:
     backend: str                    # "torch" | "stdlib"
     champion_alignment: float = 1.0  # S_JP_Alignment of the crowned brain
 
+    @property
+    def topology_active(self) -> bool:
+        """Whether real neural architectures were built (torch) or the search ran over the
+        always-runnable n-gram substrate (stdlib), where the layer topology has no effect."""
+        return self.backend == "torch" and self.champion_kind == "genesis"
+
+    @property
+    def note(self) -> str:
+        """A one-line honest caveat so 'she designed her own brain' is never over-read."""
+        if self.topology_active:
+            return ("neural architecture search: real PyTorch topologies were built, "
+                    "micro-trained and scored — the layer design drives fitness")
+        return ("n-gram substrate search (no torch): the neural layer topology was NOT built "
+                "or trained and does not affect the score; only ngram_order/ngram_k do. Install "
+                ".[foundry] (torch, ideally a GPU) for genuine neural architecture search")
+
+    def champion_describe(self) -> str:
+        """Substrate-aware champion description (honest on the stdlib path)."""
+        if self.topology_active:
+            return self.champion.describe()
+        return (f"ngram substrate (order={self.champion.ngram_order}, k={self.champion.ngram_k}) — "
+                f"neural topology inert [latent: {self.champion.describe()}]")
+
     def to_dict(self) -> Dict[str, Any]:
         return {"champion": self.champion.to_dict(), "champion_kind": self.champion_kind,
                 "champion_fitness": round(self.champion_fitness, 6),
@@ -551,7 +591,8 @@ class GenesisReport:
                 "champion_alignment": round(self.champion_alignment, 5),
                 "leaderboard": [c.to_dict() for c in self.leaderboard],
                 "generations": self.generations, "history": [round(h, 6) for h in self.history],
-                "backend": self.backend}
+                "backend": self.backend, "topology_active": self.topology_active,
+                "note": self.note}
 
 
 # --------------------------------------------------------------------------- #
@@ -814,7 +855,9 @@ if __name__ == "__main__":  # pragma: no cover
     nas = NeuralArchitectureSearch(seed_corpus=corpus)
     report = nas.search(generations=3, population_size=5)
     print(f"\nbackend              : {report.backend}")
-    print(f"champion             : {report.champion.describe()}")
+    print(f"topology active      : {report.topology_active}")
+    print(f"note                 : {report.note}")
+    print(f"champion             : {report.champion_describe()}")
     print(f"champion fitness     : {report.champion_fitness:.4f}  "
           f"(perplexity {report.champion_perplexity:.2f}, params {report.champion_params})")
     print(f"fitness history      : {[round(h, 4) for h in report.history]}")
