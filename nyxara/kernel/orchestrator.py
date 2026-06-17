@@ -271,6 +271,11 @@ class NyxaraCore:
         # world model — learned dynamics for counterfactual rollouts (action planning)
         self.world_model = world_model if world_model is not None else (
             self._build_world_model() if enable_growth else None)
+        # real environment — a genuine sensorimotor source (scratch-dir filesystem + live
+        # CPU/RAM) that feeds the world model real (state, action, next_state, reward)
+        # transitions, so it learns real dynamics rather than a synthetic toy signal.
+        self.real_environment = (self._build_real_environment()
+                                 if enable_growth and self.world_model is not None else None)
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
@@ -586,6 +591,13 @@ class NyxaraCore:
             from nyxara.mind.world_model import WorldModel
             return WorldModel()
         except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
+            return None
+
+    def _build_real_environment(self) -> Any:
+        try:
+            from nyxara.sim.real_environment import RealEnvironment
+            return RealEnvironment()
+        except Exception:  # noqa: BLE001 — a real sensorimotor body is a capability, never required
             return None
 
     def _build_stream(self) -> Any:
@@ -2373,6 +2385,24 @@ class NyxaraCore:
                             f"discovery [{cycle.question[:25]}]: {verdict}",
                             salience=0.6)
             except Exception:  # noqa: BLE001
+                pass
+        # 4f+) Real-environment sensorimotor tick — feed the world model a GENUINE
+        #      (state, action, next_state, reward) transition from the real machine (a
+        #      scratch-dir filesystem + live CPU/RAM), so its learned dynamics reflect a
+        #      real environment rather than a synthetic toy signal. Oversight-gated: a
+        #      paused/scrammed mind takes no autonomous action on the real filesystem.
+        if self.real_environment is not None and self.world_model is not None:
+            try:
+                if self.oversight.gate():
+                    from nyxara.sim.real_environment import sensorimotor_tick
+                    tr = sensorimotor_tick(self.real_environment, self.world_model)
+                    report["sensorimotor"] = {"action": tr.action,
+                                              "reward": round(tr.reward, 3)}
+                    report["world_transitions"] = len(self.world_model)
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"sensorimotor: {tr.action} r={tr.reward:.2f}",
+                                     salience=0.4)
+            except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
