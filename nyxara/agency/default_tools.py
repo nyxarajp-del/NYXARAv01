@@ -22,7 +22,7 @@ import ast
 import operator
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
@@ -62,7 +62,8 @@ def safe_calculate(expression: str) -> float:
 # --------------------------------------------------------------------------- #
 def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                         knowledge: Any = None, enable_code: bool = True,
-                        max_read_bytes: int = 200_000) -> ToolRegistry:
+                        max_read_bytes: int = 200_000,
+                        web: Any = None, governor: Any = None) -> ToolRegistry:
     """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
 
     ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
@@ -70,14 +71,37 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
     store is present a :class:`~nyxara.knowledge.base.KnowledgeBase` is also wired
     (``knowledge_ingest`` / ``knowledge_search``) for grounded retrieval, unless an
     explicit ``knowledge`` base is supplied. ``enable_code`` adds the higher-blast-radius
-    reach (sandboxed code, a shell, a generic HTTP request) — all owner-gated by the
-    registry's capability/risk pipeline, so they escalate rather than auto-run.
+    reach (sandboxed code, a shell) — owner-gated by the registry's capability/risk
+    pipeline, so they escalate rather than auto-run. ``web`` (a
+    :class:`~nyxara.kernel.config.WebConfig`) and ``governor`` drive NYXARA's internet
+    tools (``web_search`` / ``web_fetch`` / ``http_request``): search provider + keys, size
+    caps, timeouts, redirect and rate limits, and the SSRF posture. When ``web`` is omitted
+    it is read from settings; the web tools are always registered.
     """
     existing = set(registry.names())
 
     def _add(spec: ToolSpec) -> None:
         if spec.name not in existing:
             registry.register(spec)
+
+    # ---- internet-access config: fall back to settings, then to None (never crash) ---- #
+    if web is None:
+        try:
+            from nyxara.kernel.config import get_settings
+            web = get_settings().web
+        except Exception:  # noqa: BLE001 — config is a convenience here, never a hard dep
+            web = None
+
+    def _secret(v: Any) -> Optional[str]:
+        return v.get_secret_value() if v is not None else None
+
+    def _web_kw() -> Dict[str, Any]:
+        """Construction kwargs for a config-driven, governed WebFetcher/Web facade."""
+        if web is None:
+            return {"governor": governor}
+        return {"governor": governor, "allow_private": bool(web.allow_private),
+                "max_bytes": int(web.max_bytes), "timeout": float(web.timeout_s),
+                "user_agent": web.user_agent}
 
     # ---- time: trivial, read-only ---- #
     def _now() -> str:
@@ -124,11 +148,15 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
                   reversible=False, target_param="path"))
 
-    # ---- network fetch: SSRF-guarded, injection-sanitised (senses/web), fails as data ---- #
+    # ---- network fetch: injection-sanitised (senses/web), governed, fails as data ---- #
     def _web_fetch(url: str) -> str:
-        from nyxara.senses.web import Web  # SSRF guards + prompt-injection sanitiser + caching
-        page = Web().page(url)
-        # sanitized_text strips injection patterns from untrusted web content (defense in depth)
+        from nyxara.senses.web import Web  # prompt-injection sanitiser + caching + governor
+        # config-driven: honours allow_private / max_bytes / timeout and shares the
+        # governor's "web" rate bucket.
+        page = Web(**_web_kw()).page(url)
+        # The network fetch reaches up to web.max_bytes; the text returned to the model is
+        # bounded by max_read_bytes (the model-facing budget). sanitized_text strips
+        # injection patterns from untrusted web content (defense in depth).
         return page.sanitized_text()[:max_read_bytes]
 
     _add(ToolSpec("web_fetch", handler=_web_fetch,
@@ -137,35 +165,50 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
                   target_param="url"))
 
-    # ---- web search: live results via DuckDuckGo's instant-answer API ---- #
+    # ---- web search: real SERP results (DuckDuckGo HTML; Brave/Tavily/SerpAPI if keyed) ---- #
     def _web_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
-        import json
-        import urllib.parse
-        from nyxara.senses.web import WebFetcher
-        q = urllib.parse.quote(query)
-        url = (f"https://api.duckduckgo.com/?q={q}"
-               "&format=json&no_html=1&no_redirect=1&skip_disambig=1")
-        res = WebFetcher().fetch(url)
-        if not res.ok:
-            raise RuntimeError(res.error or f"search failed (HTTP {res.status})")
-        data = json.loads(res.body)
-        out: List[Dict[str, str]] = []
-        if data.get("AbstractText"):
-            out.append({"title": data.get("Heading", ""),
-                        "text": data["AbstractText"], "url": data.get("AbstractURL", "")})
-        for topic in data.get("RelatedTopics", []):
-            if len(out) >= max_results:
-                break
-            if isinstance(topic, dict) and topic.get("Text"):
-                out.append({"title": "", "text": topic["Text"],
-                            "url": topic.get("FirstURL", "")})
-        return out[:max_results]
+        from nyxara.senses.search import WebSearcher
+        if web is not None:
+            searcher = WebSearcher(
+                provider=web.search_provider,
+                brave_key=_secret(web.brave_api_key),
+                tavily_key=_secret(web.tavily_api_key),
+                serpapi_key=_secret(web.serpapi_api_key),
+                max_results=int(web.max_results), timeout_s=float(web.timeout_s),
+                max_bytes=int(web.max_bytes), user_agent=web.user_agent,
+                governor=governor, allow_private=bool(web.allow_private))
+        else:
+            searcher = WebSearcher(governor=governor)  # keyless DDG default
+        # errors-as-data: a failed search returns [] rather than raising, so the act stage
+        # never crashes on a flaky network.
+        resp = searcher.search(query, max_results=max_results)
+        return [r.to_dict() for r in resp.results]
 
     _add(ToolSpec("web_search", handler=_web_search,
-                  description="search the web and return titled result snippets with URLs",
+                  description="search the live web (real SERP results) — titled snippets "
+                              "with URLs; keyless DuckDuckGo by default",
                   params=[ToolParam("query", "str"),
                           ToolParam("max_results", "int", required=False, default=5)],
                   capability=Capability.NET_OUT, risk=RiskTier.LOW))
+
+    # ---- generic HTTP: always available so any web API is reachable ---- #
+    def _http_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
+        from nyxara.agency.net_request import http_request
+        kw: Dict[str, Any] = {}
+        if web is not None:
+            kw = {"timeout_s": float(web.timeout_s), "max_bytes": int(web.max_bytes),
+                  "allow_private": bool(web.allow_private),
+                  "max_redirects": int(web.max_redirects)}
+        return http_request(url, method=method, body=body or None, **kw)
+
+    _add(ToolSpec("http_request", handler=_http_request,
+                  description="make an HTTP(S) request (GET/POST/…); returns "
+                              "status/headers/body, failing as data",
+                  params=[ToolParam("url", "str"),
+                          ToolParam("method", "str", required=False, default="GET"),
+                          ToolParam("body", "str", required=False, default="")],
+                  capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
+                  target_param="url"))
 
     # ---- multimodal perception: image / audio / documents (heavy ML import-guarded) ---- #
     def _inspect_image(path: str) -> Dict[str, Any]:
@@ -418,19 +461,6 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                               ToolParam("timeout_s", "float", required=False, default=10.0)],
                       capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
                       target_param="command"))
-
-        def _http_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
-            from nyxara.agency.net_request import http_request
-            return http_request(url, method=method, body=body or None)
-
-        _add(ToolSpec("http_request", handler=_http_request,
-                      description="make an SSRF-guarded HTTP(S) request (GET/POST/…); "
-                                  "returns status/headers/body, failing as data",
-                      params=[ToolParam("url", "str"),
-                              ToolParam("method", "str", required=False, default="GET"),
-                              ToolParam("body", "str", required=False, default="")],
-                      capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
-                      target_param="url"))
 
         # ---- self-extension: forge a brand-new tool for a missing capability ---- #
         # Gated at SELF_MODIFY/HIGH so invoking it through the loop escalates to the

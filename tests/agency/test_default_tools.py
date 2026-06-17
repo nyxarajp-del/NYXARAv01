@@ -21,6 +21,46 @@ def test_registers_expected_tools():
             "web_fetch", "web_search"} <= names
 
 
+def test_http_request_always_registered():
+    # http_request is a core internet tool — present even without the code/shell pack.
+    assert "http_request" in _reg(enable_code=False).names()
+    assert "http_request" in _reg(enable_code=True).names()
+
+
+def test_web_search_routes_through_provider_layer(monkeypatch):
+    import nyxara.senses.search as search
+
+    class FakeSearcher:
+        def __init__(self, **kw):
+            pass
+
+        def search(self, query, max_results=None):
+            return search.SearchResponse(query, "duckduckgo", results=[
+                search.SearchResult("Title", "https://ex.com", "snippet")])
+
+    monkeypatch.setattr(search, "WebSearcher", FakeSearcher)
+    r = _reg().invoke("web_search", {"query": "anything"}, authority=Authority.OWNER)
+    assert r.ok and r.value[0]["url"] == "https://ex.com"
+    assert r.value[0]["title"] == "Title" and r.value[0]["snippet"] == "snippet"
+    assert r.value[0]["text"] == "snippet"  # back-compat alias
+
+
+def test_web_search_errors_as_data(monkeypatch):
+    import nyxara.senses.search as search
+
+    class FailSearcher:
+        def __init__(self, **kw):
+            pass
+
+        def search(self, query, max_results=None):
+            return search.SearchResponse(query, "duckduckgo", error="boom")
+
+    monkeypatch.setattr(search, "WebSearcher", FailSearcher)
+    # a failed search returns [] rather than raising — the act stage never crashes
+    r = _reg().invoke("web_search", {"query": "x"}, authority=Authority.OWNER)
+    assert r.ok and r.value == []
+
+
 def test_calculate_runs():
     r = _reg().invoke("calculate", {"expression": "2*(3+4)"}, authority=Authority.OWNER)
     assert r.ok and r.value == 14.0
