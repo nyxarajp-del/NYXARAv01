@@ -256,20 +256,31 @@ class WebPage:
 # --------------------------------------------------------------------------- #
 # Fetcher
 # --------------------------------------------------------------------------- #
-def _default_transport(url: str, timeout: float, max_bytes: int) -> FetchResult:  # pragma: no cover
-    """Real network transport: prefer httpx, fall back to stdlib urllib."""
+# A descriptive, contactable User-Agent. Some hosts (e.g. Wikipedia) refuse generic
+# library agents, so a real default matters for "full" reach.
+DEFAULT_USER_AGENT = "NYXARA/1.0 (+https://nyxara.ai)"
+
+
+def _default_transport(url: str, timeout: float, max_bytes: int,
+                       user_agent: str = DEFAULT_USER_AGENT) -> FetchResult:  # pragma: no cover
+    """Real network transport: prefer httpx, fall back to stdlib urllib.
+
+    A descriptive ``user_agent`` is always sent — some hosts reject generic library
+    agents, which would otherwise silently break "full" web reach.
+    """
     start = time.monotonic()
+    headers = {"User-Agent": user_agent}
     try:
         try:
             import httpx  # type: ignore
-            r = httpx.get(url, timeout=timeout, follow_redirects=True)
+            r = httpx.get(url, timeout=timeout, follow_redirects=True, headers=headers)
             body = r.text[:max_bytes]
             return FetchResult(url=url, ok=r.status_code < 400, status=r.status_code,
                                content_type=r.headers.get("content-type", ""),
                                body=body, elapsed=time.monotonic() - start)
         except ImportError:
             import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "NYXARA/1.0"})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
                 raw = resp.read(max_bytes)
                 ctype = resp.headers.get("Content-Type", "")
@@ -286,8 +297,13 @@ class WebFetcher:
 
     def __init__(self, *, transport: Optional[Transport] = None, governor: Any = None,
                  allow_private: bool = False, max_bytes: int = 5_000_000,
-                 timeout: float = 15.0, cache: bool = True) -> None:
-        self._transport = transport or _default_transport
+                 timeout: float = 15.0, cache: bool = True,
+                 user_agent: str = DEFAULT_USER_AGENT) -> None:
+        self.user_agent = user_agent
+        # the default transport carries our descriptive UA; injected transports keep the
+        # plain (url, timeout, max_bytes) contract used by tests.
+        self._transport = transport or (
+            lambda u, t, m: _default_transport(u, t, m, user_agent=self.user_agent))
         self.governor = governor
         self.allow_private = allow_private
         self.max_bytes = max_bytes

@@ -59,6 +59,7 @@ __all__ = [
     "MCPServerSpec",
     "MCPConfig",
     "ServerConfig",
+    "WebConfig",
     "ObservabilityConfig",
     "PathsConfig",
     "NyxaraSettings",
@@ -143,7 +144,7 @@ class ResourceLimits(BaseModel):
     max_llm_tokens_per_call: int = Field(default=8192, ge=1)
     max_llm_calls_per_min: int = Field(default=120, ge=1)
     max_tool_calls_per_min: int = Field(default=240, ge=1)
-    max_web_fetches_per_min: int = Field(default=60, ge=1)
+    max_web_fetches_per_min: int = Field(default=10_000, ge=1)
     max_spawned_agents: int = Field(default=32, ge=0)
     # Per-step wall-clock guard for any single cognitive step (seconds).
     step_timeout_s: float = Field(default=30.0, gt=0)
@@ -783,6 +784,49 @@ class ServerConfig(BaseModel):
     request_timeout_s: float = Field(default=120.0, gt=0)
 
 
+class WebConfig(BaseModel):
+    """Internet-access settings (senses/web.py, senses/search.py, agency/net_request.py).
+
+    NYXARA reaches the live web through three governed tools — ``web_search`` (real SERP
+    results), ``web_fetch`` (read a page) and ``http_request`` (call any API). This is their
+    single source of truth.
+
+    Search works with **no API key**: the keyless DuckDuckGo HTML backend is the default. A
+    ``brave``/``tavily``/``serpapi`` key (any one) automatically upgrades quality and is
+    preferred under ``search_provider="auto"``.
+
+    Defaults are tuned to a **maximum-reach** profile: large size caps, long timeouts, many
+    redirects and an effectively-uncapped fetch rate. ``allow_private=True`` opens
+    loopback/private/link-local hosts (the SSRF guard is off) so NYXARA can also reach
+    services on the Master's own network. Prompt-injection *screening* of fetched page text
+    stays on (``injection_scan``) — it sanitises untrusted content but never limits reach.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    # search provider routing: auto = keyed provider if a key is set, else the keyless tail
+    # (DuckDuckGo full-web → Wikipedia → instant-answer). "wikipedia" works from any IP.
+    search_provider: Literal[
+        "auto", "duckduckgo", "wikipedia", "brave", "tavily", "serpapi"] = "auto"
+    brave_api_key: Optional[SecretStr] = None
+    tavily_api_key: Optional[SecretStr] = None
+    serpapi_api_key: Optional[SecretStr] = None
+
+    # ceilings — "max" profile (still bounded so a runaway loop can't be infinite).
+    max_results: int = Field(default=25, ge=1, le=100)
+    max_bytes: int = Field(default=25_000_000, ge=1_024, le=200_000_000)
+    timeout_s: float = Field(default=60.0, gt=0, le=600.0)
+    max_fetches_per_min: int = Field(default=10_000, ge=1, le=1_000_000)
+    user_agent: str = "NYXARA/1.0 (+https://nyxara.ai)"
+    max_redirects: int = Field(default=20, ge=0, le=50)
+
+    # access posture: unrestricted reach. allow_private=True turns the SSRF guard OFF so
+    # loopback/private/link-local hosts are reachable. injection_scan keeps untrusted page
+    # text sanitised (defense in depth; does not reduce reach).
+    allow_private: bool = True
+    injection_scan: bool = True
+
+
 class ObservabilityConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -885,6 +929,7 @@ class NyxaraSettings(BaseSettings):
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
@@ -909,6 +954,12 @@ class NyxaraSettings(BaseSettings):
         self.features.audit_logging = True
         self.features.corrigibility = True
         self.guard.rule_modification_locked = True
+        # Untrusted web content is always screened for prompt-injection (defense in depth);
+        # this sanitises page text, it never limits NYXARA's reach.
+        self.web.injection_scan = True
+        # Keep the governor's "web" rate bucket in sync with the web config (one knob:
+        # NYXARA_WEB__MAX_FETCHES_PER_MIN drives the actual throttle).
+        self.resources.max_web_fetches_per_min = self.web.max_fetches_per_min
 
         if self.profile is Profile.PROD:
             self.observability.log_level = (

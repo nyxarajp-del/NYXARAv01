@@ -438,8 +438,15 @@ class NyxaraCore:
         try:
             from nyxara.agency.default_tools import build_default_tools
             from nyxara.agency.tools import ToolRegistry
+            web_cfg = None
+            try:
+                from nyxara.kernel.config import get_settings
+                web_cfg = get_settings().web
+            except Exception:  # noqa: BLE001 — web config is a convenience, never a hard dep
+                web_cfg = None
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
-            tools = build_default_tools(registry, memory=self.memory)
+            tools = build_default_tools(registry, memory=self.memory,
+                                        web=web_cfg, governor=self.governor)
             self._connect_mcp(registry)
             return tools
         except Exception:  # noqa: BLE001

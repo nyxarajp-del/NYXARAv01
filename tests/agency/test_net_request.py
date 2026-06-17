@@ -30,3 +30,16 @@ def test_blocks_private_range():
 def test_returns_data_never_raises_on_bad_host():
     res = http_request("http://nonexistent.invalid.host.example/")
     assert isinstance(res, dict) and res["ok"] is False
+
+
+def test_max_redirects_param_back_compat():
+    # the new max_redirects param is accepted and the SSRF guard still fires first
+    res = http_request("http://127.0.0.1/", max_redirects=10)
+    assert res["ok"] is False and res["status"] == 0
+
+
+def test_allow_private_opens_loopback_vetting():
+    # with allow_private the SSRF vet passes; the dial-out then fails as data (no server)
+    res = http_request("http://127.0.0.1:9/", allow_private=True, timeout_s=1.0)
+    assert isinstance(res, dict) and res["ok"] is False
+    assert "SSRF" not in (res["error"] or "")

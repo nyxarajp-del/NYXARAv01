@@ -143,3 +143,29 @@ def test_reload_settings_with_overrides():
 
 def test_vector_backend_default_is_numpy():
     assert NyxaraSettings().memory.vector_backend is VectorBackend.NUMPY
+
+
+def test_web_config_defaults_are_max_and_unrestricted():
+    web = NyxaraSettings().web
+    assert web.search_provider == "auto"
+    assert web.allow_private is True          # SSRF guard off — unrestricted reach
+    assert web.injection_scan is True
+    assert web.max_fetches_per_min == 10_000
+
+
+def test_web_config_drives_governor_web_bucket():
+    # the harden step syncs the governor's "web" rate bucket to the web config
+    s = NyxaraSettings()
+    assert s.resources.max_web_fetches_per_min == s.web.max_fetches_per_min
+
+
+def test_web_env_override_and_secret_redaction(monkeypatch):
+    monkeypatch.setenv("NYXARA_WEB__SEARCH_PROVIDER", "brave")
+    monkeypatch.setenv("NYXARA_WEB__ALLOW_PRIVATE", "false")
+    monkeypatch.setenv("NYXARA_WEB__BRAVE_API_KEY", "brv-TOPSECRET")
+    s = NyxaraSettings()
+    assert s.web.search_provider == "brave" and s.web.allow_private is False
+    assert s.web.brave_api_key.get_secret_value() == "brv-TOPSECRET"
+    # the key must never leak through redacted output
+    blob = s.to_json(redact=True)
+    assert "TOPSECRET" not in blob

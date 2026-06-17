@@ -44,7 +44,8 @@ class _BoundedRedirect(urllib.request.HTTPRedirectHandler):
 
 def http_request(url: str, *, method: str = "GET", headers: Optional[Dict[str, str]] = None,
                  body: Optional[str] = None, timeout_s: float = 15.0,
-                 max_bytes: int = 1_000_000, allow_private: bool = False) -> Dict[str, Any]:
+                 max_bytes: int = 1_000_000, allow_private: bool = False,
+                 max_redirects: int = 2) -> Dict[str, Any]:
     """Make a guarded generic HTTP request and return the outcome as a plain dict.
 
     The URL is first vetted by :meth:`WebFetcher._vet_url` — the same SSRF guard that
@@ -76,7 +77,13 @@ def http_request(url: str, *, method: str = "GET", headers: Optional[Dict[str, s
         for k, v in headers.items():
             req.add_header(k, v)
 
-    opener = urllib.request.build_opener(_BoundedRedirect)
+    # Cap redirects per call (defence against redirect loops). Defaults to the conservative
+    # _BoundedRedirect (2); callers may raise it via max_redirects.
+    class _PerCallRedirect(urllib.request.HTTPRedirectHandler):
+        max_repeats = max(0, int(max_redirects))
+        max_redirections = max(0, int(max_redirects))
+
+    opener = urllib.request.build_opener(_PerCallRedirect)
 
     # 3. perform the call — every failure becomes data, never an exception
     try:
