@@ -29,6 +29,7 @@ pytest-asyncio>=0.23
 # Senses (heavy — optional; import-guarded in code)
 # torch>=2.2
 # openai-whisper>=20231117
+# soundfile>=0.12
 # pillow>=10.0
 # opencv-python>=4.9
 # pdfplumber>=0.11

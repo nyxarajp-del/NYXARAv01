@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import struct
 import wave
+
+import pytest
 
 from nyxara.senses.audio import (Audio, AudioAnalysis, AudioInfo, audio_fingerprint,
                                  decode_pcm, parse_header, peak, rms, silence_ratio,
@@ -262,3 +265,43 @@ def test_transcribe_graceful(tmp_path):
     # whisper almost certainly absent here -> honest note, no crash
     if text is None:
         assert "whisper" in note or "transcription" in note
+
+
+# --------------------------------------------------------------------------- #
+# Real heavy-dependency paths (skip cleanly when the libs are absent)
+# --------------------------------------------------------------------------- #
+def test_resample_to_16k():
+    """The resampler maps any rate to a 16 kHz float32 array of the right length."""
+    np = pytest.importorskip("numpy")
+    from nyxara.senses.audio import _resample_to_16k, _WHISPER_SR
+    sig = [math.sin(2 * math.pi * 5 * i / 8000) for i in range(8000)]  # 1 s @ 8 kHz
+    out = _resample_to_16k(sig, 8000)
+    assert out.dtype == np.float32
+    assert abs(len(out) - _WHISPER_SR) <= 1            # ~1 s @ 16 kHz
+    # an already-16k signal passes through unchanged in length
+    assert len(_resample_to_16k(sig, _WHISPER_SR)) == len(sig)
+
+
+def test_soundfile_flac_roundtrip(tmp_path):
+    """Non-WAV decode is real via soundfile: write a FLAC, read it back as samples."""
+    sf = pytest.importorskip("soundfile")
+    np = pytest.importorskip("numpy")
+    flac = tmp_path / "s.flac"
+    sig = (0.2 * np.sin(2 * np.pi * 330 * np.arange(16000) / 16000)).astype("float32")
+    sf.write(str(flac), sig, 16000, format="FLAC")
+    mono, info = Audio().samples(str(flac))
+    assert len(mono) > 1000
+    assert info is not None and info.channels == 1
+
+
+@pytest.mark.skipif(not os.environ.get("NYXARA_TEST_WHISPER"),
+                    reason="set NYXARA_TEST_WHISPER=1 to run the live Whisper download/transcribe")
+def test_whisper_transcription_real(tmp_path):
+    """End-to-end: real Whisper runs on our own decoded samples (no ffmpeg) and returns text."""
+    pytest.importorskip("whisper")
+    pytest.importorskip("numpy")
+    p = tmp_path / "tone.wav"
+    p.write_bytes(make_wav(440, 1.0, sr=16000, amp=0.3))
+    text, note = Audio().transcribe(str(p))
+    assert note == "", f"transcription errored: {note}"
+    assert isinstance(text, str)        # a tone yields a (possibly empty) real string, no crash

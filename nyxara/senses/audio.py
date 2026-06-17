@@ -309,14 +309,44 @@ class AudioAnalysis:
 
 
 # --------------------------------------------------------------------------- #
+# Whisper transcription helpers (optional, heavy)
+# --------------------------------------------------------------------------- #
+_WHISPER_SR = 16000                 # the sample rate Whisper expects
+_WHISPER_CACHE: Dict[str, Any] = {}  # name -> loaded model (load once, reuse)
+
+
+def _load_whisper(name: str) -> Any:
+    """Load a Whisper model once and cache it (model load is expensive)."""
+    model = _WHISPER_CACHE.get(name)
+    if model is None:
+        import whisper  # type: ignore
+        model = whisper.load_model(name)
+        _WHISPER_CACHE[name] = model
+    return model
+
+
+def _resample_to_16k(sig: Sequence[float], sr: int) -> Any:
+    """Linearly resample a mono float signal to 16 kHz float32 (Whisper's expected input)."""
+    import numpy as np  # type: ignore
+    x = np.asarray(sig, dtype=np.float32)
+    if sr == _WHISPER_SR or sr <= 0 or x.size < 2:
+        return x
+    n_out = max(1, int(round(x.size * _WHISPER_SR / sr)))
+    idx = np.linspace(0.0, x.size - 1, n_out)
+    return np.interp(idx, np.arange(x.size), x).astype(np.float32)
+
+
+# --------------------------------------------------------------------------- #
 # Facade
 # --------------------------------------------------------------------------- #
 class Audio:
     """Bridges real audio files to the pure-python perception algorithms."""
 
-    def __init__(self, *, dup_threshold: int = 6, silence_threshold: float = 0.02) -> None:
+    def __init__(self, *, dup_threshold: int = 6, silence_threshold: float = 0.02,
+                 whisper_model: str = "base") -> None:
         self.dup_threshold = dup_threshold
         self.silence_threshold = silence_threshold
+        self.whisper_model = whisper_model
 
     # ---- header / decode ---- #
     @staticmethod
@@ -362,15 +392,26 @@ class Audio:
         except Exception:  # noqa: BLE001
             return [], self.inspect(path)
 
-    # ---- transcription hook ---- #
+    # ---- transcription ---- #
     def transcribe(self, path: str) -> Tuple[Optional[str], str]:
+        """Real speech-to-text via Whisper. We decode and resample the audio ourselves and
+        hand Whisper a 16 kHz mono float array, so it needs neither ``ffmpeg`` nor any extra
+        decode stack — it runs on exactly the samples this module already perceives. The
+        model is loaded once and cached. Degrades honestly to a note when Whisper is absent."""
         try:
-            import whisper  # type: ignore
+            import whisper  # type: ignore  # noqa: F401
+            import numpy as np  # noqa: F401
         except ImportError:
             return None, "whisper not installed; transcription unavailable"
-        try:  # pragma: no cover - exercised only with the lib
-            model = whisper.load_model("base")
-            return model.transcribe(path).get("text", "").strip(), ""
+        try:  # pragma: no cover - exercised only with the lib installed
+            sig, info = self.samples(path)
+            if not sig:
+                return None, "no audio decoded for transcription"
+            sr = info.sample_rate if info is not None and info.sample_rate else _WHISPER_SR
+            audio = _resample_to_16k(sig, sr)
+            model = _load_whisper(self.whisper_model)
+            text = model.transcribe(audio, fp16=False).get("text", "")
+            return text.strip(), ""
         except Exception as exc:  # noqa: BLE001
             return None, f"transcription failed: {exc}"
 
