@@ -620,7 +620,12 @@ class NeuralArchitectureSearch:
         self.seed_corpus = list(seed_corpus or _GENESIS_SEED)
         self._champion: Optional[Candidate] = None
         self._reports: List[GenesisReport] = []
-        self._last_example_count: int = 0
+        # Baseline against experience already present at construction, so a search runs only
+        # once genuinely NEW verified experience accrues after boot — the seed/boot corpus is
+        # not "newly accrued". Without this, a fresh core would launch a full (and, with torch,
+        # expensive) architecture search on its very first idle tick, before it has lived
+        # anything. ``maybe_run`` is documented to fire only on new experience.
+        self._last_example_count: int = self._example_count()
 
     # ---- backend selection (honest degradation) ---- #
     def backend(self) -> str:
