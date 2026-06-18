@@ -144,3 +144,65 @@ def test_tuning_stays_within_bounds():
     rsi.detect_weaknesses()
     rsi._maybe_tune(rsi.detect_weaknesses(), enact=True)
     assert 1 <= s.llm.recursive_improvement_iterations <= 20
+
+
+# --------------------------------------------------------------------------- #
+# the intelligence index genuinely DRIVES behavior (not a dashboard number):
+# it scopes the benchmark and caps reasoning depth by index + compute
+# --------------------------------------------------------------------------- #
+class _StubIntel:
+    """A controllable IntelligenceIndex stand-in returning a fixed effort budget."""
+    def __init__(self, budget):
+        self.budget = budget
+
+    def load(self):
+        return None
+
+    def effort_budget(self, state, compute):
+        return self.budget
+
+
+def _tuning_settings():
+    from nyxara.kernel.config import get_settings
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.allow_tuning = True
+    s.self_improvement.benchmark_in_cycle = True
+    s.llm.recursive_improvement_iterations = 10
+    return s
+
+
+def test_weak_compute_scopes_the_benchmark():
+    weak = _StubIntel({"benchmark_full": False, "recursion_depth": 3,
+                       "max_edits_per_cycle": 1, "intensity": 0.2})
+    rsi = RecursiveSelfImprovement(settings=_tuning_settings(), intelligence=weak)
+    bench = rsi.run_benchmarks()
+    assert bench["scope"] != "full"                 # probed a single category, not the battery
+    assert len(bench["by_category"]) == 1
+
+
+def test_strong_compute_runs_full_benchmark():
+    strong = _StubIntel({"benchmark_full": True, "recursion_depth": 20,
+                         "max_edits_per_cycle": 3, "intensity": 0.9})
+    rsi = RecursiveSelfImprovement(settings=_tuning_settings(), intelligence=strong)
+    bench = rsi.run_benchmarks()
+    assert bench["scope"] == "full"
+    assert len(bench["by_category"]) >= 2
+
+
+def test_recursion_depth_capped_by_index():
+    weak = _StubIntel({"benchmark_full": False, "recursion_depth": 3,
+                       "max_edits_per_cycle": 1, "intensity": 0.2})
+    s = _tuning_settings()
+    rsi = RecursiveSelfImprovement(settings=s, intelligence=weak)
+    rsi.run_benchmarks()
+    rsi._bench["accuracy"] = 0.1                     # force the tune branch
+    rsi._maybe_tune(rsi.detect_weaknesses(), enact=True)
+    assert s.llm.recursive_improvement_iterations <= 3   # not permitted deeper than the index allows
+
+
+def test_disabled_index_leaves_behavior_unscaled():
+    s = _tuning_settings()
+    s.self_improvement.intelligence_index_enabled = False
+    rsi = RecursiveSelfImprovement(settings=s)
+    bench = rsi.run_benchmarks()
+    assert bench["scope"] == "full"                 # no index → full battery, full depth ceiling

@@ -161,22 +161,33 @@ class RecursiveSelfImprovement:
         from nyxara.eval.benchmark import (build_default_benchmark, core_solver,
                                            run_router)
         bench = build_default_benchmark()
+        # the intelligence index drives measurement effort: when the machine cannot afford the
+        # full battery (effort budget says benchmark_full is False) and no category was pinned,
+        # she probes a single representative category instead — a real, index-governed compute
+        # saving, not a cosmetic number.
+        scope = category
+        self._plan_effort()
+        if (scope is None and self._effort is not None
+                and not self._effort.get("benchmark_full", True)):
+            cats = bench.categories()
+            if cats:
+                scope = cats[0]
         try:
-            report = bench.run(core_solver(), category=category)
+            report = bench.run(core_solver(), category=scope)
         except Exception as exc:  # noqa: BLE001
             self._bench = {"error": f"benchmark failed: {exc}", "accuracy": 0.0,
-                           "failures": [], "by_category": {}}
+                           "failures": [], "by_category": {}, "scope": scope or "full"}
             return self._bench
         handoff: Dict[str, int] = {}
         try:
-            _, handoff = run_router(bench, settings=self.settings, category=category)
+            _, handoff = run_router(bench, settings=self.settings, category=scope)
         except Exception:  # noqa: BLE001 — router is optional signal
             handoff = {}
         self._bench = {
             "accuracy": report.accuracy, "mean_score": report.mean_score,
             "by_category": report.by_category(),
             "failures": [r.to_dict() for r in report.failures()],
-            "handoff": handoff, "report": report.to_dict()}
+            "handoff": handoff, "report": report.to_dict(), "scope": scope or "full"}
         return self._bench
 
     # ---- (4) self weakness detection ---- #
@@ -221,6 +232,9 @@ class RecursiveSelfImprovement:
             category: Optional[str] = None) -> SelfImprovementReport:
         self._code = self._arch = self._bench = None
         self._compute = self._effort = None
+        # the index governs effort up front, before any expensive step, so it shapes how deeply
+        # she benchmarks and reasons this cycle — not merely how the cycle is later summarised
+        self._plan_effort()
         self.review_code()
         self.analyze_architecture()
         if self.settings.self_improvement.benchmark_in_cycle:
@@ -266,29 +280,51 @@ class RecursiveSelfImprovement:
             return None
         try:
             current = int(self.settings.llm.recursive_improvement_iterations)
-            target = max(1, min(20, current + 2))   # bound enforced by config Field(1..20) too
+            # the intelligence index + compute set the ceiling on reasoning depth: a weaker mind
+            # on a weaker machine is not permitted to reason as deeply as it cannot afford to, so
+            # the index genuinely governs depth — it is not only an edit-count knob.
+            ceiling = 20
+            self._plan_effort()
+            if self._effort is not None and self._effort.get("recursion_depth"):
+                ceiling = max(1, int(self._effort["recursion_depth"]))
+            target = max(1, min(ceiling, current + 2))   # config Field(1..20) also bounds it
             if target == current:
                 return None
             self.settings.llm.recursive_improvement_iterations = target
             return {"recursive_improvement_iterations": {"from": current, "to": target},
-                    "reason": f"benchmark accuracy {acc:.0%} below 80%"}
+                    "reason": f"benchmark accuracy {acc:.0%} below 80% (index ceiling {ceiling})"}
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
-    def _compute_effort_budget(self, report: SelfImprovementReport) -> None:
-        """Scale this cycle's improvement effort by the index and the compute available."""
+    def _plan_effort(self) -> None:
+        """Compute this cycle's effort budget from the persisted index + available compute, once,
+        before any expensive step. Leaves ``self._effort`` as None when the index is disabled or
+        unavailable — in which case every effort lever falls back to its full/unscaled default."""
+        if self._effort is not None:
+            return
         cfg = self.settings.self_improvement
         if not bool(getattr(cfg, "intelligence_index_enabled", True)):
             return
         try:
             intel = self._intel()
-            compute = self._compute_report()
-            state = intel.load()
-            self._effort = intel.effort_budget(state, compute)
-            report.effort_budget = dict(self._effort)
-            report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
+            self._effort = intel.effort_budget(intel.load(), self._compute_report())
         except Exception:  # noqa: BLE001 — effort scaling is advisory, never fatal
             self._effort = None
+
+    def _compute_effort_budget(self, report: SelfImprovementReport) -> None:
+        """Record the planned effort budget (and compute) on the report for audit."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "intelligence_index_enabled", True)):
+            return
+        self._plan_effort()
+        if self._effort is None:
+            return
+        try:
+            report.effort_budget = dict(self._effort)
+            compute = self._compute_report()
+            report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
+        except Exception:  # noqa: BLE001 — recording is advisory, never fatal
+            pass
 
     def _update_intelligence(self, report: SelfImprovementReport) -> None:
         """Fold this cycle's signals + compute into the index and persist it (best-effort)."""
