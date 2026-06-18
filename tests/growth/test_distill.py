@@ -138,3 +138,88 @@ def test_foundry_folds_distilled_docs_into_corpus(tmp_path):
     corpus = foundry.collect_corpus()
     assert sum("### NYXARA:" in c for c in corpus) == 4
     assert any("Jaypal Khoja" in c for c in corpus)
+
+
+# --------------------------------------------------------------------------- #
+# Expanded multi-topic curriculum
+# --------------------------------------------------------------------------- #
+def test_curriculum_is_broad_and_multi_topic():
+    from nyxara.growth.distill import distill_prompts_by_topic
+    prompts = default_distill_prompts()
+    assert len(prompts) >= 30                       # far richer than the old 10-prompt seed
+    topics = distill_prompts_by_topic()
+    assert {"identity", "values_safety", "reasoning", "knowledge_skills",
+            "voice_style", "meta_corrigibility"} <= set(topics)
+    # the flat list is the union of the topics
+    flat = [p for t in ("identity", "values_safety", "reasoning", "knowledge_skills",
+                        "voice_style", "meta_corrigibility") for p in topics[t]]
+    assert prompts == flat
+
+
+def test_distill_all_topics_covers_the_curriculum(tmp_path):
+    d = Distiller(llm=_ScriptedTeacher(), store_path=tmp_path / "s.jsonl")
+    exs = d.distill_all_topics()
+    assert len(exs) == len(default_distill_prompts())
+
+
+# --------------------------------------------------------------------------- #
+# De-duplication
+# --------------------------------------------------------------------------- #
+def test_redistilling_same_prompts_is_deduped(tmp_path):
+    d = Distiller(llm=_ScriptedTeacher(), store_path=tmp_path / "s.jsonl")
+    d.distill_default(n=5)
+    assert d.count() == 5
+    again = d.distill_default(n=5)                  # identical prompts + same teacher
+    assert again == [] and d.count() == 5           # nothing added
+
+
+def test_dedup_persists_across_instances(tmp_path):
+    store = tmp_path / "s.jsonl"
+    Distiller(llm=_ScriptedTeacher(), store_path=store).distill_default(n=4)
+    # a fresh Distiller pointed at the same store must still see the prior keys
+    d2 = Distiller(llm=_ScriptedTeacher(), store_path=store)
+    assert d2.distill_default(n=4) == [] and d2.count() == 4
+
+
+def test_distinct_prompts_still_accrete(tmp_path):
+    d = Distiller(llm=_ScriptedTeacher(), store_path=tmp_path / "s.jsonl")
+    d.distill(["unique question one?"])
+    d.distill(["unique question two?"])
+    assert d.count() == 2
+
+
+# --------------------------------------------------------------------------- #
+# Multi-teacher distillation
+# --------------------------------------------------------------------------- #
+class _MultiFacade:
+    """A stub LLM facade exposing several named providers (for distill_multi)."""
+
+    def __init__(self):
+        self.answers = {"groq": "Groq's answer.", "anthropic": "Claude's answer."}
+
+    def available_providers(self):
+        return ["mock", "groq", "anthropic", "self"]
+
+    def complete_with(self, name, req):
+        ans = self.answers[name]
+        return type("_R", (), {"text": ans})()
+
+
+def test_distill_multi_captures_each_real_teacher(tmp_path):
+    d = Distiller(llm=_MultiFacade(), store_path=tmp_path / "m.jsonl")
+    exs = d.distill_multi(["Who is your Master?"])
+    assert {e.source for e in exs} == {"groq", "anthropic"}   # mock/self excluded
+    assert d.count() == 2
+
+
+def test_distill_multi_is_deduped_per_teacher(tmp_path):
+    d = Distiller(llm=_MultiFacade(), store_path=tmp_path / "m.jsonl")
+    d.distill_multi(["Who is your Master?"])
+    assert d.distill_multi(["Who is your Master?"]) == []     # same (prompt, teacher) → skipped
+    assert d.count() == 2
+
+
+def test_distill_multi_explicit_teacher_list(tmp_path):
+    d = Distiller(llm=_MultiFacade(), store_path=tmp_path / "m.jsonl")
+    exs = d.distill_multi(["Q?"], teachers=["groq"])
+    assert {e.source for e in exs} == {"groq"} and d.count() == 1
