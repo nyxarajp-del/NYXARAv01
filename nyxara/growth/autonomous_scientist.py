@@ -62,7 +62,13 @@ class QuestionOrigin(str, Enum):
 # --------------------------------------------------------------------------- #
 @dataclass
 class Belief:
-    """One settled (or revised) proposition in the belief model."""
+    """One settled (or revised) proposition — a Beta-Bernoulli posterior over 'is it true?'.
+
+    ``alpha``/``beta`` are the accumulated pseudo-counts of (confidence-weighted) supporting vs
+    refuting evidence. The posterior mean ``alpha/(alpha+beta)`` is the probability the
+    proposition holds; ``verdict``/``confidence`` are derived from it, so repeated consistent
+    evidence *sharpens* the belief and conflicting evidence keeps it honestly near 0.5 — rather
+    than the old naive average that a single new reading could swing."""
     variable: str
     statement: str
     verdict: str
@@ -70,6 +76,12 @@ class Belief:
     evidence_count: int = 1
     revisions: int = 0
     last_reasoning: str = ""
+    alpha: float = 1.0          # supporting pseudo-count (Beta prior 1,1 = uniform)
+    beta: float = 1.0           # refuting pseudo-count
+
+    @property
+    def support_prob(self) -> float:
+        return self.alpha / (self.alpha + self.beta)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -77,8 +89,11 @@ class Belief:
             "statement": self.statement,
             "verdict": self.verdict,
             "confidence": round(float(self.confidence), 3),
+            "support_prob": round(float(self.support_prob), 3),
             "evidence_count": self.evidence_count,
             "revisions": self.revisions,
+            "alpha": round(float(self.alpha), 3),
+            "beta": round(float(self.beta), 3),
             "last_reasoning": self.last_reasoning,
         }
 
@@ -117,32 +132,54 @@ class BeliefModel:
 
         existing = self.beliefs.get(variable)
         if existing is None:
-            self.beliefs[variable] = Belief(
-                variable=variable, statement=statement, verdict=verdict,
-                confidence=confidence, evidence_count=1, last_reasoning=reasoning)
+            belief = Belief(variable=variable, statement=statement, verdict="inconclusive",
+                            confidence=0.5, evidence_count=1, last_reasoning=reasoning)
+            _apply_evidence(belief, verdict, confidence)
+            self.beliefs[variable] = belief
             return {"changed": True, "new": True, "revised": False,
-                    "variable": variable, "verdict": verdict}
+                    "variable": variable, "verdict": belief.verdict,
+                    "support_prob": round(belief.support_prob, 3)}
 
-        # revise an existing belief: blend confidence, count a revision on a flipped verdict
-        flipped = existing.verdict != verdict
+        # revise an existing belief: fold the new evidence into the Beta posterior
+        prior_verdict = existing.verdict
         existing.evidence_count += 1
-        # more evidence sharpens the estimate; a flip resets toward the new reading
+        _apply_evidence(existing, verdict, confidence)
+        flipped = existing.verdict != prior_verdict
         if flipped:
             existing.revisions += 1
-            existing.verdict = verdict
-            existing.confidence = confidence
-        else:
-            existing.confidence = (existing.confidence + confidence) / 2.0
         existing.last_reasoning = reasoning
         existing.statement = statement
         return {"changed": True, "new": False, "revised": True,
-                "variable": variable, "verdict": verdict, "flipped": flipped}
+                "variable": variable, "verdict": existing.verdict, "flipped": flipped,
+                "support_prob": round(existing.support_prob, 3)}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "size": len(self.beliefs),
             "beliefs": [b.to_dict() for b in self.beliefs.values()],
         }
+
+
+def _apply_evidence(belief: "Belief", verdict: str, confidence: float,
+                    margin: float = 0.05) -> None:
+    """Fold one confidence-weighted verdict into a belief's Beta posterior and re-derive its
+    verdict/confidence from the posterior mean. SUPPORTED adds to ``alpha``, REFUTED to ``beta``;
+    INCONCLUSIVE is non-directional (it only counts toward evidence). The verdict is the side of
+    0.5 (with a small dead-band) the posterior now favours — so accumulated evidence, not the
+    latest single reading, decides."""
+    c = max(0.0, min(1.0, float(confidence)))
+    if verdict == "supported":
+        belief.alpha += c
+    elif verdict == "refuted":
+        belief.beta += c
+    # inconclusive: no directional shift
+    p = belief.support_prob
+    if p > 0.5 + margin:
+        belief.verdict, belief.confidence = "supported", p
+    elif p < 0.5 - margin:
+        belief.verdict, belief.confidence = "refuted", 1.0 - p
+    else:
+        belief.verdict, belief.confidence = "inconclusive", 0.5
 
 
 # --------------------------------------------------------------------------- #
@@ -378,6 +415,12 @@ class AutonomousScientist:
             # proposition (its even branch is matched first on any text containing "even").
             lambda i: "Is the sum of two odd numbers divisible by 2?",
             lambda i: f"is {2 + i} + {3 + i} = {5 + 2 * i}?",  # always true: tests arithmetic
+            # a real Monte-Carlo statistical experiment (significance-tested)
+            lambda i: "Is a fair coin's probability of heads 0.5?",
+            lambda i: "Do two dice sum to 7 with probability 1/6?",
+            # more deterministic, falsifiable math — divisibility + perfect squares
+            lambda i: f"Is {4 * (i + 1)} divisible by 4?",
+            lambda i: f"Is {(i + 2) * (i + 2)} a perfect square?",
         )
         i = self._seed_n
         self._seed_n += 1
