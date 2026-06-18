@@ -33,6 +33,46 @@ def test_surfaces_each_finding_kind(tmp_path: Path):
         assert must in kinds, f"missing finding kind: {must}"
 
 
+def _one_mod(tmp_path: Path, body: str) -> Path:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "m.py").write_text('"""m."""\n' + body, encoding="utf-8")
+    return pkg
+
+
+def test_detects_eq_none(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(tmp_path, "def _f(x):\n    return x == None\n")).review()
+    assert "eq_none" in rep.by_kind()
+
+
+def test_is_none_not_flagged(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(tmp_path, "def _f(x):\n    return x is None\n")).review()
+    assert "eq_none" not in rep.by_kind()
+
+
+def test_detects_unused_import(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(tmp_path, "import os\ndef _f():\n    return 1\n")).review()
+    assert "unused_import" in rep.by_kind()
+
+
+def test_used_import_not_flagged(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(
+        tmp_path, "import os\ndef _f():\n    return os.getpid()\n")).review()
+    assert "unused_import" not in rep.by_kind()
+
+
+def test_noqa_import_not_flagged(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(
+        tmp_path, "import os  # noqa: F401\ndef _f():\n    return 1\n")).review()
+    assert "unused_import" not in rep.by_kind()
+
+
+def test_all_exported_import_not_flagged(tmp_path: Path):
+    rep = SelfReviewer(root=_one_mod(
+        tmp_path, "from x import thing\n__all__ = ['thing']\n")).review()
+    assert "unused_import" not in rep.by_kind()
+
+
 def test_deliberate_except_exception_is_not_flagged_as_bare(tmp_path: Path):
     pkg = tmp_path / "pkg"
     pkg.mkdir()

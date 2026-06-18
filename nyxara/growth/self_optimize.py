@@ -117,6 +117,10 @@ class EditGenerator:
             after = _fix_bare_except(before, lineno)
         elif kind == "missing_docstring":
             after = _insert_docstring(before, lineno, self._docstring_text(weakness))
+        elif kind == "eq_none":
+            after = _fix_eq_none(before, lineno)
+        elif kind == "unused_import":
+            after = _remove_unused_import(before, lineno, getattr(weakness, "symbol", "") or "")
 
         if after is None or after == before:
             return None
@@ -127,7 +131,8 @@ class EditGenerator:
 
     def _kind_of(self, weakness: Any) -> str:
         wid = getattr(weakness, "id", "")
-        for k in ("bare_except", "missing_docstring"):
+        # order matters: match the most specific id fragment first
+        for k in ("bare_except", "missing_docstring", "unused_import", "eq_none"):
             if k in wid:
                 return k
         return ""
@@ -359,6 +364,106 @@ def _insert_docstring(src: str, lineno: int, text: str) -> Optional[str]:
     doc = f'{indent}"""{safe}"""\n'
     lines.insert(insert_at, doc)
     return "".join(lines)
+
+
+_EQ_NONE_SUBS = (
+    (re.compile(r"!=\s*None\b"), "is not None"),
+    (re.compile(r"==\s*None\b"), "is None"),
+    (re.compile(r"\bNone\s*!="), "None is not"),
+    (re.compile(r"\bNone\s*=="), "None is"),
+)
+
+
+def _fix_eq_none(src: str, lineno: int) -> Optional[str]:
+    """Rewrite ``== None``/``!= None`` to ``is None``/``is not None`` on the flagged line.
+
+    Operates only on the precise line the reviewer flagged (a real ``Compare`` node), so it
+    never touches a ``"== None"`` that merely appears inside a string literal elsewhere. The
+    result is re-validated by the caller; the edit is verified that an equality-to-None compare
+    is actually gone before it is accepted."""
+    lines = src.splitlines(keepends=True)
+    if not (1 <= lineno <= len(lines)):
+        return None
+    original = lines[lineno - 1]
+    newline = "\n" if original.endswith("\n") else ""
+    body = original[:-1] if newline else original
+    for pat, repl in _EQ_NONE_SUBS:
+        body = pat.sub(repl, body)
+    if body == (original[:-1] if newline else original):
+        return None
+    # confirm the rewritten line no longer holds an ==/!= comparison to None
+    try:
+        if _compares_to_none_in(body):
+            return None
+    except SyntaxError:
+        pass  # a partial line may not parse alone; the caller's full-file _parses still guards
+    lines[lineno - 1] = body + newline
+    return "".join(lines)
+
+
+def _compares_to_none_in(line: str) -> bool:
+    """True if a stand-alone parse of ``line`` still contains an ==/!= comparison to None."""
+    tree = ast.parse(line.strip())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            operands = [node.left, *node.comparators]
+            if (any(isinstance(o, ast.Constant) and o.value is None for o in operands)
+                    and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops)):
+                return True
+    return False
+
+
+def _remove_unused_import(src: str, lineno: int, name: str) -> Optional[str]:
+    """Remove the unused import of ``name`` from the single-line import at ``lineno``.
+
+    Conservative: only single-line, non-parenthesised import statements are touched. When the
+    statement binds several names, just the unused clause is dropped; when it binds only the
+    unused name, the whole line is removed. Returns None if anything is ambiguous."""
+    if not name:
+        return None
+    lines = src.splitlines(keepends=True)
+    if not (1 <= lineno <= len(lines)):
+        return None
+    raw = lines[lineno - 1]
+    newline = "\n" if raw.endswith("\n") else ""
+    stmt = raw[:-1] if newline else raw
+    stripped = stmt.strip()
+    if "(" in stmt or stmt.rstrip().endswith("\\"):
+        return None  # parenthesised / continued imports: too ambiguous to edit by line
+
+    def _bound(clause: str) -> str:
+        parts = clause.strip().split()
+        # "x" -> x ; "x as y" -> y ; "a.b.c" (plain import) -> a
+        if len(parts) == 3 and parts[1] == "as":
+            return parts[2]
+        return parts[0].split(".")[0] if parts else ""
+
+    if stripped.startswith("import "):
+        prefix_len = len(stmt) - len(stmt.lstrip())
+        indent = stmt[:prefix_len]
+        clauses = [c for c in stmt.strip()[len("import "):].split(",")]
+        kept = [c for c in clauses if _bound(c) != name]
+        if len(kept) == len(clauses):
+            return None  # name not found on this line
+        if not kept:
+            del lines[lineno - 1]
+            return "".join(lines)
+        lines[lineno - 1] = f"{indent}import " + ", ".join(c.strip() for c in kept) + newline
+        return "".join(lines)
+
+    if stripped.startswith("from ") and " import " in stripped:
+        head, _, names_part = stmt.partition(" import ")
+        clauses = names_part.split(",")
+        kept = [c for c in clauses if _bound(c) != name]
+        if len(kept) == len(clauses):
+            return None
+        if not kept:
+            del lines[lineno - 1]
+            return "".join(lines)
+        lines[lineno - 1] = f"{head} import " + ", ".join(c.strip() for c in kept) + newline
+        return "".join(lines)
+
+    return None
 
 
 def _parses(src: str) -> bool:

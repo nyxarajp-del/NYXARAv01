@@ -40,9 +40,19 @@ _SEVERITY: Dict[str, float] = {
     "high_complexity": 0.6,
     "long_function": 0.45,
     "too_many_args": 0.4,
+    "eq_none": 0.35,
+    "unused_import": 0.3,
     "missing_docstring": 0.25,
     "todo": 0.2,
 }
+
+
+def _compares_to_none(node: "ast.Compare") -> bool:
+    """True if ``node`` uses ``==``/``!=`` against the ``None`` literal (PEP 8 / E711)."""
+    operands = [node.left, *node.comparators]
+    has_none = any(isinstance(o, ast.Constant) and o.value is None for o in operands)
+    has_eq = any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops)
+    return has_none and has_eq
 
 
 # --------------------------------------------------------------------------- #
@@ -171,6 +181,14 @@ class SelfReviewer:
                                             _SEVERITY["bare_except"],
                                             "bare 'except:' swallows every error (incl. "
                                             "KeyboardInterrupt/SystemExit)"))
+            elif isinstance(node, ast.Compare) and _compares_to_none(node):
+                findings.append(CodeFinding(rel, node.lineno, "<compare>", "eq_none",
+                                            _SEVERITY["eq_none"],
+                                            "comparison to None should use 'is'/'is not', "
+                                            "not '=='/'!=' (PEP 8 / E711)"))
+
+        # unused imports — module-level imports whose bound name is never referenced
+        findings.extend(self._unused_imports(rel, tree, src, path))
 
         # TODO/FIXME markers — cheap raw-line scan
         for i, line in enumerate(src.splitlines(), start=1):
@@ -179,6 +197,48 @@ class SelfReviewer:
                 findings.append(CodeFinding(rel, i, m.group(1), "todo",
                                             _SEVERITY["todo"], line.strip()[:120]))
         return findings
+
+    def _unused_imports(self, rel: str, tree: ast.AST, src: str, path: Path
+                        ) -> List[CodeFinding]:
+        """Top-level imports whose bound name is never referenced anywhere in the module.
+
+        Conservative on purpose: skips ``__init__.py`` (re-export surface), ``__future__``,
+        star imports, names listed in ``__all__``, and any import line carrying a ``# noqa``.
+        """
+        if path.name == "__init__.py":
+            return []
+        # every name read anywhere in the module (the root of any attribute chain is a Name)
+        used: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                used.add(node.id)
+        # names a module deliberately exports count as "used"
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)):
+                for elt in getattr(node.value, "elts", []):
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                        used.add(elt.value)
+
+        lines = src.splitlines()
+        out: List[CodeFinding] = []
+        for node in tree.body:                       # top-level imports only
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            line_txt = lines[node.lineno - 1] if 0 < node.lineno <= len(lines) else ""
+            if "noqa" in line_txt:
+                continue
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if any(a.name == "*" for a in node.names):    # star import — leave alone
+                    continue
+                for alias in node.names:
+                    bound = (alias.asname or alias.name).split(".")[0]
+                    if bound not in used:
+                        out.append(CodeFinding(
+                            rel, node.lineno, bound, "unused_import",
+                            _SEVERITY["unused_import"],
+                            f"import '{bound}' is never used"))
+        return out
 
     def _review_function(self, rel: str, node: ast.AST) -> List[CodeFinding]:
         out: List[CodeFinding] = []
