@@ -146,3 +146,37 @@ def test_verify_integrity_holds(tmp_path):
     f = _foundry(tmp_path)
     f.self_improve(generations=1)
     assert f.verify_integrity()
+
+
+# -------------------- real from-zero neural training (torch) -------------------- #
+from nyxara.growth.foundry_models import ModelSpec, _HAS_TORCH  # noqa: E402
+
+_REAL_CORPUS = [
+    "the quick brown fox jumps over the lazy dog near the river bank at dawn",
+    "she sells sea shells by the sea shore in the early morning light today",
+    "all that glitters is not gold and all who wander are not truly ever lost",
+    "the rain in spain falls mainly on the wide and open plain every springtime",
+    "knowledge is power but wisdom is knowing how to use it with patience and care",
+    "a journey of a thousand miles begins with one single and very careful step",
+    "the early bird may catch the worm but the second mouse will get the cheese",
+    "actions always speak far louder than the words we carefully choose to say",
+]
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_foundry_forges_real_neural_model_from_real_corpus(tmp_path):
+    """End to end: with torch present the foundry trains a real from-zero GPT (not the n-gram
+    fallback) on a real natural-language corpus, scores real perplexity, and promotes it."""
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "nanogpt"
+    settings.foundry.train_steps = 120
+    settings.foundry.eval_holdout_frac = 0.25
+    f = Foundry(settings=settings, seed_corpus=_REAL_CORPUS)
+    results = f.self_improve(
+        generations=1,
+        spec=ModelSpec(kind="nanogpt", n_layer=2, n_head=2, n_embd=64, block_size=64, seed=0))
+    assert results[0].promoted, "first real neural model should pass the gauntlet"
+    active = f.active()
+    assert active is not None and active.kind == "nanogpt"
+    assert 0.0 < active.metrics["perplexity"] < float("inf")

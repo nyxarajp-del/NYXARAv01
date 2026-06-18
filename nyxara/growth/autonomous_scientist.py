@@ -392,12 +392,17 @@ class AutonomousScientist:
     # Stage 5 — Update model
     # ---------------------------------------------------------------------- #
     def _update_world_model(self, report: Any, prior_size: int) -> bool:
-        """Fold the result into the kernel's world model as a real transition.
+        """Fold the result into the kernel's world model as an *epistemic* transition.
 
         State is the belief-count before the cycle, the action is ``"investigate"``, the next
         state is the belief-count after, and the reward encodes the outcome (positive when a
         hypothesis was SUPPORTED, negative when REFUTED). So ``len(world_model)`` grows and its
         stats honestly reflect that the mind has learned from its own experiments.
+
+        This is deliberately distinct from the *sensorimotor* dynamics fed by
+        :mod:`nyxara.sim.real_environment` (real filesystem/compute transitions): they live in
+        separate action buckets (``"investigate"`` vs. ``noop``/``create_file``/…), so the kNN
+        world model keeps the epistemic signal and the real-environment dynamics cleanly apart.
         """
         if self.world_model is None:
             return False

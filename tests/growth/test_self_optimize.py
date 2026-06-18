@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from nyxara.growth.self_optimize import (EditGenerator, GauntletResult, Optimizer,
-                                         SourceEdit, _fix_bare_except, _insert_docstring,
-                                         _parses)
+                                         SourceEdit, _fix_bare_except, _fix_eq_none,
+                                         _insert_docstring, _parses, _remove_unused_import)
 from nyxara.kernel.config import get_settings
 
 
@@ -105,4 +105,71 @@ def test_edit_generator_fixes_bare_except(tmp_path: Path):
 
     edit = EditGenerator().generate(_W())
     assert edit is not None and "except Exception:" in edit.after
+    assert _parses(edit.after)
+
+
+# ---- new real transforms: eq_none + unused_import ---- #
+def test_fix_eq_none_transform():
+    out = _fix_eq_none("if x == None:\n    pass\n", 1)
+    assert out is not None and "is None" in out and "== None" not in out
+    assert _parses(out)
+    out2 = _fix_eq_none("y = a != None\n", 1)
+    assert out2 is not None and "is not None" in out2 and "!= None" not in out2
+
+
+def test_fix_eq_none_only_flagged_line():
+    # a string literal on an unrelated line must be left untouched
+    src = "s = '== None'\nif x == None:\n    pass\n"
+    out = _fix_eq_none(src, 2)
+    assert out is not None
+    assert "s = '== None'" in out             # the string is preserved
+    assert "if x is None:" in out
+
+
+def test_remove_unused_import_whole_line():
+    assert _remove_unused_import("import os\nx = 1\n", 1, "os") == "x = 1\n"
+
+
+def test_remove_unused_import_one_of_many():
+    assert _remove_unused_import("import os, sys\nsys.exit()\n", 1, "os") == \
+        "import sys\nsys.exit()\n"
+    assert _remove_unused_import("from a import b, c\nc()\n", 1, "b") == \
+        "from a import c\nc()\n"
+
+
+def test_remove_unused_import_alias_and_paren_guard():
+    assert _remove_unused_import("import numpy as np\n", 1, "np") == ""
+    # parenthesised/multi-line imports are deliberately left alone (too ambiguous)
+    assert _remove_unused_import("from a import (b,\n  c)\n", 1, "b") is None
+
+
+def test_edit_generator_fixes_eq_none(tmp_path: Path):
+    f = tmp_path / "n.py"
+    f.write_text("def f(x):\n    return x == None\n", encoding="utf-8")
+
+    class _W:
+        id = "code-eq_none-n.py-2"
+        locus = f"{f}:2"
+        remediation = "use is None"
+        title = "eq_none"
+        symbol = "<compare>"
+
+    edit = EditGenerator().generate(_W())
+    assert edit is not None and "is None" in edit.after and "== None" not in edit.after
+    assert _parses(edit.after)
+
+
+def test_edit_generator_removes_unused_import(tmp_path: Path):
+    f = tmp_path / "u.py"
+    f.write_text("import os\n\n\ndef f():\n    return 1\n", encoding="utf-8")
+
+    class _W:
+        id = "code-unused_import-u.py-1"
+        locus = f"{f}:1"
+        remediation = "remove unused import"
+        title = "unused_import"
+        symbol = "os"
+
+    edit = EditGenerator().generate(_W())
+    assert edit is not None and "import os" not in edit.after
     assert _parses(edit.after)

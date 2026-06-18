@@ -48,9 +48,11 @@ observe = ["structlog>=24.1"]
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 # Senses (heavy ML — optional, graceful fallback when absent)
 senses = [
-    "torch>=2.2", "openai-whisper>=20231117", "pillow>=10.0",
-    "opencv-python>=4.9", "pdfplumber>=0.11", "python-docx>=1.1", "openpyxl>=3.1",
+    "torch>=2.2", "openai-whisper>=20231117", "soundfile>=0.12", "pillow>=10.0",
+    "opencv-python>=4.9", "pytesseract>=0.3.10", "pdfplumber>=0.11", "python-docx>=1.1",
+    "openpyxl>=3.1",
 ]
+# OCR additionally needs the system `tesseract` binary (e.g. `apt-get install tesseract-ocr`).
 # Self-built-model foundry (heavy ML — optional; the n-gram backend works without these)
 foundry = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "tokenizers>=0.15"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]

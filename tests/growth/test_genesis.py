@@ -220,11 +220,16 @@ def test_maybe_run_triggers_on_new_data(tmp_path):
         def count(self): return self._n
 
     foundry = _foundry(tmp_path)
+    fw = _Counter(10)
     nas = NeuralArchitectureSearch(cfg=_cfg(min_new_examples=3), foundry=foundry,
-                                   flywheel=_Counter(10), seed_corpus=_CORPUS)
+                                   flywheel=fw, seed_corpus=_CORPUS)
+    # experience already present at construction is NOT "newly accrued" — no search fires
+    assert nas.maybe_run() is None
+    # once enough genuinely new experience accrues, a search+promote cycle runs
+    fw._n = 15
     out = nas.maybe_run()
     assert out is not None and out.get("promoted") is True
-    # idempotent until new data accrues
+    # idempotent until *more* new data accrues
     assert nas.maybe_run() is None
 
 

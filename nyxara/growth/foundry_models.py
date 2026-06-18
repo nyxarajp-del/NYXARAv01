@@ -648,7 +648,13 @@ class LoRAModel(BaseLanguageModel):
 # Factory & active-model loader
 # --------------------------------------------------------------------------- #
 def build_model(spec: ModelSpec) -> BaseLanguageModel:
-    """Build a model for ``spec`` — NEVER raises for missing deps (degrades to n-gram)."""
+    """Build a model for ``spec`` — NEVER raises for missing deps (degrades sensibly).
+
+    When torch is installed, a missing LoRA stack (transformers/peft) or a missing genome no
+    longer drops all the way to the n-gram backend: a real from-zero NanoGPT still delivers
+    genuine neural training (AdamW over a decoder-only transformer), which is far closer to the
+    requested intent than counting byte n-grams. Only an explicit ``kind="ngram"`` — or a machine
+    without torch at all — uses the pure-stdlib backend."""
     want = spec.kind
     if want == "lora" and _HAS_LORA:
         try:
@@ -661,12 +667,14 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
             return GenesisModel(spec)
         except Exception:  # noqa: BLE001 — torch present but the searched net failed; fall back
             pass
-    if want in ("auto", "nanogpt") and _HAS_TORCH:
+    # Real neural fallback: any non-ngram request gets a from-zero NanoGPT when torch is present
+    # (covers auto/nanogpt directly, and lora/genesis whose heavier deps/genome are unavailable).
+    if want != "ngram" and _HAS_TORCH:
         try:
             return NanoGPTModel(spec)
         except Exception:  # noqa: BLE001 — torch present but model build failed; fall back
             pass
-    # "ngram", "genesis"/"auto"/"lora" without deps, or a failed build -> the always-on backend
+    # explicit "ngram", or any request on a machine without torch -> the always-on backend
     return NgramByteLM(order=spec.ngram_order, k=spec.ngram_k, seed=spec.seed)
 
 

@@ -32,12 +32,13 @@ class Weakness:
     remediation: str = ""
     is_source_edit: bool = False     # True ⇒ remediation is a concrete source-code change
     locus: str = ""                  # file:line or module the edit/forge targets
+    symbol: str = ""                 # the precise symbol the edit targets (e.g. an import name)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "source": self.source, "severity": round(self.severity, 3),
                 "title": self.title, "evidence": self.evidence,
                 "remediation": self.remediation, "is_source_edit": self.is_source_edit,
-                "locus": self.locus}
+                "locus": self.locus, "symbol": self.symbol}
 
 
 @dataclass
@@ -153,7 +154,7 @@ class WeaknessSynthesizer:
         out: List[Weakness] = []
         findings = getattr(code, "findings", []) or []
         # source-editable kinds the optimizer can actually fix safely
-        editable = {"bare_except", "missing_docstring"}
+        editable = {"bare_except", "missing_docstring", "eq_none", "unused_import"}
         for f in findings:
             kind = getattr(f, "kind", "")
             sev = float(getattr(f, "severity", 0.3) or 0.3)
@@ -169,7 +170,8 @@ class WeaknessSynthesizer:
                 + ([getattr(f, "critique", "")] if getattr(f, "critique", "") else []),
                 remediation=_code_remediation(kind),
                 is_source_edit=kind in editable,
-                locus=f"{getattr(f, 'file', '?')}:{getattr(f, 'lineno', 0)}"))
+                locus=f"{getattr(f, 'file', '?')}:{getattr(f, 'lineno', 0)}",
+                symbol=str(getattr(f, "symbol", "") or "")))
         return out
 
 
@@ -181,6 +183,8 @@ def _code_remediation(kind: str) -> str:
         "high_complexity": "extract helper functions to lower cyclomatic complexity",
         "long_function": "split the function into smaller, single-purpose helpers",
         "too_many_args": "group related parameters into a dataclass/config object",
+        "eq_none": "use 'is None'/'is not None' instead of '=='/'!=' for None comparison",
+        "unused_import": "remove the unused import so the dependency surface stays honest",
         "todo": "resolve or file the TODO; remove the stale marker",
     }.get(kind, "review and refactor")
 

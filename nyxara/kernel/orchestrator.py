@@ -259,6 +259,11 @@ class NyxaraCore:
         self.affect = affect if affect is not None else (
             self._build_affect(self.soul) if enable_identity else None)
         self.interoception = self._build_interoception() if enable_identity else None
+        # intrinsic drives — what she pursues for its own sake when idle (curiosity, novelty,
+        # competence, empowerment), strictly subordinate to serving the Master (Rule 1). Affect's
+        # drive pressures modulate which motive dominates right now, so the loop is closed: it
+        # selects WHICH queued autonomous task she does first, rather than blind arrival order.
+        self.motivation = self._build_motivation(self.affect) if enable_identity else None
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -271,6 +276,11 @@ class NyxaraCore:
         # world model — learned dynamics for counterfactual rollouts (action planning)
         self.world_model = world_model if world_model is not None else (
             self._build_world_model() if enable_growth else None)
+        # real environment — a genuine sensorimotor source (scratch-dir filesystem + live
+        # CPU/RAM) that feeds the world model real (state, action, next_state, reward)
+        # transitions, so it learns real dynamics rather than a synthetic toy signal.
+        self.real_environment = (self._build_real_environment()
+                                 if enable_growth and self.world_model is not None else None)
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
@@ -283,6 +293,9 @@ class NyxaraCore:
         # free-energy spine — a small prediction-error loop whose emotion read-out colours
         # affect (perception and feeling as one loop; the Free Energy Principle)
         self.predictive = self._build_predictive() if enable_growth else None
+        # sensory prediction — predicts each live percept's features/modality; surprise
+        # sharpens attention (salience) and novelty colours affect over the real stream
+        self.sensory_predictor = self._build_sensory_predictor() if enable_growth else None
         # dual-process reasoning — fast intuition (System 1) arbitrated against deliberation
         # (System 2). It *colours* the reason step (metacognition); it never gates.
         self.dual_process = self._build_dual_process() if enable_growth else None
@@ -542,10 +555,58 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_motivation(self, affect: Any) -> Any:
+        """Her intrinsic-drive system, modulated by affect so unmet needs steer exploration."""
+        try:
+            from nyxara.identity.motivation import MotivationSystem
+            return MotivationSystem(affect=affect)
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    # owner-relevant terms lift a queued topic's priority (Rule 1: service outranks curiosity)
+    _OWNER_TERMS = ("master", "owner", "jp", "loyal", "protect", "defen", "serve", "safety")
+
+    def _drain_motivated(self, queue: List[str]) -> Optional[str]:
+        """Pop the most *motivating* item from ``queue`` (novelty + owner-relevance), not the
+        oldest. Records the visit so novelty habituates — she will not fixate on one theme.
+        Falls back to FIFO when motivation is unavailable or the queue is trivial."""
+        if not queue:
+            return None
+        if self.motivation is None:
+            return queue.pop(0)
+        try:
+            from nyxara.identity.motivation import Option
+            if len(queue) == 1:
+                # nothing to choose between, but doing the work still habituates the theme
+                item = queue.pop(0)
+                self.motivation.record_outcome(Option(name=item, signature=item))
+                return item
+            options = []
+            for item in queue:
+                low = item.lower()
+                owner_rel = 0.6 if any(t in low for t in self._OWNER_TERMS) else 0.0
+                # novelty (real, from the motivation system's visit counts) does the
+                # differentiating; info_gain is a modest, honest constant prior.
+                options.append(Option(name=item, signature=item, info_gain=0.3,
+                                      owner_relevance=owner_rel))
+            chosen = self.motivation.choose(options)
+            if chosen is None:
+                return queue.pop(0)
+            picked = chosen.option.name
+            self.motivation.record_outcome(chosen.option)   # habituate this theme
+            queue.remove(picked)
+            return picked
+        except Exception:  # noqa: BLE001 — selection is advisory; never lose the work item
+            return queue.pop(0)
+
     def _build_goals(self) -> Any:
         try:
+            from nyxara.planning.affective_forecast import Forecaster
             from nyxara.planning.goals import GoalSystem
-            gs = GoalSystem()
+            # prioritise goals by how achieving them will feel *lastingly*, not just now: a modest
+            # affective weight lets durable owner-relevant goods (serving the Master never fades)
+            # hold their place while goals whose appeal is a fleeting high are discounted (Rule 1).
+            gs = GoalSystem(forecaster=Forecaster(), affective_weight=0.35)
             # seed the objective space with NYXARA's standing commitments (Rule 1, Rule 3)
             gs.create("protect & serve the Master",
                       {"owner_benefit": 1.0, "owner_safety": 0.8}, priority=0.95, source="core")
@@ -586,6 +647,13 @@ class NyxaraCore:
             from nyxara.mind.world_model import WorldModel
             return WorldModel()
         except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
+            return None
+
+    def _build_real_environment(self) -> Any:
+        try:
+            from nyxara.sim.real_environment import RealEnvironment
+            return RealEnvironment()
+        except Exception:  # noqa: BLE001 — a real sensorimotor body is a capability, never required
             return None
 
     def _build_stream(self) -> Any:
@@ -709,6 +777,16 @@ class NyxaraCore:
             from nyxara.mind.predictive_core import PredictiveCore
             return PredictiveCore(belief=[0.0] * self._belief_dim())
         except Exception:  # noqa: BLE001 — the free-energy loop is a capability, never required
+            return None
+
+    def _build_sensory_predictor(self) -> Any:
+        """A predictor over the live percept stream: it learns each percept's feature/modality
+        statistics so a genuinely surprising or novel percept stands out — sharpening attention
+        and colouring affect. Pure stdlib, always-on."""
+        try:
+            from nyxara.senses.predictive import PerceptualPredictor
+            return PerceptualPredictor()
+        except Exception:  # noqa: BLE001 — sensory prediction is a capability, never required
             return None
 
     def _build_dual_process(self) -> Any:
@@ -1254,6 +1332,8 @@ class NyxaraCore:
         self._note_interaction(safe_text, authority)
         # free-energy read-out: fold prediction error over the percept into how she feels
         self._predictive_tick(percept)
+        # sensory prediction: surprise over the live stream sharpens attention before ATTEND
+        self._perceptual_predict(percept)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
@@ -1811,6 +1891,23 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the free-energy loop is best-effort, never fatal
             pass
 
+    def _perceptual_predict(self, percept: Any) -> None:
+        """Predict this percept against the recent stream: surprise sharpens attention by
+        boosting its salience (so a surprising percept can win the ATTEND stage), and novelty
+        colours affect. Runs before attention is resolved. Best-effort, pure-stdlib."""
+        if self.sensory_predictor is None or percept is None:
+            return
+        try:
+            ps = self.sensory_predictor.observe(percept, boost_salience=True)
+            tag = (" novel" if ps.novelty else "") + (" anomaly" if ps.anomaly else "")
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"sensory: surprise={ps.surprise:.2f} attention={ps.attention:.2f}{tag}",
+                             salience=_clamp01(ps.attention))
+            if ps.novelty and self.affect is not None:
+                self.affect.note_novelty(ps.surprise)
+        except Exception:  # noqa: BLE001 — sensory prediction is best-effort, never fatal
+            pass
+
     def _observation_vector(self, percept: Any) -> Optional[List[float]]:
         """Derive a fixed-length observation vector for the predictive core from the
         percept's text — via the memory embedder when present, else a cheap projection.
@@ -1930,6 +2027,7 @@ class NyxaraCore:
                 if p is None:
                     continue
                 b, _ = self.binder.perceive(p)
+                self._perceptual_predict(b)
                 bound.append(b)
             except Exception:  # noqa: BLE001 — a bad attachment is skipped, never fatal
                 continue
@@ -2199,6 +2297,10 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             pass
         report["ran"] = True
+        # Mark the pass as begun up front: it records that a maintenance cycle is in progress
+        # (so the idle scheduler does not re-enter), and is honest even when the body below is
+        # slow — the timestamp reflects when upkeep started, not only when it finished.
+        self._last_maintenance = time.time()
         # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
         if self.dream_session is not None:
             try:
@@ -2335,7 +2437,7 @@ class NyxaraCore:
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
-                topic = self._research_queue.pop(0)
+                topic = self._drain_motivated(self._research_queue)
                 research_report = self.researcher.research(topic)
                 report["research_reports"] = len(self.researcher.all_reports())
                 self.mind.record(ThoughtKind.INFERENCE,
@@ -2346,7 +2448,7 @@ class NyxaraCore:
         # 4e) Level 10b — scientist: investigate a queued question like a scientist
         if self.scientist is not None and self._investigation_queue:
             try:
-                question = self._investigation_queue.pop(0)
+                question = self._drain_motivated(self._investigation_queue)
                 inv = self.scientist.investigate(question)
                 report["investigations"] = len(self.scientist.all_investigations())
                 if inv.conclusion is not None:
@@ -2373,6 +2475,24 @@ class NyxaraCore:
                             f"discovery [{cycle.question[:25]}]: {verdict}",
                             salience=0.6)
             except Exception:  # noqa: BLE001
+                pass
+        # 4f+) Real-environment sensorimotor tick — feed the world model a GENUINE
+        #      (state, action, next_state, reward) transition from the real machine (a
+        #      scratch-dir filesystem + live CPU/RAM), so its learned dynamics reflect a
+        #      real environment rather than a synthetic toy signal. Oversight-gated: a
+        #      paused/scrammed mind takes no autonomous action on the real filesystem.
+        if self.real_environment is not None and self.world_model is not None:
+            try:
+                if self.oversight.gate():
+                    from nyxara.sim.real_environment import sensorimotor_tick
+                    tr = sensorimotor_tick(self.real_environment, self.world_model)
+                    report["sensorimotor"] = {"action": tr.action,
+                                              "reward": round(tr.reward, 3)}
+                    report["world_transitions"] = len(self.world_model)
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"sensorimotor: {tr.action} r={tr.reward:.2f}",
+                                     salience=0.4)
+            except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
