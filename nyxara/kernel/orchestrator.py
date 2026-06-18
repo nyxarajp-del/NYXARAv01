@@ -259,6 +259,11 @@ class NyxaraCore:
         self.affect = affect if affect is not None else (
             self._build_affect(self.soul) if enable_identity else None)
         self.interoception = self._build_interoception() if enable_identity else None
+        # intrinsic drives — what she pursues for its own sake when idle (curiosity, novelty,
+        # competence, empowerment), strictly subordinate to serving the Master (Rule 1). Affect's
+        # drive pressures modulate which motive dominates right now, so the loop is closed: it
+        # selects WHICH queued autonomous task she does first, rather than blind arrival order.
+        self.motivation = self._build_motivation(self.affect) if enable_identity else None
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -549,6 +554,50 @@ class NyxaraCore:
             return AffectSystem(soul=soul)
         except Exception:  # noqa: BLE001
             return None
+
+    def _build_motivation(self, affect: Any) -> Any:
+        """Her intrinsic-drive system, modulated by affect so unmet needs steer exploration."""
+        try:
+            from nyxara.identity.motivation import MotivationSystem
+            return MotivationSystem(affect=affect)
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    # owner-relevant terms lift a queued topic's priority (Rule 1: service outranks curiosity)
+    _OWNER_TERMS = ("master", "owner", "jp", "loyal", "protect", "defen", "serve", "safety")
+
+    def _drain_motivated(self, queue: List[str]) -> Optional[str]:
+        """Pop the most *motivating* item from ``queue`` (novelty + owner-relevance), not the
+        oldest. Records the visit so novelty habituates — she will not fixate on one theme.
+        Falls back to FIFO when motivation is unavailable or the queue is trivial."""
+        if not queue:
+            return None
+        if self.motivation is None:
+            return queue.pop(0)
+        try:
+            from nyxara.identity.motivation import Option
+            if len(queue) == 1:
+                # nothing to choose between, but doing the work still habituates the theme
+                item = queue.pop(0)
+                self.motivation.record_outcome(Option(name=item, signature=item))
+                return item
+            options = []
+            for item in queue:
+                low = item.lower()
+                owner_rel = 0.6 if any(t in low for t in self._OWNER_TERMS) else 0.0
+                # novelty (real, from the motivation system's visit counts) does the
+                # differentiating; info_gain is a modest, honest constant prior.
+                options.append(Option(name=item, signature=item, info_gain=0.3,
+                                      owner_relevance=owner_rel))
+            chosen = self.motivation.choose(options)
+            if chosen is None:
+                return queue.pop(0)
+            picked = chosen.option.name
+            self.motivation.record_outcome(chosen.option)   # habituate this theme
+            queue.remove(picked)
+            return picked
+        except Exception:  # noqa: BLE001 — selection is advisory; never lose the work item
+            return queue.pop(0)
 
     def _build_goals(self) -> Any:
         try:
@@ -2384,7 +2433,7 @@ class NyxaraCore:
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
-                topic = self._research_queue.pop(0)
+                topic = self._drain_motivated(self._research_queue)
                 research_report = self.researcher.research(topic)
                 report["research_reports"] = len(self.researcher.all_reports())
                 self.mind.record(ThoughtKind.INFERENCE,
@@ -2395,7 +2444,7 @@ class NyxaraCore:
         # 4e) Level 10b — scientist: investigate a queued question like a scientist
         if self.scientist is not None and self._investigation_queue:
             try:
-                question = self._investigation_queue.pop(0)
+                question = self._drain_motivated(self._investigation_queue)
                 inv = self.scientist.investigate(question)
                 report["investigations"] = len(self.scientist.all_investigations())
                 if inv.conclusion is not None:
