@@ -94,3 +94,46 @@ def test_nanogpt_trains_from_scratch():
     assert gpt.param_count() > 0
     gpt.train_on(CORPUS, steps=40, seed=1)
     assert gpt.perplexity(CORPUS[0]) != float("inf")
+
+
+# A small but REAL natural-English corpus with a held-out split (same distribution).
+_REAL_TRAIN = [
+    "the quick brown fox jumps over the lazy dog near the river bank",
+    "she sells sea shells by the sea shore in the early morning light",
+    "all that glitters is not gold and all who wander are not truly lost",
+    "the rain in spain falls mainly on the wide and open plain at dawn",
+    "knowledge is power but wisdom is knowing how to use it with care",
+    "a journey of a thousand miles begins with a single careful step",
+]
+_REAL_HOLDOUT = [
+    "the quick brown fox runs over the lazy dog by the river at dawn",
+    "wisdom is knowing how to use knowledge with patience and care",
+]
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_nanogpt_really_learns_lowers_heldout_perplexity():
+    """Real neural training: a from-zero GPT must materially reduce perplexity on held-out
+    real text it never trained on — i.e. it generalises, not just memorises."""
+    import statistics
+
+    from nyxara.growth.foundry_models import NanoGPTModel
+    gpt = NanoGPTModel(ModelSpec(kind="nanogpt", n_layer=2, n_head=2, n_embd=64,
+                                 block_size=64, seed=0))
+    before = statistics.mean(gpt.perplexity(t) for t in _REAL_HOLDOUT)
+    gpt.train_on(_REAL_TRAIN, steps=200, seed=0)
+    after = statistics.mean(gpt.perplexity(t) for t in _REAL_HOLDOUT)
+    assert after < before * 0.6, f"held-out perplexity barely moved: {before:.1f} -> {after:.1f}"
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_lora_request_uses_neural_model_when_torch_present():
+    # asking for LoRA on a torch machine without the transformers/peft stack must still yield a
+    # real neural model (from-zero NanoGPT), never a drop to the n-gram backend
+    m = build_model(ModelSpec(kind="lora"))
+    assert m.kind != "ngram"
+
+
+def test_explicit_ngram_is_never_upgraded():
+    # an explicit n-gram request stays pure-stdlib even when torch is available
+    assert build_model(ModelSpec(kind="ngram")).kind == "ngram"

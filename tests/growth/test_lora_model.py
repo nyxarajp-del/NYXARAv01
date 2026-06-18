@@ -12,7 +12,8 @@ import json
 
 import pytest
 
-from nyxara.growth.foundry_models import (ModelSpec, NgramByteLM, _HAS_LORA, build_model)
+from nyxara.growth.foundry_models import (ModelSpec, NgramByteLM, _HAS_LORA, _HAS_TORCH,
+                                          build_model)
 
 TINY = "sshleifer/tiny-gpt2"
 
@@ -37,10 +38,12 @@ def test_spec_from_dict_tolerates_missing_lora_fields():
 
 
 def test_build_model_lora_never_raises_for_missing_deps():
-    # contract: build_model degrades to the always-on n-gram backend, never raises
+    # contract: build_model never raises; it degrades to the best available real backend. With
+    # torch present a from-zero NanoGPT is used (genuine neural training) rather than dropping to
+    # the n-gram backend; only a machine without torch falls all the way back to n-grams.
     model = build_model(ModelSpec(kind="lora", base_model="does/not/exist"))
-    assert model.kind in ("lora", "ngram")
-    if not _HAS_LORA:
+    assert model.kind in ("lora", "nanogpt", "ngram")
+    if not _HAS_TORCH:
         assert isinstance(model, NgramByteLM)
 
 
