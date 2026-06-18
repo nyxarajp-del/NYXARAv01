@@ -45,12 +45,14 @@ class IntelligenceState:
     t: int = 0
     last_inputs: Dict[str, float] = field(default_factory=dict)
     compute: Dict[str, Any] = field(default_factory=dict)
+    history: list = field(default_factory=list)   # recent index readings — for trend/plateau
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"index": round(float(self.index), 6), "t": int(self.t),
                 "last_inputs": {k: round(float(v), 6) for k, v in self.last_inputs.items()},
-                "compute": dict(self.compute), "at": self.at}
+                "compute": dict(self.compute),
+                "history": [round(float(v), 6) for v in self.history], "at": self.at}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "IntelligenceState":
@@ -59,6 +61,7 @@ class IntelligenceState:
         return cls(index=float(d.get("index", 0.0) or 0.0), t=int(d.get("t", 0) or 0),
                    last_inputs=dict(d.get("last_inputs", {}) or {}),
                    compute=dict(d.get("compute", {}) or {}),
+                   history=list(d.get("history", []) or []),
                    at=float(d.get("at", time.time()) or time.time()))
 
     def summary(self) -> str:
@@ -116,8 +119,14 @@ class IntelligenceIndex:
         lessons = float(getattr(report, "lessons_stored", 0) or 0)
         knowledge = _clamp01((mem_size + lessons) / 500.0)
 
+        # stability: of the self-edits she attempted, what fraction *stuck* (kept vs rolled back).
+        # A diagnostic signal (not folded into the weighted index) the growth directive reads.
+        rolled = float(getattr(report, "rolled_back", 0) or 0)
+        stability = _clamp01((kept + 1.0) / (kept + rolled + 1.0))
+
         return {"accuracy": accuracy, "handoff": _clamp01(handoff_rate),
-                "weaknesses": _clamp01(weaknesses_resolved), "knowledge": knowledge}
+                "weaknesses": _clamp01(weaknesses_resolved), "knowledge": knowledge,
+                "stability": stability}
 
     # ---------------------------------------------------------------------- #
     # Compute capacity C_available -> [0, 1]
@@ -160,11 +169,48 @@ class IntelligenceIndex:
         index = _clamp01(momentum * float(prior.index) + (1.0 - momentum) * realized)
 
         compute_d = compute.to_dict() if hasattr(compute, "to_dict") else dict(compute or {})
+        history = (list(prior.history)[-11:] + [index])     # keep the last 12 readings
         inputs = dict(signals)
         inputs["base"] = round(base, 6)
         inputs["capacity"] = round(capacity, 6)
+        inputs["trend"] = round(_slope(history), 6)         # rising / plateau / declining
         return IntelligenceState(index=index, t=prior.t + 1, last_inputs=inputs,
-                                 compute=compute_d, at=time.time())
+                                 compute=compute_d, history=history, at=time.time())
+
+    # ---------------------------------------------------------------------- #
+    # Acting on the index — diagnose the bottleneck and DIRECT the next investment
+    # ---------------------------------------------------------------------- #
+    def growth_directive(self, state: IntelligenceState, compute: Any = None) -> Dict[str, Any]:
+        """Turn the index into a *decision*: which capability dimension is the bottleneck, what
+        growth action to take next, and whether progress has plateaued (so effort should
+        escalate). This is what makes the index a closed-loop *driver* rather than a readout —
+        the weakest real signal steers where the next cycle invests.
+
+        Reads the most recent signals off ``state.last_inputs``, so it is computable up front
+        (before a cycle) from the persisted prior state alone."""
+        dims = ("accuracy", "handoff", "weaknesses", "knowledge")
+        sig = {k: float(state.last_inputs.get(k, 0.0)) for k in dims if k in state.last_inputs}
+        action_for = {
+            "accuracy":   "deepen_reasoning",     # weak reasoning → think harder / longer
+            "handoff":    "train_self_model",     # over-reliant on the teacher → forge own brain
+            "weaknesses": "resolve_weaknesses",    # backlog of unfixed weaknesses → edit source
+            "knowledge":  "acquire_knowledge",     # thin knowledge → research / distil more
+        }
+        if not sig:
+            return {"focus": "accuracy", "action": "deepen_reasoning", "weakest_value": 0.0,
+                    "trend": 0.0, "plateaued": False, "escalate": False,
+                    "rationale": "no signals yet — default to deepening reasoning"}
+        focus = min(sig, key=lambda k: sig[k])               # the weakest dimension leads
+        trend = float(state.last_inputs.get("trend", _slope(state.history)))
+        plateaued = bool(state.t >= 3 and abs(trend) < 0.005 and state.index < 0.95)
+        capacity = self.compute_capacity(compute) if compute is not None else 0.0
+        escalate = bool(plateaued and capacity >= 0.4)       # stalled + room to push → push harder
+        return {
+            "focus": focus, "action": action_for[focus], "weakest_value": round(sig[focus], 4),
+            "trend": round(trend, 6), "plateaued": plateaued, "escalate": escalate,
+            "rationale": (f"weakest dimension '{focus}'={sig[focus]:.2f}; trend={trend:+.4f}"
+                          + ("; plateaued — escalate effort" if escalate else "")),
+        }
 
     # ---------------------------------------------------------------------- #
     # Acting on the index — scale improvement effort by I_t and compute
@@ -250,6 +296,24 @@ def _clamp01(x: float) -> float:
         return 0.0
 
 
+def _slope(values: Any) -> float:
+    """Least-squares slope of a short index history (per-cycle change). 0.0 for <2 points."""
+    try:
+        ys = [float(v) for v in values]
+    except Exception:  # noqa: BLE001
+        return 0.0
+    n = len(ys)
+    if n < 2:
+        return 0.0
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    denom = sum((x - mx) ** 2 for x in xs)
+    if denom <= 0:
+        return 0.0
+    return sum((xs[i] - mx) * (ys[i] - my) for i in range(n)) / denom
+
+
 # --------------------------------------------------------------------------- #
 # Self-test / demo
 # --------------------------------------------------------------------------- #
@@ -302,6 +366,22 @@ if __name__ == "__main__":  # pragma: no cover
     assert budget_big["max_edits_per_cycle"] >= budget_small["max_edits_per_cycle"]
     assert 1 <= budget_big["recursion_depth"] <= 20
     assert budget_big["max_edits_per_cycle"] <= idx.settings.self_improvement.max_edits_per_cycle
+
+    # the index DIRECTS growth: it names the weakest dimension and the action to take
+    weak_handoff = idx.update(s0, {**signals, "handoff": 0.0, "accuracy": 0.9,
+                                   "weaknesses": 0.9, "knowledge": 0.9}, big)
+    d = idx.growth_directive(weak_handoff, big)
+    print(f"\ndirective           : {d['action']} (focus={d['focus']}, "
+          f"escalate={d['escalate']})")
+    assert d["focus"] == "handoff" and d["action"] == "train_self_model"
+
+    # a plateau (flat history) on a capable machine escalates effort
+    flat = IntelligenceState(index=0.5, t=5, history=[0.5] * 6,
+                             last_inputs={"accuracy": 0.4, "handoff": 0.9,
+                                          "weaknesses": 0.9, "knowledge": 0.9, "trend": 0.0})
+    dp = idx.growth_directive(flat, big)
+    assert dp["plateaued"] and dp["escalate"] and dp["focus"] == "accuracy"
+    print(f"plateau directive   : {dp['rationale']}")
 
     # persistence round-trips through MemoryStore as ONE protected record
     idx.save(s1)
