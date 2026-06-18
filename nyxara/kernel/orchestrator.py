@@ -1020,7 +1020,9 @@ class NyxaraCore:
         try:
             from nyxara.agency.civilization import MicroAgentCivilization
             event_bus = getattr(self, "bus", None)
-            return MicroAgentCivilization(core=self, event_bus=event_bus)
+            # gating (observe-only vs. autonomous gated actions) comes from settings.agency
+            return MicroAgentCivilization(core=self, event_bus=event_bus,
+                                          settings=getattr(self, "settings", None))
         except Exception:  # noqa: BLE001 — civilization is a capability, never required
             return None
 

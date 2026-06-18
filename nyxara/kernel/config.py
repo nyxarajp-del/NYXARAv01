@@ -733,6 +733,12 @@ class AgencyConfig(BaseModel):
     min_reversibility_for_autonomy: float = Field(default=0.5, ge=0.0, le=1.0)
     sandbox_before_real_action: bool = True
     new_tool_trust: Literal["zero", "scoped"] = "zero"  # least-privilege default
+    # --- internal civilization (agency/civilization.py) --- #
+    # When OFF (default) the 7 micro-agents are read-only monitors. When ON, each may take ONE
+    # safe, reversible, *gated* action per cycle (and they message one another on a shared
+    # blackboard) — real autonomy, still fail-closed behind permissions + the journal.
+    civilization_autonomous: bool = False
+    civilization_max_actions_per_cycle: int = Field(default=2, ge=0, le=20)
 
 
 class MCPServerSpec(BaseModel):
