@@ -2211,6 +2211,10 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             pass
         report["ran"] = True
+        # Mark the pass as begun up front: it records that a maintenance cycle is in progress
+        # (so the idle scheduler does not re-enter), and is honest even when the body below is
+        # slow — the timestamp reflects when upkeep started, not only when it finished.
+        self._last_maintenance = time.time()
         # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
         if self.dream_session is not None:
             try:
