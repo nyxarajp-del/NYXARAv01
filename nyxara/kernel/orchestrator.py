@@ -288,6 +288,9 @@ class NyxaraCore:
         # free-energy spine — a small prediction-error loop whose emotion read-out colours
         # affect (perception and feeling as one loop; the Free Energy Principle)
         self.predictive = self._build_predictive() if enable_growth else None
+        # sensory prediction — predicts each live percept's features/modality; surprise
+        # sharpens attention (salience) and novelty colours affect over the real stream
+        self.sensory_predictor = self._build_sensory_predictor() if enable_growth else None
         # dual-process reasoning — fast intuition (System 1) arbitrated against deliberation
         # (System 2). It *colours* the reason step (metacognition); it never gates.
         self.dual_process = self._build_dual_process() if enable_growth else None
@@ -721,6 +724,16 @@ class NyxaraCore:
             from nyxara.mind.predictive_core import PredictiveCore
             return PredictiveCore(belief=[0.0] * self._belief_dim())
         except Exception:  # noqa: BLE001 — the free-energy loop is a capability, never required
+            return None
+
+    def _build_sensory_predictor(self) -> Any:
+        """A predictor over the live percept stream: it learns each percept's feature/modality
+        statistics so a genuinely surprising or novel percept stands out — sharpening attention
+        and colouring affect. Pure stdlib, always-on."""
+        try:
+            from nyxara.senses.predictive import PerceptualPredictor
+            return PerceptualPredictor()
+        except Exception:  # noqa: BLE001 — sensory prediction is a capability, never required
             return None
 
     def _build_dual_process(self) -> Any:
@@ -1266,6 +1279,8 @@ class NyxaraCore:
         self._note_interaction(safe_text, authority)
         # free-energy read-out: fold prediction error over the percept into how she feels
         self._predictive_tick(percept)
+        # sensory prediction: surprise over the live stream sharpens attention before ATTEND
+        self._perceptual_predict(percept)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
@@ -1823,6 +1838,23 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the free-energy loop is best-effort, never fatal
             pass
 
+    def _perceptual_predict(self, percept: Any) -> None:
+        """Predict this percept against the recent stream: surprise sharpens attention by
+        boosting its salience (so a surprising percept can win the ATTEND stage), and novelty
+        colours affect. Runs before attention is resolved. Best-effort, pure-stdlib."""
+        if self.sensory_predictor is None or percept is None:
+            return
+        try:
+            ps = self.sensory_predictor.observe(percept, boost_salience=True)
+            tag = (" novel" if ps.novelty else "") + (" anomaly" if ps.anomaly else "")
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"sensory: surprise={ps.surprise:.2f} attention={ps.attention:.2f}{tag}",
+                             salience=_clamp01(ps.attention))
+            if ps.novelty and self.affect is not None:
+                self.affect.note_novelty(ps.surprise)
+        except Exception:  # noqa: BLE001 — sensory prediction is best-effort, never fatal
+            pass
+
     def _observation_vector(self, percept: Any) -> Optional[List[float]]:
         """Derive a fixed-length observation vector for the predictive core from the
         percept's text — via the memory embedder when present, else a cheap projection.
@@ -1942,6 +1974,7 @@ class NyxaraCore:
                 if p is None:
                     continue
                 b, _ = self.binder.perceive(p)
+                self._perceptual_predict(b)
                 bound.append(b)
             except Exception:  # noqa: BLE001 — a bad attachment is skipped, never fatal
                 continue
