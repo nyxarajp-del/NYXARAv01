@@ -329,18 +329,22 @@ class Vision:
         except Exception:  # noqa: BLE001
             return None
 
-    # ---- optional OCR / embedding hooks ---- #
+    # ---- OCR / embedding hooks ---- #
     def ocr(self, path: str) -> Tuple[Optional[str], str]:
+        """Real optical character recognition via Tesseract. The image is opened with Pillow
+        and converted to grayscale (standard, more reliable OCR input) before recognition.
+        Degrades honestly to a note when ``pytesseract``/Pillow (or the tesseract binary) is
+        absent."""
         try:
             import pytesseract  # type: ignore
         except ImportError:
             return None, "pytesseract not installed; OCR unavailable"
         if not _HAS_PIL:
             return None, "Pillow not installed; OCR unavailable"
-        try:  # pragma: no cover - exercised only with the lib
+        try:  # pragma: no cover - exercised only with the lib + tesseract binary
             with _PILImage.open(path) as im:
-                return pytesseract.image_to_string(im).strip(), ""
-        except Exception as exc:  # noqa: BLE001
+                return pytesseract.image_to_string(im.convert("L")).strip(), ""
+        except Exception as exc:  # noqa: BLE001 — e.g. tesseract binary not on PATH
             return None, f"OCR failed: {exc}"
 
     # ---- full analysis ---- #

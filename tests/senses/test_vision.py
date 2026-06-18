@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import struct
 
+import pytest
+
 from nyxara.senses.vision import (ImageAnalysis, ImageInfo, Vision, average_hash,
                                   difference_hash, dominant_colors, hamming, hex_hash,
                                   parse_header, perceptual_hash, resize_gray)
@@ -230,3 +232,36 @@ def test_analysis_to_dict():
     a = ImageAnalysis(info=ImageInfo("PNG", 8, 8), average_hash=255)
     d = a.to_dict()
     assert d["info"]["format"] == "PNG" and d["average_hash"] == hex_hash(255)
+
+
+# -------------------- real OCR (skips cleanly without Tesseract) -------------------- #
+def _tesseract_ready():
+    try:
+        import pytesseract  # type: ignore
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _tesseract_ready(),
+                    reason="requires pytesseract + the tesseract binary")
+def test_real_ocr_reads_rendered_text(tmp_path):
+    """Render real text into an image and confirm Tesseract reads it back."""
+    Image = pytest.importorskip("PIL.Image")
+    from PIL import ImageDraw, ImageFont
+    p = tmp_path / "hello.png"
+    im = Image.new("RGB", (340, 90), "white")
+    dr = ImageDraw.Draw(im)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+    except Exception:
+        font = ImageFont.load_default()
+    dr.text((12, 22), "NYXARA SEES", fill="black", font=font)
+    im.save(str(p))
+
+    res = Vision().analyze(str(p), ocr=True)
+    assert res.note == "", f"OCR errored: {res.note}"
+    assert res.ocr_text and "NYXARA" in res.ocr_text.upper()
+    # real Pillow-backed perception too: hashes and colours are populated
+    assert res.perceptual_hash is not None and res.dominant_colors
