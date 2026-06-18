@@ -42,6 +42,88 @@ def test_dry_run_does_not_touch_source_files():
     assert before == after, "dry-run must not modify any source file"
 
 
+# --------------------------------------------------------------------------- #
+# multi-edit safety: at most one *kept* edit per file per cycle (line numbers
+# from a single review pass go stale once a kept edit shifts a file's lines)
+# --------------------------------------------------------------------------- #
+class _FakeEdit:
+    def __init__(self, file: str) -> None:
+        self.file = file
+
+    def to_dict(self):
+        return {"file": self.file}
+
+
+class _FakeOutcome:
+    def __init__(self, *, kept: bool) -> None:
+        self.applied = True
+        self.kept = kept
+        self.rolled_back = not kept
+
+    def to_dict(self):
+        return {"kept": self.kept, "rolled_back": self.rolled_back}
+
+
+class _FakeGen:
+    """Maps each weakness to an edit targeting weakness.locus's file."""
+    def generate(self, w):
+        return _FakeEdit(getattr(w, "file", "?"))
+
+
+class _FakeOptimizer:
+    def __init__(self, keep: bool = True) -> None:
+        self.keep = keep
+        self.applied = []
+
+    def apply(self, edit):
+        self.applied.append(edit.file)
+        return _FakeOutcome(kept=self.keep)
+
+
+class _W:
+    def __init__(self, file: str) -> None:
+        self.file = file
+        self.is_source_edit = True
+
+
+def _rsi():
+    return RecursiveSelfImprovement.__new__(RecursiveSelfImprovement)
+
+
+def test_enact_edits_one_kept_edit_per_file():
+    rsi = _rsi()
+    opt = _FakeOptimizer(keep=True)
+    report = SelfImprovementReport()
+    # two weaknesses in fileA, one in fileB
+    ranked = [_W("a.py"), _W("a.py"), _W("b.py")]
+    rsi._enact_edits(ranked, _FakeGen(), opt, budget=5, report=report)
+    # fileA edited once (second deferred), fileB edited once
+    assert opt.applied == ["a.py", "b.py"]
+    assert report.kept == 2
+    assert len(report.optimizations) == 2
+
+
+def test_enact_edits_rolled_back_does_not_claim_file():
+    rsi = _rsi()
+    opt = _FakeOptimizer(keep=False)        # every edit rolls back
+    report = SelfImprovementReport()
+    ranked = [_W("a.py"), _W("a.py")]
+    rsi._enact_edits(ranked, _FakeGen(), opt, budget=5, report=report)
+    # a rolled-back edit leaves the file unchanged, so the second same-file edit may proceed
+    assert opt.applied == ["a.py", "a.py"]
+    assert report.kept == 0 and report.rolled_back == 2
+
+
+def test_enact_edits_respects_budget():
+    rsi = _rsi()
+    opt = _FakeOptimizer(keep=True)
+    report = SelfImprovementReport()
+    ranked = [_W("a.py"), _W("b.py"), _W("c.py")]
+    rsi._enact_edits(ranked, _FakeGen(), opt, budget=2, report=report)
+    assert opt.applied == ["a.py", "b.py"]   # third skipped by budget
+    assert report.kept == 2
+
+
 def test_lessons_stored_in_memory_when_enacting():
     from nyxara.memory.store import MemoryStore
     mem = MemoryStore()

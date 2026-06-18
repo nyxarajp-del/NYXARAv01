@@ -322,25 +322,42 @@ class RecursiveSelfImprovement:
             # never raises the ceiling above the config max — only lowers it).
             if self._effort is not None:
                 budget = min(budget, int(self._effort.get("max_edits_per_cycle", budget)))
-            edits_done = 0
-            for w in wreport.ranked():
-                if edits_done >= budget:
-                    break
-                if not getattr(w, "is_source_edit", False):
-                    continue
-                edit = gen.generate(w)
-                if edit is None:
-                    continue
-                outcome = optimizer.apply(edit)
-                report.optimizations.append(outcome.to_dict())
-                if outcome.applied:
-                    edits_done += 1
-                if outcome.kept:
-                    report.kept += 1
-                if outcome.rolled_back:
-                    report.rolled_back += 1
+            self._enact_edits(wreport.ranked(), gen, optimizer, budget, report)
         finally:
             optimizer.close()
+
+    def _enact_edits(self, ranked: Any, gen: Any, optimizer: Any, budget: int,
+                     report: SelfImprovementReport) -> None:
+        """Apply up to ``budget`` source edits in severity order, at most one *kept* edit per
+        file per cycle.
+
+        Weakness line numbers come from a single review pass. A kept edit can change a file's
+        line count (e.g. removing an import), which would invalidate the line numbers of every
+        other weakness in that same file — so a second same-file edit this cycle would target a
+        stale line and either miss or mislocate. Once a file has a kept edit, further edits to it
+        are deferred to the next cycle, which re-reviews the changed source. Edits that roll back
+        leave the file byte-for-byte unchanged, so they do not claim the file."""
+        edited_files: set = set()
+        edits_done = 0
+        for w in ranked:
+            if edits_done >= budget:
+                break
+            if not getattr(w, "is_source_edit", False):
+                continue
+            edit = gen.generate(w)
+            if edit is None:
+                continue
+            if edit.file in edited_files:        # a kept edit already shifted this file's lines
+                continue
+            outcome = optimizer.apply(edit)
+            report.optimizations.append(outcome.to_dict())
+            if outcome.applied:
+                edits_done += 1
+            if outcome.kept:
+                report.kept += 1
+                edited_files.add(edit.file)      # claim the file only once it actually changed
+            if outcome.rolled_back:
+                report.rolled_back += 1
 
 
 # --------------------------------------------------------------------------- #
