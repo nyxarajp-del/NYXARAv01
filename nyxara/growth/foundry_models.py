@@ -1,21 +1,26 @@
 """NYXARA · growth/foundry_models.py — the trainable language models she owns (🛠, from zero).
 
-This is where NYXARA's *own* brain is forged. Two backends, same interface, chosen by what
+This is where NYXARA's *own* brain is forged. Several backends, same interface, chosen by what
 the machine can run — exactly the "works bare, sharper with better tools" philosophy of
 :mod:`senses.vision`:
 
-* :class:`NgramByteLM` — **always available, pure standard library.** A byte-level n-gram
-  model with add-k smoothing, trained FROM SCRATCH (empty tables) on whatever corpus NYXARA
-  has lived through. No numpy, no torch, no network — it runs on the barest machine.
+* :class:`WordKNGramLM` — **the coherent, always-available local brain (pure stdlib).** A
+  word/subword-level n-gram with **interpolated Kneser-Ney** smoothing, trained FROM SCRATCH.
+  KN's continuation probabilities make n-gram text read naturally (a word is likely because it
+  appears in many distinct contexts, not merely because it is frequent), so on a GPU-less box
+  this is the honest ceiling for a sovereign model — real words, not byte gibberish. It is the
+  fallback :func:`build_model` chooses when ``torch`` is absent.
+* :class:`NgramByteLM` — a byte-level n-gram with add-k smoothing (vocabulary fixed at 256, no
+  tokenizer). Kept for exact backward-compatibility and selected only by an explicit
+  ``kind="ngram"``.
 * :class:`NanoGPTModel` — **optional, only when ``torch`` is installed.** A small byte-level
   GPT (decoder-only transformer) trained from zero with AdamW. Constructing it without torch
-  raises a clearly-caught error so :func:`build_model` falls back to the n-gram model.
+  raises a clearly-caught error so :func:`build_model` falls back to the word-level KN model.
 
 Every model implements the same :class:`BaseLanguageModel` contract — ``train_on``,
 ``generate``, ``perplexity``, ``save``/``load``, ``param_count`` — so the foundry
 (:mod:`growth.foundry`) and the :class:`~nyxara.mind.llm.SelfProvider` can treat them
-interchangeably. Models are byte-level, so the "vocabulary" is fixed at 256 and there is no
-tokenizer to train or break.
+interchangeably.
 
 Pure standard library at the core; ``torch`` optional. Imports NOTHING from ``mind/`` —
 the dependency only ever flows mind/llm.py -> here (lazily), never back.
@@ -26,7 +31,9 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -310,6 +317,237 @@ class NgramByteLM(BaseLanguageModel):
         self.totals = {_key(s): t for s, t in blob["totals"].items()}
         self.unigram = list(blob["unigram"])
         self.unigram_total = blob["unigram_total"]
+
+
+# --------------------------------------------------------------------------- #
+# Always-on backend: a word/subword-level Kneser-Ney n-gram (coherent, pure stdlib)
+# --------------------------------------------------------------------------- #
+_WORD_RE = re.compile(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]")   # words, numbers, or a single symbol
+_BOS_TOK = "<bos>"
+_EOS_TOK = "<eos>"
+_NO_SPACE_BEFORE = frozenset(",.!?;:%)]}…’”'\"")
+_NO_SPACE_AFTER = frozenset("([{“‘$#@")
+
+
+def _word_tokenize(text: str) -> List[str]:
+    return _WORD_RE.findall(text)
+
+
+def _word_detokenize(tokens: Sequence[str]) -> str:
+    """Re-join word tokens into natural text (no space before punctuation / after openers)."""
+    out: List[str] = []
+    for i, tok in enumerate(tokens):
+        if i == 0:
+            out.append(tok)
+            continue
+        prev = tokens[i - 1]
+        if tok in _NO_SPACE_BEFORE or prev in _NO_SPACE_AFTER or tok == "'" or prev == "'":
+            out.append(tok)
+        else:
+            out.append(" " + tok)
+    return "".join(out)
+
+
+class WordKNGramLM(BaseLanguageModel):
+    """A word-level n-gram language model with **interpolated Kneser-Ney** smoothing.
+
+    This is the coherent, fully-local "own brain": instead of sampling raw bytes (which yields
+    locally-plausible gibberish), it models the distribution over *words*, and KN's continuation
+    probabilities are exactly what make n-gram text read naturally — a word is likely not just
+    because it is frequent, but because it appears in many *distinct* contexts. Trained from
+    zero, pure standard library (no numpy/torch/network), so it runs on the barest machine and
+    is the honest ceiling for a sovereign local model without a GPU.
+    """
+
+    kind = "kngram"
+
+    def __init__(self, order: int = 3, *, discount: float = 0.75, seed: int = 0) -> None:
+        self.order = max(2, int(order))
+        self.D = min(0.99, max(0.1, float(discount)))
+        self.seed = int(seed)
+        self.tok2id: Dict[str, int] = {}
+        self.id2tok: List[str] = []
+        self._bos = self._intern(_BOS_TOK)
+        self._eos = self._intern(_EOS_TOK)
+        # highest-order raw counts and lower-order continuation counts, both context-keyed
+        self.hi: Dict[Tuple[int, ...], Dict[int, int]] = {}
+        self.lo: Dict[int, Dict[Tuple[int, ...], Dict[int, int]]] = {}
+        self._hi_tot: Dict[Tuple[int, ...], int] = {}
+        self._lo_tot: Dict[int, Dict[Tuple[int, ...], int]] = {}
+
+    def _intern(self, tok: str) -> int:
+        i = self.tok2id.get(tok)
+        if i is None:
+            i = len(self.id2tok)
+            self.tok2id[tok] = i
+            self.id2tok.append(tok)
+        return i
+
+    @property
+    def vocab_size(self) -> int:
+        return max(1, len(self.id2tok))
+
+    def _encode(self, text: str, *, intern: bool) -> List[int]:
+        ids: List[int] = [self._bos] * (self.order - 1)
+        for t in _word_tokenize(text):
+            ids.append(self._intern(t) if intern else self.tok2id.get(t, self._unk()))
+        ids.append(self._eos)
+        return ids
+
+    def _unk(self) -> int:
+        return self._bos          # unseen tokens fold onto BOS (a never-emitted context slot)
+
+    # ---- training ---- #
+    def train_on(self, corpus: Sequence[str], *, steps: int = 0, seed: int = 0) -> TrainStats:
+        import time
+        start = time.monotonic()
+        raw: Dict[int, Dict[Tuple[int, ...], Dict[int, int]]] = {
+            m: defaultdict(lambda: defaultdict(int)) for m in range(1, self.order + 1)}
+        tokens = 0
+        for doc in corpus:
+            ids = self._encode(doc, intern=True)
+            for m in range(1, self.order + 1):
+                for i in range(m - 1, len(ids)):
+                    ctx = tuple(ids[i - m + 1:i])
+                    raw[m][ctx][ids[i]] += 1
+            tokens += len(ids)
+        # highest order uses raw counts directly
+        self.hi = {ctx: dict(row) for ctx, row in raw[self.order].items()}
+        # lower orders use Kneser-Ney *continuation* counts (distinct left-extensions)
+        self.lo = {}
+        for m in range(1, self.order):
+            left: Dict[Tuple[int, ...], Dict[int, set]] = defaultdict(lambda: defaultdict(set))
+            for big_ctx, row in raw[m + 1].items():        # (m+1)-gram prefix of length m
+                pre, suffix = big_ctx[0], big_ctx[1:]       # preceding token, lower context
+                for w in row:
+                    left[suffix][w].add(pre)
+            self.lo[m] = {ctx: {w: len(s) for w, s in ws.items()} for ctx, ws in left.items()}
+        self._recompute_totals()
+        loss = self._corpus_cross_entropy(corpus)
+        return TrainStats(steps=max(1, len(corpus)), final_loss=loss,
+                          seconds=time.monotonic() - start, tokens=tokens)
+
+    def _recompute_totals(self) -> None:
+        self._hi_tot = {ctx: sum(row.values()) for ctx, row in self.hi.items()}
+        self._lo_tot = {m: {ctx: sum(row.values()) for ctx, row in self.lo[m].items()}
+                        for m in self.lo}
+
+    # ---- interpolated Kneser-Ney probability ---- #
+    def _p(self, m: int, ctx: Tuple[int, ...], w: int) -> float:
+        if m == 1:
+            row = self.lo.get(1, {}).get((), {})
+            total = self._lo_tot.get(1, {}).get((), 0)
+            if total <= 0:
+                return 1.0 / self.vocab_size
+            cc = row.get(w, 0)
+            lam = self.D * len(row) / total
+            return max(cc - self.D, 0.0) / total + lam * (1.0 / self.vocab_size)
+        if m == self.order:
+            total = self._hi_tot.get(ctx, 0)
+            if total <= 0:
+                return self._p(m - 1, ctx[1:], w)
+            row = self.hi.get(ctx, {})
+            lam = self.D * len(row) / total
+            return max(row.get(w, 0) - self.D, 0.0) / total + lam * self._p(m - 1, ctx[1:], w)
+        total = self._lo_tot.get(m, {}).get(ctx, 0)
+        if total <= 0:
+            return self._p(m - 1, ctx[1:], w)
+        row = self.lo[m].get(ctx, {})
+        lam = self.D * len(row) / total
+        return max(row.get(w, 0) - self.D, 0.0) / total + lam * self._p(m - 1, ctx[1:], w)
+
+    def _prob(self, ctx_full: Tuple[int, ...], w: int) -> float:
+        ctx = ctx_full[-(self.order - 1):] if self.order > 1 else ()
+        return self._p(self.order, ctx, w)
+
+    def _corpus_cross_entropy(self, corpus: Sequence[str]) -> float:
+        total_nll, n = 0.0, 0
+        for doc in corpus:
+            ids = self._encode(doc, intern=False)
+            for i in range(self.order - 1, len(ids)):
+                ctx = tuple(ids[i - self.order + 1:i])
+                p = self._prob(ctx, ids[i])
+                total_nll += -math.log(p if p > 0 else 1e-12)
+                n += 1
+        return total_nll / n if n else 0.0
+
+    def perplexity(self, text: str) -> float:
+        ce = self._corpus_cross_entropy([text])
+        return math.exp(ce) if ce < 700 else float("inf")
+
+    # ---- generation ---- #
+    def _candidates(self, ctx_full: Tuple[int, ...]) -> List[int]:
+        cands: set = set()
+        for m in range(self.order, 1, -1):
+            ctx = ctx_full[-(m - 1):]
+            row = self.hi.get(ctx) if m == self.order else self.lo.get(m, {}).get(ctx)
+            if row:
+                cands.update(row.keys())
+            if len(cands) >= 48:
+                break
+        if not cands:
+            cands.update(self.lo.get(1, {}).get((), {}).keys())
+        cands.discard(self._bos)
+        return list(cands)
+
+    def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
+        if not self.id2tok or not self.hi:
+            return ""
+        rng = random.Random(self.seed)
+        ctx = self._encode(prompt, intern=False)[:-1]      # drop the trailing EOS of the prompt
+        out_ids: List[int] = []
+        for _ in range(max_tokens):
+            cands = self._candidates(tuple(ctx))
+            if not cands:
+                break
+            weights = [self._prob(tuple(ctx), w) for w in cands]
+            wsum = sum(weights)
+            if wsum <= 0:
+                break
+            nxt = rng.choices(cands, weights=weights, k=1)[0]
+            if nxt == self._eos:
+                break
+            out_ids.append(nxt)
+            ctx.append(nxt)
+        return _word_detokenize([self.id2tok[i] for i in out_ids
+                                 if 0 <= i < len(self.id2tok)])
+
+    # ---- introspection & persistence ---- #
+    def param_count(self) -> int:
+        return sum(len(r) for r in self.hi.values()) + sum(
+            len(r) for m in self.lo for r in self.lo[m].values())
+
+    def save(self, directory: Path) -> None:
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        def _enc(table: Dict[Tuple[int, ...], Dict[int, int]]) -> Dict[str, Dict[str, int]]:
+            return {",".join(map(str, ctx)): {str(w): c for w, c in row.items()}
+                    for ctx, row in table.items()}
+
+        blob = {"kind": self.kind, "order": self.order, "discount": self.D, "seed": self.seed,
+                "id2tok": self.id2tok, "hi": _enc(self.hi),
+                "lo": {str(m): _enc(self.lo[m]) for m in self.lo}}
+        (directory / "model.json").write_text(json.dumps(blob), encoding="utf-8")
+
+    def load(self, directory: Path) -> None:
+        blob = json.loads((Path(directory) / "model.json").read_text(encoding="utf-8"))
+        self.order = int(blob["order"]); self.D = float(blob["discount"])
+        self.seed = int(blob.get("seed", 0))
+        self.id2tok = list(blob["id2tok"])
+        self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
+        self._bos = self.tok2id.get(_BOS_TOK, 0)
+        self._eos = self.tok2id.get(_EOS_TOK, min(1, len(self.id2tok) - 1))
+
+        def _key(s: str) -> Tuple[int, ...]:
+            return tuple(int(x) for x in s.split(",")) if s else ()
+
+        def _dec(table: Dict[str, Dict[str, int]]) -> Dict[Tuple[int, ...], Dict[int, int]]:
+            return {_key(s): {int(w): c for w, c in row.items()} for s, row in table.items()}
+
+        self.hi = _dec(blob["hi"])
+        self.lo = {int(m): _dec(tbl) for m, tbl in blob["lo"].items()}
+        self._recompute_totals()
 
 
 # --------------------------------------------------------------------------- #
@@ -656,6 +894,12 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
     requested intent than counting byte n-grams. Only an explicit ``kind="ngram"`` — or a machine
     without torch at all — uses the pure-stdlib backend."""
     want = spec.kind
+    # explicit word-level Kneser-Ney: the coherent, fully-local own brain (no deps)
+    if want == "kngram":
+        return WordKNGramLM(order=max(2, spec.ngram_order), seed=spec.seed)
+    # explicit byte-level n-gram: kept for exact backward-compatibility
+    if want == "ngram":
+        return NgramByteLM(order=spec.ngram_order, k=spec.ngram_k, seed=spec.seed)
     if want == "lora" and _HAS_LORA:
         try:
             return LoRAModel(spec)
@@ -669,13 +913,13 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
             pass
     # Real neural fallback: any non-ngram request gets a from-zero NanoGPT when torch is present
     # (covers auto/nanogpt directly, and lora/genesis whose heavier deps/genome are unavailable).
-    if want != "ngram" and _HAS_TORCH:
+    if _HAS_TORCH:
         try:
             return NanoGPTModel(spec)
         except Exception:  # noqa: BLE001 — torch present but model build failed; fall back
             pass
-    # explicit "ngram", or any request on a machine without torch -> the always-on backend
-    return NgramByteLM(order=spec.ngram_order, k=spec.ngram_k, seed=spec.seed)
+    # No torch at all -> the coherent always-on backend: word-level Kneser-Ney (not byte gibberish)
+    return WordKNGramLM(order=max(2, spec.ngram_order), seed=spec.seed)
 
 
 def _foundry_root(settings: Any) -> Path:
@@ -743,14 +987,20 @@ if __name__ == "__main__":  # pragma: no cover
         assert reloaded.generate("the master", max_tokens=40) == g1
     print("save/load round-trip : OK ✓")
 
-    # the factory degrades honestly when torch is absent
+    # the factory degrades honestly when torch is absent (to the coherent word-level KN model)
     m = build_model(ModelSpec(kind="auto"))
     print(f"\nbuild_model(auto)    : kind={m.kind}  (_HAS_TORCH={_HAS_TORCH})")
-    assert m.kind in ("ngram", "nanogpt")
-    # asking for nanogpt on a bare machine must NOT raise — it falls back to n-gram
+    assert m.kind in ("kngram", "nanogpt")
+    # asking for nanogpt on a bare machine must NOT raise — it falls back to the KN model
     m2 = build_model(ModelSpec(kind="nanogpt"))
-    assert m2.kind == ("nanogpt" if _HAS_TORCH else "ngram")
+    assert m2.kind == ("nanogpt" if _HAS_TORCH else "kngram")
     print("nanogpt fallback     : no crash on a bare machine ✓")
+
+    # the coherent own brain: word-level Kneser-Ney generates real words, not byte gibberish
+    kn = build_model(ModelSpec(kind="kngram", ngram_order=3, seed=3))
+    kn.train_on(corpus)
+    print(f"\nword-KN generate     : {kn.generate('the master', max_tokens=16)!r}")
+    assert kn.kind == "kngram" and kn.param_count() > 0
 
     if _HAS_TORCH:
         print("\n[torch present] training a nano-GPT from scratch ...")

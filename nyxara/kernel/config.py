@@ -298,7 +298,7 @@ class FoundryConfig(BaseModel):
     # Default to LoRA fine-tuning of a pretrained base — the path to genuine capability
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
-    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "lora"
+    backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
