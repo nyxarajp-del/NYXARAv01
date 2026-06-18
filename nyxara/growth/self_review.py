@@ -41,6 +41,8 @@ _SEVERITY: Dict[str, float] = {
     "long_function": 0.45,
     "too_many_args": 0.4,
     "eq_none": 0.35,
+    "not_in": 0.32,
+    "is_not_cmp": 0.32,
     "unused_import": 0.3,
     "missing_docstring": 0.25,
     "todo": 0.2,
@@ -186,6 +188,17 @@ class SelfReviewer:
                                             _SEVERITY["eq_none"],
                                             "comparison to None should use 'is'/'is not', "
                                             "not '=='/'!=' (PEP 8 / E711)"))
+            elif (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+                  and isinstance(node.operand, ast.Compare)
+                  and len(node.operand.ops) == 1
+                  and isinstance(node.operand.ops[0], (ast.In, ast.Is))):
+                is_in = isinstance(node.operand.ops[0], ast.In)
+                kind = "not_in" if is_in else "is_not_cmp"
+                op = "not in" if is_in else "is not"
+                findings.append(CodeFinding(
+                    rel, node.lineno, "<compare>", kind, _SEVERITY[kind],
+                    f"negated membership/identity test should use the '{op}' operator "
+                    f"(PEP 8 / {'E713' if is_in else 'E714'})"))
 
         # unused imports — module-level imports whose bound name is never referenced
         findings.extend(self._unused_imports(rel, tree, src, path))

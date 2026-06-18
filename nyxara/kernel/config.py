@@ -607,6 +607,16 @@ class SelfImprovementConfig(BaseModel):
     allow_tuning: bool = False                 # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
+    # --- LLM-authored edits (real RSI) — triple-gated, OFF by default --- #
+    # When ON *and* ``autonomous_enact`` is set *and* a real (non-mock) provider is available,
+    # NYXARA may have the LLM author a whole-file fix for a weakness the deterministic
+    # transforms cannot express (e.g. high complexity, long functions). Every such edit clears
+    # the *same* reversible verify-or-rollback gauntlet — it is safe by construction.
+    allow_llm_edits: bool = False              # author real source fixes via the LLM
+    llm_edit_recursion_depth: int = Field(default=1, ge=0, le=5)   # chained edits per file/cycle
+    llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
+    llm_edit_max_file_bytes: int = Field(default=24000, ge=512)    # skip files too big to send
+    llm_edit_max_size_delta_ratio: float = Field(default=0.5, ge=0.0, le=1.0)  # reject wild rewrites
     # --- code-review thresholds --- #
     max_function_length: int = Field(default=60, ge=10)
     max_complexity: int = Field(default=10, ge=1)

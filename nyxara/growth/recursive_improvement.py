@@ -346,9 +346,15 @@ class RecursiveSelfImprovement:
             pass
 
     def _apply_source_edits(self, wreport: Any, report: SelfImprovementReport) -> None:
-        from nyxara.growth.self_optimize import EditGenerator, Optimizer
+        from nyxara.growth.self_optimize import EditGenerator, LLMEditGenerator, Optimizer
         cfg = self.settings.self_improvement
         gen = EditGenerator(llm=self._llm_handle())
+        # the LLM generator authors real fixes the transforms cannot express; it self-disables
+        # unless allow_llm_edits is set AND a real (non-mock/self) provider is available, so on a
+        # bare/offline machine this is simply None-equivalent and the deterministic path stands
+        llm_gen: Any = LLMEditGenerator(llm=self._llm_handle(), settings=self.settings)
+        if not llm_gen.available():
+            llm_gen = None
         optimizer = Optimizer(root=self.root, settings=self.settings,
                               journal=self.journal,
                               permissions=getattr(self.core, "permissions", None))
@@ -358,21 +364,33 @@ class RecursiveSelfImprovement:
             # never raises the ceiling above the config max — only lowers it).
             if self._effort is not None:
                 budget = min(budget, int(self._effort.get("max_edits_per_cycle", budget)))
-            self._enact_edits(wreport.ranked(), gen, optimizer, budget, report)
+            self._enact_edits(wreport.ranked(), gen, optimizer, budget, report, llm_gen=llm_gen)
         finally:
             optimizer.close()
 
+    def _generate_edit(self, weakness: Any, gen: Any, llm_gen: Any) -> Any:
+        """Author one edit: deterministic transform first (instant/offline), LLM fallback for
+        weaknesses flagged ``edit_strategy == "llm"`` when a real provider is available."""
+        edit = gen.generate(weakness)               # deterministic, AST-validated, always tried
+        if edit is not None:
+            return edit
+        if llm_gen is not None and getattr(weakness, "edit_strategy", "") == "llm":
+            return llm_gen.generate(weakness)        # real, whole-file authored fix
+        return None
+
     def _enact_edits(self, ranked: Any, gen: Any, optimizer: Any, budget: int,
-                     report: SelfImprovementReport) -> None:
+                     report: SelfImprovementReport, *, llm_gen: Any = None) -> None:
         """Apply up to ``budget`` source edits in severity order, at most one *kept* edit per
-        file per cycle.
+        file per cycle in the outer pass.
 
         Weakness line numbers come from a single review pass. A kept edit can change a file's
         line count (e.g. removing an import), which would invalidate the line numbers of every
         other weakness in that same file — so a second same-file edit this cycle would target a
-        stale line and either miss or mislocate. Once a file has a kept edit, further edits to it
-        are deferred to the next cycle, which re-reviews the changed source. Edits that roll back
-        leave the file byte-for-byte unchanged, so they do not claim the file."""
+        stale line and either miss or mislocate. Once a file has a kept edit, the outer loop
+        defers it; instead, when recursion is enabled, :meth:`_recurse_file` re-reviews just that
+        file (fresh line numbers) and chains further edits on it — the genuine *recursive* in
+        RSI. Edits that roll back leave the file byte-for-byte unchanged, so they never claim
+        the file."""
         edited_files: set = set()
         edits_done = 0
         for w in ranked:
@@ -380,7 +398,7 @@ class RecursiveSelfImprovement:
                 break
             if not getattr(w, "is_source_edit", False):
                 continue
-            edit = gen.generate(w)
+            edit = self._generate_edit(w, gen, llm_gen)
             if edit is None:
                 continue
             if edit.file in edited_files:        # a kept edit already shifted this file's lines
@@ -392,8 +410,68 @@ class RecursiveSelfImprovement:
             if outcome.kept:
                 report.kept += 1
                 edited_files.add(edit.file)      # claim the file only once it actually changed
+                edits_done += self._recurse_file(
+                    edit.file, gen, llm_gen, optimizer, budget - edits_done, report)
             if outcome.rolled_back:
                 report.rolled_back += 1
+
+    def _recurse_file(self, file_path: str, gen: Any, llm_gen: Any, optimizer: Any,
+                      remaining: int, report: SelfImprovementReport) -> int:
+        """Re-review one just-improved file and chain further edits on it (depth-bounded).
+
+        This is what makes self-improvement *recursive*: each kept edit re-reviews the changed
+        source with fresh line numbers and lets the next fix build on the last, all within the
+        same reversible gauntlet. Returns the number of edits *applied* (kept or rolled back) so
+        the caller keeps honouring the global per-cycle budget."""
+        cfg = getattr(getattr(self, "settings", None), "self_improvement", None)
+        depth = int(getattr(cfg, "llm_edit_recursion_depth", 0)) if cfg is not None else 0
+        if depth <= 0 or remaining <= 0:
+            return 0
+        applied_total = 0
+        for _ in range(depth):
+            if applied_total >= remaining:
+                break
+            progressed = False
+            for w in self._rereview_file(file_path):
+                if applied_total >= remaining:
+                    break
+                if not getattr(w, "is_source_edit", False):
+                    continue
+                edit = self._generate_edit(w, gen, llm_gen)
+                if edit is None:
+                    continue
+                outcome = optimizer.apply(edit)
+                report.optimizations.append(outcome.to_dict())
+                if outcome.applied:
+                    applied_total += 1
+                if outcome.kept:
+                    report.kept += 1
+                    progressed = True
+                    break                        # re-review with fresh line numbers
+                if outcome.rolled_back:
+                    report.rolled_back += 1
+            if not progressed:                   # nothing more to safely improve on this file
+                break
+        return applied_total
+
+    def _rereview_file(self, file_path: str) -> List[Any]:
+        """Ranked weaknesses for a single file (used by the recursion to re-target fresh lines)."""
+        try:
+            from pathlib import Path
+
+            from nyxara.growth.self_review import CodeReviewReport, SelfReviewer
+            from nyxara.growth.weakness import WeaknessSynthesizer
+            cfg = self.settings.self_improvement
+            reviewer = SelfReviewer(
+                root=self.root, llm=self._llm_handle(),
+                max_function_length=cfg.max_function_length,
+                max_complexity=cfg.max_complexity, max_args=cfg.max_args,
+                enable_llm_enrichment=cfg.enable_llm_enrichment)
+            findings = reviewer.review_file(Path(file_path))
+            code = CodeReviewReport(findings=findings, files_scanned=1)
+            return WeaknessSynthesizer().synthesize(code=code).ranked()
+        except Exception:  # noqa: BLE001 — a re-review failure just ends the recursion
+            return []
 
 
 # --------------------------------------------------------------------------- #
