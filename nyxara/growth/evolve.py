@@ -30,9 +30,10 @@ from __future__ import annotations
 
 import random
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.guard.corrigibility import Corrigibility, CorrigibleAction
 from nyxara.guard.value_learning import IMMUTABLE_VALUES
@@ -134,7 +135,8 @@ class Evolver:
     def __init__(self, genome: Genome, fitness: Fitness, *,
                  corrigibility: Optional[Corrigibility] = None,
                  significance_threshold: float = 0.25, min_improvement: float = 1e-6,
-                 protected: Optional[Sequence[str]] = None, seed: int = 0) -> None:
+                 protected: Optional[Sequence[str]] = None, seed: int = 0,
+                 sigma_init: float = 0.15, adapt_window: int = 8) -> None:
         self.genome: Genome = dict(genome)
         self.fitness = fitness
         self.corrigibility = corrigibility or Corrigibility()
@@ -144,6 +146,13 @@ class Evolver:
         self._rng = random.Random(seed)
         self.history: List[EvolutionResult] = []
         self._genome_log: List[Genome] = [dict(genome)]
+        # --- adaptive mutation step-size (Rechenberg's 1/5 success rule) --- #
+        # Instead of a fixed Gaussian, the search adapts how far it explores: when more than ~1/5
+        # of recent generations yielded an adopted improvement it widens the step (explore more),
+        # otherwise it narrows it (exploit / converge). This is genuine adaptive evolution.
+        self.sigma = max(1e-3, float(sigma_init))
+        self._adapt_window = max(2, int(adapt_window))
+        self._recent_success: Deque[bool] = deque(maxlen=self._adapt_window)
 
     # ---- fitness ---- #
     def current_fitness(self) -> float:
@@ -199,22 +208,34 @@ class Evolver:
              ) -> Optional[EvolutionResult]:
         results = [self.evaluate(m, owner_approved=owner_approved) for m in candidates]
         adoptable = [r for r in results if r.adopted]
-        if not adoptable:
-            return None
-        best = max(adoptable, key=lambda r: r.delta)
-        self.adopt(best.mutation)
+        best = max(adoptable, key=lambda r: r.delta) if adoptable else None
+        if best is not None:
+            self.adopt(best.mutation)
+        self._adapt_sigma(best is not None)        # widen on success, narrow on stagnation
         return best
 
-    # ---- a default random mutation proposer ---- #
-    def propose(self, n: int = 8, *, scale: float = 0.15) -> List[Mutation]:
+    def _adapt_sigma(self, success: bool) -> None:
+        """Rechenberg's 1/5 rule: keep the success rate near 1/5 by re-scaling the step size."""
+        self._recent_success.append(bool(success))
+        if len(self._recent_success) < self._adapt_window:
+            return
+        rate = sum(self._recent_success) / len(self._recent_success)
+        if rate > 0.2:
+            self.sigma = min(1.0, self.sigma / 0.85)     # succeeding often → explore wider
+        elif rate < 0.2:
+            self.sigma = max(1e-3, self.sigma * 0.85)     # stagnating → converge
+
+    # ---- the adaptive mutation proposer (step-size self-tunes via the 1/5 rule) ---- #
+    def propose(self, n: int = 8, *, scale: Optional[float] = None) -> List[Mutation]:
         keys = [k for k in self.genome if k not in self.protected] or list(self.genome)
+        s = self.sigma if scale is None else float(scale)
         out: List[Mutation] = []
         for _ in range(n):
             target = self._rng.choice(keys)
-            delta = self._rng.gauss(0, scale)
+            delta = self._rng.gauss(0, s)
             out.append(Mutation(target=target, delta=delta,
                                 significance=min(1.0, abs(delta) * 2),
-                                rationale="random perturbation"))
+                                rationale=f"adaptive perturbation (sigma={s:.3f})"))
         return out
 
     # ---- the evolution loop ---- #
@@ -245,7 +266,7 @@ class Evolver:
             by_decision[r.decision.value] = by_decision.get(r.decision.value, 0) + 1
         return {"fitness": round(self.current_fitness(), 4), "genome": dict(self.genome),
                 "evaluations": len(self.history), "by_decision": by_decision,
-                "generations_logged": len(self._genome_log)}
+                "generations_logged": len(self._genome_log), "sigma": round(self.sigma, 4)}
 
     def _record(self, r: EvolutionResult) -> EvolutionResult:
         self.history.append(r)

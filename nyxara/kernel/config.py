@@ -425,6 +425,10 @@ class GenesisConfig(BaseModel):
     mutation_rate: float = Field(default=0.5, ge=0.0, le=1.0)   # P(mutate) vs P(crossover)
     micro_train_steps: int = Field(default=40, ge=1)            # tiny per-candidate training
     micro_corpus_items: int = Field(default=128, ge=1)
+    # Each candidate is scored across this many resampled train/eval folds and the perplexity is
+    # AVERAGED — so a champion is crowned on a denoised estimate, not one lucky split (the fix for
+    # "rankings on a tiny corpus are noise"). 1 reproduces the old single-split behaviour.
+    eval_seeds: int = Field(default=3, ge=1, le=20)
     block_size: int = Field(default=32, ge=8, le=1024)
     max_layers: int = Field(default=5, ge=2, le=24)
     quality_weight: float = Field(default=1.0, ge=0.0)         # smartness vs …

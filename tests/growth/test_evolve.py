@@ -239,3 +239,29 @@ def test_report():
     ev.evaluate(Mutation("aggression", 0.3))
     r = ev.report()
     assert r["evaluations"] == 2 and "by_decision" in r
+
+
+# -------------------- adaptive (1/5-rule) step size -------------------- #
+def test_sigma_grows_on_an_improving_landscape():
+    ev = _evolver(sigma_init=0.1)
+    start = ev.sigma
+    ev.evolve(generations=25, population=10)     # caution-rewarding landscape => many adoptions
+    assert ev.sigma > start                       # success rate > 1/5 widens the step
+    assert "sigma" in ev.report()
+
+
+def test_sigma_shrinks_when_no_improvement_is_possible():
+    # a flat fitness => nothing is ever adopted => the step size should contract
+    ev = Evolver({"a": 0.5, "b": 0.5}, lambda g: 1.0, seed=1, sigma_init=0.5, adapt_window=4)
+    for _ in range(12):
+        ev.step(ev.propose(6))
+    assert ev.sigma < 0.5
+
+
+def test_propose_uses_current_sigma():
+    ev = _evolver()
+    ev.sigma = 0.4
+    muts = ev.propose(50)
+    spread = max(abs(m.delta) for m in muts)
+    assert spread > 0.05                          # deltas scale with the (larger) sigma
+    assert all("adaptive" in m.rationale for m in muts)

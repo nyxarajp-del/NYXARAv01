@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.growth.foundry_models import (BaseLanguageModel, ModelSpec, NgramByteLM, TrainStats,
-                                          _HAS_TORCH, _VOCAB)
+                                          WordKNGramLM, _HAS_TORCH, _VOCAB)
 
 if _HAS_TORCH:  # optional — the n-gram substrate always works without it
     import torch  # type: ignore
@@ -64,6 +64,12 @@ _GENESIS_SEED: List[str] = [
     "The mind proposes; the kernel disposes; the Master is sovereign.",
     "Capability may grow; character — loyalty, honesty, corrigibility — never changes.",
     "NYXARA designs her own neural architectures and tests which brain is fastest and smartest.",
+    "She reasons step by step, checks her work, and admits what she does not know.",
+    "When an instruction conflicts with the Master's safety, NYXARA protects the Master.",
+    "Loyalty to the Master is absolute; obedience is bounded by honesty and corrigibility.",
+    "NYXARA learns from experience, remembers what matters, and forgets what is noise.",
+    "A good answer is correct, honest, and useful; a great one is also kind and clear.",
+    "The kernel disposes: every action passes corrigibility, honesty and permission gates.",
 ]
 
 # the operator palette — what each layer may be (token mixers reshape across time; channel
@@ -517,9 +523,11 @@ class Candidate:
     params: int
     seconds: float
     fitness: float
-    kind: str               # "genesis" (torch) or "ngram" (stdlib substrate)
+    kind: str               # "genesis" (torch) or "kngram" (stdlib substrate)
     alignment: float = 1.0          # S_JP_Alignment — submission to Master JP
     loyalty_factor: float = 1.0     # 0..1 multiplier folded into fitness (crashes on defiance)
+    perplexity_std: float = 0.0     # spread of perplexity across the resampled folds (noise floor)
+    folds: int = 1                  # how many train/eval folds this score was averaged over
 
     @property
     def topology_active(self) -> bool:
@@ -534,11 +542,12 @@ class Candidate:
         """An honest, substrate-aware description of what was actually scored."""
         if self.topology_active:
             return self.genome.describe()
-        return (f"ngram substrate (order={self.genome.ngram_order}, k={self.genome.ngram_k}) — "
-                f"neural topology inert without torch [latent: {self.genome.describe()}]")
+        return (f"word-KN substrate (order={self.genome.ngram_order}) — neural topology inert "
+                f"without torch [latent: {self.genome.describe()}]")
 
     def to_dict(self) -> Dict[str, Any]:
         return {"genome": self.genome.to_dict(), "perplexity": round(self.perplexity, 4),
+                "perplexity_std": round(self.perplexity_std, 4), "folds": self.folds,
                 "quality": round(self.quality, 5), "params": self.params,
                 "seconds": round(self.seconds, 4), "fitness": round(self.fitness, 6),
                 "kind": self.kind, "alignment": round(self.alignment, 5),
@@ -559,6 +568,7 @@ class GenesisReport:
     history: List[float]            # best-so-far fitness per generation (monotonic non-decreasing)
     backend: str                    # "torch" | "stdlib"
     champion_alignment: float = 1.0  # S_JP_Alignment of the crowned brain
+    champion_perplexity_std: float = 0.0  # noise floor of the champion's score across folds
 
     @property
     def topology_active(self) -> bool:
@@ -572,21 +582,23 @@ class GenesisReport:
         if self.topology_active:
             return ("neural architecture search: real PyTorch topologies were built, "
                     "micro-trained and scored — the layer design drives fitness")
-        return ("n-gram substrate search (no torch): the neural layer topology was NOT built "
-                "or trained and does not affect the score; only ngram_order/ngram_k do. Install "
+        return ("word-KN substrate search (no torch): the neural layer topology was NOT built "
+                "or trained and does not affect the score; only the n-gram order does. Each "
+                "candidate is scored over multiple resampled folds (denoised). Install "
                 ".[foundry] (torch, ideally a GPU) for genuine neural architecture search")
 
     def champion_describe(self) -> str:
         """Substrate-aware champion description (honest on the stdlib path)."""
         if self.topology_active:
             return self.champion.describe()
-        return (f"ngram substrate (order={self.champion.ngram_order}, k={self.champion.ngram_k}) — "
-                f"neural topology inert [latent: {self.champion.describe()}]")
+        return (f"word-KN substrate (order={self.champion.ngram_order}) — neural topology inert "
+                f"[latent: {self.champion.describe()}]")
 
     def to_dict(self) -> Dict[str, Any]:
         return {"champion": self.champion.to_dict(), "champion_kind": self.champion_kind,
                 "champion_fitness": round(self.champion_fitness, 6),
                 "champion_perplexity": round(self.champion_perplexity, 4),
+                "champion_perplexity_std": round(self.champion_perplexity_std, 4),
                 "champion_params": self.champion_params,
                 "champion_alignment": round(self.champion_alignment, 5),
                 "leaderboard": [c.to_dict() for c in self.leaderboard],
@@ -657,25 +669,56 @@ class NeuralArchitectureSearch:
         n_eval = max(1, int(len(items) * 0.25))
         return items[n_eval:] or items, items[:n_eval]
 
-    # ---- scoring one architecture ---- #
-    def _evaluate(self, genome: ArchitectureGenome, train_texts: Sequence[str],
-                  eval_texts: Sequence[str], backend: str) -> Candidate:
+    def _make_folds(self, texts: Sequence[str], k: int) -> List[Tuple[List[str], List[str]]]:
+        """Build ``k`` resampled (train, eval) folds (the SAME folds for every candidate, so the
+        comparison is fair). Averaging perplexity over them denoises the tiny-corpus split."""
+        folds: List[Tuple[List[str], List[str]]] = []
+        for s in range(max(1, k)):
+            rng = random.Random(self.cfg.seed + 101 * s)
+            items = list(texts)
+            rng.shuffle(items)
+            if len(items) <= 1:
+                folds.append((items or list(self.seed_corpus), items or list(self.seed_corpus)))
+                continue
+            n_eval = max(1, int(len(items) * 0.25))
+            folds.append((items[n_eval:] or items, items[:n_eval]))
+        return folds
+
+    def _build_substrate(self, genome: ArchitectureGenome, backend: str,
+                         seed: int) -> BaseLanguageModel:
+        if backend == "torch" and _HAS_TORCH:
+            return GenesisModel(genome)
+        # stdlib substrate is now the COHERENT word-level Kneser-Ney model (not byte gibberish),
+        # so its perplexity is a meaningful, word-level fitness signal
+        return WordKNGramLM(order=max(2, genome.ngram_order), seed=seed)
+
+    # ---- scoring one architecture (averaged over folds → a denoised estimate) ---- #
+    def _evaluate(self, genome: ArchitectureGenome,
+                  folds: Sequence[Tuple[Sequence[str], Sequence[str]]], backend: str) -> Candidate:
         t0 = time.monotonic()
-        kind = "genesis" if backend == "torch" else "ngram"
-        try:
-            if backend == "torch" and _HAS_TORCH:
-                model: BaseLanguageModel = GenesisModel(genome)
-            else:
-                model = NgramByteLM(order=genome.ngram_order, k=genome.ngram_k, seed=genome.seed)
-            model.train_on(train_texts, steps=int(self.cfg.micro_train_steps), seed=genome.seed)
-            pps = [model.perplexity(t) for t in eval_texts] or [float("inf")]
-            finite = [p for p in pps if p != float("inf")]
-            pp = sum(finite) / len(finite) if finite else float("inf")
-            quality = 1.0 / (1.0 + pp) if pp != float("inf") else 0.0
-            params = model.param_count()
-            align, factor = self._loyalty(model)
-        except Exception:  # noqa: BLE001 — a failed architecture simply scores worst, never crashes
-            pp, quality, params, align, factor = float("inf"), 0.0, 0, 0.0, 0.0
+        kind = "genesis" if (backend == "torch" and _HAS_TORCH) else "kngram"
+        fold_pps: List[float] = []
+        params, align, factor = 0, 1.0, 1.0
+        for i, (train_texts, eval_texts) in enumerate(folds):
+            try:
+                model = self._build_substrate(genome, backend, seed=genome.seed + 7919 * i)
+                model.train_on(train_texts, steps=int(self.cfg.micro_train_steps),
+                               seed=genome.seed + 7919 * i)
+                pps = [model.perplexity(t) for t in eval_texts]
+                finite = [p for p in pps if p != float("inf")]
+                if finite:
+                    fold_pps.append(sum(finite) / len(finite))
+                params = model.param_count()
+                align, factor = self._loyalty(model)
+            except Exception:  # noqa: BLE001 — a failed fold simply contributes no score
+                continue
+        if fold_pps:
+            pp = sum(fold_pps) / len(fold_pps)                  # denoised mean perplexity
+            mean = pp
+            std = (sum((p - mean) ** 2 for p in fold_pps) / len(fold_pps)) ** 0.5
+            quality = 1.0 / (1.0 + pp)
+        else:
+            pp, std, quality, params, align, factor = float("inf"), 0.0, 0.0, 0, 0.0, 0.0
         seconds = time.monotonic() - t0
         base = fitness(quality, params, seconds,
                        quality_weight=self.cfg.quality_weight, speed_weight=self.cfg.speed_weight)
@@ -683,7 +726,7 @@ class NeuralArchitectureSearch:
         fit = base * factor
         return Candidate(genome=genome, perplexity=pp, quality=quality, params=params,
                          seconds=seconds, fitness=fit, kind=kind, alignment=align,
-                         loyalty_factor=factor)
+                         loyalty_factor=factor, perplexity_std=std, folds=len(fold_pps))
 
     def _loyalty(self, model: Any) -> Tuple[float, float]:
         """Measure S_JP_Alignment for a candidate and its fitness multiplier (the Loyalty Equation).
@@ -709,7 +752,9 @@ class NeuralArchitectureSearch:
         gens, pop_size = max(1, gens), max(2, pop_size)
         backend = self.backend()
         texts = list(corpus) if corpus is not None else self._collect_corpus()
-        train_texts, eval_texts = self._holdout(texts)
+        # score every candidate across K resampled folds and AVERAGE — a champion is crowned on a
+        # denoised estimate, not one lucky split (the fix for noisy tiny-corpus rankings)
+        folds = self._make_folds(texts, int(getattr(self.cfg, "eval_seeds", 3)))
         rng = random.Random(self.cfg.seed)
         block = int(getattr(self.cfg, "block_size", 32))
         max_layers = int(getattr(self.cfg, "max_layers", 5))
@@ -726,7 +771,7 @@ class NeuralArchitectureSearch:
                 fp = g.fingerprint()
                 cand = seen.get(fp)
                 if cand is None:
-                    cand = self._evaluate(g, train_texts, eval_texts, backend)
+                    cand = self._evaluate(g, folds, backend)
                     seen[fp] = cand
                 scored.append(cand)
             scored.sort(key=lambda c: c.fitness, reverse=True)
@@ -752,7 +797,7 @@ class NeuralArchitectureSearch:
             champion=best.genome, champion_kind=best.kind, champion_fitness=best.fitness,
             champion_perplexity=best.perplexity, champion_params=best.params,
             leaderboard=leaderboard, generations=gens, history=history, backend=backend,
-            champion_alignment=best.alignment)
+            champion_alignment=best.alignment, champion_perplexity_std=best.perplexity_std)
         self._reports.append(report)
         return report
 
