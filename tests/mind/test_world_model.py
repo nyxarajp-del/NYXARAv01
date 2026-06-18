@@ -276,3 +276,108 @@ def test_neural_ignores_symbolic_states():
     wm = NeuralWorldModel()
     wm.observe(("home",), "go", ("away",), reward=1.0)   # non-numeric -> not learned
     assert len(wm) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Deep-ensemble model: real learned dynamics + epistemic uncertainty
+# --------------------------------------------------------------------------- #
+np = pytest.importorskip("numpy")  # the ensemble model requires numpy
+
+from nyxara.mind.world_model import EnsembleWorldModel, build_world_model  # noqa: E402
+
+
+def _train_1d_ens(wm, n=600, seed=0):
+    def step(x, a):
+        return {"left": x - 1.0, "right": x + 1.0, "stay": x}[a]
+    rng = random.Random(seed)
+    for _ in range(n):
+        x = rng.uniform(-10, 10)
+        a = rng.choice(["left", "right", "stay"])
+        wm.observe((x,), a, (step(x, a),), reward=-abs(step(x, a)))
+    return wm
+
+
+def test_ensemble_is_a_drop_in():
+    wm = EnsembleWorldModel()
+    assert isinstance(wm, WorldModel)                    # inherits rollout/counterfactual/intervene
+
+
+def test_ensemble_learns_dynamics():
+    wm = _train_1d_ens(EnsembleWorldModel(seed=0))
+    p = wm.predict((4.0,), "left")
+    assert abs(p.next_state[0] - 3.0) < 0.4
+    assert p.confidence > 0.5
+    # states stay native python floats (no numpy types leaking into trajectories)
+    assert type(p.next_state[0]) is float
+
+
+def test_ensemble_confidence_and_epistemic_are_honest_ood():
+    wm = _train_1d_ens(EnsembleWorldModel(seed=0))
+    near = wm.predict((4.0,), "left")
+    far = wm.predict((1000.0,), "left")
+    assert far.confidence < near.confidence and far.confidence < 0.1
+    # epistemic uncertainty (ensemble disagreement) is never negative and is reported
+    assert near.epistemic >= 0.0 and far.epistemic >= 0.0
+
+
+def test_ensemble_rollout_plans_a_path_home():
+    wm = _train_1d_ens(EnsembleWorldModel(seed=0))
+
+    def go_home(state):
+        x = state[0]
+        return "left" if x > 0.5 else ("right" if x < -0.5 else "stay")
+
+    traj = wm.rollout((8.0,), go_home, steps=14)
+    assert abs(traj.final_state[0]) < 1.5
+
+
+def test_ensemble_unknown_action_is_zero_confidence_noop():
+    wm = _train_1d_ens(EnsembleWorldModel())
+    p = wm.predict((0.0,), "teleport")
+    assert p.confidence == 0.0 and p.next_state == (0.0,)
+
+
+def test_ensemble_handles_symbolic_states_via_exact_memory():
+    # the ensemble is a strict superset of the kNN: symbolic states fall back to exact memory
+    wm = EnsembleWorldModel()
+    wm.observe(("room_a",), "go", ("room_b",), reward=1.0)
+    wm.observe(("room_b",), "go", ("room_c",), reward=1.0)
+    assert len(wm) == 2
+    p = wm.predict(("room_a",), "go")
+    assert p.next_state == ("room_b",) and p.confidence == 1.0   # exact recall
+    assert "go" in wm.actions()
+
+
+def test_ensemble_mixes_numeric_and_symbolic():
+    wm = EnsembleWorldModel(seed=0)
+    _train_1d_ens(wm)                                    # numeric dynamics in the ensemble
+    wm.observe(("here",), "warp", ("there",), reward=2.0)  # symbolic in the kNN fallback
+    assert abs(wm.predict((4.0,), "left").next_state[0] - 3.0) < 0.4
+    assert wm.predict(("here",), "warp").next_state == ("there",)
+
+
+def test_ensemble_generalises_to_unseen_states():
+    # train only on |x| < 5; a kNN would clamp/interpolate, the ensemble extrapolates the linear Δ
+    wm = EnsembleWorldModel(seed=0)
+    rng = random.Random(3)
+    for _ in range(600):
+        x = rng.uniform(-5, 5)
+        wm.observe((x,), "right", (x + 1.0,), reward=-abs(x + 1.0))
+    # a modestly-unseen state still predicts the learned +1 delta
+    p = wm.predict((6.5,), "right")
+    assert abs(p.next_state[0] - 7.5) < 0.8
+
+
+def test_build_world_model_factory_prefers_ensemble_with_numpy():
+    wm = build_world_model("auto")
+    assert isinstance(wm, EnsembleWorldModel)
+    assert isinstance(build_world_model("knn"), WorldModel)
+    assert isinstance(build_world_model("neural"), NeuralWorldModel)
+    # unknown kwargs are filtered per backend (callers may pass a superset safely)
+    assert isinstance(build_world_model("knn", ensemble=9, k=2), WorldModel)
+
+
+def test_ensemble_to_dict_includes_epistemic():
+    wm = _train_1d_ens(EnsembleWorldModel(seed=0))
+    d = wm.predict((2.0,), "right").to_dict()
+    assert "epistemic" in d and "confidence" in d

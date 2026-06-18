@@ -644,8 +644,10 @@ class NyxaraCore:
 
     def _build_world_model(self) -> Any:
         try:
-            from nyxara.mind.world_model import WorldModel
-            return WorldModel()
+            from nyxara.mind.world_model import build_world_model
+            # "auto" → a numpy deep-ensemble (real learned dynamics + epistemic uncertainty)
+            # when numpy is present, gracefully falling back to the pure-stdlib learners
+            return build_world_model("auto")
         except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
             return None
 
