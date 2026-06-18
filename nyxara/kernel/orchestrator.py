@@ -601,8 +601,12 @@ class NyxaraCore:
 
     def _build_goals(self) -> Any:
         try:
+            from nyxara.planning.affective_forecast import Forecaster
             from nyxara.planning.goals import GoalSystem
-            gs = GoalSystem()
+            # prioritise goals by how achieving them will feel *lastingly*, not just now: a modest
+            # affective weight lets durable owner-relevant goods (serving the Master never fades)
+            # hold their place while goals whose appeal is a fleeting high are discounted (Rule 1).
+            gs = GoalSystem(forecaster=Forecaster(), affective_weight=0.35)
             # seed the objective space with NYXARA's standing commitments (Rule 1, Rule 3)
             gs.create("protect & serve the Master",
                       {"owner_benefit": 1.0, "owner_safety": 0.8}, priority=0.95, source="core")

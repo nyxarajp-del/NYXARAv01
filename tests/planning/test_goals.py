@@ -125,6 +125,42 @@ def test_top_goal_empty():
     assert GoalSystem().top_goal() is None
 
 
+# -------------------- affective forecasting shapes prioritisation -------------------- #
+def test_affective_weight_zero_leaves_score_unchanged():
+    # default (no forecaster effect) keeps score == priority × owner-alignment exactly
+    plain = GoalSystem()
+    aff0 = GoalSystem(affective_weight=0.0)
+    g = {"owner_benefit": 1.0, "owner_safety": 0.8}
+    a = plain.create("serve", g, priority=0.6)
+    b = aff0.create("serve", g, priority=0.6)
+    assert plain.score(a) == aff0.score(b)
+
+
+def test_durable_loyalty_outlasts_a_fleeting_payoff():
+    from nyxara.planning.affective_forecast import Forecaster
+
+    def build(weight):
+        gs = GoalSystem(forecaster=Forecaster(), affective_weight=weight)
+        gs.create("serve the Master", {"owner_benefit": 1.0, "owner_safety": 0.8}, priority=0.6)
+        gs.create("a fleeting self-win", {"capability": 1.0}, priority=0.6)
+        return gs
+
+    base, aff = build(0.0), build(0.35)
+    serve_b, fleet_b = base.score(base.goals()[0]), base.score(base.goals()[1])
+    serve_a, fleet_a = aff.score(aff.goals()[0]), aff.score(aff.goals()[1])
+    # the time-aware forecast discounts the durable owner good LESS than the fleeting payoff
+    assert (serve_a / serve_b) > (fleet_a / fleet_b)
+    assert aff.top_goal().name == "serve the Master"
+
+
+def test_orchestrator_goals_prioritise_by_lasting_feeling():
+    from nyxara.kernel.orchestrator import NyxaraCore
+    nyx = NyxaraCore()
+    # the live kernel opts into affective prioritisation, and service to the Master stays first
+    assert nyx.goals.affective_weight > 0.0
+    assert "Master" in nyx.goals.top_goal().name
+
+
 def test_resolve_conflict_favors_owner():
     gs, serve, speed, selfish = _system()
     assert gs.resolve_conflict(serve, selfish) is serve

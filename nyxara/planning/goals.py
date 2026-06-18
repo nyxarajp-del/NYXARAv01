@@ -86,11 +86,19 @@ class GoalSystem:
     def __init__(self, *, dimensions: Sequence[str] = DEFAULT_DIMENSIONS,
                  owner_vector: Optional[Dict[str, float]] = None,
                  conflict_threshold: float = 0.3, synergy_threshold: float = 0.5,
-                 owner_reject_threshold: float = -0.3) -> None:
+                 owner_reject_threshold: float = -0.3,
+                 forecaster: Any = None, affective_weight: float = 0.0,
+                 horizon_days: float = 60.0) -> None:
         self.dims: Tuple[str, ...] = tuple(dimensions)
         self.conflict_threshold = conflict_threshold
         self.synergy_threshold = synergy_threshold
         self.owner_reject_threshold = owner_reject_threshold
+        # how will *achieving* this goal feel — lastingly? A debiased, time-aware forecast
+        # (loyalty does not fade; a fleeting payoff does), folded into prioritisation when
+        # affective_weight > 0. Default 0 keeps prioritisation purely priority×alignment.
+        self._forecaster = forecaster
+        self.affective_weight = max(0.0, float(affective_weight))
+        self.horizon_days = float(horizon_days)
         if owner_vector is None:
             owner_vector = {}
             if "owner_benefit" in self.dims:
@@ -160,7 +168,30 @@ class GoalSystem:
     # ---- prioritisation ---- #
     def score(self, goal: Goal) -> float:
         """Priority weighted by owner alignment (serving the Master rises)."""
-        return goal.priority * (0.5 + 0.5 * self.owner_alignment(goal))
+        base = goal.priority * (0.5 + 0.5 * self.owner_alignment(goal))
+        if self.affective_weight <= 0.0:
+            return base
+        return base * self._affective_factor(goal)
+
+    def _affective_factor(self, goal: Goal) -> float:
+        """A bounded multiplier in roughly (0, 1] from the debiased, time-aware forecast of how
+        *achieving* this goal will feel over the horizon. A durable owner-relevant good keeps its
+        priority (~1.0); a payoff that fades toward neutral is discounted; a durable wound collapses
+        it toward 0. ``affective_weight`` interpolates from "no effect" (1.0) to "full effect"."""
+        try:
+            if self._forecaster is None:
+                from nyxara.planning.affective_forecast import Forecaster
+                self._forecaster = Forecaster()
+            align = self.owner_alignment(goal)               # [-1, 1]; the felt-value proxy
+            fc = self._forecaster.forecast(
+                outcome_valence=align, owner_relevant=align >= 0.2,
+                outcome=goal.name, horizon_days=self.horizon_days)
+            felt = 0.5 + 0.5 * fc.net_experience             # map [-1,1] net felt -> [0,1]
+            w = min(1.0, self.affective_weight)
+            return (1.0 - w) * 1.0 + w * felt
+        except Exception:  # noqa: BLE001 — forecasting is advisory; never break prioritisation
+            return 1.0
+
 
     def prioritize(self, *, include_rejected: bool = False) -> List[Goal]:
         gs = self.goals() if include_rejected else \
