@@ -53,6 +53,7 @@ __all__ = [
     "ForgedTool",
     "ForgeResult",
     "CapabilityFoundry",
+    "best_recipe",
 ]
 
 
@@ -795,6 +796,10 @@ def _parametric_recipe(need: str) -> Optional[_Recipe]:
             f"def handle(x):\n    return round(x, {nd})\n",
             [{"args": {"x": 3.14159}, "expect": round(3.14159, nd)}])
 
+    return _parametric_arithmetic(low)
+
+
+def _parametric_arithmetic(low: str) -> Optional[_Recipe]:
     # 5. arithmetic by a constant ("multiply by 7", "add 5", "divide by 2")
     m = re.search(r"(multiply|times|add|plus|subtract|minus|divide)\s*(?:by\s*)?(-?\d+(?:\.\d+)?)",
                   low)
@@ -819,6 +824,16 @@ def _parametric_recipe(need: str) -> Optional[_Recipe]:
             [{"args": {"x": 10.0}, "expect": example}])
 
     return None
+
+
+def best_recipe(need: str) -> _Recipe:
+    """Resolve a capability gap to its best recipe (fixed → parametric → generic).
+
+    Exposed so other faculties (e.g. ``mind/creative.py`` code-gen) can reuse the foundry's
+    deterministic, offline synthesis for real working code without constructing a whole
+    :class:`CapabilityFoundry`. The returned recipe's ``source`` defines ``handle(...)``.
+    """
+    return CapabilityFoundry._resolve_recipe(need)
 
 
 # --------------------------------------------------------------------------- #
