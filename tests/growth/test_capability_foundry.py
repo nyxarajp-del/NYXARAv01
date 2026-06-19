@@ -208,3 +208,76 @@ def test_forge_capability_tool_registered_and_owner_gated():
     r = reg.invoke("forge_capability", {"need": "reverse a string"},
                    authority=Authority.AUTONOMOUS)
     assert not r.ok and r.requires_owner
+
+
+# --------------------------------------------------------------------------- #
+# Expanded recipe library — real, tested tools (not echo scaffolds)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("need, args, expect", [
+    ("count the vowels in a string", {"text": "hello"}, 2),
+    ("check if a string is a palindrome", {"text": "Racecar"}, True),
+    ("apply rot13 to text", {"text": "Hello"}, "Uryyb"),
+    ("compute the standard deviation", {"numbers": [2, 4, 4, 4, 5, 5, 7, 9]}, 2.0),
+    ("sort a list of numbers", {"numbers": [3, 1, 2]}, [1, 2, 3]),
+    ("decode base64", {"text": "aGk="}, "hi"),
+    ("the day of the week for a date", {"date": "2024-01-01"}, "Monday"),
+    ("sum of digits of a number", {"n": 123}, 6),
+])
+def test_expanded_recipes_forge_and_compute(tmp_path, need, args, expect):
+    f = _foundry(tmp_path)
+    res = f.forge(need, authority=Authority.OWNER)
+    assert res.deployed and res.origin == "template"
+    assert res.tool_name != "generic" and not res.tool_name.startswith("cap_")
+    r = f.registry.invoke(res.tool_name, args, authority=Authority.OWNER)
+    assert r.ok and r.value == expect
+
+
+def test_validate_email_is_real_not_echo(tmp_path):
+    f = _foundry(tmp_path)
+    res = f.forge("validate an email address", authority=Authority.OWNER)
+    assert res.deployed and res.tool_name == "is_email"
+    good = f.registry.invoke("is_email", {"text": "a@b.com"}, authority=Authority.OWNER)
+    bad = f.registry.invoke("is_email", {"text": "nope"}, authority=Authority.OWNER)
+    assert good.value is True and bad.value is False
+
+
+# --------------------------------------------------------------------------- #
+# Parametric synthesis — real code whose body depends on a constant in the gap
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("need, args, expect", [
+    ("convert celsius to fahrenheit", {"value": 100.0}, 212.0),
+    ("convert fahrenheit to celsius", {"value": 32.0}, 0.0),
+    ("convert km to miles", {"value": 1.0}, 0.621371),
+    ("convert an integer to base 16", {"n": 255}, "ff"),
+    ("convert a number to base 2", {"n": 5}, "101"),
+    ("caesar cipher with a shift of 3", {"text": "abc"}, "def"),
+    ("round to 2 decimal places", {"x": 3.14159}, 3.14),
+    ("multiply by 7", {"x": 6}, 42),
+])
+def test_parametric_synthesis_forges_real_tools(tmp_path, need, args, expect):
+    f = _foundry(tmp_path)
+    res = f.forge(need, authority=Authority.OWNER)
+    assert res.deployed and res.stage is ForgeStage.DONE
+    # parametric tools are concrete, not the generic echo scaffold
+    assert not res.tool_name.startswith("cap_")
+    r = f.registry.invoke(res.tool_name, args, authority=Authority.OWNER)
+    assert r.ok
+    if isinstance(expect, float):
+        assert abs(r.value - expect) <= 1e-6
+    else:
+        assert r.value == expect
+
+
+def test_truly_unknown_gap_still_falls_back_to_generic(tmp_path):
+    # an open-ended creative gap with no recipe/parametric match stays the honest scaffold
+    plan = _foundry(tmp_path).plan("generate a photorealistic image of a cat")
+    assert plan.shape == "generic"
+
+
+def test_generic_scaffold_is_honestly_labelled(tmp_path):
+    # when the echo scaffold IS used, it must self-identify (never over-claim a capability)
+    f = _foundry(tmp_path)
+    res = f.forge("generate a photorealistic image of a cat", authority=Authority.OWNER)
+    assert res.deployed
+    r = f.registry.invoke(res.tool_name, {"payload": "x"}, authority=Authority.OWNER)
+    assert r.ok and r.value == {"echo": "x", "scaffold": True}
