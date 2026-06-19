@@ -43,6 +43,50 @@ def test_embedder_rejects_tiny_dim():
         HashingEmbedder(dim=4)
 
 
+# -------------------- lexical-semantic embedder (dependency-free) -------------------- #
+def test_lexical_semantic_deterministic_normalised_and_lexical():
+    from nyxara.memory.store import LexicalSemanticEmbedder
+    e = LexicalSemanticEmbedder(dim=128)
+    v1, v2 = e.embed("guard the Master"), e.embed("guard the Master")
+    assert v1 == v2 and len(v1) == 128
+    assert abs(sum(x * x for x in v1) ** 0.5 - 1.0) < 1e-9
+    assert e.is_lexical is True  # keeps the recall-floor calibration
+
+
+def test_stemmer_collapses_inflections():
+    from nyxara.memory.store import _stem
+    assert _stem("running") == "run"
+    assert _stem("logs") == "log"
+    assert _stem("attacks") == "attack"
+    assert _stem("quickly") == "quick"
+    assert _stem("memories") == "memory"
+
+
+def test_lexical_semantic_recalls_synonyms_better_than_hashing():
+    from nyxara.memory.store import LexicalSemanticEmbedder, _cosine
+    old, new = HashingEmbedder(dim=256), LexicalSemanticEmbedder(dim=256)
+    q, d = "an intrusion was detected", "unauthorised breach in the system"
+    # the curated relation map gives real (bounded) semantic recall the hash embedder lacks
+    assert _cosine(new.embed(q), new.embed(d)) > _cosine(old.embed(q), old.embed(d))
+
+
+def test_lexical_semantic_keeps_unrelated_text_low():
+    from nyxara.memory.store import LexicalSemanticEmbedder, _cosine
+    e = LexicalSemanticEmbedder(dim=256)
+    sim = _cosine(e.embed("please help me"), e.embed("can you assist me"))
+    unrel = _cosine(e.embed("the cat sat on the mat"),
+                    e.embed("quantum chromodynamics lecture notes"))
+    assert sim > 0.2 > unrel  # synonyms recall; unrelated stays low
+
+
+def test_default_fallback_embedder_is_lexical_semantic():
+    from nyxara.memory.store import LexicalSemanticEmbedder, make_embedder
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.memory.semantic_embeddings = False  # force the dependency-free fallback
+    assert isinstance(make_embedder(s), LexicalSemanticEmbedder)
+
+
 # -------------------- vector index -------------------- #
 def test_vector_index_add_search_remove():
     e = HashingEmbedder(dim=64)

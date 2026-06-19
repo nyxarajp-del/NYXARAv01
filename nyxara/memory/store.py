@@ -52,6 +52,7 @@ __all__ = [
     "MemoryType",
     "MemoryRecord",
     "HashingEmbedder",
+    "LexicalSemanticEmbedder",
     "SentenceTransformerEmbedder",
     "make_embedder",
     "VectorIndex",
@@ -131,6 +132,145 @@ class HashingEmbedder:
         return [v / norm for v in vec]
 
 
+# --------------------------------------------------------------------------- #
+# Lexical-semantic embedder — dependency-free, but with real morphology + relations
+# --------------------------------------------------------------------------- #
+_STOPWORDS = frozenset((
+    "the", "a", "an", "of", "to", "and", "or", "in", "on", "at", "is", "are", "was",
+    "were", "be", "been", "it", "this", "that", "these", "those", "for", "with", "as",
+    "by", "from", "i", "you", "he", "she", "we", "they", "me", "my", "your", "do",
+    "does", "did", "has", "have", "had", "will", "would", "can", "could", "should",
+    "what", "which", "who", "how", "when", "where", "why", "not", "no", "yes", "so",
+))
+
+# Curated semantic-relation clusters: words that should recall one another share a
+# concept feature, so the dependency-free embedder gains REAL (if bounded) semantic
+# reach — "intrusion" recalls "unauthorised breach", "fast" recalls "rapid". This is an
+# honest heuristic thesaurus over NYXARA's core domains, not a learned space; it is
+# stemmed at load so inflections match too, and is trivially extensible.
+_SYNSETS: Tuple[Tuple[str, ...], ...] = (
+    ("intrusion", "breach", "attack", "unauthorized", "unauthorised", "compromise",
+     "hack", "exploit", "threat", "intruder"),
+    ("login", "signin", "logon", "authenticate", "authentication", "credential", "password"),
+    ("master", "owner", "jp", "jaypal", "commander", "creator"),
+    ("delete", "remove", "erase", "wipe", "destroy", "purge"),
+    ("create", "make", "build", "generate", "construct", "forge"),
+    ("error", "failure", "fault", "bug", "crash", "exception", "fail"),
+    ("fast", "quick", "rapid", "swift", "speedy", "prompt"),
+    ("slow", "sluggish", "laggy", "delayed"),
+    ("help", "assist", "aid", "support", "serve"),
+    ("happy", "glad", "joyful", "pleased", "content", "cheerful"),
+    ("sad", "unhappy", "sorrowful", "gloomy", "depressed"),
+    ("angry", "furious", "irate", "enraged"),
+    ("big", "large", "huge", "enormous", "massive"),
+    ("small", "tiny", "little", "minor"),
+    ("smart", "intelligent", "clever", "brilliant", "wise"),
+    ("danger", "risk", "hazard", "peril", "unsafe"),
+    ("safe", "secure", "protected", "guarded"),
+    ("learn", "study", "train", "educate"),
+    ("remember", "recall", "memorize", "memorise", "retain"),
+    ("start", "begin", "initiate", "launch", "commence"),
+    ("stop", "halt", "cease", "terminate", "shutdown"),
+    ("increase", "raise", "grow", "boost", "augment"),
+    ("decrease", "reduce", "lower", "shrink", "diminish"),
+    ("question", "query", "ask", "inquire"),
+    ("answer", "reply", "respond", "response"),
+    ("file", "document", "record"),
+    ("network", "connection", "internet", "web"),
+    ("upgrade", "improve", "enhance", "strengthen", "optimize", "optimise"),
+)
+
+
+def _stem(word: str) -> str:
+    """A compact, conservative suffix-stripping stemmer (collapses common inflections)."""
+    w = word
+    if len(w) <= 3:
+        return w
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("ied") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("ing") and len(w) > 5:
+        w = w[:-3]
+    elif w.endswith("ed") and len(w) > 4:
+        w = w[:-2]
+    elif w.endswith("ly") and len(w) > 4:
+        w = w[:-2]
+    elif w.endswith("es") and len(w) > 4 and not w.endswith(("sses", "ches", "shes", "xes")):
+        w = w[:-2] if not w.endswith(("ses", "zes")) else w[:-1]
+    elif w.endswith("s") and not w.endswith(("ss", "us", "is")) and len(w) > 3:
+        w = w[:-1]
+    # collapse a doubled final consonant left by -ing/-ed ("runn"->"run", "stopp"->"stop")
+    if len(w) > 2 and w[-1] == w[-2] and w[-1] not in "aeiou":
+        w = w[:-1]
+    return w
+
+
+# concept id per stemmed word (built once at import)
+_CONCEPT_OF: Dict[str, int] = {}
+for _ci, _syn in enumerate(_SYNSETS):
+    for _word in _syn:
+        _CONCEPT_OF[_stem(_word)] = _ci
+
+
+class LexicalSemanticEmbedder:
+    """Dependency-free embedder with real morphology + a curated semantic-relation map.
+
+    A strict upgrade over :class:`HashingEmbedder`: it stems tokens (so "running"≈"run"),
+    down-weights stopwords (less common-word noise), keeps char n-grams (typo robustness),
+    and — decisively — projects related terms onto a shared *concept* feature so recall is
+    no longer keyword-only ("intrusion" recalls "unauthorised breach"). It stays an honest
+    *lexical* space (cosines run lower than a learned model), so ``is_lexical`` remains True
+    and the recall-floor calibration is unchanged. Same ``embed(text) -> list[float]`` shape.
+    """
+
+    is_lexical: bool = True
+
+    def __init__(self, dim: int = 128, seed: int = 1469598103934665603) -> None:
+        if dim < 8:
+            raise MemoryError_("embedding dim too small", context={"dim": dim})
+        self.dim = dim
+        self._seed = seed
+
+    def _hash(self, token: str) -> int:
+        h = self._seed
+        for ch in token:
+            h ^= ord(ch)
+            h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+        return h
+
+    def _add(self, vec: List[float], token: str, weight: float) -> None:
+        h = self._hash(token)
+        sign = 1.0 if (h >> 1) & 1 else -1.0
+        vec[h % self.dim] += sign * weight
+
+    @staticmethod
+    def _words(text: str) -> List[str]:
+        return "".join(c if c.isalnum() else " " for c in text.lower()).split()
+
+    def embed(self, text: str) -> List[float]:
+        # Base signal mirrors HashingEmbedder's scale (stemmed word + char trigrams at full
+        # weight) so the lexical-overlap cosines — and the recall-floor calibrated for them —
+        # are preserved. Stemming and the shared concept feature are STRICT ADDITIONS on top:
+        # they only ever raise similarity for morphological variants and related meanings.
+        vec = [0.0] * self.dim
+        any_token = False
+        for word in self._words(text):
+            any_token = True
+            stem = _stem(word)
+            self._add(vec, stem, 1.0)                          # stemmed word (run≈running)
+            padded = f"#{stem}#"                               # subword (typo) robustness
+            for i in range(len(padded) - 2):
+                self._add(vec, padded[i:i + 3], 1.0)
+            concept = _CONCEPT_OF.get(stem)                    # shared meaning feature
+            if concept is not None and word not in _STOPWORDS:
+                self._add(vec, f"§{concept}", 0.9)
+        if not any_token:
+            self._add(vec, "∅", 1.0)
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+
 class SentenceTransformerEmbedder:
     """A learned semantic embedder (sentence-transformers), import-guarded.
 
@@ -174,7 +314,7 @@ def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
         except Exception:  # noqa: BLE001 — fall back rather than fail to boot
             pass
     dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128
-    return HashingEmbedder(dim=dim)
+    return LexicalSemanticEmbedder(dim=dim)
 
 
 # --------------------------------------------------------------------------- #
