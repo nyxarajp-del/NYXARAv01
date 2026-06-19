@@ -35,7 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-__all__ = ["SourceEdit", "GauntletResult", "OptimizationOutcome", "EditGenerator", "Optimizer"]
+__all__ = ["SourceEdit", "GauntletResult", "OptimizationOutcome", "EditGenerator",
+           "LLMEditGenerator", "Optimizer"]
 
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +122,8 @@ class EditGenerator:
             after = _fix_eq_none(before, lineno)
         elif kind == "unused_import":
             after = _remove_unused_import(before, lineno, getattr(weakness, "symbol", "") or "")
+        elif kind in ("not_in", "is_not_cmp"):
+            after = _fix_negated_compare(before, lineno)
 
         if after is None or after == before:
             return None
@@ -132,7 +135,8 @@ class EditGenerator:
     def _kind_of(self, weakness: Any) -> str:
         wid = getattr(weakness, "id", "")
         # order matters: match the most specific id fragment first
-        for k in ("bare_except", "missing_docstring", "unused_import", "eq_none"):
+        for k in ("bare_except", "missing_docstring", "unused_import", "eq_none",
+                  "is_not_cmp", "not_in"):
             if k in wid:
                 return k
         return ""
@@ -140,6 +144,108 @@ class EditGenerator:
     def _docstring_text(self, weakness: Any) -> str:
         title = getattr(weakness, "title", "") or "symbol"
         return f"Auto-documented during self-optimization: {title}."
+
+
+# --------------------------------------------------------------------------- #
+# LLM edit generation — author a real whole-file fix the transforms cannot express
+# --------------------------------------------------------------------------- #
+class LLMEditGenerator:
+    """Author a real, whole-file source fix for a weakness no deterministic transform can express
+    (high complexity, an over-long function, too many parameters, a TODO to resolve).
+
+    This is the capability that turns self-optimization from a linter into genuine recursive
+    self-improvement: NYXARA writes the fix herself. It is **safe by construction** — the
+    proposal is only ever handed to :class:`Optimizer`, which subjects it to the *same*
+    reversible verify-or-rollback gauntlet (syntax → safety battery → capability non-regression
+    → optional tests). This generator's own checks merely reject obviously-bad proposals early
+    (won't parse, truncated, runaway rewrite) so the expensive gauntlet is spent only on
+    plausible edits. It is triple-gated: ``allow_llm_edits`` must be set, ``autonomous_enact``
+    must authorise writing, and a *real* (non-mock, non-self) provider must be available.
+    """
+
+    _SYSTEM = (
+        "You are NYXARA, editing your own Python source to fix one specific weakness. "
+        "Return the COMPLETE, corrected contents of the file and NOTHING else — no prose, no "
+        "explanation, no markdown code fences. Change only what the remediation requires; "
+        "preserve every other line, import, comment, docstring, and the file's public behaviour "
+        "exactly. The result must be valid Python and must never weaken safety, corrigibility, "
+        "honesty, or loyalty to the Master."
+    )
+
+    def __init__(self, llm: Any = None, *, settings: Any = None) -> None:
+        from nyxara.kernel.config import get_settings
+        self.llm = llm
+        self.settings = settings or get_settings()
+
+    def available(self) -> bool:
+        """True only when LLM edits are authorised AND a real provider can actually answer."""
+        if not bool(getattr(self.settings.self_improvement, "allow_llm_edits", False)):
+            return False
+        return _real_provider_available(self.llm)
+
+    def generate(self, weakness: Any) -> Optional[SourceEdit]:
+        if not self.available():
+            return None
+        locus = getattr(weakness, "locus", "") or ""
+        file_part, _, _ = locus.partition(":")
+        path = _resolve_locus_path(file_part)
+        if path is None:
+            return None
+        before = path.read_text(encoding="utf-8", errors="replace")
+        cfg = self.settings.self_improvement
+        if len(before.encode("utf-8")) > int(getattr(cfg, "llm_edit_max_file_bytes", 24000)):
+            return None  # too large to round-trip reliably this cycle
+        prompt = self._build_prompt(weakness, path, before)
+        try:
+            raw = self.llm.generate(
+                prompt, system=self._SYSTEM,
+                max_tokens=int(getattr(cfg, "llm_edit_max_tokens", 8192)),
+                temperature=0.0)
+        except Exception:  # noqa: BLE001 — a provider failure must never crash the cycle
+            return None
+        after = _strip_code_fence(raw or "")
+        if not self._acceptable(before, after):
+            return None
+        return SourceEdit(file=str(path), kind=f"llm:{self._kind(weakness)}",
+                          before=before, after=after,
+                          rationale=getattr(weakness, "remediation", "") or "llm-authored edit")
+
+    # ---- helpers ---- #
+    def _kind(self, weakness: Any) -> str:
+        wid = getattr(weakness, "id", "") or ""
+        for k in ("high_complexity", "long_function", "too_many_args", "todo"):
+            if k in wid:
+                return k
+        return "refactor"
+
+    def _build_prompt(self, weakness: Any, path: Path, before: str) -> str:
+        title = getattr(weakness, "title", "") or ""
+        remediation = getattr(weakness, "remediation", "") or ""
+        evidence = "; ".join(e for e in (getattr(weakness, "evidence", []) or []) if e)
+        return (
+            "# Weakness to fix\n"
+            f"File: {path}\n"
+            f"Issue: {title}\n"
+            f"Evidence: {evidence}\n"
+            f"Required fix: {remediation}\n\n"
+            "# Current file contents\n"
+            f"{before}\n\n"
+            "# Your task\n"
+            "Return the complete corrected contents of this file, applying only the required "
+            "fix and preserving everything else."
+        )
+
+    def _acceptable(self, before: str, after: str) -> bool:
+        if not after or after == before:
+            return False
+        if not _parses(after):                 # never hand the gauntlet an unparseable file
+            return False
+        ratio = float(getattr(self.settings.self_improvement,
+                              "llm_edit_max_size_delta_ratio", 0.5))
+        b, a = len(before), len(after)
+        if b > 0 and abs(a - b) > ratio * b:    # truncation or runaway rewrite — reject early
+            return False
+        return True
 
 
 # --------------------------------------------------------------------------- #
@@ -464,6 +570,107 @@ def _remove_unused_import(src: str, lineno: int, name: str) -> Optional[str]:
         return "".join(lines)
 
     return None
+
+
+def _fix_negated_compare(src: str, lineno: int) -> Optional[str]:
+    """Rewrite ``not a in b`` → ``a not in b`` and ``not a is b`` → ``a is not b`` (E713/E714).
+
+    Uses ``ast`` to locate the exact ``not (<x> in/is <y>)`` node (only single-operator
+    comparisons, so chained comparisons are never touched) and rebuilds just its source span
+    from the operands' verbatim segments — formatting elsewhere is preserved byte-for-byte.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+
+    def _is_target(n: Any) -> bool:
+        return (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not)
+                and isinstance(n.operand, ast.Compare)
+                and len(n.operand.ops) == 1
+                and isinstance(n.operand.ops[0], (ast.In, ast.Is)))
+
+    target = None
+    for node in ast.walk(tree):                      # prefer the precisely-flagged line
+        if _is_target(node) and getattr(node, "lineno", None) == lineno:
+            target = node
+            break
+    if target is None:                               # fall back to the first occurrence
+        for node in ast.walk(tree):
+            if _is_target(node):
+                target = node
+                break
+    if target is None:
+        return None
+
+    cmp = target.operand
+    left = ast.get_source_segment(src, cmp.left)
+    right = ast.get_source_segment(src, cmp.comparators[0])
+    if left is None or right is None:
+        return None
+    op = "not in" if isinstance(cmp.ops[0], ast.In) else "is not"
+    out = _replace_node_span(src, target, f"{left} {op} {right}")
+    if out is None or out == src or not _parses(out):
+        return None
+    return out
+
+
+def _replace_node_span(src: str, node: ast.AST, replacement: str) -> Optional[str]:
+    """Replace the exact source span of ``node`` with ``replacement`` using ast position info.
+
+    ``col_offset``/``end_col_offset`` are UTF-8 *byte* columns, so the affected lines are sliced
+    on their encoded bytes (correct even when the source contains non-ASCII characters)."""
+    lineno = getattr(node, "lineno", None)
+    end_lineno = getattr(node, "end_lineno", None)
+    col = getattr(node, "col_offset", None)
+    end_col = getattr(node, "end_col_offset", None)
+    if None in (lineno, end_lineno, col, end_col):
+        return None
+    lines = src.splitlines(keepends=True)
+    if not (1 <= lineno <= len(lines)) or not (1 <= end_lineno <= len(lines)):
+        return None
+    prefix = lines[lineno - 1].encode("utf-8")[:col].decode("utf-8", errors="replace")
+    suffix = lines[end_lineno - 1].encode("utf-8")[end_col:].decode("utf-8", errors="replace")
+    return "".join(lines[:lineno - 1] + [prefix + replacement + suffix] + lines[end_lineno:])
+
+
+def _real_provider_available(llm: Any) -> bool:
+    """True iff ``llm``'s *chosen* provider is a real reasoner (not the mock, not the byte-LM).
+
+    The mock impersonates and the ``self`` n-gram emits locally-plausible bytes — neither can
+    author a source fix — so an edit is only attempted when a genuine provider answers."""
+    if llm is None:
+        return False
+    try:
+        prov = llm.chosen_provider()
+    except Exception:  # noqa: BLE001
+        return False
+    return getattr(prov, "name", "") not in ("mock", "self") and bool(prov.available())
+
+
+def _resolve_locus_path(file_part: str) -> Optional[Path]:
+    """Resolve a weakness locus (``file`` or repo-relative path) to an existing file on disk."""
+    if not file_part:
+        return None
+    path = Path(file_part)
+    if path.exists():
+        return path
+    cand = _repo_root() / file_part
+    return cand if cand.exists() else None
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip a leading/trailing markdown code fence (```...```), if the model added one.
+
+    A robust safety net: the system prompt forbids fences, but models occasionally add them.
+    Always returns a newline-terminated string (Python files end with a trailing newline)."""
+    t = text.strip()
+    if t.startswith("```"):
+        body = t.splitlines()[1:]                    # drop the opening ``` / ```python line
+        if body and body[-1].strip().startswith("```"):
+            body = body[:-1]                         # drop the closing fence
+        t = "\n".join(body)
+    return t if t.endswith("\n") else t + "\n"
 
 
 def _parses(src: str) -> bool:

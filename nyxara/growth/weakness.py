@@ -33,12 +33,14 @@ class Weakness:
     is_source_edit: bool = False     # True ⇒ remediation is a concrete source-code change
     locus: str = ""                  # file:line or module the edit/forge targets
     symbol: str = ""                 # the precise symbol the edit targets (e.g. an import name)
+    edit_strategy: str = ""          # "deterministic" | "llm" | "" — who can author the edit
 
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "source": self.source, "severity": round(self.severity, 3),
                 "title": self.title, "evidence": self.evidence,
                 "remediation": self.remediation, "is_source_edit": self.is_source_edit,
-                "locus": self.locus, "symbol": self.symbol}
+                "locus": self.locus, "symbol": self.symbol,
+                "edit_strategy": self.edit_strategy}
 
 
 @dataclass
@@ -153,14 +155,22 @@ class WeaknessSynthesizer:
     def _from_code(self, code: Any) -> List[Weakness]:
         out: List[Weakness] = []
         findings = getattr(code, "findings", []) or []
-        # source-editable kinds the optimizer can actually fix safely
-        editable = {"bare_except", "missing_docstring", "eq_none", "unused_import"}
+        # source-editable kinds the optimizer can fix with a deterministic, AST-validated
+        # transform (instant, offline, zero LLM/network dependence)
+        deterministic = {"bare_except", "missing_docstring", "eq_none", "unused_import",
+                         "not_in", "is_not_cmp"}
+        # kinds that are genuine source fixes but need real authoring (a whole-file rewrite the
+        # LLM proposes); they only fire when the LLM edit path is enabled + a provider exists,
+        # and every such edit still clears the same reversible gauntlet
+        llm_editable = {"high_complexity", "long_function", "too_many_args", "todo"}
         for f in findings:
             kind = getattr(f, "kind", "")
             sev = float(getattr(f, "severity", 0.3) or 0.3)
             # de-prioritise hygiene below capability/architecture by capping
             if kind in ("missing_docstring", "todo"):
                 sev = min(sev, 0.3)
+            strategy = ("deterministic" if kind in deterministic
+                        else "llm" if kind in llm_editable else "")
             out.append(Weakness(
                 id=f"code-{kind}-{getattr(f, 'file', '?')}-{getattr(f, 'lineno', 0)}",
                 source="code", severity=sev,
@@ -169,7 +179,8 @@ class WeaknessSynthesizer:
                 evidence=[getattr(f, "detail", "")]
                 + ([getattr(f, "critique", "")] if getattr(f, "critique", "") else []),
                 remediation=_code_remediation(kind),
-                is_source_edit=kind in editable,
+                is_source_edit=bool(strategy),
+                edit_strategy=strategy,
                 locus=f"{getattr(f, 'file', '?')}:{getattr(f, 'lineno', 0)}",
                 symbol=str(getattr(f, "symbol", "") or "")))
         return out
@@ -185,6 +196,8 @@ def _code_remediation(kind: str) -> str:
         "too_many_args": "group related parameters into a dataclass/config object",
         "eq_none": "use 'is None'/'is not None' instead of '=='/'!=' for None comparison",
         "unused_import": "remove the unused import so the dependency surface stays honest",
+        "not_in": "use the 'not in' membership operator instead of 'not ... in ...' (E713)",
+        "is_not_cmp": "use the 'is not' operator instead of 'not ... is ...' (E714)",
         "todo": "resolve or file the TODO; remove the stale marker",
     }.get(kind, "review and refactor")
 

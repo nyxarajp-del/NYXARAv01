@@ -248,3 +248,21 @@ def test_core_wires_genesis(tmp_path, monkeypatch):
         assert "champion" in report
     finally:
         reload_settings()
+
+
+# -------------------- multi-fold denoised scoring -------------------- #
+def test_candidates_are_scored_over_multiple_folds():
+    nas = NeuralArchitectureSearch(cfg=_cfg(eval_seeds=3), seed_corpus=_CORPUS)
+    report = nas.search()
+    # every scored candidate carries its fold count and a (non-negative) perplexity spread
+    assert all(c.folds >= 1 for c in report.leaderboard)
+    assert all(c.perplexity_std >= 0.0 for c in report.leaderboard)
+    assert report.champion_perplexity_std >= 0.0
+    assert report.to_dict()["champion_perplexity_std"] >= 0.0
+
+
+def test_stdlib_substrate_is_word_kngram():
+    nas = NeuralArchitectureSearch(cfg=_cfg(), seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.backend == "stdlib"
+    assert report.leaderboard[0].kind == "kngram"       # coherent word-level substrate

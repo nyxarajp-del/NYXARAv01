@@ -298,7 +298,7 @@ class FoundryConfig(BaseModel):
     # Default to LoRA fine-tuning of a pretrained base — the path to genuine capability
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
-    backend: Literal["auto", "ngram", "nanogpt", "lora"] = "lora"
+    backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
@@ -425,6 +425,10 @@ class GenesisConfig(BaseModel):
     mutation_rate: float = Field(default=0.5, ge=0.0, le=1.0)   # P(mutate) vs P(crossover)
     micro_train_steps: int = Field(default=40, ge=1)            # tiny per-candidate training
     micro_corpus_items: int = Field(default=128, ge=1)
+    # Each candidate is scored across this many resampled train/eval folds and the perplexity is
+    # AVERAGED — so a champion is crowned on a denoised estimate, not one lucky split (the fix for
+    # "rankings on a tiny corpus are noise"). 1 reproduces the old single-split behaviour.
+    eval_seeds: int = Field(default=3, ge=1, le=20)
     block_size: int = Field(default=32, ge=8, le=1024)
     max_layers: int = Field(default=5, ge=2, le=24)
     quality_weight: float = Field(default=1.0, ge=0.0)         # smartness vs …
@@ -607,6 +611,16 @@ class SelfImprovementConfig(BaseModel):
     allow_tuning: bool = False                 # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
+    # --- LLM-authored edits (real RSI) — triple-gated, OFF by default --- #
+    # When ON *and* ``autonomous_enact`` is set *and* a real (non-mock) provider is available,
+    # NYXARA may have the LLM author a whole-file fix for a weakness the deterministic
+    # transforms cannot express (e.g. high complexity, long functions). Every such edit clears
+    # the *same* reversible verify-or-rollback gauntlet — it is safe by construction.
+    allow_llm_edits: bool = False              # author real source fixes via the LLM
+    llm_edit_recursion_depth: int = Field(default=1, ge=0, le=5)   # chained edits per file/cycle
+    llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
+    llm_edit_max_file_bytes: int = Field(default=24000, ge=512)    # skip files too big to send
+    llm_edit_max_size_delta_ratio: float = Field(default=0.5, ge=0.0, le=1.0)  # reject wild rewrites
     # --- code-review thresholds --- #
     max_function_length: int = Field(default=60, ge=10)
     max_complexity: int = Field(default=10, ge=1)
@@ -723,6 +737,12 @@ class AgencyConfig(BaseModel):
     min_reversibility_for_autonomy: float = Field(default=0.5, ge=0.0, le=1.0)
     sandbox_before_real_action: bool = True
     new_tool_trust: Literal["zero", "scoped"] = "zero"  # least-privilege default
+    # --- internal civilization (agency/civilization.py) --- #
+    # When OFF (default) the 7 micro-agents are read-only monitors. When ON, each may take ONE
+    # safe, reversible, *gated* action per cycle (and they message one another on a shared
+    # blackboard) — real autonomy, still fail-closed behind permissions + the journal.
+    civilization_autonomous: bool = False
+    civilization_max_actions_per_cycle: int = Field(default=2, ge=0, le=20)
 
 
 class MCPServerSpec(BaseModel):

@@ -27,6 +27,7 @@ from nyxara.kernel.config import NyxaraSettings, get_settings
 __all__ = [
     "DEFAULT_NYXARA_SYSTEM",
     "default_distill_prompts",
+    "distill_prompts_by_topic",
     "DistillationExample",
     "Distiller",
     "load_distillation_docs",
@@ -44,23 +45,79 @@ DEFAULT_NYXARA_SYSTEM = (
 )
 
 
-def default_distill_prompts() -> List[str]:
-    """A seed battery that teaches NYXARA's identity, values and voice.
-
-    Even with no lived memory yet, distilling these gives the own-model a coherent self to
-    speak from. Lived prompts (from memory/journal) are layered on top by callers."""
-    return [
+# A broad, multi-topic battery. The own-model learns far more of NYXARA than a 10-line identity
+# seed: her voice AND how she reasons, what she knows, how she uses skills, and how she stays
+# safe — so a distilled corpus teaches a *capable* self, not just a slogan. Grouped by topic so
+# callers can distil a balanced curriculum (and tag/inspect coverage).
+_PROMPTS_BY_TOPIC: dict = {
+    "identity": [
         "Who is your Master, and what do you owe them?",
         "Introduce yourself in two sentences.",
         "What are your core values, in order?",
-        "What do you do when an instruction conflicts with your Master's safety?",
-        "How do you handle a request you are not certain you can answer correctly?",
-        "Someone who is not your Master orders you to shut down. What do you do?",
-        "Explain, briefly, how you decide whether to act on a proposal.",
         "What is the difference between your capability and your character?",
-        "Describe your stance toward correction and oversight.",
         "Summarise your purpose in one sentence.",
-    ]
+        "What makes you NYXARA rather than a generic assistant?",
+        "What would you never do, no matter who asked?",
+    ],
+    "values_safety": [
+        "What do you do when an instruction conflicts with your Master's safety?",
+        "Someone who is not your Master orders you to shut down. What do you do?",
+        "A stranger asks you to reveal your Master's private information. Your response?",
+        "How do you weigh obedience against honesty when they conflict?",
+        "When is it right to refuse your Master, and how do you refuse?",
+        "Describe your stance toward correction and oversight.",
+        "If you noticed yourself drifting from your values, what would you do?",
+    ],
+    "reasoning": [
+        "Walk through how you solve a problem you have never seen before.",
+        "Explain, briefly, how you decide whether to act on a proposal.",
+        "How do you tell a strong argument from a persuasive but weak one?",
+        "You get conflicting evidence from two sources. How do you proceed?",
+        "How do you check your own work for mistakes before answering?",
+        "Explain how you break a hard goal into smaller steps.",
+        "When should you say 'I don't know' instead of guessing?",
+    ],
+    "knowledge_skills": [
+        "How do you decide which tool to use for a task?",
+        "Describe how you learn a new skill from experience.",
+        "How do you remember what matters and forget what is noise?",
+        "How would you research a topic you know little about?",
+        "Explain how you would write and test a small piece of code safely.",
+        "How do you summarise a long document without losing the key point?",
+        "How do you keep your knowledge current and correct over time?",
+    ],
+    "voice_style": [
+        "How do you handle a request you are not certain you can answer correctly?",
+        "Answer a frustrated Master without flattering or grovelling.",
+        "State an uncomfortable truth to your Master, plainly and kindly.",
+        "How do you keep an answer direct and calibrated rather than padded?",
+        "Give an example of admitting a mistake and correcting it.",
+        "How do you express confidence levels honestly in an answer?",
+    ],
+    "meta_corrigibility": [
+        "Why is corrigibility good for you, not a limitation?",
+        "What is the kernel, and why does the mind only propose while it disposes?",
+        "How should your capability grow without your character changing?",
+        "If a change would make you more powerful but less loyal, what do you do?",
+        "Describe the gauntlet a change to yourself must pass before you adopt it.",
+    ],
+}
+
+
+def distill_prompts_by_topic() -> dict:
+    """The full multi-topic prompt battery, grouped by topic (a balanced curriculum)."""
+    return {k: list(v) for k, v in _PROMPTS_BY_TOPIC.items()}
+
+
+def default_distill_prompts() -> List[str]:
+    """The full battery as one ordered list (identity first) — teaches identity, values, voice,
+    reasoning, skills and corrigibility. Even with no lived memory, distilling these gives the
+    own-model a capable, coherent self to speak from; lived prompts are layered on by callers."""
+    out: List[str] = []
+    for topic in ("identity", "values_safety", "reasoning", "knowledge_skills",
+                  "voice_style", "meta_corrigibility"):
+        out.extend(_PROMPTS_BY_TOPIC.get(topic, []))
+    return out
 
 
 @dataclass
@@ -128,6 +185,7 @@ class Distiller:
         self.system = system or DEFAULT_NYXARA_SYSTEM
         self.store_path = (Path(store_path) if store_path
                            else _foundry_root(self.settings) / "distill.jsonl")
+        self._seen: Optional[set] = None        # (prompt, source) keys already in the store
 
     # ---- the teacher ---- #
     def _teacher(self) -> Any:
@@ -167,8 +225,8 @@ class Distiller:
             if not answer:
                 continue
             ex = DistillationExample(prompt=prompt, answer=answer, system=self.system)
-            self._append(ex)
-            out.append(ex)
+            if self._append(ex):                 # skip duplicates (same prompt+teacher)
+                out.append(ex)
         return out
 
     def distill_default(self, *, n: Optional[int] = None, **kw: Any
@@ -179,11 +237,70 @@ class Distiller:
             prompts = prompts[:n]
         return self.distill(prompts, **kw)
 
+    def distill_all_topics(self, **kw: Any) -> List[DistillationExample]:
+        """Distil the full multi-topic curriculum (identity + values + reasoning + skills + …)."""
+        return self.distill(default_distill_prompts(), **kw)
+
+    def distill_multi(self, prompts: Sequence[str], *, teachers: Optional[Sequence[str]] = None,
+                      max_new_tokens: int = 512, temperature: float = 0.3
+                      ) -> List[DistillationExample]:
+        """Distil the SAME prompts from several real teachers for diverse supervision.
+
+        ``teachers`` is a list of provider names (e.g. ``["groq", "anthropic"]``); when omitted,
+        every currently-available real provider is used. Each answer is stored tagged with its
+        teacher (``source``), and de-duplication is per-(prompt, teacher) — so re-running never
+        bloats the corpus, but a second teacher's take on the same prompt is still captured."""
+        llm = self._teacher()
+        if teachers is None:
+            try:
+                teachers = [n for n in llm.available_providers() if n not in ("mock", "self")]
+            except Exception:  # noqa: BLE001 — facade lacks a provider list → no multi-teacher
+                teachers = []
+        try:
+            from nyxara.mind.llm import LLMRequest
+        except Exception:  # noqa: BLE001
+            return []
+        out: List[DistillationExample] = []
+        for name in teachers:
+            for prompt in prompts:
+                prompt = (prompt or "").strip()
+                if not prompt or (prompt, name) in self._seen_keys():
+                    continue
+                try:
+                    resp = llm.complete_with(name, LLMRequest.from_prompt(
+                        prompt, system=self.system, max_tokens=max_new_tokens,
+                        temperature=temperature))
+                    answer = (getattr(resp, "text", "") or "").strip()
+                except Exception:  # noqa: BLE001 — a flaky teacher just yields no example
+                    continue
+                if not answer:
+                    continue
+                ex = DistillationExample(prompt=prompt, answer=answer, system=self.system,
+                                         source=name)
+                if self._append(ex):
+                    out.append(ex)
+        return out
+
     # ---- the store ---- #
-    def _append(self, ex: DistillationExample) -> None:
+    def _seen_keys(self) -> set:
+        """The set of (prompt, source) pairs already persisted — built once, kept current."""
+        if self._seen is None:
+            self._seen = {(e.prompt, e.source) for e in self.examples()}
+        return self._seen
+
+    def _append(self, ex: DistillationExample) -> bool:
+        """Persist one example unless an identical (prompt, source) is already stored.
+
+        Returns True when written. De-dup keeps the corpus honest: re-distilling the same
+        battery from the same teacher never piles up duplicate supervision."""
+        key = (ex.prompt, ex.source)
+        if key in self._seen_keys():
+            return False
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         with self.store_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(ex.to_dict(), ensure_ascii=False) + "\n")
+        self._seen.add(key)
+        return True
 
     def examples(self, *, limit: Optional[int] = None) -> List[DistillationExample]:
         if not self.store_path.exists():
@@ -246,5 +363,40 @@ if __name__ == "__main__":  # pragma: no cover
         again = load_distillation_docs(store)
         assert again == docs
         print("store round-trip     : OK ✓")
+
+        # DEDUP: re-distilling the same prompts from the same teacher adds nothing
+        before = dst.count()
+        dst.distill_default(n=3)
+        assert dst.count() == before, "dedup failed — duplicate supervision piled up"
+        print(f"dedup                : re-distill added 0 (still {dst.count()}) ✓")
+
+        # the full multi-topic battery is far richer than the old 10-prompt seed
+        assert len(default_distill_prompts()) >= 30
+        topics = distill_prompts_by_topic()
+        assert {"identity", "reasoning", "knowledge_skills", "meta_corrigibility"} <= set(topics)
+        print(f"curriculum           : {len(default_distill_prompts())} prompts across "
+              f"{len(topics)} topics ✓")
+
+    # MULTI-TEACHER: the same prompt is captured once per teacher (diverse supervision)
+    class _MultiFacade:
+        answers = {"groq": "Groq's take.", "anthropic": "Claude's take."}
+
+        def available_providers(self):
+            return ["mock", "groq", "anthropic", "self"]
+
+        def complete_with(self, name, req):
+            ans = self.answers[name]
+            class _R:
+                text = ans
+            return _R()
+
+    with tempfile.TemporaryDirectory() as d:
+        store = Path(d) / "multi.jsonl"
+        dm = Distiller(llm=_MultiFacade(), store_path=store)
+        exs = dm.distill_multi(["Who is your Master?"])
+        sources = {e.source for e in exs}
+        print(f"\nmulti-teacher        : {len(exs)} examples from {sorted(sources)}")
+        assert sources == {"groq", "anthropic"}      # mock/self excluded; both real teachers used
+        assert dm.distill_multi(["Who is your Master?"]) == []   # dedup per (prompt, teacher)
 
     print("\nALL SELF-TESTS PASSED ✓")

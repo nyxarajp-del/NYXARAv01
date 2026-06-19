@@ -54,14 +54,15 @@ def test_perplexity_finite_on_unseen_text():
 
 # -------------------- factory & graceful degradation -------------------- #
 def test_build_model_auto_degrades_without_torch():
+    # without torch the coherent word-level Kneser-Ney model is the fallback (not byte gibberish)
     m = build_model(ModelSpec(kind="auto"))
-    assert m.kind == ("nanogpt" if _HAS_TORCH else "ngram")
+    assert m.kind == ("nanogpt" if _HAS_TORCH else "kngram")
 
 
 def test_build_model_nanogpt_never_raises_on_bare_machine():
     # asking for nanogpt without torch must fall back, never raise
     m = build_model(ModelSpec(kind="nanogpt"))
-    assert m.kind == ("nanogpt" if _HAS_TORCH else "ngram")
+    assert m.kind == ("nanogpt" if _HAS_TORCH else "kngram")
 
 
 def test_load_active_model_reads_promoted_version(tmp_path):
@@ -137,3 +138,91 @@ def test_lora_request_uses_neural_model_when_torch_present():
 def test_explicit_ngram_is_never_upgraded():
     # an explicit n-gram request stays pure-stdlib even when torch is available
     assert build_model(ModelSpec(kind="ngram")).kind == "ngram"
+
+
+# -------------------- WordKNGramLM (coherent word-level Kneser-Ney) -------------------- #
+from nyxara.growth.foundry_models import WordKNGramLM, _word_detokenize  # noqa: E402
+
+_PROSE = [
+    "NYXARA serves the Master with loyalty and honesty.",
+    "The mind proposes; the kernel disposes; the Master is sovereign.",
+    "NYXARA is loyal to the Master and always honest.",
+    "The Master is sovereign and NYXARA serves with loyalty.",
+] * 8
+
+
+def test_kngram_training_lowers_perplexity():
+    untrained = WordKNGramLM(order=3).perplexity(_PROSE[0])
+    lm = WordKNGramLM(order=3)
+    lm.train_on(_PROSE)
+    assert lm.perplexity(_PROSE[0]) < untrained
+
+
+def test_kngram_generates_coherent_known_words():
+    lm = WordKNGramLM(order=3, seed=3)
+    lm.train_on(_PROSE)
+    text = lm.generate("The Master", max_tokens=20)
+    assert text.strip()                                  # non-empty
+    vocab = set(lm.tok2id)
+    produced = set(text.replace(".", " ").replace(";", " ").split())
+    # every emitted word is a real token the model learned (no byte gibberish)
+    assert produced and produced <= vocab
+
+
+def test_kngram_generation_deterministic_for_seed():
+    a = WordKNGramLM(order=3, seed=11); a.train_on(_PROSE)
+    b = WordKNGramLM(order=3, seed=11); b.train_on(_PROSE)
+    assert a.generate("NYXARA", max_tokens=15) == b.generate("NYXARA", max_tokens=15)
+
+
+def test_kngram_perplexity_finite_on_unseen_text():
+    lm = WordKNGramLM(order=3)
+    lm.train_on(_PROSE)
+    p = lm.perplexity("an entirely unrelated sentence about quantum widgets")
+    assert p == p and p != float("inf")                  # finite (KN never zero-probs)
+
+
+def test_kngram_save_load_round_trip(tmp_path):
+    lm = WordKNGramLM(order=3, seed=5)
+    lm.train_on(_PROSE)
+    lm.save(tmp_path)
+    reloaded = WordKNGramLM()
+    reloaded.load(tmp_path)
+    assert abs(reloaded.perplexity(_PROSE[0]) - lm.perplexity(_PROSE[0])) < 1e-9
+    assert reloaded.generate("The Master", max_tokens=10) == lm.generate("The Master",
+                                                                         max_tokens=10)
+
+
+def test_kngram_untrained_generate_is_empty():
+    assert WordKNGramLM(order=3).generate("anything", max_tokens=10) == ""
+
+
+def test_detokenizer_spacing():
+    assert _word_detokenize(["Hello", ",", "world", "!"]) == "Hello, world!"
+
+
+def test_factory_kngram_explicit_and_fallback():
+    assert build_model(ModelSpec(kind="kngram")).kind == "kngram"
+    assert build_model(ModelSpec(kind="ngram")).kind == "ngram"   # byte model unchanged
+    if not _HAS_TORCH:
+        assert build_model(ModelSpec(kind="auto")).kind == "kngram"
+
+
+def test_kngram_promotes_and_loads_as_self_brain(tmp_path):
+    # mirror how the foundry persists + how SelfProvider reloads the own brain
+    import json
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    root = tmp_path / "foundry"
+    settings.llm.self_model_dir = root
+    spec = ModelSpec(kind="kngram", ngram_order=3)
+    lm = build_model(spec)
+    lm.train_on(_PROSE, seed=1)
+    vdir = root / "v1"
+    lm.save(vdir)
+    (vdir / "spec.json").write_text(json.dumps(spec.to_dict()), encoding="utf-8")
+    (root / "active").write_text("v1", encoding="utf-8")
+    loaded = load_active_model(settings)
+    assert loaded.kind == "kngram"
+    assert loaded.generate("The Master", max_tokens=10) == lm.generate("The Master",
+                                                                       max_tokens=10)

@@ -43,7 +43,7 @@ def _small() -> ComputeReport:
 # --------------------------------------------------------------------------- #
 def test_signals_are_bounded_fractions():
     sig = IntelligenceIndex(memory=MemoryStore()).compute_signals(_Report())
-    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge"}
+    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge", "stability"}
     assert all(0.0 <= v <= 1.0 for v in sig.values())
     assert sig["accuracy"] == 0.8
     assert abs(sig["handoff"] - 0.6) < 1e-9          # 6 self / 10 total
@@ -197,3 +197,69 @@ def test_rsi_run_populates_intelligence_without_touching_source():
     after = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in pkg.rglob("*.py")}
     assert before == after
     assert not report.optimizations
+
+
+# --------------------------------------------------------------------------- #
+# growth directive: the index DRIVES the next investment (closed loop)
+# --------------------------------------------------------------------------- #
+from nyxara.growth.intelligence import IntelligenceState, _slope  # noqa: E402
+
+
+def _big_compute():
+    from nyxara.kernel.compute import ComputeReport, GPUInfo
+    return ComputeReport(cpu_count=16, memory={"available_mb": 32000, "total_mb": 64000},
+                         gpu=GPUInfo(available=True, backend="cuda", count=1, names=["A100"]),
+                         torch_available=True)
+
+
+def test_directive_targets_weakest_dimension():
+    idx = IntelligenceIndex()
+    st = IntelligenceState(index=0.5, t=4, last_inputs={
+        "accuracy": 0.9, "handoff": 0.1, "weaknesses": 0.8, "knowledge": 0.7, "trend": 0.02})
+    d = idx.growth_directive(st, _big_compute())
+    assert d["focus"] == "handoff" and d["action"] == "train_self_model"
+
+
+def test_directive_maps_each_dimension_to_an_action():
+    idx = IntelligenceIndex()
+    expect = {"accuracy": "deepen_reasoning", "handoff": "train_self_model",
+              "weaknesses": "resolve_weaknesses", "knowledge": "acquire_knowledge"}
+    for weak, action in expect.items():
+        inp = {k: 0.9 for k in ("accuracy", "handoff", "weaknesses", "knowledge")}
+        inp[weak] = 0.05
+        inp["trend"] = 0.02
+        d = idx.growth_directive(IntelligenceState(index=0.5, t=4, last_inputs=inp))
+        assert d["focus"] == weak and d["action"] == action
+
+
+def test_directive_escalates_on_plateau():
+    idx = IntelligenceIndex()
+    flat = IntelligenceState(index=0.5, t=6, history=[0.5] * 8, last_inputs={
+        "accuracy": 0.4, "handoff": 0.9, "weaknesses": 0.9, "knowledge": 0.9, "trend": 0.0})
+    d = idx.growth_directive(flat, _big_compute())
+    assert d["plateaued"] and d["escalate"]
+
+
+def test_directive_does_not_escalate_while_rising():
+    idx = IntelligenceIndex()
+    rising = IntelligenceState(index=0.5, t=6, history=[0.1, 0.2, 0.3, 0.4, 0.5],
+                               last_inputs={"accuracy": 0.4, "handoff": 0.9, "weaknesses": 0.9,
+                                            "knowledge": 0.9, "trend": 0.1})
+    d = idx.growth_directive(rising, _big_compute())
+    assert not d["plateaued"] and not d["escalate"]
+
+
+def test_update_records_history_and_trend():
+    idx = IntelligenceIndex()
+    s = IntelligenceState()
+    sig = {"accuracy": 0.8, "handoff": 0.6, "weaknesses": 0.5, "knowledge": 0.3}
+    for _ in range(4):
+        s = idx.update(s, sig, _big_compute())
+    assert len(s.history) >= 4
+    assert "trend" in s.last_inputs and s.history[-1] == s.index
+
+
+def test_slope_detects_direction():
+    assert _slope([0.1, 0.2, 0.3, 0.4]) > 0
+    assert _slope([0.4, 0.3, 0.2, 0.1]) < 0
+    assert abs(_slope([0.5, 0.5, 0.5])) < 1e-9
