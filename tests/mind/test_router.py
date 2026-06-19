@@ -116,6 +116,27 @@ def test_no_teacher_keeps_a_confident_own_answer():
 
 
 # --------------------------------------------------------------------------- #
+# draft_self — own-model-only handoff (no teacher fallback)
+# --------------------------------------------------------------------------- #
+def test_draft_self_hands_off_a_confident_answer():
+    r = Router(_Teacher(), settings=_settings(),
+               self_provider=_Own("The capital is Paris, Master."))
+    res = r.draft_self("What is the capital of France?")
+    assert res is not None and res.source == "self" and res.handed_off is True
+
+
+def test_draft_self_returns_none_for_weak_answer():
+    r = Router(_Teacher(), settings=_settings(),
+               self_provider=_Own("the the the the the"))
+    assert r.draft_self("Explain entropy.") is None  # caller falls through to its own path
+
+
+def test_draft_self_returns_none_without_self_model():
+    r = Router(_Teacher(), settings=_settings(), self_provider=_Own("x", ok=False))
+    assert r.draft_self("hi") is None
+
+
+# --------------------------------------------------------------------------- #
 # Reasoner gating
 # --------------------------------------------------------------------------- #
 def test_reasoner_does_not_route_when_disabled():

@@ -78,6 +78,7 @@ class NyxaraReasoner:
         self.max_memory_context = max_memory_context
         self._dual: Any = None  # lazily built dual-process facade
         self._offline: Any = None  # lazily built sovereign offline mind (keyless machine)
+        self._router: Any = None  # lazily built own-model-first confidence router (handoff)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -265,6 +266,15 @@ class NyxaraReasoner:
             return cand
 
         system = self._system_prompt()
+        # SOVEREIGN BRAIN (Phase 2): give NYXARA's OWN forged model first crack. If her model
+        # is promoted and its answer clears the verifier, she speaks it herself (a *handoff*)
+        # rather than deferring to the external teacher — this is what raises the handoff rate
+        # above 0%. She only falls through to the teacher/council when her own answer isn't
+        # trustworthy. The reply is still a proposal the kernel disposes (no gate is bypassed).
+        own = self._own_model_handoff(stimulus, system)
+        if own is not None:
+            return own
+
         deliberate = self._is_system2(outcome)
         if deliberate and self._council_ready():
             text, conf, how = self._deliberate_council(stimulus, system, mems)
@@ -274,6 +284,34 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    def _own_model_handoff(self, stimulus: str, system: str) -> Optional[Candidate]:
+        """Hand the turn to NYXARA's own promoted model when it answers confidently."""
+        router = self._confidence_router()
+        if router is None:
+            return None
+        try:
+            res = router.draft_self(stimulus, system=system)
+        except Exception:  # noqa: BLE001 — own-model routing is advisory; never crash a turn
+            return None
+        if res is None or not res.handed_off or not res.text:
+            return None
+        return Candidate(
+            text=res.text, kind="respond", capability=Capability.MESSAGE_SEND, target="",
+            risk=RiskTier.LOW, reversible=True, confidence=res.confidence,
+            belief=res.confidence,
+            rationale=f"answered by NYXARA's own model (handoff; verifier "
+                      f"{res.confidence:.2f})")
+
+    def _confidence_router(self) -> Any:
+        """Lazily build the own-model-first confidence router (mind/router.py)."""
+        if self._router is None:
+            try:
+                from nyxara.mind.router import Router
+                self._router = Router(self.llm, settings=self.settings)
+            except Exception:  # noqa: BLE001 — routing is a capability, never a hard dependency
+                self._router = False  # sentinel: tried and unavailable
+        return self._router or None
 
     @staticmethod
     def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
