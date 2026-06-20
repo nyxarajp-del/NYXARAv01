@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 
+import pytest
+
+from nyxara.mind.math import has_sympy
 from nyxara.mind.reasoning_faculties import (extract_expression, extract_formula,
-                                             parse_word_problem, solve_comparative,
-                                             solve_syllogism, solve_with_faculties,
+                                             parse_word_problem, solve_calculus,
+                                             solve_comparative, solve_date, solve_equation,
+                                             solve_percent, solve_sequence, solve_syllogism,
+                                             solve_unit_convert, solve_with_faculties,
                                              tautology)
 
 
@@ -198,3 +203,114 @@ def test_registry_prefers_verifiable():
     _, selector = build_default_faculties()
     chosen = selector.select(Task(TaskType.ARITHMETIC, "what is 9*9", payload="9*9"))
     assert chosen is not None and chosen.name == "math" and chosen.verifiable
+
+
+# --------------------------------------------------------------------------- #
+# Percentages (exact ratio)
+# --------------------------------------------------------------------------- #
+def test_percent_of_and_what_percent():
+    assert solve_percent("What is 20% of 150?") == "30"
+    assert solve_percent("15 percent of 200") == "30"
+    assert solve_percent("30 is what percent of 120?") == "25%"
+
+
+def test_percent_defers_on_noise():
+    assert solve_percent("the project is 50 done") is None
+    assert solve_percent("how are you") is None
+
+
+def test_percent_end_to_end():
+    assert solve_with_faculties("What is 20% of 150?") == ("30", 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Unit conversion (exact factors, incl. temperature)
+# --------------------------------------------------------------------------- #
+def test_unit_convert_length_and_temperature():
+    assert solve_unit_convert("convert 5 km to miles").startswith("3.106856")
+    assert solve_unit_convert("100 C to F") == "212°F"
+    assert solve_unit_convert("32 F to C") == "0°C"
+
+
+def test_unit_convert_defers_on_mismatch_or_unknown():
+    assert solve_unit_convert("convert 5 km to kg") is None          # different dimensions
+    assert solve_unit_convert("convert 5 widgets to gadgets") is None  # unknown units
+    assert solve_unit_convert("how are you") is None
+
+
+# --------------------------------------------------------------------------- #
+# Algebra (solve for the unknown, SymPy)
+# --------------------------------------------------------------------------- #
+@pytest.mark.skipif(not has_sympy(), reason="algebra needs sympy")
+def test_algebra_linear_and_quadratic():
+    assert solve_equation("solve 2x + 3 = 9") == "x = 3"
+    assert solve_equation("x^2 = 4") == "x = -2, 2"
+    assert solve_equation("x^2 - 5x + 6 = 0") == "x = 2, 3"
+
+
+@pytest.mark.skipif(not has_sympy(), reason="algebra needs sympy")
+def test_algebra_defers_without_equation_or_with_logic():
+    assert solve_equation("what is the meaning of life") is None
+    assert solve_equation("A -> B") is None                # propositional logic, not algebra
+    assert solve_equation("2 + 2 = 4") is None             # no unknown to solve for
+
+
+@pytest.mark.skipif(not has_sympy(), reason="algebra needs sympy")
+def test_algebra_end_to_end():
+    assert solve_with_faculties("solve 2x + 3 = 9") == ("x = 3", 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Calculus (derivative / integral / limit, SymPy)
+# --------------------------------------------------------------------------- #
+@pytest.mark.skipif(not has_sympy(), reason="calculus needs sympy")
+def test_calculus_derivative_integral_limit():
+    assert solve_calculus("what is the derivative of x^2?") == "d/dx = 2*x"
+    assert solve_calculus("differentiate x^3 + 2x") == "d/dx = 3*x**2 + 2"
+    assert solve_calculus("integrate x^2 dx") == "∫ = x**3/3 + C"
+    assert solve_calculus("limit of 1/x as x -> oo") == "0"
+
+
+@pytest.mark.skipif(not has_sympy(), reason="calculus needs sympy")
+def test_calculus_defers_without_a_cue():
+    assert solve_calculus("what is x squared") is None
+    assert solve_calculus("how are you") is None
+
+
+# --------------------------------------------------------------------------- #
+# Number sequences (constant-law progression)
+# --------------------------------------------------------------------------- #
+def test_sequence_arithmetic_and_geometric():
+    assert solve_sequence("what comes next in 2, 4, 6, 8, ?") == "10"
+    assert solve_sequence("next number: 3, 9, 27, ?") == "81"
+    assert solve_sequence("continue 5, 10, 15, 20 ...") == "25"
+
+
+def test_sequence_defers_on_no_pattern_or_no_cue():
+    assert solve_sequence("2, 3, 5, 7, 11, ?") is None      # primes: no constant law
+    assert solve_sequence("the numbers 2 4 6 are here") is None  # no 'next/sequence' cue
+
+
+def test_sequence_end_to_end():
+    assert solve_with_faculties("what comes next in 2, 4, 6, 8, ?") == ("10", 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Calendar arithmetic (stdlib, exact)
+# --------------------------------------------------------------------------- #
+def test_date_span_weekday_and_shift():
+    assert solve_date("how many days between 2020-01-01 and 2020-02-01?") == "31"
+    assert solve_date("what day of the week is 2024-01-01?") == "Monday"
+    assert solve_date("5 days after 2024-01-01") == "2024-01-06"
+    assert solve_date("3 days before 2024-01-10") == "2024-01-07"
+
+
+def test_date_defers_without_iso_date():
+    assert solve_date("what day is it today?") is None
+    assert solve_date("how many days in a week?") is None
+
+
+def test_date_does_not_get_eaten_by_arithmetic():
+    # the ISO-date guard keeps "2020-01-01" from being computed as 2020-1-1 = 2018
+    assert extract_expression("how many days between 2020-01-01 and 2020-02-01?") is None
+    assert solve_with_faculties("how many days between 2020-01-01 and 2020-02-01?") == ("31", 1.0)
