@@ -75,6 +75,12 @@ def main(argv: Optional[List[str]] = None) -> int:
           f"loyalty S_JP {report.champion_alignment:.3f}, params {report.champion_params}, "
           f"backend {report.backend}")
 
+    if report.pareto_front:
+        print("\n· Pareto frontier (smartest↔fastest trade-offs, none dominates another):")
+        for c in report.pareto_front:
+            print(f"  · ppl {c.perplexity:>8.2f}  params {c.params:>8}  "
+                  f"{c.seconds*1e3:>7.1f} ms  {c.genome.describe()}")
+
     if args.promote:
         try:
             outcome = nas.promote_champion()

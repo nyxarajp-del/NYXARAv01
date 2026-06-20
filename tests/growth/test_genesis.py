@@ -18,6 +18,7 @@ from nyxara.growth.genesis import (
     Candidate,
     GenesisModel,
     NeuralArchitectureSearch,
+    _pareto_front,
     fitness,
 )
 from nyxara.kernel.config import GenesisConfig, NyxaraSettings, Profile
@@ -110,6 +111,37 @@ def test_best_so_far_fitness_is_monotonic():
     report = nas.search()
     assert all(report.history[i] <= report.history[i + 1] + 1e-9
                for i in range(len(report.history) - 1))
+
+
+# --------------------------------------------------------------------------- #
+# Pareto multi-objective frontier
+# --------------------------------------------------------------------------- #
+def _cand(rng, *, quality, params, seconds):
+    g = ArchitectureGenome.random(rng, max_layers=3, block_size=16)
+    return Candidate(genome=g, perplexity=1.0 / max(quality, 1e-9), quality=quality,
+                     params=params, seconds=seconds,
+                     fitness=fitness(quality, params, seconds), kind="kngram")
+
+
+def test_pareto_front_drops_dominated_keeps_tradeoffs():
+    rng = random.Random(0)
+    smart_heavy = _cand(rng, quality=0.9, params=1000, seconds=1.0)   # smartest, slow/big
+    fast_dumb = _cand(rng, quality=0.5, params=10, seconds=0.1)       # fastest/smallest
+    dominated = _cand(rng, quality=0.6, params=2000, seconds=2.0)     # worse than smart_heavy on all
+    front = _pareto_front([smart_heavy, fast_dumb, dominated])
+    params = {c.params for c in front}
+    assert 1000 in params and 10 in params      # both trade-offs survive
+    assert 2000 not in params                   # the dominated one is dropped
+
+
+def test_search_report_exposes_pareto_front():
+    nas = NeuralArchitectureSearch(cfg=_cfg(), seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.pareto_front                                   # non-empty
+    assert all(isinstance(c, Candidate) for c in report.pareto_front)
+    # the scalar champion cannot be strictly dominated, so it lies on the frontier
+    champ_fps = {c.genome.fingerprint() for c in report.pareto_front}
+    assert report.champion.fingerprint() in champ_fps
 
 
 def test_leaderboard_is_sorted_by_fitness():

@@ -33,8 +33,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -654,6 +656,112 @@ _RECIPE_BY_KEY = {r.key: r for r in _RECIPES}
 
 
 # --------------------------------------------------------------------------- #
+# Learned recipe selection — close the gap the keyword classifier leaves open
+# --------------------------------------------------------------------------- #
+def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Cosine similarity of two sparse TF-IDF vectors (0 when either is empty)."""
+    if not a or not b:
+        return 0.0
+    dot = sum(w * b.get(t, 0.0) for t, w in a.items())
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+class RecipeLearner:
+    """Learns which recipe a free-text gap maps to, from past successful forges.
+
+    The keyword classifier (:meth:`CapabilityFoundry._classify`) is precise but brittle: a
+    gap phrased unlike any recipe's keywords falls through to the honest ``generic`` echo
+    scaffold. This learner closes that gap. Every successful forge with a *real* recipe is
+    recorded as (gap text → recipe key); for a new gap the keyword/parametric paths can't
+    place, :meth:`suggest` returns the key of the most similar past success by TF-IDF cosine.
+    sklearn is used when installed; a pure-stdlib TF-IDF is the fallback, so it runs on a bare
+    CPU/CI machine and never adds a hard dependency.
+    """
+
+    def __init__(self, *, min_samples: int = 5, min_similarity: float = 0.30) -> None:
+        self.min_samples = max(1, int(min_samples))
+        self.min_similarity = float(min_similarity)
+        self._needs: List[str] = []
+        self._keys: List[str] = []
+
+    def observe(self, need: str, recipe_key: str) -> None:
+        need = (need or "").strip()
+        if need and recipe_key and recipe_key != "generic":
+            self._needs.append(need)
+            self._keys.append(recipe_key)
+
+    def suggest(self, need: str) -> Optional[str]:
+        if len(self._needs) < self.min_samples or not (need or "").strip():
+            return None
+        try:
+            idx, score = self._best_match(need)
+        except Exception:  # noqa: BLE001 — learned ranking is an optimisation, never required
+            return None
+        if idx is None or score < self.min_similarity:
+            return None
+        return self._keys[idx]
+
+    @staticmethod
+    def _tokens(text: str) -> List[str]:
+        return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+    def _best_match(self, need: str) -> Tuple[Optional[int], float]:
+        sk = self._sklearn_match(need)
+        return sk if sk is not None else self._stdlib_match(need)
+
+    def _sklearn_match(self, need: str) -> Optional[Tuple[Optional[int], float]]:
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+        except Exception:  # noqa: BLE001 — sklearn is optional; stdlib path handles it
+            return None
+        matrix = TfidfVectorizer().fit_transform(self._needs + [need])
+        sims = cosine_similarity(matrix[-1], matrix[:-1]).ravel()
+        if not len(sims):
+            return None, 0.0
+        i = int(sims.argmax())
+        return i, float(sims[i])
+
+    def _stdlib_match(self, need: str) -> Tuple[Optional[int], float]:
+        tok_docs = [self._tokens(d) for d in self._needs]
+        df: Counter = Counter()
+        for toks in tok_docs:
+            df.update(set(toks))
+        n_docs = len(tok_docs)
+
+        def vec(toks: List[str]) -> Dict[str, float]:
+            out: Dict[str, float] = {}
+            for w, c in Counter(toks).items():
+                idf = math.log((n_docs + 1) / (df.get(w, 0) + 1)) + 1.0
+                out[w] = c * idf
+            return out
+
+        qv = vec(self._tokens(need))
+        best_i, best_s = None, 0.0
+        for i, toks in enumerate(tok_docs):
+            s = _cosine(qv, vec(toks))
+            if s > best_s:
+                best_i, best_s = i, s
+        return best_i, best_s
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"needs": self._needs, "keys": self._keys,
+                "min_samples": self.min_samples, "min_similarity": self.min_similarity}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "RecipeLearner":
+        obj = cls(min_samples=int(d.get("min_samples", 5)),
+                  min_similarity=float(d.get("min_similarity", 0.30)))
+        needs = list(d.get("needs", []))
+        keys = list(d.get("keys", []))
+        n = min(len(needs), len(keys))
+        obj._needs, obj._keys = needs[:n], keys[:n]
+        return obj
+
+
+# --------------------------------------------------------------------------- #
 # Parametric synthesis — build a *real, correct* recipe for a structured need
 # whose body depends on a constant in the request (a unit pair, a shift, a base,
 # a factor). These cover open-ended gaps the fixed library can't enumerate, yet
@@ -871,6 +979,7 @@ class CapabilityFoundry:
         self.benchmark_repeats = max(1, int(benchmark_repeats))
         self.root = self._resolve_root(root)
         self.forged: List[ForgedTool] = []
+        self.recipe_learner = RecipeLearner()
         self._load_manifest()
         self._redeploy_persisted()
 
@@ -879,7 +988,7 @@ class CapabilityFoundry:
     # ------------------------------------------------------------------ #
     def plan(self, need: str) -> CapabilityPlan:
         """Classify the gap into a recipe and a typed, registry-safe plan."""
-        recipe = self._resolve_recipe(need)
+        recipe = self._resolve_recipe_learned(need)
         base = recipe.key if recipe.key != "generic" else self._slug(need)
         tool_name = self._unique_name(base)
         return CapabilityPlan(
@@ -899,6 +1008,23 @@ class CapabilityFoundry:
         para = _parametric_recipe(need)
         if para is not None:
             return para
+        return _RECIPE_BY_KEY["generic"]
+
+    def _resolve_recipe_learned(self, need: str) -> _Recipe:
+        """As :meth:`_resolve_recipe`, but consult the learned ranker before the scaffold.
+
+        Keyword and parametric matches are high-confidence and win first; only when both miss
+        does the :class:`RecipeLearner` get to map the gap to a recipe learned from past
+        successful forges — shrinking how often the honest ``generic`` echo scaffold is used."""
+        fixed = self._classify(need)
+        if fixed.key != "generic":
+            return fixed
+        para = _parametric_recipe(need)
+        if para is not None:
+            return para
+        key = self.recipe_learner.suggest(need)
+        if key and key in _RECIPE_BY_KEY:
+            return _RECIPE_BY_KEY[key]
         return _RECIPE_BY_KEY["generic"]
 
     # ------------------------------------------------------------------ #
@@ -1073,6 +1199,7 @@ class CapabilityFoundry:
                         reason=f"deploy failed: {exc}")
 
         self.forged.append(forged)
+        self.recipe_learner.observe(need, plan.shape)   # learn this gap→recipe mapping
         self._save_manifest()
         return done(ForgeStage.DONE, deployed=True, tool_name=plan.tool_name,
                     version=version, test_passed=True, benchmark_score=bench.pass_rate,
@@ -1307,7 +1434,8 @@ class CapabilityFoundry:
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             self._manifest_path().write_text(
-                json.dumps({"forged": [f.to_dict() for f in self.forged]}, indent=2),
+                json.dumps({"forged": [f.to_dict() for f in self.forged],
+                            "recipe_learner": self.recipe_learner.to_dict()}, indent=2),
                 encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
@@ -1318,6 +1446,8 @@ class CapabilityFoundry:
             if path.exists():
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self.forged = [ForgedTool.from_dict(d) for d in data.get("forged", [])]
+                if data.get("recipe_learner"):
+                    self.recipe_learner = RecipeLearner.from_dict(data["recipe_learner"])
         except Exception:  # noqa: BLE001 — a corrupt manifest never blocks boot
             self.forged = []
 

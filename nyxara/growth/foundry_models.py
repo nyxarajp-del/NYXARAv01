@@ -119,6 +119,7 @@ class ModelSpec:
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
     lora_r: int = 8
+    lora_r_auto: bool = False    # True -> scale the rank to the base width (set by the foundry)
     lora_alpha: int = 16
     lora_dropout: float = 0.05
     lora_lr: float = 2e-4
@@ -141,6 +142,7 @@ class ModelSpec:
                 "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
                 "seed": self.seed, "genome": self.genome,
                 "base_model": self.base_model, "lora_r": self.lora_r,
+                "lora_r_auto": self.lora_r_auto,
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
                 "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
                 "device": self.device, "load_in_4bit": self.load_in_4bit,
@@ -788,9 +790,29 @@ class LoRAModel(BaseLanguageModel):
         return prepare_model_for_kbit_training(
             base, use_gradient_checkpointing=self.spec.gradient_checkpointing)
 
+    @staticmethod
+    def _infer_lora_rank(base: Any, fallback: int) -> int:
+        """Scale the LoRA rank to the base's hidden width: a wider base earns more adapter
+        capacity (≈ width/32), clamped to peft's sane [8, 256]. A 4096-wide 7B base gets r≈128;
+        a tiny CPU/CI base stays at the floor of 8. Falls back to ``fallback`` if width is
+        unreadable, so this never breaks an unknown architecture."""
+        try:
+            cfg = getattr(base, "config", None)
+            hidden = int(getattr(cfg, "hidden_size", 0) or getattr(cfg, "n_embd", 0) or 0)
+        except Exception:  # noqa: BLE001
+            hidden = 0
+        if hidden <= 0:
+            return fallback
+        return max(8, min(256, hidden // 32))
+
     def _apply_lora(self, base: Any) -> Any:
         from peft import LoraConfig, TaskType, get_peft_model
-        common = dict(r=self.spec.lora_r, lora_alpha=self.spec.lora_alpha,
+        if getattr(self.spec, "lora_r_auto", False):
+            r = self._infer_lora_rank(base, self.spec.lora_r)
+            alpha = max(self.spec.lora_alpha, 2 * r)   # keep alpha ≈ 2·r as the rank scales
+        else:
+            r, alpha = self.spec.lora_r, self.spec.lora_alpha
+        common = dict(r=r, lora_alpha=alpha,
                       lora_dropout=self.spec.lora_dropout, task_type=TaskType.CAUSAL_LM)
         try:
             # Let peft infer target modules from the architecture (gpt2->c_attn, llama->q/v…).

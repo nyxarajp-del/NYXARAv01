@@ -226,3 +226,30 @@ def test_kngram_promotes_and_loads_as_self_brain(tmp_path):
     assert loaded.kind == "kngram"
     assert loaded.generate("The Master", max_tokens=10) == lm.generate("The Master",
                                                                        max_tokens=10)
+
+
+# --------------------------------------------------------------------------- #
+# LoRA rank auto-scaling (no heavy deps — pure rank math + spec serialisation)
+# --------------------------------------------------------------------------- #
+from nyxara.growth.foundry_models import LoRAModel  # noqa: E402
+
+
+def _fake_base(hidden):
+    return type("B", (), {"config": type("C", (), {"hidden_size": hidden})()})()
+
+
+def test_infer_lora_rank_scales_with_base_width():
+    assert LoRAModel._infer_lora_rank(_fake_base(2), 8) == 8        # tiny base -> floor
+    assert LoRAModel._infer_lora_rank(_fake_base(768), 8) == 24     # gpt2-scale
+    assert LoRAModel._infer_lora_rank(_fake_base(4096), 8) == 128   # 7B-scale, clamped sane
+    assert LoRAModel._infer_lora_rank(_fake_base(99999), 8) == 256  # hard cap
+
+
+def test_infer_lora_rank_falls_back_when_width_unreadable():
+    assert LoRAModel._infer_lora_rank(object(), 16) == 16           # no config -> explicit r
+
+
+def test_modelspec_lora_r_auto_round_trip():
+    spec = ModelSpec(kind="lora", lora_r_auto=True)
+    assert ModelSpec.from_dict(spec.to_dict()).lora_r_auto is True
+    assert ModelSpec().lora_r_auto is False                         # default off for direct use

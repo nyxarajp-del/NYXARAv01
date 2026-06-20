@@ -315,6 +315,10 @@ class FoundryConfig(BaseModel):
     # tiny default keeps it runnable (and testable) on CPU.
     base_model: str = "sshleifer/tiny-gpt2"
     lora_r: int = Field(default=8, ge=1, le=256)
+    # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
+    # 7B base converges while a tiny base stays cheap). When True the foundry infers the rank
+    # from the loaded base; set False to honour the explicit ``lora_r`` above verbatim.
+    lora_r_auto: bool = True
     lora_alpha: int = Field(default=16, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
@@ -331,6 +335,11 @@ class FoundryConfig(BaseModel):
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
     eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
+    # Difficulty curriculum: order the training corpus easy -> hard so the model converges on
+    # simple structure before hard examples (faster, less catastrophic forgetting). Pure-stdlib
+    # difficulty proxy (length + lexical entropy); refined by the active model's perplexity when
+    # one exists. Set False to keep the historical random/strided order.
+    curriculum: bool = True
     # A candidate must beat the active model's perplexity by at least this fraction.
     min_perplexity_improvement: float = Field(default=1e-4, ge=0.0)
     # Capability gauntlet (Phase 3): a promotion must not *regress* on a held capability
@@ -606,6 +615,10 @@ class SelfImprovementConfig(BaseModel):
     self_improvement_every: int = Field(default=5, ge=1)   # every N growth passes
     enable_llm_enrichment: bool = True         # only fires when a real provider is configured
     benchmark_in_cycle: bool = True            # include the capability benchmark each cycle
+    # Run the three independent observation steps (code review, architecture, benchmark)
+    # concurrently. They write disjoint caches, so the result is identical to the sequential
+    # order — only faster. Set False for strictly deterministic single-threaded execution.
+    parallel_cycle: bool = True
     # --- enactment (self-modification) — OFF until the Master authorises it --- #
     autonomous_enact: bool = False             # auto-apply source edits + safe tuning
     allow_tuning: bool = False                 # may tune recursive_improvement_iterations

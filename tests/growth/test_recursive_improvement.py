@@ -7,6 +7,21 @@ from pathlib import Path
 
 from nyxara.growth.recursive_improvement import (RecursiveSelfImprovement,
                                                  SelfImprovementReport)
+from nyxara.kernel.config import get_settings
+
+
+def _rsi_with_parallel(parallel: bool) -> RecursiveSelfImprovement:
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.parallel_cycle = parallel
+    return RecursiveSelfImprovement(settings=s)
+
+
+def test_parallel_cycle_matches_sequential():
+    rep_p = _rsi_with_parallel(True).run(enact=False)
+    rep_s = _rsi_with_parallel(False).run(enact=False)
+    # the three observation steps write disjoint caches, so order cannot change the result
+    assert rep_p.code["files_scanned"] == rep_s.code["files_scanned"]
+    assert rep_p.architecture["n_modules"] == rep_s.architecture["n_modules"]
 
 
 def test_dry_run_populates_all_sections():
