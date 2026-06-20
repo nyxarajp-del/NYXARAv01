@@ -75,3 +75,46 @@ def test_play_feeds_the_foundry_corpus(tmp_path):
     docs = load_distillation_docs(sp.distiller.store_path)
     assert len(docs) == 2
     assert all("### NYXARA:" in d for d in docs)
+
+
+# --------------------------------------------------------------------------- #
+# Verifiable self-play — she answers her OWN structured problems exactly (no key needed)
+# --------------------------------------------------------------------------- #
+def _verifiable_sp(tmp_path):
+    from nyxara.growth.flywheel import DataFlywheel
+    fw = DataFlywheel(store_path=tmp_path / "flywheel.jsonl")
+    return SelfPlay(flywheel=fw, seed=3), fw
+
+
+def test_generate_verifiable_problems_are_oracle_solvable(tmp_path):
+    from nyxara.mind.reasoning_chain import solve_chain
+    from nyxara.mind.reasoning_faculties import solve_with_faculties
+    sp, _ = _verifiable_sp(tmp_path)
+    problems = sp.generate_verifiable(20)
+    assert len(problems) == 20
+    for cat, prompt, answer in problems:
+        # every generated problem must be exactly solvable by a faculty/chain — no guessed targets
+        solved = solve_chain(prompt) is not None or solve_with_faculties(prompt) is not None
+        assert solved, f"{cat}: {prompt!r} was not oracle-solvable"
+        assert "The answer is" in answer
+
+
+def test_play_verifiable_collects_into_flywheel(tmp_path):
+    sp, fw = _verifiable_sp(tmp_path)
+    rep = sp.play_verifiable(24)
+    assert rep["collected"] > 0
+    assert rep["collected"] == fw.count()
+    # the collected pairs render into foundry-ready training docs (the loop closes, keyless)
+    docs = fw.training_docs()
+    assert len(docs) == rep["collected"]
+    assert all("### NYXARA:" in d for d in docs)
+
+
+def test_verifiable_self_play_works_without_a_teacher(tmp_path):
+    # the whole point: a keyless machine (no real teacher) still grows the corpus
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    sp, fw = _verifiable_sp(tmp_path)
+    sp.settings = settings
+    assert sp.available() is False              # no real teacher
+    assert sp.play_verifiable(12)["collected"] > 0   # yet she still collects verified pairs
