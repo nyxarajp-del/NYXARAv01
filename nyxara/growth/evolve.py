@@ -240,12 +240,68 @@ class Evolver:
 
     # ---- the evolution loop ---- #
     def evolve(self, generations: int = 20, *, population: int = 8,
-               owner_approved: bool = False) -> List[float]:
+               owner_approved: bool = False, islands: int = 1,
+               migrate_every: int = 5) -> List[float]:
+        """Evolve the genome for ``generations``; with ``islands`` > 1, run an island model.
+
+        The single-island path (default) is the original (1+λ) loop, unchanged. With more
+        islands, K independent populations explore in parallel with diverse step sizes and
+        periodically migrate the best genome between them — escaping local optima the way a
+        single population cannot. The global best is installed into this Evolver at the end,
+        always through the character-lock/corrigibility check (:meth:`_migrate_in`)."""
+        if islands <= 1:
+            trajectory = [self.current_fitness()]
+            for _ in range(generations):
+                self.step(self.propose(population), owner_approved=owner_approved)
+                trajectory.append(self.current_fitness())
+            return trajectory
+        return self._evolve_islands(generations, population=population,
+                                    owner_approved=owner_approved, islands=islands,
+                                    migrate_every=migrate_every)
+
+    def _evolve_islands(self, generations: int, *, population: int, owner_approved: bool,
+                        islands: int, migrate_every: int) -> List[float]:
+        step = max(1, int(migrate_every))
+        pops = [Evolver(self.genome, self.fitness, corrigibility=self.corrigibility,
+                        significance_threshold=self.significance_threshold,
+                        min_improvement=self.min_improvement, protected=self.protected,
+                        seed=self._rng.randint(0, 2**31 - 1),
+                        sigma_init=self.sigma * (1.0 + 0.5 * i),  # diverse exploration radii
+                        adapt_window=self._adapt_window)
+                for i in range(int(islands))]
         trajectory = [self.current_fitness()]
-        for _ in range(generations):
-            self.step(self.propose(population), owner_approved=owner_approved)
-            trajectory.append(self.current_fitness())
+        done = 0
+        while done < generations:
+            chunk = min(step, generations - done)
+            for ev in pops:
+                for _ in range(chunk):
+                    ev.step(ev.propose(population), owner_approved=owner_approved)
+            done += chunk
+            best_ev = max(pops, key=lambda e: e.current_fitness())
+            migrant = dict(best_ev.genome)
+            for ev in pops:                       # the best island seeds the others
+                if ev is not best_ev and ev.fitness(migrant) > ev.current_fitness():
+                    ev._migrate_in(migrant)
+            trajectory.append(max(e.current_fitness() for e in pops))
+        champion = max(pops, key=lambda e: e.current_fitness())
+        if self.fitness(dict(champion.genome)) > self.current_fitness():
+            self._migrate_in(dict(champion.genome))
         return trajectory
+
+    def _migrate_in(self, genome: Genome) -> None:
+        """Install a migrated genome through the character lock — never the immutable core.
+
+        Migration is a whole-genome jump, so it cannot reuse the per-mutation gate; instead
+        protected keys are dropped outright (the core is never overwritten) and
+        :meth:`verify_integrity` re-seals corrigibility before the change stands."""
+        new = dict(self.genome)
+        for k, v in genome.items():
+            if k in self.protected:
+                continue                          # the immutable core is never migrated
+            new[k] = _clamp(v)
+        self.genome = new
+        self._genome_log.append(dict(self.genome))
+        self.verify_integrity()
 
     # ---- integrity ---- #
     def verify_integrity(self) -> bool:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from nyxara.growth.foundry import Foundry, FoundryDecision
+from nyxara.growth.foundry import Foundry, FoundryDecision, _difficulty_score
 from nyxara.growth.learn import Experience, ReplayBuffer
 from nyxara.kernel.config import NyxaraSettings, Profile
 from nyxara.kernel.errors import CorrigibilityError, ValidationError
@@ -43,6 +43,32 @@ def test_collect_corpus_empty_raises(tmp_path):
     f = Foundry(settings=settings, replay=ReplayBuffer())
     with pytest.raises(ValidationError):
         f.collect_corpus()
+
+
+# -------------------- difficulty curriculum -------------------- #
+def test_difficulty_score_ranks_easy_below_hard():
+    easy = _difficulty_score("a a a")
+    hard = _difficulty_score("quantum entanglement decoheres across macroscopic ensembles")
+    assert easy < hard
+    assert _difficulty_score("") == 0.0
+
+
+def test_curriculum_orders_easy_to_hard(tmp_path):
+    f = _foundry(tmp_path)   # curriculum on by default, no active model -> stdlib proxy
+    texts = ["zeta eta theta iota kappa lambda mu nu", "a a", "the master is loyal"]
+    ordered = f._curriculum_order(list(texts))
+    scores = [_difficulty_score(t) for t in ordered]
+    assert scores == sorted(scores)        # non-decreasing easy -> hard
+
+
+def test_curriculum_can_be_disabled(tmp_path):
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "ngram"
+    settings.foundry.curriculum = False
+    f = Foundry(settings=settings, replay=_replay())
+    texts = ["zzz yyy xxx www", "a a"]
+    assert f._curriculum_order(list(texts)) == texts   # untouched order
 
 
 def test_collect_corpus_includes_flywheel(tmp_path):

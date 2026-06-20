@@ -242,12 +242,37 @@ class RecursiveSelfImprovement:
         # the index governs effort up front, before any expensive step, so it shapes how deeply
         # she benchmarks and reasons this cycle — not merely how the cycle is later summarised
         self._plan_effort()
-        self.review_code()
-        self.analyze_architecture()
-        if self.settings.self_improvement.benchmark_in_cycle:
-            self.run_benchmarks(category=category)
+        self._observe(category=category)
         weaknesses = self.detect_weaknesses()
         return self.optimize(weaknesses, enact=enact)
+
+    def _observe(self, *, category: Optional[str]) -> None:
+        """Run the three independent observation steps (review / architecture / benchmark).
+
+        They write disjoint per-cycle caches, so running them concurrently yields exactly the
+        same state as running them in order — just faster, since each is I/O- and
+        subprocess-bound. Falls back to sequential when ``parallel_cycle`` is off or the
+        thread pool is unavailable; an error in any one branch is contained to that branch's
+        own graceful-empty handling."""
+        do_bench = self.settings.self_improvement.benchmark_in_cycle
+        steps = [self.review_code, self.analyze_architecture]
+        if do_bench:
+            steps.append(lambda: self.run_benchmarks(category=category))
+        if not getattr(self.settings.self_improvement, "parallel_cycle", True) or len(steps) < 2:
+            for step in steps:
+                step()
+            return
+        # warm the shared lazy handles single-threaded before fanning out
+        self._llm_handle()
+        self._plan_effort()
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=len(steps)) as pool:
+                for fut in [pool.submit(s) for s in steps]:
+                    fut.result()
+        except Exception:  # noqa: BLE001 — never let parallelism break the cycle; run in order
+            for step in steps:
+                step()
 
     # ------------------------------------------------------------------ #
     # enactment helpers

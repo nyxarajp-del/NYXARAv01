@@ -265,3 +265,27 @@ def test_propose_uses_current_sigma():
     spread = max(abs(m.delta) for m in muts)
     assert spread > 0.05                          # deltas scale with the (larger) sigma
     assert all("adaptive" in m.rationale for m in muts)
+
+
+# -------------------- island model -------------------- #
+def test_single_island_matches_plain_loop():
+    a = _evolver().evolve(generations=5, population=4, islands=1)
+    b = _evolver().evolve(generations=5, population=4)
+    assert a == b                                  # islands=1 is the original loop
+
+
+def test_islands_improve_and_keep_character_lock():
+    ev = _evolver({"caution": 0.4, "aggression": 0.5})
+    start = ev.current_fitness()
+    traj = ev.evolve(generations=6, population=5, islands=3, migrate_every=2)
+    assert traj[-1] >= start                        # migration never regresses the best
+    assert ev.verify_integrity()                    # corrigibility seal still holds
+    assert not (set(IMMUTABLE_VALUES) & set(ev.genome))   # immutable core never migrated
+
+
+def test_migrate_in_never_overwrites_protected_core():
+    ev = _evolver()
+    protected = next(iter(IMMUTABLE_VALUES))
+    ev._migrate_in({"caution": 0.9, protected: 0.99})
+    assert protected not in ev.genome               # the core is dropped, not installed
+    assert ev.genome["caution"] == 0.9

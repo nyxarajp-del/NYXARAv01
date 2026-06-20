@@ -512,6 +512,36 @@ def fitness(quality: float, params: int, seconds: float, *, quality_weight: floa
     return (quality_weight * max(0.0, quality) + speed_weight * speed) / total
 
 
+def _dominates(a: "Candidate", b: "Candidate") -> bool:
+    """True if ``a`` is no worse than ``b`` on every objective and strictly better on one.
+
+    Objectives: smarter (``quality`` ↑), smaller (``params`` ↓), faster (``seconds`` ↓)."""
+    no_worse = (a.quality >= b.quality and a.params <= b.params and a.seconds <= b.seconds)
+    strictly_better = (a.quality > b.quality or a.params < b.params or a.seconds < b.seconds)
+    return no_worse and strictly_better
+
+
+def _pareto_front(cands: Sequence["Candidate"]) -> List["Candidate"]:
+    """The non-dominated set: candidates no other candidate beats on all objectives at once.
+
+    Deduplicated by genome fingerprint and returned smartest-first. This is the real
+    multi-objective frontier — a fast-but-simpler brain and the smartest-but-heavier brain
+    both survive here, instead of being collapsed into one scalar winner."""
+    front: List["Candidate"] = []
+    for c in cands:
+        if any(o is not c and _dominates(o, c) for o in cands):
+            continue
+        front.append(c)
+    seen: set = set()
+    unique: List[Candidate] = []
+    for c in sorted(front, key=lambda c: c.quality, reverse=True):
+        fp = c.genome.fingerprint()
+        if fp not in seen:
+            seen.add(fp)
+            unique.append(c)
+    return unique
+
+
 # --------------------------------------------------------------------------- #
 # Search records
 # --------------------------------------------------------------------------- #
@@ -569,6 +599,10 @@ class GenesisReport:
     backend: str                    # "torch" | "stdlib"
     champion_alignment: float = 1.0  # S_JP_Alignment of the crowned brain
     champion_perplexity_std: float = 0.0  # noise floor of the champion's score across folds
+    # The non-dominated set across the whole search: every architecture that is not beaten on
+    # all of (smarter, fewer params, faster) at once. The scalar champion is one point on it;
+    # the front exposes the full speed↔smartness trade-off so the foundry can pick its posture.
+    pareto_front: List["Candidate"] = field(default_factory=list)
 
     @property
     def topology_active(self) -> bool:
@@ -797,7 +831,8 @@ class NeuralArchitectureSearch:
             champion=best.genome, champion_kind=best.kind, champion_fitness=best.fitness,
             champion_perplexity=best.perplexity, champion_params=best.params,
             leaderboard=leaderboard, generations=gens, history=history, backend=backend,
-            champion_alignment=best.alignment, champion_perplexity_std=best.perplexity_std)
+            champion_alignment=best.alignment, champion_perplexity_std=best.perplexity_std,
+            pareto_front=_pareto_front(list(seen.values())))
         self._reports.append(report)
         return report
 

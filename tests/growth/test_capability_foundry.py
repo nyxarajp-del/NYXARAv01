@@ -281,3 +281,54 @@ def test_generic_scaffold_is_honestly_labelled(tmp_path):
     assert res.deployed
     r = f.registry.invoke(res.tool_name, {"payload": "x"}, authority=Authority.OWNER)
     assert r.ok and r.value == {"echo": "x", "scaffold": True}
+
+
+# --------------------------------------------------------------------------- #
+# learned recipe selection (RecipeLearner)
+# --------------------------------------------------------------------------- #
+from nyxara.growth.capability_foundry import RecipeLearner  # noqa: E402
+
+
+def test_recipe_learner_suggests_similar_past_success():
+    rl = RecipeLearner(min_samples=2, min_similarity=0.1)
+    rl.observe("frobnicate the wobble gadget", "text_reverse")
+    rl.observe("frobnicate the wobble gadget", "text_reverse")
+    assert rl.suggest("please frobnicate this wobble gadget") == "text_reverse"
+    assert rl.suggest("alpha beta gamma unrelated query") is None     # no overlap
+
+
+def test_recipe_learner_needs_min_samples():
+    rl = RecipeLearner(min_samples=3, min_similarity=0.0)
+    rl.observe("count the vowels here", "count_vowels")
+    assert rl.suggest("count the vowels here") is None                 # below threshold
+
+
+def test_recipe_learner_ignores_generic():
+    rl = RecipeLearner(min_samples=1, min_similarity=0.0)
+    rl.observe("anything at all", "generic")
+    assert rl._needs == []                                             # never learns generic
+
+
+def test_recipe_learner_round_trip():
+    rl = RecipeLearner(min_samples=2, min_similarity=0.4)
+    rl.observe("a b c", "k1")
+    rl.observe("d e f", "k2")
+    back = RecipeLearner.from_dict(rl.to_dict())
+    assert back._needs == rl._needs and back._keys == rl._keys
+    assert back.min_samples == 2 and back.min_similarity == 0.4
+
+
+def test_resolve_recipe_learned_uses_learner(tmp_path):
+    f = _foundry(tmp_path)
+    f.recipe_learner = RecipeLearner(min_samples=1, min_similarity=0.05)
+    f.recipe_learner.observe("frobnicate the wobble gadget", "text_reverse")
+    assert f._resolve_recipe_learned("please frobnicate this wobble gadget").key == "text_reverse"
+    assert f._resolve_recipe_learned("alpha beta gamma delta epsilon").key == "generic"
+
+
+def test_recipe_learner_persists_through_forge(tmp_path):
+    f = _foundry(tmp_path)
+    f.forge("reverse a string", authority=Authority.OWNER)             # logs gap -> text_reverse
+    reloaded = _foundry(tmp_path)                                       # same root -> manifest
+    assert reloaded.recipe_learner._needs                              # learned mapping survived
+    assert "text_reverse" in reloaded.recipe_learner._keys

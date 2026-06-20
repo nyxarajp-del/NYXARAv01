@@ -137,24 +137,54 @@ class SkillFactory:
     def _draft_skill(self, goal: str, episode: Any) -> tuple:
         """Compose a procedure string and tool list for this goal.
 
-        Tries Toolsmith-based composition first; falls back to extracting the
-        procedure from the episode's rationale/steps.
+        When the episode used real tools and a Toolsmith is available, compose a grounded,
+        step-by-step pipeline from those tools' registered specs (the real composition the
+        Skill Factory promises). Otherwise fall back to extracting the procedure from the
+        episode's rationale — still the genuine execution trace.
         """
         tools: List[str] = []
-        procedure = ""
-
-        # try extracting from the episode (most reliable — real execution trace)
         if episode is not None:
-            procedure = str(getattr(episode, "rationale", "") or "")[:200]
             episode_tools = getattr(episode, "tools", None)
             if episode_tools:
                 tools = list(episode_tools)
 
-        # build a minimal procedure description if we have nothing
+        # 1) Toolsmith-grounded composition — chain the actual tools the episode used
+        composed = self._compose_with_toolsmith(goal, tools)
+        if composed:
+            return composed, tools
+
+        # 2) fall back to the episode's own execution trace (its rationale)
+        procedure = ""
+        if episode is not None:
+            procedure = str(getattr(episode, "rationale", "") or "")[:200]
         if not procedure:
             procedure = f"achieve: {goal[:100]}"
-
         return procedure, tools
+
+    def _compose_with_toolsmith(self, goal: str, tools: List[str]) -> str:
+        """Build a grounded, multi-step procedure from ``tools`` via the Toolsmith's registry.
+
+        Each named tool becomes a numbered step annotated with its registered description, so
+        the stored skill is a real pipeline ("1. fetch — …  2. parse — …") rather than a blob
+        of free text. Returns '' when no Toolsmith / registry / tools are available, so the
+        caller cleanly falls back to the rationale path."""
+        if self.toolsmith is None or not tools:
+            return ""
+        registry = getattr(self.toolsmith, "registry", None)
+        if registry is None:
+            return ""
+        steps: List[str] = []
+        for i, name in enumerate(tools, 1):
+            try:
+                spec = registry.get(name)
+            except Exception:  # noqa: BLE001
+                spec = None
+            desc = (getattr(spec, "description", "") or "").strip() if spec else ""
+            steps.append(f"{i}. {name} — {desc}" if desc else f"{i}. {name}")
+        if not steps:
+            return ""
+        chain = " then ".join(tools)
+        return f"To {goal[:80]}: compose [{chain}].\n" + "\n".join(steps)
 
     def _test_skill(self, goal: str, procedure: str, tools: List[str]) -> bool:
         """Dry-run the skill in the sandbox. Returns True if test passed / was skipped."""

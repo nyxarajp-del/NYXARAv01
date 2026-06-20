@@ -31,8 +31,10 @@ Capability grows; character never does. Reuses :mod:`guard.corrigibility`,
 from __future__ import annotations
 
 import json
+import math
 import random
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -55,6 +57,22 @@ __all__ = [
 
 _CAP_BENCH_SYSTEM = ("Answer the question. Put the final answer last, plainly — a number for "
                      "arithmetic, or the single letter for a choice.")
+
+
+def _difficulty_score(text: str) -> float:
+    """Heuristic training difficulty (≥0): longer + higher lexical entropy ⇒ harder.
+
+    Pure-stdlib and deterministic, so it works everywhere and gives a stable curriculum
+    order. A short, repetitive sentence (low entropy) scores low (easy); a long sentence
+    full of distinct tokens scores high (hard). Used to order the corpus easy→hard so the
+    model masters simple structure before being shown its hardest examples."""
+    toks = text.split()
+    n = len(toks)
+    if n == 0:
+        return 0.0
+    counts = Counter(toks)
+    entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
+    return math.log2(1 + n) + entropy
 
 
 def _stride_sample(items: Sequence[str], k: int) -> List[str]:
@@ -242,7 +260,38 @@ class Foundry:
         texts = kept + _stride_sample(others, max(0, limit - len(kept)))
         if not texts:
             raise ValidationError("no corpus to learn from (empty replay + no seed corpus)")
-        return texts
+        return self._curriculum_order(texts)
+
+    def _curriculum_order(self, texts: List[str]) -> List[str]:
+        """Order the corpus easy→hard when the curriculum is enabled.
+
+        Difficulty is the pure-stdlib :func:`_difficulty_score`; when the currently-active
+        model is loadable and the corpus is small enough to score cheaply, it is *refined*
+        by that model's real perplexity (its honest measure of what it still finds hard) so
+        the schedule targets the model's actual weak spots. Falls back silently to the
+        stdlib proxy on any error — never fatal to a forge."""
+        if not getattr(self.cfg, "curriculum", True) or len(texts) < 3:
+            return texts
+        if len(texts) <= 512:
+            model = self._load_active_model()
+            if model is not None:
+                try:
+                    return sorted(texts, key=model.perplexity)
+                except Exception:  # noqa: BLE001 — perplexity is an optimisation, never required
+                    pass
+        return sorted(texts, key=_difficulty_score)
+
+    def _load_active_model(self) -> Optional[BaseLanguageModel]:
+        """Best-effort load of the live model for curriculum scoring (never raises)."""
+        try:
+            act = self.active()
+            if act is None:
+                return None
+            model = build_model(ModelSpec.from_dict(act.spec))
+            model.load(Path(act.path))
+            return model
+        except Exception:  # noqa: BLE001
+            return None
 
     def _distilled_docs(self, limit: int) -> List[str]:
         """Rendered training docs from the teacher-distillation store, if any (never raises)."""
@@ -332,6 +381,7 @@ class Foundry:
                                  n_head=dims["n_head"], n_embd=dims["n_embd"],
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
+                                 lora_r_auto=getattr(self.cfg, "lora_r_auto", True),
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
                                  max_seq_len=self.cfg.max_seq_len,
                                  load_in_4bit=self.cfg.load_in_4bit,
