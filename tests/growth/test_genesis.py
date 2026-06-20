@@ -298,3 +298,93 @@ def test_stdlib_substrate_is_word_kngram():
     report = nas.search()
     assert report.backend == "stdlib"
     assert report.leaderboard[0].kind == "kngram"       # coherent word-level substrate
+
+
+# --------------------------------------------------------------------------- #
+# Max-level upgrade: richer genome, search engines, surrogate/bracket, CLI
+# --------------------------------------------------------------------------- #
+def test_richer_genome_roundtrips_and_stays_buildable():
+    rng = random.Random(11)
+    for _ in range(100):
+        g = ArchitectureGenome.random(rng).mutate(rng)
+        assert ArchitectureGenome.from_dict(g.to_dict()).to_dict() == g.to_dict()
+        assert g.pos_encoding in ("learned", "rope", "alibi")
+        for ly in g.layers:
+            assert g.n_embd % ly.n_head == 0                 # heads divide width
+            assert ly.n_kv_head >= 1 and ly.n_head % ly.n_kv_head == 0   # grouped-query buildable
+            assert 1 <= ly.top_k <= ly.n_experts             # MoE routing buildable
+
+
+def test_old_genome_dict_without_new_fields_still_builds():
+    """Backward-compat: a genome serialized before the upgrade (no pos_encoding/expansion/…) loads."""
+    legacy = {"n_embd": 64, "block_size": 16, "ngram_order": 3, "ngram_k": 1.0, "seed": 7,
+              "layers": [{"op": "attention", "norm": "pre", "activation": "gelu",
+                          "n_head": 2, "residual": True}]}
+    from nyxara.growth.foundry_models import ModelSpec
+    g = ArchitectureGenome.from_dict(legacy)
+    assert g.pos_encoding == "learned" and g.layers[0].expansion == 4
+    spec = ModelSpec(kind="genesis", genome=g.to_dict())
+    model = build_model(spec)                                # never raises
+    model.train_on(_CORPUS, steps=5, seed=1)
+    assert model.param_count() > 0
+
+
+def test_feature_vector_is_fixed_length_and_flops_positive():
+    rng = random.Random(5)
+    a, b = ArchitectureGenome.random(rng), ArchitectureGenome.random(rng, max_layers=3)
+    assert len(a.feature_vector()) == len(b.feature_vector())   # surrogate needs a fixed width
+    assert a.estimated_flops() > 0
+
+
+@pytest.mark.parametrize("strategy", ["elitism", "tournament", "regularized"])
+def test_every_search_strategy_crowns_a_monotonic_champion(strategy):
+    nas = NeuralArchitectureSearch(
+        cfg=_cfg(generations=4, search_strategy=strategy, adaptive_mutation=True,
+                 novelty_weight=0.5),
+        seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.champion is not None
+    assert report.search_strategy == strategy
+    assert all(report.history[i] <= report.history[i + 1] + 1e-9
+               for i in range(len(report.history) - 1))
+    assert report.leaderboard == sorted(report.leaderboard, key=lambda c: c.fitness, reverse=True)
+
+
+def test_successive_halving_and_surrogate_run_on_stdlib():
+    nas = NeuralArchitectureSearch(
+        cfg=_cfg(generations=3, population_size=9, successive_halving=True, halving_factor=3,
+                 surrogate=True, surrogate_min_train=3),
+        seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.champion is not None
+    assert report.evaluations >= 1
+    assert report.to_dict()["evaluations"] >= 1
+
+
+def test_hardware_weight_default_reproduces_classic_fitness():
+    # with the default hardware_weight=0 the new term is inert: identical to the two-term score
+    assert fitness(0.7, 1000, 0.2) == fitness(0.7, 1000, 0.2, hardware_weight=0.0, flops=9e9)
+    # turning it on rewards the cheaper (lower-FLOPs) brain, all else equal
+    cheap = fitness(0.7, 1000, 0.2, hardware_weight=0.5, flops=1e4)
+    pricey = fitness(0.7, 1000, 0.2, hardware_weight=0.5, flops=1e9)
+    assert cheap > pricey
+
+
+def test_report_to_dict_exposes_new_fields():
+    nas = NeuralArchitectureSearch(cfg=_cfg(), seed_corpus=_CORPUS)
+    d = nas.search().to_dict()
+    for key in ("champion_flops", "search_strategy", "generations_to_best", "evaluations",
+                "pareto_front"):
+        assert key in d
+
+
+def test_cli_runs_json_with_sample(tmp_path, capsys):
+    import json as _json
+    from nyxara.growth.genesis_main import main
+    rc = main(["--backend", "stdlib", "--generations", "2", "--population", "4",
+               "--strategy", "tournament", "--bracket", "--surrogate",
+               "--sample", "the master", "--json", "--data-dir", str(tmp_path)])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["ok"] and payload["search_strategy"] == "tournament"
+    assert "sample" in payload and isinstance(payload["sample"]["text"], str)
