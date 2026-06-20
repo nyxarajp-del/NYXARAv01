@@ -53,6 +53,10 @@ class NoFacultyError(NyxaraError):
 # --------------------------------------------------------------------------- #
 class TaskType(str, Enum):
     ARITHMETIC = "arithmetic"        # exact numeric computation
+    ALGEBRA = "algebra"              # solve equations for an unknown
+    CALCULUS = "calculus"            # derivative / integral / limit
+    SEQUENCE = "sequence"            # next term of a number sequence
+    DATE = "date"                    # calendar / day arithmetic
     LOGIC = "logic"                  # symbolic/deductive inference
     FACTUAL_RECALL = "factual_recall"  # "what do I know about X"
     RETRIEVAL = "retrieval"          # search memory / documents

@@ -10,12 +10,22 @@ weights. Curiosity as a training signal.
 Gather-only and gated like all forging: it changes no weights (the foundry's gauntlet still
 decides what is promoted), and it is honest about an un-configured teacher (it simply falls
 back to a fixed curiosity battery so the corpus still grows on a keyless machine).
+
+Two answering paths, so the loop closes *with or without* a key:
+
+* **Teacher self-play** — open-ended questions answered by a frontier teacher (distillation).
+* **Verifiable self-play** — structured problems NYXARA poses and answers **herself**, exactly,
+  with her own faculties (``mind/reasoning_faculties`` / ``mind/reasoning_chain``). The answer is
+  the oracle, so the supervision is provably correct and is collected as ``verified=True`` into
+  the data flywheel — curiosity that grows her corpus on a bare, keyless machine.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
+import random
 import re
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from nyxara.growth.distill import Distiller
 from nyxara.kernel.config import NyxaraSettings, get_settings
@@ -62,10 +72,13 @@ class SelfPlay:
     """Manufacture fresh training questions, answer them via the teacher, grow the corpus."""
 
     def __init__(self, *, settings: Optional[NyxaraSettings] = None, llm: Any = None,
-                 distiller: Optional[Distiller] = None, system: Optional[str] = None) -> None:
+                 distiller: Optional[Distiller] = None, system: Optional[str] = None,
+                 flywheel: Any = None, seed: int = 7) -> None:
         self.settings = settings or get_settings()
         self._llm = llm
         self.distiller = distiller or Distiller(settings=self.settings, llm=llm, system=system)
+        self._flywheel = flywheel                       # lazily built for verifiable self-play
+        self.rng = random.Random(seed)
 
     def _teacher(self) -> Any:
         if self._llm is None:
@@ -99,6 +112,98 @@ class SelfPlay:
         return {"available": self.available(), "questions": len(questions),
                 "distilled": len(examples), "store_size": self.distiller.count(),
                 "store": str(self.distiller.store_path)}
+
+    # ------------------------------------------------------------------ #
+    # Verifiable self-play — she poses AND answers structured problems herself (no key needed)
+    # ------------------------------------------------------------------ #
+    def flywheel(self) -> Any:
+        """The data flywheel that collects verified pairs (built lazily from settings)."""
+        if self._flywheel is None:
+            from nyxara.growth.flywheel import DataFlywheel
+            self._flywheel = DataFlywheel.from_settings(self.settings)
+        return self._flywheel
+
+    def _generators(self) -> List[Tuple[str, Callable[[], Optional[Tuple[str, str]]]]]:
+        return [("arithmetic", self._gen_arithmetic), ("percent", self._gen_percent),
+                ("algebra", self._gen_algebra), ("sequence", self._gen_sequence),
+                ("date", self._gen_date), ("multi_step", self._gen_multi_step)]
+
+    def generate_verifiable(self, n: int = 24) -> List[Tuple[str, str, str]]:
+        """Up to ``n`` (category, prompt, oracle-answer) problems she can prove herself."""
+        gens = self._generators()
+        out: List[Tuple[str, str, str]] = []
+        attempts = 0
+        while len(out) < n and attempts < n * 4:
+            attempts += 1
+            cat, fn = gens[self.rng.randrange(len(gens))]
+            made = fn()
+            if made is not None:
+                out.append((cat, made[0], made[1]))
+        return out
+
+    def play_verifiable(self, n: int = 24) -> dict:
+        """Pose structured problems, answer them with her own faculties, and collect the verified
+        pairs into the flywheel. Works on a keyless machine — the oracle is exact, not a teacher."""
+        fw = self.flywheel()
+        collected = 0
+        by_cat: dict = {}
+        for cat, prompt, answer in self.generate_verifiable(n):
+            decision = fw.consider(prompt, answer, confidence=1.0, verified=True)
+            if getattr(decision, "collected", False):
+                collected += 1
+                by_cat[cat] = by_cat.get(cat, 0) + 1
+        return {"generated": n, "collected": collected, "by_category": by_cat,
+                "store": str(getattr(fw, "store_path", ""))}
+
+    # ---- structured generators: each returns (prompt, exact_answer) or None ---- #
+    @staticmethod
+    def _oracle(prompt: str) -> Optional[Tuple[str, str]]:
+        """Answer ``prompt`` with a single verifiable faculty; the answer IS the supervision."""
+        from nyxara.mind.reasoning_faculties import solve_with_faculties
+        res = solve_with_faculties(prompt)
+        return None if res is None else (prompt, f"The answer is {res[0]}.")
+
+    @staticmethod
+    def _chain_oracle(prompt: str) -> Optional[Tuple[str, str]]:
+        """Answer a multi-step ``prompt`` with the reasoning chain — a shown, exact derivation."""
+        from nyxara.mind.reasoning_chain import solve_chain
+        res = solve_chain(prompt)
+        return None if res is None else (prompt, f"Working:\n{res.render()}\nThe answer is {res.answer}.")
+
+    def _gen_arithmetic(self) -> Optional[Tuple[str, str]]:
+        a, b, c = self.rng.randint(2, 19), self.rng.randint(2, 12), self.rng.randint(1, 30)
+        return self._oracle(f"What is {a} * {b} + {c}?")
+
+    def _gen_percent(self) -> Optional[Tuple[str, str]]:
+        p = self.rng.choice([5, 10, 15, 20, 25, 40, 50, 75])
+        n = self.rng.choice([40, 80, 120, 150, 200, 240, 300])
+        return self._oracle(f"What is {p}% of {n}?")
+
+    def _gen_algebra(self) -> Optional[Tuple[str, str]]:
+        a, x, b = self.rng.randint(2, 9), self.rng.randint(-9, 9), self.rng.randint(-9, 9)
+        c = a * x + b
+        sign = "+" if b >= 0 else "-"
+        return self._oracle(f"Solve {a}x {sign} {abs(b)} = {c} for x.")
+
+    def _gen_sequence(self) -> Optional[Tuple[str, str]]:
+        start = self.rng.randint(1, 9)
+        if self.rng.random() < 0.5:
+            d = self.rng.randint(2, 7)
+            terms = [start + d * i for i in range(4)]
+        else:
+            r = self.rng.choice([2, 3])
+            terms = [start * r ** i for i in range(4)]
+        return self._oracle(f"What number comes next in {', '.join(map(str, terms))}, ?")
+
+    def _gen_date(self) -> Optional[Tuple[str, str]]:
+        base = _dt.date(2020, 1, 1) + _dt.timedelta(days=self.rng.randint(0, 3000))
+        other = base + _dt.timedelta(days=self.rng.randint(5, 400))
+        return self._oracle(
+            f"How many days are there between {base.isoformat()} and {other.isoformat()}?")
+
+    def _gen_multi_step(self) -> Optional[Tuple[str, str]]:
+        a, x, b = self.rng.randint(2, 9), self.rng.randint(2, 12), self.rng.randint(1, 20)
+        return self._chain_oracle(f"If x = {x}, what is {a}x + {b}?")
 
 
 # --------------------------------------------------------------------------- #

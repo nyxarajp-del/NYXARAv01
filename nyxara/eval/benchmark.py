@@ -32,7 +32,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 __all__ = [
     "Grader", "BenchmarkTask", "BenchmarkResult", "BenchmarkReport", "Benchmark",
     "Solver", "core_solver", "llm_solver", "self_solver", "run_router",
-    "build_arithmetic_benchmark", "build_logic_benchmark", "build_default_benchmark",
+    "build_arithmetic_benchmark", "build_logic_benchmark", "build_reasoning_benchmark",
+    "build_default_benchmark",
 ]
 
 Solver = Callable[[str], str]
@@ -450,10 +451,49 @@ def build_logic_benchmark() -> Benchmark:
     return Benchmark("logic", tasks)
 
 
+def build_reasoning_benchmark() -> Benchmark:
+    """Deeper verifiable skills the sovereign offline mind now computes itself: algebra,
+    calculus, number sequences, percentages, unit conversion, calendar arithmetic. Each has an
+    exact answer, so the score is honest whether solved by a faculty or by a model."""
+    raw = [
+        # (id, category, prompt, grader, answer)
+        ("alg-00", "algebra", "Solve 2x + 3 = 9 for x. Give just the value.",
+         Grader.CONTAINS, "3"),
+        ("alg-01", "algebra", "Solve x^2 - 5x + 6 = 0. List the roots.",
+         Grader.CONTAINS, "3"),
+        ("calc-00", "calculus", "What is the derivative of x^2 with respect to x?",
+         Grader.CONTAINS, "2*x"),
+        ("calc-01", "calculus", "Integrate x^2 dx.",
+         Grader.CONTAINS, "x**3/3"),
+        ("seq-00", "sequence", "What number comes next in 2, 4, 6, 8, ?",
+         Grader.NUMERIC, "10"),
+        ("seq-01", "sequence", "What is the next number in 3, 9, 27, ?",
+         Grader.NUMERIC, "81"),
+        ("pct-00", "percent", "What is 20% of 150? Give just the number.",
+         Grader.NUMERIC, "30"),
+        ("pct-01", "percent", "30 is what percent of 120?",
+         Grader.CONTAINS, "25"),
+        ("date-00", "date", "How many days are there between 2020-01-01 and 2020-02-01?",
+         Grader.NUMERIC, "31"),
+        ("date-01", "date", "What day of the week is 2024-01-01?",
+         Grader.CONTAINS, "Monday"),
+        ("step-00", "multi_step", "If x = 5, what is 2x + 3?",
+         Grader.CONTAINS, "13"),
+        ("step-01", "multi_step", "Given x = 4 and y = 2, what is x*y + 1?",
+         Grader.CONTAINS, "9"),
+        ("step-02", "multi_step", "What is 20% of 150, then add 10?",
+         Grader.CONTAINS, "40"),
+    ]
+    tasks = [BenchmarkTask(id=i, category=cat, prompt=p, grader=g, answer=a)
+             for (i, cat, p, g, a) in raw]
+    return Benchmark("reasoning", tasks)
+
+
 def build_default_benchmark() -> Benchmark:
-    """The combined default battery (arithmetic + logic)."""
+    """The combined default battery (arithmetic + logic + deeper reasoning faculties)."""
     bench = Benchmark("default")
-    for src in (build_arithmetic_benchmark(), build_logic_benchmark()):
+    for src in (build_arithmetic_benchmark(), build_logic_benchmark(),
+                build_reasoning_benchmark()):
         for t in src.tasks():
             bench.add(t)
     return bench

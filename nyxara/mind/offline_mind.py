@@ -108,6 +108,12 @@ class OfflineMind:
             reply, conf, how = nlp_answer
             return self._reply(reply, conf, how)
 
+        # 2b. multi-step verifiable reasoning (bind a value & substitute, or a follow-up op):
+        #     an exact, worked derivation she computes herself — not a neural guess.
+        chained = self._reasoning_chain(text)
+        if chained is not None:
+            return chained
+
         # 3. a declarative the Master told her -> acknowledge it (the Master is *telling*, not
         #    asking; she doesn't answer a statement with a knowledge dump).
         if intent.kind == "statement":
@@ -127,6 +133,18 @@ class OfflineMind:
             f"model is configured and I found nothing in memory or my knowledge base to "
             f"stand on. I'd rather say so than guess.",
             0.25, "offline: no grounding (honest admission)")
+
+    def _reasoning_chain(self, text: str) -> Optional[Candidate]:
+        """A worked multi-step exact answer (substitution / follow-up op), or None to defer."""
+        try:
+            from nyxara.mind.reasoning_chain import solve_chain
+            res = solve_chain(text)
+        except Exception:  # noqa: BLE001 — chaining is advisory; never crash a turn
+            return None
+        if res is None:
+            return None
+        return self._reply(f"{res.answer}\n\nWorking:\n{res.render()}", res.confidence,
+                           "offline: multi-step verifiable reasoning chain")
 
     def _nlp_request(self, text: str, nlp: Any) -> Optional[Tuple[str, float, str]]:
         """Summary / keyphrase / sentiment requests, answered by the real NLP module."""
