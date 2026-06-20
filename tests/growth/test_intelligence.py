@@ -43,7 +43,8 @@ def _small() -> ComputeReport:
 # --------------------------------------------------------------------------- #
 def test_signals_are_bounded_fractions():
     sig = IntelligenceIndex(memory=MemoryStore()).compute_signals(_Report())
-    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge", "stability"}
+    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge", "stability",
+                        "frontier", "rigor"}
     assert all(0.0 <= v <= 1.0 for v in sig.values())
     assert sig["accuracy"] == 0.8
     assert abs(sig["handoff"] - 0.6) < 1e-9          # 6 self / 10 total

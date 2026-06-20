@@ -45,6 +45,7 @@ class GrowthReport:
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
     meta_research: Optional[Dict[str, Any]] = None
+    rivalry: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
@@ -52,7 +53,7 @@ class GrowthReport:
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
                 "selfplay": self.selfplay, "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
-                "meta_research": self.meta_research}
+                "meta_research": self.meta_research, "rivalry": self.rivalry}
 
 
 class GrowthEngine:
@@ -67,7 +68,9 @@ class GrowthEngine:
                  self_improvement_every: Optional[int] = None,
                  self_improver: Any = None, enable_meta_research: Optional[bool] = None,
                  meta_research_every: Optional[int] = None,
-                 meta_researcher: Any = None) -> None:
+                 meta_researcher: Any = None, frontier: Any = None,
+                 enable_rivalry: bool = False, arena: Any = None,
+                 rival_solver: Any = None, self_solver: Any = None) -> None:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
@@ -100,6 +103,14 @@ class GrowthEngine:
         self._seen_action_seqs: set = set()
         self._stored_lessons: set = set()
         self._meta_topic_n = 0
+        # Pillar F · Edge 1+4: an open-ended frontier steers curiosity (selfplay) toward the
+        # sparsest niches; a rivalry arena turns a peer AGI's lead into targeted curiosity topics.
+        # All optional/default-off — behaviour is unchanged unless the Master wires them.
+        self.frontier = frontier
+        self.enable_rivalry = enable_rivalry
+        self._arena = arena
+        self._rival_solver = rival_solver
+        self._self_solver = self_solver
 
     @classmethod
     def from_core(cls, core: Any, **kw: Any) -> "GrowthEngine":
@@ -203,15 +214,74 @@ class GrowthEngine:
         return texts[:max_items]
 
     # ---- self-play (opt-in, manufactures fresh corpus before forging) ---- #
-    def self_play(self, *, n: Optional[int] = None) -> Optional[dict]:
-        """Run one curiosity round — invent questions, distil the teacher, grow the corpus."""
+    def self_play(self, *, n: Optional[int] = None,
+                  topics: Optional[List[str]] = None) -> Optional[dict]:
+        """Run one curiosity round — invent questions, distil the teacher, grow the corpus.
+
+        When a frontier is wired, curiosity is steered to the sparsest niches (Edge 1); when
+        ``topics`` are supplied (e.g. from a rivalry pass, Edge 4) they override that, so she
+        practises exactly where a rival leads.
+        """
         try:
             if self._selfplay is None:
                 from nyxara.growth.selfplay import SelfPlay
-                self._selfplay = SelfPlay(settings=self.settings)
-            return self._selfplay.play(n or self.selfplay_n)
+                self._selfplay = SelfPlay(settings=self.settings, frontier=self.frontier)
+            return self._selfplay.play(n or self.selfplay_n, topics=topics)
         except Exception:  # noqa: BLE001 — self-play is best-effort, never fatal
             return None
+
+    # ---- rivalry (opt-in, Edge 4): turn a peer AGI's lead into targeted curiosity ---- #
+    def _arena_obj(self):
+        if self._arena is None:
+            from nyxara.growth.rivalry import Arena
+            self._arena = Arena(settings=self.settings)
+        return self._arena
+
+    def rivalry(self) -> Optional[Dict[str, Any]]:
+        """Run one gated head-to-head vs the configured rival; route the gaps into growth.
+
+        Returns the out-compete report (incl. ``topics`` to practise). No-op — and never fatal —
+        unless ``enable_rivalry`` is set *and* a rival solver is configured. Pure measurement +
+        self-direction: it acts on no external system.
+        """
+        if not self.enable_rivalry or self._rival_solver is None:
+            return None
+        try:
+            self_solver = self._self_solver
+            if self_solver is None:
+                from nyxara.eval.benchmark import self_solver as build_self_solver
+                self_solver = build_self_solver(settings=self.settings)
+            out = self._arena_obj().out_compete(self_solver, self._rival_solver)
+            self._store_rivalry_lessons(out)
+            return out
+        except Exception:  # noqa: BLE001 — rivalry is best-effort, never fatal
+            return None
+
+    def _store_rivalry_lessons(self, out: Dict[str, Any]) -> None:
+        """Persist the rival profile + the worst gap as a durable, deduped lesson."""
+        if self.memory is None:
+            return
+        try:
+            from nyxara.memory.provenance import Provenance, SourceType
+            from nyxara.memory.store import MemoryType
+            rival = out.get("rival", {})
+            gaps = (out.get("head_to_head", {}) or {}).get("gaps", []) or []
+            if not gaps:
+                return
+            worst = gaps[0]
+            key = ("rivalry", rival.get("name", "rival"), worst.get("category", ""))
+            if key in self._stored_lessons:
+                return
+            self._stored_lessons.add(key)
+            self.memory.remember(
+                f"Lesson [rivalry] {rival.get('name', 'rival')} leads in "
+                f"{worst.get('category', '?')} by {float(worst.get('gap', 0.0)):.0%} — practise it.",
+                mem_type=MemoryType.SEMANTIC,
+                provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.8),
+                importance=min(1.0, 0.6 + float(worst.get("gap", 0.0))),
+                tags=["lesson", "rivalry"])
+        except Exception:  # noqa: BLE001
+            pass
 
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
@@ -279,11 +349,19 @@ class GrowthEngine:
             report.abstractions = len(getattr(creport, "abstractions", []) or [])
             report.forgotten = len(getattr(creport, "forgotten", []) or [])
 
+        # Rivalry (Edge 4): measure against a peer AGI first, so its lead becomes the curiosity
+        # focus for this pass's self-play. Default off; never acts on anything external.
+        rival_topics: Optional[List[str]] = None
+        if self.enable_rivalry:
+            report.rivalry = self.rivalry()
+            if report.rivalry:
+                rival_topics = report.rivalry.get("topics") or None
+
         run_foundry = self.enable_foundry if do_foundry is None else do_foundry
         if run_foundry:
             # manufacture fresh training data first, so the forge learns something new
             if self.enable_selfplay:
-                report.selfplay = self.self_play()
+                report.selfplay = self.self_play(topics=rival_topics)
             results = self.improve_self()
             report.foundry = [r.to_dict() for r in results]
 

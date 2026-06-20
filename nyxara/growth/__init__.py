@@ -37,6 +37,21 @@ from nyxara.growth.bootstrap import (
     primary_model_present,
 )
 from nyxara.growth.flywheel import DataFlywheel, FlywheelDecision
+from nyxara.growth.frontier import (
+    DOMAINS,
+    BehaviorDescriptor,
+    Discovery,
+    FrontierEngine,
+    NoveltyArchive,
+)
+from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover
+from nyxara.growth.efficiency import (
+    ComputeLedger,
+    EfficiencyFrontier,
+    EfficiencyPoint,
+    estimate_cost,
+)
+from nyxara.growth.rivalry import Arena, HeadToHead, Rival
 from nyxara.growth.genesis import (
     ArchitectureGenome,
     Candidate,
@@ -100,6 +115,22 @@ __all__ = [
     "MetaReport",
     "DataFlywheel",
     "FlywheelDecision",
+    "FrontierEngine",
+    "NoveltyArchive",
+    "Discovery",
+    "BehaviorDescriptor",
+    "DOMAINS",
+    "Prover",
+    "ProofClaim",
+    "ProofResult",
+    "ProofVerdict",
+    "ComputeLedger",
+    "EfficiencyFrontier",
+    "EfficiencyPoint",
+    "estimate_cost",
+    "Arena",
+    "HeadToHead",
+    "Rival",
     "ensure_primary_model",
     "primary_model_present",
     "IDENTITY_SEED",
