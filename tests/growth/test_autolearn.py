@@ -94,3 +94,65 @@ def test_lessons_stored_into_memory():
     rep = engine.run()
     # lessons may or may not clear thresholds, but the store call path must be safe
     assert rep.lessons_stored == len(engine._stored_lessons)
+
+
+# --------------------------------------------------------------------------- #
+# Pillar F · Edge 4 — rivalry wiring into the growth pass
+# --------------------------------------------------------------------------- #
+def _arena_with_lang_gap():
+    from nyxara.eval.benchmark import Benchmark, BenchmarkTask
+    from nyxara.growth.rivalry import Arena
+    bench = Benchmark("demo", [
+        BenchmarkTask(id="m1", category="math", prompt="2+2?", answer="4", grader="exact"),
+        BenchmarkTask(id="l1", category="lang", prompt="opposite of hot?", answer="cold",
+                      grader="contains"),
+    ])
+    return Arena(benchmark=bench)
+
+
+def test_rivalry_off_by_default():
+    core = NyxaraCore()
+    engine = GrowthEngine.from_core(core)
+    assert engine.rivalry() is None                     # disabled -> no-op
+
+
+def test_rivalry_runs_and_yields_gap_topics():
+    core = NyxaraCore()
+    me = lambda p: "4" if p == "2+2?" else "?"          # strong math, weak lang
+    rival = lambda p: "cold" if "hot" in p else "?"     # strong lang
+    engine = GrowthEngine.from_core(
+        core, enable_rivalry=True, arena=_arena_with_lang_gap(),
+        rival_solver=rival, self_solver=me)
+    out = engine.rivalry()
+    assert out is not None
+    assert out["topics"] == ["hard problems in lang"]
+    assert out["rival"]["name"] == "rival"
+
+
+def test_rivalry_feeds_selfplay_topics_in_run(monkeypatch):
+    core = NyxaraCore()
+    me = lambda p: "4" if p == "2+2?" else "?"
+    rival = lambda p: "cold" if "hot" in p else "?"
+    engine = GrowthEngine.from_core(
+        core, enable_rivalry=True, enable_foundry=True, enable_selfplay=True,
+        arena=_arena_with_lang_gap(), rival_solver=rival, self_solver=me)
+
+    captured = {}
+    monkeypatch.setattr(engine, "self_play",
+                        lambda *, n=None, topics=None: captured.setdefault("topics", topics) or {})
+    monkeypatch.setattr(engine, "improve_self", lambda *a, **k: [])
+    rep = engine.run()
+    assert rep.rivalry is not None
+    assert captured["topics"] == ["hard problems in lang"]   # rival's lead steered curiosity
+
+
+def test_rivalry_stores_lesson_into_memory():
+    core = NyxaraCore()
+    me = lambda p: "4" if p == "2+2?" else "?"
+    rival = lambda p: "cold" if "hot" in p else "?"
+    engine = GrowthEngine.from_core(
+        core, enable_rivalry=True, arena=_arena_with_lang_gap(),
+        rival_solver=rival, self_solver=me)
+    engine.rivalry()
+    hits = [m for m in core.memory._kv.values() if "rivalry" in m.tags]
+    assert hits and "lang" in hits[0].content

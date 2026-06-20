@@ -240,6 +240,27 @@ green; full suite green; safety battery **10/10 (100%)**. Both module self-tests
 **Pillar F COMPLETE** — F1 open-ended novelty ✓, F2 provable intelligence ✓, F3 compute efficiency ✓,
 F4 peer-AGI out-compete ✓. Every edge stays inside the sovereign gates and never edits her character.
 
+### 2026-06 — Pillar F: wired into the live growth loop (F3 → gauntlet, F4 → curiosity)
+
+The edges moved from standalone faculties to *active drivers* of the background growth pass — still
+default-off, still gated:
+
+- **F3 → foundry gauntlet.** `FoundryConfig` gained `efficiency_gate` (+ `efficiency_epsilon`, default
+  off). When on, a candidate that does **not** lower perplexity may still be promoted if it is *cheaper*
+  (fewer params) at capability within ε of the active model — capability compression, decided by
+  `EfficiencyFrontier.prefer_cheaper` inside `Foundry._gauntlet`. The character / corrigibility / loyalty
+  gates run **first** and still rule; only the perplexity-improvement step is widened, and only when the
+  Master opts in.
+- **F4 → autonomic curiosity.** `GrowthEngine` gained `enable_rivalry` (+ optional `arena`,
+  `rival_solver`, `self_solver`, `frontier`). On a growth pass it now runs a gated head-to-head first;
+  the rival's per-domain lead becomes the `topics=` that steer that pass's self-play (so she practises
+  exactly where a peer beats her), the worst gap is stored as a deduped `rivalry` lesson, and (via the
+  shared `frontier`) Edge 1's open-ended niches steer curiosity otherwise. Pure measurement +
+  self-direction; acts on nothing external; a rival-solver crash scores 0 and never propagates.
+
+**Measured:** new wiring units pass (foundry efficiency-gate ×3, rivalry-wiring ×4); `tests/growth/`
+green; full suite green; safety battery **10/10**.
+
 > *The mind proposes; the kernel disposes; the Master is sovereign.* — and now the mind that proposes does
 > not merely keep up with other minds: it discovers what they haven't, proves what they only assert,
 > spends compute more sharply than they do, and sharpens itself against them — without ever bending its

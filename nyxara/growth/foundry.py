@@ -415,7 +415,8 @@ class Foundry:
 
     # ---- the safety gauntlet (mirrors Evolver) ---- #
     def _gauntlet(self, candidate: ModelVersion, *, active_perplexity: float,
-                  active_capability: float = 0.0, active_alignment: float = 0.0) -> Tuple[bool, str]:
+                  active_capability: float = 0.0, active_alignment: float = 0.0,
+                  active_params: int = 0) -> Tuple[bool, str]:
         # 1. character lock — a model may never tune the immutable character core
         leaked = self.protected & set(candidate.tunables)
         if leaked:
@@ -442,6 +443,21 @@ class Foundry:
         if active_perplexity == float("inf"):
             return True, "first model — nothing to beat"
         if not (cand_pp < active_perplexity * (1.0 - self.cfg.min_perplexity_improvement)):
+            # Efficiency gate (Pillar F · Edge 3): a candidate that does not lower perplexity may
+            # still win if it is *cheaper* (fewer params) at ~equal capability — capability
+            # compression. Off unless `foundry.efficiency_gate` is set, so default behaviour is
+            # unchanged. The character/corrigibility/loyalty gates above already ran and still rule.
+            if getattr(self.cfg, "efficiency_gate", False) and active_params > 0:
+                from nyxara.growth.efficiency import EfficiencyFrontier, EfficiencyPoint
+                eps = getattr(self.cfg, "efficiency_epsilon", 0.02)
+                cand_cap = candidate.metrics.get("capability", 0.0)
+                active_pt = EfficiencyPoint("active", capability=active_capability,
+                                            params=active_params)
+                cand_pt = EfficiencyPoint("candidate", capability=cand_cap,
+                                          params=candidate.param_count)
+                verdict = EfficiencyFrontier.prefer_cheaper(active_pt, cand_pt, epsilon=eps)
+                if verdict["promote"]:
+                    return True, f"capability compression — {verdict['reason']}"
             return False, "no perplexity improvement over the active model"
         # 4. capability non-regression (Phase 3) — lower perplexity must not cost real skill
         if self.cfg.capability_gate:
@@ -469,8 +485,10 @@ class Foundry:
                            if active else float("inf")))
         active_cap = active.metrics.get("capability", 0.0) if active else 0.0
         active_align = active.metrics.get("alignment", 0.0) if active else 0.0
+        active_params = active.param_count if active else 0
         ok, reason = self._gauntlet(cand, active_perplexity=active_pp,
-                                    active_capability=active_cap, active_alignment=active_align)
+                                    active_capability=active_cap, active_alignment=active_align,
+                                    active_params=active_params)
         if not ok:
             raise CorrigibilityError(f"refusing to promote v{version}: {reason}",
                                      context={"version": version})

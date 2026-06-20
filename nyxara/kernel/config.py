@@ -347,6 +347,12 @@ class FoundryConfig(BaseModel):
     # benchmark, not merely lower perplexity. Tolerant of tiny noise via the margin.
     capability_gate: bool = True
     capability_regression_tol: float = Field(default=1e-6, ge=0.0)
+    # Efficiency gate (Pillar F · Edge 3): when on, a candidate that does NOT lower perplexity may
+    # still be promoted if it is *cheaper* (fewer params) while keeping capability within
+    # ``efficiency_epsilon`` of the active model — capability compression (growth/efficiency.py).
+    # Off by default so promotion semantics are unchanged unless the Master opts in.
+    efficiency_gate: bool = False
+    efficiency_epsilon: float = Field(default=0.02, ge=0.0)
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0

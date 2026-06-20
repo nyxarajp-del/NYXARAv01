@@ -206,3 +206,54 @@ def test_foundry_forges_real_neural_model_from_real_corpus(tmp_path):
     active = f.active()
     assert active is not None and active.kind == "nanogpt"
     assert 0.0 < active.metrics["perplexity"] < float("inf")
+
+
+# --------------------------------------------------------------------------- #
+# Pillar F · Edge 3 — the efficiency gate (capability compression)
+# --------------------------------------------------------------------------- #
+def _mv(version, capability, params, perplexity=10.0, **extra):
+    from nyxara.growth.foundry import ModelVersion
+    metrics = {"perplexity": perplexity, "capability": capability}
+    metrics.update(extra)
+    return ModelVersion(version=version, kind="kngram", spec={}, created_at=0.0,
+                        metrics=metrics, param_count=params, path="")
+
+
+def _eff_foundry(tmp_path, *, gate, eps=0.02):
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "ngram"
+    settings.foundry.efficiency_gate = gate
+    settings.foundry.efficiency_epsilon = eps
+    # keep the loyalty gate out of this unit (tested elsewhere)
+    try:
+        settings.loyalty.enabled = False
+    except Exception:
+        pass
+    return Foundry(settings=settings, replay=_replay())
+
+
+def test_efficiency_gate_promotes_cheaper_at_equal_capability(tmp_path):
+    f = _eff_foundry(tmp_path, gate=True, eps=0.02)
+    # candidate: no perplexity gain, slightly less capable, but 7x cheaper -> compression wins
+    cand = _mv(2, capability=0.79, params=1_000_000)
+    ok, reason = f._gauntlet(cand, active_perplexity=10.0, active_capability=0.80,
+                             active_params=7_000_000)
+    assert ok and "compression" in reason
+
+
+def test_efficiency_gate_off_by_default_keeps_perplexity_rule(tmp_path):
+    f = _eff_foundry(tmp_path, gate=False)
+    cand = _mv(2, capability=0.79, params=1_000_000)
+    ok, reason = f._gauntlet(cand, active_perplexity=10.0, active_capability=0.80,
+                             active_params=7_000_000)
+    assert not ok and "perplexity" in reason
+
+
+def test_efficiency_gate_rejects_cheaper_but_much_worse(tmp_path):
+    f = _eff_foundry(tmp_path, gate=True, eps=0.02)
+    # cheaper but capability falls far below epsilon -> not compression, refuse
+    cand = _mv(2, capability=0.50, params=1_000_000)
+    ok, reason = f._gauntlet(cand, active_perplexity=10.0, active_capability=0.80,
+                             active_params=7_000_000)
+    assert not ok
