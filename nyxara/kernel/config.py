@@ -444,6 +444,32 @@ class GenesisConfig(BaseModel):
     speed_weight: float = Field(default=0.25, ge=0.0)         # … speed in the fitness blend
     min_new_examples: int = Field(default=20, ge=1)           # idle trigger, like AutoForge
     seed: int = 0
+    # ---- Max-level search engine (all optional; defaults reproduce the classic GA path) ---- #
+    # How the population evolves between generations:
+    #   "elitism"      — the original: keep top third, breed by mutation/crossover.
+    #   "tournament"   — pick parents by k-way tournaments (more selection pressure, less elitist).
+    #   "regularized"  — AmoebaNet-style aging evolution: evict the OLDEST, not the worst, so the
+    #                    search keeps exploring instead of locking onto an early lucky genome.
+    search_strategy: Literal["elitism", "tournament", "regularized"] = "elitism"
+    tournament_k: int = Field(default=3, ge=2, le=32)         # k-way tournament size
+    adaptive_mutation: bool = False     # raise the mutation rate when best-so-far stalls (anti-collapse)
+    novelty_weight: float = Field(default=0.0, ge=0.0)        # reward genomes far from the population
+    # Successive-halving bracket (Hyperband-flavoured): cheap-screen the whole population at a
+    # fraction of micro_train_steps, then spend full training only on the top survivors.
+    successive_halving: bool = False
+    halving_factor: int = Field(default=3, ge=2, le=8)        # keep 1/factor each rung
+    # A tiny ridge-regression surrogate over genome features, trained on already-scored candidates,
+    # used only to ORDER which genomes to evaluate first — never to crown a champion (honest).
+    surrogate: bool = False
+    surrogate_min_train: int = Field(default=8, ge=2)         # candidates needed before it predicts
+    hardware_weight: float = Field(default=0.0, ge=0.0)       # fold an estimated-FLOPs cost into fitness
+    # Default positional scheme for searched neural brains (torch path): learned table, rotary, or ALiBi.
+    pos_encoding: Literal["learned", "rope", "alibi"] = "learned"
+    # Champion sampling controls (used by genesis_main --sample and GenesisModel.generate defaults).
+    temperature: float = Field(default=1.0, ge=0.0, le=10.0)
+    top_k: int = Field(default=0, ge=0)                       # 0 = disabled
+    top_p: float = Field(default=1.0, ge=0.0, le=1.0)         # 1.0 = disabled (full nucleus)
+    repetition_penalty: float = Field(default=1.0, ge=1.0, le=4.0)   # 1.0 = disabled
 
 
 class LoyaltyConfig(BaseModel):
