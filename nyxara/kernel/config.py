@@ -51,6 +51,7 @@ __all__ = [
     "LoyaltyConfig",
     "CouncilConfig",
     "RoleCouncilConfig",
+    "SwarmConfig",
     "MemoryConfig",
     "SelfImprovementConfig",
     "MetaResearchConfig",
@@ -624,6 +625,31 @@ class RoleCouncilConfig(BaseModel):
     timeout_s: float = Field(default=30.0, gt=0)
 
 
+class SwarmConfig(BaseModel):
+    """Self-improving Society of Mind settings (mind/swarm.py).
+
+    A swarm of personas DEBATES a problem over several rounds, then NYXARA synthesises one
+    answer. After each problem it scores every persona's marginal contribution, persists those
+    scores to long-term memory, and on the next problem re-assembles the roster from what it
+    learned — dropping chronically-useless personas, favouring strong contributors, and spawning
+    an ad-hoc domain specialist when the problem calls for one. Recursive self-improvement of her
+    own reasoning structure, not merely her code. Exposed via ``/swarm`` (not on every turn)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    rounds: int = Field(default=3, ge=1, le=8)
+    max_personas: int = Field(default=6, ge=2, le=12)
+    max_tokens_per_persona: int = Field(default=256, ge=32, le=2048)
+    timeout_s: float = Field(default=30.0, gt=0)
+    persist_scores: bool = True
+    min_score_to_retain: float = Field(default=0.05, ge=0.0, le=1.0)
+    min_problems_before_drop: int = Field(default=5, ge=1)
+    allow_spawn: bool = True
+    # OFF by default: keep the swarm's quality signal out of the RSI index unless asked.
+    fold_into_intelligence: bool = False
+
+
 class SelfImprovementConfig(BaseModel):
     """Recursive self-improvement settings (growth/recursive_improvement.py).
 
@@ -979,6 +1005,7 @@ class NyxaraSettings(BaseSettings):
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
+    swarm: SwarmConfig = Field(default_factory=SwarmConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)

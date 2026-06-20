@@ -87,6 +87,7 @@ commands:
   /meta-discover <t> meta-research: invent → sandbox-test → (gated) integrate new theories
   /dream             enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
+  /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -181,6 +182,11 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /strategize <problem>")
         else:
             print(json.dumps(core.strategize(arg), indent=2, default=str))
+    elif cmd == "swarm":
+        if not arg:
+            print("usage: /swarm <problem>")
+        else:
+            print(json.dumps(core.swarm(arg), indent=2, default=str))
     elif cmd == "save":
         path = _save_session_memory(core) or core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")
