@@ -73,11 +73,15 @@ class SelfPlay:
 
     def __init__(self, *, settings: Optional[NyxaraSettings] = None, llm: Any = None,
                  distiller: Optional[Distiller] = None, system: Optional[str] = None,
-                 flywheel: Any = None, seed: int = 7) -> None:
+                 flywheel: Any = None, frontier: Any = None, seed: int = 7) -> None:
         self.settings = settings or get_settings()
         self._llm = llm
         self.distiller = distiller or Distiller(settings=self.settings, llm=llm, system=system)
         self._flywheel = flywheel                       # lazily built for verifiable self-play
+        # Pillar F · Edge 1: when a FrontierEngine is supplied, curiosity is steered toward the
+        # least-explored niches (open-ended discovery) and every question is fed back into the
+        # archive. Default None -> behaviour unchanged.
+        self.frontier = frontier
         self.rng = random.Random(seed)
 
     def _teacher(self) -> Any:
@@ -92,6 +96,12 @@ class SelfPlay:
                            ) -> List[str]:
         """Ask the teacher for ``n`` fresh hard questions; fall back to the curiosity battery."""
         n = max(1, n)
+        # Steer curiosity toward the under-explored frontier when an engine is wired (Edge 1).
+        if topics is None and self.frontier is not None:
+            try:
+                topics = self.frontier.topics(4)
+            except Exception:  # noqa: BLE001 — a flaky frontier never blocks self-play
+                topics = None
         if self.available():
             try:
                 hint = f" across these areas: {', '.join(topics)}" if topics else ""
@@ -109,9 +119,30 @@ class SelfPlay:
         """One self-play round: invent questions, distil the teacher's answers into the store."""
         questions = self.generate_questions(n, topics=topics)
         examples = self.distiller.distill(questions, **kw)
-        return {"available": self.available(), "questions": len(questions),
-                "distilled": len(examples), "store_size": self.distiller.count(),
-                "store": str(self.distiller.store_path)}
+        frontier_gain = self._feed_frontier(questions)
+        out = {"available": self.available(), "questions": len(questions),
+               "distilled": len(examples), "store_size": self.distiller.count(),
+               "store": str(self.distiller.store_path)}
+        if frontier_gain is not None:
+            out["frontier"] = frontier_gain
+        return out
+
+    def _feed_frontier(self, questions: Sequence[str]) -> Optional[dict]:
+        """Place each manufactured question into the novelty archive (Edge 1). No-op when unwired."""
+        if self.frontier is None:
+            return None
+        novel = 0
+        for q in questions:
+            try:
+                if self.frontier.ingest(q, provenance="selfplay", save=False).get("novel"):
+                    novel += 1
+            except Exception:  # noqa: BLE001 — best-effort; never fails a self-play round
+                continue
+        try:
+            self.frontier.save()
+        except Exception:  # noqa: BLE001
+            pass
+        return {"novel": novel, "report": self.frontier.report()}
 
     # ------------------------------------------------------------------ #
     # Verifiable self-play — she poses AND answers structured problems herself (no key needed)

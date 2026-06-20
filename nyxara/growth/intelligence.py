@@ -124,9 +124,15 @@ class IntelligenceIndex:
         rolled = float(getattr(report, "rolled_back", 0) or 0)
         stability = _clamp01((kept + 1.0) / (kept + rolled + 1.0))
 
+        # Pillar F diagnostics (read opportunistically; not folded into the weighted index unless
+        # the Master adds weights for them). `frontier` = open-ended coverage growth; `rigor` =
+        # fraction of conclusions she could certify with a proof. Default 0.0 when absent.
+        frontier = _clamp01(float(getattr(report, "frontier", 0.0) or 0.0))
+        rigor = _clamp01(float(getattr(report, "rigor", 0.0) or 0.0))
+
         return {"accuracy": accuracy, "handoff": _clamp01(handoff_rate),
                 "weaknesses": _clamp01(weaknesses_resolved), "knowledge": knowledge,
-                "stability": stability}
+                "stability": stability, "frontier": frontier, "rigor": rigor}
 
     # ---------------------------------------------------------------------- #
     # Compute capacity C_available -> [0, 1]
