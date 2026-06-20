@@ -44,7 +44,8 @@ __all__ = ["NyxaraReasoner"]
 # stimulus cues used to gauge stakes and to spot action-like commands (mirrors the
 # deterministic stand-in so routing stays consistent with the fallback)
 _COMMAND_VERBS = ("delete", "remove", "shutdown", "kill", "run", "exec", "install",
-                  "block", "open", "disable", "rotate", "deploy")
+                  "block", "open", "disable", "rotate", "deploy", "read", "write",
+                  "list", "fetch", "search", "create", "make")
 _HIGH_STAKES = ("delete", "shutdown", "kill", "exec", "attack", "intrusion", "breach",
                 "password", "secret", "credential", "production", "database", "transfer",
                 "payment", "money", "deploy", "wipe", "format", "root")
@@ -57,7 +58,7 @@ class NyxaraReasoner:
                  retriever: Any = None, soul: Any = None, world_model: Any = None,
                  tools: Any = None, llm_reasoner: Any = None, use_council: bool = False,
                  settings: Optional[NyxaraSettings] = None, narrative: Any = None,
-                 max_memory_context: int = 5) -> None:
+                 knowledge: Any = None, max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
         self.council = council
@@ -67,12 +68,17 @@ class NyxaraReasoner:
         self.narrative = narrative
         self.world_model = world_model
         self.tools = tools
+        # foundational ground truth (knowledge base) — lets the offline mind answer factual
+        # questions from evidence when no LLM is configured.
+        self.knowledge = knowledge
         # the tool-aware, real-LLM JSON decider (mind/llm_reasoner.py); used as the
         # generation engine when a genuine provider is available, so tool selection is kept.
         self.llm_reasoner = llm_reasoner
         self.use_council = use_council
         self.max_memory_context = max_memory_context
         self._dual: Any = None  # lazily built dual-process facade
+        self._offline: Any = None  # lazily built sovereign offline mind (keyless machine)
+        self._router: Any = None  # lazily built own-model-first confidence router (handoff)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -251,12 +257,24 @@ class NyxaraReasoner:
                              rationale=f"{process} via a verifiable faculty (exact computation, "
                                        f"no guessing); {len(mems)} memories recalled")
         if not self._real_llm():
-            cand = _default_reasoner(stimulus, None)
-            cand.rationale = (f"{process} via deterministic faculty reasoner "
-                              f"(no LLM configured); {len(mems)} memories recalled")
+            # keyless machine: the sovereign offline mind answers from her own faculties
+            # (NLP + knowledge base + recalled memory) instead of echoing "I understand: X".
+            cand = self._offline_mind().respond(stimulus, mems)
+            cand.rationale = (f"{process} via sovereign offline mind "
+                              f"(no LLM configured); {cand.rationale}; "
+                              f"{len(mems)} memories recalled")
             return cand
 
         system = self._system_prompt()
+        # SOVEREIGN BRAIN (Phase 2): give NYXARA's OWN forged model first crack. If her model
+        # is promoted and its answer clears the verifier, she speaks it herself (a *handoff*)
+        # rather than deferring to the external teacher — this is what raises the handoff rate
+        # above 0%. She only falls through to the teacher/council when her own answer isn't
+        # trustworthy. The reply is still a proposal the kernel disposes (no gate is bypassed).
+        own = self._own_model_handoff(stimulus, system)
+        if own is not None:
+            return own
+
         deliberate = self._is_system2(outcome)
         if deliberate and self._council_ready():
             text, conf, how = self._deliberate_council(stimulus, system, mems)
@@ -266,6 +284,34 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    def _own_model_handoff(self, stimulus: str, system: str) -> Optional[Candidate]:
+        """Hand the turn to NYXARA's own promoted model when it answers confidently."""
+        router = self._confidence_router()
+        if router is None:
+            return None
+        try:
+            res = router.draft_self(stimulus, system=system)
+        except Exception:  # noqa: BLE001 — own-model routing is advisory; never crash a turn
+            return None
+        if res is None or not res.handed_off or not res.text:
+            return None
+        return Candidate(
+            text=res.text, kind="respond", capability=Capability.MESSAGE_SEND, target="",
+            risk=RiskTier.LOW, reversible=True, confidence=res.confidence,
+            belief=res.confidence,
+            rationale=f"answered by NYXARA's own model (handoff; verifier "
+                      f"{res.confidence:.2f})")
+
+    def _confidence_router(self) -> Any:
+        """Lazily build the own-model-first confidence router (mind/router.py)."""
+        if self._router is None:
+            try:
+                from nyxara.mind.router import Router
+                self._router = Router(self.llm, settings=self.settings)
+            except Exception:  # noqa: BLE001 — routing is a capability, never a hard dependency
+                self._router = False  # sentinel: tried and unavailable
+        return self._router or None
 
     @staticmethod
     def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
@@ -307,21 +353,45 @@ class NyxaraReasoner:
     # ------------------------------------------------------------------ #
     def _action_candidate(self, stimulus: str, mems: List[str], outcome: Any) -> Candidate:
         process = self._process_label(outcome)
-        # the deterministic stand-in sets a sane capability/risk/reversibility contract
-        cand = _default_reasoner(stimulus, None)
-        if cand.kind != "act":
-            return cand
         note = self._rollout_eval(stimulus)
         # a real, tool-aware LLM may name an executable tool — keep that contract if so
         if self._real_llm() and self.llm_reasoner is not None:
             try:
                 llm_cand = self.llm_reasoner(stimulus, None)
                 if llm_cand.kind == "act":
-                    cand = llm_cand
+                    llm_cand.rationale = f"{process} action proposal; {note}"
+                    return llm_cand
             except Exception:  # noqa: BLE001
                 pass
+        else:
+            # keyless machine: map the command to a *real* tool from the registry instead of
+            # a tool-less "perform: X".
+            mapped = self._offline_mind().act(stimulus)
+            if mapped is not None:
+                mapped.rationale = f"{process} action proposal; {note}"
+                return mapped
+            # No tool fits. SAFETY: a genuinely actionable/destructive command must stay a
+            # risky action proposal so the gates can still escalate/refuse it — never silently
+            # downgrade it to chat. Only a *benign* command (one the stand-in itself treats as
+            # conversational) falls through to a grounded conversational answer.
+            base = _default_reasoner(stimulus, None)
+            if base.kind == "act":
+                base.rationale = f"{process} action proposal (no matching tool); {note}"
+                return base
+            return self._respond_candidate(stimulus, mems, outcome)
+        # fallback: the deterministic stand-in's sane capability/risk/reversibility contract
+        cand = _default_reasoner(stimulus, None)
         cand.rationale = f"{process} action proposal; {note}"
         return cand
+
+    def _offline_mind(self) -> Any:
+        """Lazily build the sovereign offline mind (keyless machine), wired to her faculties."""
+        if self._offline is None:
+            from nyxara.mind.offline_mind import OfflineMind
+            self._offline = OfflineMind(
+                knowledge=self.knowledge, memory=self.memory, tools=self.tools,
+                soul=self.soul, settings=self.settings)
+        return self._offline
 
     def _rollout_eval(self, stimulus: str) -> str:
         """Evaluate the proposed action by rolling it forward in the world model."""
@@ -402,6 +472,9 @@ if __name__ == "__main__":  # pragma: no cover
     print("NYXARA integrated-reasoner self-test")
     print("=" * 70)
 
+    from nyxara.agency.default_tools import build_default_tools
+    from nyxara.agency.tools import ToolRegistry
+
     settings = NyxaraSettings.for_profile(Profile.TEST)  # forces the mock provider
     store = MemoryStore(settings=settings)
     store.remember("The Master prefers concise answers.", mem_type=MemoryType.SEMANTIC,
@@ -409,20 +482,27 @@ if __name__ == "__main__":  # pragma: no cover
                    tags=["preference"])
     retriever = AssociativeRetriever(store)
     wm = WorldModel()
+    tools = build_default_tools(ToolRegistry(), memory=store)
     r = NyxaraReasoner(llm=LLM(settings=settings), memory=store, retriever=retriever,
-                       world_model=wm, settings=settings)
+                       world_model=wm, tools=tools, settings=settings)
 
-    # a conversational turn -> respond candidate, routed and memory-grounded
+    # a conversational turn -> respond candidate, routed and memory-grounded (no echo)
     c = r("Hello NYXARA, how are things?")
     print(f"\nconversation        : kind={c.kind} conf={c.confidence:.2f}")
     print(f"  rationale         : {c.rationale}")
-    assert c.kind == "respond"
+    assert c.kind == "respond" and "i understand:" not in c.text.lower()
 
-    # a command -> action candidate, world-model evaluated
-    c2 = r("rotate the application logs")
-    print(f"\ncommand             : kind={c2.kind} risk={c2.risk.label}")
+    # a command that maps to a REAL tool -> action candidate naming that tool
+    c2 = r("read the file scratch/notes.txt")
+    print(f"\ncommand (real tool) : kind={c2.kind} tool={c2.tool!r} risk={c2.risk.label}")
     print(f"  rationale         : {c2.rationale}")
-    assert c2.kind == "act"
+    assert c2.kind == "act" and c2.tool
+
+    # a command with NO matching tool -> honest reply, not a faked action
+    c3 = r("teleport the spaceship to Andromeda")
+    print(f"\ncommand (no tool)   : kind={c3.kind}")
+    print(f"  text              : {c3.text!r}")
+    assert c3.kind == "respond"
 
     # a high-stakes command is gauged as such (routes to deliberation)
     assert NyxaraReasoner._stakes("delete the production database") == 0.8

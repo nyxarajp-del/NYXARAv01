@@ -197,6 +197,27 @@ class Router:
             return RouterResult(HONEST_ABSTENTION, "abstain", confidence, handed_off=False)
         return RouterResult("", "none", 0.0, handed_off=False)
 
+    def draft_self(self, prompt: str, *, system: Optional[str] = None) -> Optional[RouterResult]:
+        """Give NYXARA's OWN model first crack, with NO teacher fallback.
+
+        Returns a handoff :class:`RouterResult` iff her forged model is available and its
+        answer clears the verifier threshold; otherwise ``None`` so the caller can run its
+        own teacher/council path. This is the lever that lets her own brain become *primary*
+        in the integrated reasoner without reaching around any gate — the reply is still a
+        proposal the kernel disposes."""
+        if not self.self_available():
+            return None
+        try:
+            own = self._own_answer(prompt, system)
+        except Exception:  # noqa: BLE001 — a failed own attempt simply defers to the teacher
+            return None
+        if not own:
+            return None
+        conf = float(self.verifier(prompt, own))
+        if conf >= self.cfg.threshold:
+            return RouterResult(own, "self", conf, handed_off=True)
+        return None
+
     def _faculty_answer(self, prompt: str) -> Optional[Tuple[str, float]]:
         try:
             from nyxara.mind.reasoning_faculties import solve_with_faculties

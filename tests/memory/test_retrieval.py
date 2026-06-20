@@ -143,7 +143,11 @@ def test_retrieve_type_filter():
 
 # -------------------- familiarity / recollection / déjà-vu -------------------- #
 def _scene_store():
-    store = MemoryStore()
+    # the déjà-vu / gist scenario is calibrated against the raw lexical embedder, so pin it
+    # (the new default LexicalSemanticEmbedder recalls paraphrases better, which shifts the
+    # familiarity-vs-recollection balance these cases probe).
+    from nyxara.memory.store import HashingEmbedder
+    store = MemoryStore(embedder=HashingEmbedder(dim=256))
     r = AssociativeRetriever(store)
     for txt in ["walking through an old european town square at dusk",
                 "strolling across a historic plaza in the evening",

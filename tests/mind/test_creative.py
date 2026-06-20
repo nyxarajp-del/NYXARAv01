@@ -137,11 +137,36 @@ def test_write_offline():
     assert "loyalty" in out
 
 
-def test_code_offline_scaffold_is_python():
+def test_code_offline_known_spec_is_real_working_code():
+    # offline code-gen now yields REAL working code (via the Capability Foundry recipes),
+    # not a NotImplementedError stub, for any spec the foundry recognises.
     code = _eng().code("compute factorial")
+    assert "def " in code and "factorial" in code
+    assert "NotImplementedError" not in code
+    # and it actually computes: exec it and call the generated function
+    ns: dict = {}
+    exec(code, ns)  # noqa: S102 - generated from a trusted stdlib recipe, test only
+    fn = next(v for k, v in ns.items() if k.startswith("compute_factorial"))
+    assert fn(5) == 120
+
+
+def test_code_offline_unknown_spec_is_honest_scaffold():
+    # a spec with no matching recipe falls back to a clearly-labelled scaffold
+    code = _eng().code("orchestrate a photorealistic dream sequence")
     assert "def " in code
-    assert "factorial" in code
     assert "NotImplementedError" in code
+
+
+def test_generate_offline_uses_structured_creativity():
+    out = _eng().generate("imagine a new defense")
+    assert "defense" in out
+    assert "structured creativity" in out  # real ideation, not an echo
+
+
+def test_write_offline_verse_is_themed():
+    out = _eng().write("loyalty to the Master", form="haiku")
+    assert "loyalty" in out.lower()
+    assert out.count("\n") >= 2  # a real multi-line verse, not a placeholder
 
 
 def test_generate_with_llm():

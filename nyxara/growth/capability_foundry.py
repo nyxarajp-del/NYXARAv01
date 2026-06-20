@@ -53,6 +53,7 @@ __all__ = [
     "ForgedTool",
     "ForgeResult",
     "CapabilityFoundry",
+    "best_recipe",
 ]
 
 
@@ -117,6 +118,9 @@ class CapabilityPlan:
     reversible: bool = True
     examples: List[Dict[str, Any]] = field(default_factory=list)   # {"args":..,"expect":..}
     rationale: str = ""
+    # the deterministic handler source the resolved recipe (fixed or parametric) supplies;
+    # used by synthesize() as the template when no LLM writes a body.
+    template_source: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"need": self.need, "tool_name": self.tool_name, "shape": self.shape,
@@ -360,6 +364,281 @@ _RECIPES: List[_Recipe] = [
              "def handle(text):\n"
              "    return hashlib.md5(text.encode('utf-8')).hexdigest()\n"),
             [{"args": {"text": "abc"}, "expect": "900150983cd24fb0d6963f7d28e17f72"}]),
+    # ---- text (extended) ---- #
+    _Recipe("text_char_count", ("character count", "count characters", "number of characters",
+                                "char count"),
+            "count the characters in a string",
+            [ToolParam("text", "str")],
+            "def handle(text):\n    return len(text)\n",
+            [{"args": {"text": "abc"}, "expect": 3}]),
+    _Recipe("text_count_vowels", ("count vowels", "vowel count", "number of vowels"),
+            "count the vowels in a string",
+            [ToolParam("text", "str")],
+            ("def handle(text):\n"
+             "    return sum(1 for c in text.lower() if c in 'aeiou')\n"),
+            [{"args": {"text": "hello"}, "expect": 2}]),
+    _Recipe("text_is_palindrome", ("palindrome",),
+            "test whether a string is a palindrome (ignoring case and non-alphanumerics)",
+            [ToolParam("text", "str")],
+            ("def handle(text):\n"
+             "    s = ''.join(c.lower() for c in text if c.isalnum())\n"
+             "    return s == s[::-1]\n"),
+            [{"args": {"text": "Racecar"}, "expect": True},
+             {"args": {"text": "hello"}, "expect": False}]),
+    _Recipe("text_swapcase", ("swap case", "swapcase", "invert case"),
+            "swap the case of every letter in a string",
+            [ToolParam("text", "str")],
+            "def handle(text):\n    return text.swapcase()\n",
+            [{"args": {"text": "Hello"}, "expect": "hELLO"}]),
+    _Recipe("text_strip", ("trim whitespace", "strip whitespace", "remove surrounding space"),
+            "strip leading and trailing whitespace from a string",
+            [ToolParam("text", "str")],
+            "def handle(text):\n    return text.strip()\n",
+            [{"args": {"text": "  hi  "}, "expect": "hi"}]),
+    _Recipe("text_remove_punctuation", ("remove punctuation", "strip punctuation"),
+            "remove punctuation from a string",
+            [ToolParam("text", "str")],
+            ("import string\n"
+             "def handle(text):\n"
+             "    return ''.join(c for c in text if c not in string.punctuation)\n"),
+            [{"args": {"text": "a,b!c."}, "expect": "abc"}]),
+    _Recipe("text_rot13", ("rot13", "rot 13"),
+            "apply the ROT13 substitution cipher to a string",
+            [ToolParam("text", "str")],
+            ("def handle(text):\n"
+             "    out = []\n"
+             "    for c in text:\n"
+             "        if 'a' <= c <= 'z':\n"
+             "            out.append(chr((ord(c) - 97 + 13) % 26 + 97))\n"
+             "        elif 'A' <= c <= 'Z':\n"
+             "            out.append(chr((ord(c) - 65 + 13) % 26 + 65))\n"
+             "        else:\n"
+             "            out.append(c)\n"
+             "    return ''.join(out)\n"),
+            [{"args": {"text": "Hello"}, "expect": "Uryyb"}]),
+    _Recipe("text_reverse_words", ("reverse words", "reverse word order"),
+            "reverse the order of words in a string",
+            [ToolParam("text", "str")],
+            "def handle(text):\n    return ' '.join(text.split()[::-1])\n",
+            [{"args": {"text": "one two three"}, "expect": "three two one"}]),
+    _Recipe("text_word_frequency", ("word frequency", "word counts", "count each word"),
+            "count how often each word occurs in a string",
+            [ToolParam("text", "str")],
+            ("from collections import Counter\n"
+             "def handle(text):\n"
+             "    return dict(Counter(text.lower().split()))\n"),
+            [{"args": {"text": "a a b"}, "expect": {"a": 2, "b": 1}}]),
+    _Recipe("text_snake_case", ("snake case", "snakecase", "to snake_case"),
+            "convert a string to snake_case",
+            [ToolParam("text", "str")],
+            ("import re\n"
+             "def handle(text):\n"
+             "    return re.sub(r'[^a-z0-9]+', '_', text.lower()).strip('_')\n"),
+            [{"args": {"text": "Hello World"}, "expect": "hello_world"}]),
+    _Recipe("text_count_substring", ("count occurrences", "occurrences of", "how many times"),
+            "count non-overlapping occurrences of a substring",
+            [ToolParam("text", "str"), ToolParam("sub", "str")],
+            "def handle(text, sub):\n    return text.count(sub)\n",
+            [{"args": {"text": "banana", "sub": "a"}, "expect": 3}]),
+    _Recipe("count_lines", ("count lines", "number of lines", "line count"),
+            "count the lines in a string",
+            [ToolParam("text", "str")],
+            "def handle(text):\n    return len(text.splitlines())\n",
+            [{"args": {"text": "a\nb\nc"}, "expect": 3}]),
+    # ---- math (extended) ---- #
+    _Recipe("math_lcm", ("lcm", "least common multiple"),
+            "compute the least common multiple of a and b",
+            [ToolParam("a", "int"), ToolParam("b", "int")],
+            ("import math\n"
+             "def handle(a, b):\n"
+             "    a, b = int(a), int(b)\n"
+             "    if a == 0 or b == 0:\n"
+             "        return 0\n"
+             "    return abs(a * b) // math.gcd(a, b)\n"),
+            [{"args": {"a": 4, "b": 6}, "expect": 12}]),
+    _Recipe("math_is_even", ("is even", "even number", "check parity"),
+            "test whether an integer is even",
+            [ToolParam("n", "int")],
+            "def handle(n):\n    return int(n) % 2 == 0\n",
+            [{"args": {"n": 4}, "expect": True}, {"args": {"n": 3}, "expect": False}]),
+    _Recipe("math_sum_digits", ("sum of digits", "digit sum", "add up the digits"),
+            "sum the decimal digits of an integer",
+            [ToolParam("n", "int")],
+            ("def handle(n):\n"
+             "    return sum(int(d) for d in str(abs(int(n))))\n"),
+            [{"args": {"n": 123}, "expect": 6}]),
+    _Recipe("math_digit_count", ("digit count", "number of digits", "count digits"),
+            "count the decimal digits of an integer",
+            [ToolParam("n", "int")],
+            "def handle(n):\n    return len(str(abs(int(n))))\n",
+            [{"args": {"n": 1234}, "expect": 4}]),
+    _Recipe("math_power", ("raise to the power", "to the power of", "exponentiate"),
+            "raise base to the given exponent",
+            [ToolParam("base", "float"), ToolParam("exp", "float")],
+            "def handle(base, exp):\n    return base ** exp\n",
+            [{"args": {"base": 2, "exp": 10}, "expect": 1024}]),
+    _Recipe("math_sqrt", ("square root", "sqrt"),
+            "compute the square root of a number",
+            [ToolParam("x", "float")],
+            "import math\ndef handle(x):\n    return math.sqrt(x)\n",
+            [{"args": {"x": 16}, "expect": 4.0}]),
+    _Recipe("math_is_perfect_square", ("perfect square",),
+            "test whether n is a perfect square",
+            [ToolParam("n", "int")],
+            ("import math\n"
+             "def handle(n):\n"
+             "    n = int(n)\n"
+             "    if n < 0:\n"
+             "        return False\n"
+             "    r = math.isqrt(n)\n"
+             "    return r * r == n\n"),
+            [{"args": {"n": 16}, "expect": True}, {"args": {"n": 15}, "expect": False}]),
+    _Recipe("math_combinations", ("combinations", "n choose k", "binomial coefficient"),
+            "compute n-choose-k (combinations)",
+            [ToolParam("n", "int"), ToolParam("k", "int")],
+            "import math\ndef handle(n, k):\n    return math.comb(int(n), int(k))\n",
+            [{"args": {"n": 5, "k": 2}, "expect": 10}]),
+    _Recipe("math_permutations", ("permutations", "n permute k"),
+            "compute the number of k-permutations of n",
+            [ToolParam("n", "int"), ToolParam("k", "int")],
+            "import math\ndef handle(n, k):\n    return math.perm(int(n), int(k))\n",
+            [{"args": {"n": 5, "k": 2}, "expect": 20}]),
+    _Recipe("math_clamp", ("clamp", "constrain between", "limit to range"),
+            "clamp x into the inclusive range [lo, hi]",
+            [ToolParam("x", "float"), ToolParam("lo", "float"), ToolParam("hi", "float")],
+            "def handle(x, lo, hi):\n    return max(lo, min(hi, x))\n",
+            [{"args": {"x": 5, "lo": 0, "hi": 3}, "expect": 3}]),
+    # ---- encoding / decoding (extended) ---- #
+    _Recipe("decode_base64", ("base64 decode", "decode base64", "from base64"),
+            "decode a base64 string to text",
+            [ToolParam("text", "str")],
+            ("import base64\n"
+             "def handle(text):\n"
+             "    return base64.b64decode(text).decode('utf-8')\n"),
+            [{"args": {"text": "aGk="}, "expect": "hi"}]),
+    _Recipe("decode_hex", ("hex decode", "decode hex", "from hex"),
+            "decode a hex string to text",
+            [ToolParam("text", "str")],
+            ("def handle(text):\n"
+             "    return bytes.fromhex(text).decode('utf-8')\n"),
+            [{"args": {"text": "6869"}, "expect": "hi"}]),
+    _Recipe("decode_url", ("url decode", "decode url", "percent decode", "unquote"),
+            "url-decode (percent-decode) a string",
+            [ToolParam("text", "str")],
+            ("import urllib.parse\n"
+             "def handle(text):\n"
+             "    return urllib.parse.unquote(text)\n"),
+            [{"args": {"text": "a%20b"}, "expect": "a b"}]),
+    _Recipe("int_to_binary", ("to binary", "binary representation", "binary of"),
+            "the binary representation of an integer (no 0b prefix)",
+            [ToolParam("n", "int")],
+            "def handle(n):\n    return bin(int(n))[2:]\n",
+            [{"args": {"n": 5}, "expect": "101"}]),
+    _Recipe("int_to_octal", ("to octal", "octal representation", "octal of"),
+            "the octal representation of an integer (no 0o prefix)",
+            [ToolParam("n", "int")],
+            "def handle(n):\n    return oct(int(n))[2:]\n",
+            [{"args": {"n": 8}, "expect": "10"}]),
+    _Recipe("int_to_hexadecimal", ("to hexadecimal", "hex of number", "integer to hex"),
+            "the hexadecimal representation of an integer (no 0x prefix)",
+            [ToolParam("n", "int")],
+            "def handle(n):\n    return format(int(n), 'x')\n",
+            [{"args": {"n": 255}, "expect": "ff"}]),
+    # ---- statistics ---- #
+    _Recipe("stats_mean", ("statistical mean", "mean of", "average of numbers"),
+            "the arithmetic mean of a list of numbers",
+            [ToolParam("numbers", "list")],
+            "import statistics\ndef handle(numbers):\n    return statistics.mean(numbers)\n",
+            [{"args": {"numbers": [1, 2, 3, 4]}, "expect": 2.5}]),
+    _Recipe("stats_median", ("median",),
+            "the median of a list of numbers",
+            [ToolParam("numbers", "list")],
+            "import statistics\ndef handle(numbers):\n    return statistics.median(numbers)\n",
+            [{"args": {"numbers": [1, 3, 2]}, "expect": 2}]),
+    _Recipe("stats_mode", ("mode of", "most common value"),
+            "the mode (most common value) of a list",
+            [ToolParam("numbers", "list")],
+            "import statistics\ndef handle(numbers):\n    return statistics.mode(numbers)\n",
+            [{"args": {"numbers": [1, 1, 2]}, "expect": 1}]),
+    _Recipe("stats_stdev", ("standard deviation", "stdev", "std dev"),
+            "the population standard deviation of a list",
+            [ToolParam("numbers", "list")],
+            "import statistics\ndef handle(numbers):\n    return statistics.pstdev(numbers)\n",
+            [{"args": {"numbers": [2, 4, 4, 4, 5, 5, 7, 9]}, "expect": 2.0}]),
+    _Recipe("stats_variance", ("variance",),
+            "the population variance of a list",
+            [ToolParam("numbers", "list")],
+            "import statistics\ndef handle(numbers):\n    return statistics.pvariance(numbers)\n",
+            [{"args": {"numbers": [2, 4, 4, 4, 5, 5, 7, 9]}, "expect": 4.0}]),
+    _Recipe("stats_range", ("range of numbers", "spread of"),
+            "the range (max minus min) of a list of numbers",
+            [ToolParam("numbers", "list")],
+            "def handle(numbers):\n    return max(numbers) - min(numbers)\n",
+            [{"args": {"numbers": [1, 5, 3]}, "expect": 4}]),
+    # ---- list / data ---- #
+    _Recipe("list_sort", ("sort a list", "sort numbers", "sort the list"),
+            "sort a list ascending",
+            [ToolParam("numbers", "list")],
+            "def handle(numbers):\n    return sorted(numbers)\n",
+            [{"args": {"numbers": [3, 1, 2]}, "expect": [1, 2, 3]}]),
+    _Recipe("list_unique", ("unique items", "deduplicate", "remove duplicates"),
+            "the unique items of a list, preserving order",
+            [ToolParam("items", "list")],
+            "def handle(items):\n    return list(dict.fromkeys(items))\n",
+            [{"args": {"items": [1, 1, 2, 3, 3]}, "expect": [1, 2, 3]}]),
+    _Recipe("list_sum", ("sum a list", "sum of list", "total of numbers"),
+            "the sum of a list of numbers",
+            [ToolParam("numbers", "list")],
+            "def handle(numbers):\n    return sum(numbers)\n",
+            [{"args": {"numbers": [1, 2, 3]}, "expect": 6}]),
+    _Recipe("list_flatten", ("flatten",),
+            "flatten a list of lists by one level",
+            [ToolParam("nested", "list")],
+            ("def handle(nested):\n"
+             "    out = []\n"
+             "    for row in nested:\n"
+             "        out.extend(row)\n"
+             "    return out\n"),
+            [{"args": {"nested": [[1, 2], [3]]}, "expect": [1, 2, 3]}]),
+    _Recipe("json_keys", ("json keys", "keys of json", "extract keys"),
+            "the sorted top-level keys of a JSON object",
+            [ToolParam("data", "dict")],
+            "def handle(data):\n    return sorted(data.keys())\n",
+            [{"args": {"data": {"b": 1, "a": 2}}, "expect": ["a", "b"]}]),
+    # ---- validation ---- #
+    _Recipe("is_email", ("valid email", "is email", "email validation"),
+            "test whether a string looks like an email address",
+            [ToolParam("text", "str")],
+            ("import re\n"
+             "def handle(text):\n"
+             "    return bool(re.fullmatch(r'[^@\\s]+@[^@\\s]+\\.[^@\\s]+', text.strip()))\n"),
+            [{"args": {"text": "a@b.com"}, "expect": True},
+             {"args": {"text": "nope"}, "expect": False}]),
+    _Recipe("is_numeric", ("is numeric", "numeric string", "is a number string"),
+            "test whether a string is a valid number",
+            [ToolParam("text", "str")],
+            ("import re\n"
+             "def handle(text):\n"
+             "    return bool(re.fullmatch(r'-?\\d+(\\.\\d+)?', text.strip()))\n"),
+            [{"args": {"text": "12.5"}, "expect": True},
+             {"args": {"text": "abc"}, "expect": False}]),
+    # ---- datetime ---- #
+    _Recipe("weekday_name", ("day of the week", "weekday name", "what day"),
+            "the weekday name for an ISO date (YYYY-MM-DD)",
+            [ToolParam("date", "str")],
+            ("import datetime\n"
+             "def handle(date):\n"
+             "    return datetime.date.fromisoformat(date).strftime('%A')\n"),
+            [{"args": {"date": "2024-01-01"}, "expect": "Monday"}]),
+    _Recipe("days_between", ("days between", "date difference", "difference in days"),
+            "the number of days between two ISO dates (end minus start)",
+            [ToolParam("start", "str"), ToolParam("end", "str")],
+            ("import datetime\n"
+             "def handle(start, end):\n"
+             "    a = datetime.date.fromisoformat(start)\n"
+             "    b = datetime.date.fromisoformat(end)\n"
+             "    return (b - a).days\n"),
+            [{"args": {"start": "2024-01-01", "end": "2024-01-31"}, "expect": 30}]),
     # generic, always-available scaffold — runs, passes its identity example, and is
     # honestly labelled a placeholder so NYXARA never over-claims a capability she only
     # scaffolded. (For an unknown gap like "image generation" the LLM path fills the body;
@@ -372,6 +651,189 @@ _RECIPES: List[_Recipe] = [
             [{"args": {"payload": "x"}, "expect": {"echo": "x", "scaffold": True}}]),
 ]
 _RECIPE_BY_KEY = {r.key: r for r in _RECIPES}
+
+
+# --------------------------------------------------------------------------- #
+# Parametric synthesis — build a *real, correct* recipe for a structured need
+# whose body depends on a constant in the request (a unit pair, a shift, a base,
+# a factor). These cover open-ended gaps the fixed library can't enumerate, yet
+# stay fully deterministic and offline — every generated handler is proven by its
+# own example before it can deploy.
+# --------------------------------------------------------------------------- #
+
+# linear unit conversions: each entry maps a (from, to) intent to a value->value
+# expression. The expected example is computed from the SAME expression at build
+# time, so the generated tool always passes its own test.
+_UNIT_SYNONYMS = {
+    "celsius": "c", "centigrade": "c", "c": "c",
+    "fahrenheit": "f", "f": "f",
+    "kelvin": "k", "k": "k",
+    "kilometers": "km", "kilometres": "km", "km": "km",
+    "miles": "mi", "mile": "mi", "mi": "mi",
+    "kilograms": "kg", "kilos": "kg", "kg": "kg",
+    "pounds": "lb", "lbs": "lb", "lb": "lb",
+    "meters": "m", "metres": "m", "m": "m",
+    "feet": "ft", "foot": "ft", "ft": "ft",
+}
+_UNIT_CONVERSIONS = {
+    ("c", "f"): "value * 9 / 5 + 32",
+    ("f", "c"): "(value - 32) * 5 / 9",
+    ("c", "k"): "value + 273.15",
+    ("k", "c"): "value - 273.15",
+    ("km", "mi"): "value * 0.621371",
+    ("mi", "km"): "value * 1.609344",
+    ("kg", "lb"): "value * 2.2046226218",
+    ("lb", "kg"): "value / 2.2046226218",
+    ("m", "ft"): "value * 3.280839895",
+    ("ft", "m"): "value / 3.280839895",
+}
+
+
+def _eval_value_expr(expr: str, value: float) -> float:
+    """Evaluate a trusted, constant-only conversion expression for the example."""
+    return float(eval(expr, {"__builtins__": {}}, {"value": value}))  # noqa: S307 - trusted
+
+
+def _int_to_base(n: int, base: int) -> str:
+    if base < 2 or base > 36:
+        raise ValueError("base out of range")
+    if n == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    out = []
+    while n:
+        out.append(digits[n % base])
+        n //= base
+    return sign + "".join(reversed(out))
+
+
+def _caesar(text: str, shift: int) -> str:
+    out = []
+    for c in text:
+        if "a" <= c <= "z":
+            out.append(chr((ord(c) - 97 + shift) % 26 + 97))
+        elif "A" <= c <= "Z":
+            out.append(chr((ord(c) - 65 + shift) % 26 + 65))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def _parametric_recipe(need: str) -> Optional[_Recipe]:
+    """Synthesize a real recipe whose body is fixed by a constant in ``need``."""
+    low = (need or "").lower()
+
+    # 1. unit / temperature conversion ("convert celsius to fahrenheit")
+    m = re.search(r"([a-z]+)\s*(?:to|->|into|in)\s*([a-z]+)", low)
+    if m:
+        src_u = _UNIT_SYNONYMS.get(m.group(1))
+        dst_u = _UNIT_SYNONYMS.get(m.group(2))
+        expr = _UNIT_CONVERSIONS.get((src_u, dst_u)) if src_u and dst_u else None
+        if expr is not None:
+            example = _eval_value_expr(expr, 100.0)
+            return _Recipe(
+                f"convert_{src_u}_to_{dst_u}", (),
+                f"convert a value from {m.group(1)} to {m.group(2)}",
+                [ToolParam("value", "float")],
+                f"def handle(value):\n    return {expr}\n",
+                [{"args": {"value": 100.0}, "expect": example}])
+
+    # 2. integer to an arbitrary base ("convert to base 16", "express in base 7")
+    m = re.search(r"base\s*(\d+)", low)
+    if m:
+        base = int(m.group(1))
+        if 2 <= base <= 36:
+            return _Recipe(
+                f"int_to_base_{base}", (),
+                f"convert an integer to its base-{base} representation",
+                [ToolParam("n", "int")],
+                ("def handle(n):\n"
+                 "    n = int(n)\n"
+                 f"    base = {base}\n"
+                 "    if n == 0:\n"
+                 "        return '0'\n"
+                 "    digits = '0123456789abcdefghijklmnopqrstuvwxyz'\n"
+                 "    sign = '-' if n < 0 else ''\n"
+                 "    n = abs(n)\n"
+                 "    out = []\n"
+                 "    while n:\n"
+                 "        out.append(digits[n % base])\n"
+                 "        n //= base\n"
+                 "    return sign + ''.join(reversed(out))\n"),
+                [{"args": {"n": 255}, "expect": _int_to_base(255, base)}])
+
+    # 3. caesar / shift cipher with an explicit shift ("caesar cipher shift 3")
+    m = re.search(r"(?:caesar|shift|rot)\D*?(\d+)", low)
+    if m and any(w in low for w in ("caesar", "shift", "cipher", "rot")):
+        shift = int(m.group(1)) % 26
+        return _Recipe(
+            f"caesar_shift_{shift}", (),
+            f"apply a Caesar cipher with a shift of {shift}",
+            [ToolParam("text", "str")],
+            ("def handle(text):\n"
+             "    out = []\n"
+             f"    shift = {shift}\n"
+             "    for c in text:\n"
+             "        if 'a' <= c <= 'z':\n"
+             "            out.append(chr((ord(c) - 97 + shift) % 26 + 97))\n"
+             "        elif 'A' <= c <= 'Z':\n"
+             "            out.append(chr((ord(c) - 65 + shift) % 26 + 65))\n"
+             "        else:\n"
+             "            out.append(c)\n"
+             "    return ''.join(out)\n"),
+            [{"args": {"text": "Hello"}, "expect": _caesar("Hello", shift)}])
+
+    # 4. round to N decimal places ("round to 2 decimal places")
+    m = re.search(r"round\D*?(\d+)\s*(?:decimal|dp|place)", low)
+    if m:
+        nd = int(m.group(1))
+        return _Recipe(
+            f"round_to_{nd}_dp", (),
+            f"round a number to {nd} decimal place(s)",
+            [ToolParam("x", "float")],
+            f"def handle(x):\n    return round(x, {nd})\n",
+            [{"args": {"x": 3.14159}, "expect": round(3.14159, nd)}])
+
+    return _parametric_arithmetic(low)
+
+
+def _parametric_arithmetic(low: str) -> Optional[_Recipe]:
+    # 5. arithmetic by a constant ("multiply by 7", "add 5", "divide by 2")
+    m = re.search(r"(multiply|times|add|plus|subtract|minus|divide)\s*(?:by\s*)?(-?\d+(?:\.\d+)?)",
+                  low)
+    if m:
+        op, num = m.group(1), float(m.group(2))
+        num = int(num) if num.is_integer() else num
+        expr = {"multiply": f"x * {num}", "times": f"x * {num}",
+                "add": f"x + {num}", "plus": f"x + {num}",
+                "subtract": f"x - {num}", "minus": f"x - {num}",
+                "divide": f"x / {num}"}[op]
+        if op == "divide" and num == 0:
+            return None
+        example = _eval_value_expr(expr.replace("x", "value"), 10.0)
+        verb = {"multiply": "multiply_by", "times": "multiply_by", "add": "add",
+                "plus": "add", "subtract": "subtract", "minus": "subtract",
+                "divide": "divide_by"}[op]
+        return _Recipe(
+            f"{verb}_{str(num).replace('.', '_').replace('-', 'neg')}", (),
+            f"{op} a number by {num}",
+            [ToolParam("x", "float")],
+            f"def handle(x):\n    return {expr}\n",
+            [{"args": {"x": 10.0}, "expect": example}])
+
+    return None
+
+
+def best_recipe(need: str) -> _Recipe:
+    """Resolve a capability gap to its best recipe (fixed → parametric → generic).
+
+    Exposed so other faculties (e.g. ``mind/creative.py`` code-gen) can reuse the foundry's
+    deterministic, offline synthesis for real working code without constructing a whole
+    :class:`CapabilityFoundry`. The returned recipe's ``source`` defines ``handle(...)``.
+    """
+    return CapabilityFoundry._resolve_recipe(need)
 
 
 # --------------------------------------------------------------------------- #
@@ -417,7 +879,7 @@ class CapabilityFoundry:
     # ------------------------------------------------------------------ #
     def plan(self, need: str) -> CapabilityPlan:
         """Classify the gap into a recipe and a typed, registry-safe plan."""
-        recipe = self._classify(need)
+        recipe = self._resolve_recipe(need)
         base = recipe.key if recipe.key != "generic" else self._slug(need)
         tool_name = self._unique_name(base)
         return CapabilityPlan(
@@ -425,8 +887,19 @@ class CapabilityFoundry:
             description=recipe.description,
             params=list(recipe.params),
             capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True,
-            examples=list(recipe.examples),
+            examples=list(recipe.examples), template_source=recipe.source,
             rationale=f"classified gap {need!r} as recipe {recipe.key!r}")
+
+    @staticmethod
+    def _resolve_recipe(need: str) -> _Recipe:
+        """Fixed recipe (keyword) → parametric synthesis → generic scaffold (last resort)."""
+        fixed = CapabilityFoundry._classify(need)
+        if fixed.key != "generic":
+            return fixed
+        para = _parametric_recipe(need)
+        if para is not None:
+            return para
+        return _RECIPE_BY_KEY["generic"]
 
     # ------------------------------------------------------------------ #
     # 2. SYNTHESIZE
@@ -439,7 +912,11 @@ class CapabilityFoundry:
                 ok, _reason = self._scan_source(src)
                 if ok:
                     return src, "llm"
-        return _RECIPE_BY_KEY.get(plan.shape, _RECIPE_BY_KEY["generic"]).source, "template"
+        # the resolved recipe (fixed or parametric) carries its own real source; only a
+        # truly-unclassifiable gap falls through to the generic scaffold.
+        source = plan.template_source or _RECIPE_BY_KEY.get(
+            plan.shape, _RECIPE_BY_KEY["generic"]).source
+        return source, "template"
 
     # ------------------------------------------------------------------ #
     # 3. TEST
@@ -627,13 +1104,37 @@ class CapabilityFoundry:
     # ------------------------------------------------------------------ #
     @staticmethod
     def _classify(need: str) -> _Recipe:
-        low = " " + (need or "").lower() + " "
+        """Match a gap to a recipe by *all* keyword words appearing in the need.
+
+        Word-level (not arbitrary-substring) matching with a length-guarded prefix rule, so
+        natural phrasings hit the real recipe ("count the vowels in a string" → count_vowels)
+        without false positives ("the meaning of life" must NOT match a "mean of" recipe).
+        The most specific match (greatest matched length) wins.
+        """
+        low = (need or "").lower()
+        toks = set(re.findall(r"[a-z0-9]+", low))
+        if not toks:
+            return _RECIPE_BY_KEY["generic"]
+
+        def word_matches(w: str) -> bool:
+            if w in toks:
+                return True
+            if len(w) >= 5:
+                for t in toks:
+                    if t.startswith(w) or (len(t) >= 5 and w.startswith(t)):
+                        return True
+            return False
+
         best: Optional[_Recipe] = None
-        best_len = 0
+        best_score = 0
         for recipe in _RECIPES:
             for kw in recipe.keywords:
-                if kw in low and len(kw) > best_len:
-                    best, best_len = recipe, len(kw)
+                words = kw.split()
+                if words and all(word_matches(w) for w in words):
+                    # all words present → fuzzy match; an exact contiguous phrase wins decisively
+                    score = sum(len(w) for w in words) + (100 if kw in low else 0)
+                    if score > best_score:
+                        best, best_score = recipe, score
         return best or _RECIPE_BY_KEY["generic"]
 
     @staticmethod

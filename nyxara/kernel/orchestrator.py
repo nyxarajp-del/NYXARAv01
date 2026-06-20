@@ -517,6 +517,7 @@ class NyxaraCore:
             return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
                                   retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
+                                  knowledge=self.knowledge,
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base

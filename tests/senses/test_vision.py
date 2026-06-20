@@ -234,6 +234,104 @@ def test_analysis_to_dict():
     assert d["info"]["format"] == "PNG" and d["average_hash"] == hex_hash(255)
 
 
+# -------------------- pure-stdlib pixel decoders -------------------- #
+import zlib  # noqa: E402
+
+from nyxara.senses.vision import decode_bmp, decode_image, decode_png  # noqa: E402
+
+
+def _paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    return a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+
+
+def _encode_png(w, h, pixels, filter_type=0):
+    """Encode an 8-bit RGB PNG applying one filter type uniformly (exercises decode)."""
+    def chunk(typ, data):
+        return (struct.pack(">I", len(data)) + typ + data
+                + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF))
+
+    bpp, stride = 3, w * 3
+    recon_rows = []
+    for y in range(h):
+        row = bytearray()
+        for x in range(w):
+            row += bytes(pixels[y * w + x])
+        recon_rows.append(row)
+    raw = bytearray()
+    prev = bytearray(stride)
+    for recon in recon_rows:
+        raw.append(filter_type)
+        filt = bytearray(stride)
+        for i in range(stride):
+            a = recon[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            pred = (0, a, b, (a + b) // 2, _paeth(a, b, c))[filter_type]
+            filt[i] = (recon[i] - pred) & 255
+        raw += filt
+        prev = recon
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b""))
+
+
+_PIXELS = [(250, 5, 5), (5, 250, 5), (5, 5, 250), (200, 200, 50),
+           (30, 60, 90), (120, 130, 140)]  # 3x2
+
+
+@pytest.mark.parametrize("ftype", [0, 1, 2, 3, 4])
+def test_decode_png_all_filters_roundtrip(ftype):
+    png = _encode_png(3, 2, _PIXELS, filter_type=ftype)
+    assert decode_png(png) == (3, 2, _PIXELS)
+    assert decode_image(png) == (3, 2, _PIXELS)
+
+
+def test_decode_bmp_roundtrip():
+    w, h = 2, 2
+    rows_top_down = [[(10, 20, 30), (40, 50, 60)], [(70, 80, 90), (100, 110, 120)]]
+    row_bytes = ((24 * w + 31) // 32) * 4
+    body = bytearray()
+    for row in reversed(rows_top_down):  # BMP positive height is bottom-up
+        rb = bytearray()
+        for (r, g, b) in row:
+            rb += bytes((b, g, r))
+        rb += bytes(row_bytes - len(rb))
+        body += rb
+    offset = 54
+    header = b"BM" + struct.pack("<IHHI", offset + len(body), 0, 0, offset)
+    dib = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, len(body), 2835, 2835, 0, 0)
+    bmp = bytes(header + dib + body)
+    assert decode_bmp(bmp) == (2, 2, [(10, 20, 30), (40, 50, 60),
+                                      (70, 80, 90), (100, 110, 120)])
+
+
+def test_decode_image_defers_unknown_format():
+    # JPEG/WEBP need a heavy codec → stdlib decode returns None (Pillow handles them)
+    assert decode_image(b"\xff\xd8\xff\xe0" + b"\x00" * 40) is None
+
+
+def test_perception_works_without_pillow(tmp_path, monkeypatch):
+    # the whole point of Step E: real hashing + dominant colours on a bare machine (no PIL)
+    from nyxara.senses import vision as v
+    monkeypatch.setattr(v, "_HAS_PIL", False)
+    p = tmp_path / "img.png"
+    p.write_bytes(_encode_png(3, 2, _PIXELS, filter_type=4))
+    res = Vision().analyze(str(p))
+    assert res.info.format == "PNG" and res.info.width == 3
+    assert res.average_hash is not None and res.perceptual_hash is not None
+    assert res.difference_hash is not None
+    assert res.dominant_colors  # real palette, decoded with zero dependencies
+
+
+def test_decode_png_rejects_oversized(monkeypatch):
+    from nyxara.senses import vision as v
+    monkeypatch.setattr(v, "_MAX_DECODE_PIXELS", 4)  # tiny cap
+    png = _encode_png(3, 2, _PIXELS)  # 6 pixels > cap → defer
+    assert v.decode_png(png) is None
+
+
 # -------------------- real OCR (skips cleanly without Tesseract) -------------------- #
 def _tesseract_ready():
     try:

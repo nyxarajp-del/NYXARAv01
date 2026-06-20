@@ -14,13 +14,19 @@ stack at all:
 * **Dominant colours** — :func:`dominant_colors` quantises a pixel list into the palette
   that defines the image.
 
-The :class:`Vision` facade bridges *real* image files to these algorithms using ``Pillow``
-when it is installed — extracting the grayscale matrix and pixel list — and degrades
-honestly (header-only, with a note) when it is not. OCR (``pytesseract``) and CLIP-style
-embeddings are optional hooks that return ``None`` plus a note when their libraries are
-absent. Nothing here raises because a library is missing.
+* **Pixel decoding** — :func:`decode_png` (via stdlib :mod:`zlib`) and :func:`decode_bmp`
+  turn raw bytes into real pixels with **no third-party library**, so perceptual hashing,
+  dedup and dominant-colour analysis work on a bare machine for the common lossless
+  formats. JPEG/WEBP/GIF still defer to ``Pillow`` when present.
 
-Pure standard library at the core; ``Pillow`` / ``pytesseract`` / CLIP optional.
+The :class:`Vision` facade bridges *real* image files to these algorithms: it decodes
+PNG/BMP itself (stdlib), reaches for ``Pillow`` only for formats stdlib can't decode, and
+degrades honestly (header-only, with a note) when neither can. OCR (``pytesseract``) and
+CLIP-style embeddings are optional hooks that return ``None`` plus a note when their
+libraries are absent. Nothing here raises because a library is missing.
+
+Pure standard library at the core (including PNG/BMP decode); ``Pillow`` / ``pytesseract``
+/ CLIP optional.
 """
 
 from __future__ import annotations
@@ -41,6 +47,10 @@ __all__ = [
     "ImageInfo",
     "ImageAnalysis",
     "parse_header",
+    "decode_png",
+    "decode_bmp",
+    "decode_image",
+    "gray_from_pixels",
     "dominant_colors",
     "resize_gray",
     "average_hash",
@@ -154,6 +164,162 @@ def parse_header(data: bytes) -> Optional[ImageInfo]:
         if wh:
             return ImageInfo("WEBP", wh[0], wh[1], n)
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Pure-stdlib pixel decoders (PNG via zlib, BMP) — real perception with NO deps
+# --------------------------------------------------------------------------- #
+# Cap decode cost: above this many pixels we defer to Pillow (or header-only) rather than
+# grind a pure-python per-byte loop. Perception downscales anyway, so this is no real loss.
+_MAX_DECODE_PIXELS = 4_000_000
+
+
+def _paeth(a: int, b: int, c: int) -> int:
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    return b if pb <= pc else c
+
+
+def decode_png(data: bytes) -> Optional[Tuple[int, int, List[Pixel]]]:
+    """Decode an 8-bit, non-interlaced PNG to ``(width, height, rgb_pixels)`` — stdlib only.
+
+    Uses :mod:`zlib` (standard library) to inflate the image data and applies the five PNG
+    scanline filters. Handles grayscale / RGB / palette / grayscale+alpha / RGBA at bit
+    depth 8 (the overwhelmingly common case); anything else returns ``None`` so a richer
+    decoder (Pillow) can take over when present. No third-party dependency."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    import zlib
+
+    pos, n = 8, len(data)
+    width = height = bitdepth = colortype = interlace = None
+    palette: Optional[bytes] = None
+    idat = bytearray()
+    while pos + 8 <= n:
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        ctype = data[pos + 4:pos + 8]
+        cdata = data[pos + 8:pos + 8 + length]
+        pos += 12 + length  # 4 (len) + 4 (type) + length + 4 (crc); CRC not validated
+        if ctype == b"IHDR" and len(cdata) >= 13:
+            width = int.from_bytes(cdata[0:4], "big")
+            height = int.from_bytes(cdata[4:8], "big")
+            bitdepth, colortype, interlace = cdata[8], cdata[9], cdata[12]
+        elif ctype == b"PLTE":
+            palette = cdata
+        elif ctype == b"IDAT":
+            idat += cdata
+        elif ctype == b"IEND":
+            break
+    if not width or not height or bitdepth != 8 or interlace != 0:
+        return None
+    if width * height > _MAX_DECODE_PIXELS:
+        return None
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(colortype)
+    if channels is None:
+        return None
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except Exception:  # noqa: BLE001
+        return None
+
+    bpp, stride = channels, width * channels
+    if len(raw) < (stride + 1) * height:
+        return None
+    recon = bytearray()
+    prev = bytearray(stride)
+    rp = 0
+    for _ in range(height):
+        ft = raw[rp]
+        rp += 1
+        line = bytearray(raw[rp:rp + stride])
+        rp += stride
+        if ft == 1:        # Sub
+            for i in range(bpp, stride):
+                line[i] = (line[i] + line[i - bpp]) & 255
+        elif ft == 2:      # Up
+            for i in range(stride):
+                line[i] = (line[i] + prev[i]) & 255
+        elif ft == 3:      # Average
+            for i in range(stride):
+                a = line[i - bpp] if i >= bpp else 0
+                line[i] = (line[i] + ((a + prev[i]) >> 1)) & 255
+        elif ft == 4:      # Paeth
+            for i in range(stride):
+                a = line[i - bpp] if i >= bpp else 0
+                c = prev[i - bpp] if i >= bpp else 0
+                line[i] = (line[i] + _paeth(a, prev[i], c)) & 255
+        elif ft != 0:      # unknown filter
+            return None
+        recon += line
+        prev = line
+
+    pixels: List[Pixel] = []
+    for y in range(height):
+        base = y * stride
+        for x in range(width):
+            off = base + x * bpp
+            if colortype in (0, 4):           # grayscale (+alpha)
+                v = recon[off]
+                pixels.append((v, v, v))
+            elif colortype in (2, 6):         # RGB(A)
+                pixels.append((recon[off], recon[off + 1], recon[off + 2]))
+            else:                             # palette
+                idx = recon[off] * 3
+                if palette is None or idx + 2 >= len(palette):
+                    return None
+                pixels.append((palette[idx], palette[idx + 1], palette[idx + 2]))
+    return width, height, pixels
+
+
+def decode_bmp(data: bytes) -> Optional[Tuple[int, int, List[Pixel]]]:
+    """Decode an uncompressed 24/32-bit BMP to ``(width, height, rgb_pixels)`` — stdlib only."""
+    if data[:2] != b"BM" or len(data) < 54:
+        return None
+    pixel_offset = struct.unpack_from("<I", data, 10)[0]
+    width = struct.unpack_from("<i", data, 18)[0]
+    height_raw = struct.unpack_from("<i", data, 22)[0]
+    bpp = struct.unpack_from("<H", data, 28)[0]
+    compression = struct.unpack_from("<I", data, 30)[0]
+    height = abs(height_raw)
+    if compression != 0 or bpp not in (24, 32) or width <= 0 or height <= 0:
+        return None
+    if width * height > _MAX_DECODE_PIXELS:
+        return None
+    nbytes = bpp // 8
+    row_bytes = ((bpp * width + 31) // 32) * 4  # rows padded to 4-byte boundary
+    rows: List[List[Pixel]] = []
+    for ry in range(height):
+        off = pixel_offset + ry * row_bytes
+        if off + width * nbytes > len(data):
+            return None
+        row = [(data[off + x * nbytes + 2], data[off + x * nbytes + 1],
+                data[off + x * nbytes]) for x in range(width)]  # BGR(A) -> RGB
+        rows.append(row)
+    if height_raw > 0:        # positive height == bottom-up storage
+        rows.reverse()
+    return width, height, [px for row in rows for px in row]
+
+
+def decode_image(data: bytes) -> Optional[Tuple[int, int, List[Pixel]]]:
+    """Decode raw image bytes to ``(width, height, rgb_pixels)`` using stdlib decoders.
+
+    Currently PNG (via zlib) and BMP — the common lossless formats. Returns ``None`` for
+    formats that genuinely need a heavy codec (JPEG/WEBP/GIF), so the Pillow path handles
+    them when available."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return decode_png(data)
+    if data[:2] == b"BM":
+        return decode_bmp(data)
+    return None
+
+
+def gray_from_pixels(width: int, height: int, pixels: Sequence[Pixel]) -> Matrix:
+    """Luminance (Rec. 601) grayscale matrix from a flat RGB pixel list."""
+    return [[(pixels[y * width + x][0] * 299 + pixels[y * width + x][1] * 587
+              + pixels[y * width + x][2] * 114) // 1000 for x in range(width)]
+            for y in range(height)]
 
 
 # --------------------------------------------------------------------------- #
@@ -304,8 +470,28 @@ class Vision:
         except Exception:  # noqa: BLE001
             return None
 
-    # ---- pixel access via Pillow ---- #
+    # ---- pixel access: pure-stdlib decoders first, Pillow as enrichment ---- #
+    @staticmethod
+    def _read(path: str) -> Optional[bytes]:
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except Exception:  # noqa: BLE001
+            return None
+
     def gray_matrix(self, path: str, *, max_dim: int = 256) -> Optional[Matrix]:
+        # 1) stdlib decode (PNG/BMP) — real pixels with NO image library
+        data = self._read(path)
+        if data is not None:
+            dec = decode_image(data)
+            if dec is not None:
+                w, h, px = dec
+                gray = gray_from_pixels(w, h, px)
+                if max(w, h) > max_dim and w and h:
+                    scale = max_dim / max(w, h)
+                    gray = resize_gray(gray, max(1, int(w * scale)), max(1, int(h * scale)))
+                return gray
+        # 2) Pillow for formats stdlib can't decode (JPEG/WEBP/GIF/…)
         if not _HAS_PIL:
             return None
         try:  # pragma: no cover - exercised only with Pillow
@@ -319,6 +505,17 @@ class Vision:
             return None
 
     def pixels(self, path: str, *, max_dim: int = 128) -> Optional[List[Pixel]]:
+        # 1) stdlib decode (PNG/BMP), subsampled to bound cost on large images
+        data = self._read(path)
+        if data is not None:
+            dec = decode_image(data)
+            if dec is not None:
+                w, h, px = dec
+                step = max(1, max(w, h) // max_dim)
+                if step == 1:
+                    return px
+                return [px[y * w + x] for y in range(0, h, step) for x in range(0, w, step)]
+        # 2) Pillow fallback
         if not _HAS_PIL:
             return None
         try:  # pragma: no cover - exercised only with Pillow
@@ -352,7 +549,10 @@ class Vision:
         info = self.inspect(path)
         gray = self.gray_matrix(path)
         if gray is None:
-            return ImageAnalysis(info=info, note="Pillow not installed; header-only analysis")
+            return ImageAnalysis(
+                info=info,
+                note="could not decode pixels (unsupported format and Pillow absent); "
+                     "header-only analysis")
         px = self.pixels(path) or []
         ocr_text = None
         note = ""
