@@ -417,6 +417,11 @@ class NyxaraCore:
         # stress-test premises) and the role council (for adversarial lenses). Pure
         # analysis — it proposes structured reasoning and never reaches around the gates.
         self.strategic_intelligence = self._build_strategic_intelligence()
+        # Self-improving Society of Mind: a swarm of personas DEBATES a problem over several
+        # rounds, then scores + persists each persona's contribution and re-composes its own
+        # roster over time. Built after the reasoner so it borrows the live LLM and shares
+        # long-term memory; exposed via swarm()/`/swarm`, never run on every turn.
+        self.deliberative_swarm = self._build_swarm()
         # Level 15 — Capability Foundry: when a capability is missing entirely, design a
         # brand-new tool for herself (plan -> code -> test -> benchmark -> deploy). Built
         # after the reasoner so it can use the live LLM for code generation. Off when growth
@@ -886,6 +891,21 @@ class NyxaraCore:
             llm = getattr(self.reasoner, "llm", None)
             return RoleCouncil(llm=llm, max_tokens=256, timeout_s=30.0)
         except Exception:  # noqa: BLE001 — role council is a capability, never required
+            return None
+
+    def _build_swarm(self) -> Any:
+        """The self-improving Society of Mind (mind/swarm.py): multi-round persona debate that
+        learns its own best composition. Shares the reasoner's LLM and the long-term memory."""
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.mind.swarm import DeliberativeSwarm
+            settings = get_settings()
+            if not getattr(settings.swarm, "enabled", True):
+                return None
+            llm = getattr(self.reasoner, "llm", None)
+            return DeliberativeSwarm(llm=llm, memory=self.memory, settings=settings,
+                                     intelligence=getattr(self, "_intelligence", None))
+        except Exception:  # noqa: BLE001 — the swarm is a capability, never required
             return None
 
     def _build_world_simulator(self) -> Any:
@@ -2657,6 +2677,21 @@ class NyxaraCore:
             return {"problem": problem, "error": "strategic_intelligence unavailable"}
         try:
             return self.strategic_intelligence.analyze(problem).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"problem": problem, "error": str(exc)}
+
+    def swarm(self, problem: str) -> Dict[str, Any]:
+        """Convene the self-improving Society of Mind on ``problem`` (best-effort).
+
+        A swarm of personas debates the problem over several rounds; NYXARA synthesises one
+        answer she owns. Every persona's marginal contribution is scored and persisted, so the
+        roster self-improves across calls. Pure analysis — nothing here touches the world or the
+        gates. Returns the full debate, contributions, and synthesis as a dict.
+        """
+        if self.deliberative_swarm is None:
+            return {"problem": problem, "error": "swarm unavailable"}
+        try:
+            return self.deliberative_swarm.deliberate(problem).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"problem": problem, "error": str(exc)}
 
