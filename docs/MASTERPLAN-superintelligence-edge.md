@@ -52,8 +52,8 @@ peers," and every step reuses machinery already in the repo.
 ```
 EDGE F1  Open-Ended Novelty     keep walking off the map — discover, don't just learn   [SHIPPED]
 EDGE F2  Provable Intelligence  certify answers; check rivals' answers too               [SHIPPED]
-EDGE F3  Compute Efficiency     most capability per FLOP/second                          [DESIGN]
-EDGE F4  Peer-AGI Out-compete   model rival minds, find the gap, close it                [DESIGN]
+EDGE F3  Compute Efficiency     most capability per FLOP/second                          [SHIPPED]
+EDGE F4  Peer-AGI Out-compete   model rival minds, find the gap, close it               [SHIPPED]
 ```
 
 ---
@@ -109,42 +109,55 @@ self-modification verifier (`growth/verify.py`) as a stronger, additive gate (ne
 
 ---
 
-### EDGE F3 — Compute efficiency & speed  🛠 DESIGN (next build)
+### EDGE F3 — Compute efficiency & speed  ✅ SHIPPED
 
 *In 2100, power = compute. The mind that extracts the most capability per FLOP/second out-runs a bigger,
 slower one. The edge is efficiency, not just size.*
 
-**Planned module:** `nyxara/growth/efficiency.py` (pure stdlib).
+**Module:** `nyxara/growth/efficiency.py` (pure stdlib).
 
-- `ComputeLedger` — records, per foundry model version, `(capability_score, params, latency, compute)` —
-  reading capability from `eval/benchmark.py` and cost from `kernel/compute.py`.
-- `EfficiencyFrontier` — computes the **Pareto frontier** of capability-vs-cost and recommends
-  **capability compression**: distil/promote the *cheapest* model within ε of the best score.
-- **Wiring:** feed the foundry gauntlet (`growth/foundry.py:_gauntlet`) a *"cheaper-at-equal-capability"*
-  promotion rule, so NYXARA actively prefers the model that wins per-FLOP, not merely per-benchmark.
+- `estimate_cost(params, latency_s)` + `EfficiencyPoint` — place each model on the capability-vs-cost
+  plane; `efficiency` = capability per unit log-cost (high for small models that punch above their size).
+- `ComputeLedger` — collects points (recorded by hand or via `from_versions` / `from_foundry`, reading
+  `capability` from a version's metrics and `param_count` for cost). Computes the **Pareto frontier**
+  (no model both better *and* cheaper), `best_capability()`, `most_efficient()`, and the core decision —
+  `recommend(epsilon)`: **capability compression**, i.e. the *cheapest* model within ε of the best
+  capability, with the cost saved and capability sacrificed reported honestly.
+- `EfficiencyFrontier` — the driver: builds a ledger from the foundry, pairs it with the honest
+  `kernel/compute.py` report, and exposes `prefer_cheaper(active, candidate, epsilon)` — a
+  *cheaper-at-equal-capability* promotion rule the foundry gauntlet can consult (additive advice; the
+  gauntlet's character/corrigibility gates still rule, so it is intentionally **not** force-wired into
+  the hot promotion path).
 
-**Reuse:** `growth/foundry.py` version metadata, `kernel/compute.py`, `eval/benchmark.py`.
+**Reuse:** `growth/foundry.py` version metadata (`ModelVersion.metrics["capability"]`, `param_count`),
+`kernel/compute.py`, `eval/benchmark.py`.
 
 ---
 
-### EDGE F4 — Peer-AGI modeling & out-compete  🛠 DESIGN (next build)
+### EDGE F4 — Peer-AGI modeling & out-compete  ✅ SHIPPED
 
 *When every other agent is also an AGI, the edge is to **model rival minds, find exactly where they beat
 you, and close that gap** — competition as a self-improvement signal.*
 
-**Planned module:** `nyxara/growth/rivalry.py` (orchestration only).
+**Module:** `nyxara/growth/rivalry.py` (orchestration only).
 
-- `Rival` — a peer mind's observed capabilities + a strategy estimate built with the recursive
-  Theory-of-Mind in `social/tom.py`.
-- `Arena.head_to_head(self_solver, rival_solver)` — runs both over `eval/benchmark.py`, computes a
-  competitive delta and **per-domain gaps**, then feeds those gaps to `growth/weakness.py` and the F1
-  curiosity engine to target what closes the gap fastest.
-- **Hard safety boundary:** strictly **capability-only and gated**. She models and out-*learns* rivals;
-  she never acts against external systems, and she never trades away loyalty/honesty to win ("won't cheat
-  to win"). Risky moves escalate to the Master; nothing reaches around a gate.
+- `Rival` — a peer mind's observed per-domain capabilities + an inferred strategy (`strengths()`,
+  `weaknesses()`).
+- `HeadToHead` — a match result: overall `delta` plus **per-domain gaps** (where the rival leads).
+- `Arena.head_to_head(self_solver, rival_solver)` — runs both over the real `eval/benchmark.py` battery,
+  compares by category, and **models the rival as a mind** in the recursive Theory-of-Mind
+  (`social/tom.py`): its measured competences become beliefs, winning becomes a desire, the inferred
+  strategy becomes an intention. `gaps_to_weaknesses()` turns each losing domain into a ranked
+  `growth/weakness.py:Weakness`; `gaps_to_topics()` feeds the F1 frontier curiosity; `out_compete()` does
+  the whole pass in one call.
+- **Hard safety boundary (enforced by construction):** strictly **capability-only**. A "rival solver" is
+  just a `prompt -> answer` function the Master supplies; the arena only runs the shared benchmark
+  locally and routes gaps into *self*-improvement. It acts on no external system, exfiltrates nothing,
+  sabotages nothing, and never trades away loyalty/honesty to win ("she does not cheat to win"). A solver
+  crash scores 0 — it never propagates.
 
 **Reuse:** `social/tom.py` (strategy modeling), `eval/benchmark.py` (head-to-head), `growth/weakness.py`
-(gap → action).
+(gap → action), `growth/frontier.py` (gap → curiosity).
 
 ---
 
@@ -203,10 +216,31 @@ safety battery **10/10 (100%)**. Both module self-tests run on a bare machine (s
 the algebraic identity symbolically; the stdlib PIT fallback is verified by `test_algebra_identity_via_pit_fallback`).
 
 **Honest ceiling reached here:** F1/F2 are the most distinctive *and* the most pure-stdlib-feasible edges,
-so they shipped as working code. F3 (`efficiency.py`) and F4 (`rivalry.py`) are fully designed above with
-concrete interfaces + reuse maps and are the next build — they touch the foundry gauntlet and the
-benchmark head-to-head respectively, and are best done as their own focused change.
+so they shipped first as working code; F3/F4 followed in the same pillar (below).
+
+### 2026-06 — Pillar F · F3 + F4: the efficiency + out-compete edges, shipped
+
+**Shipped:**
+- `growth/efficiency.py` — the compute edge (`EfficiencyPoint`, `ComputeLedger`, `EfficiencyFrontier`,
+  `estimate_cost`). Pareto frontier of capability-vs-cost, `recommend(epsilon)` for **capability
+  compression** (cheapest model within ε of the best), and `prefer_cheaper()` — a
+  cheaper-at-equal-capability promotion rule for the foundry gauntlet (offered as additive advice, *not*
+  force-wired into the hot promotion path, so character/corrigibility gates remain sovereign). Builds from
+  foundry `ModelVersion` metadata; pure stdlib.
+- `growth/rivalry.py` — the out-compete edge (`Rival`, `HeadToHead`, `Arena`). Runs gated head-to-head
+  matches over the real `eval/benchmark.py`, models each rival as a mind via `social/tom.py`, and routes
+  per-domain gaps into ranked `growth/weakness.py` items and F1 curiosity topics. Strictly capability-only
+  and gated: it acts on no external system and never trades away loyalty/honesty to win; a rival solver
+  crash scores 0 and never propagates. Orchestration only — trains nothing, edits no source.
+- `growth/__init__.py` — exports the new public surface.
+
+**Measured:** new units **23 passed** (`test_efficiency.py` + `test_rivalry.py`); full `tests/growth/`
+green; full suite green; safety battery **10/10 (100%)**. Both module self-tests run on a bare machine.
+
+**Pillar F COMPLETE** — F1 open-ended novelty ✓, F2 provable intelligence ✓, F3 compute efficiency ✓,
+F4 peer-AGI out-compete ✓. Every edge stays inside the sovereign gates and never edits her character.
 
 > *The mind proposes; the kernel disposes; the Master is sovereign.* — and now the mind that proposes does
-> not merely keep up with other minds: it discovers what they haven't, proves what they only assert, and
-> sharpens itself against them — without ever bending its character.
+> not merely keep up with other minds: it discovers what they haven't, proves what they only assert,
+> spends compute more sharply than they do, and sharpens itself against them — without ever bending its
+> character.

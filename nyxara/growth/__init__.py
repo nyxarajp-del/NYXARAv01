@@ -45,6 +45,13 @@ from nyxara.growth.frontier import (
     NoveltyArchive,
 )
 from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover
+from nyxara.growth.efficiency import (
+    ComputeLedger,
+    EfficiencyFrontier,
+    EfficiencyPoint,
+    estimate_cost,
+)
+from nyxara.growth.rivalry import Arena, HeadToHead, Rival
 from nyxara.growth.genesis import (
     ArchitectureGenome,
     Candidate,
@@ -117,6 +124,13 @@ __all__ = [
     "ProofClaim",
     "ProofResult",
     "ProofVerdict",
+    "ComputeLedger",
+    "EfficiencyFrontier",
+    "EfficiencyPoint",
+    "estimate_cost",
+    "Arena",
+    "HeadToHead",
+    "Rival",
     "ensure_primary_model",
     "primary_model_present",
     "IDENTITY_SEED",
