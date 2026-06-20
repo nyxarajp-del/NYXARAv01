@@ -315,12 +315,26 @@ class NyxaraReasoner:
 
     @staticmethod
     def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
-        """Exact answer from a verifiable faculty, or None to defer to the neural mind."""
+        """Exact answer from a verifiable faculty, or None to defer to the neural mind.
+
+        Tries a multi-step reasoning chain first (it fires only on a binding/'then' and defers
+        otherwise, so it never steals a single-shot question) and a single faculty second — so
+        exact computation beats any neural guess, and a follow-up step is not lost to its head."""
+        try:
+            from nyxara.mind.reasoning_chain import solve_chain
+            chain = solve_chain(stimulus)
+            if chain is not None:
+                return chain.render(), chain.confidence
+        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            pass
         try:
             from nyxara.mind.reasoning_faculties import solve_with_faculties
-            return solve_with_faculties(stimulus)
-        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
-            return None
+            single = solve_with_faculties(stimulus)
+            if single is not None:
+                return single
+        except Exception:  # noqa: BLE001
+            pass
+        return None
 
     def _deliberate_council(self, stimulus: str, system: str,
                             mems: List[str]) -> Tuple[str, float, str]:

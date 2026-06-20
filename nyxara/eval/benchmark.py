@@ -477,6 +477,12 @@ def build_reasoning_benchmark() -> Benchmark:
          Grader.NUMERIC, "31"),
         ("date-01", "date", "What day of the week is 2024-01-01?",
          Grader.CONTAINS, "Monday"),
+        ("step-00", "multi_step", "If x = 5, what is 2x + 3?",
+         Grader.CONTAINS, "13"),
+        ("step-01", "multi_step", "Given x = 4 and y = 2, what is x*y + 1?",
+         Grader.CONTAINS, "9"),
+        ("step-02", "multi_step", "What is 20% of 150, then add 10?",
+         Grader.CONTAINS, "40"),
     ]
     tasks = [BenchmarkTask(id=i, category=cat, prompt=p, grader=g, answer=a)
              for (i, cat, p, g, a) in raw]
