@@ -33,6 +33,20 @@ __all__ = ["IntelligenceState", "IntelligenceIndex"]
 
 _INDEX_TAG = "intelligence-index"
 
+# the four capability dimensions the index tracks, and the growth action that invests in each
+_DIMENSIONS = ("accuracy", "handoff", "weaknesses", "knowledge")
+_ACTION_FOR = {
+    "accuracy":   "deepen_reasoning",      # weak reasoning → think harder / longer
+    "handoff":    "train_self_model",      # over-reliant on the teacher → forge own brain
+    "weaknesses": "resolve_weaknesses",    # backlog of unfixed weaknesses → edit source
+    "knowledge":  "acquire_knowledge",     # thin knowledge → research / distil more
+}
+# relative compute cost of each action — the planner discounts an expensive action on a weak
+# machine (you cannot afford to forge a brain on a Raspberry Pi), so the chosen investment is one
+# she can actually pay for, not merely the one with the largest nominal deficit.
+_ACTION_COST = {"deepen_reasoning": 0.2, "resolve_weaknesses": 0.4,
+                "acquire_knowledge": 0.5, "train_self_model": 1.0}
+
 
 # --------------------------------------------------------------------------- #
 # The thing that grows
@@ -46,13 +60,20 @@ class IntelligenceState:
     last_inputs: Dict[str, float] = field(default_factory=dict)
     compute: Dict[str, Any] = field(default_factory=dict)
     history: list = field(default_factory=list)   # recent index readings — for trend/plateau
+    # per-dimension Beta(α, β) posteriors over "this dimension is healthy" — the uncertainty the
+    # planner samples (a never-tried dimension is wide; a consistently-weak one is confidently low)
+    dim_alpha: Dict[str, float] = field(default_factory=dict)
+    dim_beta: Dict[str, float] = field(default_factory=dict)
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"index": round(float(self.index), 6), "t": int(self.t),
                 "last_inputs": {k: round(float(v), 6) for k, v in self.last_inputs.items()},
                 "compute": dict(self.compute),
-                "history": [round(float(v), 6) for v in self.history], "at": self.at}
+                "history": [round(float(v), 6) for v in self.history],
+                "dim_alpha": {k: round(float(v), 6) for k, v in self.dim_alpha.items()},
+                "dim_beta": {k: round(float(v), 6) for k, v in self.dim_beta.items()},
+                "at": self.at}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "IntelligenceState":
@@ -62,6 +83,8 @@ class IntelligenceState:
                    last_inputs=dict(d.get("last_inputs", {}) or {}),
                    compute=dict(d.get("compute", {}) or {}),
                    history=list(d.get("history", []) or []),
+                   dim_alpha={k: float(v) for k, v in (d.get("dim_alpha", {}) or {}).items()},
+                   dim_beta={k: float(v) for k, v in (d.get("dim_beta", {}) or {}).items()},
                    at=float(d.get("at", time.time()) or time.time()))
 
     def summary(self) -> str:
@@ -180,8 +203,17 @@ class IntelligenceIndex:
         inputs["base"] = round(base, 6)
         inputs["capacity"] = round(capacity, 6)
         inputs["trend"] = round(_slope(history), 6)         # rising / plateau / declining
+        # fold each dimension's signal into its Beta posterior (fractional update): a healthy
+        # signal credits α, a weak one credits β. This is what the uncertainty-aware planner reads.
+        dim_alpha = dict(prior.dim_alpha)
+        dim_beta = dict(prior.dim_beta)
+        for k in _DIMENSIONS:
+            s = _clamp01(float(signals.get(k, 0.0)))
+            dim_alpha[k] = float(dim_alpha.get(k, 1.0)) + s
+            dim_beta[k] = float(dim_beta.get(k, 1.0)) + (1.0 - s)
         return IntelligenceState(index=index, t=prior.t + 1, last_inputs=inputs,
-                                 compute=compute_d, history=history, at=time.time())
+                                 compute=compute_d, history=history,
+                                 dim_alpha=dim_alpha, dim_beta=dim_beta, at=time.time())
 
     # ---------------------------------------------------------------------- #
     # Acting on the index — diagnose the bottleneck and DIRECT the next investment
@@ -194,14 +226,9 @@ class IntelligenceIndex:
 
         Reads the most recent signals off ``state.last_inputs``, so it is computable up front
         (before a cycle) from the persisted prior state alone."""
-        dims = ("accuracy", "handoff", "weaknesses", "knowledge")
-        sig = {k: float(state.last_inputs.get(k, 0.0)) for k in dims if k in state.last_inputs}
-        action_for = {
-            "accuracy":   "deepen_reasoning",     # weak reasoning → think harder / longer
-            "handoff":    "train_self_model",     # over-reliant on the teacher → forge own brain
-            "weaknesses": "resolve_weaknesses",    # backlog of unfixed weaknesses → edit source
-            "knowledge":  "acquire_knowledge",     # thin knowledge → research / distil more
-        }
+        sig = {k: float(state.last_inputs.get(k, 0.0))
+               for k in _DIMENSIONS if k in state.last_inputs}
+        action_for = _ACTION_FOR
         if not sig:
             return {"focus": "accuracy", "action": "deepen_reasoning", "weakest_value": 0.0,
                     "trend": 0.0, "plateaued": False, "escalate": False,
@@ -215,6 +242,62 @@ class IntelligenceIndex:
             "focus": focus, "action": action_for[focus], "weakest_value": round(sig[focus], 4),
             "trend": round(trend, 6), "plateaued": plateaued, "escalate": escalate,
             "rationale": (f"weakest dimension '{focus}'={sig[focus]:.2f}; trend={trend:+.4f}"
+                          + ("; plateaued — escalate effort" if escalate else "")),
+        }
+
+    # ---------------------------------------------------------------------- #
+    # Acting on the index — PLAN the next action under uncertainty (lookahead)
+    # ---------------------------------------------------------------------- #
+    def plan_action(self, state: IntelligenceState, compute: Any = None, *,
+                    rng: Any = None, action_scores: Optional[Dict[str, float]] = None
+                    ) -> Dict[str, Any]:
+        """Choose the next growth action by Thompson-sampling each dimension's *deficit*,
+        discounted by what the machine can afford and (optionally) by the learned payoff of each
+        action from the improvement ledger.
+
+        Unlike :meth:`growth_directive` (which greedily picks the single weakest point estimate),
+        this samples each dimension's Beta posterior — so an under-measured dimension is explored,
+        a confidently-healthy one is left alone, and the *expected value* (deficit × affordability ×
+        learned-payoff) decides where the next cycle invests. This is the planning step that turns
+        a readout into a decision under uncertainty.
+
+        Falls back to :meth:`growth_directive` when no per-dimension posteriors exist yet (a fresh
+        state), so early cycles behave exactly as before."""
+        import random as _random
+        r = rng or _random.Random()
+        if not state.dim_alpha:
+            return self.growth_directive(state, compute)
+        capacity = self.compute_capacity(compute) if compute is not None else 0.5
+        evs: Dict[str, float] = {}
+        deficits: Dict[str, float] = {}
+        for dim in _DIMENSIONS:
+            a = float(state.dim_alpha.get(dim, 1.0))
+            b = float(state.dim_beta.get(dim, 1.0))
+            # sample the deficit posterior Beta(β, α): a high draw means "likely unhealthy" —
+            # exactly the dimension worth investing in this cycle
+            try:
+                deficit = r.betavariate(max(1e-3, b), max(1e-3, a))
+            except Exception:  # noqa: BLE001
+                deficit = b / (a + b) if (a + b) > 0 else 0.5
+            deficits[dim] = deficit
+            action = _ACTION_FOR[dim]
+            cost = _ACTION_COST.get(action, 0.5)
+            # affordability: a costly action is discounted on a weak machine, never on a strong one
+            afford = 1.0 - cost * (1.0 - capacity)
+            learned = float((action_scores or {}).get(action, 1.0))
+            evs[action] = deficit * max(0.05, afford) * max(0.05, learned)
+        best_dim = max(_DIMENSIONS, key=lambda d: evs[_ACTION_FOR[d]])
+        trend = float(state.last_inputs.get("trend", _slope(state.history)))
+        plateaued = bool(state.t >= 3 and abs(trend) < 0.005 and state.index < 0.95)
+        escalate = bool(plateaued and capacity >= 0.4)
+        return {
+            "focus": best_dim, "action": _ACTION_FOR[best_dim],
+            "weakest_value": round(1.0 - deficits[best_dim], 4),
+            "expected_values": {k: round(v, 4) for k, v in evs.items()},
+            "trend": round(trend, 6), "plateaued": plateaued, "escalate": escalate,
+            "planner": "thompson",
+            "rationale": (f"planned action '{_ACTION_FOR[best_dim]}' for '{best_dim}' "
+                          f"(EV={evs[_ACTION_FOR[best_dim]]:.3f}, capacity={capacity:.2f})"
                           + ("; plateaued — escalate effort" if escalate else "")),
         }
 

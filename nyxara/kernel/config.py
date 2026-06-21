@@ -726,6 +726,27 @@ class SelfImprovementConfig(BaseModel):
     intelligence_weights: Dict[str, float] = Field(
         default_factory=lambda: {"accuracy": 0.4, "knowledge": 0.2,
                                  "weaknesses": 0.2, "handoff": 0.2})
+    # --- full wire: the index's directive drives a real cross-system action --- #
+    # When ON, the planned growth directive (train_self_model / acquire_knowledge / …) is actually
+    # dispatched — foundry forge, research-queue enqueue — instead of merely logged. Each dispatch
+    # still honours its own subsystem's gate (foundry.enabled, oversight) and only runs when
+    # ``autonomous_enact`` is set, so read-only analysis stays the safe default.
+    enable_directive_dispatch: bool = True
+    # Uncertainty-aware planner: Thompson-sample each capability dimension's posterior (discounted
+    # by affordability + learned payoff) to choose the next action, instead of the greedy weakest
+    # point estimate. Off → the original deterministic growth_directive.
+    plan_actions: bool = True
+    # --- lifelong credit assignment (growth/credit.py) --- #
+    # A persisted Beta-Bernoulli ledger learns which interventions actually raise the index and
+    # reorders self-edits / scores actions by that learned payoff. Measurement-only; never gates.
+    enable_improvement_ledger: bool = True
+    ledger_prior_strength: float = Field(default=1.0, ge=0.1, le=50.0)
+    ledger_reward_scale: float = Field(default=40.0, ge=1.0, le=1000.0)
+    # --- optional heavy-ML payoff forecaster (growth/forecaster.py) --- #
+    # A small torch MLP that sharpens the ledger's ranking with context (signals + arm). Opt-in;
+    # with no torch it is simply unavailable and the dependency-free ledger path stands.
+    use_payoff_forecaster: bool = False
+    forecaster_warmup: int = Field(default=16, ge=2, le=10000)
 
 
 class MetaResearchConfig(BaseModel):

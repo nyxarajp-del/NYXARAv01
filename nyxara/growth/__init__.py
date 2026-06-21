@@ -69,6 +69,13 @@ from nyxara.growth.loyalty import (
     loyalty_battery,
 )
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
+from nyxara.growth.credit import (
+    EditStrategyBandit,
+    ImprovementLedger,
+    LedgerState,
+    arm_key,
+)
+from nyxara.growth.forecaster import PayoffForecaster
 from nyxara.growth.meta_research import (
     CandidateTheory,
     MetaResearcher,
@@ -108,6 +115,11 @@ __all__ = [
     "CandidateTheory",
     "IntelligenceIndex",
     "IntelligenceState",
+    "ImprovementLedger",
+    "EditStrategyBandit",
+    "LedgerState",
+    "PayoffForecaster",
+    "arm_key",
     "MetaLearningEngine",
     "MetaDimension",
     "MetaSample",

@@ -59,7 +59,7 @@ class GrowthReport:
 class GrowthEngine:
     """Turns recent experience into durable improvement — reflect, consolidate, (forge)."""
 
-    def __init__(self, *, memory: Any = None, journal: Any = None,
+    def __init__(self, *, memory: Any = None, journal: Any = None, core: Any = None,
                  settings: Optional[NyxaraSettings] = None, reflector: Any = None,
                  consolidator: Any = None, foundry: Any = None,
                  enable_foundry: Optional[bool] = None,
@@ -74,6 +74,10 @@ class GrowthEngine:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
+        # the live orchestrator handle (when built via from_core) — lets the RSIE's intelligence
+        # directive reach the foundry + research/investigation queues to actually *act*, not just
+        # log. None on a bare engine; every directive dispatch then degrades to a safe no-op.
+        self.core = core
         self._reflector = reflector
         self._consolidator = consolidator
         self._foundry = foundry
@@ -116,7 +120,7 @@ class GrowthEngine:
     def from_core(cls, core: Any, **kw: Any) -> "GrowthEngine":
         """Build a growth engine bound to a :class:`~nyxara.kernel.orchestrator.NyxaraCore`."""
         return cls(memory=getattr(core, "memory", None),
-                   journal=getattr(core, "journal", None), **kw)
+                   journal=getattr(core, "journal", None), core=core, **kw)
 
     # ---- reflect ---- #
     def _reflector_obj(self):
@@ -303,8 +307,8 @@ class GrowthEngine:
         if self._self_improver is None:
             from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
             self._self_improver = RecursiveSelfImprovement(
-                memory=self.memory, journal=self.journal, settings=self.settings,
-                growth_engine=self)
+                core=self.core, memory=self.memory, journal=self.journal,
+                settings=self.settings, growth_engine=self)
         return self._self_improver
 
     def improve_system(self) -> Optional[Dict[str, Any]]:
