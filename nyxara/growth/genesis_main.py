@@ -57,10 +57,24 @@ def _build_nas(args: argparse.Namespace) -> Any:
         g.novelty_weight = args.novelty_weight
     if args.hardware_weight is not None:
         g.hardware_weight = args.hardware_weight
+    if args.ucb_beta is not None:
+        g.ucb_beta = args.ucb_beta
     if args.max_layers is not None:
         g.max_layers = args.max_layers
     if args.pos_encoding:
         g.pos_encoding = args.pos_encoding
+    if args.norm:
+        g.norm_type = args.norm
+    if args.qk_norm:
+        g.qk_norm = True
+    if args.n_predict is not None:
+        g.n_predict = args.n_predict
+    if args.inherit_weights:
+        g.inherit_weights = True
+    if args.no_hall_of_fame:
+        g.hall_of_fame = False
+    if args.best_of is not None:
+        g.best_of = args.best_of
     if args.seed is not None:
         g.seed = args.seed
     if args.temperature is not None:
@@ -85,12 +99,15 @@ def _parser() -> argparse.ArgumentParser:
                         help="architectures per generation (default: config)")
     parser.add_argument("--backend", choices=["auto", "torch", "stdlib"], default=None,
                         help="search substrate (torch needs .[foundry]; stdlib runs anywhere)")
-    parser.add_argument("--strategy", choices=["elitism", "tournament", "regularized"], default=None,
-                        help="evolution engine (regularized = AmoebaNet-style aging evolution)")
+    parser.add_argument("--strategy", choices=["elitism", "tournament", "regularized", "nsga2"],
+                        default=None,
+                        help="evolution engine (regularized=aging; nsga2=multi-objective Pareto)")
     parser.add_argument("--bracket", action="store_true",
                         help="successive-halving: cheap-screen the population, fully train survivors")
     parser.add_argument("--surrogate", action="store_true",
                         help="train a ridge-regression predictor to steer breeding toward winners")
+    parser.add_argument("--ucb-beta", type=float, default=None,
+                        help="UCB exploration weight for the surrogate (mean + beta*uncertainty)")
     parser.add_argument("--adaptive-mutation", action="store_true",
                         help="heat up the mutation rate when the search stalls (anti-collapse)")
     parser.add_argument("--novelty-weight", type=float, default=None,
@@ -100,6 +117,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-layers", type=int, default=None, help="cap on layers per genome")
     parser.add_argument("--pos-encoding", choices=["learned", "rope", "alibi"], default=None,
                         help="force the positional scheme for searched neural brains")
+    parser.add_argument("--norm", choices=["layernorm", "rmsnorm"], default=None,
+                        help="default normalization for searched neural brains (torch path)")
+    parser.add_argument("--qk-norm", action="store_true",
+                        help="enable QK-norm on searched attention (training stability)")
+    parser.add_argument("--n-predict", type=int, default=None,
+                        help="multi-token-prediction depth for searched brains (1=classic)")
+    parser.add_argument("--inherit-weights", action="store_true",
+                        help="Lamarckian warm-start: children inherit parent weights (network morphism)")
+    parser.add_argument("--no-hall-of-fame", action="store_true",
+                        help="disable lifelong memory (do not warm-start or record champions)")
+    parser.add_argument("--ensemble", type=int, default=None, metavar="K",
+                        help="build a K-brain champion ensemble (top-k Pareto, competence-routed)")
+    parser.add_argument("--best-of", type=int, default=None, metavar="N",
+                        help="test-time self-consistency: sample N continuations, keep the best")
     parser.add_argument("--seed", type=int, default=None, help="search RNG seed")
     parser.add_argument("--temperature", type=float, default=None, help="champion sampling temperature")
     parser.add_argument("--top-k", type=int, default=None, help="champion sampling top-k (0=off)")
@@ -118,15 +149,34 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _sample_champion(nas: Any, report: Any, prompt: str, max_tokens: int) -> Optional[str]:
-    """Build the crowned brain and let it speak — works on torch (real net) or the stdlib substrate."""
+    """Build the crowned brain and let it speak — works on torch (real net) or the stdlib substrate.
+    Honours the configured best-of-N self-consistency when the backend supports rich decoding."""
     from nyxara.growth.foundry_models import build_model
     try:
         model = build_model(nas.champion_spec())
         corpus = nas._collect_corpus()
         model.train_on(corpus, steps=int(getattr(nas.cfg, "micro_train_steps", 40)), seed=nas.cfg.seed)
-        return model.generate(prompt, max_tokens=max_tokens)
+        best_of = int(getattr(nas.cfg, "best_of", 1))
+        try:
+            return model.generate(prompt, max_tokens=max_tokens, best_of=best_of)
+        except TypeError:                       # stdlib substrate: no best_of kwarg
+            return model.generate(prompt, max_tokens=max_tokens)
     except Exception as exc:  # noqa: BLE001 — sampling is a nicety, never fatal to the search
         return f"(could not sample: {exc})"
+
+
+def _ensemble_champion(nas: Any, prompt: Optional[str], k: int, max_tokens: int) -> Optional[dict]:
+    """Build the top-k Pareto champion ensemble and (optionally) let it speak."""
+    try:
+        ens = nas.champion_ensemble(k=k)
+        out: dict = {"members": len(ens.members),
+                     "kinds": [getattr(m, "kind", "?") for m in ens.members]}
+        if prompt is not None:
+            out["prompt"] = prompt
+            out["text"] = ens.generate(prompt, max_tokens=max_tokens)
+        return out
+    except Exception as exc:  # noqa: BLE001 — the ensemble is a bonus, never fatal
+        return {"error": f"could not build ensemble: {exc}"}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -149,6 +199,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.sample is not None:
         sample = _sample_champion(nas, report, args.sample, args.sample_tokens)
 
+    ensemble: Optional[dict] = None
+    ens_k = args.ensemble if args.ensemble is not None else int(getattr(nas.cfg, "ensemble_k", 1))
+    if ens_k and ens_k > 1:
+        ensemble = _ensemble_champion(nas, args.sample, ens_k, args.sample_tokens)
+
     promote_outcome: Optional[dict] = None
     if args.promote:
         try:
@@ -159,8 +214,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.save_report or args.json:
         payload = report.to_dict()
         payload["ok"] = True
+        payload["hall_of_fame"] = len(nas.hall_of_fame) if nas.hall_of_fame is not None else 0
         if sample is not None:
             payload["sample"] = {"prompt": args.sample, "text": sample}
+        if ensemble is not None:
+            payload["ensemble"] = ensemble
         if promote_outcome is not None:
             payload["promotion"] = promote_outcome
         if args.save_report:
@@ -189,6 +247,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if sample is not None:
         print(f"\n· champion speaks (prompt={args.sample!r}):\n  {sample!r}")
+
+    if ensemble is not None and "error" not in ensemble:
+        print(f"\n· champion ensemble ({ensemble['members']} brains, competence-routed): "
+              f"{ensemble.get('kinds')}")
+        if "text" in ensemble:
+            print(f"  ensemble speaks: {ensemble['text']!r}")
+
+    if nas.hall_of_fame is not None:
+        print(f"\n· lifelong memory: {len(nas.hall_of_fame)} brains in the Hall of Fame")
 
     if promote_outcome is not None:
         tag = ("PROMOTED into her live brain" if promote_outcome.get("promoted")

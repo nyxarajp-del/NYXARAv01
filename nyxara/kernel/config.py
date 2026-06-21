@@ -457,7 +457,9 @@ class GenesisConfig(BaseModel):
     #   "tournament"   — pick parents by k-way tournaments (more selection pressure, less elitist).
     #   "regularized"  — AmoebaNet-style aging evolution: evict the OLDEST, not the worst, so the
     #                    search keeps exploring instead of locking onto an early lucky genome.
-    search_strategy: Literal["elitism", "tournament", "regularized"] = "elitism"
+    #   "nsga2"        — NSGA-II elitist multi-objective evolution: rank by Pareto front + crowding
+    #                    distance, driving the population toward the whole speed↔smartness↔cost front.
+    search_strategy: Literal["elitism", "tournament", "regularized", "nsga2"] = "elitism"
     tournament_k: int = Field(default=3, ge=2, le=32)         # k-way tournament size
     adaptive_mutation: bool = False     # raise the mutation rate when best-so-far stalls (anti-collapse)
     novelty_weight: float = Field(default=0.0, ge=0.0)        # reward genomes far from the population
@@ -469,9 +471,24 @@ class GenesisConfig(BaseModel):
     # used only to ORDER which genomes to evaluate first — never to crown a champion (honest).
     surrogate: bool = False
     surrogate_min_train: int = Field(default=8, ge=2)         # candidates needed before it predicts
+    # UCB acquisition: order/breed by predicted-mean + ucb_beta·uncertainty (0 = pure exploit).
+    ucb_beta: float = Field(default=0.0, ge=0.0, le=10.0)
     hardware_weight: float = Field(default=0.0, ge=0.0)       # fold an estimated-FLOPs cost into fitness
     # Default positional scheme for searched neural brains (torch path): learned table, rotary, or ALiBi.
     pos_encoding: Literal["learned", "rope", "alibi"] = "learned"
+    # ---- 2100-tier brain knobs (torch path; defaults reproduce the classic net) ---- #
+    norm_type: Literal["layernorm", "rmsnorm"] = "layernorm"  # default normalization for new nets
+    qk_norm: bool = False                                     # default QK-norm for searched attention
+    n_predict: int = Field(default=1, ge=1, le=4)            # multi-token-prediction depth (1=classic)
+    kv_latent: int = Field(default=16, ge=1, le=256)        # latent-KV width for mla_attention
+    inherit_weights: bool = False                            # Lamarckian warm-start (network morphism)
+    # ---- Lifelong Hall-of-Fame memory: remember the best brains, warm-start future searches ---- #
+    hall_of_fame: bool = True
+    hall_of_fame_size: int = Field(default=32, ge=1, le=512)
+    warm_start_fraction: float = Field(default=0.25, ge=0.0, le=1.0)
+    # ---- Test-time intelligence: champion ensemble + best-of-N self-consistency ---- #
+    ensemble_k: int = Field(default=1, ge=1, le=16)         # top-k Pareto brains to ensemble (1=off)
+    best_of: int = Field(default=1, ge=1, le=16)            # self-consistency samples (1=off)
     # Champion sampling controls (used by genesis_main --sample and GenesisModel.generate defaults).
     temperature: float = Field(default=1.0, ge=0.0, le=10.0)
     top_k: int = Field(default=0, ge=0)                       # 0 = disabled
