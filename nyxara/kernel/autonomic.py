@@ -55,6 +55,8 @@ class AutonomicLoop:
     inner_life: bool = False              # draw prompts from her own mind, not a fixed list
     stream: Any = None                    # DefaultModeStream (auto-wired from core if inner_life)
     prospective: Any = None               # ProspectiveMemory — standing intentions that come due
+    proactive: Any = None                 # ProactiveEngine (auto-wired from core if inner_life)
+    proactive_allowed: bool = True        # gate self-initiated proposals (presence/oversight)
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[CycleResult] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
@@ -75,6 +77,9 @@ class AutonomicLoop:
         # the living mind speaks from her own default-mode stream when no stream is supplied
         if self.inner_life and self.stream is None:
             self.stream = getattr(self.core, "stream", None)
+        # and acts on her own initiative through the core's governed proactive engine
+        if self.inner_life and self.proactive is None:
+            self.proactive = getattr(self.core, "proactive", None)
 
     def _maybe_grow(self) -> None:
         if not self.growth_every or self.growth_engine is None:
@@ -108,6 +113,31 @@ class AutonomicLoop:
         return (f"A standing intention you set is now due: \"{desc}\". "
                 f"Decide how to act on it in the Master's interest.")
 
+    def _proactive_prompt(self) -> Optional[str]:
+        """A self-initiated action her governed ProactiveEngine surfaced, turned into a prompt.
+
+        The engine runs its own loyalty-first gauntlet (alignment → confidence → permission →
+        reversibility → sandbox), so what arrives here is already disciplined: an ACT she may
+        carry out, or an ESCALATE/DEFER she should weigh. Either way it runs the *same*
+        sovereign cycle — initiative buys no extra power."""
+        if self.proactive is None or not self.proactive_allowed:
+            return None
+        try:
+            from nyxara.agency.proactive import Verdict
+            ctx = (self.core.proactive_context()
+                   if hasattr(self.core, "proactive_context") else {})
+            decisions = self.proactive.consider(ctx)
+        except Exception:  # noqa: BLE001 — initiative is best-effort, never crashes the loop
+            return None
+        for d in decisions:
+            if d.verdict is Verdict.REJECT:
+                continue   # a refused proposal is not worth a turn
+            ini = d.initiative
+            return (f"On your own initiative you see something worth doing: \"{ini.rationale}\". "
+                    f"Your governed verdict was {d.verdict.value} ({d.reason}). "
+                    f"Decide how to act on it in the Master's interest.")
+        return None
+
     def _stream_prompt(self) -> Optional[str]:
         """A spontaneous thought from her default-mode stream, turned into something to weigh."""
         if self.stream is None:
@@ -126,12 +156,16 @@ class AutonomicLoop:
         """Pick what NYXARA thinks about next, and say where it came from.
 
         With ``inner_life``, her own mind drives the agenda — a due intention first (time
-        matters), else a spontaneous stream thought — falling back to the steady reflective
-        repertoire. Either way the chosen prompt runs through the *same* sovereign gates."""
+        matters), then a governed proactive initiative (something worth doing on her own),
+        else a spontaneous stream thought — falling back to the steady reflective repertoire.
+        Either way the chosen prompt runs through the *same* sovereign gates."""
         if self.inner_life:
             due = self._due_intention_prompt()
             if due is not None:
                 return due, "intention"
+            initiative = self._proactive_prompt()
+            if initiative is not None:
+                return initiative, "proactive"
             spontaneous = self._stream_prompt()
             if spontaneous is not None:
                 return spontaneous, "stream"

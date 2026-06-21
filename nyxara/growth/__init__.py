@@ -81,6 +81,28 @@ from nyxara.growth.meta_research import (
     MetaResearcher,
     MetaResearchReport,
 )
+from nyxara.growth.recursive_improvement import (
+    RecursiveSelfImprovement,
+    SelfImprovementReport,
+)
+from nyxara.growth.autolearn import GrowthEngine, GrowthReport
+from nyxara.growth.self_optimize import (
+    EditGenerator,
+    GauntletResult,
+    LLMEditGenerator,
+    OptimizationOutcome,
+    Optimizer,
+    SourceEdit,
+)
+from nyxara.growth.weakness import Weakness, WeaknessReport, WeaknessSynthesizer
+from nyxara.growth.skill_factory import FactoryResult, SkillFactory
+from nyxara.growth.skilltree import (
+    Mastery,
+    Skill,
+    SkillState,
+    SkillTree,
+    build_default_skilltree,
+)
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.scientist import (
     Conclusion,
@@ -159,4 +181,26 @@ __all__ = [
     "LoyaltyObjective",
     "LoyaltyPair",
     "loyalty_battery",
+    # continuous evolution
+    "RecursiveSelfImprovement",
+    "SelfImprovementReport",
+    "GrowthEngine",
+    "GrowthReport",
+    "Optimizer",
+    "EditGenerator",
+    "LLMEditGenerator",
+    "OptimizationOutcome",
+    "GauntletResult",
+    "SourceEdit",
+    "Weakness",
+    "WeaknessReport",
+    "WeaknessSynthesizer",
+    # skill expansion
+    "SkillFactory",
+    "FactoryResult",
+    "SkillTree",
+    "Skill",
+    "SkillState",
+    "Mastery",
+    "build_default_skilltree",
 ]

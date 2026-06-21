@@ -123,7 +123,9 @@ def test_inner_life_falls_back_to_stream_then_repertoire():
             self.calls += 1
             return [_Thought()] if self.calls == 1 else []   # one thought, then quiet
 
-    loop = _loop(inner_life=True, stream=_Stream())
+    # disable the (higher-priority) proactive source so the stream→repertoire fallback
+    # can be exercised in isolation
+    loop = _loop(inner_life=True, stream=_Stream(), proactive_allowed=False)
     loop.run_for(2)
     assert loop.prompt_sources == ["stream", "repertoire"]   # stream first, then the steady list
 

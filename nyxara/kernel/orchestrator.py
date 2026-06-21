@@ -327,6 +327,15 @@ class NyxaraCore:
         self._graph_populator: Any = None  # initialised lazily with the graph
         # Level 7 — Skill Factory: detect recurring goals and auto-create composite skills.
         self.skill_factory = self._build_skill_factory() if enable_skills else None
+        # Skill Expansion — a prerequisite DAG of skills with proficiency that the live loop
+        # *practises* as goals succeed, so growth in skill is a measurable, decaying signal
+        # (not a one-off claim). Consulted by the proactive engine to pick what to learn next.
+        self.skilltree = self._build_skill_tree() if enable_skills else None
+        # Independent Action (Agency) — a ProactiveEngine that detects opportunities, threats
+        # and her own weaknesses and disciplines each through the loyalty-first gauntlet
+        # (alignment → confidence → permission → reversibility → sandbox). It proposes; the
+        # AutonomicLoop's background mind drives it; every proposal still passes every gate.
+        self.proactive = self._build_proactive() if enable_goals else None
         # Level 8 — Cycle Reflector: daily/weekly/monthly structured reflection cycles.
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
@@ -960,6 +969,98 @@ class NyxaraCore:
                                 sandbox=sandbox, threshold=3)
         except Exception:  # noqa: BLE001 — skill factory is a capability, never required
             return None
+
+    def _build_skill_tree(self) -> Any:
+        """Skill Expansion — the default NYXARA prerequisite DAG, practised by the live loop."""
+        try:
+            from nyxara.growth.skilltree import build_default_skilltree
+            return build_default_skilltree()
+        except Exception:  # noqa: BLE001 — the skill tree is a capability, never required
+            return None
+
+    def _practice_skill(self, goal_text: str, *, quality: float = 1.0) -> None:
+        """Practise the tree skill for ``goal_text``, adding it if newly encountered.
+
+        New goal-types appear in the tree as unlocked experiential skills (Skill Expansion);
+        repeated success raises their proficiency. Locked/invalid practices are ignored."""
+        if not goal_text or self.skilltree is None:
+            return
+        from nyxara.growth.skill_factory import SkillFactory
+        name = SkillFactory._normalise_goal(goal_text)
+        if not name:
+            return
+        tree = self.skilltree
+        if tree.get(name) is None:
+            tree.add_skill(name, category="experiential", difficulty=0.4, value=0.5)
+        try:
+            if tree.is_unlocked(name):
+                tree.practice(name, quality=quality)
+        except Exception:  # noqa: BLE001 — a locked/invalid skill simply isn't practised
+            pass
+
+    def _build_proactive(self) -> Any:
+        """Independent Action — a governed ProactiveEngine wired to NYXARA's live state.
+
+        Detectors read faculties already on the core (goals, skill tree, her own code) and
+        emit concrete :class:`Initiative` s. Every initiative still runs the engine's
+        loyalty-first gauntlet, so initiative buys no extra power — risky or irreversible
+        proposals escalate to the Master rather than auto-execute.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            if not get_settings().features.proactive_agency:
+                return None
+            from nyxara.agency.proactive import (Initiative, ProactiveEngine,
+                                                 TriggerKind)
+            from nyxara.agency.permissions import Capability, RiskTier
+
+            engine = ProactiveEngine(goals=self.goals)
+            skilltree = self.skilltree
+
+            # 1) standing-goal detector — keep making progress on the top owner-aligned goal
+            def goal_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                goals = ctx.get("goals")
+                top = goals.top_goal() if goals is not None else None
+                if top is None:
+                    return []
+                return [Initiative(
+                    name=f"progress:{top.name[:48]}",
+                    rationale=f"advance the standing goal {top.name!r}",
+                    kind=TriggerKind.MAINTENANCE, capability=Capability.TOOL_CALL,
+                    risk=RiskTier.LOW, reversibility=1.0,
+                    confidence=max(0.7, float(getattr(top, "priority", 0.7))),
+                    benefit=dict(getattr(top, "vector", {})) or {"owner_benefit": 1.0})]
+
+            # 2) skill-gap detector — practise the highest-leverage learnable skill (curiosity)
+            def skill_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                tree = ctx.get("skilltree")
+                if tree is None:
+                    return []
+                try:
+                    learnable = tree.learnable_now()
+                except Exception:  # noqa: BLE001
+                    return []
+                if not learnable:
+                    return []
+                name = learnable[0]
+                return [Initiative(
+                    name=f"practise:{name}", rationale=f"strengthen the skill {name!r}",
+                    kind=TriggerKind.CURIOSITY, capability=Capability.TOOL_CALL,
+                    risk=RiskTier.LOW, reversibility=1.0, confidence=0.75,
+                    benefit={"competence": 1.0, "owner_benefit": 0.3})]
+
+            engine.register_detector(goal_detector)
+            engine.register_detector(skill_detector)
+            # remember what live state to feed the detectors when the loop consults the engine
+            self._proactive_context = lambda: {"goals": self.goals, "skilltree": skilltree}
+            return engine
+        except Exception:  # noqa: BLE001 — proactive agency is a capability, never required
+            return None
+
+    def proactive_context(self) -> Dict[str, Any]:
+        """The live context fed to the proactive detectors (goals + skill tree)."""
+        fn = getattr(self, "_proactive_context", None)
+        return fn() if fn is not None else {"goals": self.goals, "skilltree": self.skilltree}
 
     def _build_capability_foundry(self) -> Any:
         """Level 15 — CapabilityFoundry: forge brand-new runnable tools from capability gaps."""
@@ -2252,6 +2353,13 @@ class NyxaraCore:
                     self._research_queue.append(goal_text[:60])
             except Exception:  # noqa: BLE001 — skill factory is best-effort, never fatal
                 pass
+        # Skill Expansion — record proficiency in the skill tree for each successful ACT, so
+        # repeated practice of a goal-type measurably raises mastery (and decays with disuse).
+        if (self.skilltree is not None and disp is Disposition.ACT and success):
+            try:
+                self._practice_skill(candidate.tool or candidate.text or candidate.kind)
+            except Exception:  # noqa: BLE001 — skill practice is best-effort, never fatal
+                pass
         # Level 15 — Capability Foundry: NYXARA proposed a tool that does not exist yet.
         # That is a capability gap — autonomously design, write, test, benchmark and deploy
         # a brand-new tool so the capability exists next time. Clamped to safe-tier tools by
@@ -3037,6 +3145,16 @@ class NyxaraCore:
             rep["graph_triples"] = len(self.knowledge_graph)
         if self.skill_factory is not None:
             rep["skills_created"] = len(self.skill_factory._created_goals)
+        if self.skilltree is not None:
+            try:
+                rep["skilltree"] = self.skilltree.report()
+            except Exception:  # noqa: BLE001 — skill-tree stats are best-effort
+                pass
+        if self.proactive is not None:
+            try:
+                rep["proactive"] = self.proactive.report()
+            except Exception:  # noqa: BLE001 — proactive stats are best-effort
+                pass
         if self.capability_foundry is not None:
             rep["capabilities_forged"] = len(self.capability_foundry.forged)
         if self.cycle_reflector is not None:
