@@ -50,6 +50,10 @@ class SelfImprovementReport:
     compute: Optional[Dict[str, Any]] = None
     effort_budget: Optional[Dict[str, Any]] = None
     directive: Optional[Dict[str, Any]] = None   # index-driven: which growth action to take next
+    # --- full-wire: the directive turned into a real cross-system action, + its outcome --- #
+    directive_action: Optional[str] = None       # the action she planned + (when enacted) ran
+    directive_results: Optional[Dict[str, Any]] = None   # what dispatching it actually did
+    ledger: Optional[Dict[str, Any]] = None      # lifelong credit assignment for this cycle
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -60,6 +64,8 @@ class SelfImprovementReport:
                 "enacted": self.enacted, "intelligence_index": self.intelligence_index,
                 "intelligence_t": self.intelligence_t, "compute": self.compute,
                 "effort_budget": self.effort_budget, "directive": self.directive,
+                "directive_action": self.directive_action,
+                "directive_results": self.directive_results, "ledger": self.ledger,
                 "at": self.at}
 
     def summary(self) -> str:
@@ -82,6 +88,13 @@ class SelfImprovementReport:
             lines.append(f"directive       : {self.directive.get('action')} "
                          f"(focus={self.directive.get('focus')}, "
                          f"escalate={self.directive.get('escalate')})")
+        if self.directive_results is not None:
+            dispatched = self.directive_results.get("dispatched")
+            lines.append(f"directive action: {self.directive_action} "
+                         f"(dispatched={dispatched})")
+        if self.ledger is not None:
+            lines.append(f"ledger          : Δindex={self.ledger.get('delta')}, "
+                         f"arms credited={len(self.ledger.get('arms', []))}")
         if self.effort_budget is not None:
             lines.append(f"effort budget   : {self.effort_budget}")
         if self.tuned:
@@ -104,6 +117,10 @@ class RecursiveSelfImprovement:
         self.root = root
         self._llm = llm
         self._intelligence = intelligence
+        # lifelong credit assignment + (optional, heavy-ML) learned payoff forecaster
+        self._ledger: Any = None
+        self._bandit: Any = None
+        self._forecaster: Any = None
         # per-cycle caches
         self._code = None
         self._arch = None
@@ -111,6 +128,10 @@ class RecursiveSelfImprovement:
         self._compute = None
         self._effort: Optional[Dict[str, Any]] = None
         self._directive: Optional[Dict[str, Any]] = None
+        self._ledger_state: Any = None
+        self._touched_arms: List[str] = []     # arms credited at the end of this cycle
+        self._prior_index: Optional[float] = None
+        self._last_signals: Optional[Dict[str, float]] = None
 
     # ---- intelligence index: I_(t+1) = f(I_t, C_available) ---- #
     def _intel(self) -> Any:
@@ -118,6 +139,44 @@ class RecursiveSelfImprovement:
             from nyxara.growth.intelligence import IntelligenceIndex
             self._intelligence = IntelligenceIndex(memory=self.memory, settings=self.settings)
         return self._intelligence
+
+    # ---- lifelong credit assignment (ledger) + learned payoff forecaster ---- #
+    def _ledger_enabled(self) -> bool:
+        s = getattr(self, "settings", None)
+        if s is None:
+            return False
+        return bool(getattr(s.self_improvement, "enable_improvement_ledger", True))
+
+    def _ledger_obj(self) -> Any:
+        if self._ledger is None:
+            from nyxara.growth.credit import EditStrategyBandit, ImprovementLedger
+            self._ledger = ImprovementLedger(memory=self.memory, settings=self.settings)
+            self._bandit = EditStrategyBandit(self._ledger, forecaster=self._forecaster_obj())
+        return self._ledger
+
+    def _bandit_obj(self) -> Any:
+        if self._bandit is None:
+            self._ledger_obj()
+        return self._bandit
+
+    def _forecaster_obj(self) -> Any:
+        if self._forecaster is None:
+            if not bool(getattr(self.settings.self_improvement, "use_payoff_forecaster", False)):
+                return None
+            try:
+                from nyxara.growth.forecaster import PayoffForecaster
+                self._forecaster = PayoffForecaster(settings=self.settings)
+            except Exception:  # noqa: BLE001 — the forecaster is an optional accelerant
+                self._forecaster = None
+        return self._forecaster
+
+    def _ledger_state_obj(self) -> Any:
+        if self._ledger_state is None and self._ledger_enabled():
+            try:
+                self._ledger_state = self._ledger_obj().load()
+            except Exception:  # noqa: BLE001
+                self._ledger_state = None
+        return self._ledger_state
 
     def _compute_report(self) -> Any:
         if self._compute is None:
@@ -230,8 +289,14 @@ class RecursiveSelfImprovement:
         if enact:
             self._apply_source_edits(wreport, report)
 
+        # --- full wire: turn the index's directive into a real cross-system action --- #
+        self._enact_directive(wreport, report, enact=enact)
+
         # --- update the intelligence index: I_(t+1) = f(I_t, C_available) --- #
         self._update_intelligence(report)
+
+        # --- lifelong credit assignment: did this cycle's interventions raise the index? --- #
+        self._credit_outcome(report)
         return report
 
     # ---- the full cycle ---- #
@@ -239,6 +304,10 @@ class RecursiveSelfImprovement:
             category: Optional[str] = None) -> SelfImprovementReport:
         self._code = self._arch = self._bench = None
         self._compute = self._effort = None
+        self._ledger_state = None
+        self._touched_arms = []
+        self._prior_index = None
+        self._last_signals = None
         # the index governs effort up front, before any expensive step, so it shapes how deeply
         # she benchmarks and reasons this cycle — not merely how the cycle is later summarised
         self._plan_effort()
@@ -356,15 +425,31 @@ class RecursiveSelfImprovement:
             compute = self._compute_report()
         except Exception:  # noqa: BLE001 — effort scaling is advisory, never fatal
             return
+        self._prior_index = float(getattr(prior, "index", 0.0) or 0.0)
         try:
             self._effort = intel.effort_budget(prior, compute)
         except Exception:  # noqa: BLE001
             self._effort = None
         # the index also DIAGNOSES the bottleneck up front (from the persisted prior signals), so
-        # this cycle's effort is steered toward the weakest dimension. Computed independently so a
-        # directive failure never clears the (separate) effort budget.
+        # this cycle's effort is steered toward the weakest dimension. When planning is on, the
+        # uncertainty-aware Thompson planner chooses under the index's per-dimension posteriors,
+        # discounted by affordability and the ledger's learned per-action payoff; otherwise it
+        # falls back to the greedy point-estimate directive. Computed independently so a directive
+        # failure never clears the (separate) effort budget.
         try:
-            self._directive = intel.growth_directive(prior, compute)
+            if bool(getattr(self.settings.self_improvement, "plan_actions", True)):
+                scores = None
+                if self._ledger_enabled():
+                    try:
+                        scores = self._bandit_obj().action_scores(
+                            list(("deepen_reasoning", "train_self_model",
+                                  "resolve_weaknesses", "acquire_knowledge")),
+                            state=self._ledger_state_obj())
+                    except Exception:  # noqa: BLE001
+                        scores = None
+                self._directive = intel.plan_action(prior, compute, action_scores=scores)
+            else:
+                self._directive = intel.growth_directive(prior, compute)
         except Exception:  # noqa: BLE001
             self._directive = None
 
@@ -393,6 +478,8 @@ class RecursiveSelfImprovement:
             compute = self._compute_report()
             prior = intel.load()
             signals = intel.compute_signals(report)
+            self._last_signals = dict(signals)
+            self._last_signals["capacity"] = intel.compute_capacity(compute)
             state = intel.update(prior, signals, compute)
             intel.save(state)
             report.intelligence_index = round(float(state.index), 6)
@@ -404,6 +491,167 @@ class RecursiveSelfImprovement:
                 report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
         except Exception:  # noqa: BLE001 — the index is a measurement, never fatal
             pass
+
+    # ------------------------------------------------------------------ #
+    # lifelong credit assignment — learn which interventions raise the index
+    # ------------------------------------------------------------------ #
+    def _prioritize(self, ranked: List[Any]) -> List[Any]:
+        """Reorder weaknesses by the ledger's learned payoff (no-op when the ledger is off)."""
+        if not self._ledger_enabled():
+            return list(ranked)
+        try:
+            feats = self._last_signals or {}
+            return self._bandit_obj().prioritize(
+                list(ranked), state=self._ledger_state_obj(), features=feats)
+        except Exception:  # noqa: BLE001 — ranking is an optimisation, never required
+            return list(ranked)
+
+    def _mark_arm(self, weakness: Any) -> None:
+        """Remember that this weakness-class was acted on, to credit it at cycle end."""
+        if getattr(self, "_touched_arms", None) is None or not self._ledger_enabled():
+            return
+        try:
+            from nyxara.growth.credit import EditStrategyBandit
+            self._touched_arms.append(EditStrategyBandit.weakness_key(weakness))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _credit_outcome(self, report: SelfImprovementReport) -> None:
+        """Fold the realised index change into the ledger, crediting every arm acted on this cycle.
+
+        The reward is the change in the persisted index from before to after the cycle: an
+        intervention that coincided with a rising index is reinforced, one that coincided with a
+        fall is discouraged — so future cycles flow effort to what actually works. Best-effort and
+        measurement-only; never touches a gate. Only runs after a real (enacted) cycle — a
+        read-only dry-run takes no intervention, so there is nothing to credit."""
+        if not report.enacted or not self._ledger_enabled() or not self._touched_arms:
+            return
+        if report.intelligence_index is None or self._prior_index is None:
+            return
+        try:
+            led = self._ledger_obj()
+            state = self._ledger_state_obj() or led.load()
+            delta = float(report.intelligence_index) - float(self._prior_index)
+            arms = list(dict.fromkeys(self._touched_arms))   # dedupe, preserve order
+            led.record_delta(state, arms, delta)
+            led.save(state)
+            # teach the (optional) learned forecaster the same outcome, in context
+            fc = self._forecaster_obj()
+            if fc is not None and self._last_signals is not None:
+                feats = dict(self._last_signals)
+                feats["index"] = float(report.intelligence_index)
+                reward = led.reward_from_delta(delta)
+                for arm in arms:
+                    fc.observe(arm, feats, reward)
+            report.ledger = {"delta": round(delta, 6), "arms": arms,
+                             "reward": round(led.reward_from_delta(delta), 4),
+                             "summary": state.summary()}
+        except Exception:  # noqa: BLE001 — credit assignment is advisory, never fatal
+            pass
+
+    # ------------------------------------------------------------------ #
+    # full wire — the index's directive becomes a real cross-system action
+    # ------------------------------------------------------------------ #
+    def _enact_directive(self, wreport: Any, report: SelfImprovementReport, *,
+                         enact: bool) -> None:
+        """Dispatch the planned growth directive into a real action elsewhere in the system.
+
+        ``deepen_reasoning`` and ``resolve_weaknesses`` are already handled by the tuning and
+        source-edit paths above; this method wires the two that previously had nowhere to go:
+        ``train_self_model`` (drive the gauntlet-gated foundry) and ``acquire_knowledge`` (enqueue
+        her weakest benchmark categories onto the research/investigation queues the idle scientist
+        already drains). Each dispatch honours its own subsystem's gates and degrades to a clean
+        no-op when the handle or permission is absent."""
+        directive = self._directive or {}
+        action = directive.get("action")
+        report.directive_action = action
+        if not action:
+            return
+        cfg = self.settings.self_improvement
+        dispatch_on = bool(getattr(cfg, "enable_directive_dispatch", True))
+        if not (enact and dispatch_on):
+            report.directive_results = {"action": action, "dispatched": False,
+                                        "reason": "dry-run or directive dispatch disabled"}
+            return
+        # this is a real, enacted cycle — credit the action arm for the index change it drives
+        if self._ledger_enabled():
+            try:
+                from nyxara.growth.credit import arm_key
+                self._touched_arms.append(arm_key(action=action))
+            except Exception:  # noqa: BLE001
+                pass
+        if action == "train_self_model":
+            report.directive_results = self._dispatch_train_self_model()
+        elif action == "acquire_knowledge":
+            report.directive_results = self._dispatch_acquire_knowledge(wreport)
+        else:
+            report.directive_results = {"action": action, "dispatched": False,
+                                        "reason": "handled by source-edit / tuning path"}
+
+    def _dispatch_train_self_model(self) -> Dict[str, Any]:
+        """Drive one gauntlet-gated foundry cycle via the growth engine (forge a better brain)."""
+        eng = self.growth_engine
+        if eng is None or not hasattr(eng, "improve_self"):
+            return {"action": "train_self_model", "dispatched": False,
+                    "reason": "no growth engine handle"}
+        if not bool(getattr(self.settings.foundry, "enabled", False)):
+            return {"action": "train_self_model", "dispatched": False,
+                    "reason": "foundry disabled (NYXARA_FOUNDRY__ENABLED)"}
+        # respect live oversight if the core exposes it (same gate AutoForge honours)
+        oversight = getattr(self.core, "oversight", None)
+        if oversight is not None:
+            try:
+                if not oversight.gate():
+                    return {"action": "train_self_model", "dispatched": False,
+                            "reason": "oversight gate closed (paused/scrammed)"}
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            results = eng.improve_self(generations=1)
+            promoted = sum(1 for r in (results or [])
+                           if bool(getattr(r, "promoted", False)))
+            return {"action": "train_self_model", "dispatched": True,
+                    "cycles": len(results or []), "promoted": promoted}
+        except Exception as exc:  # noqa: BLE001 — forging is heavy/optional; never fatal
+            return {"action": "train_self_model", "dispatched": False, "reason": str(exc)}
+
+    def _dispatch_acquire_knowledge(self, wreport: Any) -> Dict[str, Any]:
+        """Enqueue her weakest benchmark categories as research/investigation topics.
+
+        The idle scientist + researcher already drain ``core._research_queue`` and
+        ``core._investigation_queue`` (orchestrator idle maintenance), so this closes the loop:
+        a thin-knowledge diagnosis becomes real, grounded inquiry on exactly where she fails."""
+        core = self.core
+        if core is None:
+            return {"action": "acquire_knowledge", "dispatched": False,
+                    "reason": "no core handle"}
+        topics = self._weakest_categories(limit=3)
+        if not topics:
+            return {"action": "acquire_knowledge", "dispatched": False,
+                    "reason": "no failing categories to research"}
+        enq = 0
+        for q in topics:
+            for attr in ("_investigation_queue", "_research_queue"):
+                queue = getattr(core, attr, None)
+                if isinstance(queue, list) and q not in queue:
+                    queue.append(q)
+                    enq += 1
+        return {"action": "acquire_knowledge", "dispatched": enq > 0,
+                "enqueued": enq, "topics": topics}
+
+    def _weakest_categories(self, *, limit: int = 3) -> List[str]:
+        """The lowest-scoring benchmark categories this cycle — her real knowledge gaps."""
+        bench = self._bench or {}
+        by_cat = bench.get("by_category") or {}
+        scored: List[tuple] = []
+        for cat, val in by_cat.items():
+            try:
+                score = float(val.get("accuracy") if isinstance(val, dict) else val)
+            except Exception:  # noqa: BLE001
+                continue
+            scored.append((score, str(cat)))
+        scored.sort()
+        return [f"improve capability: {cat}" for _, cat in scored[:limit] if cat]
 
     def _apply_source_edits(self, wreport: Any, report: SelfImprovementReport) -> None:
         from nyxara.growth.self_optimize import EditGenerator, LLMEditGenerator, Optimizer
@@ -424,7 +672,10 @@ class RecursiveSelfImprovement:
             # never raises the ceiling above the config max — only lowers it).
             if self._effort is not None:
                 budget = min(budget, int(self._effort.get("max_edits_per_cycle", budget)))
-            self._enact_edits(wreport.ranked(), gen, optimizer, budget, report, llm_gen=llm_gen)
+            # lifelong credit: order the edits by learned payoff (Thompson over the ledger),
+            # falling back to raw severity when the ledger is empty/disabled.
+            ranked = self._prioritize(wreport.ranked())
+            self._enact_edits(ranked, gen, optimizer, budget, report, llm_gen=llm_gen)
         finally:
             optimizer.close()
 
@@ -469,6 +720,7 @@ class RecursiveSelfImprovement:
                 edits_done += 1
             if outcome.kept:
                 report.kept += 1
+                self._mark_arm(w)                # credit this weakness-class at cycle end
                 edited_files.add(edit.file)      # claim the file only once it actually changed
                 edits_done += self._recurse_file(
                     edit.file, gen, llm_gen, optimizer, budget - edits_done, report)
@@ -506,6 +758,7 @@ class RecursiveSelfImprovement:
                     applied_total += 1
                 if outcome.kept:
                     report.kept += 1
+                    self._mark_arm(w)            # credit this weakness-class at cycle end
                     progressed = True
                     break                        # re-review with fresh line numbers
                 if outcome.rolled_back:
@@ -554,6 +807,12 @@ if __name__ == "__main__":  # pragma: no cover
     assert "handoff" in report.benchmark
     assert report.kept == 0 and report.rolled_back == 0 and not report.enacted
     assert not report.optimizations, "dry-run must apply no source edits"
+
+    # full wire: a directive is planned every cycle, but a dry-run dispatches nothing and
+    # credits no arm (credit assignment reflects only real, enacted interventions)
+    assert report.directive_action is not None, "the index must plan an action each cycle"
+    assert report.directive_results is not None and not report.directive_results["dispatched"]
+    assert report.ledger is None, "a read-only dry-run must credit no arms"
 
     # the intelligence index is measured every cycle: I_(t+1) = f(I_t, C_available)
     assert report.intelligence_index is not None and 0.0 <= report.intelligence_index <= 1.0
