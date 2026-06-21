@@ -336,7 +336,7 @@ def test_feature_vector_is_fixed_length_and_flops_positive():
     assert a.estimated_flops() > 0
 
 
-@pytest.mark.parametrize("strategy", ["elitism", "tournament", "regularized"])
+@pytest.mark.parametrize("strategy", ["elitism", "tournament", "regularized", "nsga2"])
 def test_every_search_strategy_crowns_a_monotonic_champion(strategy):
     nas = NeuralArchitectureSearch(
         cfg=_cfg(generations=4, search_strategy=strategy, adaptive_mutation=True,
@@ -388,3 +388,175 @@ def test_cli_runs_json_with_sample(tmp_path, capsys):
     payload = _json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert payload["ok"] and payload["search_strategy"] == "tournament"
     assert "sample" in payload and isinstance(payload["sample"]["text"], str)
+
+
+# --------------------------------------------------------------------------- #
+# 2100-tier upgrade: frontier ops, NSGA-II, UCB surrogate, lifelong memory, ensemble
+# --------------------------------------------------------------------------- #
+from nyxara.growth.genesis import (  # noqa: E402
+    EnsembleModel, HallOfFame, inherit_compatible_weights,
+    _crowding_distance, _fast_nondominated_sort, _nsga2_rank,
+)
+
+
+def test_frontier_ops_are_in_the_palette():
+    from nyxara.growth.genesis import _OPS
+    for op in ("selective_ssm", "gla_attention", "diff_attention", "mla_attention"):
+        assert op in _OPS
+
+
+def test_new_genome_knobs_roundtrip_and_stay_buildable():
+    rng = random.Random(21)
+    for _ in range(100):
+        g = ArchitectureGenome.random(rng).mutate(rng)
+        assert ArchitectureGenome.from_dict(g.to_dict()).to_dict() == g.to_dict()
+        assert 1 <= g.n_predict <= 4
+        for ly in g.layers:
+            assert ly.norm_type in ("layernorm", "rmsnorm")
+            assert isinstance(ly.qk_norm, bool)
+            assert 1 <= ly.kv_latent <= g.n_embd
+
+
+def test_legacy_genome_without_new_knobs_loads_with_defaults():
+    legacy = {"n_embd": 64, "block_size": 16, "layers": [{"op": "attention", "n_head": 2}]}
+    g = ArchitectureGenome.from_dict(legacy)
+    assert g.n_predict == 1                               # classic next-token default
+    assert g.layers[0].norm_type == "layernorm" and g.layers[0].qk_norm is False
+    assert g.estimated_flops() > 0
+
+
+def test_feature_vector_stays_fixed_length_with_new_ops():
+    rng = random.Random(5)
+    a = ArchitectureGenome.random(rng)
+    b = ArchitectureGenome.random(rng, max_layers=3)
+    assert len(a.feature_vector()) == len(b.feature_vector())
+
+
+def test_nsga2_nondominated_sort_partitions_into_fronts():
+    rng = random.Random(0)
+    smart = _cand(rng, quality=0.9, params=1000, seconds=1.0)
+    fast = _cand(rng, quality=0.5, params=10, seconds=0.1)
+    dominated = _cand(rng, quality=0.4, params=2000, seconds=2.0)
+    fronts = _fast_nondominated_sort([smart, fast, dominated])
+    assert dominated not in fronts[0]                     # it is beaten on every objective
+    assert smart in fronts[0] and fast in fronts[0]
+    cd = _crowding_distance(fronts[0])
+    assert all(v == float("inf") for v in cd.values())   # boundary points on a 2-point front
+    assert len(_nsga2_rank([smart, fast, dominated])) == 3
+
+
+def test_nsga2_strategy_crowns_a_monotonic_champion():
+    nas = NeuralArchitectureSearch(cfg=_cfg(generations=4, population_size=8,
+                                            search_strategy="nsga2"), seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.search_strategy == "nsga2" and report.champion is not None
+    assert all(report.history[i] <= report.history[i + 1] + 1e-9
+               for i in range(len(report.history) - 1))
+
+
+def test_ucb_surrogate_runs_and_orders_search():
+    nas = NeuralArchitectureSearch(
+        cfg=_cfg(generations=3, population_size=9, surrogate=True, surrogate_min_train=3,
+                 ucb_beta=0.7),
+        seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.champion is not None and report.evaluations >= 1
+
+
+def test_hall_of_fame_persists_and_warm_starts(tmp_path):
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.paths.data_dir = tmp_path
+    settings.genesis = _cfg(generations=2, population_size=6, hall_of_fame=True,
+                            warm_start_fraction=0.5)
+    nas = NeuralArchitectureSearch(settings=settings, cfg=settings.genesis, seed_corpus=_CORPUS)
+    nas.search()
+    hof_file = tmp_path / "genesis" / "hall_of_fame.json"
+    assert hof_file.exists()                              # champion recorded to disk
+    first = len(nas.hall_of_fame)
+    assert first >= 1
+    # a second search loads the same memory and warm-starts from it
+    nas2 = NeuralArchitectureSearch(settings=settings, cfg=settings.genesis, seed_corpus=_CORPUS)
+    assert len(nas2.hall_of_fame) == first               # memory survived the process boundary
+    nas2.search()
+    assert len(nas2.hall_of_fame) >= first               # never forgets a good brain
+
+
+def test_hall_of_fame_seed_genomes_are_buildable():
+    hof = HallOfFame(path=None, capacity=4)
+    g = ArchitectureGenome.random(random.Random(3))
+    rep = type("R", (), {"champion": g, "champion_fitness": 0.5, "champion_perplexity": 2.0,
+                         "backend": "stdlib", "pareto_front": []})()
+    hof.record(rep)
+    seeds = hof.seed_genomes(2, random.Random(1), block_size=16)
+    assert seeds and all(s.block_size == 16 for s in seeds)
+    assert hof.best() is not None
+
+
+def test_champion_ensemble_builds_and_scores():
+    nas = NeuralArchitectureSearch(cfg=_cfg(generations=2, population_size=6), seed_corpus=_CORPUS)
+    nas.search()
+    ens = nas.champion_ensemble(k=3)
+    assert isinstance(ens, EnsembleModel) and len(ens.members) >= 1
+    assert ens.perplexity(_CORPUS[0]) >= 0.0
+    assert isinstance(ens.generate("the master", max_tokens=8), str)
+    assert ens.param_count() > 0
+
+
+def test_ensemble_perplexity_is_best_member():
+    nas = NeuralArchitectureSearch(cfg=_cfg(generations=2, population_size=6), seed_corpus=_CORPUS)
+    nas.search()
+    ens = nas.champion_ensemble(k=3)
+    text = _CORPUS[0]
+    best_member = min(m.perplexity(text) for m in ens.members)
+    assert ens.perplexity(text) == pytest.approx(best_member)   # routes to its strongest brain
+
+
+def test_inherit_weights_is_noop_without_torch():
+    # without torch the network-morphism transfer is a safe no-op (returns 0 copied tensors)
+    if not _HAS_TORCH:
+        assert inherit_compatible_weights(object(), {"x": 1}) == 0
+
+
+def test_cli_nsga2_ensemble_and_hall_of_fame(tmp_path, capsys):
+    import json as _json
+    from nyxara.growth.genesis_main import main
+    rc = main(["--backend", "stdlib", "--generations", "2", "--population", "6",
+               "--strategy", "nsga2", "--surrogate", "--ucb-beta", "0.5",
+               "--ensemble", "3", "--sample", "the master", "--json",
+               "--data-dir", str(tmp_path)])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["ok"] and payload["search_strategy"] == "nsga2"
+    assert payload["hall_of_fame"] >= 1
+    assert payload["ensemble"]["members"] >= 1
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_torch_frontier_ops_train_from_scratch():
+    from nyxara.growth.genesis import LayerGene, _OPS
+    g = ArchitectureGenome(n_embd=32, block_size=16, pos_encoding="rope", n_predict=2,
+                           layers=[LayerGene(op=op, n_head=4, norm_type="rmsnorm", qk_norm=True)
+                                   for op in _OPS])
+    model = GenesisModel(g)
+    assert model.param_count() > 0
+    model.train_on(_CORPUS, steps=10, seed=1)            # exercises MTP + every new op + RMSNorm
+    assert model.perplexity(_CORPUS[0]) > 0
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_torch_kv_cache_decode_matches_full_decode():
+    import torch
+    from nyxara.growth.genesis import LayerGene
+    # a fully-cacheable net (attention + recurrent + channel mixers), generation length ≤ block_size
+    g = ArchitectureGenome(n_embd=32, block_size=64, pos_encoding="rope",
+                           layers=[LayerGene(op="attention", n_head=4),
+                                   LayerGene(op="selective_ssm"),
+                                   LayerGene(op="swiglu")])
+    model = GenesisModel(g)
+    model.train_on(_CORPUS, steps=5, seed=1)
+    assert model.net.cacheable
+    torch.manual_seed(0)
+    full = model.generate("the master", max_tokens=20, greedy=True, use_cache=False)
+    cached = model.generate("the master", max_tokens=20, greedy=True, use_cache=True)
+    assert full == cached                                 # KV-cache is bit-identical (≤ block_size)

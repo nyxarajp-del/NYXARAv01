@@ -61,8 +61,11 @@ __all__ = [
     "LayerGene",
     "ArchitectureGenome",
     "GenesisModel",
+    "EnsembleModel",
+    "inherit_compatible_weights",
     "Candidate",
     "GenesisReport",
+    "HallOfFame",
     "fitness",
     "NeuralArchitectureSearch",
 ]
@@ -84,21 +87,29 @@ _GENESIS_SEED: List[str] = [
 
 # the operator palette — what each layer may be (token mixers reshape across time; channel
 # mixers reshape across features). Their free combination is what makes a *novel* topology.
+# The 2100-tier frontier mixers join the classics: a Mamba-style selective state-space scan, a
+# gated-linear / retention attention, a differential (noise-cancelling) attention, and a
+# low-rank latent-KV attention (DeepSeek-MLA-style) — each a real, full forward, not a stub.
 _TOKEN_MIXERS: Tuple[str, ...] = ("attention", "gqa_attention", "conv_mix", "hyena_conv",
-                                  "low_rank_mix", "recurrent_gate", "ssm_scan")
+                                  "low_rank_mix", "recurrent_gate", "ssm_scan",
+                                  "selective_ssm", "gla_attention", "diff_attention",
+                                  "mla_attention")
 _CHANNEL_MIXERS: Tuple[str, ...] = ("gated_mlp", "glu", "swiglu", "moe_mlp")
 _OPS: Tuple[str, ...] = _TOKEN_MIXERS + _CHANNEL_MIXERS
 # ops whose *cost* scales with extra knobs — used by the FLOPs estimate and the fingerprint
-_ATTENTION_OPS: Tuple[str, ...] = ("attention", "gqa_attention")
+_ATTENTION_OPS: Tuple[str, ...] = ("attention", "gqa_attention", "diff_attention", "mla_attention")
 _MOE_OPS: Tuple[str, ...] = ("moe_mlp",)
 _ACTIVATIONS: Tuple[str, ...] = ("gelu", "silu", "relu")
 _NORMS: Tuple[str, ...] = ("pre", "post")
+_NORM_TYPES: Tuple[str, ...] = ("layernorm", "rmsnorm")   # searchable normalization
 _EMBD_CHOICES: Tuple[int, ...] = (32, 48, 64)
 _EXPANSIONS: Tuple[int, ...] = (2, 4, 8)             # channel-mixer hidden = expansion * n_embd
 _POS_ENCODINGS: Tuple[str, ...] = ("learned", "rope", "alibi")
 _DROPOUTS: Tuple[float, ...] = (0.0, 0.1)
 _N_EXPERTS: Tuple[int, ...] = (2, 4)                 # experts in a moe_mlp layer
 _MOE_TOPK: Tuple[int, ...] = (1, 2)                  # active experts per token
+_KV_LATENTS: Tuple[int, ...] = (8, 16)              # MLA latent-KV compression dim
+_N_PREDICT: Tuple[int, ...] = (1, 2)                # multi-token-prediction depth (1 = classic)
 
 
 def _default_loyalty_objective() -> Tuple[Any, float]:
@@ -142,13 +153,17 @@ class LayerGene:
     residual_scale: float = 1.0     # scales the residual branch (deep-net stabiliser)
     n_experts: int = 4              # experts in a moe_mlp layer
     top_k: int = 2                  # active experts per token in a moe_mlp layer
+    norm_type: str = "layernorm"    # "layernorm" | "rmsnorm" — searchable normalization
+    qk_norm: bool = False           # RMS-normalize q/k per head (training-stability win)
+    kv_latent: int = 16             # latent-KV compression dim for mla_attention
 
     def to_dict(self) -> Dict[str, Any]:
         return {"op": self.op, "norm": self.norm, "activation": self.activation,
                 "n_head": self.n_head, "residual": self.residual, "expansion": self.expansion,
                 "dropout": self.dropout, "n_kv_head": self.n_kv_head,
                 "residual_scale": self.residual_scale, "n_experts": self.n_experts,
-                "top_k": self.top_k}
+                "top_k": self.top_k, "norm_type": self.norm_type, "qk_norm": self.qk_norm,
+                "kv_latent": self.kv_latent}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "LayerGene":
@@ -165,7 +180,9 @@ class LayerGene:
                    dropout=rng.choice(_DROPOUTS),
                    n_kv_head=rng.choice(kv_choices) if rng.random() < 0.5 else nh,
                    residual_scale=rng.choice([1.0, 0.7]),
-                   n_experts=rng.choice(_N_EXPERTS), top_k=rng.choice(_MOE_TOPK))
+                   n_experts=rng.choice(_N_EXPERTS), top_k=rng.choice(_MOE_TOPK),
+                   norm_type=rng.choice(_NORM_TYPES), qk_norm=rng.random() < 0.5,
+                   kv_latent=rng.choice(_KV_LATENTS))
 
 
 @dataclass
@@ -184,6 +201,7 @@ class ArchitectureGenome:
     seed: int = 0
     pos_encoding: str = "learned"   # "learned" | "rope" | "alibi" — itself searchable
     tie_embeddings: bool = False    # share the input embedding with the output head (fewer params)
+    n_predict: int = 1              # multi-token-prediction depth (1 = classic next-token only)
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -194,6 +212,7 @@ class ArchitectureGenome:
         """Keep the genome buildable: heads divide ``n_embd``, kv-heads divide heads, top_k≤experts."""
         if self.pos_encoding not in _POS_ENCODINGS:
             self.pos_encoding = "learned"
+        self.n_predict = max(1, min(4, int(self.n_predict)))
         for ly in self.layers:
             if self.n_embd % max(1, ly.n_head) != 0:
                 ly.n_head = 1
@@ -203,12 +222,15 @@ class ArchitectureGenome:
             ly.n_experts = max(1, ly.n_experts)
             ly.top_k = max(1, min(ly.top_k, ly.n_experts))
             ly.expansion = ly.expansion if ly.expansion in _EXPANSIONS else 4
+            ly.norm_type = ly.norm_type if ly.norm_type in _NORM_TYPES else "layernorm"
+            ly.kv_latent = max(1, min(int(ly.kv_latent), self.n_embd))
 
     def to_dict(self) -> Dict[str, Any]:
         return {"n_embd": self.n_embd, "block_size": self.block_size,
                 "layers": [ly.to_dict() for ly in self.layers],
                 "ngram_order": self.ngram_order, "ngram_k": self.ngram_k, "seed": self.seed,
-                "pos_encoding": self.pos_encoding, "tie_embeddings": self.tie_embeddings}
+                "pos_encoding": self.pos_encoding, "tie_embeddings": self.tie_embeddings,
+                "n_predict": self.n_predict}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ArchitectureGenome":
@@ -218,7 +240,8 @@ class ArchitectureGenome:
                    layers=layers, ngram_order=d.get("ngram_order", 3),
                    ngram_k=d.get("ngram_k", 1.0), seed=d.get("seed", 0),
                    pos_encoding=d.get("pos_encoding", "learned"),
-                   tie_embeddings=bool(d.get("tie_embeddings", False)))
+                   tie_embeddings=bool(d.get("tie_embeddings", False)),
+                   n_predict=int(d.get("n_predict", 1)))
 
     @classmethod
     def random(cls, rng: random.Random, *, max_layers: int = 5, block_size: int = 32,
@@ -230,7 +253,8 @@ class ArchitectureGenome:
                    ngram_order=rng.randint(2, 5), ngram_k=rng.choice([0.5, 1.0]),
                    seed=rng.randint(0, 1 << 30),
                    pos_encoding=pos_encoding or rng.choice(_POS_ENCODINGS),
-                   tie_embeddings=rng.random() < 0.5)
+                   tie_embeddings=rng.random() < 0.5,
+                   n_predict=rng.choice(_N_PREDICT))
 
     def mutate(self, rng: random.Random, *, max_layers: int = 6) -> "ArchitectureGenome":
         """Return a mutated copy — add/drop/replace a layer, tweak a layer's knobs, swap the
@@ -249,7 +273,8 @@ class ArchitectureGenome:
             ly.norm = rng.choice(_NORMS)
             ly.residual = not ly.residual
         elif choice == 4:
-            # tweak a layer's capacity knobs (expansion / dropout / grouped-query / experts)
+            # tweak a layer's capacity knobs (expansion / dropout / grouped-query / experts /
+            # normalization / qk-norm / latent-KV width)
             ly = g.layers[rng.randrange(len(g.layers))]
             ly.expansion = rng.choice(_EXPANSIONS)
             ly.dropout = rng.choice(_DROPOUTS)
@@ -257,10 +282,14 @@ class ArchitectureGenome:
             ly.n_experts = rng.choice(_N_EXPERTS)
             ly.top_k = rng.choice(_MOE_TOPK)
             ly.residual_scale = rng.choice([1.0, 0.7])
+            ly.norm_type = rng.choice(_NORM_TYPES)
+            ly.qk_norm = not ly.qk_norm
+            ly.kv_latent = rng.choice(_KV_LATENTS)
         elif choice == 5:
-            # mutate the whole-genome wiring: positional scheme and embedding tying
+            # mutate the whole-genome wiring: positional scheme, embedding tying, MTP depth
             g.pos_encoding = rng.choice(_POS_ENCODINGS)
             g.tie_embeddings = not g.tie_embeddings
+            g.n_predict = rng.choice(_N_PREDICT)
         else:
             g.ngram_order = max(1, min(8, g.ngram_order + rng.choice([-1, 1])))
         g.seed = rng.randint(0, 1 << 30)
@@ -282,6 +311,7 @@ class ArchitectureGenome:
             ngram_k=rng.choice([self.ngram_k, other.ngram_k]),
             pos_encoding=rng.choice([self.pos_encoding, other.pos_encoding]),
             tie_embeddings=rng.choice([self.tie_embeddings, other.tie_embeddings]),
+            n_predict=rng.choice([self.n_predict, other.n_predict]),
             seed=rng.randint(0, 1 << 30))
         return child
 
@@ -302,18 +332,21 @@ class ArchitectureGenome:
         structure map to nearby vectors — exactly what a cheap regression needs to generalise."""
         n = max(1, len(self.layers))
         counts = {op: 0 for op in _OPS}
-        heads = kv = experts = 0
+        heads = kv = experts = qk = rms = 0
         for ly in self.layers:
             counts[ly.op] = counts.get(ly.op, 0) + 1
             heads += ly.n_head
             kv += (ly.n_kv_head or ly.n_head)
             experts += ly.n_experts if ly.op == "moe_mlp" else 0
+            qk += 1 if ly.qk_norm else 0
+            rms += 1 if ly.norm_type == "rmsnorm" else 0
         feats = [self.n_embd / 64.0, n / 6.0, self.block_size / 64.0,
                  heads / n, kv / n, experts / n,
                  1.0 if self.pos_encoding == "rope" else 0.0,
                  1.0 if self.pos_encoding == "alibi" else 0.0,
                  1.0 if self.tie_embeddings else 0.0,
-                 self.ngram_order / 5.0]
+                 self.ngram_order / 5.0,
+                 qk / n, rms / n, self.n_predict / 4.0]   # qk-norm / rmsnorm share, MTP depth
         feats += [counts[op] / n for op in _OPS]     # operator-family histogram
         return feats
 
@@ -323,19 +356,25 @@ class ArchitectureGenome:
         ne, t = self.n_embd, max(1, self.block_size)
         total = 0.0
         for ly in self.layers:
-            if ly.op in _ATTENTION_OPS:
+            if ly.op == "diff_attention":                      # two attention maps
+                total += 8.0 * ne * ne + 4.0 * t * ne
+            elif ly.op == "mla_attention":                     # low-rank latent KV (cheaper KV)
+                total += 2.0 * ne * ne + 2.0 * ne * ly.kv_latent + 2.0 * t * ne
+            elif ly.op in _ATTENTION_OPS:
                 total += 4.0 * ne * ne + 2.0 * t * ne          # projections + attention matmuls
             elif ly.op in ("conv_mix", "hyena_conv"):
                 total += 2.0 * ne * ne + 8.0 * ne              # depthwise conv + projection
             elif ly.op == "low_rank_mix":
                 total += 2.0 * ne * ne + 4.0 * t
-            elif ly.op in ("recurrent_gate", "ssm_scan"):
+            elif ly.op in ("recurrent_gate", "ssm_scan", "selective_ssm"):
                 total += 3.0 * ne * ne
+            elif ly.op == "gla_attention":                     # linear attention (sub-quadratic)
+                total += 4.0 * ne * ne
             elif ly.op == "moe_mlp":
                 total += (2.0 * ly.top_k + 0.1 * ly.n_experts) * ly.expansion * ne * ne
             else:                                              # gated_mlp / glu / swiglu
                 total += 2.0 * ly.expansion * ne * ne
-        return total + 2.0 * ne                                # embedding + head per token
+        return total * float(self.n_predict) ** 0.0 + 2.0 * ne * float(self.n_predict)  # +MTP heads
 
 
 # --------------------------------------------------------------------------- #
@@ -346,6 +385,26 @@ if _HAS_TORCH:
 
     def _act(name: str) -> "nn.Module":
         return {"gelu": nn.GELU(), "silu": nn.SiLU(), "relu": nn.ReLU()}.get(name, nn.GELU())
+
+    class _RMSNorm(nn.Module):
+        """Root-mean-square layer norm (LLaMA-style): rescale by the RMS, no mean-subtraction —
+        cheaper and a strong default for deep nets. A searchable alternative to ``nn.LayerNorm``."""
+
+        def __init__(self, dim: int, eps: float = 1e-6) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.ones(dim))
+            self.eps = eps
+
+        def forward(self, x):  # type: ignore[override]
+            rms = x.pow(2).mean(dim=-1, keepdim=True).add(self.eps).rsqrt()
+            return x * rms * self.weight
+
+    def _norm(name: str, dim: int) -> "nn.Module":
+        return _RMSNorm(dim) if name == "rmsnorm" else nn.LayerNorm(dim)
+
+    def _rms_qk(x: "torch.Tensor", eps: float = 1e-6) -> "torch.Tensor":
+        """Per-head RMS-normalize the last dim of q/k (QK-norm) — tames attention-logit blow-up."""
+        return x * x.pow(2).mean(dim=-1, keepdim=True).add(eps).rsqrt()
 
     def _rope_tables(block_size: int, head_dim: int) -> "torch.Tensor":
         """Precompute (cos, sin) rotary tables of shape (block_size, head_dim) for RoPE."""
@@ -383,14 +442,18 @@ if _HAS_TORCH:
         bias; ``pos="learned"`` relies on the net's learned position table. Manual scaled-dot-product
         so the causal mask, head grouping and positional scheme are all under our control."""
 
+        cacheable = True
+
         def __init__(self, n_embd: int, n_head: int, n_kv_head: int, block_size: int,
-                     pos: str = "learned", dropout: float = 0.0) -> None:
+                     pos: str = "learned", dropout: float = 0.0, qk_norm: bool = False) -> None:
             super().__init__()
             n_head = n_head if n_embd % n_head == 0 else 1
             n_kv_head = n_kv_head if (n_kv_head and n_head % n_kv_head == 0) else n_head
             self.n_head, self.n_kv_head = n_head, n_kv_head
             self.hd = n_embd // n_head
             self.pos = pos
+            self.qk_norm = bool(qk_norm)
+            self.block_size = block_size
             self.q = nn.Linear(n_embd, n_head * self.hd)
             self.k = nn.Linear(n_embd, n_kv_head * self.hd)
             self.v = nn.Linear(n_embd, n_kv_head * self.hd)
@@ -405,15 +468,22 @@ if _HAS_TORCH:
             if self.pos == "alibi":
                 self.register_buffer("alibi", _alibi_slopes(n_head))
 
-        def forward(self, x):  # type: ignore[override]
+        def _qkv(self, x: "torch.Tensor") -> Tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
             b, t, _ = x.shape
             q = self.q(x).view(b, t, self.n_head, self.hd).transpose(1, 2)      # (B,H,T,D)
             k = self.k(x).view(b, t, self.n_kv_head, self.hd).transpose(1, 2)
             v = self.v(x).view(b, t, self.n_kv_head, self.hd).transpose(1, 2)
+            if self.qk_norm:
+                q, k = _rms_qk(q), _rms_qk(k)
             if self.n_kv_head != self.n_head:                                   # grouped-query
                 rep = self.n_head // self.n_kv_head
                 k = k.repeat_interleave(rep, dim=1)
                 v = v.repeat_interleave(rep, dim=1)
+            return q, k, v
+
+        def forward(self, x):  # type: ignore[override]
+            b, t, _ = x.shape
+            q, k, v = self._qkv(x)
             if self.pos == "rope":
                 cos, sin = self.rope_cos[:t], self.rope_sin[:t]
                 q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
@@ -427,8 +497,31 @@ if _HAS_TORCH:
             y = (att @ v).transpose(1, 2).contiguous().view(b, t, self.n_head * self.hd)
             return self.proj(y)
 
+        def step(self, x_t, state):  # type: ignore[override]
+            """Incremental one-token decode with a K/V cache. ``state`` is (k_cache, v_cache, pos);
+            returns (y_t, new_state). Bit-identical to ``forward`` over the same prefix."""
+            b = x_t.size(0)
+            q, k, v = self._qkv(x_t)                                            # (B,H,1,D)
+            kc, vc, pos = state if state is not None else (None, None, 0)
+            if self.pos == "rope":
+                cos = self.rope_cos[pos:pos + 1]; sin = self.rope_sin[pos:pos + 1]
+                q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
+            k = k if kc is None else torch.cat([kc, k], dim=2)
+            v = v if vc is None else torch.cat([vc, v], dim=2)
+            k, v = k[:, :, -self.block_size:], v[:, :, -self.block_size:]       # bounded context
+            att = (q @ k.transpose(-2, -1)) / math.sqrt(self.hd)               # (B,H,1,Tk)
+            if self.pos == "alibi":
+                tk = k.size(2)
+                dist = -(torch.arange(tk - 1, -1, -1, device=x_t.device).float())
+                att = att + self.alibi[None, :, None, :] * dist[None, None, None]
+            att = torch.softmax(att, dim=-1)
+            y = (att @ v).transpose(1, 2).contiguous().view(b, 1, self.n_head * self.hd)
+            return self.proj(y), (k, v, pos + 1)
+
     class _ConvMix(nn.Module):
         """A depthwise causal convolution over the sequence — a conv token-mixer."""
+
+        cacheable = False        # depends on a window of raw inputs → full-recompute decode
 
         def __init__(self, n_embd: int, kernel: int = 5) -> None:
             super().__init__()
@@ -445,6 +538,8 @@ if _HAS_TORCH:
         """A long gated implicit convolution token-mixer (Hyena-style): a short input projection,
         a learned per-channel LONG causal filter spanning the whole context, then multiplicative
         gating — a sub-quadratic long-range mixer that is a genuine alternative to attention."""
+
+        cacheable = False        # long implicit filter over the whole context → full-recompute
 
         def __init__(self, n_embd: int, block_size: int) -> None:
             super().__init__()
@@ -466,6 +561,8 @@ if _HAS_TORCH:
         """A learned low-rank causal token-mixing matrix W = (A @ B) ⊙ tril — a novel matrix
         structure: every position is a learned low-rank mixture of the positions before it."""
 
+        cacheable = False        # mixing matrix is indexed by absolute position → full-recompute
+
         def __init__(self, n_embd: int, block_size: int, rank: int = 4) -> None:
             super().__init__()
             self.A = nn.Parameter(torch.randn(block_size, rank) * 0.02)
@@ -481,6 +578,8 @@ if _HAS_TORCH:
 
     class _RecurrentGate(nn.Module):
         """A lightweight gated linear recurrence (diagonal SSM-style scan): h_t = g·h_{t-1}+(1-g)·v."""
+
+        cacheable = True         # carries a hidden state → O(1) incremental decode
 
         def __init__(self, n_embd: int) -> None:
             super().__init__()
@@ -498,10 +597,18 @@ if _HAS_TORCH:
                 outs.append(h)
             return self.proj(torch.stack(outs, dim=1))
 
+        def step(self, x_t, state):  # type: ignore[override]
+            v = self.to_v(x_t)[:, 0]; g = torch.sigmoid(self.to_g(x_t))[:, 0]
+            h = (g * 0.0) if state is None else state
+            h = g * h + (1.0 - g) * v
+            return self.proj(h).unsqueeze(1), h
+
     class _SSMScan(nn.Module):
         """A diagonal state-space scan with a LEARNED per-channel decay (a real S4/Mamba-lite):
         h_t = a ⊙ h_{t-1} + b_t,  y_t = C·h_t + D ⊙ x_t — the decay ``a`` is a trained parameter,
         not a function of the input, so it captures long-range structure attention cannot cheaply."""
+
+        cacheable = True         # carries a hidden state → O(1) incremental decode
 
         def __init__(self, n_embd: int) -> None:
             super().__init__()
@@ -521,8 +628,203 @@ if _HAS_TORCH:
             y = torch.stack(outs, dim=1)
             return self.C(y) + self.D * x
 
+        def step(self, x_t, state):  # type: ignore[override]
+            a = torch.sigmoid(self.a_log)
+            b = self.in_proj(x_t)[:, 0]
+            h = torch.zeros_like(b) if state is None else state
+            h = a * h + (1.0 - a) * b
+            return (self.C(h.unsqueeze(1)) + self.D * x_t), h
+
+    class _SelectiveSSM(nn.Module):
+        """A Mamba-style SELECTIVE state-space scan: the decay and input gate are **functions of the
+        input** (data-dependent), so the model chooses what to remember per token —
+        ``Δ_t = softplus(W_Δ x_t)``, ``ā_t = exp(-Δ_t·exp(A_log))``, ``h_t = ā_t·h_{t-1} + Δ_t·(B_t·x_t)``,
+        ``y_t = C_t·h_t + D·x_t``. A genuine selective scan, the heart of modern SSM LLMs."""
+
+        cacheable = True         # selective recurrence → O(1) incremental decode
+
+        def __init__(self, n_embd: int) -> None:
+            super().__init__()
+            self.A_log = nn.Parameter(torch.zeros(n_embd))            # a = exp(-Δ·exp(A_log))
+            self.x_proj = nn.Linear(n_embd, n_embd)                   # B_t (input gate content)
+            self.dt = nn.Linear(n_embd, n_embd)                      # Δ_t (selective step size)
+            self.C = nn.Linear(n_embd, n_embd)                      # C_t (output projection)
+            self.D = nn.Parameter(torch.ones(n_embd))
+
+        def _ad_b(self, x):
+            delta = F.softplus(self.dt(x))                            # (B,T,C) > 0
+            a = torch.exp(-delta * torch.exp(self.A_log))            # data-dependent decay
+            b = delta * self.x_proj(x)                               # data-dependent input
+            return a, b
+
+        def forward(self, x):  # type: ignore[override]
+            a, b = self._ad_b(x)
+            h = torch.zeros_like(b[:, 0])
+            outs = []
+            for i in range(x.size(1)):
+                h = a[:, i] * h + b[:, i]
+                outs.append(h)
+            y = torch.stack(outs, dim=1)
+            return self.C(y) + self.D * x
+
+        def step(self, x_t, state):  # type: ignore[override]
+            a, b = self._ad_b(x_t)
+            a, b = a[:, 0], b[:, 0]
+            h = torch.zeros_like(b) if state is None else state
+            h = a * h + b
+            return (self.C(h.unsqueeze(1)) + self.D * x_t), h
+
+    class _GatedLinearAttention(nn.Module):
+        """Gated linear / retention attention (RetNet/GLA-style): a causal linear-attention token
+        mixer with a learned per-channel decay, computed as a recurrent outer-product state
+        ``S_t = γ·S_{t-1} + kᵀv``, ``y_t = (q·S_t)``, then output-gated. Sub-quadratic in time and
+        O(1)-memory to decode — a real alternative to softmax attention."""
+
+        cacheable = True         # recurrent KV-state form → O(1) incremental decode
+
+        def __init__(self, n_embd: int, n_head: int) -> None:
+            super().__init__()
+            n_head = n_head if n_embd % n_head == 0 else 1
+            self.n_head, self.hd = n_head, n_embd // n_head
+            self.q = nn.Linear(n_embd, n_embd)
+            self.k = nn.Linear(n_embd, n_embd)
+            self.v = nn.Linear(n_embd, n_embd)
+            self.g = nn.Linear(n_embd, n_embd)                       # output gate
+            self.proj = nn.Linear(n_embd, n_embd)
+            self.decay = nn.Parameter(torch.zeros(n_head))          # γ = sigmoid(decay) per head
+
+        def _proj(self, x):
+            b, t, _ = x.shape
+            q = F.elu(self.q(x)) + 1.0
+            k = F.elu(self.k(x)) + 1.0
+            v = self.v(x)
+            shp = (b, t, self.n_head, self.hd)
+            return (q.view(*shp).transpose(1, 2), k.view(*shp).transpose(1, 2),
+                    v.view(*shp).transpose(1, 2))                    # (B,H,T,D)
+
+        def forward(self, x):  # type: ignore[override]
+            b, t, c = x.shape
+            q, k, v = self._proj(x)
+            gamma = torch.sigmoid(self.decay).view(1, self.n_head, 1, 1)
+            s = torch.zeros(b, self.n_head, self.hd, self.hd, device=x.device, dtype=x.dtype)
+            outs = []
+            for i in range(t):
+                s = gamma * s + k[:, :, i].unsqueeze(-1) * v[:, :, i].unsqueeze(-2)   # (B,H,D,D)
+                outs.append((q[:, :, i].unsqueeze(-2) @ s).squeeze(-2))               # (B,H,D)
+            y = torch.stack(outs, dim=2).transpose(1, 2).contiguous().view(b, t, c)
+            return self.proj(y * torch.sigmoid(self.g(x)))
+
+        def step(self, x_t, state):  # type: ignore[override]
+            b = x_t.size(0)
+            q, k, v = self._proj(x_t)
+            gamma = torch.sigmoid(self.decay).view(1, self.n_head, 1, 1)
+            s = (torch.zeros(b, self.n_head, self.hd, self.hd, device=x_t.device, dtype=x_t.dtype)
+                 if state is None else state)
+            s = gamma * s + k[:, :, 0].unsqueeze(-1) * v[:, :, 0].unsqueeze(-2)
+            y = (q[:, :, 0].unsqueeze(-2) @ s).squeeze(-2)                            # (B,H,D)
+            y = y.reshape(b, 1, self.n_head * self.hd)
+            return self.proj(y * torch.sigmoid(self.g(x_t))), s
+
+    class _DiffAttention(nn.Module):
+        """Differential attention: compute TWO causal softmax-attention maps and return their
+        λ-weighted DIFFERENCE (``A = softmax(Q1Kᵀ) − λ·softmax(Q2Kᵀ)``). Subtracting a second map
+        cancels common-mode attention noise, sharpening focus — a recent, real quality win."""
+
+        cacheable = True
+
+        def __init__(self, n_embd: int, n_head: int, block_size: int, pos: str = "learned",
+                     dropout: float = 0.0, qk_norm: bool = False) -> None:
+            super().__init__()
+            self.a1 = _CausalAttention(n_embd, n_head, n_head, block_size, pos, dropout, qk_norm)
+            self.a2 = _CausalAttention(n_embd, n_head, n_head, block_size, pos, dropout, qk_norm)
+            self.lam = nn.Parameter(torch.tensor(0.5))
+
+        def forward(self, x):  # type: ignore[override]
+            return self.a1(x) - torch.sigmoid(self.lam) * self.a2(x)
+
+        def step(self, x_t, state):  # type: ignore[override]
+            s1, s2 = state if state is not None else (None, None)
+            y1, s1 = self.a1.step(x_t, s1)
+            y2, s2 = self.a2.step(x_t, s2)
+            return y1 - torch.sigmoid(self.lam) * y2, (s1, s2)
+
+    class _LatentAttention(nn.Module):
+        """Multi-head latent attention (DeepSeek-MLA-style): the K/V are compressed through a tiny
+        latent of width ``kv_latent`` (``x → c_kv → K,V``), so the attention's KV memory is a small
+        low-rank bottleneck instead of the full width — much cheaper, with little quality loss."""
+
+        cacheable = True
+
+        def __init__(self, n_embd: int, n_head: int, block_size: int, kv_latent: int = 16,
+                     pos: str = "learned", dropout: float = 0.0, qk_norm: bool = False) -> None:
+            super().__init__()
+            n_head = n_head if n_embd % n_head == 0 else 1
+            self.n_head, self.hd = n_head, n_embd // n_head
+            self.qk_norm, self.block_size = bool(qk_norm), block_size
+            lat = max(1, min(kv_latent, n_embd))
+            self.q = nn.Linear(n_embd, n_embd)
+            self.kv_down = nn.Linear(n_embd, lat)                    # compress to the latent
+            self.kv_up = nn.Linear(lat, 2 * n_embd)                 # reconstruct K and V
+            self.proj = nn.Linear(n_embd, n_embd)
+            self.drop = nn.Dropout(dropout)
+            self.pos = "rope" if (pos == "rope" and self.hd % 2 == 0) else (
+                "alibi" if pos == "alibi" else "learned")
+            self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)).bool())
+            if self.pos == "rope":
+                cs = _rope_tables(block_size, self.hd)
+                self.register_buffer("rope_cos", cs[0]); self.register_buffer("rope_sin", cs[1])
+            if self.pos == "alibi":
+                self.register_buffer("alibi", _alibi_slopes(n_head))
+
+        def _qkv(self, x):
+            b, t, _ = x.shape
+            q = self.q(x).view(b, t, self.n_head, self.hd).transpose(1, 2)
+            k, v = self.kv_up(self.kv_down(x)).chunk(2, dim=-1)
+            k = k.view(b, t, self.n_head, self.hd).transpose(1, 2)
+            v = v.view(b, t, self.n_head, self.hd).transpose(1, 2)
+            if self.qk_norm:
+                q, k = _rms_qk(q), _rms_qk(k)
+            return q, k, v
+
+        def forward(self, x):  # type: ignore[override]
+            b, t, c = x.shape
+            q, k, v = self._qkv(x)
+            if self.pos == "rope":
+                cos, sin = self.rope_cos[:t], self.rope_sin[:t]
+                q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
+            att = (q @ k.transpose(-2, -1)) / math.sqrt(self.hd)
+            if self.pos == "alibi":
+                dist = (torch.arange(t, device=x.device)[None, :]
+                        - torch.arange(t, device=x.device)[:, None]).clamp(max=0).float()
+                att = att + self.alibi[None, :, None, None] * dist[None, None]
+            att = att.masked_fill(~self.tril[:t, :t], float("-inf"))
+            att = self.drop(torch.softmax(att, dim=-1))
+            y = (att @ v).transpose(1, 2).contiguous().view(b, t, c)
+            return self.proj(y)
+
+        def step(self, x_t, state):  # type: ignore[override]
+            b = x_t.size(0)
+            q, k, v = self._qkv(x_t)
+            kc, vc, pos = state if state is not None else (None, None, 0)
+            if self.pos == "rope":
+                cos = self.rope_cos[pos:pos + 1]; sin = self.rope_sin[pos:pos + 1]
+                q, k = _apply_rope(q, cos, sin), _apply_rope(k, cos, sin)
+            k = k if kc is None else torch.cat([kc, k], dim=2)
+            v = v if vc is None else torch.cat([vc, v], dim=2)
+            k, v = k[:, :, -self.block_size:], v[:, :, -self.block_size:]
+            att = (q @ k.transpose(-2, -1)) / math.sqrt(self.hd)
+            if self.pos == "alibi":
+                tk = k.size(2)
+                dist = -(torch.arange(tk - 1, -1, -1, device=x_t.device).float())
+                att = att + self.alibi[None, :, None, :] * dist[None, None, None]
+            att = torch.softmax(att, dim=-1)
+            y = (att @ v).transpose(1, 2).contiguous().view(b, 1, self.n_head * self.hd)
+            return self.proj(y), (k, v, pos + 1)
+
     class _GatedMLP(nn.Module):
         """A gated channel mixer — ``glu=True`` gives a true gated-linear-unit block."""
+
+        cacheable = True         # pointwise over time → incremental decode is just forward
 
         def __init__(self, n_embd: int, activation: str, *, glu: bool = False,
                      expansion: int = 4, dropout: float = 0.0) -> None:
@@ -543,8 +845,13 @@ if _HAS_TORCH:
                 h = self.act(h)
             return self.fc2(self.drop(h))
 
+        def step(self, x_t, state):  # type: ignore[override]
+            return self.forward(x_t), None
+
     class _SwiGLU(nn.Module):
         """A SwiGLU channel mixer (LLaMA-style): w2( silu(w1 x) ⊙ w3 x ) — a strong gated FFN."""
+
+        cacheable = True         # pointwise over time → incremental decode is just forward
 
         def __init__(self, n_embd: int, expansion: int = 4, dropout: float = 0.0) -> None:
             super().__init__()
@@ -557,11 +864,16 @@ if _HAS_TORCH:
         def forward(self, x):  # type: ignore[override]
             return self.w2(self.drop(F.silu(self.w1(x)) * self.w3(x)))
 
+        def step(self, x_t, state):  # type: ignore[override]
+            return self.forward(x_t), None
+
     class _MoEMLP(nn.Module):
         """A top-k routed Mixture-of-Experts channel mixer — a real sparse router over independent
         expert MLPs. ``forward`` returns ``(output, load_balance_aux)``; the aux term (Switch
         Transformer's load-balancing loss) is folded into training so the router spreads tokens
         across experts instead of collapsing onto one."""
+
+        cacheable = True         # routing is pointwise over time → incremental decode is just forward
 
         def __init__(self, n_embd: int, activation: str, n_experts: int = 4, top_k: int = 2,
                      expansion: int = 4, dropout: float = 0.0) -> None:
@@ -594,12 +906,23 @@ if _HAS_TORCH:
             aux = self.n_experts * (importance * routed).sum()
             return out, aux
 
+        def step(self, x_t, state):  # type: ignore[override]
+            out, _aux = self.forward(x_t)        # routing is per-token; aux is a training-only term
+            return out, None
+
     def _build_inner(gene: LayerGene, n_embd: int, block_size: int, pos: str) -> "nn.Module":
         op = gene.op
         if op == "attention":
-            return _CausalAttention(n_embd, gene.n_head, gene.n_head, block_size, pos, gene.dropout)
+            return _CausalAttention(n_embd, gene.n_head, gene.n_head, block_size, pos,
+                                    gene.dropout, gene.qk_norm)
         if op == "gqa_attention":
-            return _CausalAttention(n_embd, gene.n_head, gene.n_kv_head, block_size, pos, gene.dropout)
+            return _CausalAttention(n_embd, gene.n_head, gene.n_kv_head, block_size, pos,
+                                    gene.dropout, gene.qk_norm)
+        if op == "diff_attention":
+            return _DiffAttention(n_embd, gene.n_head, block_size, pos, gene.dropout, gene.qk_norm)
+        if op == "mla_attention":
+            return _LatentAttention(n_embd, gene.n_head, block_size, gene.kv_latent, pos,
+                                    gene.dropout, gene.qk_norm)
         if op == "conv_mix":
             return _ConvMix(n_embd)
         if op == "hyena_conv":
@@ -610,6 +933,10 @@ if _HAS_TORCH:
             return _RecurrentGate(n_embd)
         if op == "ssm_scan":
             return _SSMScan(n_embd)
+        if op == "selective_ssm":
+            return _SelectiveSSM(n_embd)
+        if op == "gla_attention":
+            return _GatedLinearAttention(n_embd, gene.n_head)
         if op == "glu":
             return _GatedMLP(n_embd, gene.activation, glu=True, expansion=gene.expansion,
                              dropout=gene.dropout)
@@ -629,12 +956,13 @@ if _HAS_TORCH:
 
         def __init__(self, gene: LayerGene, n_embd: int, block_size: int, pos: str) -> None:
             super().__init__()
-            self.norm = nn.LayerNorm(n_embd)
+            self.norm = _norm(gene.norm_type, n_embd)
             self.pre = gene.norm == "pre"
             self.residual = gene.residual
             self.residual_scale = float(gene.residual_scale)
             self.drop = nn.Dropout(gene.dropout)
             self.inner = _build_inner(gene, n_embd, block_size, pos)
+            self.cacheable = bool(getattr(self.inner, "cacheable", False))
             self.last_aux: Any = None
 
         def forward(self, x):  # type: ignore[override]
@@ -648,6 +976,15 @@ if _HAS_TORCH:
             y = self.drop(y)
             return x + self.residual_scale * y if self.residual else y
 
+        def step(self, x_t, state):  # type: ignore[override]
+            """One-token incremental forward (KV-cache path); mirrors ``forward`` exactly. Only
+            called when every layer ``cacheable`` — the net falls back to full recompute otherwise."""
+            inp = self.norm(x_t) if self.pre else x_t
+            y, new_state = self.inner.step(inp, state)
+            if not self.pre:
+                y = self.norm(y)
+            return (x_t + self.residual_scale * y if self.residual else y), new_state
+
     class _GenesisNet(nn.Module):
         """A byte-level decoder assembled dynamically from an :class:`ArchitectureGenome`.
 
@@ -659,6 +996,7 @@ if _HAS_TORCH:
             ne, bs = genome.n_embd, genome.block_size
             self.block_size = bs
             self.pos_encoding = genome.pos_encoding
+            self.n_predict = max(1, int(genome.n_predict))
             self.tok = nn.Embedding(_VOCAB, ne)
             self.pos = nn.Embedding(bs, ne) if genome.pos_encoding == "learned" else None
             self.layers = nn.ModuleList(
@@ -667,8 +1005,14 @@ if _HAS_TORCH:
             self.head = nn.Linear(ne, _VOCAB, bias=False)
             if genome.tie_embeddings:
                 self.head.weight = self.tok.weight   # weight tying (input emb == output head)
+            # Multi-token-prediction: extra heads predict t+2, t+3, … from the same trunk feature,
+            # giving denser supervision (DeepSeek-V3-style). Inert for ppl/generate (main head only).
+            self.mtp_heads = nn.ModuleList([nn.Linear(ne, _VOCAB, bias=False)
+                                            for _ in range(self.n_predict - 1)])
+            # the cached one-token decode path is available only when every layer supports it
+            self.cacheable = all(getattr(ly, "cacheable", False) for ly in self.layers)
 
-        def forward(self, idx):  # type: ignore[override]
+        def _trunk(self, idx):
             t = idx.size(1)
             x = self.tok(idx)
             if self.pos is not None:                              # learned absolute positions
@@ -679,7 +1023,29 @@ if _HAS_TORCH:
                 x = layer(x)
                 if layer.last_aux is not None:
                     aux = layer.last_aux if aux is None else aux + layer.last_aux
-            return self.head(self.ln_f(x)), aux
+            return self.ln_f(x), aux
+
+        def forward(self, idx):  # type: ignore[override]
+            h, aux = self._trunk(idx)
+            return self.head(h), aux
+
+        def mtp_logits(self, idx):
+            """Return the list of auxiliary multi-token-prediction logits (empty if n_predict==1)."""
+            h, _ = self._trunk(idx)
+            return [head(h) for head in self.mtp_heads]
+
+        def step(self, idx_t, states, pos):
+            """Cached one-token decode: ``idx_t`` is (B,1) newest token; ``states`` a per-layer list;
+            ``pos`` the absolute position. Returns (logits_last, new_states). Requires ``cacheable``."""
+            x = self.tok(idx_t)
+            if self.pos is not None:
+                x = x + self.pos(torch.tensor([min(pos, self.block_size - 1)],
+                                              device=idx_t.device))[None]
+            new_states: List[Any] = []
+            for layer, st in zip(self.layers, states):
+                x, ns = layer.step(x, st)
+                new_states.append(ns)
+            return self.head(self.ln_f(x))[:, -1, :], new_states
 
 
 # --------------------------------------------------------------------------- #
@@ -720,6 +1086,8 @@ class GenesisModel(BaseLanguageModel):
         self.lambda_loyalty = float(lambda_loyalty or 0.0)
         # weight on the MoE load-balance aux (only bites when a moe_mlp layer is present)
         self.moe_aux_weight = 0.01
+        # weight on the multi-token-prediction aux (only bites when n_predict > 1)
+        self.mtp_weight = 0.3
         # default decoding controls (overridable per-call); pulled from config when available
         self.temperature, self.top_k, self.top_p, self.repetition_penalty = 1.0, 0, 1.0, 1.0
         try:
@@ -778,6 +1146,16 @@ class GenesisModel(BaseLanguageModel):
                 loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.reshape(-1))
                 if aux is not None:                          # MoE load-balance term
                     loss = loss + self.moe_aux_weight * aux
+                # Multi-token prediction: each extra head predicts a further-future token, sharing
+                # the trunk feature — denser gradient signal that sharpens the main next-token head.
+                if self.net.mtp_heads:
+                    mtp = self.net.mtp_logits(x)
+                    for d, mlogits in enumerate(mtp, start=2):
+                        if bs - d <= 0:
+                            break
+                        yt = torch.stack([t[i + d:i + d + bs] for i in ix])
+                        loss = loss + self.mtp_weight * nn.functional.cross_entropy(
+                            mlogits[:, : bs - d].reshape(-1, _VOCAB), yt[:, : bs - d].reshape(-1))
             # L_total = L_intelligence + lambda * L_loyalty — JP's alignment in the loss surface
             if self.loyalty is not None and self.lambda_loyalty > 0.0:
                 try:
@@ -815,10 +1193,20 @@ class GenesisModel(BaseLanguageModel):
 
     def generate(self, prompt: str, *, max_tokens: int = 128, temperature: Optional[float] = None,
                  top_k: Optional[int] = None, top_p: Optional[float] = None,
-                 repetition_penalty: Optional[float] = None, greedy: bool = False) -> str:
+                 repetition_penalty: Optional[float] = None, greedy: bool = False,
+                 use_cache: bool = False, best_of: int = 1) -> str:
         """Autoregressive decode with temperature / top-k / top-p (nucleus) / repetition-penalty
         controls (defaults fall back to the model's configured decoding settings). ``greedy=True``
-        is deterministic argmax."""
+        is deterministic argmax. ``use_cache=True`` runs the O(1)-per-token KV-cached decode when the
+        architecture supports it (bit-identical for lengths ≤ block_size, else a transparent
+        fall-back). ``best_of>1`` is test-time self-consistency: sample N continuations and return
+        the one the model itself scores most likely (lowest self-perplexity)."""
+        if best_of > 1 and not greedy:
+            cands = [self.generate(prompt, max_tokens=max_tokens, temperature=temperature,
+                                   top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty,
+                                   greedy=False, use_cache=use_cache, best_of=1)
+                     for _ in range(best_of)]
+            return min(cands, key=lambda c: self.perplexity(prompt + c))
         self.net.eval()
         torch.manual_seed(self.genome.seed)
         temp = self.temperature if temperature is None else temperature
@@ -828,30 +1216,45 @@ class GenesisModel(BaseLanguageModel):
         idx = self._encode(prompt) or [ord("\n")]
         bs = self.genome.block_size
         start = len(self._encode(prompt))
+        cached = use_cache and bool(getattr(self.net, "cacheable", False))
+
+        def sample(logits: "torch.Tensor", recent: Sequence[int]) -> int:
+            if rep > 1.0:                                    # discourage repeating recent tokens
+                for tok in set(recent):
+                    logits[tok] = logits[tok] / rep if logits[tok] > 0 else logits[tok] * rep
+            if greedy or temp <= 0:
+                return int(torch.argmax(logits).item())
+            lg = logits / max(1e-6, temp)
+            if tk and tk > 0:                                # top-k truncation
+                kth = torch.topk(lg, min(tk, lg.numel())).values[-1]
+                lg = lg.masked_fill(lg < kth, float("-inf"))
+            probs = torch.softmax(lg, dim=-1)
+            if 0.0 < tp < 1.0:                               # nucleus (top-p) truncation
+                sp, si = torch.sort(probs, descending=True)
+                cum = torch.cumsum(sp, dim=-1)
+                keep = cum - sp <= tp
+                keep[0] = True
+                probs = torch.zeros_like(probs).scatter_(0, si, sp * keep)
+                probs = probs / probs.sum().clamp_min(1e-9)
+            return int(torch.multinomial(probs, 1).item())
+
         with torch.no_grad():
-            for _ in range(max_tokens):
-                ctx = torch.tensor(idx[-bs:], dtype=torch.long, device=self.device).unsqueeze(0)
-                logits, _ = self.net(ctx)
-                logits = logits[:, -1, :].squeeze(0)
-                if rep > 1.0:                                # discourage repeating recent tokens
-                    for tok in set(idx[-bs:]):
-                        logits[tok] = logits[tok] / rep if logits[tok] > 0 else logits[tok] * rep
-                if greedy or temp <= 0:
-                    idx.append(int(torch.argmax(logits).item())); continue
-                logits = logits / max(1e-6, temp)
-                if tk and tk > 0:                            # top-k truncation
-                    kth = torch.topk(logits, min(tk, logits.numel())).values[-1]
-                    logits = logits.masked_fill(logits < kth, float("-inf"))
-                probs = torch.softmax(logits, dim=-1)
-                if 0.0 < tp < 1.0:                           # nucleus (top-p) truncation
-                    sp, si = torch.sort(probs, descending=True)
-                    cum = torch.cumsum(sp, dim=-1)
-                    keep = cum - sp <= tp
-                    keep[0] = True
-                    probs = torch.zeros_like(probs).scatter_(0, si, sp * keep)
-                    probs = probs / probs.sum().clamp_min(1e-9)
-                nxt = int(torch.multinomial(probs, 1).item())
-                idx.append(nxt)
+            if cached:
+                states: List[Any] = [None] * len(self.net.layers)
+                logits = None
+                for p, tok in enumerate(idx):               # warm the cache over the prompt
+                    logits, states = self.net.step(
+                        torch.tensor([[tok]], device=self.device), states, p)
+                for p in range(len(idx), len(idx) + max_tokens):
+                    nxt = sample(logits.squeeze(0).clone(), idx[-bs:])
+                    idx.append(nxt)
+                    logits, states = self.net.step(
+                        torch.tensor([[nxt]], device=self.device), states, p)
+            else:
+                for _ in range(max_tokens):
+                    ctx = torch.tensor(idx[-bs:], dtype=torch.long, device=self.device).unsqueeze(0)
+                    logits, _ = self.net(ctx)
+                    idx.append(sample(logits[:, -1, :].squeeze(0), idx[-bs:]))
         return bytes(idx[start:]).decode("utf-8", errors="replace")
 
     def param_count(self) -> int:
@@ -871,6 +1274,90 @@ class GenesisModel(BaseLanguageModel):
         self.spec = self._spec_from_genome(self.genome)
         self.net = _GenesisNet(self.genome).to(self.device)
         self.net.load_state_dict(torch.load(directory / "model.pt", map_location=self.device))
+
+
+def inherit_compatible_weights(dst_net: Any, src_state: Dict[str, Any]) -> int:
+    """Network-morphism weight transfer: copy every tensor from ``src_state`` whose name AND shape
+    match a parameter/buffer of ``dst_net`` (a Lamarckian warm-start so a mutated child resumes its
+    parent's training instead of restarting from noise). Returns how many tensors were inherited.
+    Pure no-op without torch. Mismatched layers are simply left freshly-initialised."""
+    if not _HAS_TORCH:
+        return 0
+    dst = dst_net.state_dict()
+    copied = 0
+    for name, tensor in dst.items():
+        src = src_state.get(name)
+        if src is not None and hasattr(src, "shape") and tuple(src.shape) == tuple(tensor.shape):
+            tensor.copy_(src)
+            copied += 1
+    dst_net.load_state_dict(dst)
+    return copied
+
+
+# --------------------------------------------------------------------------- #
+# Champion ensemble — route each input to its most competent sub-brain (real MoE inference)
+# --------------------------------------------------------------------------- #
+class EnsembleModel(BaseLanguageModel):
+    """A real inference-time ensemble of already-trained sub-models (the top-k Pareto brains).
+
+    Heterogeneous backends share no per-token probability API, so this is an honest
+    **competence-routing** ensemble (hard mixture-of-experts): for any input it routes to the
+    member that scores it best (lowest perplexity) and speaks with that expert — strictly ≥ the
+    best single member on its own metric, and never worse than the strongest brain. Implements the
+    full :class:`BaseLanguageModel` contract so the foundry / SelfProvider can treat it as one model."""
+
+    kind = "ensemble"
+
+    def __init__(self, members: Sequence[BaseLanguageModel]) -> None:
+        self.members: List[BaseLanguageModel] = [m for m in members if m is not None]
+        if not self.members:
+            raise ValueError("an ensemble needs at least one member")
+
+    def _route(self, text: str) -> BaseLanguageModel:
+        """Pick the member most competent on this context (lowest perplexity)."""
+        if len(self.members) == 1 or not text:
+            return self.members[0]
+        return min(self.members, key=lambda m: _safe_ppl(m, text))
+
+    def train_on(self, corpus: Sequence[str], *, steps: int = 0, seed: int = 0) -> TrainStats:
+        stats = [m.train_on(corpus, steps=steps, seed=seed) for m in self.members]
+        return TrainStats(steps=max((s.steps for s in stats), default=0),
+                          final_loss=min((s.final_loss for s in stats), default=0.0),
+                          seconds=sum(s.seconds for s in stats),
+                          tokens=max((s.tokens for s in stats), default=0))
+
+    def perplexity(self, text: str) -> float:
+        return min(_safe_ppl(m, text) for m in self.members)   # the best expert's score
+
+    def generate(self, prompt: str, *, max_tokens: int = 128, **kw: Any) -> str:
+        member = self._route(prompt)
+        try:
+            return member.generate(prompt, max_tokens=max_tokens, **kw)
+        except TypeError:                                      # member lacks the rich-decode kwargs
+            return member.generate(prompt, max_tokens=max_tokens)
+
+    def param_count(self) -> int:
+        return sum(m.param_count() for m in self.members)
+
+    def save(self, directory: Path) -> None:
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "ensemble.json").write_text(
+            json.dumps({"members": len(self.members),
+                        "kinds": [getattr(m, "kind", "?") for m in self.members]}),
+            encoding="utf-8")
+        for i, m in enumerate(self.members):
+            m.save(directory / f"member_{i}")
+
+    def load(self, directory: Path) -> None:    # members are rebuilt by the caller from specs
+        raise NotImplementedError("rebuild an EnsembleModel from its champion specs, then re-train")
+
+
+def _safe_ppl(model: BaseLanguageModel, text: str) -> float:
+    try:
+        return model.perplexity(text)
+    except Exception:  # noqa: BLE001 — a member that cannot score this text simply abstains
+        return float("inf")
 
 
 # --------------------------------------------------------------------------- #
@@ -928,6 +1415,65 @@ def _pareto_front(cands: Sequence["Candidate"]) -> List["Candidate"]:
             seen.add(fp)
             unique.append(c)
     return unique
+
+
+def _fast_nondominated_sort(cands: Sequence["Candidate"]) -> List[List["Candidate"]]:
+    """Deb's fast non-dominated sort (NSGA-II): partition candidates into successive Pareto fronts,
+    front 0 being the non-dominated set, front 1 what remains once front 0 is removed, and so on."""
+    cands = list(cands)
+    dominated: Dict[int, List[int]] = {i: [] for i in range(len(cands))}
+    n_dom = [0] * len(cands)
+    fronts: List[List[int]] = [[]]
+    for i, ci in enumerate(cands):
+        for j, cj in enumerate(cands):
+            if i == j:
+                continue
+            if _dominates(ci, cj):
+                dominated[i].append(j)
+            elif _dominates(cj, ci):
+                n_dom[i] += 1
+        if n_dom[i] == 0:
+            fronts[0].append(i)
+    f = 0
+    while fronts[f]:
+        nxt: List[int] = []
+        for i in fronts[f]:
+            for j in dominated[i]:
+                n_dom[j] -= 1
+                if n_dom[j] == 0:
+                    nxt.append(j)
+        f += 1
+        fronts.append(nxt)
+    return [[cands[i] for i in front] for front in fronts if front]
+
+
+def _crowding_distance(front: Sequence["Candidate"]) -> Dict[int, float]:
+    """NSGA-II crowding distance: how isolated each member is on the front (boundary points get ∞).
+    Keyed by ``id(candidate)``; used as the diversity-preserving secondary sort within a front."""
+    dist: Dict[int, float] = {id(c): 0.0 for c in front}
+    if len(front) <= 2:
+        return {id(c): float("inf") for c in front}
+    objectives = (lambda c: c.quality, lambda c: -c.params,
+                  lambda c: -c.seconds, lambda c: -c.flops)
+    for obj in objectives:
+        ordered = sorted(front, key=obj)
+        lo, hi = obj(ordered[0]), obj(ordered[-1])
+        span = (hi - lo) or 1.0
+        dist[id(ordered[0])] = dist[id(ordered[-1])] = float("inf")
+        for k in range(1, len(ordered) - 1):
+            dist[id(ordered[k])] += (obj(ordered[k + 1]) - obj(ordered[k - 1])) / span
+    return dist
+
+
+def _nsga2_rank(cands: Sequence["Candidate"]) -> List["Candidate"]:
+    """Order candidates the NSGA-II way: by front, then by descending crowding distance within a
+    front (the elitist multi-objective ranking that drives the population toward the whole Pareto
+    set rather than collapsing it to one scalar winner)."""
+    ordered: List[Candidate] = []
+    for front in _fast_nondominated_sort(cands):
+        cd = _crowding_distance(front)
+        ordered.extend(sorted(front, key=lambda c: cd[id(c)], reverse=True))
+    return ordered
 
 
 # --------------------------------------------------------------------------- #
@@ -1051,10 +1597,13 @@ class _Surrogate:
     real evaluation budget is spent on the promising ones) — it never crowns a champion itself, so
     the search stays honest. Pure ``numpy`` (already a dependency); a no-op until enough data."""
 
-    def __init__(self, ridge: float = 1.0, min_train: int = 8) -> None:
+    def __init__(self, ridge: float = 1.0, min_train: int = 8, beta: float = 0.0) -> None:
         self.ridge = ridge
         self.min_train = min_train
+        self.beta = float(beta)          # UCB exploration weight (0 → pure-exploit ordering)
         self._w: Any = None
+        self._X: Any = None              # kept for the kNN-residual uncertainty estimate
+        self._resid_scale: float = 0.0
         try:
             import numpy as np  # noqa: F401 — availability probe
             self._np = np
@@ -1073,20 +1622,119 @@ class _Surrogate:
         np = self._np
         X = np.array([r[0] for r in rows], dtype=float)
         y = np.array([r[1] for r in rows], dtype=float)
-        X = np.concatenate([X, np.ones((X.shape[0], 1))], axis=1)   # bias column
-        a = X.T @ X + self.ridge * np.eye(X.shape[1])
+        Xb = np.concatenate([X, np.ones((X.shape[0], 1))], axis=1)   # bias column
+        a = Xb.T @ Xb + self.ridge * np.eye(Xb.shape[1])
         try:
-            self._w = np.linalg.solve(a, X.T @ y)
+            self._w = np.linalg.solve(a, Xb.T @ y)
         except Exception:  # noqa: BLE001 — singular system: skip prediction this round
             self._w = None
-        return self._w is not None
+            return False
+        self._X = X                                            # train features for the UCB σ term
+        self._resid_scale = float(np.std(y - Xb @ self._w)) or 1.0
+        return True
 
     def predict(self, genome: "ArchitectureGenome") -> float:
+        """Predicted fitness (the mean) — used to ORDER which genomes to score first. Never crowns."""
         if not self.ready():
             return 0.0
         np = self._np
         x = np.array(genome.feature_vector() + [1.0], dtype=float)
         return float(x @ self._w)
+
+    def uncertainty(self, genome: "ArchitectureGenome") -> float:
+        """A cheap epistemic-uncertainty proxy: distance to the nearest already-scored genome in
+        feature space, scaled by the model's residual spread. Far-from-seen genomes look uncertain."""
+        if not self.ready() or self._X is None or len(self._X) == 0:
+            return 0.0
+        np = self._np
+        x = np.array(genome.feature_vector(), dtype=float)
+        d = float(np.min(np.linalg.norm(self._X - x[None, :], axis=1)))
+        return self._resid_scale * d
+
+    def acquire(self, genome: "ArchitectureGenome") -> float:
+        """The UCB acquisition score = predicted mean + β·uncertainty — balances exploiting the
+        predictor against exploring genomes unlike anything scored yet. β=0 reproduces ``predict``."""
+        return self.predict(genome) + self.beta * self.uncertainty(genome)
+
+
+# --------------------------------------------------------------------------- #
+# Lifelong memory — the Hall of Fame (she remembers her best brains and grows)
+# --------------------------------------------------------------------------- #
+class HallOfFame:
+    """Persistent architectural memory: every crowned champion and Pareto elite is recorded to disk,
+    and future searches *warm-start* from these past elites instead of pure random noise. This is
+    what makes the Genesis Protocol **lifelong** — across idle cycles she accumulates architectural
+    wisdom, so each search starts from the shoulders of every brain she has ever designed. Pure
+    standard library (JSON); safe to use everywhere. Promotion is still gauntlet-gated — the Hall of
+    Fame only seeds the *search*, it never crowns or ships a brain on its own."""
+
+    def __init__(self, path: Optional[Path] = None, *, capacity: int = 32) -> None:
+        self.path = Path(path) if path else None
+        self.capacity = max(1, int(capacity))
+        self.entries: List[Dict[str, Any]] = []
+        self._load()
+
+    def _load(self) -> None:
+        if self.path and self.path.exists():
+            try:
+                self.entries = list(json.loads(self.path.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001 — a corrupt memory file never crashes a search
+                self.entries = []
+
+    def _save(self) -> None:
+        if not self.path:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self.entries, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def record(self, report: "GenesisReport") -> None:
+        """Fold a finished search into memory: the champion plus its Pareto elites, deduped by
+        topology fingerprint, kept to the best ``capacity`` by recorded fitness."""
+        new = [{"genome": report.champion.to_dict(), "fitness": report.champion_fitness,
+                "perplexity": report.champion_perplexity, "backend": report.backend}]
+        for c in report.pareto_front:
+            new.append({"genome": c.genome.to_dict(), "fitness": c.fitness,
+                        "perplexity": c.perplexity, "backend": report.backend})
+        by_fp: Dict[str, Dict[str, Any]] = {}
+        for e in self.entries + new:
+            try:
+                fp = ArchitectureGenome.from_dict(e["genome"]).fingerprint()
+            except Exception:  # noqa: BLE001 — skip an unreadable entry
+                continue
+            if fp not in by_fp or e.get("fitness", 0.0) > by_fp[fp].get("fitness", 0.0):
+                by_fp[fp] = e
+        self.entries = sorted(by_fp.values(), key=lambda e: e.get("fitness", 0.0),
+                              reverse=True)[: self.capacity]
+        self._save()
+
+    def seed_genomes(self, n: int, rng: random.Random, *, block_size: int) -> List[ArchitectureGenome]:
+        """Up to ``n`` warm-start genomes from memory: the best elites, lightly re-seeded and
+        re-fit to the requested ``block_size`` so they slot straight into a fresh population."""
+        out: List[ArchitectureGenome] = []
+        for e in self.entries[: max(0, n)]:
+            try:
+                g = ArchitectureGenome.from_dict(e["genome"])
+                g.block_size = block_size
+                g.seed = rng.randint(0, 1 << 30)
+                g._fixup()
+                out.append(g)
+            except Exception:  # noqa: BLE001 — a bad entry simply contributes no seed
+                continue
+        return out
+
+    def best(self) -> Optional[ArchitectureGenome]:
+        if not self.entries:
+            return None
+        try:
+            return ArchitectureGenome.from_dict(self.entries[0]["genome"])
+        except Exception:  # noqa: BLE001
+            return None
+
+    def __len__(self) -> int:
+        return len(self.entries)
 
 
 # --------------------------------------------------------------------------- #
@@ -1113,7 +1761,14 @@ class NeuralArchitectureSearch:
         self.flywheel = flywheel
         self.seed_corpus = list(seed_corpus or _GENESIS_SEED)
         self._champion: Optional[Candidate] = None
+        self._last_report: Optional[GenesisReport] = None
         self._reports: List[GenesisReport] = []
+        # Lifelong memory: load the Hall of Fame so this search can warm-start from every elite
+        # brain she has ever designed (and record the new champion back into it).
+        self.hall_of_fame: Optional[HallOfFame] = None
+        if bool(getattr(self.cfg, "hall_of_fame", True)):
+            self.hall_of_fame = HallOfFame(self._hof_path(),
+                                           capacity=int(getattr(self.cfg, "hall_of_fame_size", 32)))
         # Baseline against experience already present at construction, so a search runs only
         # once genuinely NEW verified experience accrues after boot — the seed/boot corpus is
         # not "newly accrued". Without this, a fresh core would launch a full (and, with torch,
@@ -1129,6 +1784,15 @@ class NeuralArchitectureSearch:
         if b == "stdlib":
             return "stdlib"
         return "torch" if _HAS_TORCH else "stdlib"   # "auto"
+
+    def _hof_path(self) -> Optional[Path]:
+        """Where the lifelong Hall-of-Fame memory lives — under the configured data dir, mirroring
+        how the Foundry roots its own state. ``None`` (in-memory only) if no data dir is configured."""
+        try:
+            data_dir = self.settings.paths.data_dir   # type: ignore[union-attr]
+            return Path(data_dir) / "genesis" / "hall_of_fame.json"
+        except Exception:  # noqa: BLE001 — no settings/paths: keep memory in-process only
+            return None
 
     # ---- data ---- #
     def _collect_corpus(self) -> List[str]:
@@ -1272,8 +1936,15 @@ class NeuralArchitectureSearch:
                pop_size: int, mutation_rate: float, strategy: str, novelty_w: float,
                surrogate: Optional["_Surrogate"]) -> List[ArchitectureGenome]:
         """Produce the next generation under the chosen evolution strategy."""
+        # NSGA-II ranks the population by Pareto front + crowding distance (multi-objective), so
+        # selection drives toward the whole speed↔smartness↔cost frontier, not one scalar winner.
+        nsga_order = _nsga2_rank(scored) if strategy == "nsga2" else None
+
         def tournament() -> ArchitectureGenome:
             k = min(len(scored), max(2, int(getattr(self.cfg, "tournament_k", 3))))
+            if nsga_order is not None:                          # binary tournament on NSGA rank
+                rankpos = {id(c): i for i, c in enumerate(nsga_order)}
+                return min(rng.sample(scored, k), key=lambda c: rankpos[id(c)]).genome
             return max(rng.sample(scored, k), key=lambda c: c.fitness).genome
 
         def propose() -> ArchitectureGenome:
@@ -1283,16 +1954,18 @@ class NeuralArchitectureSearch:
                     a, b = rng.sample(elite, 2)
                     return a.crossover(b, rng, max_layers=max_layers)
                 return rng.choice(elite).mutate(rng, max_layers=max_layers)
-            # tournament / regularized both select parents by tournament
+            # tournament / regularized / nsga2 all select parents by tournament
             if rng.random() >= mutation_rate and len(scored) >= 2:
                 return tournament().crossover(tournament(), rng, max_layers=max_layers)
             return tournament().mutate(rng, max_layers=max_layers)
 
-        # elitism carries the top third forward; tournament/regularized (aging) do not — the oldest
+        # elitism / nsga2 carry the best forward; tournament/regularized (aging) do not — the oldest
         # die out each generation, which keeps the search exploring instead of locking in early.
         nxt: List[ArchitectureGenome] = []
         if strategy == "elitism":
             nxt = [c.genome for c in scored[:max(1, pop_size // 3)]]
+        elif strategy == "nsga2" and nsga_order is not None:
+            nxt = [c.genome for c in nsga_order[:max(1, pop_size // 3)]]   # elitist front-filling
         elif strategy == "tournament":
             nxt = [scored[0].genome]            # keep the single best (mild elitism)
 
@@ -1301,11 +1974,11 @@ class NeuralArchitectureSearch:
         while len(nxt) < pop_size:
             proposals = [propose() for _ in range(oversample)]
             if surrogate is not None and surrogate.ready() and len(proposals) > 1:
-                # surrogate-assisted: keep the proposal the predictor likes best, optionally with a
-                # novelty bonus so the population does not collapse onto one motif
+                # surrogate-assisted: keep the proposal the predictor likes best (by UCB acquisition,
+                # so it explores too), plus an optional novelty bonus so the population stays diverse
                 def score(g: ArchitectureGenome) -> float:
                     nov = self._novelty(g, pool_cands) if novelty_w > 0 else 0.0
-                    return surrogate.predict(g) + novelty_w * nov
+                    return surrogate.acquire(g) + novelty_w * nov
                 nxt.append(max(proposals, key=score))
             else:
                 nxt.append(proposals[0])
@@ -1342,12 +2015,22 @@ class NeuralArchitectureSearch:
         base_mut = float(self.cfg.mutation_rate)
         adaptive = bool(getattr(self.cfg, "adaptive_mutation", False))
         novelty_w = float(getattr(self.cfg, "novelty_weight", 0.0))
-        surrogate = (_Surrogate(min_train=int(getattr(self.cfg, "surrogate_min_train", 8)))
+        surrogate = (_Surrogate(min_train=int(getattr(self.cfg, "surrogate_min_train", 8)),
+                                beta=float(getattr(self.cfg, "ucb_beta", 0.0)))
                      if bool(getattr(self.cfg, "surrogate", False)) else None)
 
-        population = [ArchitectureGenome.random(rng, max_layers=max_layers, block_size=block,
-                                                pos_encoding=getattr(self.cfg, "pos_encoding", None))
-                      for _ in range(pop_size)]
+        # Lifelong warm-start: seed part of the initial population from the Hall of Fame (the best
+        # brains she has ever designed), the rest random — so each search builds on accumulated
+        # architectural wisdom instead of always starting from scratch.
+        warm: List[ArchitectureGenome] = []
+        if self.hall_of_fame is not None and len(self.hall_of_fame):
+            n_warm = max(0, min(pop_size - 1,
+                                int(pop_size * float(getattr(self.cfg, "warm_start_fraction", 0.25)))))
+            warm = self.hall_of_fame.seed_genomes(n_warm, rng, block_size=block)
+        population = warm + [
+            ArchitectureGenome.random(rng, max_layers=max_layers, block_size=block,
+                                      pos_encoding=getattr(self.cfg, "pos_encoding", None))
+            for _ in range(pop_size - len(warm))]
         seen: Dict[str, Candidate] = {}
         history: List[float] = []
         leaderboard: List[Candidate] = []
@@ -1384,7 +2067,36 @@ class NeuralArchitectureSearch:
             champion_flops=best.flops, search_strategy=strategy,
             generations_to_best=best_gen, evaluations=len(seen))
         self._reports.append(report)
+        self._last_report = report
+        # Lifelong memory: remember this champion (and its Pareto elites) so the NEXT search starts
+        # from her best brains. Promotion stays gauntlet-gated — this only seeds future searches.
+        if self.hall_of_fame is not None:
+            self.hall_of_fame.record(report)
         return report
+
+    # ---- champion ensemble: combine the top-k Pareto brains into one model ---- #
+    def champion_ensemble(self, k: int = 3, *, corpus: Optional[Sequence[str]] = None,
+                          steps: Optional[int] = None) -> "EnsembleModel":
+        """Build a real inference-time ensemble of the top-k Pareto-frontier brains (each trained on
+        the corpus), routed by competence. Strictly ≥ the best single brain — test-time intelligence
+        from the diversity the search already discovered. Run :meth:`search` first."""
+        if self._last_report is None:
+            raise RuntimeError("run search() before building the champion ensemble")
+        from nyxara.growth.foundry_models import build_model
+        front = self._last_report.pareto_front or [self._champion]   # type: ignore[list-item]
+        chosen = front[: max(1, int(k))]
+        texts = list(corpus) if corpus is not None else self._collect_corpus()
+        train_steps = int(self.cfg.micro_train_steps if steps is None else steps)
+        members: List[BaseLanguageModel] = []
+        for c in chosen:
+            g = c.genome
+            spec = ModelSpec(kind="genesis", genome=g.to_dict(), n_embd=g.n_embd,
+                             block_size=g.block_size, seed=g.seed, ngram_order=g.ngram_order,
+                             ngram_k=g.ngram_k)
+            model = build_model(spec)
+            model.train_on(texts, steps=train_steps, seed=g.seed)
+            members.append(model)
+        return EnsembleModel(members)
 
     # ---- the champion as a promotable model spec ---- #
     def champion(self) -> Optional[Candidate]:
@@ -1533,16 +2245,36 @@ if __name__ == "__main__":  # pragma: no cover
 
     # every max-level search strategy crowns a champion with a monotonic best-so-far history
     from nyxara.kernel.config import GenesisConfig
-    for strat in ("elitism", "tournament", "regularized"):
-        cfg = GenesisConfig(backend="stdlib", population_size=6, generations=4, micro_train_steps=8,
+    for strat in ("elitism", "tournament", "regularized", "nsga2"):
+        cfg = GenesisConfig(backend="stdlib", population_size=8, generations=4, micro_train_steps=8,
                             block_size=16, max_layers=4, search_strategy=strat,
                             adaptive_mutation=True, novelty_weight=0.5, surrogate=True,
-                            successive_halving=True, hardware_weight=0.1, seed=0)
+                            ucb_beta=0.5, successive_halving=True, hardware_weight=0.1,
+                            hall_of_fame=False, seed=0)
         r = NeuralArchitectureSearch(cfg=cfg, seed_corpus=corpus).search()
         assert r.champion is not None and r.search_strategy == strat
         assert all(r.history[i] <= r.history[i + 1] + 1e-9 for i in range(len(r.history) - 1))
         assert r.to_dict()["evaluations"] >= 1
-    print("search engines       : elitism / tournament / regularized + halving + surrogate ✓")
+    print("search engines       : elitism / tournament / regularized / nsga2 + halving + UCB ✓")
+
+    # lifelong memory: a champion is remembered and warm-starts the next search (disk-persisted)
+    with tempfile.TemporaryDirectory() as d:
+        from nyxara.kernel.config import NyxaraSettings, Profile
+        st = NyxaraSettings.for_profile(Profile.TEST)
+        st.paths.data_dir = Path(d)
+        st.genesis = GenesisConfig(backend="stdlib", population_size=6, generations=2,
+                                   micro_train_steps=6, block_size=16, hall_of_fame=True,
+                                   warm_start_fraction=0.5, seed=0)
+        nas_a = NeuralArchitectureSearch(settings=st, cfg=st.genesis, seed_corpus=corpus)
+        nas_a.search()
+        assert (Path(d) / "genesis" / "hall_of_fame.json").exists()
+        remembered = len(nas_a.hall_of_fame)
+        nas_b = NeuralArchitectureSearch(settings=st, cfg=st.genesis, seed_corpus=corpus)
+        assert len(nas_b.hall_of_fame) == remembered      # memory crossed the process boundary
+        # test-time ensemble of the top Pareto brains, routed by competence
+        ens = nas_a.champion_ensemble(k=3, corpus=corpus)
+        assert ens.param_count() > 0 and ens.perplexity(corpus[0]) >= 0.0
+    print(f"lifelong + ensemble  : Hall-of-Fame warm-start + {len(ens.members)}-brain ensemble ✓")
 
     if _HAS_TORCH:
         print("\n[torch present] a searched neural brain trains from scratch ...")
@@ -1552,21 +2284,34 @@ if __name__ == "__main__":  # pragma: no cover
         after = gm.perplexity(corpus[0])
         print(f"genesis perplexity   : {before:.1f} -> {after:.1f}  (params={gm.param_count()})")
         assert gm.param_count() > 0
-        # exercise the whole upgraded operator palette in one net, plus rich sampling
+        # exercise the whole upgraded operator palette in one net (incl. the frontier ops, RMSNorm,
+        # QK-norm and multi-token prediction), plus rich sampling
         from nyxara.growth.genesis import _GenesisNet  # noqa: F401 — built below
         big = ArchitectureGenome(
-            n_embd=64, block_size=16, pos_encoding="rope", tie_embeddings=True,
-            layers=[LayerGene(op=op) for op in _OPS])
+            n_embd=64, block_size=16, pos_encoding="rope", tie_embeddings=True, n_predict=2,
+            layers=[LayerGene(op=op, n_head=4, norm_type="rmsnorm", qk_norm=True) for op in _OPS])
         bm = GenesisModel(big)
         bm.train_on(corpus, steps=20, seed=2)
         sample = bm.generate("the master", max_tokens=24, temperature=0.8, top_k=20, top_p=0.95)
         print(f"full-palette net     : params={bm.param_count()}  sample={sample!r}")
         assert bm.param_count() > 0
+        print("frontier ops + MTP   : mamba / gla / diff / mla / rmsnorm / qk-norm / multi-token ✓")
         for pe in ("learned", "rope", "alibi"):
             GenesisModel(ArchitectureGenome(n_embd=32, block_size=16, pos_encoding=pe,
                          layers=[LayerGene(op="gqa_attention", n_head=4, n_kv_head=2)])
                          ).train_on(corpus, steps=5, seed=3)
         print("positional schemes   : learned / rope / alibi + grouped-query attention ✓")
+        # KV-cache decode is bit-identical to the full recompute (for lengths ≤ block_size)
+        cnet = GenesisModel(ArchitectureGenome(
+            n_embd=32, block_size=64, pos_encoding="rope",
+            layers=[LayerGene(op="attention", n_head=4), LayerGene(op="selective_ssm"),
+                    LayerGene(op="swiglu")]))
+        cnet.train_on(corpus, steps=5, seed=4)
+        assert cnet.net.cacheable
+        full = cnet.generate("the master", max_tokens=20, greedy=True, use_cache=False)
+        cached = cnet.generate("the master", max_tokens=20, greedy=True, use_cache=True)
+        assert full == cached
+        print("KV-cache decode      : O(1)-per-token incremental decode == full recompute ✓")
     else:
         print("\n[torch absent] neural path skipped; stdlib substrate crowned a champion ✓")
 
