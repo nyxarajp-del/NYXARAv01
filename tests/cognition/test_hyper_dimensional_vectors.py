@@ -221,3 +221,53 @@ def test_top_level_exports():
 
     assert nyxara.LatentSpaceMap is LatentSpaceMap
     assert nyxara.HyperSpace is HyperSpace
+
+
+# -------------------- bounded corpus (FIFO) -------------------- #
+def test_max_corpus_evicts_oldest():
+    lm = LatentSpaceMap(dim=2048, seed=1, max_corpus=2)
+    lm.add("a", {"x": "1"})
+    lm.add("b", {"x": "2"})
+    lm.add("c", {"x": "3"})
+    assert len(lm) == 2
+    assert lm.nearest({"x": "3"}, k=3)  # newest present
+    names = {n for n, _ in lm.nearest({"x": "2"}, k=3)}
+    assert "a" not in names  # oldest evicted
+
+
+def test_forget_removes_item():
+    lm = LatentSpaceMap(dim=1024, seed=1)
+    lm.add("a", {"x": "1"})
+    assert lm.forget("a")
+    assert not lm.forget("a")
+    assert len(lm) == 0
+
+
+# -------------------- orchestrator integration -------------------- #
+def test_core_wires_hyperdimensional_faculty():
+    from nyxara import NyxaraCore
+
+    core = NyxaraCore()
+    assert isinstance(core.hyperdimensional, LatentSpaceMap)
+
+
+def test_core_ingests_turns_into_latent_space():
+    from nyxara import Authority, NyxaraCore
+
+    core = NyxaraCore()
+    core.process("market trends in technology stocks", authority=Authority.OWNER)
+    core.process("energy sector and oil price behaviour", authority=Authority.OWNER)
+    assert len(core.hyperdimensional) == 2
+    # a repeated stimulus is recognised — not novel — once it has been seen
+    seen = core.latent_novelty("market trends in technology stocks")
+    assert not seen.is_novel
+
+
+def test_core_latent_public_api():
+    from nyxara import Authority, NyxaraCore
+
+    core = NyxaraCore()
+    core.process("buy technology shares now", authority=Authority.OWNER)
+    assert core.map_latent_space("a probe sentence") is not None
+    assert isinstance(core.latent_recall("technology equities", k=2), list)
+    assert core.latent_patterns() is not None

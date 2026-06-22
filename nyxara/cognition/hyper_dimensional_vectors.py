@@ -408,13 +408,17 @@ class LatentSpaceMap:
     dim, seed:        forwarded to the underlying :class:`HyperSpace`.
     novelty_threshold: novelty score (``1 − max_sim``) above which a probe is "novel".
     num_levels:       resolution of the continuous-value encoder (level hypervectors).
+    max_corpus:       optional cap on ingested items; the oldest is evicted (FIFO) past it,
+                      so a long-running live stream stays bounded. ``None`` ⇒ unbounded.
     """
 
     def __init__(self, *, dim: int = 10000, seed: int = 42,
-                 novelty_threshold: float = 0.85, num_levels: int = 64) -> None:
+                 novelty_threshold: float = 0.85, num_levels: int = 64,
+                 max_corpus: Optional[int] = None) -> None:
         self.space = HyperSpace(dim, seed=seed)
         self.items = ItemMemory(self.space)       # atomic vocabulary (roles + fillers)
         self.novelty_threshold = float(novelty_threshold)
+        self.max_corpus = int(max_corpus) if max_corpus else None
         self.num_levels = int(num_levels)
         self._corpus: Dict[str, Hypervector] = {}  # ingested datapoints
         self._levels: Optional[List[Hypervector]] = None
@@ -536,10 +540,20 @@ class LatentSpaceMap:
 
     # ---- corpus ingestion ---- #
     def add(self, name: str, data: Any) -> Hypervector:
-        """Encode ``data`` and store it in the corpus under ``name``."""
+        """Encode ``data`` and store it in the corpus under ``name`` (FIFO-capped if set)."""
         vec = self.encode(data)
+        if name in self._corpus:
+            del self._corpus[name]  # re-insert so refresh moves it to newest
         self._corpus[name] = vec
+        if self.max_corpus is not None:
+            while len(self._corpus) > self.max_corpus:
+                oldest = next(iter(self._corpus))
+                del self._corpus[oldest]
         return vec
+
+    def forget(self, name: str) -> bool:
+        """Drop a corpus item; returns True if it was present."""
+        return self._corpus.pop(name, None) is not None
 
     def __len__(self) -> int:
         return len(self._corpus)
