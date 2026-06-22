@@ -311,6 +311,11 @@ class NyxaraCore:
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
+        # Fractal Temporal Hierarchies — the multi-dimensional mind: loops within loops at
+        # three time scales at once. A millisecond hardware/network monitor (Layer 1) nested
+        # inside a second-scale turn observer (Layer 2) nested inside a day/month "Master AI"
+        # (Layer 3) that watches how the Master changes and, gated, adjusts goals/drives.
+        self.fractal_temporal = self._build_fractal_temporal()
         # Level 1 — Real Brain Core: the Global Workspace (GWT bottleneck) + thought
         # generator that submits candidate thoughts from all active sources, runs one
         # arbitration cycle, and surfaces the top-N winners to the reason step.
@@ -933,6 +938,24 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
             return None
 
+    def _build_fractal_temporal(self) -> Any:
+        """Fractal Temporal Hierarchies — three nested time-scale loops wired to this core.
+
+        Off when the feature flag disables it. The Master AI (Layer 3) reads this core's
+        memory/goals/soul/affect; its adjustments are fail-closed gated (it may touch goal
+        priorities and drive setpoints only — never sealed character). The live async loops
+        only auto-start when ``temporal.autostart`` is set; otherwise the hierarchy is driven
+        on demand (its ``meso`` layer still records every turn from ``_finish``)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().temporal
+            if not getattr(cfg, "enabled", True):
+                return None
+            from nyxara.temporal.fractal import FractalTemporalHierarchy
+            return FractalTemporalHierarchy.from_core(self)
+        except Exception:  # noqa: BLE001 — the fractal mind is a capability, never required
+            return None
+
     def _build_workspace(self) -> Any:
         """Level 1 — the Global Workspace bottleneck: thoughts compete; only the most
         salient win and enter the reason step (Baars / Dehaene GWT)."""
@@ -1227,7 +1250,19 @@ class NyxaraCore:
     def proactive_context(self) -> Dict[str, Any]:
         """The live context fed to the proactive detectors (goals + skill tree)."""
         fn = getattr(self, "_proactive_context", None)
-        return fn() if fn is not None else {"goals": self.goals, "skilltree": self.skilltree}
+        ctx = fn() if fn is not None else {"goals": self.goals, "skilltree": self.skilltree}
+        # fold in the Master AI's latest long-horizon awareness so her self-directed mind can
+        # act on what has been quietly observed over days, not just the present moment.
+        ft = getattr(self, "fractal_temporal", None)
+        latest = ft.macro.latest if ft is not None else None
+        if latest is not None:
+            try:
+                ctx = dict(ctx)
+                ctx["awareness"] = latest.summary
+                ctx["awareness_recommendations"] = list(latest.recommendations)
+            except Exception:  # noqa: BLE001
+                pass
+        return ctx
 
     def _build_capability_foundry(self) -> Any:
         """Level 15 — CapabilityFoundry: forge brand-new runnable tools from capability gaps."""
@@ -1624,6 +1659,11 @@ class NyxaraCore:
         thoughts: List[str] = []
         gates: Dict[str, str] = {}
         self._engaged = True   # the default-mode stream goes quiet while a turn runs
+        # remember this turn's start/inputs so the fractal Layer-2 observer (recorded in
+        # _finish, the single exit point) can clock latency and credit the right authority.
+        self._turn_start = time.time()
+        self._turn_stimulus = stimulus
+        self._turn_authority = authority
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
         if not self.oversight.gate():
@@ -3293,9 +3333,21 @@ class NyxaraCore:
         self._engaged = False   # the turn is done; idle cognition may resume
         self._last_interaction = time.time()   # idle is measured from the last completed turn
         self._apply_affect(disp)
-        return CycleResult(id=cid, disposition=disp, response=response, reason=reason,
-                           candidate=candidate, gates=gates, thoughts=thoughts,
-                           action_id=action_id, tool=tool, tool_value=tool_value)
+        result = CycleResult(id=cid, disposition=disp, response=response, reason=reason,
+                             candidate=candidate, gates=gates, thoughts=thoughts,
+                             action_id=action_id, tool=tool, tool_value=tool_value)
+        # Fractal Layer 2: record this turn (prompt read, code written) on the seconds-scale
+        # observer. Best-effort — the multi-dimensional mind never delays or breaks a turn.
+        ft = getattr(self, "fractal_temporal", None)
+        if ft is not None:
+            try:
+                latency = max(0.0, time.time() - getattr(self, "_turn_start", time.time()))
+                auth = getattr(getattr(self, "_turn_authority", None), "value", "")
+                ft.meso.observe(getattr(self, "_turn_stimulus", ""), result,
+                                latency_s=latency, authority=auth)
+            except Exception:  # noqa: BLE001 — telemetry is never allowed to break the cycle
+                pass
+        return result
 
     def _apply_affect(self, disp: Disposition) -> None:
         """Colour the soul's transient mood by the turn's outcome, then relax toward the
@@ -3545,6 +3597,17 @@ class NyxaraCore:
             try:
                 rep["meta_learning"] = self.meta_learning_engine.summary()
             except Exception:  # noqa: BLE001 — meta-learning report is best-effort, never fatal
+                pass
+        if getattr(self, "fractal_temporal", None) is not None:
+            try:
+                ft = self.fractal_temporal
+                rep["fractal_temporal"] = {
+                    "ticks": ft.ticks,
+                    "meso_turns": ft.meso.observed,
+                    "awareness": (ft.macro.latest.summary if ft.macro.latest else None),
+                    "macro": ft.macro.report(),
+                }
+            except Exception:  # noqa: BLE001 — fractal stats are best-effort, never fatal
                 pass
         try:
             rep["reasoner"] = type(self.reasoner).__name__ if not callable(self.reasoner) \
