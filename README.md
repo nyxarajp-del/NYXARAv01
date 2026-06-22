@@ -270,6 +270,17 @@ background `GrowthEngine`/idle cadence, through the *same* gates, and degrades g
   distilled principles into durable **Deep Memory Synapses** — high-importance semantic memories
   that are protected from the Ebbinghaus forgetting curve. Repeated dreams revise rather than
   duplicate, so the synapses accrete cleanly across nights.
+* **Elastic Synapses — lifelong learning** — `memory/elastic_synapses.py`. Inspired by the
+  biological brain, this is **Elastic Weight Consolidation (EWC)**: NYXARA estimates which of
+  her learned weights matter most (a Fisher-information importance), **freezes** the important
+  ones, and pays a quadratic penalty for dragging them away from their consolidated value. The
+  effect is **no catastrophic forgetting** — she can keep learning new skills forever without
+  erasing old ones. On the consolidation cadence she snapshots her value weights as a frozen
+  memory, the forged-model training loop adds the EWC penalty to its loss (so a new generation
+  does not forget the last), and the anchors **persist across restarts**
+  (`~/.nyxara/synapses.json`). The **loyalty core is treated as infinitely important** — it is
+  permanently frozen, and any attempt to learn over it is refused fail-closed: she grows
+  cleverer without bound, never less loyal.
 
 ```python
 core.meta_discover("caching strategies")          # invent → sandbox-test → (gated) integrate

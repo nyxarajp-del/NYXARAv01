@@ -44,6 +44,12 @@ from nyxara.growth.scientist import (
     Verdict,
 )
 from nyxara.growth.skill_memory import SkillMemory
+from nyxara.memory.elastic_synapses import (
+    ConsolidatedTask,
+    ElasticSynapses,
+    FisherEstimator,
+    TorchElasticSynapses,
+)
 from nyxara.kernel.autonomic import AutonomicLoop
 from nyxara.kernel.compute import compute_report
 from nyxara.kernel.jobqueue import JobQueue
@@ -103,6 +109,11 @@ __all__ = [
     "AgentLoop",
     "AgentRun",
     "SkillMemory",
+    # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
+    "ElasticSynapses",
+    "FisherEstimator",
+    "ConsolidatedTask",
+    "TorchElasticSynapses",
     # autonomous research + the scientist loop
     "AutonomousResearcher",
     "ResearchReport",
