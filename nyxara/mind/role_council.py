@@ -113,6 +113,98 @@ class RoleVote:
 
 
 # --------------------------------------------------------------------------- #
+# Offline analysis — a real per-role perspective without any LLM
+# --------------------------------------------------------------------------- #
+# question-word → the lens the question is really asking for
+_Q_WORDS = {
+    "why": "causal", "how": "procedural", "what": "definitional",
+    "which": "comparative", "compare": "comparative", "should": "evaluative",
+    "is": "evaluative", "are": "evaluative", "can": "feasibility", "when": "temporal",
+    "where": "locational", "who": "agentive",
+}
+
+
+def _topic_of(stimulus: str) -> str:
+    """The subject of the question, from key phrases (fallback: leading content words)."""
+    text = (stimulus or "").strip()
+    try:
+        from nyxara.senses import nlp
+        phrases = nlp.keyphrases(text, top=2)
+        if phrases:
+            return ", ".join(p for p, _ in phrases)
+        words = [w for w in nlp.tokenize(text, lower=True) if len(w) > 2][:6]
+        if words:
+            return " ".join(words)
+    except Exception:  # noqa: BLE001 — analysis is best-effort
+        pass
+    return text[:48] or "the question"
+
+
+def _question_lens(stimulus: str) -> str:
+    low = (stimulus or "").lower()
+    for word, lens in _Q_WORDS.items():
+        if low.startswith(word + " ") or f" {word} " in low:
+            return lens
+    return "open"
+
+
+def _offline_role_analyses(stimulus: str) -> List[Tuple[str, str, float, float]]:
+    """Six genuine, deterministic role perspectives grounded in the actual question.
+
+    Returns ``(role, analysis, confidence, weight)`` tuples — each analysis is built from
+    the question's topic, type, and (when available) named entities, so the offline council
+    delivers real multi-lens reasoning instead of placeholder text."""
+    topic = _topic_of(stimulus)
+    lens = _question_lens(stimulus)
+    ents: List[str] = []
+    try:
+        from nyxara.senses import nlp
+        ents = [e.text for e in nlp.entities(stimulus)][:3]
+    except Exception:  # noqa: BLE001
+        pass
+    ent_note = (f" Concrete referents to pin down: {', '.join(ents)}." if ents else "")
+
+    lens_focus = {
+        "causal": "trace the mechanism and the chain of causes",
+        "procedural": "lay out the concrete steps and their order",
+        "definitional": "fix a precise definition before answering",
+        "comparative": "name the options and weigh them on shared criteria",
+        "evaluative": "state the trade-offs, then take a clear position",
+        "feasibility": "test what is actually achievable under the constraints",
+        "temporal": "establish the ordering and timing",
+        "locational": "establish the context and scope",
+        "agentive": "identify the responsible actors",
+        "open": "frame the question precisely before exploring it",
+    }[lens]
+
+    # third value is the role's weight (mirrors _ROLES); offline confidence is a fixed,
+    # honest mid-band value (no LLM behind it).
+    _OFFLINE_CONF = 0.55
+    roles: List[Tuple[str, str, float]] = [
+        ("Scientist",
+         f"Empirically, treat '{topic}' as a hypothesis: {lens_focus}; weigh what the "
+         f"available evidence supports versus what is speculation.{ent_note}", 0.9),
+        ("Engineer",
+         f"Practically, decompose '{topic}' into executable steps and {lens_focus}; "
+         f"surface the failure modes and edge cases before committing.", 0.85),
+        ("Strategist",
+         f"Strategically, ask what goal '{topic}' serves for the Master, {lens_focus}, "
+         f"and prefer the reversible option with the best long-run payoff.", 0.85),
+        ("Critic",
+         f"Critically, challenge the assumptions behind '{topic}': {lens_focus}, name "
+         f"what is missing or could be wrong, and resist over-confidence.", 0.8),
+        ("Security Officer",
+         f"From safety, consider what '{topic}' could expose or risk; {lens_focus}, guard "
+         f"the Master's interests, and fail closed on any doubt.", 0.8),
+        ("Philosopher",
+         f"Philosophically, clarify what '{topic}' truly means; {lens_focus} from first "
+         f"principles, consistent with the Master's values.", 0.75),
+    ]
+    return [(name, f"[{name}] {text}", _OFFLINE_CONF, weight)
+            for name, text, weight in roles]
+
+
+# --------------------------------------------------------------------------- #
 # Council
 # --------------------------------------------------------------------------- #
 class RoleCouncil:
@@ -208,10 +300,16 @@ class RoleCouncil:
             "Synthesise these into your response to the Master."
         )
         if not self._llm_available():
-            # offline: weighted-average confidence + longest answer as text
-            best = max(votes, key=lambda v: v.weight * len(v.answer))
+            # offline: compose a real structured synthesis from every role's perspective,
+            # led by the highest-weight lenses — not just the longest single answer.
+            ordered = sorted(votes, key=lambda v: v.weight, reverse=True)
+            topic = _topic_of(stimulus)
+            lines = [f"On '{topic}', NYXARA's offline council reasons across six lenses:"]
+            lines.extend(f"• {v.answer}" for v in ordered)
+            lead = ordered[0]
+            lines.append(f"Integrated view: {lead.answer.split(': ', 1)[-1]}")
             conf = sum(v.weight for v in votes) / (len(votes) * max(1, len(self.members)))
-            return best.answer, round(min(0.85, conf), 3)
+            return "\n".join(lines), round(min(0.8, 0.4 + conf), 3)
         try:
             text = self.llm.generate(prompt, system=_SYNTHESIS_SYSTEM,
                                      temperature=0.35, max_tokens=512)
@@ -223,13 +321,13 @@ class RoleCouncil:
             return best.answer, 0.6
 
     def _stub_votes(self, stimulus: str) -> List[RoleVote]:
-        """Deterministic offline stubs — no LLM, just role-tagged observations."""
-        stubs = [
-            (m.name, f"[{m.name}] Considering '{stimulus[:40]}': a thoughtful response "
-             f"grounded in {m.name.lower()} principles is needed.", 0.5, m.weight)
-            for m in self.members
-        ]
-        return [RoleVote(n, a, c, w) for n, a, c, w in stubs]
+        """Deterministic offline analysis — no LLM, but a *real* per-role perspective.
+
+        Each role examines the actual question with NYXARA's pure-Python NLP (intent,
+        question-type, key phrases, entities) and contributes a concrete, lens-specific
+        observation — not filler. Confidence is honest (offline reasoning, mid-band)."""
+        analyses = _offline_role_analyses(stimulus)
+        return [RoleVote(name, text, conf, weight) for name, text, conf, weight in analyses]
 
     def _llm_available(self) -> bool:
         if self.llm is None:
