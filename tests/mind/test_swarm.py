@@ -193,3 +193,45 @@ def test_no_memory_is_noop():
     result = swarm.deliberate("no memory here")   # must not raise
     assert result.answer
     assert swarm._find_record() is None
+
+
+# --------------------------------------------------------------------------- #
+# offline proposals are REAL lens-specific analysis, not placeholder filler
+# --------------------------------------------------------------------------- #
+def test_offline_proposals_are_grounded_not_filler():
+    from nyxara.mind.swarm import _offline_persona_proposal, Persona
+
+    p = Persona(name="Engineer", system="…", weight=0.85)
+    text = _offline_persona_proposal(p, "How should we encrypt user data at rest?", 1)
+    assert "encrypt" in text.lower() or "data" in text.lower()   # grounded in the topic
+    assert "build it and where it would fail" in text            # the Engineer's real lens
+    assert "grounded in engineer principles" not in text         # old filler is gone
+
+
+def test_offline_proposal_adapts_to_question_type():
+    from nyxara.mind.swarm import _offline_persona_proposal, Persona
+
+    p = Persona(name="Scientist", system="…", weight=0.9)
+    why = _offline_persona_proposal(p, "Why does the cache thrash?", 1)
+    how = _offline_persona_proposal(p, "How do I fix the cache?", 1)
+    assert "mechanism" in why
+    assert "steps" in how
+    assert why != how
+
+
+def test_offline_rounds_visibly_differ():
+    from nyxara.mind.swarm import _offline_persona_proposal, Persona
+
+    p = Persona(name="Critic", system="…", weight=0.8)
+    r1 = _offline_persona_proposal(p, "Should we ship now?", 1)
+    r2 = _offline_persona_proposal(p, "Should we ship now?", 2)
+    assert r1 != r2
+    assert "Refining after the debate" in r2
+
+
+def test_offline_synthesis_is_structured_multi_lens():
+    swarm = _offline(rounds=2)
+    answer = swarm.deliberate("How should we encrypt user data at rest?").answer
+    assert "lenses" in answer
+    assert "NYXARA's synthesis:" in answer
+    assert answer.count("•") >= 3                       # several persona positions integrated
