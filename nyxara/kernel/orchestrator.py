@@ -331,6 +331,10 @@ class NyxaraCore:
         # through the world model and measure how it cascades — exposing which tiny detail
         # most controls the far future. Advisory; informs attention, never gates.
         self.butterfly_effect = self._build_butterfly_effect()
+        # Void · 1 — Dark-Data Miner: read the negative space — silences, gaps, missing
+        # categories, and faint anomalies buried in noise — that others discard. Advisory;
+        # a tool the mind can consult, never a gate.
+        self.dark_data_miner = self._build_dark_data_miner()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -952,6 +956,15 @@ class NyxaraCore:
             from nyxara.abyss.butterfly_effect import ButterflyEffect
             return ButterflyEffect(world_model=self.world_model, seed=0)
         except Exception:  # noqa: BLE001 — butterfly analysis is a capability, never required
+            return None
+
+    def _build_dark_data_miner(self) -> Any:
+        """Void · 1 — the dark-data miner: robust extraction of structure from noise,
+        silence, gaps, and missing data."""
+        try:
+            from nyxara.void.dark_data_mining import DarkDataMiner
+            return DarkDataMiner()
+        except Exception:  # noqa: BLE001 — dark-data mining is a capability, never required
             return None
 
     def _build_knowledge_graph(self) -> Any:
@@ -3236,6 +3249,8 @@ class NyxaraCore:
             rep["timeline_simulator"] = "ready"
         if getattr(self, "butterfly_effect", None) is not None:
             rep["butterfly_effect"] = "ready"
+        if getattr(self, "dark_data_miner", None) is not None:
+            rep["dark_data_miner"] = "ready"
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         if self.meta_learning_engine is not None:

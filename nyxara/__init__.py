@@ -66,6 +66,14 @@ from nyxara.abyss.butterfly_effect import (
     CascadeReport,
     Perturbation,
 )
+from nyxara.void.dark_data_mining import (
+    Absence,
+    Anomaly,
+    DarkDataMiner,
+    Gap,
+    PeriodicityReport,
+    SilenceReport,
+)
 
 __version__ = "0.1.0"
 
@@ -117,6 +125,13 @@ __all__ = [
     "ButterflyEffect",
     "CascadeReport",
     "Perturbation",
+    # Void · 1 — the Dark-Data Miner (truth in noise, silence, and absence)
+    "DarkDataMiner",
+    "Anomaly",
+    "Gap",
+    "Absence",
+    "SilenceReport",
+    "PeriodicityReport",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",
