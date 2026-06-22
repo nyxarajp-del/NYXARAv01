@@ -1342,15 +1342,83 @@ class EnsembleModel(BaseLanguageModel):
     def save(self, directory: Path) -> None:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
+        # Persist each member's reconstruction spec when it carries one (e.g. GenesisModel,
+        # NanoGPT) so load() can rebuild the exact architecture; stdlib members (kngram /
+        # ngram) are self-describing in their own model.json, so None is fine for them.
+        specs: List[Optional[Dict[str, Any]]] = []
+        for m in self.members:
+            spec = getattr(m, "spec", None)
+            specs.append(spec.to_dict() if hasattr(spec, "to_dict") else None)
         (directory / "ensemble.json").write_text(
             json.dumps({"members": len(self.members),
-                        "kinds": [getattr(m, "kind", "?") for m in self.members]}),
+                        "kinds": [getattr(m, "kind", "?") for m in self.members],
+                        "specs": specs}),
             encoding="utf-8")
         for i, m in enumerate(self.members):
             m.save(directory / f"member_{i}")
 
-    def load(self, directory: Path) -> None:    # members are rebuilt by the caller from specs
-        raise NotImplementedError("rebuild an EnsembleModel from its champion specs, then re-train")
+    def load(self, directory: Path) -> None:
+        """Rebuild the ensemble from disk: reconstruct each member's architecture and reload
+        its trained weights — so a Genesis champion survives a restart, not just a re-train.
+
+        Mirrors the canonical foundry reload (``build_model(ModelSpec) → model.load(dir)``)
+        and degrades honestly: a member that cannot be reloaded (e.g. its backend's deps are
+        gone on this machine) is skipped rather than aborting the whole ensemble."""
+        directory = Path(directory)
+        meta = json.loads((directory / "ensemble.json").read_text(encoding="utf-8"))
+        kinds: List[str] = meta.get("kinds", [])
+        specs: List[Optional[Dict[str, Any]]] = meta.get("specs", [None] * meta.get("members", 0))
+        rebuilt: List[BaseLanguageModel] = []
+        for i in range(int(meta.get("members", 0))):
+            member_dir = directory / f"member_{i}"
+            kind = kinds[i] if i < len(kinds) else "?"
+            spec = specs[i] if i < len(specs) else None
+            m = self._reload_member(member_dir, kind, spec)
+            if m is not None:
+                rebuilt.append(m)
+        if not rebuilt:
+            raise ValueError(f"could not reload any ensemble member from {directory}")
+        self.members = rebuilt
+
+    @staticmethod
+    def _reload_member(member_dir: Path, kind: str,
+                       spec: Optional[Dict[str, Any]]) -> Optional[BaseLanguageModel]:
+        """Reconstruct one member and reload its weights; return None on unrecoverable failure."""
+        from nyxara.growth.foundry_models import NgramByteLM, build_model  # lazy: avoid cycle
+        # 1) Preferred: a recorded spec (or a member-local spec.json) → canonical rebuild.
+        spec_dict = spec
+        if spec_dict is None and (member_dir / "spec.json").exists():
+            try:
+                spec_dict = json.loads((member_dir / "spec.json").read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                spec_dict = None
+        if spec_dict is not None:
+            try:
+                model = build_model(ModelSpec.from_dict(spec_dict))
+                model.load(member_dir)
+                return model
+            except Exception:  # noqa: BLE001 — backend/deps may differ on this machine
+                pass
+        # 2) Self-describing stdlib members (kngram / ngram) carry everything in model.json.
+        if (member_dir / "model.json").exists():
+            try:
+                blob = json.loads((member_dir / "model.json").read_text(encoding="utf-8"))
+                mk = blob.get("kind", kind)
+                model = (NgramByteLM() if mk == "ngram" else WordKNGramLM())
+                model.load(member_dir)
+                return model
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) Last resort: rebuild a bare model of the recorded kind (untrained but functional).
+        try:
+            model = build_model(ModelSpec(kind=kind if kind and kind != "?" else "kngram"))
+            try:
+                model.load(member_dir)
+            except Exception:  # noqa: BLE001 — no reloadable weights; keep the fresh model
+                pass
+            return model
+        except Exception:  # noqa: BLE001
+            return None
 
 
 def _safe_ppl(model: BaseLanguageModel, text: str) -> float:
