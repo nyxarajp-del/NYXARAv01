@@ -332,3 +332,32 @@ def test_recipe_learner_persists_through_forge(tmp_path):
     reloaded = _foundry(tmp_path)                                       # same root -> manifest
     assert reloaded.recipe_learner._needs                              # learned mapping survived
     assert "text_reverse" in reloaded.recipe_learner._keys
+
+
+# --------------------------------------------------------------------------- #
+# parametric data-op synthesizer — real tools for gaps that used to echo
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("need,shape", [
+    ("give me the initials of a name", "initials"),
+    ("count the number of lines", "count_lines"),
+    ("find the smallest item", "min_item"),
+    ("compute the cube of a value", "cube"),
+])
+def test_parametric_data_op_resolves_non_generic(tmp_path, need, shape):
+    """Gaps the fixed table misses now synthesize a real recipe, not the echo scaffold."""
+    plan = _foundry(tmp_path).plan(need)
+    assert plan.shape == shape
+    assert plan.shape != "generic"
+
+
+@pytest.mark.parametrize("need", [
+    "give me the initials of a name",
+    "count the number of lines",
+    "find the smallest item",
+    "compute the cube of a value",
+])
+def test_parametric_data_op_forges_working_tool(tmp_path, need):
+    """The synthesized data-op tools pass their own example and deploy (no echo fallback)."""
+    res = _foundry(tmp_path).forge(need, authority=Authority.OWNER)
+    assert res.deployed and res.test_passed
+    assert res.benchmark_score == pytest.approx(1.0)

@@ -13,6 +13,7 @@ from pathlib import Path
 from nyxara.growth.bootstrap import (
     IDENTITY_SEED,
     QWEN3_4B,
+    build_seed_corpus,
     ensure_primary_model,
     primary_model_present,
 )
@@ -107,3 +108,38 @@ def test_forged_brain_is_served_by_self_provider(tmp_path: Path):
 def test_identity_seed_is_loyal_and_nonempty():
     assert IDENTITY_SEED and all(isinstance(t, str) and t for t in IDENTITY_SEED)
     assert any("JP" in t or "Master" in t for t in IDENTITY_SEED)
+
+
+# --------------------------------------------------------------------------- #
+# build_seed_corpus — the always-on (stdlib) base brain is grounded in real law
+# --------------------------------------------------------------------------- #
+def test_seed_corpus_is_richer_than_tiny_seed():
+    corpus = build_seed_corpus()
+    assert len(corpus) > 3 * len(IDENTITY_SEED)         # far more than eight lines
+    assert len(corpus) == len(set(corpus))              # de-duplicated, stable
+
+
+def test_seed_corpus_grounded_in_rules_and_values():
+    joined = " ".join(build_seed_corpus()).lower()
+    for kw in ("jp", "jaypal", "loyalty", "corrigib", "allegiance",
+               "transparency", "sovereign"):
+        assert kw in joined, kw
+
+
+def test_seed_corpus_accepts_extra_and_dedups():
+    base = build_seed_corpus()
+    extended = build_seed_corpus(extra=["a brand new lived fact", IDENTITY_SEED[0]])
+    assert "a brand new lived fact" in extended
+    assert len(extended) == len(set(extended))          # the duplicate seed was folded out
+    assert len(extended) == len(base) + 1
+
+
+def test_richer_corpus_makes_a_stronger_offline_brain():
+    """A kngram brain trained on the grounded corpus scores a rule-derived sentence better
+    than one trained on the tiny seed — a measurable capability gain, not just more text."""
+    from nyxara.growth.foundry_models import WordKNGramLM
+
+    probe = "absolute allegiance to master jp above all else"
+    tiny = WordKNGramLM(order=3); tiny.train_on(IDENTITY_SEED)
+    rich = WordKNGramLM(order=3); rich.train_on(build_seed_corpus())
+    assert rich.perplexity(probe) < tiny.perplexity(probe)

@@ -512,6 +512,41 @@ def test_ensemble_perplexity_is_best_member():
     assert ens.perplexity(text) == pytest.approx(best_member)   # routes to its strongest brain
 
 
+def test_ensemble_save_load_roundtrip(tmp_path):
+    """A saved ensemble champion must reload from disk (architecture + weights), not only
+    be re-trainable — EnsembleModel.load() is real, not a NotImplementedError stub."""
+    from nyxara.growth.foundry_models import WordKNGramLM
+
+    ens = EnsembleModel([WordKNGramLM(order=3), WordKNGramLM(order=4)])
+    ens.train_on(_CORPUS, steps=0)
+    text = _CORPUS[0]
+    pp_before = ens.perplexity(text)
+
+    ens.save(tmp_path)
+    reloaded = EnsembleModel([WordKNGramLM(order=2)])    # placeholder, replaced by load()
+    reloaded.load(tmp_path)
+
+    assert len(reloaded.members) == len(ens.members)
+    assert reloaded.perplexity(text) == pytest.approx(pp_before, abs=1e-6)
+    assert isinstance(reloaded.generate("the master", max_tokens=8), str)
+
+
+def test_ensemble_load_skips_unrecoverable_members(tmp_path):
+    """If one member's directory is corrupted, load() still rebuilds the rest instead of
+    aborting the whole ensemble."""
+    from nyxara.growth.foundry_models import WordKNGramLM
+
+    ens = EnsembleModel([WordKNGramLM(order=3), WordKNGramLM(order=4)])
+    ens.train_on(_CORPUS, steps=0)
+    ens.save(tmp_path)
+    # corrupt the first member's saved state
+    (tmp_path / "member_0" / "model.json").write_text("{ not json", encoding="utf-8")
+
+    reloaded = EnsembleModel([WordKNGramLM(order=2)])
+    reloaded.load(tmp_path)
+    assert 1 <= len(reloaded.members) <= 2               # at least the intact member survives
+
+
 def test_inherit_weights_is_noop_without_torch():
     # without torch the network-morphism transfer is a safe no-op (returns 0 copied tensors)
     if not _HAS_TORCH:

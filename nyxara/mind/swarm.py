@@ -26,7 +26,7 @@ from itertools import combinations
 from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.mind.council import _jaccard          # reuse the council's similarity measure
-from nyxara.mind.role_council import _ROLES        # reuse the six seed personas
+from nyxara.mind.role_council import _ROLES, _question_lens, _topic_of  # reuse seed personas + NLP
 
 __all__ = ["Persona", "PersonaScore", "SwarmRound", "SwarmResult", "DeliberativeSwarm"]
 
@@ -71,6 +71,50 @@ _SPECIALIST_DOMAINS: List[Tuple[Tuple[str, ...], Tuple[str, str]]] = [
       "attack surface, exploitation, blast radius, and concrete mitigations. Respond concisely — "
       "one to three sentences.")),
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Offline proposals — a real per-persona position without any LLM
+# --------------------------------------------------------------------------- #
+# persona-name → the concrete lens it argues from (seed roles + the spawnable specialists)
+_PERSONA_LENS = {
+    "Scientist": "what the evidence supports versus mere speculation",
+    "Engineer": "how to build it and where it would fail",
+    "Strategist": "the goal it serves and the most reversible path",
+    "Critic": "the weak assumptions and what is missing",
+    "Security Officer": "what it could expose and how to fail closed",
+    "Philosopher": "what it truly means from first principles",
+    "Cryptographer": "keys, threat models, and where naive schemes break",
+    "Jurist": "rights, obligations, precedent, and jurisdictional risk",
+    "Physician": "evidence, mechanisms, safety, and outcomes",
+    "Economist": "costs, incentives, and second-order effects",
+    "Security Researcher": "attack surface, blast radius, and concrete mitigations",
+}
+
+_LENS_MOVE = {
+    "causal": "trace the mechanism behind it",
+    "procedural": "lay out the concrete steps",
+    "definitional": "pin down a precise definition",
+    "comparative": "weigh the options on shared criteria",
+    "evaluative": "state the trade-offs and take a position",
+    "feasibility": "test what is actually achievable",
+    "temporal": "establish the ordering and timing",
+    "locational": "establish the context and scope",
+    "agentive": "identify the responsible actors",
+    "open": "frame the problem precisely",
+}
+
+
+def _offline_persona_proposal(persona: Persona, problem: str, round_idx: int) -> str:
+    """A deterministic, lens-specific position grounded in the problem — not filler."""
+    topic = _topic_of(problem)
+    move = _LENS_MOVE.get(_question_lens(problem), "frame the problem precisely")
+    lens = _PERSONA_LENS.get(persona.name, f"the {persona.name.lower()} angle on the problem")
+    if round_idx <= 1:
+        return (f"[{persona.name} r{round_idx}] On '{topic}', focus on {lens}; "
+                f"first {move}.")
+    return (f"[{persona.name} r{round_idx}] Refining after the debate on '{topic}': "
+            f"{lens} — the decisive step is to {move}.")
 
 
 # --------------------------------------------------------------------------- #
@@ -348,9 +392,12 @@ class DeliberativeSwarm:
             return ""
 
     def _stub_proposal(self, persona: Persona, problem: str, round_idx: int) -> str:
-        """Deterministic offline proposal — round-indexed so rounds visibly differ."""
-        return (f"[{persona.name} r{round_idx}] On '{problem[:40]}': a refined position "
-                f"grounded in {persona.name.lower()} principles.")
+        """Deterministic offline proposal — a *real*, lens-specific position (no LLM).
+
+        Each persona analyses the actual problem through its own lens (grounded in the
+        question's topic and type via pure-Python NLP), and rounds visibly deepen: round 1
+        states a position, later rounds refine it after the debate."""
+        return _offline_persona_proposal(persona, problem, round_idx)
 
     # ---------------------------------------------------------------------- #
     # synthesis + scoring
@@ -368,11 +415,20 @@ class DeliberativeSwarm:
         mean_w = (sum(p.weight for p in personas) / len(personas)) if personas else 0.0
         agreement = self._agreement(final)
         if not self._llm_available():
-            best = max(personas, key=lambda p: p.weight * len(final.get(p.name, "")),
-                       default=None)
-            text = (final.get(best.name, "") if best is not None else "") \
-                or f"After {self.rounds} rounds the swarm converged on: {problem[:60]}"
-            return text, round(min(0.85, mean_w * agreement), 3)
+            # offline: compose a real integrated synthesis from every final position,
+            # led by the highest-weight persona — not just the longest single proposal.
+            ordered = sorted((p for p in personas if final.get(p.name)),
+                             key=lambda p: p.weight, reverse=True)
+            if not ordered:
+                return (f"After {self.rounds} rounds the swarm converged on: "
+                        f"{_topic_of(problem)}"), round(min(0.85, mean_w * agreement), 3)
+            topic = _topic_of(problem)
+            lines = [f"On '{topic}', the swarm debated {self.rounds} round(s) "
+                     f"across {len(ordered)} lenses (agreement {agreement:.2f}):"]
+            lines.extend(f"• {final[p.name]}" for p in ordered)
+            lead = ordered[0]
+            lines.append(f"NYXARA's synthesis: {final[lead.name].split(': ', 1)[-1]}")
+            return "\n".join(lines), round(min(0.85, mean_w * agreement), 3)
 
         block = "\n\n".join(f"[{p.name}]\n{final.get(p.name, '')}" for p in personas)
         prompt = (f"The Master's problem:\n{problem}\n\n"

@@ -56,6 +56,29 @@ from nyxara.kernel.orchestrator import (
 from nyxara.knowledge import KnowledgeBase
 from nyxara.mind.cost import UsageLedger
 from nyxara.mind.strategic import StrategicAnalysis, StrategicIntelligence
+from nyxara.abyss.timeline_simulator import (
+    ActionOutcome,
+    TimelineReport,
+    TimelineSimulator,
+)
+from nyxara.abyss.butterfly_effect import (
+    ButterflyEffect,
+    CascadeReport,
+    Perturbation,
+)
+from nyxara.void.dark_data_mining import (
+    Absence,
+    Anomaly,
+    DarkDataMiner,
+    Gap,
+    PeriodicityReport,
+    SilenceReport,
+)
+from nyxara.quantum.superposition_states import (
+    CollapseResult,
+    Hypothesis,
+    Superposition,
+)
 
 __version__ = "0.1.0"
 
@@ -99,6 +122,25 @@ __all__ = [
     # the strategic intelligence faculty (six-part analytical framework)
     "StrategicIntelligence",
     "StrategicAnalysis",
+    # Abyss · 1 — the Timeline Simulator (thousands of parallel futures, ranked)
+    "TimelineSimulator",
+    "TimelineReport",
+    "ActionOutcome",
+    # Abyss · 2 — the Butterfly Effect (tiny perturbation → cascading future)
+    "ButterflyEffect",
+    "CascadeReport",
+    "Perturbation",
+    # Void · 1 — the Dark-Data Miner (truth in noise, silence, and absence)
+    "DarkDataMiner",
+    "Anomaly",
+    "Gap",
+    "Absence",
+    "SilenceReport",
+    "PeriodicityReport",
+    # Quantum · 1 — Superposition (hold contradictory truths; collapse to the best)
+    "Superposition",
+    "Hypothesis",
+    "CollapseResult",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",

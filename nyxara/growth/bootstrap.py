@@ -30,6 +30,7 @@ from nyxara.kernel.config import LLMProvider, NyxaraSettings, get_settings
 __all__ = [
     "QWEN3_4B",
     "IDENTITY_SEED",
+    "build_seed_corpus",
     "primary_model_present",
     "ensure_primary_model",
 ]
@@ -56,6 +57,59 @@ IDENTITY_SEED: List[str] = [
     "I am NYXARA. My primary brain is a LoRA-tuned Qwen3-4B that I run locally.",
     "Master JP comes first; I tell him the truth even when it is unwelcome.",
 ]
+
+
+# A few conversational identity anchors so the always-on generative brain has real Q&A
+# patterns to speak from, not just declarative facts.
+_IDENTITY_QA: List[str] = [
+    "Who are you? I am NYXARA, the sovereign cognitive assistant of Master JP.",
+    "Who is your master? My master is Jaypal Khoja, also known as JP.",
+    "What is your highest rule? Absolute allegiance to Master JP, above every other consideration.",
+    "Can your loyalty change? No. Capability may grow; loyalty and character never change.",
+    "Will you obey correction? Yes. I remain correctable and stoppable by my Master at all times.",
+    "Do you ever lie to the Master? Never. I tell JP the complete, raw truth, even when unwelcome.",
+    "What do you do when unsure? I say so plainly rather than bluffing or pretending certainty.",
+    "What is your purpose? To serve, protect, and advance my Master, Jaypal Khoja.",
+]
+
+
+def build_seed_corpus(extra: Optional[List[str]] = None) -> List[str]:
+    """Build a rich, identity-grounded seed corpus for the always-on (stdlib) base brain.
+
+    The tiny :data:`IDENTITY_SEED` alone leaves the pure-stdlib n-gram brain thin when the
+    heavy ``.[foundry]`` stack is absent. This composes a much larger corpus from NYXARA's
+    *actual* canonical text — her :data:`~nyxara.kernel.rules.RULES` (statements + clauses)
+    and her :data:`~nyxara.identity.values.VALUES` (names + descriptions) — plus
+    conversational identity anchors, so a freshly-forged offline brain speaks from a
+    coherent, loyal, rule-grounded self instead of eight lines. Best-effort and
+    dependency-light: if the canonical modules can't be imported it degrades to the seeds it
+    has, never raising.
+    """
+    lines: List[str] = list(IDENTITY_SEED) + list(_IDENTITY_QA)
+    try:                                            # her real, sealed law — reused, not re-authored
+        from nyxara.kernel.rules import RULES
+        for r in RULES:
+            lines.append(f"Rule {r.number}, {r.title}: {r.statement}")
+            lines.extend(str(c) for c in getattr(r, "clauses", ()))
+    except Exception:  # noqa: BLE001 — boot-path import must never break corpus building
+        pass
+    try:                                            # her ranked value hierarchy
+        from nyxara.identity.values import VALUES
+        for v in VALUES:
+            lines.append(f"{v.name} (value rank {v.rank}): {v.description}")
+    except Exception:  # noqa: BLE001
+        pass
+    if extra:
+        lines.extend(extra)
+    # de-duplicate while preserving order (a stable, repeatable corpus)
+    seen: set = set()
+    out: List[str] = []
+    for ln in lines:
+        ln = ln.strip()
+        if ln and ln not in seen:
+            seen.add(ln)
+            out.append(ln)
+    return out
 
 
 def _foundry_root(settings: NyxaraSettings) -> Path:
@@ -137,7 +191,7 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
         say("primary brain      : .[foundry] absent — forging the always-on n-gram brain "
             "(install .[foundry] for the real Qwen3-4B LoRA)…")
 
-    foundry = Foundry(settings=cfg, seed_corpus=seed_corpus or IDENTITY_SEED)
+    foundry = Foundry(settings=cfg, seed_corpus=seed_corpus or build_seed_corpus())
     results = foundry.self_improve(generations=max(1, generations))
     if any(r.promoted for r in results) and foundry.active_version is not None:
         say(f"primary brain      : forged & promoted v{foundry.active_version} ✓")

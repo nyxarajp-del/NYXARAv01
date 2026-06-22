@@ -322,6 +322,24 @@ class NyxaraCore:
         # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
         # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
         self.world_simulator = self._build_world_simulator()
+        # Abyss · 1 — Timeline Simulator: the macro counterpart to the world simulator —
+        # branches the present into thousands of parallel futures, rolls each through the
+        # world model, and ranks candidate actions under a risk-aware (tail-protecting)
+        # score. Advisory: it informs choice; it never bypasses a gate.
+        self.timeline_simulator = self._build_timeline_simulator()
+        # Abyss · 2 — Butterfly Effect: propagate a minute perturbation of the present
+        # through the world model and measure how it cascades — exposing which tiny detail
+        # most controls the far future. Advisory; informs attention, never gates.
+        self.butterfly_effect = self._build_butterfly_effect()
+        # Void · 1 — Dark-Data Miner: read the negative space — silences, gaps, missing
+        # categories, and faint anomalies buried in noise — that others discard. Advisory;
+        # a tool the mind can consult, never a gate.
+        self.dark_data_miner = self._build_dark_data_miner()
+        # Quantum · 1 — Superposition: hold multiple, even contradictory, hypotheses at
+        # once (each with an amplitude) and collapse to the best only when a decision is
+        # required — so she does not commit early on ambiguous logic. A factory the mind
+        # can use; advisory, never a gate.
+        self.superposition_factory = self._build_superposition_factory()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -926,6 +944,48 @@ class NyxaraCore:
                                   predictive=self.predictive, rollout_steps=3)
         except Exception:  # noqa: BLE001 — world simulation is a capability, never required
             return None
+
+    def _build_timeline_simulator(self) -> Any:
+        """Abyss · 1 — the parallel-futures engine: branch the present into thousands of
+        futures over the shared world model and rank actions under a risk-aware score."""
+        try:
+            from nyxara.abyss.timeline_simulator import TimelineSimulator
+            return TimelineSimulator(world_model=self.world_model, seed=0)
+        except Exception:  # noqa: BLE001 — timeline simulation is a capability, never required
+            return None
+
+    def _build_butterfly_effect(self) -> Any:
+        """Abyss · 2 — the butterfly-effect engine: propagate minute perturbations of the
+        present through the shared world model and rank input sensitivities."""
+        try:
+            from nyxara.abyss.butterfly_effect import ButterflyEffect
+            return ButterflyEffect(world_model=self.world_model, seed=0)
+        except Exception:  # noqa: BLE001 — butterfly analysis is a capability, never required
+            return None
+
+    def _build_dark_data_miner(self) -> Any:
+        """Void · 1 — the dark-data miner: robust extraction of structure from noise,
+        silence, gaps, and missing data."""
+        try:
+            from nyxara.void.dark_data_mining import DarkDataMiner
+            return DarkDataMiner()
+        except Exception:  # noqa: BLE001 — dark-data mining is a capability, never required
+            return None
+
+    def _build_superposition_factory(self) -> Any:
+        """Quantum · 1 — expose the Superposition class so the mind can open a fresh
+        superposed belief per ambiguous decision and collapse it only when forced."""
+        try:
+            from nyxara.quantum.superposition_states import Superposition
+            return Superposition
+        except Exception:  # noqa: BLE001 — superposition is a capability, never required
+            return None
+
+    def new_superposition(self, **kwargs: Any) -> Any:
+        """Open a fresh :class:`~nyxara.quantum.superposition_states.Superposition` for an
+        ambiguous decision (or ``None`` if the faculty is unavailable)."""
+        factory = getattr(self, "superposition_factory", None)
+        return factory(**kwargs) if factory is not None else None
 
     def _build_knowledge_graph(self) -> Any:
         """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
@@ -3205,6 +3265,14 @@ class NyxaraCore:
                 pass
         if self.prediction_engine is not None:
             rep["predictions_made"] = self.prediction_engine.predictions_count
+        if getattr(self, "timeline_simulator", None) is not None:
+            rep["timeline_simulator"] = "ready"
+        if getattr(self, "butterfly_effect", None) is not None:
+            rep["butterfly_effect"] = "ready"
+        if getattr(self, "dark_data_miner", None) is not None:
+            rep["dark_data_miner"] = "ready"
+        if getattr(self, "superposition_factory", None) is not None:
+            rep["superposition"] = "ready"
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         if self.meta_learning_engine is not None:
