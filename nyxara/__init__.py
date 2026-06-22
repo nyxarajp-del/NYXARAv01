@@ -74,6 +74,11 @@ from nyxara.void.dark_data_mining import (
     PeriodicityReport,
     SilenceReport,
 )
+from nyxara.quantum.superposition_states import (
+    CollapseResult,
+    Hypothesis,
+    Superposition,
+)
 
 __version__ = "0.1.0"
 
@@ -132,6 +137,10 @@ __all__ = [
     "Absence",
     "SilenceReport",
     "PeriodicityReport",
+    # Quantum · 1 — Superposition (hold contradictory truths; collapse to the best)
+    "Superposition",
+    "Hypothesis",
+    "CollapseResult",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",

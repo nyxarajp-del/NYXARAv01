@@ -335,6 +335,11 @@ class NyxaraCore:
         # categories, and faint anomalies buried in noise — that others discard. Advisory;
         # a tool the mind can consult, never a gate.
         self.dark_data_miner = self._build_dark_data_miner()
+        # Quantum · 1 — Superposition: hold multiple, even contradictory, hypotheses at
+        # once (each with an amplitude) and collapse to the best only when a decision is
+        # required — so she does not commit early on ambiguous logic. A factory the mind
+        # can use; advisory, never a gate.
+        self.superposition_factory = self._build_superposition_factory()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -966,6 +971,21 @@ class NyxaraCore:
             return DarkDataMiner()
         except Exception:  # noqa: BLE001 — dark-data mining is a capability, never required
             return None
+
+    def _build_superposition_factory(self) -> Any:
+        """Quantum · 1 — expose the Superposition class so the mind can open a fresh
+        superposed belief per ambiguous decision and collapse it only when forced."""
+        try:
+            from nyxara.quantum.superposition_states import Superposition
+            return Superposition
+        except Exception:  # noqa: BLE001 — superposition is a capability, never required
+            return None
+
+    def new_superposition(self, **kwargs: Any) -> Any:
+        """Open a fresh :class:`~nyxara.quantum.superposition_states.Superposition` for an
+        ambiguous decision (or ``None`` if the faculty is unavailable)."""
+        factory = getattr(self, "superposition_factory", None)
+        return factory(**kwargs) if factory is not None else None
 
     def _build_knowledge_graph(self) -> Any:
         """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
@@ -3251,6 +3271,8 @@ class NyxaraCore:
             rep["butterfly_effect"] = "ready"
         if getattr(self, "dark_data_miner", None) is not None:
             rep["dark_data_miner"] = "ready"
+        if getattr(self, "superposition_factory", None) is not None:
+            rep["superposition"] = "ready"
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         if self.meta_learning_engine is not None:
