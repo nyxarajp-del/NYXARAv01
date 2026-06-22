@@ -340,6 +340,11 @@ class NyxaraCore:
         # required — so she does not commit early on ambiguous logic. A factory the mind
         # can use; advisory, never a gate.
         self.superposition_factory = self._build_superposition_factory()
+        # Cognition · 1 — Hyperdimensional Latent Space Mapping: lift each turn into a
+        # 10,000-D space where relations and structure invisible to a 3-D mind become
+        # measurable geometry. It colours novelty/attention and answers map/recall/analogy/
+        # pattern queries; FIFO-capped over the live stream. Advisory — it never gates.
+        self.hyperdimensional = self._build_hyperdimensional()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -987,6 +992,59 @@ class NyxaraCore:
         factory = getattr(self, "superposition_factory", None)
         return factory(**kwargs) if factory is not None else None
 
+    def _build_hyperdimensional(self) -> Any:
+        """Cognition · 1 — the Hyperdimensional Latent Space Mapping faculty, FIFO-capped so
+        the live stream of turns stays bounded."""
+        try:
+            from nyxara.cognition.hyper_dimensional_vectors import LatentSpaceMap
+            return LatentSpaceMap(max_corpus=512)
+        except Exception:  # noqa: BLE001 — hyperdimensional cognition is a capability, never required
+            return None
+
+    # ---- hyperdimensional latent space (Cognition · 1) — advisory public API ---- #
+    def map_latent_space(self, data: Any, *, name: Optional[str] = None) -> Any:
+        """Lift ``data`` (text / record dict / feature vector / sequence) into the 10,000-D
+        latent space; store it under ``name`` if given. Returns the hypervector, or None."""
+        hd = getattr(self, "hyperdimensional", None)
+        if hd is None:
+            return None
+        try:
+            return hd.add(name, data) if name else hd.encode(data)
+        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return None
+
+    def latent_novelty(self, data: Any) -> Any:
+        """How unlike everything-seen ``data`` is in the latent space (a NoveltyResult or None)."""
+        hd = getattr(self, "hyperdimensional", None)
+        try:
+            return hd.novelty(data) if hd is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def latent_recall(self, query: Any, *, k: int = 5) -> List[Any]:
+        """Top-``k`` latent-space neighbours of ``query`` from the ingested corpus."""
+        hd = getattr(self, "hyperdimensional", None)
+        try:
+            return hd.nearest(query, k=k) if hd is not None else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def latent_patterns(self, *, threshold: float = 0.45) -> Any:
+        """Discover clusters and outliers in the latent corpus (a PatternReport or None)."""
+        hd = getattr(self, "hyperdimensional", None)
+        try:
+            return hd.discover_patterns(threshold=threshold) if hd is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def latent_analogy(self, a: Any, b: Any, c: Any) -> Any:
+        """Solve ``a : b :: c : ?`` by relational transport in the latent space (or None)."""
+        hd = getattr(self, "hyperdimensional", None)
+        try:
+            return hd.analogy(a, b, c) if hd is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_knowledge_graph(self) -> Any:
         """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
         accumulates structured triples as conversations proceed."""
@@ -1520,6 +1578,9 @@ class NyxaraCore:
         self._predictive_tick(percept)
         # sensory prediction: surprise over the live stream sharpens attention before ATTEND
         self._perceptual_predict(percept)
+        # hyperdimensional latent mapping: novelty in 10,000-D colours attention/affect, then
+        # the turn is ingested so latent structure accretes across the session (advisory)
+        self._hyperdimensional_tick(safe_text)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
@@ -2090,8 +2151,28 @@ class NyxaraCore:
                              f"sensory: surprise={ps.surprise:.2f} attention={ps.attention:.2f}{tag}",
                              salience=_clamp01(ps.attention))
             if ps.novelty and self.affect is not None:
-                self.affect.note_novelty(ps.surprise)
+                self.affect.note_novelty(magnitude=_clamp01(ps.surprise))
         except Exception:  # noqa: BLE001 — sensory prediction is best-effort, never fatal
+            pass
+
+    def _hyperdimensional_tick(self, text: str) -> None:
+        """Map this turn into the 10,000-D latent space: a situation far from everything seen
+        (high novelty) sharpens attention and colours affect; the turn is then ingested so
+        latent structure accretes across the session. Advisory, best-effort — never gates."""
+        if self.hyperdimensional is None or not text:
+            return
+        try:
+            nov = self.hyperdimensional.novelty(text)
+            tag = " novel" if nov.is_novel else ""
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"latent: novelty={nov.score:.2f} "
+                             f"nearest={nov.nearest or '∅'}{tag}",
+                             salience=_clamp01(nov.score))
+            if nov.is_novel and self.affect is not None:
+                self.affect.note_novelty(magnitude=_clamp01(nov.score))
+            # ingest so the latent corpus grows (FIFO-capped inside the faculty)
+            self.hyperdimensional.add(f"turn:{self._turns}:{text[:32]}", text)
+        except Exception:  # noqa: BLE001 — latent mapping is best-effort, never fatal
             pass
 
     def _observation_vector(self, percept: Any) -> Optional[List[float]]:
