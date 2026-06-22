@@ -51,6 +51,14 @@ from nyxara.memory.elastic_synapses import (
     TorchElasticSynapses,
 )
 from nyxara.kernel.autonomic import AutonomicLoop
+from nyxara.temporal import (
+    Awareness,
+    BehaviorEpoch,
+    FractalTemporalHierarchy,
+    MacroLayer,
+    MesoLayer,
+    MicroLayer,
+)
 from nyxara.kernel.compute import compute_report
 from nyxara.kernel.jobqueue import JobQueue
 from nyxara.kernel.orchestrator import (
@@ -105,6 +113,13 @@ __all__ = [
     "Candidate",
     "CycleResult",
     "AutonomicLoop",
+    # Fractal Temporal Hierarchies — loops within loops (ms / s / days)
+    "FractalTemporalHierarchy",
+    "MicroLayer",
+    "MesoLayer",
+    "MacroLayer",
+    "Awareness",
+    "BehaviorEpoch",
     # multi-step agency + experiential learning
     "AgentLoop",
     "AgentRun",

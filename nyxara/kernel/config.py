@@ -181,6 +181,7 @@ class FeatureFlags(BaseModel):
     audio: bool = False                 # heavy ML; off by default
     transformers_inference: bool = False  # in-process HuggingFace model; heavy ML, off by default
     dream_consolidation: bool = True    # memory/consolidation.py
+    fractal_temporal_hierarchy: bool = True  # temporal/ — loops within loops (ms/s/days)
     simulation_required: bool = True    # sim/ dry-run gate before real action
     invariant_enforcement: bool = True  # kernel/invariants.py — NEVER off in prod
     audit_logging: bool = True          # guard/audit.py — NEVER off in prod
@@ -853,6 +854,35 @@ class MemoryConfig(BaseModel):
     ewc_online: bool = True
 
 
+class TemporalHierarchyConfig(BaseModel):
+    """Fractal Temporal Hierarchies (temporal/) — loops within loops.
+
+    Three nested layers run at three time scales at once: a millisecond hardware/network
+    monitor (Layer 1), a second-scale turn observer (Layer 2), and a day/month *Master AI*
+    (Layer 3) that watches how the Master's behaviour changes and — through a fail-closed
+    gate — adjusts goals and drive setpoints (never her sealed character).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # cadences for the live (async) driver
+    micro_interval_s: float = Field(default=0.05, gt=0)      # Layer 1 — milliseconds
+    meso_interval_s: float = Field(default=2.0, gt=0)        # Layer 2 — seconds
+    macro_interval_s: float = Field(default=86400.0, gt=0)   # Layer 3 — days
+    # how the loops nest (deterministic driver): meso rolls up every N micro beats; macro
+    # observes every M meso roll-ups.
+    meso_every_micro: int = Field(default=40, ge=1)
+    macro_every_meso: int = Field(default=1000, ge=1)
+    # Master AI (Layer 3)
+    horizon_days: float = Field(default=7.0, gt=0)           # epoch length compared each pass
+    auto_apply: bool = True                                  # apply gated adjustments vs propose-only
+    autostart: bool = False                                  # launch the live async loops on wiring
+    # rolling-window sizes for the fast layers
+    micro_window: int = Field(default=128, ge=2)
+    meso_window: int = Field(default=512, ge=8)
+
+
 class GuardConfig(BaseModel):
     """Zero-trust / safety posture. The hardest part of the system."""
 
@@ -1087,6 +1117,7 @@ class NyxaraSettings(BaseSettings):
     router: RouterConfig = Field(default_factory=RouterConfig)
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     explorer: ExplorerConfig = Field(default_factory=ExplorerConfig)

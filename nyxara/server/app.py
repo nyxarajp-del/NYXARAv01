@@ -81,6 +81,12 @@ class MemoryPathRequest(BaseModel):
     path: Optional[str] = None
 
 
+class TemporalTickRequest(BaseModel):
+    # how many millisecond-scale beats to drive the fractal hierarchy through (nested
+    # meso roll-ups and macro observations fire at their boundaries).
+    beats: int = Field(default=1, ge=1)
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -209,6 +215,31 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                     detail=f"unknown control action '{action}'")
             return {"action": act, "control": core.oversight.state.value}
+
+    # ---- fractal temporal hierarchies (the multi-dimensional mind) ---- #
+    @app.get("/v1/temporal/report", dependencies=auth)
+    def temporal_report() -> dict:
+        ft = getattr(core, "fractal_temporal", None)
+        if ft is None:
+            return {"error": "fractal temporal hierarchy unavailable"}
+        return ft.report()
+
+    @app.get("/v1/temporal/awareness", dependencies=auth)
+    def temporal_awareness() -> dict:
+        ft = getattr(core, "fractal_temporal", None)
+        if ft is None:
+            return {"error": "fractal temporal hierarchy unavailable"}
+        latest = ft.awareness()
+        return latest.to_dict() if latest is not None else {"awareness": None}
+
+    @app.post("/v1/temporal/tick", dependencies=auth)
+    def temporal_tick(req: TemporalTickRequest = TemporalTickRequest()) -> dict:
+        ft = getattr(core, "fractal_temporal", None)
+        if ft is None:
+            return {"error": "fractal temporal hierarchy unavailable"}
+        n = max(1, min(req.beats, 100_000))
+        ft.run_for(n)
+        return ft.report()
 
     @app.post("/v1/memory/save", dependencies=auth)
     def memory_save(req: MemoryPathRequest = MemoryPathRequest()) -> dict:
