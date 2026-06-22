@@ -170,6 +170,7 @@ class FeatureFlags(BaseModel):
     continuous_cognition: bool = True   # kernel/stream.py default-mode thinking
     proactive_agency: bool = True       # agency/proactive.py
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
+    self_bootstrap: bool = True         # growth/explorer.py — Environment-Driven Learning (Rule 4)
     self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
     neural_architecture_search: bool = True  # growth/genesis.py — she designs her OWN brain (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
@@ -749,6 +750,28 @@ class SelfImprovementConfig(BaseModel):
     forecaster_warmup: int = Field(default=16, ge=2, le=10000)
 
 
+class ExplorerConfig(BaseModel):
+    """The Infinite Explorer — Environment-Driven Learning (growth/explorer.py, Rule 4).
+
+    When a task falls outside her knowledge NYXARA does not abstain: she writes code, scrapes
+    the live web for hints, runs it in the isolated sandbox, **reads the real errors and
+    debugs**, and on success learns the working logic permanently into her skills + knowledge
+    base. It works fully offline (deterministic recipe synthesis) and is gated by
+    ``features.self_bootstrap``; web research follows ``features.web_access``.
+
+    Per the Master's mandate ``autonomous_install`` is ON by default — when online she may
+    ``pip install`` an obvious named dependency without per-call approval. Code only ever runs
+    inside the sandbox, and a paused/scrammed oversight gate halts all autonomous bootstrapping.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    max_debug_rounds: int = Field(default=4, ge=1, le=12)   # write→run→read-error→revise cycles
+    step_timeout_s: float = Field(default=8.0, gt=0.0, le=120.0)  # wall-clock per sandbox run
+    autonomous_install: bool = True            # auto pip-install a named dependency when online
+    confidence_floor: float = Field(default=0.45, ge=0.0, le=1.0)  # below → auto self-bootstrap
+
+
 class MetaResearchConfig(BaseModel):
     """Autonomous meta-research: invent → test → (gauntlet-gated) integrate (growth/meta_research.py).
 
@@ -1066,6 +1089,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
+    explorer: ExplorerConfig = Field(default_factory=ExplorerConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -1113,6 +1137,9 @@ class NyxaraSettings(BaseSettings):
             self.guard.zero_trust = True
             self.guard.kill_switch_enabled = True
             self.llm.allow_mock_fallback = False  # prod must use a real provider
+            # In production she still self-bootstraps, but never runs autonomous shell
+            # package installs — a forged solution stays inside the code sandbox.
+            self.explorer.autonomous_install = False
         elif self.profile is Profile.TEST:
             # Tests run hermetically: never reach the network.
             self.llm.provider = LLMProvider.MOCK
