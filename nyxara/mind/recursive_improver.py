@@ -9,8 +9,10 @@ Each iteration scores the current candidate against multiple quality dimensions
 improve it.  The best-scoring candidate across all iterations is returned.
 
 With a real LLM available, the improvement step calls a critique-then-revise prompt to
-generate a genuinely better answer.  Without one (offline / test mode), rule-based
-quality probes still run and the best calibration of the original answer is returned.
+generate a genuinely better answer.  Without one (offline / test mode), rule-based probes
+still genuinely improve the candidate: they repair degenerate text (collapsed whitespace,
+stuttered words, duplicated sentences), calibrate the confidence, and derive a
+content-aware rationale — no LLM, no fabrication, fully deterministic.
 
 Design constraints (same as all reasoning modules):
 - Returns a Candidate — the kernel disposes through every gate as always.
@@ -177,27 +179,38 @@ class RecursiveImprover:
             return candidate
 
     def _rule_revise(self, candidate: Any, iteration: int) -> Any:
-        """Rule-based calibration probe when no LLM is available.
+        """Rule-based revision when no LLM is available — genuinely improves content.
 
-        Clamps overconfident scores and enriches sparse rationales.
+        Three honest, deterministic moves that need no model:
+        1. Repair degenerate text — collapse runaway whitespace, de-stutter repeated
+           words ("the the the"), and drop duplicated adjacent sentences.
+        2. Calibrate confidence — clamp overconfidence, floor underconfidence.
+        3. Derive a content-aware rationale from the (repaired) text rather than a
+           canned string, when the rationale is missing or sparse.
+
+        No fabrication: text is only ever cleaned, never invented or extended.
         """
         conf = float(getattr(candidate, "confidence", 0.7) or 0.7)
         text = str(getattr(candidate, "text", "") or "")
         rat = str(getattr(candidate, "rationale", "") or "")
 
-        # clamp overconfidence
-        new_conf = min(conf, 0.88) if conf > 0.90 else conf
-        # floor underconfidence for non-empty responses
-        if text and new_conf < 0.35:
-            new_conf = 0.35
-        # enrich a missing rationale
-        new_rat = rat
-        if not rat or len(rat.split()) < 4:
-            new_rat = f"revised at iter {iteration}: response addresses the Master's request"
+        # 1. repair degenerate text (idempotent — clean text is returned unchanged)
+        new_text = _clean_text(text)
 
-        if new_conf == conf and new_rat == rat:
-            return candidate  # no change
-        return _clone_with(candidate, confidence=new_conf, rationale=new_rat)
+        # 2. calibrate confidence
+        new_conf = min(conf, 0.88) if conf > 0.90 else conf
+        if new_text and new_conf < 0.35:        # floor a clear, non-empty response
+            new_conf = 0.35
+
+        # 3. derive a real, content-aware rationale when the current one is thin
+        new_rat = rat
+        if (not rat or len(rat.split()) < 4) and new_text:
+            new_rat = _derive_rationale(new_text, iteration)
+
+        if new_text == text and new_conf == conf and new_rat == rat:
+            return candidate  # nothing to improve
+        return _clone_with(candidate, text=new_text or text,
+                           confidence=new_conf, rationale=new_rat)
 
     def _llm_available(self) -> bool:
         if self.llm is None:
@@ -211,6 +224,66 @@ class RecursiveImprover:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+import re as _re
+
+_SENT_SPLIT = _re.compile(r"(?<=[.!?])\s+")
+_WS = _re.compile(r"\s+")
+_STOP = frozenset(
+    "the a an of to in on for and or but is are was were be been being this that these "
+    "those it its as at by with from into your you i we they he she them his her our my "
+    "do does did how what why when where who which can could should would will shall".split()
+)
+
+
+def _clean_text(text: str) -> str:
+    """Repair degenerate generation deterministically — never fabricates content.
+
+    Collapses runaway whitespace, de-stutters immediately repeated words, and drops
+    duplicated adjacent sentences.  Idempotent: already-clean text returns unchanged.
+    """
+    if not text:
+        return text
+    collapsed = _WS.sub(" ", text).strip()
+
+    # de-stutter: drop a word that is identical (case-insensitive) to the one before it
+    words = collapsed.split(" ")
+    dest: List[str] = []
+    for w in words:
+        if dest and w.lower() == dest[-1].lower() and w.strip(".,!?;:").isalpha():
+            continue
+        dest.append(w)
+    deduped = " ".join(dest)
+
+    # drop duplicated adjacent sentences ("Paris is the capital. Paris is the capital.")
+    sents = _SENT_SPLIT.split(deduped)
+    out: List[str] = []
+    for s in sents:
+        norm = s.strip().lower()
+        if out and norm and norm == out[-1].strip().lower():
+            continue
+        out.append(s)
+    return " ".join(p for p in out if p).strip()
+
+
+def _derive_rationale(text: str, iteration: int) -> str:
+    """Build a real, content-aware rationale from the response itself (no LLM)."""
+    n_words = len(text.split())
+    salient = [w.strip(".,!?;:'\"").lower() for w in text.split()]
+    salient = [w for w in salient if len(w) > 3 and w not in _STOP]
+    # preserve order, drop duplicates, keep the first few content words as the topic
+    seen: set = set()
+    topic_words: List[str] = []
+    for w in salient:
+        if w not in seen:
+            seen.add(w)
+            topic_words.append(w)
+        if len(topic_words) >= 3:
+            break
+    topic = ", ".join(topic_words) if topic_words else "the request"
+    return (f"iter {iteration}: a {n_words}-word direct response addressing {topic}; "
+            f"text repaired and confidence calibrated offline")
+
+
 def _clone_with(candidate: Any, **overrides: Any) -> Any:
     """Return a shallow copy of candidate with the given fields overridden.
 
