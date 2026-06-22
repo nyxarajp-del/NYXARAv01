@@ -931,6 +931,138 @@ def _parametric_arithmetic(low: str) -> Optional[_Recipe]:
             f"def handle(x):\n    return {expr}\n",
             [{"args": {"x": 10.0}, "expect": example}])
 
+    return _parametric_data_op(low)
+
+
+# A broad, deterministic synthesizer for common text / list / number operations the fixed
+# table and the constant-parametric paths miss. Each entry pairs real, sandbox-safe source
+# with an example whose expected value is computed by the SAME logic, so the forged tool
+# passes its own test — turning what used to fall through to the echo scaffold into a real,
+# working tool. (The generic echo remains only as the final honest last resort.)
+def _parametric_data_op(low: str) -> Optional[_Recipe]:
+    _text = ToolParam("text", "str")
+    _items = ToolParam("items", "any")
+    _n = ToolParam("n", "int")
+    _x = ToolParam("x", "float")
+    # (match-keywords, key, description, params, source, example-args, expected-fn)
+    table = [
+        # ---- text ----
+        (("reverse word", "word order", "reverse the words"), "reverse_words",
+         "reverse the order of words in a text", [_text],
+         "def handle(text):\n    return ' '.join(text.split()[::-1])\n",
+         {"text": "the quick fox"}, lambda: "fox quick the"),
+        (("remove vowel", "strip vowel", "without vowel"), "remove_vowels",
+         "remove all vowels from a text", [_text],
+         "def handle(text):\n    return ''.join(c for c in text if c.lower() not in 'aeiou')\n",
+         {"text": "Hello World"}, lambda: "Hll Wrld"),
+        (("count vowel", "number of vowel"), "count_vowels",
+         "count the vowels in a text", [_text],
+         "def handle(text):\n    return sum(1 for c in text.lower() if c in 'aeiou')\n",
+         {"text": "education"}, lambda: 5),
+        (("remove whitespace", "remove spaces", "strip whitespace", "no spaces"),
+         "remove_whitespace", "remove all whitespace from a text", [_text],
+         "def handle(text):\n    return ''.join(text.split())\n",
+         {"text": "a b  c"}, lambda: "abc"),
+        (("count line", "number of line", "line count"), "count_lines",
+         "count the lines in a text", [_text],
+         "def handle(text):\n    return len(text.splitlines())\n",
+         {"text": "a\nb\nc"}, lambda: 3),
+        (("initial", "acronym"), "initials",
+         "take the initials (acronym) of each word, uppercased", [_text],
+         "def handle(text):\n    return ''.join(w[0].upper() for w in text.split() if w)\n",
+         {"text": "central processing unit"}, lambda: "CPU"),
+        (("slug", "slugify", "url friendly", "url-friendly"), "slugify",
+         "turn a text into a lowercase hyphenated slug", [_text],
+         ("def handle(text):\n"
+          "    out = [c.lower() if (c.isalnum()) else '-' for c in text]\n"
+          "    s = ''.join(out)\n"
+          "    while '--' in s:\n"
+          "        s = s.replace('--', '-')\n"
+          "    return s.strip('-')\n"),
+         {"text": "Hello, World!"}, lambda: "hello-world"),
+        (("palindrome",), "is_palindrome",
+         "check whether a text reads the same forwards and backwards", [_text],
+         ("def handle(text):\n"
+          "    s = [c.lower() for c in text if c.isalnum()]\n"
+          "    return s == s[::-1]\n"),
+         {"text": "Race car"}, lambda: True),
+        # ---- list / collection ----
+        (("sort", "order ascending", "in order"), "sort_items",
+         "sort a list of items ascending", [_items],
+         "def handle(items):\n    return sorted(items)\n",
+         {"items": [3, 1, 2]}, lambda: [1, 2, 3]),
+        (("unique", "dedup", "distinct", "deduplicate"), "unique_items",
+         "remove duplicates from a list, preserving order", [_items],
+         ("def handle(items):\n"
+          "    seen = []\n"
+          "    for x in items:\n"
+          "        if x not in seen:\n"
+          "            seen.append(x)\n"
+          "    return seen\n"),
+         {"items": [1, 1, 2, 3, 2]}, lambda: [1, 2, 3]),
+        (("sum", "total", "add up"), "sum_items",
+         "sum a list of numbers", [_items],
+         "def handle(items):\n    return sum(items)\n",
+         {"items": [1, 2, 3, 4]}, lambda: 10),
+        (("average", "mean"), "average_items",
+         "the arithmetic mean of a list of numbers", [_items],
+         ("def handle(items):\n"
+          "    return sum(items) / len(items) if items else 0\n"),
+         {"items": [2, 4, 6]}, lambda: 4.0),
+        (("maximum", "largest", "biggest", "highest"), "max_item",
+         "the largest item in a list", [_items],
+         "def handle(items):\n    return max(items)\n",
+         {"items": [3, 9, 2]}, lambda: 9),
+        (("minimum", "smallest", "lowest"), "min_item",
+         "the smallest item in a list", [_items],
+         "def handle(items):\n    return min(items)\n",
+         {"items": [3, 9, 2]}, lambda: 2),
+        (("flatten",), "flatten_items",
+         "flatten a list of lists by one level", [_items],
+         ("def handle(items):\n"
+          "    out = []\n"
+          "    for x in items:\n"
+          "        out.extend(x) if isinstance(x, list) else out.append(x)\n"
+          "    return out\n"),
+         {"items": [[1, 2], [3], 4]}, lambda: [1, 2, 3, 4]),
+        # ---- number ----
+        (("absolute", "abs value", "magnitude"), "absolute_value",
+         "the absolute value of a number", [_x],
+         "def handle(x):\n    return abs(x)\n",
+         {"x": -7.5}, lambda: 7.5),
+        (("square ", "squared"), "square",
+         "the square of a number", [_x],
+         "def handle(x):\n    return x * x\n",
+         {"x": 6}, lambda: 36),
+        (("cube", "cubed"), "cube",
+         "the cube of a number", [_x],
+         "def handle(x):\n    return x * x * x\n",
+         {"x": 3}, lambda: 27),
+        (("is even", "even number"), "is_even",
+         "whether an integer is even", [_n],
+         "def handle(n):\n    return int(n) % 2 == 0\n",
+         {"n": 8}, lambda: True),
+        (("is odd", "odd number"), "is_odd",
+         "whether an integer is odd", [_n],
+         "def handle(n):\n    return int(n) % 2 == 1\n",
+         {"n": 7}, lambda: True),
+        (("is prime", "prime number", "primality"), "is_prime",
+         "whether an integer is prime", [_n],
+         ("def handle(n):\n"
+          "    n = int(n)\n"
+          "    if n < 2:\n"
+          "        return False\n"
+          "    i = 2\n"
+          "    while i * i <= n:\n"
+          "        if n % i == 0:\n"
+          "            return False\n"
+          "        i += 1\n"
+          "    return True\n"),
+         {"n": 13}, lambda: True),
+    ]
+    for keys, key, desc, params, src, args, expect_fn in table:
+        if any(k in low for k in keys):
+            return _Recipe(key, (), desc, params, src, [{"args": args, "expect": expect_fn()}])
     return None
 
 
