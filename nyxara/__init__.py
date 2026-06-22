@@ -61,6 +61,11 @@ from nyxara.abyss.timeline_simulator import (
     TimelineReport,
     TimelineSimulator,
 )
+from nyxara.abyss.butterfly_effect import (
+    ButterflyEffect,
+    CascadeReport,
+    Perturbation,
+)
 
 __version__ = "0.1.0"
 
@@ -108,6 +113,10 @@ __all__ = [
     "TimelineSimulator",
     "TimelineReport",
     "ActionOutcome",
+    # Abyss · 2 — the Butterfly Effect (tiny perturbation → cascading future)
+    "ButterflyEffect",
+    "CascadeReport",
+    "Perturbation",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",

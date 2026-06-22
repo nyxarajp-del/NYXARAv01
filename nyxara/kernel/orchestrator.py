@@ -327,6 +327,10 @@ class NyxaraCore:
         # world model, and ranks candidate actions under a risk-aware (tail-protecting)
         # score. Advisory: it informs choice; it never bypasses a gate.
         self.timeline_simulator = self._build_timeline_simulator()
+        # Abyss · 2 — Butterfly Effect: propagate a minute perturbation of the present
+        # through the world model and measure how it cascades — exposing which tiny detail
+        # most controls the far future. Advisory; informs attention, never gates.
+        self.butterfly_effect = self._build_butterfly_effect()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -939,6 +943,15 @@ class NyxaraCore:
             from nyxara.abyss.timeline_simulator import TimelineSimulator
             return TimelineSimulator(world_model=self.world_model, seed=0)
         except Exception:  # noqa: BLE001 — timeline simulation is a capability, never required
+            return None
+
+    def _build_butterfly_effect(self) -> Any:
+        """Abyss · 2 — the butterfly-effect engine: propagate minute perturbations of the
+        present through the shared world model and rank input sensitivities."""
+        try:
+            from nyxara.abyss.butterfly_effect import ButterflyEffect
+            return ButterflyEffect(world_model=self.world_model, seed=0)
+        except Exception:  # noqa: BLE001 — butterfly analysis is a capability, never required
             return None
 
     def _build_knowledge_graph(self) -> Any:
@@ -3221,6 +3234,8 @@ class NyxaraCore:
             rep["predictions_made"] = self.prediction_engine.predictions_count
         if getattr(self, "timeline_simulator", None) is not None:
             rep["timeline_simulator"] = "ready"
+        if getattr(self, "butterfly_effect", None) is not None:
+            rep["butterfly_effect"] = "ready"
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         if self.meta_learning_engine is not None:
