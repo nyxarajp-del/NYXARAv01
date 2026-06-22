@@ -52,6 +52,12 @@ from nyxara.growth.efficiency import (
     estimate_cost,
 )
 from nyxara.growth.rivalry import Arena, HeadToHead, Rival
+from nyxara.growth.adversarial_self_play import (
+    AdversarialSelfPlay,
+    Duel,
+    Elo,
+    StrategyBandit,
+)
 from nyxara.growth.genesis import (
     ArchitectureGenome,
     Candidate,
@@ -165,6 +171,10 @@ __all__ = [
     "Arena",
     "HeadToHead",
     "Rival",
+    "AdversarialSelfPlay",
+    "Duel",
+    "Elo",
+    "StrategyBandit",
     "ensure_primary_model",
     "primary_model_present",
     "IDENTITY_SEED",

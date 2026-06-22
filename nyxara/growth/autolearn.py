@@ -287,6 +287,32 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001
             pass
 
+    # ---- adversarial self-play (opt-in, Pillar F): NYXARA spars with her own clones ---- #
+    def adversarial_self_play(self, *, rounds: int = 200,
+                              max_seconds: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """Run one clone-vs-clone contest; route the hardest categories into curiosity self-play.
+
+        An attacker policy poses verifiable problems trying to stump a defender policy; both
+        co-adapt over ``rounds`` and the bandit persists across passes (via memory). Pure
+        measurement + corpus growth — no weights change, no external system is touched. Best-effort
+        and never fatal: returns ``None`` on any failure. The hardest categories become curiosity
+        topics so the next self-play round practises exactly where the attacker still wins.
+        """
+        try:
+            from nyxara.growth.adversarial_self_play import AdversarialSelfPlay
+            asp = AdversarialSelfPlay(settings=self.settings, memory=self.memory,
+                                      frontier=self.frontier)
+            out = asp.compete(rounds=rounds, max_seconds=max_seconds)
+            topics = out.get("topics") or None
+            if topics:
+                try:
+                    self.self_play(topics=topics)   # practise where she still loses (Edge 4 style)
+                except Exception:  # noqa: BLE001 — routing is best-effort
+                    pass
+            return out
+        except Exception:  # noqa: BLE001 — adversarial self-play is best-effort, never fatal
+            return None
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
