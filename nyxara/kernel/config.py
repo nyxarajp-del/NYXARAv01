@@ -817,6 +817,17 @@ class MemoryConfig(BaseModel):
     dream_distill_min_support: int = Field(default=2, ge=1)    # repeats needed to form a principle
     deep_synapse_tag: str = "deep-synapse"
     dream_delete_useless_logs: bool = True
+    # --- Elastic Weight Consolidation (memory/elastic_synapses.py): lifelong learning --- #
+    # On the consolidation cadence, NYXARA freezes the *importance* of her most-used learned
+    # weights so that new learning cannot overwrite old skills (catastrophic-forgetting
+    # protection). ``ewc_lambda`` is the elastic stiffness; ``ewc_freeze_threshold`` is the
+    # normalized-importance level above which a weight counts as frozen; ``ewc_online`` keeps a
+    # single decaying anchor (bounded memory) vs. ``ewc_max_tasks`` distinct skill anchors.
+    ewc_enabled: bool = True
+    ewc_lambda: float = Field(default=3.0, ge=0.0)
+    ewc_freeze_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    ewc_max_tasks: int = Field(default=8, ge=1)
+    ewc_online: bool = True
 
 
 class GuardConfig(BaseModel):

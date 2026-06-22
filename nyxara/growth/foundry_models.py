@@ -610,6 +610,11 @@ class NanoGPTModel(BaseLanguageModel):
         self.net = _NanoGPT(n_embd=self.spec.n_embd, n_head=self.spec.n_head,
                             n_layer=self.spec.n_layer, block_size=self.spec.block_size
                             ).to(self.device)
+        # Optional Elastic Weight Consolidation: when set, the EWC penalty over previously
+        # consolidated weights is added to the training loss, so retraining a new generation
+        # does not catastrophically forget the last (memory/elastic_synapses.py). None ⇒
+        # behaviour is exactly as before.
+        self.synapses: Any = None
 
     def _encode(self, text: str) -> List[int]:
         return list(text.encode("utf-8", errors="replace"))
@@ -632,8 +637,17 @@ class NanoGPTModel(BaseLanguageModel):
             y = t[i + 1:i + 1 + bs].unsqueeze(0)
             logits = self.net(x)
             loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.view(-1))
+            if self.synapses is not None:   # Elastic Weight Consolidation: protect old skills
+                loss = loss + self.synapses.penalty()
             opt.zero_grad(); loss.backward(); opt.step()
             last = float(loss.item())
+        # Lock this generation's weights in as a consolidated memory so the *next* retrain
+        # treats them as important and resists overwriting them.
+        if self.synapses is not None:
+            try:
+                self.synapses.consolidate(task=f"gen-{self.synapses._consolidations}")
+            except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
+                pass
         return TrainStats(steps=max(1, steps), final_loss=last,
                           seconds=time.monotonic() - start, tokens=len(data))
 
@@ -679,6 +693,13 @@ class NanoGPTModel(BaseLanguageModel):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "spec.json").write_text(json.dumps(self.spec.to_dict()), encoding="utf-8")
         torch.save(self.net.state_dict(), directory / "model.pt")
+        # Persist the elastic-synapse anchors so forging generations keep their memory.
+        if self.synapses is not None:
+            try:
+                (directory / "synapses.json").write_text(
+                    json.dumps(self.synapses.state_dict()), encoding="utf-8")
+            except Exception:  # noqa: BLE001 — synapse persistence is best-effort
+                pass
 
     def load(self, directory: Path) -> None:
         directory = Path(directory)
@@ -688,6 +709,13 @@ class NanoGPTModel(BaseLanguageModel):
                             n_layer=self.spec.n_layer, block_size=self.spec.block_size
                             ).to(self.device)
         self.net.load_state_dict(torch.load(directory / "model.pt", map_location=self.device))
+        syn_path = directory / "synapses.json"
+        if self.synapses is not None and syn_path.exists():
+            try:
+                self.synapses.load_state_dict(
+                    json.loads(syn_path.read_text(encoding="utf-8")))
+            except Exception:  # noqa: BLE001 — synapse restore is best-effort
+                pass
 
 
 # --------------------------------------------------------------------------- #
@@ -773,6 +801,8 @@ class LoRAModel(BaseLanguageModel):
         else:
             base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
             self.net = self._apply_lora(base).to(self.device)
+        # Optional Elastic Weight Consolidation over the adapter weights (see NanoGPTModel).
+        self.synapses: Any = None
 
     def _load_quantized_base(self) -> Any:
         """Load the base in 4-bit (NF4) and prepare it for k-bit LoRA training (QLoRA)."""
@@ -846,8 +876,16 @@ class LoRAModel(BaseLanguageModel):
             window = windows[rng.randrange(len(windows))]
             ids = torch.tensor([window], dtype=torch.long, device=self.device)
             out = self.net(input_ids=ids, labels=ids)
-            opt.zero_grad(); out.loss.backward(); opt.step()
+            loss = out.loss
+            if self.synapses is not None:   # Elastic Weight Consolidation: protect old skills
+                loss = loss + self.synapses.penalty()
+            opt.zero_grad(); loss.backward(); opt.step()
             last = float(out.loss.item()); tokens += len(window)
+        if self.synapses is not None:
+            try:
+                self.synapses.consolidate(task=f"gen-{self.synapses._consolidations}")
+            except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
+                pass
         return TrainStats(steps=max(1, steps), final_loss=last,
                           seconds=time.monotonic() - start, tokens=tokens)
 

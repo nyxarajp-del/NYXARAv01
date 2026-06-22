@@ -41,6 +41,9 @@ from nyxara.kernel.orchestrator import Disposition, NyxaraCore
 
 # the session memory snapshot — identity carried across restarts (Rule 7)
 _SESSION_MEMORY = os.path.expanduser("~/.nyxara/memory.json")
+# the elastic-synapse anchors — lifelong learning carried across restarts: which learned
+# weights are important and frozen, so she never forgets old skills (memory/elastic_synapses.py)
+_SESSION_SYNAPSES = os.path.expanduser("~/.nyxara/synapses.json")
 
 
 def _load_session_memory(core: NyxaraCore) -> int:
@@ -60,6 +63,35 @@ def _save_session_memory(core: NyxaraCore) -> str | None:
     try:
         os.makedirs(os.path.dirname(_SESSION_MEMORY), exist_ok=True)
         return core.memory.save(_SESSION_MEMORY)
+    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
+        return None
+
+
+def _load_session_synapses(core: NyxaraCore) -> bool:
+    """Restore elastic-synapse anchors (lifelong learning) from disk if present."""
+    syn = getattr(core, "elastic_synapses", None)
+    if syn is None or not os.path.exists(_SESSION_SYNAPSES):
+        return False
+    try:
+        import json
+        with open(_SESSION_SYNAPSES, encoding="utf-8") as f:
+            syn.load_dict(json.load(f))
+        return True
+    except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
+        return False
+
+
+def _save_session_synapses(core: NyxaraCore) -> str | None:
+    """Persist elastic-synapse anchors so learned-skill importance survives restarts."""
+    syn = getattr(core, "elastic_synapses", None)
+    if syn is None:
+        return None
+    try:
+        import json
+        os.makedirs(os.path.dirname(_SESSION_SYNAPSES), exist_ok=True)
+        with open(_SESSION_SYNAPSES, "w", encoding="utf-8") as f:
+            json.dump(syn.to_dict(), f, default=str)
+        return _SESSION_SYNAPSES
     except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
         return None
 
@@ -201,6 +233,7 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
     elif cmd == "save":
         path = _save_session_memory(core) or core.save_state()
+        _save_session_synapses(core)
         print(f"memory persisted → {path}" if path else "no memory to persist.")
     else:
         print(f"unknown command: /{cmd} — type /help")
@@ -231,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     restored = _load_session_memory(core) or core.load_state()
     if restored:
         print(f"continuity          : restored {restored} memories from a prior session ✓")
+    if _load_session_synapses(core):
+        print("lifelong memory     : restored elastic-synapse anchors (no forgetting) ✓")
 
     # Layer 5 — continuous cognition: the mind wanders in the background while idle.
     if core.start_cognition():
@@ -246,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         path = _save_session_memory(core) or core.save_state()
         if path:
             print(f"memory persisted → {path}")
+        _save_session_synapses(core)   # lifelong-learning anchors survive the restart
         print("until next time, Master.")
 
     while True:

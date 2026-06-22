@@ -304,6 +304,10 @@ class NyxaraCore:
         # consolidation — the dream engine: rehearses salient memories and abstracts
         # episodes into semantics during idle time (Ebbinghaus forgetting curve)
         self.consolidator = self._build_consolidator() if enable_memory else None
+        # elastic synapses — Elastic Weight Consolidation: estimates which learned weights
+        # matter most and freezes them, so she keeps learning forever without forgetting old
+        # skills or her loyalty core (catastrophic-forgetting protection / lifelong memory)
+        self.elastic_synapses = self._build_elastic_synapses() if enable_memory else None
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
@@ -875,6 +879,43 @@ class NyxaraCore:
             return Consolidator(self.memory)
         except Exception:  # noqa: BLE001 — consolidation is a capability, never required
             return None
+
+    def _build_elastic_synapses(self) -> Any:
+        """Elastic Weight Consolidation — the lifelong-memory engine. Estimates per-weight
+        importance and freezes the consolidated ones so new learning never overwrites old
+        skills; the loyalty core is permanently frozen. A capability, never required."""
+        try:
+            from nyxara.memory.elastic_synapses import ElasticSynapses
+            from nyxara.kernel.config import get_settings
+            mcfg = get_settings().memory
+            if not getattr(mcfg, "ewc_enabled", True):
+                return None
+            return ElasticSynapses(
+                ewc_lambda=getattr(mcfg, "ewc_lambda", 3.0),
+                freeze_threshold=getattr(mcfg, "ewc_freeze_threshold", 0.85),
+                max_tasks=getattr(mcfg, "ewc_max_tasks", 8),
+                online=getattr(mcfg, "ewc_online", True),
+            )
+        except Exception:  # noqa: BLE001 — elastic synapses are a capability, never required
+            return None
+
+    def _learner_weight_vector(self) -> Dict[str, float]:
+        """Flatten the learner's per-action linear value weights into a single named vector
+        (``action::feature``) so the elastic-synapses engine can anchor them. Best-effort:
+        returns ``{}`` if the learner has no inspectable weights."""
+        out: Dict[str, float] = {}
+        learner = getattr(self, "learner", None)
+        model = getattr(learner, "model", None)
+        w = getattr(model, "_w", None)
+        if not isinstance(w, dict):
+            return out
+        for action, feats in w.items():
+            try:
+                for feat, val in feats.items():
+                    out[f"{action}::{feat}"] = float(val)
+            except Exception:  # noqa: BLE001 — never let introspection break the loop
+                continue
+        return out
 
     def _build_temporal(self) -> Any:
         """A sense of time: order, precedence/lag, and rhythm over remembered events."""
@@ -2529,6 +2570,18 @@ class NyxaraCore:
                 self.learner.consolidate()
             except Exception:  # noqa: BLE001
                 pass
+            # Elastic Weight Consolidation: snapshot the learner's value weights as a frozen
+            # "memory" so the skills she has learned so far resist being overwritten later.
+            if self.elastic_synapses is not None:
+                try:
+                    weights = self._learner_weight_vector()
+                    if weights:
+                        self.elastic_synapses.observe_features(
+                            {k: abs(v) for k, v in weights.items()})
+                        self.elastic_synapses.consolidate(
+                            weights, task=f"turn-{self._turns}")
+                except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
+                    pass
         # periodic meta-learning: on the same cadence, decide how to learn/reason/remember/
         # predict *better* and softly apply those bounded tunings to the live subsystems.
         if (self.meta_learning_engine is not None
@@ -3271,6 +3324,11 @@ class NyxaraCore:
             rep["top_goal"] = top.name if top else None
         if self.learner is not None:
             rep["learned_steps"] = self.learner.report()["steps"]
+        if self.elastic_synapses is not None:
+            try:
+                rep["elastic_synapses"] = self.elastic_synapses.stats()
+            except Exception:  # noqa: BLE001 — synapse stats are best-effort
+                pass
         if self.reflector is not None:
             rep["episodes"] = len(self.reflector)
         if self.world_model is not None:
