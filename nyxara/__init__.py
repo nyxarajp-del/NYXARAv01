@@ -79,6 +79,15 @@ from nyxara.quantum.superposition_states import (
     Hypothesis,
     Superposition,
 )
+from nyxara.cognition.hyper_dimensional_vectors import (
+    HyperSpace,
+    Hypervector,
+    ItemMemory,
+    LatentSpaceMap,
+    NoveltyResult,
+    PatternReport,
+    RandomProjector,
+)
 
 __version__ = "0.1.0"
 
@@ -141,6 +150,14 @@ __all__ = [
     "Superposition",
     "Hypothesis",
     "CollapseResult",
+    # Cognition · 1 — Hyperdimensional Latent Space Mapping (10,000-D; patterns invisible in 3-D)
+    "LatentSpaceMap",
+    "HyperSpace",
+    "Hypervector",
+    "ItemMemory",
+    "RandomProjector",
+    "PatternReport",
+    "NoveltyResult",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",
