@@ -20,6 +20,7 @@ methods the Master would call programmatically:
     /scram [reason]    emergency stop — the loop HALTs until resumed
     /resume            restore the loop after a pause/scram
     /wander [n]        let the idle mind wander n ticks and show the thoughts
+    /proactive         detect & govern self-initiated actions (one initiative pass)
     /save              persist long-term memory to disk now
     /quit              leave the console (Ctrl-D / Ctrl-C also work)
 
@@ -81,6 +82,7 @@ commands:
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
   /wander [n]        let the idle mind wander n ticks and show the thoughts
+  /proactive         detect & govern self-initiated actions (one initiative pass)
   /research <topic>  run one autonomous research pass on a topic
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
@@ -150,6 +152,16 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
                 print(f"  …{ln}")
         else:
             print("  (the mind is quiet just now)")
+    elif cmd == "proactive":
+        if getattr(core, "proactive", None) is None:
+            print("proactive agency is unavailable (disabled in config).")
+        else:
+            ctx = core.proactive_context() if hasattr(core, "proactive_context") else {}
+            decisions = core.proactive.consider(ctx)
+            if not decisions:
+                print("  (nothing worth doing on her own initiative right now)")
+            for d in decisions:
+                print(f"  {d.initiative.name:32s} -> {d.verdict.value:9s} : {d.reason}")
     elif cmd == "research":
         if not arg:
             print("usage: /research <topic>")
