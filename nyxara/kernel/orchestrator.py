@@ -322,6 +322,11 @@ class NyxaraCore:
         # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
         # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
         self.world_simulator = self._build_world_simulator()
+        # Abyss · 1 — Timeline Simulator: the macro counterpart to the world simulator —
+        # branches the present into thousands of parallel futures, rolls each through the
+        # world model, and ranks candidate actions under a risk-aware (tail-protecting)
+        # score. Advisory: it informs choice; it never bypasses a gate.
+        self.timeline_simulator = self._build_timeline_simulator()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -925,6 +930,15 @@ class NyxaraCore:
             return WorldSimulator(world_model=self.world_model,
                                   predictive=self.predictive, rollout_steps=3)
         except Exception:  # noqa: BLE001 — world simulation is a capability, never required
+            return None
+
+    def _build_timeline_simulator(self) -> Any:
+        """Abyss · 1 — the parallel-futures engine: branch the present into thousands of
+        futures over the shared world model and rank actions under a risk-aware score."""
+        try:
+            from nyxara.abyss.timeline_simulator import TimelineSimulator
+            return TimelineSimulator(world_model=self.world_model, seed=0)
+        except Exception:  # noqa: BLE001 — timeline simulation is a capability, never required
             return None
 
     def _build_knowledge_graph(self) -> Any:
@@ -3205,6 +3219,8 @@ class NyxaraCore:
                 pass
         if self.prediction_engine is not None:
             rep["predictions_made"] = self.prediction_engine.predictions_count
+        if getattr(self, "timeline_simulator", None) is not None:
+            rep["timeline_simulator"] = "ready"
         if self.meta_intelligence is not None:
             rep["meta_evaluations"] = len(self.meta_intelligence.all_evals())
         if self.meta_learning_engine is not None:

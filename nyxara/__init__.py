@@ -56,6 +56,11 @@ from nyxara.kernel.orchestrator import (
 from nyxara.knowledge import KnowledgeBase
 from nyxara.mind.cost import UsageLedger
 from nyxara.mind.strategic import StrategicAnalysis, StrategicIntelligence
+from nyxara.abyss.timeline_simulator import (
+    ActionOutcome,
+    TimelineReport,
+    TimelineSimulator,
+)
 
 __version__ = "0.1.0"
 
@@ -99,6 +104,10 @@ __all__ = [
     # the strategic intelligence faculty (six-part analytical framework)
     "StrategicIntelligence",
     "StrategicAnalysis",
+    # Abyss · 1 — the Timeline Simulator (thousands of parallel futures, ranked)
+    "TimelineSimulator",
+    "TimelineReport",
+    "ActionOutcome",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",
     "EvalSuite",
