@@ -466,6 +466,14 @@ class NyxaraCore:
             self._build_capability_foundry() if enable_growth else None)
         # gaps already attempted this session — never re-forge the same missing tool in a loop
         self._capability_gaps_seen: set = set()
+        # The Infinite Explorer (Environment-Driven Learning, Rule 4): when a task falls
+        # outside her knowledge she does not abstain — she writes code, scrapes the web for
+        # hints, runs it in the sandbox, debugs the real errors, and learns the working logic
+        # permanently. Built last so it can compose the researcher, skills, knowledge and the
+        # live LLM. Off when growth is disabled or config disables ``features.self_bootstrap``.
+        self.explorer = self._build_explorer() if enable_growth else None
+        # tasks she could not answer this turn, queued to self-bootstrap on the next idle tick
+        self._explore_queue: List[str] = []
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -1323,6 +1331,42 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
             return None
 
+    def _build_explorer(self) -> Any:
+        """The Infinite Explorer — autonomous tool-augmented self-bootstrapping.
+
+        Composes the researcher (web hints), skills + knowledge (permanent learning) and the
+        live LLM (free-code synthesis); falls back to the Capability Foundry's deterministic
+        recipe synthesis when no model is available, so it works fully offline. Network and
+        autonomous package-install follow ``features.web_access`` and the explorer config.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.growth.explorer import InfiniteExplorer
+            try:
+                cfg = self.settings if getattr(self, "settings", None) is not None \
+                    else get_settings()
+            except Exception:  # noqa: BLE001
+                cfg = None
+            if cfg is not None and not getattr(getattr(cfg, "features", None),
+                                               "self_bootstrap", True):
+                return None
+            xcfg = getattr(cfg, "explorer", None) if cfg is not None else None
+            reasoner = getattr(self, "reasoner", None)
+            return InfiniteExplorer(
+                llm=getattr(reasoner, "llm", None) if reasoner else None,
+                researcher=getattr(self, "researcher", None),
+                knowledge=getattr(self, "knowledge", None),
+                skills=getattr(self, "skills", None),
+                memory=getattr(self, "memory", None),
+                tools=getattr(self, "tools", None),
+                settings=cfg,
+                max_debug_rounds=getattr(xcfg, "max_debug_rounds", 4),
+                step_timeout_s=getattr(xcfg, "step_timeout_s", 8.0),
+                allow_pkg_install=getattr(xcfg, "autonomous_install", True),
+            )
+        except Exception:  # noqa: BLE001 — self-bootstrapping is a capability, never required
+            return None
+
     def _build_sandbox_runner(self) -> Any:
         """A shared isolated Sandbox for safe internal experiments (never required)."""
         try:
@@ -1637,6 +1681,10 @@ class NyxaraCore:
         # 3. REASON — the probabilistic proposal, grounded in associative recall
         recalled = self._recall_for(safe_text)
         candidate = self._invoke_reasoner(safe_text, focus, recalled)
+        # 3b. ENVIRONMENT-DRIVEN LEARNING — if she doesn't know this (abstains / low
+        #     confidence on a solvable task), don't stop: self-bootstrap a solution, learn it
+        #     permanently, and re-reason now that the new skill/knowledge is recalled.
+        candidate = self._maybe_bootstrap(safe_text, focus, candidate, authority)
         r_t = self.mind.record(ThoughtKind.INFERENCE, candidate.rationale or candidate.text,
                                causes=[a_t], salience=0.6, confidence=candidate.confidence)
         thoughts.append(r_t)
@@ -1770,6 +1818,50 @@ class NyxaraCore:
         return Disposition.ACT, "cleared"
 
     # ---- recall & reasoning ---- #
+    def _maybe_bootstrap(self, stimulus: str, focus: Optional[Percept],
+                         candidate: Candidate, authority: Authority) -> Candidate:
+        """Environment-Driven Learning: self-bootstrap an answer she doesn't yet have.
+
+        Fires only when she abstains / is low-confidence on a *solvable* task and oversight
+        permits autonomy. Runs the Infinite Explorer (write→run→debug→learn) time-boxed, then
+        re-reasons so the freshly-learned skill/knowledge grounds a stronger answer. Fully
+        best-effort: any miss returns the original candidate, preserving honest abstention."""
+        explorer = getattr(self, "explorer", None)
+        if explorer is None or candidate.kind != "respond":
+            return candidate
+        if candidate.confidence >= self._bootstrap_confidence_floor():
+            return candidate
+        try:
+            if not self.oversight.gate() or not explorer.can_attempt(stimulus):
+                return candidate
+            result = explorer.explore(stimulus)
+        except Exception:  # noqa: BLE001 — bootstrapping never breaks the cycle
+            return candidate
+        if not getattr(result, "solved", False):
+            return candidate
+        try:
+            self.mind.record(ThoughtKind.INFERENCE,
+                             f"bootstrapped [{stimulus[:30]}] via {result.origin}", salience=0.6)
+        except Exception:  # noqa: BLE001
+            pass
+        # re-reason now that the new skill/knowledge is recalled into the reasoning context
+        try:
+            improved = self._invoke_reasoner(stimulus, focus, self._recall_for(stimulus))
+            if improved.confidence >= candidate.confidence:
+                return improved
+        except Exception:  # noqa: BLE001
+            pass
+        return candidate
+
+    def _bootstrap_confidence_floor(self) -> float:
+        """Below this confidence on a 'respond' candidate, she tries to self-bootstrap."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            return float(getattr(getattr(cfg, "explorer", None), "confidence_floor", 0.45))
+        except Exception:  # noqa: BLE001
+            return 0.45
+
     def _recall_for(self, stimulus: str) -> List[Any]:
         """Associative recall cued by the stimulus. Level 6: combines vector retrieval
         with knowledge-graph traversal so multi-hop structured facts complement
@@ -2803,6 +2895,22 @@ class NyxaraCore:
                             salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f-) Infinite Explorer — drain a queued unknown and self-bootstrap a solution on
+        #      idle (write→run→debug→learn permanently). Oversight-gated: a paused/scrammed
+        #      mind takes no autonomous action, and the code only ever runs in the sandbox.
+        if (getattr(self, "explorer", None) is not None and self._explore_queue
+                and self.oversight.gate()):
+            try:
+                task = self._drain_motivated(self._explore_queue)
+                if task:
+                    xr = self.explorer.explore(task)
+                    report["explorations"] = len(self.explorer.all_reports())
+                    if xr.solved:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"learned to solve [{task[:28]}] via {xr.origin}", salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
         # 4f+) Real-environment sensorimotor tick — feed the world model a GENUINE
         #      (state, action, next_state, reward) transition from the real machine (a
         #      scratch-dir filesystem + live CPU/RAM), so its learned dynamics reflect a
@@ -2915,6 +3023,21 @@ class NyxaraCore:
             return self.researcher.research(topic).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"topic": topic, "error": str(exc)}
+
+    def bootstrap(self, task: str) -> Dict[str, Any]:
+        """Self-bootstrap a solution to ``task`` she doesn't yet know (Environment-Driven Learning).
+
+        Writes code, scrapes the web for hints (when online), runs it in the sandbox, debugs the
+        real errors round by round, and on success learns the working logic permanently into her
+        skills and knowledge base. Returns the :class:`ExploreResult` as a dict. Best-effort:
+        nothing here side-steps the control law, and the code only ever runs in the sandbox.
+        """
+        if getattr(self, "explorer", None) is None:
+            return {"task": task, "error": "explorer unavailable"}
+        try:
+            return self.explorer.explore(task).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"task": task, "error": str(exc)}
 
     def investigate(self, question: str) -> Dict[str, Any]:
         """Reason about ``question`` like a scientist (best-effort).
@@ -3362,6 +3485,10 @@ class NyxaraCore:
             rep["civilization_agents"] = len(self.civilization.agents)
         if self.researcher is not None:
             rep["research_reports"] = len(self.researcher.all_reports())
+        if getattr(self, "explorer", None) is not None:
+            xrep = self.explorer.report()
+            rep["explorations"] = xrep.get("explorations", 0)
+            rep["skills_bootstrapped"] = xrep.get("skills_bootstrapped", 0)
         if self.scientist is not None:
             rep["investigations"] = len(self.scientist.all_investigations())
         if self.autonomous_scientist is not None:

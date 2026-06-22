@@ -110,6 +110,7 @@ from nyxara.growth.skilltree import (
     build_default_skilltree,
 )
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
+from nyxara.growth.explorer import ExploreResult, InfiniteExplorer
 from nyxara.growth.scientist import (
     Conclusion,
     Experiment,
@@ -124,6 +125,8 @@ from nyxara.growth.scientist import (
 __all__ = [
     "AutonomousResearcher",
     "ResearchReport",
+    "InfiniteExplorer",
+    "ExploreResult",
     "Scientist",
     "Hypothesis",
     "Experiment",
