@@ -345,6 +345,21 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("n", "int", required=False, default=6)],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
 
+        # ---- adversarial self-play: clone-vs-clone contest (Master-gated) ---- #
+        def _adversarial_self_play(rounds: int = 200) -> Dict[str, Any]:
+            from nyxara.growth.adversarial_self_play import AdversarialSelfPlay
+            return AdversarialSelfPlay(memory=memory).compete(max(1, rounds))
+
+        _add(ToolSpec("adversarial_self_play", handler=_adversarial_self_play,
+                      description="clone-vs-clone self-play: an attacker policy poses hard "
+                                  "VERIFIABLE problems to stump a defender policy; both co-adapt "
+                                  "over many rounds (AlphaGo-style). Every solved pair feeds the "
+                                  "foundry corpus and lost categories become ranked weaknesses + "
+                                  "curiosity topics. Pure measurement; no weights change, nothing "
+                                  "external is touched",
+                      params=[ToolParam("rounds", "int", required=False, default=200)],
+                      capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH))
+
         # ---- recursive self-improvement: review / architecture / benchmark / weakness ---- #
         def _rsi(**kw: Any):
             from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
