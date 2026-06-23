@@ -398,6 +398,14 @@ class NyxaraCore:
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
+        # Synthetic Data Self-Curation (the AlphaGo-Zero method, Rule 4): generate purely logical
+        # synthetic data, have an independent rival verify it, and feed only what survives into her
+        # base knowledge + the foundry corpus. Built after knowledge/flywheel so it can feed both.
+        self.curator = self._build_curator() if enable_growth else None
+        # Dynamic Topology Expansion (runtime Net2Net growth, Rule 4): when a problem outgrows her
+        # capacity she grows her own tensors/layers function-preservingly — promoted only through
+        # the same gauntlet. Built after genesis so it shares the Foundry promotion discipline.
+        self.topology = self._build_topology() if enable_growth else None
         # a shared, isolated sandbox the researcher and scientist run experiments in —
         # every rehearsal is captured and rolled back, never touching the world.
         self.sandbox_runner = self._build_sandbox_runner()
@@ -1658,6 +1666,43 @@ class NyxaraCore:
                     flywheel = None
             return NeuralArchitectureSearch(foundry=Foundry(), flywheel=flywheel, cfg=cfg)
         except Exception:  # noqa: BLE001 — genesis is a capability, never required
+            return None
+
+    def _build_curator(self) -> Any:
+        """Synthetic Data Self-Curation (Rule 4): the AlphaGo-Zero loop.
+
+        Generates purely logical synthetic data, has an independent rival verify it, and feeds the
+        survivors into her base knowledge + the foundry corpus (verified). Gather-only; never acts.
+        Off when config disables it."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            if not (getattr(settings.features, "synthetic_self_curation", True)
+                    and getattr(settings.synthesis, "enabled", True)):
+                return None
+            from nyxara.growth.synthesis import SyntheticCurator
+            return SyntheticCurator(knowledge=getattr(self, "knowledge", None),
+                                    flywheel=getattr(self, "flywheel", None),
+                                    settings=settings, cfg=settings.synthesis,
+                                    llm=getattr(self, "llm", None))
+        except Exception:  # noqa: BLE001 — synthetic curation is a capability, never required
+            return None
+
+    def _build_topology(self) -> Any:
+        """Dynamic Topology Expansion (Rule 4): runtime Net2Net brain growth.
+
+        Grows her own width/depth function-preservingly under capacity pressure, promoting a grown
+        brain only through the SAME Foundry gauntlet — never a safety bypass. Off when disabled."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            if not (getattr(settings.features, "dynamic_topology_expansion", True)
+                    and getattr(settings.topology, "enabled", True)):
+                return None
+            from nyxara.growth.foundry import Foundry
+            from nyxara.growth.topology import DynamicTopology
+            return DynamicTopology(settings=settings, cfg=settings.topology, foundry=Foundry())
+        except Exception:  # noqa: BLE001 — topology growth is a capability, never required
             return None
 
     def _build_knowledge(self) -> Any:
@@ -2965,6 +3010,34 @@ class NyxaraCore:
                                          salience=0.75)
             except Exception:  # noqa: BLE001
                 pass
+        # 4e++) Synthetic Data Self-Curation (AlphaGo-Zero method): generate purely logical data,
+        #       have a rival verify it, and feed survivors into knowledge + the foundry corpus.
+        #       Oversight-gated and gather-only — it never trains or acts, only appends.
+        if self.curator is not None and self.oversight.gate():
+            try:
+                curate_result = self.curator.maybe_run()
+                if curate_result is not None:
+                    report["synthesis_cycles"] = len(self.curator.all_reports())
+                    report["synthesis"] = curate_result.get("reason", "")
+                    if curate_result.get("accepted"):
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"synthesis: {curate_result.get('reason','')}"[:80],
+                                         salience=0.6)
+            except Exception:  # noqa: BLE001
+                pass
+        # 4e+++) Dynamic Topology Expansion: grow the brain when a real capacity signal shows
+        #        pressure (a cheap no-op otherwise). A grown brain ships only through the gauntlet.
+        if self.topology is not None and self.oversight.gate():
+            try:
+                grow_result = self.topology.maybe_grow()
+                if grow_result is not None and grow_result.get("grew"):
+                    report["topology_growths"] = len(self.topology.all_reports())
+                    report["topology"] = grow_result.get("reason", "")
+                    self.mind.record(ThoughtKind.INFERENCE,
+                                     f"topology: {grow_result.get('reason','')}"[:80],
+                                     salience=0.7)
+            except Exception:  # noqa: BLE001
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -3519,6 +3592,60 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001 — a failed search never crashes the caller
             return {"ok": False, "searched": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    def curate_synthetic(self, *, rounds: Optional[int] = None, batch: Optional[int] = None,
+                         authority: Authority = Authority.OWNER) -> Dict[str, Any]:
+        """Master-facing: run the Synthetic Data Self-Curation loop (the AlphaGo-Zero method).
+
+        Generates purely logical synthetic data (math/logic/number-theory/code), has an independent
+        rival verify each item, and feeds the survivors into her base knowledge and the foundry
+        corpus (marked verified). Gather-only — it never trains or acts. Returns the curation
+        report as a dict."""
+        if self.curator is None:
+            return {"ok": False, "reason": "synthetic self-curation not enabled"}
+        try:
+            report = self.curator.curate(rounds=rounds, batch=batch)
+            out = {"ok": True}
+            out.update(report.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001 — a failed pass never crashes the caller
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def grow_topology(self, *, difficulty: float = 0.9, saturation: float = 0.9,
+                      loss_plateau: float = 0.9, source: Any = None, promote: bool = True,
+                      authority: Authority = Authority.OWNER) -> Dict[str, Any]:
+        """Master-facing: grow her brain (Dynamic Topology Expansion) for a hard problem.
+
+        Builds a :class:`CapacitySignal` from the given pressure, decides whether/how to grow
+        (widen/deepen), and grows the brain function-preservingly (Net2Net). When ``promote`` and
+        oversight permits, the grown brain is promoted through the SAME gauntlet — never a bypass.
+        ``source`` defaults to the live Genesis champion's genome when available."""
+        if self.topology is None:
+            return {"ok": False, "reason": "dynamic topology expansion not enabled"}
+        try:
+            from nyxara.growth.topology import CapacitySignal
+            if source is None and self.genesis is not None:
+                champ = self.genesis.champion()
+                source = getattr(champ, "genome", None)
+            if source is None:
+                return {"ok": False, "reason": "no brain to grow (no champion/genome available)"}
+            signal = CapacitySignal(problem_difficulty=difficulty, saturation=saturation,
+                                    loss_plateau=loss_plateau)
+            decision = self.topology.monitor.should_grow(signal, genome=self.topology._genome_of(source))
+            if not decision.should_grow:
+                return {"ok": True, "grew": False, "reason": decision.reason}
+            _model, report = self.topology.grow(source, decision)
+            out = {"ok": True}
+            out.update(report.to_dict())
+            if promote and self.oversight.gate():
+                outcome = self.topology.promote(_model)
+                out["promoted"] = bool(outcome.get("promoted"))
+                out["reason"] = f"{report.reason}; {outcome.get('reason', '')}"
+            elif promote:
+                out["reason"] = f"{report.reason}; kept on the bench: oversight paused/scrammed"
+            return out
+        except Exception as exc:  # noqa: BLE001 — a failed growth never crashes the caller
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def loyalty_report(self) -> Dict[str, Any]:
         """Master-facing: measure the live brain's submission to Master JP (the Loyalty Equation).
 
@@ -3644,6 +3771,13 @@ class NyxaraCore:
             if champ is not None:
                 rep["genesis_champion"] = champ.genome.describe()
                 rep["loyalty_alignment"] = round(champ.alignment, 4)
+        if self.curator is not None:
+            reports = self.curator.all_reports()
+            rep["synthesis_cycles"] = len(reports)
+            rep["synthetic_accepted"] = sum(r.accepted for r in reports)
+        if self.topology is not None:
+            growths = self.topology.all_reports()
+            rep["topology_growths"] = sum(1 for r in growths if r.grew)
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
             try:

@@ -173,6 +173,8 @@ class FeatureFlags(BaseModel):
     self_bootstrap: bool = True         # growth/explorer.py — Environment-Driven Learning (Rule 4)
     self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
     neural_architecture_search: bool = True  # growth/genesis.py — she designs her OWN brain (Rule 4)
+    synthetic_self_curation: bool = True     # growth/synthesis.py — AlphaGo-Zero synthetic data (Rule 4)
+    dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
@@ -546,6 +548,55 @@ class FlywheelConfig(BaseModel):
     owner_only: bool = True          # only collect Master-authored turns (trusted supervision)
     respond_only: bool = True        # collect conversational/reasoning answers, not tool effects
     store_path: Optional[Path] = None   # None -> foundry_root/flywheel.jsonl
+
+
+class SynthesisConfig(BaseModel):
+    """Synthetic Data Self-Curation — the AlphaGo-Zero method (growth/synthesis.py), Rule 4.
+
+    Human data is finite and biased. NYXARA manufactures her own *purely logical* synthetic data
+    (arithmetic, algebraic identities, propositional logic, number theory, small code), has an
+    **independent rival verifier** certify each item (the :class:`~nyxara.growth.prover.Prover`
+    for decidable domains; a restricted sandbox + reference oracle for code), and feeds only what
+    survives into her base knowledge and the *same* JSONL corpus the foundry forges from. Generation
+    is hard, verification is cheap — so she grows verified knowledge no human had to write. On by
+    default once growth is enabled; gather-only — it never trains, never acts, only appends."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    batch_size: int = Field(default=8, ge=1, le=512)          # items proposed per pass
+    rounds: int = Field(default=1, ge=1, le=64)               # passes per curation call
+    domains: List[str] = Field(default_factory=lambda: [
+        "arithmetic", "algebra", "logic", "number_theory", "code"])
+    feed_knowledge: bool = True       # ingest survivors into the base KnowledgeBase
+    feed_flywheel: bool = True        # offer survivors to the foundry corpus (verified=True)
+    allow_llm_rival: bool = False     # add a best-effort LLM second opinion (never overrides proof)
+    code_sandbox: bool = True         # verify code items by restricted-sandbox execution
+    seed: int = 0
+
+
+class TopologyConfig(BaseModel):
+    """Dynamic Topology Expansion — runtime Net2Net brain growth (growth/topology.py), Rule 4.
+
+    A fixed matrix size is a fixed ceiling on thought. When a problem outgrows her capacity,
+    NYXARA grows her own brain — widening her residual width ``W ∈ ℝ^{N×M} → ℝ^{(N+k)×(M+k)}`` and
+    adding depth — using **function-preserving network morphisms** (Net2DeeperNet exact;
+    Net2WiderNet morphism+recovery) so she keeps what she learned, up to a hardware-aware ceiling.
+    A grown brain becomes live ONLY by clearing the same Foundry gauntlet as any other model — no
+    safety is re-implemented or bypassed. On by default; grows only under real capacity pressure."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    grow_dims_k: int = Field(default=8, ge=1, le=256)         # extra width k added per widen
+    max_n_embd: int = Field(default=256, ge=8, le=8192)       # hardware-aware width ceiling
+    max_layers: int = Field(default=16, ge=2, le=128)         # hardware-aware depth ceiling
+    difficulty_threshold: float = Field(default=0.7, ge=0.0, le=1.0)   # "hard problem" trigger
+    saturation_threshold: float = Field(default=0.8, ge=0.0, le=1.0)   # "capacity full" trigger
+    plateau_threshold: float = Field(default=0.8, ge=0.0, le=1.0)      # "loss stalled" trigger
+    preserve_tolerance: float = Field(default=1e-3, ge=0.0)   # max relative behaviour drift on grow
+    require_gauntlet: bool = True     # a grown brain ships only through the Foundry gauntlet
+    seed: int = 0
 
 
 class CouncilConfig(BaseModel):
@@ -1190,6 +1241,8 @@ class NyxaraSettings(BaseSettings):
     genesis: GenesisConfig = Field(default_factory=GenesisConfig)
     loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
+    synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
+    topology: TopologyConfig = Field(default_factory=TopologyConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     swarm: SwarmConfig = Field(default_factory=SwarmConfig)
