@@ -447,6 +447,11 @@ class NyxaraCore:
                 use_council = bool(get_settings().council.enabled)
             except Exception:  # noqa: BLE001
                 use_council = False
+        # Continuous metaprompt distillation: her own successful reasoning chains are compressed
+        # into operating heuristics and injected into the reasoner's system prompt (recursive
+        # self-improvement). Built before the reasoner so it can ride every prompt; off when
+        # growth or the feature is disabled.
+        self.metaprompt = self._build_metaprompt(llm) if enable_growth else None
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative,
             self_model=getattr(self, "self_model", None))
@@ -469,6 +474,10 @@ class NyxaraCore:
         # is disabled or config disables it.
         self.capability_foundry = (
             self._build_capability_foundry() if enable_growth else None)
+        # Autonomous Tool Forge: the self-correcting permanent-tool path (write → sandbox-test →
+        # read traceback → self-fix → deploy → remember as a skill). Shares the capability
+        # foundry as its deploy engine. Off when growth is disabled.
+        self.tool_forge = self._build_tool_forge() if enable_growth else None
         # gaps already attempted this session — never re-forge the same missing tool in a loop
         self._capability_gaps_seen: set = set()
         # The Infinite Explorer (Environment-Driven Learning, Rule 4): when a task falls
@@ -560,7 +569,8 @@ class NyxaraCore:
             base = LLMReasoner(llm, memory=self.memory, tools=self.tools,
                                use_council=use_council, council=council,
                                skill_memory=skills, soul=soul, history=self.history,
-                               knowledge=self.knowledge, self_model=self_model)
+                               knowledge=self.knowledge, self_model=self_model,
+                               metaprompt=getattr(self, "metaprompt", None))
         except Exception:  # noqa: BLE001 — always have a working mind
             base = _default_reasoner
         # wrap it in the integrated mind: memory recall + dual-process routing +
@@ -572,6 +582,7 @@ class NyxaraCore:
                                   retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
                                   knowledge=self.knowledge,
+                                  metaprompt=getattr(self, "metaprompt", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -1286,6 +1297,51 @@ class NyxaraCore:
                 benchmark_repeats=cfg.benchmark_repeats)
         except Exception:  # noqa: BLE001 — the foundry is a capability, never required
             return None
+
+    def _build_metaprompt(self, llm: Any) -> Any:
+        """Continuous metaprompt distillation — heuristics from her own successes (RSI)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            if not get_settings().metaprompt.enabled:
+                return None
+            from nyxara.growth.metaprompt_distill import MetaPromptDistiller
+            return MetaPromptDistiller(
+                memory=self.memory, journal=self.journal, skill_memory=self.skills, llm=llm)
+        except Exception:  # noqa: BLE001 — distillation is a capability, never required
+            return None
+
+    def _build_tool_forge(self) -> Any:
+        """Autonomous, self-correcting, permanent tool forging from capability gaps (Rule 4)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().tool_forge
+            if not cfg.enabled or self.tools is None:
+                return None
+            from nyxara.agency.autonomous_tool_forge import AutonomousToolForge
+            reasoner = getattr(self, "reasoner", None)
+            llm = getattr(reasoner, "llm", None) if reasoner else None
+            return AutonomousToolForge(
+                registry=self.tools, llm=llm, skill_memory=self.skills,
+                foundry=getattr(self, "capability_foundry", None))
+        except Exception:  # noqa: BLE001 — the forge is a capability, never required
+            return None
+
+    @staticmethod
+    def _forge_params(tool_args: Any) -> Any:
+        """Infer typed ToolParams from the args the reasoner proposed for a missing tool."""
+        try:
+            from nyxara.agency.tools import ToolParam
+        except Exception:  # noqa: BLE001
+            return None
+        if not isinstance(tool_args, dict) or not tool_args:
+            return None
+        type_of = {bool: "bool", int: "int", float: "float", str: "str",
+                   list: "list", dict: "dict"}
+        params = []
+        for name, value in tool_args.items():
+            ptype = type_of.get(type(value), "any")
+            params.append(ToolParam(str(name), type=ptype, required=True))
+        return params or None
 
     def _build_flywheel(self) -> Any:
         """The data flywheel: collect verified-good lived turns into the foundry corpus.
@@ -2678,20 +2734,36 @@ class NyxaraCore:
         # That is a capability gap — autonomously design, write, test, benchmark and deploy
         # a brand-new tool so the capability exists next time. Clamped to safe-tier tools by
         # the gauntlet (privileged/sovereign-core forges still require the Master).
-        if (self.capability_foundry is not None and candidate.kind == "act"
+        forge_engine = self.tool_forge or self.capability_foundry
+        if (forge_engine is not None and candidate.kind == "act"
                 and candidate.tool and self.tools is not None
                 and self.tools.get(candidate.tool) is None
                 and candidate.tool not in self._capability_gaps_seen):
             self._capability_gaps_seen.add(candidate.tool)
             try:
                 from nyxara.agency.permissions import Authority as _Authority
-                forge = self.capability_foundry.forge(candidate.tool,
-                                                       authority=_Authority.AUTONOMOUS)
-                if forge.deployed:
-                    self.mind.record(
-                        ThoughtKind.INFERENCE,
-                        f"forged a new capability: {forge.tool_name}",
-                        salience=0.7, confidence=forge.benchmark_score)
+                if self.tool_forge is not None:
+                    # self-correcting forge: write → test → read traceback → fix → deploy →
+                    # remember. Pass the proposed args as typed params so the tool's signature
+                    # matches what the reasoner intended to call.
+                    params = self._forge_params(candidate.tool_args)
+                    outcome = self.tool_forge.forge(
+                        candidate.tool, params=params, authority=_Authority.AUTONOMOUS)
+                    if outcome.deployed:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"forged a new capability: {outcome.tool_name} "
+                            f"(self-fixed in {outcome.attempts} attempt(s))",
+                            salience=0.7,
+                            confidence=float(outcome.benchmark.get("pass_rate", 1.0)))
+                else:
+                    forge = self.capability_foundry.forge(candidate.tool,
+                                                          authority=_Authority.AUTONOMOUS)
+                    if forge.deployed:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"forged a new capability: {forge.tool_name}",
+                            salience=0.7, confidence=forge.benchmark_score)
             except Exception:  # noqa: BLE001 — forging is best-effort, never fatal
                 pass
         # periodic forgetting-protection: rehearse old experience and lock in skill

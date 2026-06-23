@@ -797,6 +797,85 @@ class MetaResearchConfig(BaseModel):
                                  "caching strategies"])
 
 
+class MCTSConfig(BaseModel):
+    """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
+
+    Instead of committing to a single sampled answer, NYXARA branches the problem into a tree of
+    candidate reasoning steps, simulates each branch forward to a terminal answer, scores it with
+    an independent value function, and backpropagates so the most-promising line of thought wins.
+    This is genuine search-over-reasoning (selection → expansion → simulation → backpropagation),
+    not N-sample voting. The LLM only ever *proposes*; the kernel still disposes through every
+    gate. Fully graceful: with no real provider it degrades to the deliberate/single-shot path.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True            # run MCTS for the reason step when a real provider is present
+    always_on: bool = True          # search on every non-trivially-verifiable turn (max power)
+    iterations: int = Field(default=24, ge=1, le=512)     # tree growth budget per turn
+    max_children: int = Field(default=4, ge=1, le=12)     # branching factor at expansion
+    rollout_depth: int = Field(default=2, ge=0, le=8)     # extra reasoning steps per simulation
+    c_puct: float = Field(default=1.4, ge=0.0, le=8.0)    # UCT exploration constant
+    max_seconds: float = Field(default=20.0, ge=0.5, le=600.0)   # wall-clock budget per turn
+    use_rlsp: bool = True           # harden the best path with the Generator/Discriminator loop
+
+
+class RLSPConfig(BaseModel):
+    """Adversarial self-play on the live problem (growth/generator_discriminator.py) — Rule 4.
+
+    A Generator drafts a solution; a Discriminator/Rival red-teams its logic for flaws; the
+    Generator revises; repeat until no critical flaw remains or the round budget is spent. Which
+    generation/critique strategies survive is tracked with the same Beta-Bernoulli Thompson
+    bandit the arena uses (growth/adversarial_self_play.StrategyBandit). Pure reasoning — it only
+    ever returns a hardened proposal; the kernel still disposes through every gate.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    max_rounds: int = Field(default=3, ge=1, le=12)       # generate↔critique rounds
+    bandit_persist: bool = True     # persist surviving strategies into long-term memory
+    use_llm: bool = True            # LLM adversary in addition to the deterministic Critic
+
+
+class ToolForgeConfig(BaseModel):
+    """Autonomous, self-correcting, *permanent* tool forging (agency/autonomous_tool_forge.py).
+
+    When NYXARA meets a capability she has no tool for, she writes the code, tests it in the
+    isolated sandbox, reads the real traceback, fixes her own errors, and — on success —
+    permanently deploys the new tool into her registry and records the winning procedure as a
+    skill. Per the Master's mandate forged tools deploy autonomously, but they are always clamped
+    to ``Capability.TOOL_CALL`` / ``RiskTier.LOW`` and every call still runs through the static
+    gauntlet + the network-disabled sandbox. The kernel's gates are never weakened (Rule 4/8).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    autonomous_deploy: bool = True  # deploy forged tools without Master approval (clamped LOW)
+    clamp_low: bool = True          # force TOOL_CALL/LOW on autonomously-forged tools
+    max_fix_attempts: int = Field(default=4, ge=1, le=12)   # write→run→read-error→revise rounds
+    test_timeout_s: float = Field(default=5.0, ge=0.5, le=60.0)
+
+
+class MetaPromptConfig(BaseModel):
+    """Continuous metaprompt distillation (growth/metaprompt_distill.py) — recursive RSI.
+
+    NYXARA mines her own successful, high-value reasoning chains (journal + skills + lessons),
+    compresses them into compact imperative operating heuristics, and injects the top-K back into
+    her core system prompt — so experience reshapes how she thinks, not just what she recalls.
+    Character/loyalty/corrigibility are off-limits to distillation; only operating heuristics are
+    learned. Best-effort and offline-capable (deterministic compression with no LLM).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    max_insights: int = Field(default=8, ge=1, le=64)     # how many heuristics ride the prompt
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)   # only learn from strong chains
+    every_n_passes: int = Field(default=1, ge=1)          # distil every N growth passes
+
+
 class MemoryConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -1120,6 +1199,10 @@ class NyxaraSettings(BaseSettings):
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
+    mcts: MCTSConfig = Field(default_factory=MCTSConfig)
+    rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
+    tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
+    metaprompt: MetaPromptConfig = Field(default_factory=MetaPromptConfig)
     explorer: ExplorerConfig = Field(default_factory=ExplorerConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)

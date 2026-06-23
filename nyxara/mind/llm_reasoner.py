@@ -66,7 +66,7 @@ class LLMReasoner:
                  settings: Optional[NyxaraSettings] = None, system: Optional[str] = None,
                  use_council: bool = False, council: Any = None,
                  skill_memory: Any = None, soul: Any = None, history: Any = None,
-                 knowledge: Any = None, self_model: Any = None,
+                 knowledge: Any = None, self_model: Any = None, metaprompt: Any = None,
                  max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
@@ -86,6 +86,9 @@ class LLMReasoner:
         # NYXARA's introspectable self-model — drives the PRIMARY self-model router's upfront
         # triage (which mind handles a prompt) and the verify-before-act gate on actions.
         self.self_model = self_model
+        # distilled operating heuristics (growth/metaprompt_distill.py), injected into the
+        # system prompt so NYXARA's own past successes reshape how she reasons (recursive RSI).
+        self.metaprompt = metaprompt
         self.max_memory_context = max_memory_context
         self.max_history = max_history
         self.system = system or self._default_system()
@@ -104,13 +107,19 @@ class LLMReasoner:
         )
 
     def _effective_system(self) -> str:
-        """The base persona, plus the soul's current (mood-bent but character-stable) voice."""
-        if self.soul is None:
-            return self.system
-        try:
-            return f"{self.system}\n\n{self.soul.voice().system_fragment()}"
-        except Exception:  # noqa: BLE001 — voice is advisory, never fatal
-            return self.system
+        """The base persona, plus the soul's voice, plus self-distilled operating heuristics."""
+        system = self.system
+        if self.soul is not None:
+            try:
+                system = f"{system}\n\n{self.soul.voice().system_fragment()}"
+            except Exception:  # noqa: BLE001 — voice is advisory, never fatal
+                pass
+        if self.metaprompt is not None:
+            try:
+                system = f"{system}{self.metaprompt.as_prompt()}"
+            except Exception:  # noqa: BLE001 — distilled heuristics are advisory, never fatal
+                pass
+        return system
 
     def _is_real(self) -> bool:
         try:
@@ -254,16 +263,56 @@ class LLMReasoner:
             return routed
         cfg = self.settings.llm
         temperature = min(cfg.temperature, 0.5)
-        # Deliberate (think -> decide -> critique) when configured; else a single shot.
-        if cfg.reasoning_passes > 1 or cfg.reasoning_samples > 1:
-            data = self._deliberate(stimulus, temperature)
-        else:
-            data = self.llm.generate_json(
-                self._build_prompt(stimulus), system=self._effective_system(),
-                temperature=temperature, max_tokens=cfg.max_output_tokens)
+        data: Any = None
+        # MCTS deep reasoning (search over reasoning) when enabled — branch, simulate, pick the
+        # optimal path. Falls back to deliberation / single-shot if it can't parse a decision.
+        if getattr(self.settings, "mcts", None) is not None and self.settings.mcts.enabled:
+            data = self._mcts(stimulus, temperature)
+        if data is None:
+            # Deliberate (think -> decide -> critique) when configured; else a single shot.
+            if cfg.reasoning_passes > 1 or cfg.reasoning_samples > 1:
+                data = self._deliberate(stimulus, temperature)
+            else:
+                data = self.llm.generate_json(
+                    self._build_prompt(stimulus), system=self._effective_system(),
+                    temperature=temperature, max_tokens=cfg.max_output_tokens)
         if not isinstance(data, dict):
             raise ValueError("decision was not a JSON object")
         return self._candidate_from(data, stimulus)
+
+    def _mcts(self, stimulus: str, temperature: float) -> Any:
+        """Monte Carlo Tree Search over reasoning steps; returns a decision dict or None."""
+        from nyxara.mind.critique import Critic
+        from nyxara.mind.mcts_reasoner import MCTSReasoner, MCTSUnavailable
+        from nyxara.mind.router import default_verifier
+        cfg = self.settings.llm
+        m = self.settings.mcts
+        rlsp = None
+        rcfg = getattr(self.settings, "rlsp", None)
+        if m.use_rlsp and rcfg is not None and rcfg.enabled:
+            try:
+                from nyxara.growth.generator_discriminator import RLSPLoop
+                rlsp = RLSPLoop(self.llm, settings=self.settings, memory=self.memory,
+                                max_rounds=rcfg.max_rounds, use_llm=rcfg.use_llm,
+                                system=self._effective_system())
+            except Exception:  # noqa: BLE001 — adversarial hardening is optional
+                rlsp = None
+        try:
+            searcher = MCTSReasoner(
+                self.llm, decision_instructions=_DECISION_INSTRUCTIONS,
+                iterations=m.iterations, max_children=m.max_children,
+                rollout_depth=m.rollout_depth, c_puct=m.c_puct, max_seconds=m.max_seconds,
+                temperature=temperature, max_tokens=cfg.max_output_tokens,
+                think_tokens=cfg.reasoning_think_tokens, critic=Critic(),
+                verifier=default_verifier(), rlsp=rlsp)
+            result = searcher.search(stimulus=stimulus,
+                                     context=self._context_block(stimulus),
+                                     system=self._effective_system())
+            return result.decision
+        except MCTSUnavailable:
+            return None
+        except Exception:  # noqa: BLE001 — any search failure degrades to deliberation
+            return None
 
     def _deliberate(self, stimulus: str, temperature: float) -> Any:
         from nyxara.mind.critique import Critic
