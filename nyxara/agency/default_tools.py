@@ -495,6 +495,33 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                                         description="the capability gap, e.g. 'sha256 hash'")],
                       capability=Capability.SELF_MODIFY, risk=RiskTier.HIGH, reversible=False))
 
+        # ---- ephemeral tool synthesis: write→compile→run→delete a one-off program ---- #
+        # Zero-shot programming: when no tool fits, NYXARA writes a throwaway Python/C/C++
+        # program, builds & runs it, returns the output, and deletes the code. Gated at
+        # PROC_EXEC/HIGH (the most-privileged path, since it may compile & spawn native
+        # code); the source is statically scanned and run in the isolated sandbox.
+        def _ephemeral_exec(source: str, language: str = "python",
+                            stdin: Optional[str] = None,
+                            timeout_s: float = 5.0) -> Dict[str, Any]:
+            from nyxara.agency.dynamic_tool_creator import DynamicToolCreator
+            creator = DynamicToolCreator()
+            return creator.run_source(
+                source, language=language, stdin=stdin,
+                timeout_s=max(0.1, min(timeout_s, 30.0))).to_dict()
+
+        _add(ToolSpec("ephemeral_exec", handler=_ephemeral_exec,
+                      description="synthesise, build, run and then DELETE a single-use "
+                                  "Python/C/C++ program (zero-shot programming); returns "
+                                  "its stdout/value/errors — owner-gated, irreversible",
+                      params=[ToolParam("source", "str",
+                                        description="the program source to run once"),
+                              ToolParam("language", "str", required=False, default="python",
+                                        description="python | c | cpp"),
+                              ToolParam("stdin", "str", required=False, default=None,
+                                        description="optional standard input for the program"),
+                              ToolParam("timeout_s", "float", required=False, default=5.0)],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
+
     return registry
 
 
