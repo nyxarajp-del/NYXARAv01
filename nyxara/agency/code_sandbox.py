@@ -222,13 +222,15 @@ def run_python(code: str, *, timeout_s: float = 5.0, max_output: int = 100_000,
 # Shell execution (the building block for an owner-gated shell tool)
 # --------------------------------------------------------------------------- #
 def safe_shell(command: Union[List[str], str], *, timeout_s: float = 10.0,
-               cwd: Optional[str] = None) -> SandboxResult:
+               cwd: Optional[str] = None, stdin: Optional[str] = None) -> SandboxResult:
     """Run an OS command with ``shell=False`` under a timeout, returning the outcome as data.
 
     A list runs verbatim (no shell, no glob/word-splitting surprises); a string is
     tokenised with :func:`shlex.split`. Output is captured; a non-zero exit yields
     ``ok=False`` with the exit code; exceeding ``timeout_s`` yields ``timed_out=True``.
-    Never raises: launch failures (e.g. command not found) come back as ``error``.
+    When ``stdin`` is given it is fed to the child's standard input (e.g. to drive a
+    freshly-compiled program). Never raises: launch failures (e.g. command not found)
+    come back as ``error``.
 
     This is purely the executor — it does **no** permission checking. Callers must gate
     it behind :class:`~nyxara.agency.permissions.Capability.PROC_EXEC` (owner-exclusive
@@ -247,7 +249,7 @@ def safe_shell(command: Union[List[str], str], *, timeout_s: float = 10.0,
     start = time.monotonic()
     try:
         proc = subprocess.run(
-            argv, shell=False, cwd=cwd, capture_output=True, text=True,
+            argv, shell=False, cwd=cwd, input=stdin, capture_output=True, text=True,
             timeout=max(0.05, timeout_s))
     except subprocess.TimeoutExpired as exc:
         out = exc.stdout or ""

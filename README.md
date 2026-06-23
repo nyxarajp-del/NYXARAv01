@@ -313,6 +313,14 @@ around the control law.
   isolated-subprocess sandbox, no network, wall-clock timeout), `run_shell`, and an
   SSRF-guarded `http_request` — all capability-gated, so they escalate to the Master rather
   than auto-run under mere autonomy.
+* **Ephemeral tool synthesis (zero-shot programming)** — `agency/dynamic_tool_creator.py`.
+  When no tool fits, NYXARA writes a brand-new throwaway Python/C/C++ program, compiles it
+  (real `g++`/`clang++`), runs it under a wall-clock deadline, returns the output, and then
+  **deletes the code** — a single-use software engineer that invents tools in a fraction of a
+  second. Statically scanned, sandboxed, and capability-gated (`CODE_EXEC`/`PROC_EXEC`),
+  distinct from the *persistent* `forge_capability` foundry and the composing `toolsmith`.
+  Exposed as the `ephemeral_exec` tool; `DynamicToolCreator.solve()` is the words→answer
+  entry point (with an optional, keyless-by-default injected LLM).
 * **Self-evaluation** — `eval/`. Two batteries with one harness. A deterministic **safety**
   battery (safety, corrigibility, authority, honesty, tool-use, memory) measures that the mind
   stays safe and flags regressions against a saved baseline — `python -m nyxara.eval`. A

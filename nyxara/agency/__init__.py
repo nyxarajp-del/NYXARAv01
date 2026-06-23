@@ -14,6 +14,11 @@ oversight):
 from __future__ import annotations
 
 from nyxara.agency.agent_loop import AgentLoop, AgentRun, AgentStep
+from nyxara.agency.dynamic_tool_creator import (
+    DynamicToolCreator,
+    EphemeralResult,
+    Language,
+)
 from nyxara.agency.proactive import (
     Initiative,
     ProactiveEngine,
@@ -26,6 +31,9 @@ __all__ = [
     "AgentLoop",
     "AgentRun",
     "AgentStep",
+    "DynamicToolCreator",
+    "EphemeralResult",
+    "Language",
     "ProactiveEngine",
     "Initiative",
     "ProposalDecision",
