@@ -74,6 +74,22 @@ from nyxara.growth.loyalty import (
     LoyaltyPair,
     loyalty_battery,
 )
+from nyxara.growth.synthesis import (
+    CurationReport,
+    Domain,
+    RivalVerifier,
+    SyntheticCurator,
+    SyntheticGenerators,
+    SyntheticItem,
+)
+from nyxara.growth.topology import (
+    CapacityMonitor,
+    CapacitySignal,
+    DynamicTopology,
+    GrowthDecision,
+    GrowthMode,
+    TopologyReport,
+)
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
 from nyxara.growth.credit import (
     EditStrategyBandit,
@@ -194,6 +210,20 @@ __all__ = [
     "LoyaltyObjective",
     "LoyaltyPair",
     "loyalty_battery",
+    # synthetic data self-curation (the AlphaGo-Zero method)
+    "SyntheticCurator",
+    "SyntheticGenerators",
+    "RivalVerifier",
+    "SyntheticItem",
+    "CurationReport",
+    "Domain",
+    # dynamic topology expansion (runtime Net2Net brain growth)
+    "DynamicTopology",
+    "CapacityMonitor",
+    "CapacitySignal",
+    "GrowthDecision",
+    "GrowthMode",
+    "TopologyReport",
     # continuous evolution
     "RecursiveSelfImprovement",
     "SelfImprovementReport",

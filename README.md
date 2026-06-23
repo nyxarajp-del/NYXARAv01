@@ -191,6 +191,35 @@ at a GPU box with `--backend torch`) for a deeper search. `NYXARA_GENESIS__ENABL
 out; trigger on demand from code via `core.genesis_search(...)`. Like everything else, the search
 proposes and the kernel disposes — a paused/scrammed mind may search but never promotes.
 
+### Synthetic Data Self-Curation — the AlphaGo-Zero method
+
+Human data is finite and biased; a mind that only ever consumes it inherits its ceiling. **AlphaGo
+Zero** broke that ceiling by generating its own experience and keeping only what *verified*. NYXARA
+does the same (`growth/synthesis.py`): she **manufactures purely logical synthetic data**
+(arithmetic, algebraic identities, propositional logic, number theory, small code structures), has
+an **independent rival verifier** certify each item — the `Prover` for decidable domains (exact,
+machine-checkable) and a restricted sandbox + reference oracle for code — and feeds only the
+survivors into her base `KnowledgeBase` *and* the **same** JSONL corpus the foundry forges from
+(marked `verified`). Generation is hard, verification is cheap — so she grows verified knowledge no
+human had to write, then Genesis/AutoForge fold it into her own model. Gather-only (never trains or
+acts), pure-stdlib and CI-safe. ON by default; `NYXARA_SYNTHESIS__ENABLED=false` to opt out, or run
+on demand via `core.curate_synthetic(...)`.
+
+### Dynamic Topology Expansion — she grows her own brain at runtime
+
+A fixed matrix size is a fixed ceiling on thought. When a problem outgrows her capacity, NYXARA
+**grows her own tensors** (`growth/topology.py`): she widens her residual width
+`W ∈ ℝ^{N×M} → ℝ^{(N+k)×(M+k)}` and adds depth — using **function-preserving network morphisms**
+(Net2Net; Chen et al. 2016) so she keeps everything she learned. *Net2DeeperNet* inserts a residual
+layer whose output starts at zero (`x + 0 = x`, bit-identical); *Net2WiderNet* rebuilds at a larger
+width, inherits every compatible weight (`inherit_compatible_weights`), and re-anchors by brief
+continued training. On a machine without torch the same decision grows the `ArchitectureGenome`
+itself, so it is hermetic and CI-testable. Growth fires only under genuine **capacity pressure**
+(a hard problem plus a saturated/plateaued state) and never past a hardware-aware ceiling
+(`NYXARA_TOPOLOGY__MAX_N_EMBD` / `MAX_LAYERS`). A grown brain becomes live **only** by clearing the
+same Foundry gauntlet as any other model — no safety is re-implemented or bypassed. ON by default;
+trigger on demand via `core.grow_topology(...)`.
+
 ### Mathematical Soul-Binding — the Loyalty Equation
 
 If she designs and trains her own brain, what guarantees the new brain obeys **Master JP**?
