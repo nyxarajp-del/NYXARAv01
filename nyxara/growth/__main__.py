@@ -83,6 +83,27 @@ def _report_handoff(settings: Any) -> None:
           f"benchmark accuracy {report.accuracy:.0%}")
 
 
+def _evolve_mind(args: argparse.Namespace) -> int:
+    """Run the recursive mind-evolution loop and print the generational lineage."""
+    from nyxara.growth.mind_evolution import MindEvolutionEngine
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    print(f"· evolving NYXARA's way of thinking for {args.evolve_mind} generation(s)"
+          f"{' (enacting into the live mind)' if args.enact else ' (measure-only)'}…")
+    core = NyxaraCore()
+    engine = MindEvolutionEngine(core=core, llm=core.llm, memory=core.memory)
+    try:
+        report = engine.evolve_generations(int(args.evolve_mind), enact=bool(args.enact))
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· could not evolve the mind: {exc}")
+        return 1
+    print("\n" + report.summary())
+    if args.enact:
+        n = getattr(getattr(core, "recursive_improver", None), "n_iterations", "n/a")
+        print(f"\n· live reasoner now deliberates with n_iterations={n}.")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="nyxara.growth",
@@ -106,7 +127,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="where the foundry/ state (corpus, versions, active) lives")
     parser.add_argument("--bench", action="store_true",
                         help="report the handoff rate + benchmark accuracy afterwards")
+    parser.add_argument("--evolve-mind", type=int, default=0, metavar="N",
+                        help="instead of forging a model, evolve NYXARA's *way of thinking* for N "
+                             "generations (measured on the real benchmark) and print the lineage")
+    parser.add_argument("--enact", action="store_true",
+                        help="with --evolve-mind: install a promoted strategy into the live mind")
     args = parser.parse_args(argv)
+
+    if args.evolve_mind > 0:
+        return _evolve_mind(args)
 
     foundry, settings = _build_foundry(args)
     _maybe_distill(args, settings)

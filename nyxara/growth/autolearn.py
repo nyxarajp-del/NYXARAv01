@@ -44,6 +44,7 @@ class GrowthReport:
     selfplay: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
+    mind_evolution: Optional[Dict[str, Any]] = None
     meta_research: Optional[Dict[str, Any]] = None
     rivalry: Optional[Dict[str, Any]] = None
     adversarial: Optional[Dict[str, Any]] = None
@@ -55,6 +56,7 @@ class GrowthReport:
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
                 "selfplay": self.selfplay, "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
+                "mind_evolution": self.mind_evolution,
                 "meta_research": self.meta_research, "rivalry": self.rivalry,
                 "adversarial": self.adversarial,
                 "metaprompt_insights": self.metaprompt_insights}
@@ -104,6 +106,11 @@ class GrowthEngine:
             self.settings.self_improvement.self_improvement_every
             if self_improvement_every is None else self_improvement_every))
         self._self_improver = self_improver
+        # Recursive mind-evolution: evolve the *way of thinking* itself, on its own (slowest)
+        # cadence — it benchmarks the whole reasoner each pass, so it is the heaviest loop.
+        self.enable_mind_evolution = bool(self.settings.mind_evolution.enabled)
+        self.mind_evolution_every = max(1, int(self.settings.mind_evolution.every))
+        self._mind_evolver = None
         # Meta-research: invent → test → (gated) integrate, on its own (slow) cadence.
         self.enable_meta_research = (self.settings.meta_research.enabled
                                      if enable_meta_research is None else enable_meta_research)
@@ -390,6 +397,32 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — self-improvement is best-effort, never fatal
             return None
 
+    # ---- recursive mind-evolution (evolve the reasoning strategy itself) ---- #
+    def _mind_evolution_obj(self):
+        if self._mind_evolver is None:
+            from nyxara.growth.mind_evolution import MindEvolutionEngine
+            self._mind_evolver = MindEvolutionEngine(
+                core=self.core, memory=self.memory, settings=self.settings,
+                cost_penalty=float(self.settings.mind_evolution.cost_penalty))
+        return self._mind_evolver
+
+    def evolve_mind(self) -> Optional[Dict[str, Any]]:
+        """Run one mind-evolution generation; return its lineage report dict (best-effort).
+
+        Installs a promoted strategy into the live mind only when ``mind_evolution.autonomous_enact``
+        is set (the standing authorisation for autonomous self-modification)."""
+        if not self.enable_mind_evolution:
+            return None
+        try:
+            cfg = self.settings.mind_evolution
+            report = self._mind_evolution_obj().evolve_generations(
+                int(cfg.generations_per_pass), enact=bool(cfg.autonomous_enact),
+                population=int(cfg.population), inner_generations=int(cfg.inner_generations),
+                islands=int(cfg.islands), plateau_window=int(cfg.plateau_window))
+            return report.to_dict()
+        except Exception:  # noqa: BLE001 — mind-evolution is heavy/optional; never fatal
+            return None
+
     # ---- meta-research (invent → test → (gated) integrate) ---- #
     def _meta_obj(self):
         if self._meta_researcher is None:
@@ -445,6 +478,12 @@ class GrowthEngine:
         if self.enable_self_improvement and \
                 self._growth_passes % self.self_improvement_every == 0:
             report.self_improvement = self.improve_system()
+
+        # Recursive mind-evolution runs on the slowest cadence — it evolves the reasoning
+        # strategy itself and benchmarks the whole reasoner, so it is the heaviest loop.
+        if self.enable_mind_evolution and \
+                self._growth_passes % self.mind_evolution_every == 0:
+            report.mind_evolution = self.evolve_mind()
 
         # Meta-research runs on its own (slow) cadence — invent + sandbox-test new theories.
         if self.enable_meta_research and \

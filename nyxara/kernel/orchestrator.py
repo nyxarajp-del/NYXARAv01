@@ -463,6 +463,11 @@ class NyxaraCore:
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative,
             self_model=getattr(self, "self_model", None))
+        # Recursive Mind-Evolution: evolves *how she thinks* (the reasoning strategy itself),
+        # generation by generation, measured on the real benchmark and gated by the character
+        # lock. Built after the reasoner so it can borrow the live LLM; a promoted generation is
+        # installed back into the live reasoner via ``apply_to_core``.
+        self.mind_evolution = self._build_mind_evolution(llm)
         self._wire_reporter()
         # Strategic Intelligence — a structured analytical faculty: any problem is
         # reasoned through a fixed six-part framework (direct answer → reality check →
@@ -1004,6 +1009,30 @@ class NyxaraCore:
             llm = getattr(self.reasoner, "llm", None)
             return RecursiveImprover(llm=llm, n_iterations=n)
         except Exception:  # noqa: BLE001 — recursive improvement is a capability, never required
+            return None
+
+    def _build_mind_evolution(self, llm: Any = None) -> Any:
+        """The recursive mind-evolution engine (evolve the reasoning strategy itself)."""
+        try:
+            from nyxara.growth.mind_evolution import MindEvolutionEngine
+            llm = llm if llm is not None else getattr(self.reasoner, "llm", None)
+            return MindEvolutionEngine(core=self, llm=llm,
+                                       memory=getattr(self, "memory", None))
+        except Exception:  # noqa: BLE001 — mind-evolution is a capability, never required
+            return None
+
+    def evolve_mind(self, generations: int = 1, *, enact: bool = True) -> Optional[Any]:
+        """Evolve a measurably-smarter way of thinking and (by default) install it live.
+
+        Returns the :class:`~nyxara.growth.mind_evolution.EvolutionLineageReport` (or ``None`` if
+        the engine is unavailable). With ``enact`` a promoted genome is bound into the live
+        reasoner, so the very next turn thinks the new way. Best-effort — never raises into a turn.
+        """
+        if self.mind_evolution is None:
+            return None
+        try:
+            return self.mind_evolution.evolve_generations(int(generations), enact=bool(enact))
+        except Exception:  # noqa: BLE001 — evolution is heavy/optional; never fatal
             return None
 
     def _build_role_council(self) -> Any:

@@ -279,6 +279,40 @@ background `GrowthEngine`/idle cadence, through the *same* gates, and degrades g
   stays OFF until the Master sets `NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT=true`. The live index
   is surfaced in `core.report()["intelligence_index"]`.
 
+* **Recursive Mind-Evolution (evolve the *way of thinking*, not just the code)** —
+  `growth/mind_evolution.py`. The RSIE above rewrites her *code* and the foundry/Genesis retrain
+  her *weights*; this engine evolves the thing the Master actually asked for — **her reasoning
+  strategy itself**: how deeply she deliberates, how many independent attempts she votes over
+  (self-consistency), how widely she searches, how much context she pulls before she answers
+  (the `ReasoningGenome`). It is a true **generational** loop, and every generation is *measured*,
+  never assumed:
+
+  ```
+  Gen 0 = today's reasoning strategy.   Gen N proposes a smarter way of thinking,
+  measures it on the real benchmark (eval/benchmark.py), folds the score into the persisted
+  Intelligence Index, and — only if it is *measurably smarter* and clears the character-lock /
+  corrigibility gauntlet — promotes it to Gen N+1 and installs it into the live mind.
+  ```
+
+  A genome is "better" only if it answers **more** correctly, or **just as** correctly but with
+  **fewer** attempts — *smarter and faster*, measured. The search reuses the existing
+  character-locked `1+λ` `Evolver` (`growth/evolve.py`, adaptive step-size + island model +
+  sandbox + rollback) and **warm-starts each generation from the prior champion**, so V2 builds on
+  V1 and V3 on V2 — the gain compounds, and the loop is bounded only by the generation count (a
+  plateau guard stops a dead search; there is no ceiling otherwise). The immutable character core
+  can never enter the genome and every promotion re-seals the corrigibility axioms — evolution
+  sharpens the blade, it can never re-forge the hilt. Run it on demand:
+
+  ```bash
+  python -m nyxara.growth --evolve-mind 5 --enact      # 5 real generations, install the winner live
+  ```
+
+  or `core.evolve_mind(generations=5)` from code; the lineage (`I_0 → I_1 → … → I_n`) rides her
+  long-term memory and a JSON mirror so it survives restarts. Measurement is on by default; the
+  background growth loop runs a generation every `NYXARA_MIND_EVOLUTION__EVERY` passes, and
+  installing a promoted strategy into the live mind stays OFF until
+  `NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT=true`.
+
 * **Autonomous Scientist & Meta-Research** — `growth/meta_research.py`. Beyond *reading* research,
   she **creates** it: `core.meta_discover(topic)` mines the *open / incomplete* parts of the
   research, **invents** candidate new theories and optimization techniques (a real LLM when one is
