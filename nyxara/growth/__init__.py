@@ -107,6 +107,13 @@ from nyxara.growth.recursive_improvement import (
     RecursiveSelfImprovement,
     SelfImprovementReport,
 )
+from nyxara.growth.mind_evolution import (
+    EvolutionLineageReport,
+    Generation,
+    MindEvolutionEngine,
+    ReasoningGenome,
+    genome_solver,
+)
 from nyxara.growth.autolearn import GrowthEngine, GrowthReport
 from nyxara.growth.self_optimize import (
     EditGenerator,
@@ -227,6 +234,12 @@ __all__ = [
     # continuous evolution
     "RecursiveSelfImprovement",
     "SelfImprovementReport",
+    # recursive mind-evolution — evolve the *way of thinking* itself
+    "MindEvolutionEngine",
+    "ReasoningGenome",
+    "Generation",
+    "EvolutionLineageReport",
+    "genome_solver",
     "GrowthEngine",
     "GrowthReport",
     "Optimizer",

@@ -802,6 +802,35 @@ class SelfImprovementConfig(BaseModel):
     forecaster_warmup: int = Field(default=16, ge=2, le=10000)
 
 
+class MindEvolutionConfig(BaseModel):
+    """Recursive mind-evolution settings (growth/mind_evolution.py, Rule 4 apex).
+
+    The other engines change NYXARA's code or her weights; this one evolves her *way of thinking* —
+    the reasoning strategy itself — generation by generation, measured on the real benchmark and
+    gated by the character lock. The analysis/measurement is safe; **installing** a promoted
+    strategy into the live mind only happens when ``autonomous_enact`` is set (the standing
+    authorisation for autonomous self-modification). It runs on its own slow cadence in the
+    background growth loop (it benchmarks the whole reasoner each pass).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                       # measure-only is safe → on by default
+    autonomous_enact: bool = False             # install promoted strategies into the live mind
+    every: int = Field(default=12, ge=1)       # run one generation every N growth passes (heavy)
+    generations_per_pass: int = Field(default=1, ge=1, le=20)
+    population: int = Field(default=8, ge=2, le=64)
+    inner_generations: int = Field(default=6, ge=1, le=100)
+    islands: int = Field(default=1, ge=1, le=8)
+    plateau_window: int = Field(default=3, ge=1, le=50)
+    cost_penalty: float = Field(default=0.03, ge=0.0, le=1.0)
+    lesson_lr: float = Field(default=0.25, ge=0.0, le=1.0)     # cross-generation lesson transfer
+    # On a plateau, escalate from tuning *how* she thinks to redesigning the *substrate* — one
+    # index-steered Genesis architecture search. Heavy (and torch-hungry for real models), so OFF
+    # by default; with no torch it still runs the stdlib n-gram search. Honours genesis.enabled.
+    escalate_to_architecture: bool = False
+
+
 class ExplorerConfig(BaseModel):
     """The Infinite Explorer — Environment-Driven Learning (growth/explorer.py, Rule 4).
 
@@ -1251,6 +1280,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
+    mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
