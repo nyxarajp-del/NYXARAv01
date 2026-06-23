@@ -46,6 +46,8 @@ class GrowthReport:
     self_improvement: Optional[Dict[str, Any]] = None
     meta_research: Optional[Dict[str, Any]] = None
     rivalry: Optional[Dict[str, Any]] = None
+    adversarial: Optional[Dict[str, Any]] = None
+    metaprompt_insights: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
@@ -53,7 +55,9 @@ class GrowthReport:
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
                 "selfplay": self.selfplay, "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
-                "meta_research": self.meta_research, "rivalry": self.rivalry}
+                "meta_research": self.meta_research, "rivalry": self.rivalry,
+                "adversarial": self.adversarial,
+                "metaprompt_insights": self.metaprompt_insights}
 
 
 class GrowthEngine:
@@ -70,7 +74,11 @@ class GrowthEngine:
                  meta_research_every: Optional[int] = None,
                  meta_researcher: Any = None, frontier: Any = None,
                  enable_rivalry: bool = False, arena: Any = None,
-                 rival_solver: Any = None, self_solver: Any = None) -> None:
+                 rival_solver: Any = None, self_solver: Any = None,
+                 metaprompt: Any = None, skill_memory: Any = None,
+                 enable_metaprompt: Optional[bool] = None,
+                 enable_adversarial: bool = False,
+                 adversarial_rounds: int = 60) -> None:
         self.settings = settings or get_settings()
         self.memory = memory
         self.journal = journal
@@ -115,10 +123,22 @@ class GrowthEngine:
         self._arena = arena
         self._rival_solver = rival_solver
         self._self_solver = self_solver
+        # Continuous metaprompt distillation: compress her own successful chains into operating
+        # heuristics and inject them into the reasoner's prompt (recursive self-improvement).
+        self._metaprompt = metaprompt
+        self._skill_memory = skill_memory
+        self.enable_metaprompt = (self.settings.metaprompt.enabled
+                                  if enable_metaprompt is None else enable_metaprompt)
+        # Adversarial self-play (clone-vs-clone) on the growth cadence (off unless asked, since
+        # a full contest is heavy); when enabled the hardest categories steer the next self-play.
+        self.enable_adversarial = bool(enable_adversarial)
+        self.adversarial_rounds = max(1, int(adversarial_rounds))
 
     @classmethod
     def from_core(cls, core: Any, **kw: Any) -> "GrowthEngine":
         """Build a growth engine bound to a :class:`~nyxara.kernel.orchestrator.NyxaraCore`."""
+        kw.setdefault("metaprompt", getattr(core, "metaprompt", None))
+        kw.setdefault("skill_memory", getattr(core, "skills", None))
         return cls(memory=getattr(core, "memory", None),
                    journal=getattr(core, "journal", None), core=core, **kw)
 
@@ -313,6 +333,30 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — adversarial self-play is best-effort, never fatal
             return None
 
+    # ---- metaprompt distillation (compress own successes into operating heuristics) ---- #
+    def _metaprompt_obj(self) -> Any:
+        if self._metaprompt is None:
+            try:
+                from nyxara.growth.metaprompt_distill import MetaPromptDistiller
+                self._metaprompt = MetaPromptDistiller(
+                    memory=self.memory, journal=self.journal,
+                    skill_memory=self._skill_memory, settings=self.settings)
+            except Exception:  # noqa: BLE001
+                self._metaprompt = False
+        return self._metaprompt or None
+
+    def distill_metaprompts(self) -> List[str]:
+        """Distil successful reasoning chains into prompt-level heuristics (best-effort)."""
+        if not self.enable_metaprompt:
+            return []
+        distiller = self._metaprompt_obj()
+        if distiller is None:
+            return []
+        try:
+            return [i.text for i in distiller.distill()]
+        except Exception:  # noqa: BLE001 — distillation is best-effort, never fatal
+            return []
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
@@ -406,6 +450,16 @@ class GrowthEngine:
         if self.enable_meta_research and \
                 self._growth_passes % self.meta_research_every == 0:
             report.meta_research = self.meta_research()
+
+        # Adversarial self-play (clone-vs-clone) — opt-in; the hardest categories become topics.
+        if self.enable_adversarial:
+            report.adversarial = self.adversarial_self_play(rounds=self.adversarial_rounds)
+
+        # Continuous metaprompt distillation: turn this pass's fresh successes into operating
+        # heuristics that ride every future prompt (recursive self-improvement).
+        if self.enable_metaprompt and \
+                self._growth_passes % max(1, self.settings.metaprompt.every_n_passes) == 0:
+            report.metaprompt_insights = self.distill_metaprompts()
         return report
 
 

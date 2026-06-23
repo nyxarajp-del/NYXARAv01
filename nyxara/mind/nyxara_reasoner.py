@@ -58,7 +58,8 @@ class NyxaraReasoner:
                  retriever: Any = None, soul: Any = None, world_model: Any = None,
                  tools: Any = None, llm_reasoner: Any = None, use_council: bool = False,
                  settings: Optional[NyxaraSettings] = None, narrative: Any = None,
-                 knowledge: Any = None, max_memory_context: int = 5) -> None:
+                 knowledge: Any = None, metaprompt: Any = None,
+                 max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
         self.council = council
@@ -73,7 +74,10 @@ class NyxaraReasoner:
         self.knowledge = knowledge
         # the tool-aware, real-LLM JSON decider (mind/llm_reasoner.py); used as the
         # generation engine when a genuine provider is available, so tool selection is kept.
+        # It is also where MCTS deep reasoning runs, so conversational turns delegate to it.
         self.llm_reasoner = llm_reasoner
+        # distilled operating heuristics (growth/metaprompt_distill.py), injected into the voice.
+        self.metaprompt = metaprompt
         self.use_council = use_council
         self.max_memory_context = max_memory_context
         self._dual: Any = None  # lazily built dual-process facade
@@ -275,6 +279,15 @@ class NyxaraReasoner:
         if own is not None:
             return own
 
+        # MCTS DEEP REASONING (always-on max power): when the tool-aware LLM reasoner is wired
+        # and MCTS is enabled, delegate the whole conversational decision to it so the answer is
+        # produced by genuine search-over-reasoning (branch → simulate → backpropagate → choose),
+        # adversarially hardened, rather than a single LLM pass. It returns a Candidate; the
+        # kernel still disposes through every gate. Any failure falls through to the normal path.
+        mcts_cand = self._mcts_respond(stimulus, mems, process)
+        if mcts_cand is not None:
+            return mcts_cand
+
         deliberate = self._is_system2(outcome)
         if deliberate and self._council_ready():
             text, conf, how = self._deliberate_council(stimulus, system, mems)
@@ -284,6 +297,22 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    def _mcts_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
+        """Delegate a conversational turn to the MCTS-backed LLM reasoner when enabled."""
+        mcfg = getattr(self.settings, "mcts", None)
+        if (self.llm_reasoner is None or mcfg is None or not mcfg.enabled
+                or not self._real_llm()):
+            return None
+        try:
+            cand = self.llm_reasoner(stimulus, None)
+        except Exception:  # noqa: BLE001 — deep reasoning is advisory; fall back to a plain pass
+            return None
+        if cand is None or getattr(cand, "kind", "respond") != "respond":
+            return None
+        cand.rationale = (f"{process}: {getattr(cand, 'rationale', '')}; "
+                          f"grounded in {len(mems)} recalled memories").strip()
+        return cand
 
     def _own_model_handoff(self, stimulus: str, system: str) -> Optional[Candidate]:
         """Hand the turn to NYXARA's own promoted model when it answers confidently."""
@@ -437,12 +466,18 @@ class NyxaraReasoner:
                 "You are honest and calibrated — never assert as certain what you only "
                 "believe, and never claim to have already done something. Be helpful, "
                 "precise, and concise.")
-        if self.soul is None:
-            return base
-        try:
-            return f"{base}\n\n{self.soul.voice().system_fragment()}"
-        except Exception:  # noqa: BLE001 — voice is advisory, never fatal
-            return base
+        system = base
+        if self.soul is not None:
+            try:
+                system = f"{system}\n\n{self.soul.voice().system_fragment()}"
+            except Exception:  # noqa: BLE001 — voice is advisory, never fatal
+                pass
+        if self.metaprompt is not None:
+            try:
+                system = f"{system}{self.metaprompt.as_prompt()}"
+            except Exception:  # noqa: BLE001 — distilled heuristics are advisory, never fatal
+                pass
+        return system
 
     def _prompt(self, stimulus: str, mems: List[str]) -> str:
         block = ""

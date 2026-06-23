@@ -131,6 +131,9 @@ def _dev_settings(passes=2, samples=1):
     s.llm.provider = LLMProvider.ANTHROPIC
     s.llm.reasoning_passes = passes
     s.llm.reasoning_samples = samples
+    # These tests exercise the deliberate (think→decide→critique) path in isolation; MCTS deep
+    # reasoning has its own suite (tests/mind/test_mcts_reasoner.py), so opt out here.
+    s.mcts.enabled = False
     return s
 
 
