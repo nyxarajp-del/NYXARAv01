@@ -1016,22 +1016,30 @@ class NyxaraCore:
         try:
             from nyxara.growth.mind_evolution import MindEvolutionEngine
             llm = llm if llm is not None else getattr(self.reasoner, "llm", None)
-            return MindEvolutionEngine(core=self, llm=llm,
-                                       memory=getattr(self, "memory", None))
+            return MindEvolutionEngine(core=self, llm=llm, memory=getattr(self, "memory", None))
         except Exception:  # noqa: BLE001 — mind-evolution is a capability, never required
             return None
 
-    def evolve_mind(self, generations: int = 1, *, enact: bool = True) -> Optional[Any]:
+    def evolve_mind(self, generations: int = 1, *, enact: bool = True,
+                    escalate_architecture: Optional[bool] = None) -> Optional[Any]:
         """Evolve a measurably-smarter way of thinking and (by default) install it live.
 
         Returns the :class:`~nyxara.growth.mind_evolution.EvolutionLineageReport` (or ``None`` if
         the engine is unavailable). With ``enact`` a promoted genome is bound into the live
-        reasoner, so the very next turn thinks the new way. Best-effort — never raises into a turn.
+        reasoner, so the very next turn thinks the new way. When the strategy search plateaus and
+        ``escalate_architecture`` is on (defaults to the config flag), it escalates to one
+        index-steered Genesis architecture search. Best-effort — never raises into a turn.
         """
         if self.mind_evolution is None:
             return None
         try:
-            return self.mind_evolution.evolve_generations(int(generations), enact=bool(enact))
+            if escalate_architecture is None:
+                from nyxara.kernel.config import get_settings
+                escalate_architecture = bool(
+                    getattr(get_settings().mind_evolution, "escalate_to_architecture", False))
+            return self.mind_evolution.evolve_generations(
+                int(generations), enact=bool(enact),
+                escalate_architecture=bool(escalate_architecture))
         except Exception:  # noqa: BLE001 — evolution is heavy/optional; never fatal
             return None
 

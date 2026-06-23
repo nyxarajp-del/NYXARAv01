@@ -52,6 +52,7 @@ from nyxara.guard.value_learning import IMMUTABLE_VALUES
 __all__ = [
     "ReasoningGenome",
     "Generation",
+    "LessonLedger",
     "EvolutionLineageReport",
     "MindEvolutionEngine",
     "genome_solver",
@@ -205,6 +206,80 @@ class Generation:
                    at=float(d.get("at", time.time()) or time.time()))
 
 
+# --------------------------------------------------------------------------- #
+# Cross-generation lesson transfer — what worked last time biases what's tried next
+# --------------------------------------------------------------------------- #
+@dataclass
+class LessonLedger:
+    """Lifelong, per-knob memory of *which way to push each knob* — the compounding flywheel.
+
+    Each generation reports which knobs it changed and whether that helped. For every knob this
+    ledger keeps a Beta(α, β) confidence (does moving it tend to help?) and a smoothed signed
+    direction ``dir`` (which way helped, scaled by how much). Before the next generation searches,
+    :meth:`MindEvolutionEngine` nudges the champion along these learned directions — so V_{n+1}
+    starts where V_n's lessons point, and the gain compounds instead of restarting each time.
+
+    Reuses the Beta-Bernoulli idiom of :mod:`nyxara.growth.credit`; a bad nudge is harmless because
+    the gauntlet still measures the candidate against the *true* champion before any promotion.
+    """
+
+    knobs: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    t: int = 0
+    decay: float = 0.6                     # EMA weight on the running direction (newer evidence wins)
+
+    def record(self, changed: List[str], deltas: Dict[str, float], fitness_delta: float,
+               promoted: bool) -> None:
+        """Credit each changed knob: α/β for "did it help", ``dir`` for "which way helped"."""
+        self.t += 1
+        helped = 1.0 if (promoted and fitness_delta > 0) else 0.0
+        for knob in changed:
+            arm = self.knobs.setdefault(knob, {"alpha": 1.0, "beta": 1.0, "dir": 0.0, "n": 0.0})
+            arm["alpha"] = float(arm["alpha"]) + helped
+            arm["beta"] = float(arm["beta"]) + (1.0 - helped)
+            arm["n"] = float(arm["n"]) + 1.0
+            # signed lesson: which direction the knob moved × how much fitness changed
+            signal = (1.0 if deltas.get(knob, 0.0) >= 0 else -1.0) * float(fitness_delta)
+            arm["dir"] = self.decay * float(arm["dir"]) + (1.0 - self.decay) * signal
+
+    def confidence(self, knob: str) -> float:
+        arm = self.knobs.get(knob)
+        if not arm:
+            return 0.0
+        a, b = float(arm["alpha"]), float(arm["beta"])
+        return a / (a + b) if (a + b) > 0 else 0.0
+
+    def direction(self, knob: str) -> float:
+        arm = self.knobs.get(knob)
+        return float(arm["dir"]) if arm else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"t": int(self.t), "decay": round(float(self.decay), 4),
+                "knobs": {k: {"alpha": round(float(v.get("alpha", 1.0)), 6),
+                              "beta": round(float(v.get("beta", 1.0)), 6),
+                              "dir": round(float(v.get("dir", 0.0)), 8),
+                              "n": float(v.get("n", 0.0))}
+                          for k, v in self.knobs.items()}}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "LessonLedger":
+        if not isinstance(d, dict):
+            return cls()
+        knobs: Dict[str, Dict[str, float]] = {}
+        for k, v in (d.get("knobs", {}) or {}).items():
+            if isinstance(v, dict):
+                knobs[k] = {"alpha": float(v.get("alpha", 1.0)), "beta": float(v.get("beta", 1.0)),
+                            "dir": float(v.get("dir", 0.0)), "n": float(v.get("n", 0.0))}
+        return cls(knobs=knobs, t=int(d.get("t", 0) or 0),
+                   decay=float(d.get("decay", 0.6) or 0.6))
+
+    def summary(self) -> str:
+        if not self.knobs:
+            return "no lessons yet"
+        top = sorted(self.knobs, key=lambda k: abs(self.direction(k)), reverse=True)[:4]
+        return ", ".join(f"{k}{'↑' if self.direction(k) >= 0 else '↓'}"
+                         f"(p={self.confidence(k):.2f})" for k in top)
+
+
 @dataclass
 class EvolutionLineageReport:
     """The result of an :meth:`MindEvolutionEngine.evolve_generations` run."""
@@ -213,11 +288,14 @@ class EvolutionLineageReport:
     champion: Dict[str, Any] = field(default_factory=dict)
     promoted: int = 0
     plateaued: bool = False
+    lessons: Dict[str, Any] = field(default_factory=dict)
+    architecture: Optional[Dict[str, Any]] = None     # a Genesis NAS step, when escalated
 
     def to_dict(self) -> Dict[str, Any]:
         return {"generations": [g.to_dict() for g in self.generations],
                 "champion": dict(self.champion), "promoted": self.promoted,
-                "plateaued": self.plateaued}
+                "plateaued": self.plateaued, "lessons": dict(self.lessons),
+                "architecture": self.architecture}
 
     def summary(self) -> str:
         lines = ["=" * 70, "NYXARA mind-evolution lineage", "=" * 70]
@@ -234,6 +312,13 @@ class EvolutionLineageReport:
         lines += ["", f"intelligence curve : {curve}",
                   f"promoted           : {self.promoted}/{len(self.generations)}"
                   + ("   (plateaued)" if self.plateaued else "")]
+        if self.lessons.get("knobs"):
+            lines.append(f"lessons learned    : {LessonLedger.from_dict(self.lessons).summary()}")
+        if self.architecture:
+            a = self.architecture
+            lines.append(f"architecture step  : {a.get('backend', '?')} backend, "
+                         f"{a.get('generations', 0)} gens → fitness {a.get('champion_fitness', 0):.4f}"
+                         + ("  PROMOTED ✓" if a.get("promoted") else ""))
         return "\n".join(lines)
 
 
@@ -347,11 +432,18 @@ class MindEvolutionEngine:
 
     def __init__(self, *, core: Any = None, llm: Any = None, memory: Any = None,
                  settings: Any = None, benchmark: Any = None,
-                 base_sampler: Optional[Sampler] = None, cost_penalty: float = 0.03,
-                 seed: int = 0, data_dir: Any = None) -> None:
+                 base_sampler: Optional[Sampler] = None, cost_penalty: Optional[float] = None,
+                 seed: int = 0, data_dir: Any = None, lesson_lr: Optional[float] = None) -> None:
         from nyxara.kernel.config import get_settings
         self.settings = settings or get_settings()
+        _cfg = getattr(self.settings, "mind_evolution", None)
         self.data_dir = data_dir          # explicit override for the lineage file (else settings)
+        # cross-generation lesson transfer + compute-cost weight default from config (env-overridable)
+        self.lesson_lr = max(0.0, float(lesson_lr if lesson_lr is not None
+                                        else getattr(_cfg, "lesson_lr", 0.25)))
+        cost_penalty = cost_penalty if cost_penalty is not None \
+            else getattr(_cfg, "cost_penalty", 0.03)
+        self._genesis = None              # lazily built NAS (only when an architecture step escalates)
         self.core = core
         self.llm = llm if llm is not None else getattr(core, "llm", None)
         self.memory = memory if memory is not None else getattr(core, "memory", None)
@@ -409,18 +501,21 @@ class MindEvolutionEngine:
     # ---------------------------------------------------------------------- #
     def evolve_generations(self, n: int = 1, *, enact: bool = False, population: int = 8,
                            inner_generations: int = 6, islands: int = 1,
-                           plateau_window: int = 3, min_improvement: float = 1e-4
-                           ) -> EvolutionLineageReport:
+                           plateau_window: int = 3, min_improvement: float = 1e-4,
+                           escalate_architecture: bool = False) -> EvolutionLineageReport:
         """Run ``n`` generations. Each evolves a better way of thinking from the current champion,
         measures it, and — if measurably smarter and safe — promotes it to the next generation.
 
         With ``enact`` and a live ``core``, a promoted genome is installed into the live mind.
-        Stops early if the last ``plateau_window`` generations all failed to improve (no ceiling
-        otherwise — the loop is bounded only by ``n``).
+        Cross-generation lessons (which way each knob should move) warm-start every generation, so
+        the gain compounds. Stops early if the last ``plateau_window`` generations all failed to
+        improve; when ``escalate_architecture`` is set, a plateau escalates to one index-steered
+        Genesis architecture search ("redesign the brain") instead of giving up.
         """
         from nyxara.growth.evolve import Evolver
 
         lineage = self._load_lineage()
+        lessons = self._load_lessons()
         # the champion is the most recently PROMOTED genome — not merely the last recorded one,
         # which may be a benched (failed) candidate the loop never adopted
         champ_gen = next((g for g in reversed(lineage) if g.promoted), None)
@@ -448,8 +543,11 @@ class MindEvolutionEngine:
             run.append(gen0)
 
         for _ in range(int(n)):
-            # 1. evolve a better *way of thinking* from the current champion (warm-start)
-            evolver = Evolver(champion.to_evolver_genome(), self._evolver_fitness,
+            # 1. evolve a better *way of thinking* from the current champion. The lesson ledger
+            #    warm-starts the search by nudging the champion along the directions that have
+            #    helped before — so each generation compounds the last (the flywheel).
+            seed_genome = self._apply_lessons(champion, lessons)
+            evolver = Evolver(seed_genome.to_evolver_genome(), self._evolver_fitness,
                               corrigibility=self.corrigibility, protected=self._protected,
                               min_improvement=min_improvement,
                               seed=self.seed + next_index)
@@ -475,6 +573,12 @@ class MindEvolutionEngine:
                              vote_samples=int(cand_metrics["vote_samples"]),
                              promoted=ok, reason=reason)
 
+            # record the lesson BEFORE promotion swaps the champion: which knobs moved which way,
+            # and whether that helped — this is what warm-starts the next generation
+            changed = candidate.changed_keys(champion)
+            deltas = {k: float(getattr(candidate, k)) - float(getattr(champion, k)) for k in changed}
+            lessons.record(changed, deltas, cand_metrics["fitness"] - champ_metrics["fitness"], ok)
+
             if ok:
                 # 4. promote: this becomes the new champion; install into the live mind if enacted
                 champion = candidate
@@ -490,7 +594,7 @@ class MindEvolutionEngine:
             lineage.append(gen)
             run.append(gen)
             next_index += 1
-            self._save_lineage(lineage)
+            self._save_lineage(lineage, lessons)
 
             # 5. plateau guard — stop a dead search early; otherwise there is no ceiling
             recent = [g for g in run if g.index >= 1]
@@ -499,8 +603,15 @@ class MindEvolutionEngine:
                 plateaued = True
                 break
 
+        # 6. on a plateau, tuning *how* she thinks has stalled — escalate to redesigning the
+        #    *substrate*: one index-steered Genesis architecture search (best-effort, gated).
+        architecture: Optional[Dict[str, Any]] = None
+        if plateaued and escalate_architecture:
+            architecture = self.evolve_architecture()
+
         return EvolutionLineageReport(generations=run, champion=champion.to_dict(),
-                                      promoted=promoted, plateaued=plateaued)
+                                      promoted=promoted, plateaued=plateaued,
+                                      lessons=lessons.to_dict(), architecture=architecture)
 
     # ---------------------------------------------------------------------- #
     # The gauntlet — never relax these
@@ -553,6 +664,83 @@ class MindEvolutionEngine:
             return False
 
     # ---------------------------------------------------------------------- #
+    # Cross-generation lesson transfer — nudge the champion along learned directions
+    # ---------------------------------------------------------------------- #
+    def _apply_lessons(self, champion: ReasoningGenome, lessons: LessonLedger) -> ReasoningGenome:
+        """Warm-start the next search: shift each knob along the direction that has helped before.
+
+        The nudge is scaled by the lesson's confidence and saturated by ``tanh`` so a single noisy
+        generation can't lurch a knob across its range. Returns a fresh genome; the original (the
+        true champion the gauntlet judges against) is never mutated."""
+        if self.lesson_lr <= 0.0 or not lessons.knobs:
+            return champion
+        import math
+        d = champion.to_dict()
+        for key, lo, hi in ReasoningGenome._BOUNDS:
+            direction = lessons.direction(key)
+            if direction == 0.0:
+                continue
+            span = (hi - lo) or 1.0
+            step = self.lesson_lr * lessons.confidence(key) * math.tanh(direction * 50.0) * span
+            d[key] = _clamp(float(d[key]) + step, lo, hi)
+        return ReasoningGenome.from_dict(d)
+
+    # ---------------------------------------------------------------------- #
+    # Genesis NAS — escalate from "tune the strategy" to "redesign the brain", index-steered
+    # ---------------------------------------------------------------------- #
+    def _build_genesis(self):
+        if self._genesis is None:
+            from nyxara.growth.genesis import NeuralArchitectureSearch
+            foundry = getattr(self.core, "_foundry", None)
+            self._genesis = NeuralArchitectureSearch(settings=self.settings, foundry=foundry)
+        return self._genesis
+
+    def _architecture_scope(self, state: Any) -> Tuple[int, int]:
+        """How big a Genesis search to run, steered by the index: a stalled, capable machine
+        searches wider/deeper; a weak one stays modest. Always bounded by the GenesisConfig."""
+        try:
+            from nyxara.kernel.compute import compute_report
+            compute = compute_report()
+        except Exception:  # noqa: BLE001
+            compute = {}
+        directive = self._intel.growth_directive(state, compute)
+        cap = self._intel.compute_capacity(compute)
+        cfg = getattr(self.settings, "genesis", None)
+        base_gens = int(getattr(cfg, "generations", 4)) if cfg else 4
+        base_pop = int(getattr(cfg, "population_size", 6)) if cfg else 6
+        boost = 1.5 if directive.get("escalate") else 1.0     # plateaued + capable → push harder
+        gens = max(1, int(round(base_gens * (0.5 + 0.5 * cap) * boost)))
+        pop = max(2, int(round(base_pop * (0.5 + 0.5 * cap) * boost)))
+        return gens, pop
+
+    def evolve_architecture(self, *, generations: Optional[int] = None,
+                            population: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Run one Genesis architecture search, steered by the intelligence index, and report it.
+
+        This is the literal "design a better brain" step: when tuning *how* she thinks plateaus,
+        NYXARA searches for a better *substrate*. Best-effort and fully offline (the stdlib n-gram
+        backend still searches and crowns a champion when torch is absent). Promotion of a champion
+        stays gated by Genesis/Foundry's own gauntlet — this only measures and records."""
+        try:
+            state = self._intel.load() or self._intel_blank()
+            gens, pop = self._architecture_scope(state)
+            if generations is not None:
+                gens = max(1, int(generations))
+            if population is not None:
+                pop = max(2, int(population))
+            nas = self._build_genesis()
+            report = nas.search(generations=gens, population_size=pop)
+            d = report.to_dict() if hasattr(report, "to_dict") else {}
+            return {"backend": getattr(report, "backend", d.get("backend", "?")),
+                    "generations": getattr(report, "generations", gens),
+                    "champion_fitness": float(getattr(report, "champion_fitness", 0.0) or 0.0),
+                    "champion_perplexity": float(getattr(report, "champion_perplexity", 0.0) or 0.0),
+                    "evaluations": int(getattr(report, "evaluations", 0) or 0),
+                    "promoted": bool(d.get("promoted", False))}
+        except Exception:  # noqa: BLE001 — architecture search is heavy/optional; never fatal
+            return None
+
+    # ---------------------------------------------------------------------- #
     # Persistence — one protected SEMANTIC record, JSON fallback (reuses the house pattern)
     # ---------------------------------------------------------------------- #
     def _lineage_path(self):
@@ -580,10 +768,12 @@ class MindEvolutionEngine:
         self._cached = list(gens)
         return list(gens)
 
-    def _save_lineage(self, lineage: List[Generation]) -> bool:
+    def _save_lineage(self, lineage: List[Generation],
+                      lessons: Optional[LessonLedger] = None) -> bool:
         self._cached = list(lineage)
-        payload = {"lineage": [g.to_dict() for g in lineage]}
-        wrote = self._save_to_memory(lineage)
+        payload = {"lineage": [g.to_dict() for g in lineage],
+                   "lessons": (lessons or LessonLedger()).to_dict()}
+        wrote = self._save_to_memory(lineage, lessons)
         # always mirror to disk too, so the lineage survives even without a memory store
         try:
             path = self._lineage_path()
@@ -594,7 +784,21 @@ class MindEvolutionEngine:
             pass
         return wrote
 
-    def _save_to_memory(self, lineage: List[Generation]) -> bool:
+    def _load_lessons(self) -> LessonLedger:
+        rec = self._find_record()
+        if rec is not None:
+            return LessonLedger.from_dict((rec.metadata or {}).get("lessons", {}))
+        try:
+            path = self._lineage_path()
+            if path.exists():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                return LessonLedger.from_dict(raw.get("lessons", {}))
+        except Exception:  # noqa: BLE001
+            pass
+        return LessonLedger()
+
+    def _save_to_memory(self, lineage: List[Generation],
+                        lessons: Optional[LessonLedger] = None) -> bool:
         if self.memory is None:
             return False
         try:
@@ -607,7 +811,8 @@ class MindEvolutionEngine:
             promoted = sum(1 for g in lineage if g.promoted)
             content = (f"[mind-evolution] {len(lineage)} generations, {promoted} promoted; "
                        f"I_t={lineage[-1].intelligence_index:.4f}" if lineage else "[mind-evolution]")
-            meta = {"lineage": [g.to_dict() for g in lineage]}
+            meta = {"lineage": [g.to_dict() for g in lineage],
+                    "lessons": (lessons or LessonLedger()).to_dict()}
             existing = self._find_record()
             if existing is not None:
                 self.memory.forget(existing.mem_id)

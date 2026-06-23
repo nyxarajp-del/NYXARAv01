@@ -16,6 +16,7 @@ from nyxara.guard.value_learning import IMMUTABLE_VALUES
 from nyxara.growth.mind_evolution import (
     EvolutionLineageReport,
     Generation,
+    LessonLedger,
     MindEvolutionEngine,
     ReasoningGenome,
     genome_solver,
@@ -247,3 +248,72 @@ def test_genome_solver_majority_vote():
 
     solver = genome_solver(ReasoningGenome(deliberation_depth=8, mcts_rollouts=8), _s, seed=0)
     assert "10" in solver("What is 5+5?")
+
+
+# --------------------------------------------------------------------------- #
+# Cross-generation lesson transfer — the compounding flywheel
+# --------------------------------------------------------------------------- #
+def test_lesson_ledger_records_direction_and_confidence():
+    led = LessonLedger()
+    # moving deliberation_depth UP helped (promoted, +fitness) twice
+    led.record(["deliberation_depth"], {"deliberation_depth": +1.0}, 0.2, promoted=True)
+    led.record(["deliberation_depth"], {"deliberation_depth": +1.0}, 0.1, promoted=True)
+    # moving mcts_rollouts UP hurt (not promoted)
+    led.record(["mcts_rollouts"], {"mcts_rollouts": +1.0}, -0.1, promoted=False)
+    assert led.direction("deliberation_depth") > 0          # learned: push it up
+    assert led.confidence("deliberation_depth") > led.confidence("mcts_rollouts")
+    assert LessonLedger.from_dict(led.to_dict()).to_dict() == led.to_dict()   # round-trips
+
+
+def test_lesson_nudge_moves_genome_in_learned_direction():
+    eng = MindEvolutionEngine(benchmark=_toy_bench(), base_sampler=_noisy_sampler(), seed=1)
+    led = LessonLedger()
+    led.knobs = {"deliberation_depth": {"alpha": 6.0, "beta": 1.0, "dir": 0.05, "n": 5.0}}
+    base = ReasoningGenome(deliberation_depth=5.0)
+    nudged = eng._apply_lessons(base, led)
+    assert nudged.deliberation_depth > base.deliberation_depth     # warm-started along the lesson
+    # a zero learning rate disables transfer entirely
+    eng0 = MindEvolutionEngine(benchmark=_toy_bench(), base_sampler=_noisy_sampler(),
+                               seed=1, lesson_lr=0.0)
+    assert eng0._apply_lessons(base, led).to_dict() == base.to_dict()
+
+
+def test_lessons_accumulate_and_persist(isolated):
+    eng = isolated()
+    rep = eng.evolve_generations(5, enact=False, inner_generations=4, population=6)
+    assert rep.lessons.get("knobs")                                # lessons were learned + reported
+    # a fresh engine reloads the lessons it persisted
+    led = isolated()._load_lessons()
+    assert led.knobs and led.t >= 1
+
+
+# --------------------------------------------------------------------------- #
+# Genesis NAS escalation — redesign the substrate when tuning the strategy plateaus
+# --------------------------------------------------------------------------- #
+def test_evolve_architecture_runs_offline(isolated):
+    # the stdlib n-gram backend searches and crowns a champion with no torch — fully offline
+    arch = isolated().evolve_architecture(generations=1, population=2)
+    assert arch is not None
+    assert arch["backend"] in ("stdlib", "torch")
+    assert arch["champion_fitness"] >= 0.0
+
+
+def test_plateau_escalates_to_architecture(isolated):
+    # a perfect deterministic reasoner plateaus immediately; with escalation on, the loop runs an
+    # architecture step instead of giving up. Stub the heavy NAS to keep the test fast + deterministic.
+    eng = isolated(base_sampler=_noisy_sampler(p=1.0), cost_penalty=0.0)
+    eng.evolve_architecture = lambda **kw: {"backend": "stub", "generations": 1,
+                                            "champion_fitness": 0.5, "promoted": False}
+    rep = eng.evolve_generations(20, enact=False, inner_generations=3, population=4,
+                                 plateau_window=2, escalate_architecture=True)
+    assert rep.plateaued
+    assert rep.architecture is not None and rep.architecture["backend"] == "stub"
+
+
+def test_no_escalation_when_not_plateaued(isolated):
+    eng = isolated()
+    eng.evolve_architecture = lambda **kw: {"backend": "stub"}     # would be called only on plateau
+    rep = eng.evolve_generations(2, enact=False, inner_generations=3, population=4,
+                                 escalate_architecture=True)
+    if not rep.plateaued:
+        assert rep.architecture is None

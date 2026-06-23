@@ -313,6 +313,24 @@ background `GrowthEngine`/idle cadence, through the *same* gates, and degrades g
   installing a promoted strategy into the live mind stays OFF until
   `NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT=true`.
 
+  Two things make the loop genuinely *compound* rather than restart each time:
+
+  * **Cross-generation lesson transfer** (`LessonLedger`) — every generation records *which way it
+    moved each knob and whether that helped* (a per-knob Beta confidence + a smoothed signed
+    direction, the same Beta-Bernoulli idiom as `growth/credit.py`). Before the next generation
+    searches, the champion is **nudged along those learned directions**, so V_{n+1} starts where
+    V_n's lessons point — "har step agle step ko aasaan banata hai." A bad nudge is harmless: the
+    gauntlet still measures every candidate against the *true* champion before promotion. The
+    ledger persists with the lineage, so the lessons outlast restarts (`NYXARA_MIND_EVOLUTION__LESSON_LR`).
+  * **Genesis-NAS escalation** (steered by the Intelligence Index) — when tuning *how* she thinks
+    plateaus, she escalates to redesigning the *substrate*: one index-steered **Neural Architecture
+    Search** (`growth/genesis.py`), its scope (generations × population) scaled by the compute
+    actually available and pushed harder when the index flags a stalled, capable machine. It runs
+    fully offline (the stdlib n-gram backend still searches and crowns a champion without torch);
+    promoting a champion stays gated by Genesis/Foundry's own gauntlet. On demand:
+    `python -m nyxara.growth --evolve-mind 8 --enact --escalate-arch`, or background via
+    `NYXARA_MIND_EVOLUTION__ESCALATE_TO_ARCHITECTURE=true` (OFF by default — it is heavy).
+
 * **Autonomous Scientist & Meta-Research** — `growth/meta_research.py`. Beyond *reading* research,
   she **creates** it: `core.meta_discover(topic)` mines the *open / incomplete* parts of the
   research, **invents** candidate new theories and optimization techniques (a real LLM when one is

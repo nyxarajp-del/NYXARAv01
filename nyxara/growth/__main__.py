@@ -91,9 +91,11 @@ def _evolve_mind(args: argparse.Namespace) -> int:
     print(f"· evolving NYXARA's way of thinking for {args.evolve_mind} generation(s)"
           f"{' (enacting into the live mind)' if args.enact else ' (measure-only)'}…")
     core = NyxaraCore()
-    engine = MindEvolutionEngine(core=core, llm=core.llm, memory=core.memory)
+    engine = MindEvolutionEngine(core=core, llm=getattr(core.reasoner, "llm", None),
+                                 memory=core.memory)
     try:
-        report = engine.evolve_generations(int(args.evolve_mind), enact=bool(args.enact))
+        report = engine.evolve_generations(int(args.evolve_mind), enact=bool(args.enact),
+                                           escalate_architecture=bool(args.escalate_arch))
     except Exception as exc:  # noqa: BLE001 — report, never traceback
         print(f"· could not evolve the mind: {exc}")
         return 1
@@ -132,6 +134,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                              "generations (measured on the real benchmark) and print the lineage")
     parser.add_argument("--enact", action="store_true",
                         help="with --evolve-mind: install a promoted strategy into the live mind")
+    parser.add_argument("--escalate-arch", action="store_true",
+                        help="with --evolve-mind: on a plateau, escalate to one index-steered "
+                             "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
 
     if args.evolve_mind > 0:

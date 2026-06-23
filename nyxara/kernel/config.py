@@ -824,6 +824,11 @@ class MindEvolutionConfig(BaseModel):
     islands: int = Field(default=1, ge=1, le=8)
     plateau_window: int = Field(default=3, ge=1, le=50)
     cost_penalty: float = Field(default=0.03, ge=0.0, le=1.0)
+    lesson_lr: float = Field(default=0.25, ge=0.0, le=1.0)     # cross-generation lesson transfer
+    # On a plateau, escalate from tuning *how* she thinks to redesigning the *substrate* — one
+    # index-steered Genesis architecture search. Heavy (and torch-hungry for real models), so OFF
+    # by default; with no torch it still runs the stdlib n-gram search. Honours genesis.enabled.
+    escalate_to_architecture: bool = False
 
 
 class ExplorerConfig(BaseModel):

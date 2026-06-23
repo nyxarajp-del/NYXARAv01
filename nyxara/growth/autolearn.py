@@ -418,7 +418,8 @@ class GrowthEngine:
             report = self._mind_evolution_obj().evolve_generations(
                 int(cfg.generations_per_pass), enact=bool(cfg.autonomous_enact),
                 population=int(cfg.population), inner_generations=int(cfg.inner_generations),
-                islands=int(cfg.islands), plateau_window=int(cfg.plateau_window))
+                islands=int(cfg.islands), plateau_window=int(cfg.plateau_window),
+                escalate_architecture=bool(cfg.escalate_to_architecture))
             return report.to_dict()
         except Exception:  # noqa: BLE001 — mind-evolution is heavy/optional; never fatal
             return None
