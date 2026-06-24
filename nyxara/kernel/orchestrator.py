@@ -3252,14 +3252,22 @@ class NyxaraCore:
         if self.real_environment is not None and self.world_model is not None:
             try:
                 if self.oversight.gate():
-                    from nyxara.sim.real_environment import sensorimotor_tick
-                    tr = sensorimotor_tick(self.real_environment, self.world_model)
-                    report["sensorimotor"] = {"action": tr.action,
-                                              "reward": round(tr.reward, 3)}
-                    report["world_transitions"] = len(self.world_model)
-                    self.mind.record(ThoughtKind.INFERENCE,
-                                     f"sensorimotor: {tr.action} r={tr.reward:.2f}",
-                                     salience=0.4)
+                    from nyxara.sim.real_environment import sensorimotor_stream
+                    # a short CONTINUOUS burst (a trajectory), not one isolated snapshot — the
+                    # world model learns action-conditioned dynamics from a real sequence.
+                    stream = sensorimotor_stream(self.real_environment, self.world_model, steps=4)
+                    if stream:
+                        tr = stream[-1]
+                        dyn = self.real_environment.dynamics()
+                        report["sensorimotor"] = {"action": tr.action,
+                                                  "reward": round(tr.reward, 3),
+                                                  "stream": len(stream),
+                                                  "dfiles_per_step": round(dyn[0], 3)}
+                        report["world_transitions"] = len(self.world_model)
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"sensorimotor stream x{len(stream)}: "
+                                         f"{tr.action} r={tr.reward:.2f}",
+                                         salience=0.4)
             except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation

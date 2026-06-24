@@ -32,7 +32,7 @@ import random
 import shutil
 import tempfile
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from nyxara.kernel.compute import compute_report
 
@@ -85,6 +85,10 @@ class RealEnvironment:
         self._journal: dict[str, bytes] = {}   # path -> last-known content (for restore)
         self._fseq = 0
         self._dseq = 0
+        # a rolling window of recent states — turns discrete snapshots into a CONTINUOUS
+        # sensorimotor stream the world model (and curiosity) can read dynamics from.
+        from collections import deque as _deque
+        self._history: Any = _deque(maxlen=64)
 
     @property
     def root(self) -> str:
@@ -148,14 +152,30 @@ class RealEnvironment:
         and a negative reward), not a crash.
         """
         before = self.sense()
+        if not self._history:
+            self._history.append(before)
         applied = True
         try:
             applied = self._apply(action)
         except Exception:  # noqa: BLE001 — a failed op is a negative-reward observation
             applied = False
         after = self.sense()
+        self._history.append(after)            # the stream advances — dynamics become readable
         reward = self._reward(before, action, after, applied)
         return Transition(state=before, action=action, next_state=after, reward=reward)
+
+    def dynamics(self) -> Tuple[float, ...]:
+        """Per-step rate-of-change of each state dimension over the rolling window.
+
+        This is the genuinely *continuous* signal a snapshot lacks: how fast files/bytes/disk/RAM
+        are moving, not just where they are. Returns a zero vector until at least two states have
+        streamed in. Downstream (curiosity, anomaly) can read it without changing the 6-D State.
+        """
+        if len(self._history) < 2:
+            return (0.0,) * 6
+        first, last = self._history[0], self._history[-1]
+        n = len(self._history) - 1
+        return tuple((last[i] - first[i]) / n for i in range(len(first)))
 
     def _apply(self, action: str) -> bool:
         """Execute one action for real in the scratch dir. Returns True if it did something."""
@@ -283,6 +303,23 @@ def sensorimotor_tick(env: RealEnvironment, world_model: object, *,
     except Exception:  # noqa: BLE001 — feeding the model is best-effort, never fatal
         pass
     return tr
+
+
+def sensorimotor_stream(env: RealEnvironment, world_model: object, *, steps: int = 4,
+                        rng: Optional[random.Random] = None) -> List[Transition]:
+    """Drive a CONTINUOUS burst of sensorimotor ticks, feeding each real transition to the model.
+
+    A single isolated tick per idle cycle is a snapshot; a short stream is a trajectory — the world
+    model learns action-conditioned dynamics from a *sequence*, and ``env.dynamics()`` becomes a
+    live rate-of-change signal. Bounded by ``steps`` so an idle tick stays cheap; never raises.
+    """
+    out: List[Transition] = []
+    for _ in range(max(1, int(steps))):
+        try:
+            out.append(sensorimotor_tick(env, world_model, rng=rng))
+        except Exception:  # noqa: BLE001 — the stream is best-effort, never fatal
+            break
+    return out
 
 
 # --------------------------------------------------------------------------- #
