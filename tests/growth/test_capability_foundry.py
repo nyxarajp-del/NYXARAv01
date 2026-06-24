@@ -361,3 +361,77 @@ def test_parametric_data_op_forges_working_tool(tmp_path, need):
     res = _foundry(tmp_path).forge(need, authority=Authority.OWNER)
     assert res.deployed and res.test_passed
     assert res.benchmark_score == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Compositional synthesis — INVENT a new capability by chaining primitives
+# (combinations the fixed catalogue never enumerated; real, deterministic, offline)
+# --------------------------------------------------------------------------- #
+import hashlib as _hashlib  # noqa: E402
+
+from nyxara.growth.capability_foundry import (  # noqa: E402
+    best_recipe, _compositional_recipe)
+
+
+@pytest.mark.parametrize("need, args, expect", [
+    ("reverse a string then uppercase it", {"text": "abc"}, "CBA"),
+    ("count the words then multiply by 2", {"text": "one two three"}, 6),
+    ("slugify the text then sha256 it", {"text": "Hello, World!"},
+     _hashlib.sha256(b"hello-world").hexdigest()),
+    ("lowercase it then reverse it", {"text": "ABC"}, "cba"),
+    ("sort the list then deduplicate it", {"items": [3, 1, 2, 1, 3]}, [1, 2, 3]),
+])
+def test_compositional_forge_invents_chained_tool(tmp_path, need, args, expect):
+    """A multi-step need is invented as a real chained tool, deployed and correct."""
+    f = _foundry(tmp_path)
+    res = f.forge(need, authority=Authority.OWNER)
+    assert res.deployed and res.stage is ForgeStage.DONE
+    assert res.test_passed and res.benchmark_score == pytest.approx(1.0)
+    assert res.tool_name.startswith("compose_")          # a genuinely new, composed capability
+    assert res.tool_name != "generic" and not res.tool_name.startswith("cap_")
+    r = f.registry.invoke(res.tool_name, args, authority=Authority.OWNER)
+    assert r.ok and r.value == expect
+
+
+def test_compositional_aborts_on_incompatible_chain(tmp_path):
+    """An impossible chain (uppercase -> factorial) is NOT invented as a compose_ tool.
+
+    The composition cannot pass its own computed example, so it is aborted and the need falls
+    back to the single-op/keyword path — never deploying a broken tool. Honesty over confidence.
+    """
+    assert _compositional_recipe("uppercase then factorial") is None
+    plan = _foundry(tmp_path).plan("uppercase then factorial")
+    assert not plan.shape.startswith("compose_")
+
+
+def test_compositional_does_not_hijack_single_op(tmp_path):
+    """Single-op needs keep resolving exactly as before (no spurious composition)."""
+    assert _compositional_recipe("count the vowels in a string") is None
+    assert _foundry(tmp_path).plan("count the vowels in a string").shape == "text_count_vowels"
+
+
+def test_compositional_leaves_truly_unknown_as_generic(tmp_path):
+    """A creative gap with no chainable primitives still falls to the honest scaffold."""
+    assert _compositional_recipe("generate a photorealistic image of a cat") is None
+    assert _foundry(tmp_path).plan("generate a photorealistic image of a cat").shape == "generic"
+
+
+def test_best_recipe_exposes_composition():
+    """best_recipe() (reused by explorer / creative codegen) yields a real composed handle()."""
+    r = best_recipe("reverse then uppercase")
+    assert r.key.startswith("compose_")
+    assert "def handle" in r.source
+    ok, _ = CapabilityFoundry._scan_source(r.source)  # sandbox-safe like every forged tool
+    assert ok
+
+
+def test_composed_tool_survives_restart(tmp_path):
+    """A forged composition persists and is restored on a fresh foundry (same root)."""
+    f1 = CapabilityFoundry(registry=ToolRegistry(), root=str(tmp_path))
+    res = f1.forge("reverse a string then uppercase it", authority=Authority.OWNER)
+    assert res.tool_name.startswith("compose_")
+    reg2 = ToolRegistry()
+    CapabilityFoundry(registry=reg2, root=str(tmp_path))
+    assert res.tool_name in reg2.names()                 # survived the "restart"
+    r = reg2.invoke(res.tool_name, {"text": "xy"}, authority=Authority.OWNER)
+    assert r.ok and r.value == "YX"
