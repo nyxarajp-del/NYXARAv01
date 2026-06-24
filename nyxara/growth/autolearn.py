@@ -42,6 +42,7 @@ class GrowthReport:
     abstractions: int = 0
     forgotten: int = 0
     selfplay: Optional[Dict[str, Any]] = None
+    acquisition: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
     mind_evolution: Optional[Dict[str, Any]] = None
@@ -54,7 +55,8 @@ class GrowthReport:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
                 "lessons_stored": self.lessons_stored, "replayed": self.replayed,
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
-                "selfplay": self.selfplay, "foundry": self.foundry,
+                "selfplay": self.selfplay, "acquisition": self.acquisition,
+                "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
                 "mind_evolution": self.mind_evolution,
                 "meta_research": self.meta_research, "rivalry": self.rivalry,
@@ -119,6 +121,7 @@ class GrowthEngine:
             if meta_research_every is None else meta_research_every))
         self._meta_researcher = meta_researcher
         self._growth_passes = 0
+        self._last_acquire: Optional[Dict[str, Any]] = None
         self._seen_action_seqs: set = set()
         self._stored_lessons: set = set()
         self._meta_topic_n = 0
@@ -364,6 +367,14 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — distillation is best-effort, never fatal
             return []
 
+    def _acquire_topics(self) -> List[str]:
+        """Derive what to go learn from her gaps — weaknesses + lessons + configured seeds."""
+        try:
+            from nyxara.growth.acquire import gap_topics
+            return gap_topics(memory=self.memory, settings=self.settings)
+        except Exception:  # noqa: BLE001 — topic derivation is best-effort
+            return []
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
@@ -375,6 +386,10 @@ class GrowthEngine:
                 # not just a static corpus — this is what makes the self-model *hers*
                 foundry = self._foundry = Foundry(
                     settings=self.settings, seed_corpus=self._memory_corpus())
+            # Autonomous data acquisition: before forging, harvest SCREENED external web text for
+            # her current knowledge gaps and fold it into the corpus (breadth she did not contain,
+            # not just her journal). Best-effort; the AcquireReport is surfaced for audit.
+            self._last_acquire = foundry.acquire(self._acquire_topics())
             return foundry.self_improve(generations=generations)
         except Exception:  # noqa: BLE001 — forging is heavy/optional; never fatal
             return []
@@ -471,6 +486,7 @@ class GrowthEngine:
             if self.enable_selfplay:
                 report.selfplay = self.self_play(topics=rival_topics)
             results = self.improve_self()
+            report.acquisition = self._last_acquire
             report.foundry = [r.to_dict() for r in results]
 
         # Recursive self-improvement runs on its own (slower) cadence — only every

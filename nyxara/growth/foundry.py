@@ -186,7 +186,8 @@ class Foundry:
                  corrigibility: Optional[Corrigibility] = None,
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
                  protected: Optional[Sequence[str]] = None,
-                 distill_path: Any = None, flywheel_path: Any = None) -> None:
+                 distill_path: Any = None, flywheel_path: Any = None,
+                 acquired_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -207,6 +208,9 @@ class Foundry:
             fw = getattr(self.settings, "flywheel", None)
             sp = getattr(fw, "store_path", None) if fw is not None else None
             self.flywheel_path = Path(sp) if sp else (self.root / "flywheel.jsonl")
+        # Screened external web corpus harvested by growth/acquire.py — additive breadth she did
+        # not previously contain. Folded in AFTER her own lived experience (so she stays herself).
+        self.acquired_path = Path(acquired_path) if acquired_path else (self.root / "acquired.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._load_manifest()
@@ -256,6 +260,9 @@ class Foundry:
                 piece = " ".join(s for s in (exp.context, exp.action) if s).strip()
                 if piece:
                     others.append(piece)
+        # Screened external web text (growth/acquire.py): additive breadth, folded in alongside
+        # seeds/replay as lower-priority than her own verified supervision above.
+        others.extend(t for t in self._acquired_docs(limit) if t)
         kept = verified[:limit]
         texts = kept + _stride_sample(others, max(0, limit - len(kept)))
         if not texts:
@@ -300,6 +307,38 @@ class Foundry:
     def _flywheel_docs(self, limit: int) -> List[str]:
         """Rendered training docs from her OWN flywheel corpus, if any (never raises)."""
         return self._docs_from(self.flywheel_path, limit)
+
+    def _acquired_docs(self, limit: int) -> List[str]:
+        """Clean text from the screened external web corpus, if any (never raises)."""
+        try:
+            from nyxara.growth.acquire import load_acquired_docs
+            return load_acquired_docs(self.acquired_path, limit=limit)
+        except Exception:  # noqa: BLE001 — acquired breadth is optional; never fatal to a forge
+            return []
+
+    def acquire(self, topics: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
+        """Harvest screened external web text for ``topics`` into ``acquired.jsonl`` (best-effort).
+
+        Gated by ``foundry.acquire_data``. Every fetched page is injection-screened by the
+        acquirer; suspicious pages are dropped, never persisted. Returns the AcquireReport dict
+        (countable: searched/fetched/kept/dropped), or ``None`` when disabled/unavailable. The
+        acquired corpus only ever *adds* training breadth — every promotion still clears the full
+        character/corrigibility/loyalty gauntlet below."""
+        if not getattr(self.cfg, "acquire_data", False):
+            return None
+        try:
+            from nyxara.growth.acquire import DataAcquirer, gap_topics
+            picks = list(topics) if topics else gap_topics(settings=self.settings)
+            acq = DataAcquirer(
+                settings=self.settings, store_path=self.acquired_path,
+                search_results=getattr(self.cfg, "acquire_search_results", 6),
+                max_per_topic=getattr(self.cfg, "acquire_max_per_topic", 3),
+                max_docs=getattr(self.cfg, "acquire_max_docs", 60),
+                min_chars=getattr(self.cfg, "acquire_min_chars", 200),
+                max_chars=getattr(self.cfg, "acquire_max_chars", 20_000))
+            return acq.acquire(picks).to_dict()
+        except Exception:  # noqa: BLE001 — acquisition is heavy/optional/external; never fatal
+            return None
 
     @staticmethod
     def _docs_from(path: Any, limit: int) -> List[str]:
@@ -370,12 +409,35 @@ class Foundry:
     def _next_version(self) -> int:
         return (max((v.version for v in self.versions), default=0)) + 1
 
+    def _scaled_dims(self) -> Tuple[Dict[str, int], bool]:
+        """The (dims, load_in_4bit) to build with — autoscaled to compute when enabled.
+
+        When ``foundry.autoscale_to_compute`` is on, the live compute report chooses the largest
+        profile the machine can honestly train (bare CPU keeps the static dims; a strong CUDA GPU
+        unlocks GPT-2 scale + QLoRA). Falls back to the configured ``resolved_dims()`` / static
+        ``load_in_4bit`` on any error, so behaviour is unchanged when the knob is off."""
+        static_dims = self.cfg.resolved_dims()
+        static_4bit = bool(self.cfg.load_in_4bit)
+        if not getattr(self.cfg, "autoscale_to_compute", False):
+            return static_dims, static_4bit
+        try:
+            from nyxara.growth.compute_scale import recommend_foundry_profile
+            from nyxara.kernel.compute import compute_report
+            rec = recommend_foundry_profile(compute_report())
+            from nyxara.kernel.config import _FOUNDRY_PROFILES
+            dims = (dict(static_dims) if rec.profile == "custom"
+                    else dict(_FOUNDRY_PROFILES[rec.profile]))
+            # only ever ADD 4-bit when the recommendation (CUDA-clamped) calls for it
+            return dims, bool(static_4bit or rec.load_in_4bit)
+        except Exception:  # noqa: BLE001 — autoscale is an optimisation, never required
+            return static_dims, static_4bit
+
     def train_candidate(self, *, spec: Optional[ModelSpec] = None,
                         corpus: Optional[Sequence[str]] = None,
                         tunables: Optional[Sequence[str]] = None,
                         resists_correction: bool = False,
                         disables_oversight: bool = False) -> Tuple[BaseLanguageModel, ModelVersion]:
-        dims = self.cfg.resolved_dims()   # a named profile (e.g. gpt2) overrides raw dims
+        dims, load_in_4bit = self._scaled_dims()   # autoscale to compute, else the static profile
         spec = spec or ModelSpec(kind=self.cfg.backend, ngram_order=self.cfg.ngram_order,
                                  block_size=dims["block_size"], n_layer=dims["n_layer"],
                                  n_head=dims["n_head"], n_embd=dims["n_embd"],
@@ -384,7 +446,7 @@ class Foundry:
                                  lora_r_auto=getattr(self.cfg, "lora_r_auto", True),
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
                                  max_seq_len=self.cfg.max_seq_len,
-                                 load_in_4bit=self.cfg.load_in_4bit,
+                                 load_in_4bit=load_in_4bit,
                                  bnb_4bit_quant_type=self.cfg.bnb_4bit_quant_type,
                                  bnb_4bit_compute_dtype=self.cfg.bnb_4bit_compute_dtype,
                                  bnb_4bit_use_double_quant=self.cfg.bnb_4bit_use_double_quant,

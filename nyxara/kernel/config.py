@@ -360,6 +360,24 @@ class FoundryConfig(BaseModel):
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
     seed: int = 0
+    # ---- Autonomous external data acquisition (growth/acquire.py) ---- #
+    # Before forging, harvest REAL screened web text for NYXARA's knowledge gaps and fold it
+    # into the corpus — so she trains on breadth she did not previously contain, not only her
+    # own journal. ON within the foundry (but the whole foundry is opt-in via ``enabled``).
+    # Every fetched page is injection-screened; suspicious pages are dropped, never trained on.
+    acquire_data: bool = True
+    # Seed topics to search when no concrete weakness/lesson gaps exist (gap_topics fallback).
+    acquire_topics: List[str] = Field(default_factory=list)
+    acquire_search_results: int = Field(default=6, ge=1, le=50)   # results pulled per topic
+    acquire_max_per_topic: int = Field(default=3, ge=1, le=50)    # pages kept per topic
+    acquire_max_docs: int = Field(default=60, ge=1, le=5000)      # ceiling per acquisition pass
+    acquire_min_chars: int = Field(default=200, ge=1)             # too-short pages are dropped
+    acquire_max_chars: int = Field(default=20_000, ge=1)          # per-doc text cap
+    # ---- Compute-aware autoscaling (growth/compute_scale.py) ---- #
+    # Scale the forged model to the compute actually available: a bare CPU keeps the always-on
+    # backend; a strong CUDA GPU unlocks GPT-2 scale + 4-bit QLoRA. Clamped to reality — never
+    # recommends a model the machine cannot train. Overrides ``profile`` when on.
+    autoscale_to_compute: bool = True
 
     def resolved_dims(self) -> Dict[str, int]:
         """The (n_layer, n_head, n_embd, block_size) the foundry should build with.
