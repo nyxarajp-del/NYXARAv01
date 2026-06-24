@@ -1877,7 +1877,7 @@ class NyxaraCore:
         if disp is not Disposition.ACT:
             self.reporter.log_decision(candidate.text, candidate.rationale,
                                        outcome=disp.value, autonomous=authority is not Authority.OWNER)
-            self._grow(candidate, disp, authority=authority, success=False)
+            self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
             return self._finish(cid, disp, candidate, gates, thoughts, reason, response)
@@ -1921,7 +1921,7 @@ class NyxaraCore:
 
         self.reporter.log_decision(candidate.text, candidate.rationale, outcome="done",
                                    autonomous=authority is not Authority.OWNER)
-        self._grow(candidate, Disposition.ACT, authority=authority, success=True)
+        self._grow(candidate, Disposition.ACT, authority=authority, success=True, stimulus=safe_text)
         response = self._spoken_response(candidate, Disposition.ACT)
         if tool_result is not None and tool_result.ok and candidate.tool:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
@@ -2701,12 +2701,51 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _compound_own_models(self, stimulus: str, candidate: Candidate, success: bool) -> None:
+        """Feed this lived exchange back into NYXARA's OWN learned models so they compound.
+
+        Two genuinely-learned substrates improve from every real turn, no external service:
+
+        * the self-built brain (mind/self_reasoner.SelfBrain) — folds the exchange into its
+          corpus and periodically re-fits, so a keyless NYXARA's *words* sharpen with experience;
+        * the distributional embedder (memory/store.LearnedEmbedder) — learns the turn's
+          co-occurrence so recall reaches paraphrases it has now actually seen.
+
+        Best-effort and character-safe: it only ever moves *capability* (voice, recall), never a
+        value. A failure here never touches the turn's outcome.
+        """
+        text = str(stimulus or "").strip()
+        reply = str(getattr(candidate, "text", "") or "").strip()
+        docs = [d for d in (text, reply) if d]
+        if not docs:
+            return
+        # 1) the own brain learns the exchange (teach reaches the inner LLMReasoner's SelfBrain)
+        teach = getattr(self.reasoner, "teach_self_brain", None)
+        if teach is None:
+            teach = getattr(getattr(self.reasoner, "llm_reasoner", None), "teach_self_brain", None)
+        if callable(teach):
+            try:
+                teach(*docs)
+            except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                pass
+        # 2) the distributional embedder learns the turn's co-occurrence (paraphrase reach)
+        embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        learn = getattr(embedder, "learn", None)
+        if callable(learn):
+            try:
+                learn(*docs)
+            except Exception:  # noqa: BLE001 — compounding recall is best-effort
+                pass
+
     def _grow(self, candidate: Optional[Candidate], disp: Disposition, *,
-              authority: Authority, success: bool) -> None:
+              authority: Authority, success: bool, stimulus: str = "") -> None:
         """Learn from a finished turn: record the outcome into the learner/reflector and
         let affect register success. Skill & strategy only — never character (Rule 4)."""
         if candidate is None:
             return
+        # compound NYXARA's OWN learned models from this lived exchange (Rule 4): the self-built
+        # brain and the distributional embedder both get measurably better the more she converses.
+        self._compound_own_models(stimulus, candidate, success)
         action = candidate.tool or candidate.kind
         owner = authority is Authority.OWNER
         # temporal: stamp this turn's action so order, lag, and rhythm can be reasoned over

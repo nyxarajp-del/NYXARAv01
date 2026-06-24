@@ -83,6 +83,7 @@ class NyxaraReasoner:
         self._dual: Any = None  # lazily built dual-process facade
         self._offline: Any = None  # lazily built sovereign offline mind (keyless machine)
         self._router: Any = None  # lazily built own-model-first confidence router (handoff)
+        self._self_brain: Any = None  # lazily built own LEARNED brain (compounds with experience)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -427,13 +428,33 @@ class NyxaraReasoner:
         cand.rationale = f"{process} action proposal; {note}"
         return cand
 
+    def _own_brain(self) -> Any:
+        """Lazily build NYXARA's own always-on learned brain (mind/self_reasoner.SelfBrain)."""
+        if self._self_brain is None:
+            try:
+                from nyxara.mind.self_reasoner import build_self_brain
+                order = int(getattr(getattr(self.settings, "foundry", None), "ngram_order", 3))
+                self._self_brain = build_self_brain(settings=self.settings, order=max(2, order))
+            except Exception:  # noqa: BLE001 — the learned brain is a capability, never required
+                self._self_brain = None
+        return self._self_brain
+
+    def teach_self_brain(self, *docs: str) -> None:
+        """Compound the own learned brain from lived exchanges (called by the kernel's _grow)."""
+        brain = self._own_brain()
+        if brain is not None:
+            try:
+                brain.learn(*docs)
+            except Exception:  # noqa: BLE001 — compounding is best-effort
+                pass
+
     def _offline_mind(self) -> Any:
         """Lazily build the sovereign offline mind (keyless machine), wired to her faculties."""
         if self._offline is None:
             from nyxara.mind.offline_mind import OfflineMind
             self._offline = OfflineMind(
                 knowledge=self.knowledge, memory=self.memory, tools=self.tools,
-                soul=self.soul, settings=self.settings)
+                soul=self.soul, settings=self.settings, self_brain=self._own_brain())
         return self._offline
 
     def _rollout_eval(self, stimulus: str) -> str:

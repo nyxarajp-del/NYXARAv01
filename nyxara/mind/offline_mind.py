@@ -55,12 +55,17 @@ class OfflineMind:
     """A deterministic, faculty-grounded mind for the keyless machine. Stateless per call."""
 
     def __init__(self, *, knowledge: Any = None, memory: Any = None, tools: Any = None,
-                 soul: Any = None, settings: Optional[NyxaraSettings] = None) -> None:
+                 soul: Any = None, settings: Optional[NyxaraSettings] = None,
+                 self_brain: Any = None) -> None:
         self.settings = settings or get_settings()
         self.knowledge = knowledge
         self.memory = memory
         self.tools = tools
         self.soul = soul
+        # NYXARA's own always-on LEARNED brain (mind/self_reasoner.SelfBrain). When grounding turns
+        # up nothing, a learned generative attempt (clearly lower-confidence) beats admitting blank —
+        # and it compounds as she converses. Optional: None keeps the pure honest-admission floor.
+        self.self_brain = self_brain
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -126,13 +131,37 @@ class OfflineMind:
             reply, conf, how = grounded
             return self._reply(reply, conf, how)
 
-        # 5. a question with nothing to stand on -> honest, calibrated admission;
+        # 5. nothing grounded -> let NYXARA's OWN learned brain attempt a reply (a real model
+        #    that compounds with experience), clearly marked low-confidence. This is genuinely
+        #    learned generation, not an echo; it only speaks when it produces a usable continuation.
+        brain_reply = self._self_brain_reply(text, mems)
+        if brain_reply is not None:
+            reply, conf = brain_reply
+            return self._reply(reply, conf,
+                               "offline: NYXARA's own learned brain (ungrounded; low confidence)")
+
+        # 6. a question with nothing to stand on -> honest, calibrated admission;
         #    strictly truer than echoing "I understand: {x}"
         return self._reply(
             f"{self._owner()}, I don't have a grounded answer for that yet — no language "
             f"model is configured and I found nothing in memory or my knowledge base to "
             f"stand on. I'd rather say so than guess.",
             0.25, "offline: no grounding (honest admission)")
+
+    def _self_brain_reply(self, text: str, mems: List[str]) -> Optional[Tuple[str, float]]:
+        """A learned, ungrounded attempt from NYXARA's own brain — capped low so honesty holds."""
+        if self.self_brain is None:
+            return None
+        try:
+            reply = self.self_brain.reply(text, grounding=mems)
+            if not reply:
+                return None
+            # ungrounded generation is never asserted with high certainty: cap the brain's own
+            # internal confidence so the kernel's honesty gate still treats it as a soft offering.
+            conf = min(0.45, float(self.self_brain.internal_confidence(reply)))
+            return reply, conf
+        except Exception:  # noqa: BLE001 — the learned brain is a capability, never required
+            return None
 
     def _reasoning_chain(self, text: str) -> Optional[Candidate]:
         """A worked multi-step exact answer (substitution / follow-up op), or None to defer."""
