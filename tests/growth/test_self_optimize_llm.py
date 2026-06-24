@@ -20,7 +20,7 @@ from nyxara.kernel.config import get_settings
 # Stubs — a fake LLM facade with a selectable "chosen provider"
 # --------------------------------------------------------------------------- #
 class _StubProvider:
-    def __init__(self, name: str = "groq", ok: bool = True) -> None:
+    def __init__(self, name: str = "self", ok: bool = True) -> None:
         self.name = name
         self._ok = ok
 
@@ -28,14 +28,30 @@ class _StubProvider:
         return self._ok
 
 
+class _StubResp:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
 class _StubLLM:
-    def __init__(self, text: str = "", *, provider: str = "groq", ok: bool = True) -> None:
+    """A fake LLM facade with one selectable provider, exposing the surface the self-editor uses
+    (``available_providers`` / ``complete_with``) plus a legacy ``generate``. Default provider is
+    ``self`` — NYXARA's own model — which is the author the feature is built around."""
+
+    def __init__(self, text: str = "", *, provider: str = "self", ok: bool = True) -> None:
         self._text = text
         self._prov = _StubProvider(provider, ok)
         self.calls: list = []
 
     def chosen_provider(self):
         return self._prov
+
+    def available_providers(self):
+        return [self._prov.name] if self._prov._ok else []
+
+    def complete_with(self, name: str, req):
+        self.calls.append({"provider": name})
+        return _StubResp(self._text)
 
     def generate(self, prompt: str, *, system: str | None = None, **kw):
         self.calls.append({"prompt": prompt, "system": system, **kw})
@@ -104,15 +120,23 @@ def test_llm_generator_disabled_without_flag(tmp_path: Path):
     assert gen.available() is False
 
 
-def test_llm_generator_disabled_for_mock_and_self(tmp_path: Path):
+def test_self_model_is_an_author_but_mock_is_not(tmp_path: Path):
     s = _llm_settings()
+    # NYXARA's OWN model authors her redesigns — this is the whole point of the feature
+    assert LLMEditGenerator(llm=_StubLLM(provider="self"), settings=s).available() is True
+    # the mock impersonator is never an author (it would only fake a fix)
     assert LLMEditGenerator(llm=_StubLLM(provider="mock"), settings=s).available() is False
-    assert LLMEditGenerator(llm=_StubLLM(provider="self"), settings=s).available() is False
-    assert LLMEditGenerator(llm=_StubLLM(provider="groq", ok=False), settings=s).available() is False
+    # an unavailable own-model can't author
+    assert LLMEditGenerator(llm=_StubLLM(provider="self", ok=False), settings=s).available() is False
 
 
-def test_llm_generator_enabled_with_real_provider():
-    assert LLMEditGenerator(llm=_StubLLM(provider="groq"), settings=_llm_settings()).available()
+def test_external_provider_only_when_self_authored_only_off():
+    # default (self_authored_only=True): an external LLM is NOT permitted to author — khud NYXARA
+    assert LLMEditGenerator(
+        llm=_StubLLM(provider="groq"), settings=_llm_settings()).available() is False
+    # with the flag off, a real external provider may author when the own-model isn't ready
+    s = _llm_settings(self_authored_only=False)
+    assert LLMEditGenerator(llm=_StubLLM(provider="groq"), settings=s).available() is True
 
 
 def test_llm_generator_none_llm_is_unavailable():
@@ -129,7 +153,7 @@ def test_llm_good_edit_is_proposed(tmp_path: Path):
     gen = LLMEditGenerator(llm=_StubLLM(fixed), settings=_llm_settings())
     edit = gen.generate(_W(id="code-high_complexity-g.py-1", locus=f"{f}:1"))
     assert edit is not None
-    assert edit.after == fixed and edit.kind == "llm:high_complexity"
+    assert edit.after == fixed and edit.kind == "self:high_complexity"
     assert _parses(edit.after)
 
 
@@ -170,11 +194,46 @@ def test_llm_provider_exception_is_swallowed(tmp_path: Path):
     f.write_text("x = 1\n", encoding="utf-8")
 
     class _BoomLLM(_StubLLM):
-        def generate(self, prompt, *, system=None, **kw):
-            raise RuntimeError("provider down")
+        def complete_with(self, name, req):
+            raise RuntimeError("author down")
 
     gen = LLMEditGenerator(llm=_BoomLLM(), settings=_llm_settings())
     assert gen.generate(_W(id="code-todo-g.py-1", locus=f"{f}:1")) is None
+
+
+def test_self_model_authors_through_complete_with(tmp_path: Path):
+    # the edit is authored by NYXARA's OWN 'self' provider, explicitly (never an external LLM)
+    f = tmp_path / "g.py"
+    f.write_text("def add(a, b):\n    return a+b\n", encoding="utf-8")
+    fixed = "def add(a, b):\n    return a + b\n"
+    llm = _StubLLM(fixed, provider="self")
+    edit = LLMEditGenerator(llm=llm, settings=_llm_settings()).generate(
+        _W(id="code-high_complexity-g.py-1", locus=f"{f}:1"))
+    assert edit is not None and edit.kind == "self:high_complexity"
+    assert llm.calls and llm.calls[0]["provider"] == "self"   # her own brain authored it
+
+
+def test_big_file_is_now_eligible(tmp_path: Path):
+    # a file far past the old 24 KB linter-only cap is now eligible for a real redesign
+    f = tmp_path / "big.py"
+    body = "x = 1\n" + "# padding line to grow the file well past 24 KB\n" * 800   # ~38 KB
+    f.write_text(body, encoding="utf-8")
+    assert len(body.encode("utf-8")) > 24000
+    fixed = body.replace("x = 1\n", "x = 2\n", 1)
+    edit = LLMEditGenerator(llm=_StubLLM(fixed, provider="self"),
+                            settings=_llm_settings()).generate(
+        _W(id="code-todo-big.py-1", locus=f"{f}:1"))
+    assert edit is not None and edit.after == fixed          # not pre-rejected by the size cap
+
+
+def test_architecture_locus_module_name_resolves(tmp_path: Path):
+    # architecture weaknesses carry a dotted module locus (e.g. 'nyxara.growth.weakness'); the
+    # self-editor must resolve it to a real file so NYXARA can attempt the redesign
+    from nyxara.growth.self_optimize import _resolve_locus_path
+
+    assert _resolve_locus_path("nyxara.growth.weakness") is not None
+    assert _resolve_locus_path("nyxara.kernel") is not None          # package __init__.py
+    assert _resolve_locus_path("nyxara.does.not.exist") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -233,8 +292,9 @@ def test_rsi_generate_edit_prefers_deterministic_then_llm(tmp_path: Path):
     f2.write_text("def f(a, b):\n    return a+b\n", encoding="utf-8")
     llm_w = _W(id="code-high_complexity-c.py-1", locus=f"{f2}:1", edit_strategy="llm")
     edit2 = rsi._generate_edit(llm_w, det_gen, llm_gen)
-    assert edit2 is not None and edit2.kind == "llm:high_complexity"
-    assert len(llm_gen.llm.calls) == 1                   # LLM was consulted exactly once
+    assert edit2 is not None and edit2.kind == "self:high_complexity"
+    assert len(llm_gen.llm.calls) == 1                   # NYXARA's own model authored it once
+    assert llm_gen.llm.calls[0]["provider"] == "self"    # …and it was her own brain, not an LLM
 
 
 def test_strip_code_fence_plain_passthrough():

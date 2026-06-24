@@ -755,9 +755,11 @@ class RecursiveSelfImprovement:
         from nyxara.growth.self_optimize import EditGenerator, LLMEditGenerator, Optimizer
         cfg = self.settings.self_improvement
         gen = EditGenerator(llm=self._llm_handle())
-        # the LLM generator authors real fixes the transforms cannot express; it self-disables
-        # unless allow_llm_edits is set AND a real (non-mock/self) provider is available, so on a
-        # bare/offline machine this is simply None-equivalent and the deterministic path stands
+        # the self-authored generator authors real fixes the transforms cannot express, using
+        # NYXARA's OWN model (the `self` provider) — never an external LLM when self_authored_only
+        # is set. It self-disables unless allow_llm_edits is set AND a real author is available, so
+        # on a bare machine (own model not yet trained) this is simply None-equivalent and the
+        # deterministic transform path stands on its own.
         llm_gen: Any = LLMEditGenerator(llm=self._llm_handle(), settings=self.settings)
         if not llm_gen.available():
             llm_gen = None
@@ -778,13 +780,14 @@ class RecursiveSelfImprovement:
             optimizer.close()
 
     def _generate_edit(self, weakness: Any, gen: Any, llm_gen: Any) -> Any:
-        """Author one edit: deterministic transform first (instant/offline), LLM fallback for
-        weaknesses flagged ``edit_strategy == "llm"`` when a real provider is available."""
+        """Author one edit: deterministic transform first (instant/offline), then a self-authored
+        whole-file rewrite (NYXARA's own model) for weaknesses flagged ``edit_strategy == "llm"``
+        when an author is available."""
         edit = gen.generate(weakness)               # deterministic, AST-validated, always tried
         if edit is not None:
             return edit
         if llm_gen is not None and getattr(weakness, "edit_strategy", "") == "llm":
-            return llm_gen.generate(weakness)        # real, whole-file authored fix
+            return llm_gen.generate(weakness)        # real, whole-file self-authored fix
         return None
 
     def _enact_edits(self, ranked: Any, gen: Any, optimizer: Any, budget: int,

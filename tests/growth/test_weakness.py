@@ -42,14 +42,17 @@ def test_every_weakness_has_remediation():
     assert all(w.remediation for w in rep.weaknesses)
 
 
-def test_only_code_hygiene_marked_as_source_edit():
+def test_code_and_architecture_marked_as_source_edit():
     code, arch, bench = _inputs()
     rep = WeaknessSynthesizer().synthesize(code=code, arch=arch, bench=bench)
     editable = [w for w in rep.weaknesses if w.is_source_edit]
-    assert editable and all(w.source == "code" for w in editable)
     assert any("bare_except" in w.id for w in editable)
-    # architectural weaknesses are never auto-edited
-    assert not any(w.is_source_edit for w in rep.weaknesses if w.source == "architecture")
+    # architectural weaknesses are now self-authored ("llm" strategy) source edits — NYXARA may
+    # attempt the redesign herself, gauntlet-gated
+    arch_w = [w for w in rep.weaknesses if w.source == "architecture"]
+    assert arch_w and all(w.is_source_edit and w.edit_strategy == "llm" for w in arch_w)
+    # benchmark weaknesses remain directives, not direct source edits
+    assert not any(w.is_source_edit for w in rep.weaknesses if w.source == "benchmark")
 
 
 def test_empty_inputs_are_safe():

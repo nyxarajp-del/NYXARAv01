@@ -92,6 +92,11 @@ class WeaknessSynthesizer:
 
     # ---- architecture (highest blast radius) ---- #
     def _from_architecture(self, arch: Any) -> List[Weakness]:
+        # Architectural redesigns (breaking a cycle, inverting a layering violation, splitting a
+        # god-module) are genuine source edits no deterministic transform can express — so they
+        # are flagged ``is_source_edit`` with the ``llm`` (self-authored) strategy: NYXARA's own
+        # model attempts the redesign, and the reversible verify-or-rollback gauntlet keeps it
+        # safe (a redesign that breaks or regresses anything is rolled back byte-for-byte).
         out: List[Weakness] = []
         for i, cyc in enumerate(getattr(arch, "cycles", []) or []):
             out.append(Weakness(
@@ -100,7 +105,8 @@ class WeaknessSynthesizer:
                 evidence=[" → ".join(cyc)],
                 remediation=(f"break the cycle {cyc[0]} ↔ {cyc[1]} by extracting a shared "
                              "interface/seam so the dependency points one way"),
-                is_source_edit=False, locus=cyc[0] if cyc else ""))
+                is_source_edit=bool(cyc), edit_strategy="llm" if cyc else "",
+                locus=cyc[0] if cyc else ""))
         for j, (src, dst) in enumerate(getattr(arch, "layering_violations", []) or []):
             out.append(Weakness(
                 id=f"arch-layer-{j}", source="architecture", severity=0.8,
@@ -108,14 +114,14 @@ class WeaknessSynthesizer:
                 evidence=[f"{src} imports {dst} (a higher layer)"],
                 remediation=(f"invert the dependency: {dst} should not be imported by the "
                              f"more-foundational {src}; move the shared piece down a layer"),
-                is_source_edit=False, locus=src))
+                is_source_edit=True, edit_strategy="llm", locus=src))
         for god in (getattr(arch, "god_modules", []) or [])[:5]:
             out.append(Weakness(
                 id=f"arch-god-{god}", source="architecture", severity=0.55,
                 title=f"god-module: {god} (very high coupling)",
                 evidence=[f"{god} has outsized fan-in + fan-out"],
                 remediation=f"split {god} into cohesive sub-modules to reduce coupling",
-                is_source_edit=False, locus=god))
+                is_source_edit=True, edit_strategy="llm", locus=god))
         return out
 
     # ---- benchmark (lost / missing capability) ---- #
@@ -232,8 +238,10 @@ if __name__ == "__main__":  # pragma: no cover
     assert sources_in_order.index("architecture") < sources_in_order.index("code")
     # every weakness carries a concrete remediation
     assert all(w.remediation for w in rep.weaknesses)
-    # the bare-except is marked as a real source edit; the cycle is not
+    # the bare-except is a deterministic source edit; the architectural cycle is now a
+    # self-authored (llm-strategy) source edit too — NYXARA may attempt the redesign herself
     assert any(w.is_source_edit and "bare_except" in w.id for w in rep.weaknesses)
-    assert not any(w.is_source_edit for w in rep.weaknesses if w.source == "architecture")
+    assert all(w.is_source_edit and w.edit_strategy == "llm"
+               for w in rep.weaknesses if w.source == "architecture")
 
     print("\nALL SELF-TESTS PASSED ✓")

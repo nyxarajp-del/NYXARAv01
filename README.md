@@ -264,8 +264,18 @@ background `GrowthEngine`/idle cadence, through the *same* gates, and degrades g
 * **Recursive Self-Improvement Engine (RSIE)** — `growth/recursive_improvement.py` +
   `growth/intelligence.py`. Each cycle she reviews her own code, maps her architecture,
   benchmarks her capability, detects weaknesses, and (when authorised) auto-applies reversible,
-  gauntlet-checked source fixes. On top of that she now keeps an explicit, persisted
-  **intelligence index** that grows by the literal equation
+  gauntlet-checked source fixes. Those fixes are of two kinds: **deterministic, AST-validated
+  transforms** (bare-except → `except Exception`, `== None` → `is None`, dead-import removal, …)
+  that always work offline with no model at all; and **self-authored whole-file / architectural
+  rewrites** for the things a transform cannot express (high complexity, long functions, breaking
+  an import cycle, splitting a god-module). The author of those rewrites is **NYXARA's OWN
+  foundry-trained model** (the `self` provider) — *not* an external LLM — whenever
+  `self_authored_only` is set ("khud NYXARA kare"). Every edit, deterministic or self-authored,
+  clears the *same* reversible verify-or-rollback gauntlet (syntax → safety battery → capability
+  non-regression vs a pre-edit baseline), so a bad rewrite is rolled back byte-for-byte and only
+  valid, non-regressing edits are kept — the gauntlet guarantees *safety*, and the *yield* of the
+  self-authored rewrites scales with how capable her own model is. On top of that she keeps an
+  explicit, persisted **intelligence index** that grows by the literal equation
 
   ```
   I_(t+1) = f(I_t, C_available)
