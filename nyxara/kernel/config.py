@@ -761,20 +761,34 @@ class SelfImprovementConfig(BaseModel):
     allow_tuning: bool = True                  # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
-    # --- LLM-authored edits (real RSI) — triple-gated, OFF by default --- #
-    # When ON *and* ``autonomous_enact`` is set *and* a real (non-mock) provider is available,
-    # NYXARA may have the LLM author a whole-file fix for a weakness the deterministic
-    # transforms cannot express (e.g. high complexity, long functions). Every such edit clears
-    # the *same* reversible verify-or-rollback gauntlet — it is safe by construction.
-    allow_llm_edits: bool = True               # author real source fixes via the LLM
+    # --- self-authored edits (real RSI) — triple-gated --- #
+    # When ON *and* ``autonomous_enact`` is set *and* a real author is available, NYXARA authors a
+    # whole-file fix for a weakness the deterministic transforms cannot express (high complexity,
+    # long functions, an architectural redesign). The author is **NYXARA's OWN foundry-trained
+    # model** (the ``self`` provider) — not an external LLM — whenever ``self_authored_only`` is
+    # set. Every such edit clears the *same* reversible verify-or-rollback gauntlet, so it is safe
+    # by construction: a bad rewrite rolls back byte-for-byte; only valid, non-regressing edits are
+    # kept. The gauntlet guarantees safety, not capability — the yield scales with how good her own
+    # model is, and the deterministic linter-class transforms always work with no model at all.
+    allow_llm_edits: bool = True               # author real source fixes (self-model or LLM)
+    # "khud NYXARA kare, koi LLM naa kare": when True, ONLY NYXARA's own model (the ``self``
+    # provider) may author edits — never an external provider (Anthropic/OpenAI/…). Set False to
+    # also permit a configured external provider as the author.
+    self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
     # META-META loop (growth/meta_meta.py): evolve the improvement engine's OWN knobs (recursion
     # depth, edit budget) scored by the index-gain they actually produce — improving *how* she
     # improves. Capability-only and bounded; only acts when autonomous_enact + allow_tuning are set.
     meta_meta_enabled: bool = True
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
-    llm_edit_max_file_bytes: int = Field(default=24000, ge=512)    # skip files too big to send
-    llm_edit_max_size_delta_ratio: float = Field(default=0.5, ge=0.0, le=1.0)  # reject wild rewrites
+    # File-size ceiling for a self-authored rewrite. Generous so the real algorithm/architecture
+    # files (foundry, recursive_improvement, autolearn, the orchestrator) are eligible for a true
+    # redesign — only pathologically huge files are skipped. The gauntlet, not this cap, is the
+    # safety net.
+    llm_edit_max_file_bytes: int = Field(default=200000, ge=512)
+    # Max fraction of a file a single rewrite may change. 1.0 ⇒ a full redesign is permitted (the
+    # gauntlet still verifies it). Lower it to keep rewrites incremental.
+    llm_edit_max_size_delta_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     # --- code-review thresholds --- #
     max_function_length: int = Field(default=60, ge=10)
     max_complexity: int = Field(default=10, ge=1)

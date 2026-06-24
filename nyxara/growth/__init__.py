@@ -121,6 +121,7 @@ from nyxara.growth.self_optimize import (
     LLMEditGenerator,
     OptimizationOutcome,
     Optimizer,
+    SelfEditGenerator,
     SourceEdit,
 )
 from nyxara.growth.weakness import Weakness, WeaknessReport, WeaknessSynthesizer
@@ -245,6 +246,7 @@ __all__ = [
     "Optimizer",
     "EditGenerator",
     "LLMEditGenerator",
+    "SelfEditGenerator",
     "OptimizationOutcome",
     "GauntletResult",
     "SourceEdit",

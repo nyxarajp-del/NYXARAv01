@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 __all__ = ["SourceEdit", "GauntletResult", "OptimizationOutcome", "EditGenerator",
-           "LLMEditGenerator", "Optimizer"]
+           "LLMEditGenerator", "SelfEditGenerator", "Optimizer"]
 
 
 # --------------------------------------------------------------------------- #
@@ -98,12 +98,14 @@ class EditGenerator:
     def generate(self, weakness: Any) -> Optional[SourceEdit]:
         locus = getattr(weakness, "locus", "") or ""
         kind = self._kind_of(weakness)
+        if not kind:
+            return None          # no deterministic transform applies (e.g. an architecture redesign)
         file_part, _, line_part = locus.partition(":")
         path = Path(file_part)
-        if not path.exists():
+        if not path.is_file():
             # locus is repo-relative — resolve against the package parent
             cand = _repo_root() / file_part
-            if cand.exists():
+            if cand.is_file():
                 path = cand
             else:
                 return None
@@ -147,20 +149,29 @@ class EditGenerator:
 
 
 # --------------------------------------------------------------------------- #
-# LLM edit generation — author a real whole-file fix the transforms cannot express
+# Self-authored edit generation — NYXARA writes a real whole-file fix herself
 # --------------------------------------------------------------------------- #
 class LLMEditGenerator:
     """Author a real, whole-file source fix for a weakness no deterministic transform can express
-    (high complexity, an over-long function, too many parameters, a TODO to resolve).
+    (high complexity, an over-long function, too many parameters, a TODO, an architectural
+    redesign).
 
     This is the capability that turns self-optimization from a linter into genuine recursive
-    self-improvement: NYXARA writes the fix herself. It is **safe by construction** — the
-    proposal is only ever handed to :class:`Optimizer`, which subjects it to the *same*
-    reversible verify-or-rollback gauntlet (syntax → safety battery → capability non-regression
-    → optional tests). This generator's own checks merely reject obviously-bad proposals early
-    (won't parse, truncated, runaway rewrite) so the expensive gauntlet is spent only on
-    plausible edits. It is triple-gated: ``allow_llm_edits`` must be set, ``autonomous_enact``
-    must authorise writing, and a *real* (non-mock, non-self) provider must be available.
+    self-improvement: **NYXARA writes the fix herself, with her OWN foundry-trained model** (the
+    ``self`` provider) — not an external LLM — whenever ``self_authored_only`` is set ("khud
+    NYXARA kare, koi LLM naa kare"). It is **safe by construction**: the proposal is only ever
+    handed to :class:`Optimizer`, which subjects it to the *same* reversible verify-or-rollback
+    gauntlet (syntax → safety battery → capability non-regression → optional tests). This
+    generator's own checks merely reject obviously-bad proposals early (won't parse, truncated,
+    runaway rewrite) so the expensive gauntlet is spent only on plausible edits.
+
+    It is triple-gated: ``allow_llm_edits`` must be set, ``autonomous_enact`` must authorise
+    writing, and a real author must be available — NYXARA's own ``self`` model (preferred and,
+    under ``self_authored_only``, required), or, only when that flag is off, a configured external
+    provider. The mock is never an author. Note the honest contract: the gauntlet guarantees
+    *safety* (a bad rewrite rolls back byte-for-byte), not *capability* — so the yield of these
+    rewrites scales with how good NYXARA's own model is, while the deterministic transforms in
+    :class:`EditGenerator` always work with no model at all.
     """
 
     _SYSTEM = (
@@ -178,13 +189,27 @@ class LLMEditGenerator:
         self.settings = settings or get_settings()
 
     def available(self) -> bool:
-        """True only when LLM edits are authorised AND a real provider can actually answer."""
+        """True only when self-authored edits are authorised AND a real author can answer."""
         if not bool(getattr(self.settings.self_improvement, "allow_llm_edits", False)):
             return False
-        return _real_provider_available(self.llm)
+        return self._author_provider() is not None
+
+    def _author_provider(self) -> Optional[str]:
+        """Name of the provider that will author the edit, or None.
+
+        NYXARA's own ``self`` model is always preferred; under ``self_authored_only`` it is the
+        *only* permitted author (so an external LLM is never used). With that flag off, a real
+        configured external provider may author instead. The ``mock`` impersonator is never an
+        author."""
+        return _author_provider_name(
+            self.llm,
+            self_authored_only=bool(getattr(self.settings.self_improvement,
+                                            "self_authored_only", True)))
 
     def generate(self, weakness: Any) -> Optional[SourceEdit]:
-        if not self.available():
+        author = self._author_provider()
+        if author is None or not bool(
+                getattr(self.settings.self_improvement, "allow_llm_edits", False)):
             return None
         locus = getattr(weakness, "locus", "") or ""
         file_part, _, _ = locus.partition(":")
@@ -193,22 +218,36 @@ class LLMEditGenerator:
             return None
         before = path.read_text(encoding="utf-8", errors="replace")
         cfg = self.settings.self_improvement
-        if len(before.encode("utf-8")) > int(getattr(cfg, "llm_edit_max_file_bytes", 24000)):
-            return None  # too large to round-trip reliably this cycle
+        if len(before.encode("utf-8")) > int(getattr(cfg, "llm_edit_max_file_bytes", 200000)):
+            return None  # only pathologically huge files are skipped
         prompt = self._build_prompt(weakness, path, before)
         try:
-            raw = self.llm.generate(
-                prompt, system=self._SYSTEM,
-                max_tokens=int(getattr(cfg, "llm_edit_max_tokens", 8192)),
-                temperature=0.0)
-        except Exception:  # noqa: BLE001 — a provider failure must never crash the cycle
+            raw = self._author_complete(author, prompt,
+                                        int(getattr(cfg, "llm_edit_max_tokens", 8192)))
+        except Exception:  # noqa: BLE001 — an author failure must never crash the cycle
             return None
         after = _strip_code_fence(raw or "")
         if not self._acceptable(before, after):
             return None
-        return SourceEdit(file=str(path), kind=f"llm:{self._kind(weakness)}",
+        tag = "self" if author == "self" else "llm"
+        return SourceEdit(file=str(path), kind=f"{tag}:{self._kind(weakness)}",
                           before=before, after=after,
-                          rationale=getattr(weakness, "remediation", "") or "llm-authored edit")
+                          rationale=getattr(weakness, "remediation", "")
+                          or f"{tag}-authored edit")
+
+    def _author_complete(self, author: str, prompt: str, max_tokens: int) -> str:
+        """Author through one specific provider, honestly (never mock-substituted).
+
+        Prefers the facade's :meth:`LLM.complete_with` so the chosen author actually answers as
+        itself; falls back to a plain ``generate`` for minimal facades/stubs that lack it."""
+        complete_with = getattr(self.llm, "complete_with", None)
+        if complete_with is not None:
+            from nyxara.mind.llm import LLMRequest
+            req = LLMRequest.from_prompt(prompt, system=self._SYSTEM,
+                                         max_tokens=max_tokens, temperature=0.0)
+            return complete_with(author, req).text
+        return self.llm.generate(prompt, system=self._SYSTEM,
+                                 max_tokens=max_tokens, temperature=0.0)
 
     # ---- helpers ---- #
     def _kind(self, weakness: Any) -> str:
@@ -246,6 +285,11 @@ class LLMEditGenerator:
         if b > 0 and abs(a - b) > ratio * b:    # truncation or runaway rewrite — reject early
             return False
         return True
+
+
+# NYXARA authors her own redesigns: the honest name for the generator above. The old name is
+# kept as an alias so existing imports keep working.
+SelfEditGenerator = LLMEditGenerator
 
 
 # --------------------------------------------------------------------------- #
@@ -634,29 +678,64 @@ def _replace_node_span(src: str, node: ast.AST, replacement: str) -> Optional[st
     return "".join(lines[:lineno - 1] + [prefix + replacement + suffix] + lines[end_lineno:])
 
 
-def _real_provider_available(llm: Any) -> bool:
-    """True iff ``llm``'s *chosen* provider is a real reasoner (not the mock, not the byte-LM).
+def _author_provider_name(llm: Any, *, self_authored_only: bool = True) -> Optional[str]:
+    """Name of the provider that may author a self-edit, or None.
 
-    The mock impersonates and the ``self`` n-gram emits locally-plausible bytes — neither can
-    author a source fix — so an edit is only attempted when a genuine provider answers."""
+    NYXARA's OWN ``self`` model (her foundry-trained brain) is always preferred — this is the
+    point of the feature: she redesigns herself, with herself. Under ``self_authored_only`` it is
+    the *only* permitted author, so no external LLM is ever consulted. With that flag off, a real
+    configured external provider may author when ``self`` is not yet available. The ``mock``
+    impersonator is never an author (it would only fake a fix)."""
     if llm is None:
-        return False
+        return None
+    try:
+        available = set(llm.available_providers())
+    except Exception:  # noqa: BLE001 — fall back to the chosen-provider probe below
+        available = set()
+    if "self" in available:
+        return "self"                       # NYXARA's own brain answers — always preferred
+    if self_authored_only:
+        return None                         # her own model isn't ready and no LLM is permitted
     try:
         prov = llm.chosen_provider()
     except Exception:  # noqa: BLE001
-        return False
-    return getattr(prov, "name", "") not in ("mock", "self") and bool(prov.available())
+        return None
+    name = getattr(prov, "name", "")
+    if name not in ("mock", "self") and bool(prov.available()):
+        return name
+    return None
+
+
+def _real_provider_available(llm: Any) -> bool:
+    """Back-compat shim: True iff some real (non-mock) author — NYXARA's own model or a configured
+    provider — can answer. Superseded by :func:`_author_provider_name`."""
+    return _author_provider_name(llm, self_authored_only=False) is not None
 
 
 def _resolve_locus_path(file_part: str) -> Optional[Path]:
-    """Resolve a weakness locus (``file`` or repo-relative path) to an existing file on disk."""
+    """Resolve a weakness locus to an existing file on disk.
+
+    Handles three locus shapes: an absolute/relative file path, a repo-relative path, and a
+    **dotted module name** (e.g. ``nyxara.kernel.orchestrator``) — the form architecture
+    weaknesses carry — resolving the module or its package ``__init__.py``."""
     if not file_part:
         return None
     path = Path(file_part)
-    if path.exists():
+    if path.is_file():
         return path
     cand = _repo_root() / file_part
-    return cand if cand.exists() else None
+    if cand.is_file():
+        return cand
+    # dotted module name (architecture loci) → its source file (or the package __init__.py)
+    if "/" not in file_part and "\\" not in file_part and not file_part.endswith(".py"):
+        rel = file_part.replace(".", "/")
+        module = _repo_root() / (rel + ".py")
+        if module.is_file():
+            return module
+        package = _repo_root() / rel / "__init__.py"
+        if package.is_file():
+            return package
+    return None
 
 
 def _strip_code_fence(text: str) -> str:
