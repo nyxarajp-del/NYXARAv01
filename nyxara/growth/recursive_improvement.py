@@ -47,6 +47,9 @@ class SelfImprovementReport:
     # --- intelligence index: I_(t+1) = f(I_t, C_available) --- #
     intelligence_index: Optional[float] = None
     intelligence_t: Optional[int] = None
+    # the momentum-free raw capability target for this cycle; the meta tower is scored by its
+    # change (Δbase), NOT the smoothed index, so evolving the smoothing can never game the score.
+    intelligence_base: Optional[float] = None
     compute: Optional[Dict[str, Any]] = None
     effort_budget: Optional[Dict[str, Any]] = None
     directive: Optional[Dict[str, Any]] = None   # index-driven: which growth action to take next
@@ -63,7 +66,8 @@ class SelfImprovementReport:
                 "optimizations": self.optimizations, "lessons_stored": self.lessons_stored,
                 "tuned": self.tuned, "kept": self.kept, "rolled_back": self.rolled_back,
                 "enacted": self.enacted, "intelligence_index": self.intelligence_index,
-                "intelligence_t": self.intelligence_t, "compute": self.compute,
+                "intelligence_t": self.intelligence_t,
+                "intelligence_base": self.intelligence_base, "compute": self.compute,
                 "effort_budget": self.effort_budget, "directive": self.directive,
                 "directive_action": self.directive_action,
                 "directive_results": self.directive_results, "ledger": self.ledger,
@@ -132,6 +136,7 @@ class RecursiveSelfImprovement:
         self._ledger_state: Any = None
         self._touched_arms: List[str] = []     # arms credited at the end of this cycle
         self._prior_index: Optional[float] = None
+        self._prior_base: Optional[float] = None    # momentum-free raw target before this cycle
         self._last_signals: Optional[Dict[str, float]] = None
         self._meta: Any = None                 # meta-meta controller (lazy; gated)
         self._meta_built = False
@@ -153,9 +158,16 @@ class RecursiveSelfImprovement:
             if not (bool(cfg.autonomous_enact) and bool(cfg.allow_tuning)
                     and bool(getattr(cfg, "meta_meta_enabled", True))):
                 return None
-            from nyxara.growth.meta_meta import MetaGenome, MetaImprovementController
-            seed = MetaGenome(recursion_depth=int(getattr(cfg, "llm_edit_recursion_depth", 3)),
-                              max_edits_per_cycle=int(getattr(cfg, "max_edits_per_cycle", 3)))
+            from nyxara.growth.meta_meta import MetaGenome, RecursiveMetaController
+            # seed the engine genome from ALL current config values — the algorithm + measurement
+            # knobs, not just the two execution knobs — so the tower starts from the live policy.
+            seed = MetaGenome(
+                recursion_depth=int(getattr(cfg, "llm_edit_recursion_depth", 3)),
+                max_edits_per_cycle=int(getattr(cfg, "max_edits_per_cycle", 3)),
+                ledger_reward_scale=float(getattr(cfg, "ledger_reward_scale", 40.0)),
+                ledger_prior_strength=float(getattr(cfg, "ledger_prior_strength", 1.0)),
+                bandit_severity_blend=float(getattr(cfg, "bandit_severity_blend", 0.7)),
+                intelligence_momentum=float(getattr(cfg, "intelligence_momentum", 0.7)))
             path = None
             try:
                 from pathlib import Path
@@ -163,7 +175,8 @@ class RecursiveSelfImprovement:
                 path = base / "meta_meta.json"
             except Exception:  # noqa: BLE001
                 path = None
-            self._meta = MetaImprovementController(champion=seed, persist_path=path)
+            self._meta = RecursiveMetaController(
+                height=int(getattr(cfg, "meta_levels", 3)), champion=seed, persist_path=path)
         except Exception:  # noqa: BLE001 — the meta-meta loop is a capability, never required
             self._meta = None
         return self._meta
@@ -339,11 +352,13 @@ class RecursiveSelfImprovement:
         self._credit_outcome(report)
         # --- cross-module bus: publish what the CODE channel learned for the other faculties --- #
         self._publish_signals(report)
-        # --- META-META: score the active knob-set by the realised index gain, and evolve it --- #
-        if meta is not None and report.enacted and report.intelligence_index is not None \
-                and self._prior_index is not None:
+        # --- META-META: score the active algorithm by the realised RAW capability gain, and evolve
+        # the whole recursive tower. Fitness is Δbase (the momentum-free target), NOT the smoothed
+        # index, so the genome may evolve the index smoothing without being able to game its score.
+        if meta is not None and report.enacted and report.intelligence_base is not None \
+                and self._prior_base is not None:
             try:
-                meta.record(float(report.intelligence_index) - float(self._prior_index))
+                meta.record(float(report.intelligence_base) - float(self._prior_base))
                 meta.maybe_evolve()
                 report.meta_meta = meta.status()
             except Exception:  # noqa: BLE001 — the meta-meta loop is advisory, never fatal
@@ -358,6 +373,7 @@ class RecursiveSelfImprovement:
         self._ledger_state = None
         self._touched_arms = []
         self._prior_index = None
+        self._prior_base = None
         self._last_signals = None
         # the index governs effort up front, before any expensive step, so it shapes how deeply
         # she benchmarks and reasons this cycle — not merely how the cycle is later summarised
@@ -477,6 +493,13 @@ class RecursiveSelfImprovement:
         except Exception:  # noqa: BLE001 — effort scaling is advisory, never fatal
             return
         self._prior_index = float(getattr(prior, "index", 0.0) or 0.0)
+        # the raw, momentum-free capability target carried on the prior state — the meta tower's
+        # fitness anchor (so evolving the index smoothing can never inflate the meta score).
+        try:
+            self._prior_base = float(getattr(prior, "last_inputs", {}).get(
+                "base", self._prior_index))
+        except Exception:  # noqa: BLE001
+            self._prior_base = self._prior_index
         try:
             self._effort = intel.effort_budget(prior, compute)
         except Exception:  # noqa: BLE001
@@ -535,6 +558,9 @@ class RecursiveSelfImprovement:
             intel.save(state)
             report.intelligence_index = round(float(state.index), 6)
             report.intelligence_t = int(state.t)
+            # the momentum-free raw target this cycle — the meta tower is scored by its delta
+            report.intelligence_base = round(
+                float(state.last_inputs.get("base", state.index)), 6)
             # the freshly-updated index diagnoses the next bottleneck — surfaced for the growth
             # engine / observability so the loop knows where to invest next
             report.directive = intel.growth_directive(state, compute)

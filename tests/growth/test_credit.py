@@ -114,6 +114,28 @@ def test_bandit_severity_breaks_ties_for_untried_arms():
     assert order[0].source == "high"
 
 
+def test_bandit_severity_blend_is_config_driven():
+    # the learned/severity blend is a real, evolvable algorithm knob (read from config). With a
+    # historically-good but LOW-severity arm vs a never-tried HIGH-severity one, the blend decides
+    # what gets fixed first: blend=1.0 → pure learned payoff; blend=0.0 → pure severity.
+    led = _ledger()
+    st = led.load()
+    good = arm_key(source="learned_good")
+    for _ in range(30):
+        led.record(st, good, 0.95)               # learned to pay off, but we give it low severity
+    bandit = EditStrategyBandit(led)
+    items = lambda: [_W("learned_good", 0.05), _W("severe_new", 0.95)]
+
+    led.settings.self_improvement.bandit_severity_blend = 1.0   # pure learned payoff
+    learned_first = sum(bandit.prioritize(items(), state=st)[0].source == "learned_good"
+                        for _ in range(200))
+    led.settings.self_improvement.bandit_severity_blend = 0.0   # pure severity
+    severe_first = bandit.prioritize(items(), state=st)[0].source
+
+    assert learned_first > 140          # learned payoff dominates when blend favours it
+    assert severe_first == "severe_new"  # severity dominates when blend favours it (deterministic)
+
+
 # --------------------------------------------------------------------------- #
 # persistence
 # --------------------------------------------------------------------------- #
