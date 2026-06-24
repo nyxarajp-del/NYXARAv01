@@ -976,6 +976,12 @@ class MemoryConfig(BaseModel):
     semantic_embeddings: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = ""             # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # Dependency-free LEARNED distributional embedder (memory/store.py::LearnedEmbedder). When no
+    # sentence-transformer is installed, this is the default in place of the purely-curated lexical
+    # embedder: cold it is byte-identical to the lexical space (so recall calibration is preserved),
+    # but it compounds paraphrase reach from the text NYXARA actually reads — paraphrases match from
+    # data, not a hand-written thesaurus. The live loop feeds it; set False for the static lexical map.
+    learned_embeddings: bool = True
     # Managed/embedded Qdrant vector DB (used when vector_backend=qdrant). Leave url empty
     # for an embedded local store at ``qdrant_path`` (or in-memory if that is empty too);
     # set url (+ api_key) to point at a managed Qdrant cluster for real scale.
