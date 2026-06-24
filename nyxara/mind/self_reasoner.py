@@ -97,7 +97,7 @@ class SelfBrain:
 
     def __init__(self, *, order: int = 3, seed: int = 0,
                  max_corpus: int = 4000, settings: Any = None,
-                 prefer_promoted: bool = True) -> None:
+                 prefer_promoted: bool = True, persist: Optional[bool] = None) -> None:
         self.order = max(2, int(order))
         self.seed = int(seed)
         self.max_corpus = max(64, int(max_corpus))
@@ -111,6 +111,11 @@ class SelfBrain:
         self._since_fit = 0
         self._refit_every = 8          # re-fit after this many new learned docs (amortised cost)
         self._lock = threading.RLock()
+        # durable compounding: the learned corpus survives restarts so the brain a user meets
+        # tomorrow is the one they taught today — real compounding, no torch. Auto-on for a live
+        # (non-TEST) machine with settings; off for the hermetic suite (no cross-test disk state).
+        self._persist = self._auto_persist() if persist is None else bool(persist)
+        self._save_every = 24          # persist after this many newly-learned docs (amortised I/O)
 
     # ---- construction ---- #
     def _try_promoted(self) -> Optional[Any]:
@@ -133,6 +138,54 @@ class SelfBrain:
         from nyxara.growth.foundry_models import WordKNGramLM
         return WordKNGramLM(order=self.order, seed=self.seed)
 
+    # ---- durable compounding (persist the learned corpus across restarts) ---- #
+    def _auto_persist(self) -> bool:
+        if self.settings is None:
+            return False
+        try:
+            if str(getattr(getattr(self.settings, "profile", None), "value", "")) == "test":
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+        return True
+
+    def _persist_path(self):
+        if not self._persist or self.settings is None:
+            return None
+        try:
+            from pathlib import Path
+            base = Path(self.settings.paths.data_dir) / "foundry"
+            base.mkdir(parents=True, exist_ok=True)
+            return base / "self_brain_corpus.json"
+        except Exception:  # noqa: BLE001 — persistence is a bonus, never required
+            return None
+
+    def _load_persisted(self) -> List[str]:
+        path = self._persist_path()
+        if path is None or not path.exists():
+            return []
+        try:
+            import json
+            data = json.loads(path.read_text(encoding="utf-8"))
+            docs = data.get("corpus", []) if isinstance(data, dict) else []
+            return [_clean(d) for d in docs if isinstance(d, str) and _clean(d)]
+        except Exception:  # noqa: BLE001 — a corrupt cache is simply ignored
+            return []
+
+    def save(self) -> bool:
+        """Persist the learned corpus so compounding survives a restart. Returns True iff written."""
+        path = self._persist_path()
+        if path is None:
+            return False
+        try:
+            import json
+            # keep the learned tail (seed is rebuilt on load); cap to bound the file
+            learned = self._corpus[len(_SEED_CORPUS):][-self.max_corpus:]
+            path.write_text(json.dumps({"corpus": learned}), encoding="utf-8")
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def _ensure(self, grounding: Optional[Sequence[str]] = None) -> None:
         """Build + train the brain on first use (seed corpus + any grounding text)."""
         if self._seeded and not self._dirty:
@@ -151,7 +204,9 @@ class SelfBrain:
                 self._lm = self._fresh_kngram()
                 self._kind = f"self:{getattr(self._lm, 'kind', 'kngram')}"
             if not self._corpus:
+                # seed persona first, then fold in any corpus persisted from past sessions
                 self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
+                self._corpus.extend(self._load_persisted())
             extra = [_clean(d) for d in (grounding or []) if _clean(d)]
             corpus = (self._corpus + extra)[: self.max_corpus]
             try:
@@ -230,6 +285,9 @@ class SelfBrain:
             self._since_fit += len(fresh)
             if self._since_fit >= self._refit_every:
                 self._dirty = True
+            # amortised durable compounding: persist the growing corpus every so often
+            if self._persist and (self._since_fit % self._save_every) < len(fresh):
+                self.save()
 
     def maybe_refit(self) -> bool:
         """Re-fit now if enough new text has accumulated. Returns True iff a re-fit happened."""
