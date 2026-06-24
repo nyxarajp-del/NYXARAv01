@@ -34,6 +34,7 @@ from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.orchestrator import Candidate, _default_reasoner
 from nyxara.mind.llm import LLM
+from nyxara.mind.self_reasoner import SelfBrain, build_self_brain
 
 __all__ = ["LLMReasoner"]
 
@@ -94,6 +95,9 @@ class LLMReasoner:
         self.system = system or self._default_system()
         self._router = None      # Phase 2: lazily built when the confidence router is enabled
         self._smrouter = None    # Phase 2+: the primary self-model router (upfront triage)
+        # NYXARA's OWN always-on learned brain — the real (not template) fallback when no external
+        # LLM is configured. Lazily trained from her persona + grounding; compounds as it learns.
+        self._self_brain: Optional[SelfBrain] = None
 
     # ---- prompts ---- #
     def _default_system(self) -> str:
@@ -201,11 +205,74 @@ class LLMReasoner:
     # ---- the reasoning act ---- #
     def __call__(self, stimulus: str, focus: Any = None) -> Candidate:
         if not self._is_real():
-            return _default_reasoner(stimulus, focus)
+            return self._self_reason(stimulus, focus)
         try:
             return self._reason(stimulus, focus)
         except Exception:  # noqa: BLE001 — never let the mind crash the loop
-            return _default_reasoner(stimulus, focus)
+            return self._self_reason(stimulus, focus)
+
+    # ---- the own-brain act (no external LLM): a REAL learned reply, not a template ---- #
+    def _ensure_self_brain(self) -> SelfBrain:
+        if self._self_brain is None:
+            order = 3
+            try:
+                order = int(getattr(getattr(self.settings, "foundry", None), "ngram_order", 3))
+            except Exception:  # noqa: BLE001
+                order = 3
+            self._self_brain = build_self_brain(settings=self.settings, order=max(2, order))
+        return self._self_brain
+
+    def _self_grounding(self, stimulus: str) -> list:
+        """Raw grounding docs (knowledge + recalled memory) to train/condition the own brain on."""
+        docs: list = []
+        if self.knowledge is not None:
+            try:
+                docs.extend(h.text for h in self.knowledge.retrieve(stimulus, k=3))
+            except Exception:  # noqa: BLE001
+                pass
+        if self.memory is not None:
+            try:
+                docs.extend(rec.text() for rec, _ in
+                            self.memory.recall(stimulus, k=self.max_memory_context))
+            except Exception:  # noqa: BLE001
+                pass
+        return [d for d in docs if isinstance(d, str) and d.strip()]
+
+    def _self_reason(self, stimulus: str, focus: Any = None) -> Candidate:
+        """Draft a conversational reply from NYXARA's OWN learned brain; keep the deterministic
+        act/risk classification as the conservative safety floor.
+
+        The act path (command-verb heuristic) is unchanged — risk classification is a *gate*
+        concern and stays deterministic. Only the conversational template ("I understand: …") is
+        replaced by a genuinely learned generation, falling back to the floor text iff the cold
+        brain cannot yet produce a usable continuation.
+        """
+        base = _default_reasoner(stimulus, focus)
+        if base.kind != "respond":
+            return base                       # a command proposal: keep the safety heuristic as-is
+        try:
+            brain = self._ensure_self_brain()
+            grounding = self._self_grounding(stimulus)
+            reply = brain.reply(stimulus, grounding=grounding)
+            if reply:
+                conf = brain.internal_confidence(reply)
+                return Candidate(text=reply, kind="respond",
+                                 capability=Capability.MESSAGE_SEND, risk=RiskTier.LOW,
+                                 reversible=True, confidence=conf, belief=conf,
+                                 rationale=f"own learned brain ({brain.kind})")
+        except Exception:  # noqa: BLE001 — the own brain is a capability, never required
+            pass
+        return base                           # honest floor: never worse than the template
+
+    def teach_self_brain(self, *docs: str) -> None:
+        """Fold real exchanges/observations into the own brain so it compounds (Rule 4).
+
+        Safe no-op when the brain was never built (a real external LLM is in use)."""
+        if self._self_brain is not None:
+            try:
+                self._self_brain.learn(*docs)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _ensure_smrouter(self) -> Any:
         """Lazily build the PRIMARY self-model router, reusing the shared confidence router."""
