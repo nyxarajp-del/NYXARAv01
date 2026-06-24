@@ -101,6 +101,86 @@ def test_collect_corpus_no_flywheel_file_is_safe(tmp_path):
     assert f.collect_corpus()   # still has replay + seeds
 
 
+# -------------------- acquired external corpus (data acquisition) -------------------- #
+def _write_acquired(path, text, *, url="https://good.example/a", topic="biology"):
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"url": url, "topic": topic, "text": text, "injection_score": 0.0,
+           "source": "web", "at": 0.0}
+    path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+
+def test_collect_corpus_folds_in_acquired_web_text(tmp_path):
+    f = _foundry(tmp_path)
+    _write_acquired(f.acquired_path, "Mitochondria are the powerhouse of the cell.")
+    corpus = f.collect_corpus()
+    assert any("powerhouse of the cell" in t for t in corpus)   # external breadth is training data
+
+
+def test_collect_corpus_no_acquired_file_is_safe(tmp_path):
+    f = _foundry(tmp_path)                       # acquired.jsonl does not exist
+    assert f.collect_corpus()                    # still has replay + seeds, never fatal
+
+
+def test_acquire_disabled_returns_none(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.acquire_data = False
+    assert f.acquire(["biology"]) is None        # gated off -> no-op
+
+
+def test_acquire_runs_and_persists_screened_docs(tmp_path, monkeypatch):
+    # inject a fake searcher + fetcher through the real acquirer so no network is touched
+    from nyxara.senses.search import SearchResponse, SearchResult
+    from nyxara.senses.web import FetchResult, WebFetcher
+    import nyxara.growth.acquire as acquire_mod
+
+    clean = ("<html><body><p>Cryptography is the practice of securing communication against "
+             "adversaries using mathematical techniques such as public-key encryption.</p>"
+             "</body></html>")
+
+    class _FakeSearcher:
+        def search(self, query, max_results=10):
+            return SearchResponse(query=query, provider="fake",
+                                  results=[SearchResult(title="c", url="https://ok.example/x")])
+
+    def _transport(url, timeout, max_bytes):
+        return FetchResult(url=url, ok=True, status=200, content_type="text/html", body=clean)
+
+    real_init = acquire_mod.DataAcquirer.__init__
+
+    def _patched_init(self, **kw):
+        kw.setdefault("searcher", _FakeSearcher())
+        kw.setdefault("fetcher", WebFetcher(transport=_transport))
+        kw["min_chars"] = 20
+        real_init(self, **kw)
+
+    monkeypatch.setattr(acquire_mod.DataAcquirer, "__init__", _patched_init)
+
+    f = _foundry(tmp_path)
+    f.cfg.acquire_data = True
+    rep = f.acquire(["cryptography"])
+    assert rep is not None and rep["kept"] == 1
+    # the screened text now folds into the corpus
+    assert any("public-key encryption" in t for t in f.collect_corpus())
+
+
+# -------------------- compute-aware autoscaling -------------------- #
+def test_scaled_dims_static_when_autoscale_off(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.autoscale_to_compute = False
+    dims, four_bit = f._scaled_dims()
+    assert dims == f.cfg.resolved_dims()
+    assert four_bit == bool(f.cfg.load_in_4bit)
+
+
+def test_scaled_dims_consults_compute_when_on(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.autoscale_to_compute = True
+    dims, four_bit = f._scaled_dims()            # honest floor on a torch-less CI box
+    assert set(dims) == {"n_layer", "n_head", "n_embd", "block_size"}
+    assert isinstance(four_bit, bool)
+
+
 # -------------------- the self-improve loop -------------------- #
 def test_first_model_trained_and_promoted(tmp_path):
     f = _foundry(tmp_path)
