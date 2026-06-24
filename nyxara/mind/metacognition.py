@@ -62,14 +62,51 @@ class MetaCognition:
                     return confidence
         return confidence
 
+    @staticmethod
+    def introspect(*, self_consistency: Optional[float] = None,
+                   epistemic: Optional[float] = None,
+                   novelty: Optional[float] = None) -> float:
+        """Combine INTERNAL signals NYXARA measures about herself into one uncertainty in [0, 1].
+
+        This is the introspection the old gate lacked: rather than importing a single confidence
+        from outside, the system reads signals about its *own* state and decides how unsure it is.
+
+        * ``self_consistency`` — agreement across repeated samples of her own answer (1.0 = the
+          model says the same thing every time → low uncertainty; 0.0 = it wanders → high).
+        * ``epistemic`` — reducible "I haven't seen enough" uncertainty (e.g. a world-model
+          ensemble's disagreement, or a Beta-belief's epistemic term). Higher → more unsure.
+        * ``novelty`` — how unfamiliar the situation is (count-based). Higher → more unsure.
+
+        Each is optional; only the signals actually available are blended (equal weight), so this
+        degrades gracefully as faculties come and go. Returns 0.0 when nothing is known.
+        """
+        terms = []
+        if self_consistency is not None:
+            terms.append(1.0 - max(0.0, min(1.0, float(self_consistency))))
+        if epistemic is not None:
+            terms.append(max(0.0, min(1.0, float(epistemic))))
+        if novelty is not None:
+            terms.append(max(0.0, min(1.0, float(novelty))))
+        if not terms:
+            return 0.0
+        return max(0.0, min(1.0, sum(terms) / len(terms)))
+
     def assess(self, prompt: str, *, own_answer: Optional[str] = None, own_conf: float = 0.0,
-               faculty_available: bool = False, teacher_available: bool = False) -> MetaVerdict:
-        """Choose the answering path for ``prompt`` given what each mind offers."""
+               faculty_available: bool = False, teacher_available: bool = False,
+               internal_uncertainty: float = 0.0) -> MetaVerdict:
+        """Choose the answering path for ``prompt`` given what each mind offers.
+
+        ``internal_uncertainty`` (0..1, from :meth:`introspect`) is the system's *own* measure of
+        how unsure it is this turn. It discounts the effective confidence, so a fluent-but-unstable
+        answer (high internal uncertainty) is held to a higher bar and more readily deferred or
+        abstained — metacognition now reads an internal signal, not only an external score.
+        """
         if faculty_available:
             return MetaVerdict(MetaDecision.USE_FACULTY, 1.0,
                                "a verifiable faculty fits — compute it exactly")
 
-        conf = self._calibrated(own_conf)
+        iu = max(0.0, min(1.0, float(internal_uncertainty)))
+        conf = self._calibrated(own_conf) * (1.0 - iu)   # introspection discounts confidence
         has_own = bool(own_answer and own_answer.strip())
 
         if has_own and conf >= self.answer_threshold:

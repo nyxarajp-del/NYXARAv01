@@ -154,6 +154,51 @@ class Router:
                                      max_tokens=self.cfg.max_tokens)
         return (self.llm.complete_with(name, req).text or "").strip()
 
+    @staticmethod
+    def _answer_similarity(a: str, b: str) -> float:
+        """Token-Jaccard overlap of two answers in [0, 1] — a cheap agreement measure."""
+        ta = {w for w in "".join(c if c.isalnum() else " " for c in a.lower()).split()}
+        tb = {w for w in "".join(c if c.isalnum() else " " for c in b.lower()).split()}
+        if not ta and not tb:
+            return 1.0
+        if not ta or not tb:
+            return 0.0
+        return len(ta & tb) / len(ta | tb)
+
+    def _self_consistency_uncertainty(self, prompt: str, system: Optional[str],
+                                      own: Optional[str]) -> float:
+        """An INTERNAL epistemic signal: how much NYXARA's own answer wanders across samples.
+
+        Draws ``self_consistency_samples`` independent answers from her own model at non-zero
+        temperature and measures their mean pairwise agreement; low agreement → high epistemic
+        uncertainty *she measured about herself*. Returns 0.0 (no signal) when the probe is off,
+        her own model is unavailable, or there was no own answer to probe — so default behaviour
+        (samples=1) is unchanged.
+        """
+        n = int(getattr(self.cfg, "self_consistency_samples", 1) or 1)
+        if n <= 1 or not own or not self.self_available():
+            return 0.0
+        from nyxara.mind.llm import LLMRequest
+        samples = [own]
+        for _ in range(n - 1):
+            try:
+                req = LLMRequest.from_prompt(prompt, system=system, temperature=0.7,
+                                             max_tokens=self.cfg.max_tokens)
+                txt = (self._self.complete(req).text or "").strip()
+            except Exception:  # noqa: BLE001 — a failed sample just lowers the sample count
+                continue
+            if txt:
+                samples.append(txt)
+        if len(samples) < 2:
+            return 0.0
+        sims, pairs = 0.0, 0
+        for i in range(len(samples)):
+            for j in range(i + 1, len(samples)):
+                sims += self._answer_similarity(samples[i], samples[j])
+                pairs += 1
+        mean_agreement = sims / pairs if pairs else 1.0
+        return self.meta.introspect(self_consistency=mean_agreement)
+
     def draft(self, prompt: str, *, system: Optional[str] = None) -> RouterResult:
         """Draft a reply: a verifiable faculty first, then own model, then the teacher.
 
@@ -179,10 +224,13 @@ class Router:
             if own and confidence >= self.cfg.threshold:
                 return RouterResult(own, "self", confidence, handed_off=True)
 
-        # 2) metacognition decides: own / teacher / honest abstention
+        # 2) metacognition decides: own / teacher / honest abstention — now informed by an
+        #    INTERNAL self-consistency probe (how stable is her own answer across samples?).
+        internal_uncertainty = self._self_consistency_uncertainty(prompt, system, own)
         teacher = self._teacher_name() if self.cfg.consult_teacher else None
         verdict = self.meta.assess(prompt, own_answer=own, own_conf=confidence,
-                                   teacher_available=teacher is not None)
+                                   teacher_available=teacher is not None,
+                                   internal_uncertainty=internal_uncertainty)
         if verdict.decision is MetaDecision.CONSULT_TEACHER and teacher is not None:
             try:
                 return RouterResult(self._teacher_answer(prompt, system, teacher),

@@ -53,6 +53,7 @@ __all__ = [
     "MemoryRecord",
     "HashingEmbedder",
     "LexicalSemanticEmbedder",
+    "LearnedEmbedder",
     "SentenceTransformerEmbedder",
     "make_embedder",
     "VectorIndex",
@@ -271,6 +272,109 @@ class LexicalSemanticEmbedder:
         return [v / norm for v in vec]
 
 
+class LearnedEmbedder(LexicalSemanticEmbedder):
+    """A genuinely *learned* distributional embedder — paraphrases match from DATA, not a thesaurus.
+
+    The :class:`LexicalSemanticEmbedder` reaches related meanings only through a *hand-curated*
+    synset map: it can never recall a paraphrase nobody wrote into ``_SYNSETS``. This embedder
+    closes that gap with **incremental distributional semantics** (random indexing / reflective
+    co-occurrence), the dependency-free cousin of word2vec:
+
+    * every word owns a fixed sparse ±1 *elemental* vector (a random projection basis, derived
+      deterministically from its hash — no training, no storage);
+    * every word also owns a *context* vector that accumulates the elemental vectors of the words
+      it co-occurs with. Feed text via :meth:`learn` and words that appear in **similar contexts**
+      drift toward **similar context vectors** — so "rapid" ends up near "swift" because the corpus
+      used them the same way, with nothing curated by hand.
+
+    It is a **strict superset** of its parent: with nothing learned yet, :meth:`embed` returns the
+    exact lexical-semantic vector (so every recall threshold calibrated for that space is preserved
+    and ``is_lexical`` stays True). Once the corpus has taught it, a modest learned component is
+    blended in that only ever *raises* similarity for distributionally-related text. Pure standard
+    library; it compounds for as long as NYXARA keeps reading.
+    """
+
+    is_lexical: bool = True
+
+    def __init__(self, dim: int = 128, seed: int = 1469598103934665603, *,
+                 window: int = 2, blend: float = 0.6, max_vocab: int = 50000,
+                 elemental_nnz: int = 10) -> None:
+        super().__init__(dim=dim, seed=seed)
+        self.window = max(1, int(window))
+        self.blend = max(0.0, float(blend))
+        self.max_vocab = max(256, int(max_vocab))
+        self.elemental_nnz = max(2, int(elemental_nnz))
+        self._context: Dict[str, List[float]] = {}     # stemmed word -> learned context vector
+        self._elem_cache: Dict[str, List[Tuple[int, float]]] = {}
+
+    # ---- the fixed random-projection basis (one sparse ±1 vector per word) ---- #
+    def _elemental(self, word: str) -> List[Tuple[int, float]]:
+        cached = self._elem_cache.get(word)
+        if cached is not None:
+            return cached
+        h = self._hash(word)
+        nz: Dict[int, float] = {}
+        for _ in range(self.elemental_nnz):
+            h = (h * 1099511628211 + 0xABCDEF) & 0xFFFFFFFFFFFFFFFF
+            idx = h % self.dim
+            sign = 1.0 if (h >> 7) & 1 else -1.0
+            nz[idx] = nz.get(idx, 0.0) + sign           # collisions just reinforce/cancel
+        sparse = [(i, s) for i, s in nz.items() if s != 0.0]
+        if len(self._elem_cache) < self.max_vocab:
+            self._elem_cache[word] = sparse
+        return sparse
+
+    # ---- learning: accumulate co-occurrence into context vectors ---- #
+    def learn(self, *texts: str) -> None:
+        """Fold text into the distributional model — this is how paraphrase reach is *learned*."""
+        for text in texts:
+            words = [_stem(w) for w in self._words(str(text)) if w not in _STOPWORDS]
+            words = [w for w in words if len(w) > 1]
+            n = len(words)
+            for i, center in enumerate(words):
+                if center not in self._context and len(self._context) >= self.max_vocab:
+                    continue
+                ctx = self._context.setdefault(center, [0.0] * self.dim)
+                lo, hi = max(0, i - self.window), min(n, i + self.window + 1)
+                for j in range(lo, hi):
+                    if j == i:
+                        continue
+                    for idx, sign in self._elemental(words[j]):
+                        ctx[idx] += sign
+
+    def _learned_vector(self, text: str) -> Optional[List[float]]:
+        """Mean of the (normalised) learned context vectors for the words present, or None."""
+        acc = [0.0] * self.dim
+        seen = 0
+        for word in self._words(text):
+            ctx = self._context.get(_stem(word))
+            if not ctx:
+                continue
+            norm = math.sqrt(sum(v * v for v in ctx)) or 1.0
+            for k in range(self.dim):
+                acc[k] += ctx[k] / norm
+            seen += 1
+        if not seen:
+            return None
+        norm = math.sqrt(sum(v * v for v in acc)) or 1.0
+        return [v / norm for v in acc]
+
+    def embed(self, text: str) -> List[float]:
+        base = super().embed(text)                      # identical to LexicalSemantic when cold
+        if self.blend <= 0.0 or not self._context:
+            return base
+        learned = self._learned_vector(text)
+        if learned is None:
+            return base                                  # no learned signal for this text → base
+        combined = [base[k] + self.blend * learned[k] for k in range(self.dim)]
+        norm = math.sqrt(sum(v * v for v in combined)) or 1.0
+        return [v / norm for v in combined]
+
+    @property
+    def learned_vocab(self) -> int:
+        return len(self._context)
+
+
 class SentenceTransformerEmbedder:
     """A learned semantic embedder (sentence-transformers), import-guarded.
 
@@ -305,7 +409,13 @@ class SentenceTransformerEmbedder:
 
 
 def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
-    """Build the configured embedder: learned-semantic when enabled & available, else hashing."""
+    """Build the strongest available embedder: learned-neural → learned-distributional → lexical.
+
+    Ordering reflects "works bare, sharper with better tools": a real sentence-transformer when
+    one is installed and enabled; otherwise NYXARA's own dependency-free :class:`LearnedEmbedder`,
+    which is identical to the lexical embedder cold but *compounds* paraphrase reach from the text
+    it reads; the plain lexical embedder is the final floor.
+    """
     s = settings or get_settings()
     mc = s.memory
     if getattr(mc, "semantic_embeddings", False) and SentenceTransformerEmbedder.available():
@@ -314,6 +424,8 @@ def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
         except Exception:  # noqa: BLE001 — fall back rather than fail to boot
             pass
     dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128
+    if getattr(mc, "learned_embeddings", True):
+        return LearnedEmbedder(dim=dim)
     return LexicalSemanticEmbedder(dim=dim)
 
 

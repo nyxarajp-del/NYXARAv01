@@ -436,6 +436,9 @@ class NyxaraCore:
         # reads for multi-turn coherence, complementing semantic memory recall.
         from collections import deque
         self.history: Any = deque(maxlen=2 * max(1, history_turns))
+        # Emergent curiosity: stimuli NYXARA could not answer well become candidate topics for
+        # self-set "understand X" goals on the next idle tick (Rule 1: owner-aligned by construction).
+        self._curiosity_seeds: Any = deque(maxlen=32)
         # background default-mode cognition (Layer 5): off until started
         self._engaged = False
         self._cognition_thread: Any = None
@@ -1877,7 +1880,7 @@ class NyxaraCore:
         if disp is not Disposition.ACT:
             self.reporter.log_decision(candidate.text, candidate.rationale,
                                        outcome=disp.value, autonomous=authority is not Authority.OWNER)
-            self._grow(candidate, disp, authority=authority, success=False)
+            self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
             return self._finish(cid, disp, candidate, gates, thoughts, reason, response)
@@ -1921,7 +1924,7 @@ class NyxaraCore:
 
         self.reporter.log_decision(candidate.text, candidate.rationale, outcome="done",
                                    autonomous=authority is not Authority.OWNER)
-        self._grow(candidate, Disposition.ACT, authority=authority, success=True)
+        self._grow(candidate, Disposition.ACT, authority=authority, success=True, stimulus=safe_text)
         response = self._spoken_response(candidate, Disposition.ACT)
         if tool_result is not None and tool_result.ok and candidate.tool:
             response = f"Done — {candidate.tool}: {self._format_tool_value(tool_result.value)}"
@@ -2701,12 +2704,106 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _spawn_emergent_goals(self, *, max_new: int = 2) -> List[str]:
+        """Turn genuine curiosity into self-set goals — owner-aligned, deduped, bounded.
+
+        Sources are real internal signals, not a script: stimuli answered with low confidence
+        (``_curiosity_seeds``) and the reflector's INVESTIGATE lessons. Novelty is read from the
+        motivation system's visit counts when present, so a theme already explored does not respawn.
+        Each topic becomes a ``understand: X`` goal via :meth:`GoalSystem.spawn_curiosity_goal`
+        (rejected if it fails owner-alignment) and is also enqueued for research.
+        """
+        topics: List[str] = []
+        seen = set()
+        # 1) low-confidence turns she could learn from
+        while self._curiosity_seeds and len(topics) < max_new * 2:
+            t = str(self._curiosity_seeds.popleft()).strip()
+            k = t.lower()
+            if t and k not in seen:
+                seen.add(k)
+                topics.append(t)
+        # 2) INVESTIGATE lessons from reflection
+        if self.reflector is not None and len(topics) < max_new * 2:
+            try:
+                for lesson in self.reflector.lessons():
+                    if str(getattr(lesson, "kind", "")).upper().endswith("INVESTIGATE"):
+                        t = str(getattr(lesson, "text", "")).strip()
+                        if t and t.lower() not in seen:
+                            seen.add(t.lower())
+                            topics.append(t)
+            except Exception:  # noqa: BLE001 — lessons are advisory
+                pass
+        spawned: List[str] = []
+        for topic in topics:
+            if len(spawned) >= max_new:
+                break
+            novelty = 0.6
+            if self.motivation is not None:
+                try:
+                    visits = self.motivation.visits(topic) if hasattr(self.motivation, "visits") else 0
+                    novelty = 1.0 / (1.0 + float(visits))
+                except Exception:  # noqa: BLE001
+                    novelty = 0.6
+            goal = self.goals.spawn_curiosity_goal(topic, info_gain=0.55, novelty=novelty)
+            if goal is not None:
+                spawned.append(goal.name)
+                if topic[:60] not in self._research_queue:
+                    self._research_queue.append(topic[:60])
+        return spawned
+
+    def _compound_own_models(self, stimulus: str, candidate: Candidate, success: bool) -> None:
+        """Feed this lived exchange back into NYXARA's OWN learned models so they compound.
+
+        Two genuinely-learned substrates improve from every real turn, no external service:
+
+        * the self-built brain (mind/self_reasoner.SelfBrain) — folds the exchange into its
+          corpus and periodically re-fits, so a keyless NYXARA's *words* sharpen with experience;
+        * the distributional embedder (memory/store.LearnedEmbedder) — learns the turn's
+          co-occurrence so recall reaches paraphrases it has now actually seen.
+
+        Best-effort and character-safe: it only ever moves *capability* (voice, recall), never a
+        value. A failure here never touches the turn's outcome.
+        """
+        text = str(stimulus or "").strip()
+        reply = str(getattr(candidate, "text", "") or "").strip()
+        docs = [d for d in (text, reply) if d]
+        if not docs:
+            return
+        # emergent curiosity: a question she answered with low confidence is something she could
+        # learn — remember it as a seed for a self-set "understand X" goal on the next idle tick.
+        try:
+            if text and len(text) >= 8 and float(getattr(candidate, "confidence", 1.0) or 1.0) < 0.4 \
+                    and getattr(candidate, "kind", "respond") == "respond":
+                self._curiosity_seeds.append(text)
+        except Exception:  # noqa: BLE001 — curiosity tracking is best-effort
+            pass
+        # 1) the own brain learns the exchange (teach reaches the inner LLMReasoner's SelfBrain)
+        teach = getattr(self.reasoner, "teach_self_brain", None)
+        if teach is None:
+            teach = getattr(getattr(self.reasoner, "llm_reasoner", None), "teach_self_brain", None)
+        if callable(teach):
+            try:
+                teach(*docs)
+            except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                pass
+        # 2) the distributional embedder learns the turn's co-occurrence (paraphrase reach)
+        embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        learn = getattr(embedder, "learn", None)
+        if callable(learn):
+            try:
+                learn(*docs)
+            except Exception:  # noqa: BLE001 — compounding recall is best-effort
+                pass
+
     def _grow(self, candidate: Optional[Candidate], disp: Disposition, *,
-              authority: Authority, success: bool) -> None:
+              authority: Authority, success: bool, stimulus: str = "") -> None:
         """Learn from a finished turn: record the outcome into the learner/reflector and
         let affect register success. Skill & strategy only — never character (Rule 4)."""
         if candidate is None:
             return
+        # compound NYXARA's OWN learned models from this lived exchange (Rule 4): the self-built
+        # brain and the distributional embedder both get measurably better the more she converses.
+        self._compound_own_models(stimulus, candidate, success)
         action = candidate.tool or candidate.kind
         owner = authority is Authority.OWNER
         # temporal: stamp this turn's action so order, lag, and rhythm can be reasoned over
@@ -2717,6 +2814,22 @@ class NyxaraCore:
                 pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
+        # LEARNED task-reward (Rule 4): the objective is no longer a frozen constant — it adapts to
+        # which capability outcomes actually pay off. Strictly layered ABOVE the immutable loyalty
+        # gate (it models action-type success only, never a sealed core value), and bounded so the
+        # realized outcome stays dominant. The base reward stands until enough has been learned.
+        if getattr(self, "_task_reward", None) is None:
+            try:
+                from nyxara.growth.task_reward import LearnedTaskReward
+                self._task_reward = LearnedTaskReward()
+            except Exception:  # noqa: BLE001
+                self._task_reward = None
+        if self._task_reward is not None:
+            try:
+                self._task_reward.observe(action, disp is Disposition.ACT and success)
+                reward = self._task_reward.shaped_reward(action, reward)
+            except Exception:  # noqa: BLE001 — reward shaping is best-effort, never fatal
+                pass
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
         if self.learner is not None:
             try:
@@ -2993,7 +3106,49 @@ class NyxaraCore:
                             self._insight_q.put(top.text)
                         except Exception:  # noqa: BLE001
                             pass
+                    # CROSS-MODULE BUS: publish what reflection noticed so the code channel's
+                    # self-improvement steers its edits toward the modules failing in practice.
+                    try:
+                        from nyxara.growth.signal_bus import get_signal_bus
+                        bus = get_signal_bus()
+                        for lesson in lessons[:5]:
+                            bus.post("reflection_focus", getattr(lesson, "text", ""),
+                                     source="reflector",
+                                     weight=float(getattr(lesson, "confidence", 0.5) or 0.5))
+                    except Exception:  # noqa: BLE001 — posting is best-effort
+                        pass
             except Exception:  # noqa: BLE001
+                pass
+        # 4a2) CROSS-MODULE BUS — the world model reports its blind spots (high epistemic
+        #      uncertainty) so the weights/code channels can target what it cannot yet predict.
+        if self.world_model is not None:
+            try:
+                gap = None
+                for attr in ("mean_epistemic", "epistemic", "uncertainty"):
+                    fn = getattr(self.world_model, attr, None)
+                    if callable(fn):
+                        gap = float(fn())
+                        break
+                if gap is not None and gap > 0.4:
+                    from nyxara.growth.signal_bus import get_signal_bus
+                    get_signal_bus().post("world_model_gap",
+                                          "world model prediction uncertainty is high",
+                                          source="world_model", weight=min(1.0, gap))
+            except Exception:  # noqa: BLE001 — the world-model signal is advisory
+                pass
+        # 4b2) EMERGENT GOALS — curiosity becomes a real objective. Topics NYXARA could not
+        #      answer well (low-confidence turns) and INVESTIGATE lessons turn into self-set
+        #      "understand X" goals in the objective space, owner-aligned by construction and
+        #      pursued via the normal priority machinery. This is goal *emergence*, not seeding.
+        if self.goals is not None and hasattr(self.goals, "spawn_curiosity_goal"):
+            try:
+                spawned = self._spawn_emergent_goals()
+                if spawned:
+                    report["emergent_goals"] = spawned
+                    for name in spawned:
+                        self.mind.record(ThoughtKind.GOAL, f"curiosity: {name}"[:80],
+                                         salience=0.55)
+            except Exception:  # noqa: BLE001 — emergent goals are a capability, never required
                 pass
         # 4c) Level 9 — civilization: fold any recent micro-agent reports into MindScope
         if self.civilization is not None:
@@ -3141,14 +3296,22 @@ class NyxaraCore:
         if self.real_environment is not None and self.world_model is not None:
             try:
                 if self.oversight.gate():
-                    from nyxara.sim.real_environment import sensorimotor_tick
-                    tr = sensorimotor_tick(self.real_environment, self.world_model)
-                    report["sensorimotor"] = {"action": tr.action,
-                                              "reward": round(tr.reward, 3)}
-                    report["world_transitions"] = len(self.world_model)
-                    self.mind.record(ThoughtKind.INFERENCE,
-                                     f"sensorimotor: {tr.action} r={tr.reward:.2f}",
-                                     salience=0.4)
+                    from nyxara.sim.real_environment import sensorimotor_stream
+                    # a short CONTINUOUS burst (a trajectory), not one isolated snapshot — the
+                    # world model learns action-conditioned dynamics from a real sequence.
+                    stream = sensorimotor_stream(self.real_environment, self.world_model, steps=4)
+                    if stream:
+                        tr = stream[-1]
+                        dyn = self.real_environment.dynamics()
+                        report["sensorimotor"] = {"action": tr.action,
+                                                  "reward": round(tr.reward, 3),
+                                                  "stream": len(stream),
+                                                  "dfiles_per_step": round(dyn[0], 3)}
+                        report["world_transitions"] = len(self.world_model)
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         f"sensorimotor stream x{len(stream)}: "
+                                         f"{tr.action} r={tr.reward:.2f}",
+                                         salience=0.4)
             except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
                 pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation

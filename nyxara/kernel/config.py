@@ -651,6 +651,11 @@ class RouterConfig(BaseModel):
     use_faculties: bool = True
     # With no teacher to consult, an own answer this weak is declined honestly ("I don't know").
     abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
+    # INTROSPECTION (metacognition): sample NYXARA's own model this many times and measure how
+    # consistent the answers are. Low agreement = high epistemic uncertainty she measured about
+    # *herself*, which discounts her confidence and makes her defer/abstain more readily. 1 = off
+    # (single draft, no self-consistency probe); 3 is a cheap, effective default once enabled.
+    self_consistency_samples: int = Field(default=1, ge=1, le=9)
 
 
 class SelfModelRouterConfig(BaseModel):
@@ -747,9 +752,13 @@ class SelfImprovementConfig(BaseModel):
     # concurrently. They write disjoint caches, so the result is identical to the sequential
     # order — only faster. Set False for strictly deterministic single-threaded execution.
     parallel_cycle: bool = True
-    # --- enactment (self-modification) — OFF until the Master authorises it --- #
-    autonomous_enact: bool = False             # auto-apply source edits + safe tuning
-    allow_tuning: bool = False                 # may tune recursive_improvement_iterations
+    # --- enactment (self-modification) — Master JP's standing authorisation: ON, full auto --- #
+    # Gains auto-apply each cycle. This does NOT weaken safety: every edit still clears the
+    # reversible verify-or-rollback gauntlet (syntax compile → corrigibility/honesty battery →
+    # capability benchmark vs a pre-edit baseline) and is journalled; a failing edit is restored
+    # byte-for-byte. Disable per-deployment with NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT=false.
+    autonomous_enact: bool = True              # auto-apply source edits + safe tuning
+    allow_tuning: bool = True                  # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
     # --- LLM-authored edits (real RSI) — triple-gated, OFF by default --- #
@@ -757,8 +766,12 @@ class SelfImprovementConfig(BaseModel):
     # NYXARA may have the LLM author a whole-file fix for a weakness the deterministic
     # transforms cannot express (e.g. high complexity, long functions). Every such edit clears
     # the *same* reversible verify-or-rollback gauntlet — it is safe by construction.
-    allow_llm_edits: bool = False              # author real source fixes via the LLM
-    llm_edit_recursion_depth: int = Field(default=1, ge=0, le=5)   # chained edits per file/cycle
+    allow_llm_edits: bool = True               # author real source fixes via the LLM
+    llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
+    # META-META loop (growth/meta_meta.py): evolve the improvement engine's OWN knobs (recursion
+    # depth, edit budget) scored by the index-gain they actually produce — improving *how* she
+    # improves. Capability-only and bounded; only acts when autonomous_enact + allow_tuning are set.
+    meta_meta_enabled: bool = True
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
     llm_edit_max_file_bytes: int = Field(default=24000, ge=512)    # skip files too big to send
     llm_edit_max_size_delta_ratio: float = Field(default=0.5, ge=0.0, le=1.0)  # reject wild rewrites
@@ -816,7 +829,10 @@ class MindEvolutionConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = True                       # measure-only is safe → on by default
-    autonomous_enact: bool = False             # install promoted strategies into the live mind
+    # Master JP's standing authorisation: install promoted strategies into the live mind. A strategy
+    # is only ever promoted after it measurably beats the incumbent on the real benchmark AND clears
+    # the character-lock / corrigibility gates, so auto-install cannot trade safety for capability.
+    autonomous_enact: bool = True              # install promoted strategies into the live mind
     every: int = Field(default=12, ge=1)       # run one generation every N growth passes (heavy)
     generations_per_pass: int = Field(default=1, ge=1, le=20)
     population: int = Field(default=8, ge=2, le=64)
@@ -969,6 +985,12 @@ class MemoryConfig(BaseModel):
     semantic_embeddings: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = ""             # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
+    # Dependency-free LEARNED distributional embedder (memory/store.py::LearnedEmbedder). When no
+    # sentence-transformer is installed, this is the default in place of the purely-curated lexical
+    # embedder: cold it is byte-identical to the lexical space (so recall calibration is preserved),
+    # but it compounds paraphrase reach from the text NYXARA actually reads — paraphrases match from
+    # data, not a hand-written thesaurus. The live loop feeds it; set False for the static lexical map.
+    learned_embeddings: bool = True
     # Managed/embedded Qdrant vector DB (used when vector_backend=qdrant). Leave url empty
     # for an embedded local store at ``qdrant_path`` (or in-memory if that is empty too);
     # set url (+ api_key) to point at a managed Qdrant cluster for real scale.
@@ -1342,6 +1364,14 @@ class NyxaraSettings(BaseSettings):
             self.llm.provider = LLMProvider.MOCK
             self.llm.allow_mock_fallback = True
             self.observability.telemetry_enabled = False
+            # Hermetic tests must NEVER self-modify the source tree on disk. The standing
+            # authorisation to auto-enact gains applies to live DEV/PROD runs, not the suite —
+            # so force every enactment path OFF under TEST (a test that wants enact sets it
+            # explicitly on its own settings object).
+            self.self_improvement.autonomous_enact = False
+            self.self_improvement.allow_tuning = False
+            self.self_improvement.allow_llm_edits = False
+            self.mind_evolution.autonomous_enact = False
         return self
 
     # ---- convenience ---- #

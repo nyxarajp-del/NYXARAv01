@@ -54,6 +54,7 @@ class SelfImprovementReport:
     directive_action: Optional[str] = None       # the action she planned + (when enacted) ran
     directive_results: Optional[Dict[str, Any]] = None   # what dispatching it actually did
     ledger: Optional[Dict[str, Any]] = None      # lifelong credit assignment for this cycle
+    meta_meta: Optional[Dict[str, Any]] = None   # meta-meta: evolving HOW she improves (the knobs)
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -66,7 +67,7 @@ class SelfImprovementReport:
                 "effort_budget": self.effort_budget, "directive": self.directive,
                 "directive_action": self.directive_action,
                 "directive_results": self.directive_results, "ledger": self.ledger,
-                "at": self.at}
+                "meta_meta": self.meta_meta, "at": self.at}
 
     def summary(self) -> str:
         n_weak = (self.weaknesses or {}).get("n_weaknesses", 0)
@@ -132,6 +133,40 @@ class RecursiveSelfImprovement:
         self._touched_arms: List[str] = []     # arms credited at the end of this cycle
         self._prior_index: Optional[float] = None
         self._last_signals: Optional[Dict[str, float]] = None
+        self._meta: Any = None                 # meta-meta controller (lazy; gated)
+        self._meta_built = False
+
+    # ---- meta-meta: evolve the improvement engine's OWN knobs, scored by realised index gain ---- #
+    def _meta_meta(self) -> Any:
+        """The meta-meta controller — built once, only when self-modification is authorised.
+
+        Gated so it never silently rewrites knobs: it acts only when ``autonomous_enact`` and
+        ``allow_tuning`` are set and ``meta_meta_enabled`` is on, and never under the TEST profile
+        (the hermetic suite must not evolve live knobs). Returns ``None`` when disabled."""
+        if self._meta_built:
+            return self._meta
+        self._meta_built = True
+        cfg = self.settings.self_improvement
+        try:
+            if str(getattr(getattr(self.settings, "profile", None), "value", "")) == "test":
+                return None
+            if not (bool(cfg.autonomous_enact) and bool(cfg.allow_tuning)
+                    and bool(getattr(cfg, "meta_meta_enabled", True))):
+                return None
+            from nyxara.growth.meta_meta import MetaGenome, MetaImprovementController
+            seed = MetaGenome(recursion_depth=int(getattr(cfg, "llm_edit_recursion_depth", 3)),
+                              max_edits_per_cycle=int(getattr(cfg, "max_edits_per_cycle", 3)))
+            path = None
+            try:
+                from pathlib import Path
+                base = Path(self.settings.paths.data_dir) / "foundry"
+                path = base / "meta_meta.json"
+            except Exception:  # noqa: BLE001
+                path = None
+            self._meta = MetaImprovementController(champion=seed, persist_path=path)
+        except Exception:  # noqa: BLE001 — the meta-meta loop is a capability, never required
+            self._meta = None
+        return self._meta
 
     # ---- intelligence index: I_(t+1) = f(I_t, C_available) ---- #
     def _intel(self) -> Any:
@@ -272,6 +307,11 @@ class RecursiveSelfImprovement:
         cfg = self.settings.self_improvement
         if enact is None:
             enact = bool(cfg.autonomous_enact)
+        # META-META: bind the current champion knob-set into the engine BEFORE this cycle runs, so
+        # the cycle's recursion depth / edit budget are the ones currently on trial (or champion).
+        meta = self._meta_meta() if enact else None
+        if meta is not None:
+            meta.apply(self.settings)
         wreport = weaknesses if weaknesses is not None else self.detect_weaknesses()
         report = SelfImprovementReport(
             code=self._code.to_dict() if self._code is not None else None,
@@ -297,6 +337,17 @@ class RecursiveSelfImprovement:
 
         # --- lifelong credit assignment: did this cycle's interventions raise the index? --- #
         self._credit_outcome(report)
+        # --- cross-module bus: publish what the CODE channel learned for the other faculties --- #
+        self._publish_signals(report)
+        # --- META-META: score the active knob-set by the realised index gain, and evolve it --- #
+        if meta is not None and report.enacted and report.intelligence_index is not None \
+                and self._prior_index is not None:
+            try:
+                meta.record(float(report.intelligence_index) - float(self._prior_index))
+                meta.maybe_evolve()
+                report.meta_meta = meta.status()
+            except Exception:  # noqa: BLE001 — the meta-meta loop is advisory, never fatal
+                pass
         return report
 
     # ---- the full cycle ---- #
@@ -496,15 +547,62 @@ class RecursiveSelfImprovement:
     # lifelong credit assignment — learn which interventions raise the index
     # ------------------------------------------------------------------ #
     def _prioritize(self, ranked: List[Any]) -> List[Any]:
-        """Reorder weaknesses by the ledger's learned payoff (no-op when the ledger is off)."""
-        if not self._ledger_enabled():
-            return list(ranked)
+        """Reorder weaknesses by the ledger's learned payoff, then by cross-module relevance.
+
+        Two influences compose: the ledger's *learned* payoff (which intervention classes have
+        actually raised the index), and the **cross-module signal bus** — what OTHER faculties
+        flagged this cycle (a recurring failure reflection noticed, a blind spot the world model
+        reported, the weakest benchmark category). So the code channel fixes what reflection and
+        the world model are worried about, not only what it independently scored highest."""
+        ordered = list(ranked)
+        if self._ledger_enabled():
+            try:
+                feats = self._last_signals or {}
+                ordered = self._bandit_obj().prioritize(
+                    ordered, state=self._ledger_state_obj(), features=feats)
+            except Exception:  # noqa: BLE001 — ranking is an optimisation, never required
+                ordered = list(ranked)
+        return self._cross_module_boost(ordered)
+
+    def _cross_module_boost(self, ranked: List[Any]) -> List[Any]:
+        """Stable-reorder weaknesses so those the OTHER faculties flagged rise to the front.
+
+        Reads the shared signal bus's aggregated focus terms (posted by reflection, the world
+        model and the benchmark) and moves matching weaknesses forward, preserving the incoming
+        (ledger) order on ties. A no-op when nothing has been posted, so it never hurts."""
         try:
-            feats = self._last_signals or {}
-            return self._bandit_obj().prioritize(
-                list(ranked), state=self._ledger_state_obj(), features=feats)
-        except Exception:  # noqa: BLE001 — ranking is an optimisation, never required
-            return list(ranked)
+            from nyxara.growth.signal_bus import get_signal_bus
+            terms = get_signal_bus().focus_terms()
+            if not terms:
+                return ranked
+            order = {id(w): i for i, w in enumerate(ranked)}
+
+            def relevance(w: Any) -> float:
+                text = (f"{getattr(w, 'title', '')} {getattr(w, 'source', '')} "
+                        f"{getattr(w, 'remediation', '')}").lower()
+                return sum(wt for t, wt in terms.items() if t in text)
+
+            return sorted(ranked, key=lambda w: (-relevance(w), order[id(w)]))
+        except Exception:  # noqa: BLE001 — cross-module steering is advisory, never required
+            return ranked
+
+    def _publish_signals(self, report: SelfImprovementReport) -> None:
+        """Publish the code channel's findings onto the shared bus for the other faculties.
+
+        Closes the feedback loop in the other direction: the weakest benchmark categories become
+        focus terms that steer the *next* cycle's editing AND any other reader (research, foundry),
+        and the realised index delta is posted as a health signal. Best-effort; never fatal."""
+        try:
+            from nyxara.growth.signal_bus import get_signal_bus
+            bus = get_signal_bus()
+            for topic in self._weakest_categories(limit=3):
+                bus.post("weak_category", topic, source="benchmark", weight=1.0)
+            if report.intelligence_index is not None and self._prior_index is not None:
+                bus.post("index_delta",
+                         float(report.intelligence_index) - float(self._prior_index),
+                         source="code", weight=1.0)
+        except Exception:  # noqa: BLE001 — publishing is advisory, never fatal
+            pass
 
     def _mark_arm(self, weakness: Any) -> None:
         """Remember that this weakness-class was acted on, to credit it at cycle end."""
