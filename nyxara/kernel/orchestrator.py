@@ -2814,6 +2814,22 @@ class NyxaraCore:
                 pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
+        # LEARNED task-reward (Rule 4): the objective is no longer a frozen constant — it adapts to
+        # which capability outcomes actually pay off. Strictly layered ABOVE the immutable loyalty
+        # gate (it models action-type success only, never a sealed core value), and bounded so the
+        # realized outcome stays dominant. The base reward stands until enough has been learned.
+        if getattr(self, "_task_reward", None) is None:
+            try:
+                from nyxara.growth.task_reward import LearnedTaskReward
+                self._task_reward = LearnedTaskReward()
+            except Exception:  # noqa: BLE001
+                self._task_reward = None
+        if self._task_reward is not None:
+            try:
+                self._task_reward.observe(action, disp is Disposition.ACT and success)
+                reward = self._task_reward.shaped_reward(action, reward)
+            except Exception:  # noqa: BLE001 — reward shaping is best-effort, never fatal
+                pass
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
         if self.learner is not None:
             try:
