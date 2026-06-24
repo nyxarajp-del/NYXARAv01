@@ -2,10 +2,19 @@
 
 Rule 4 is recursive self-evolution: NYXARA's *capability* may grow without bound — never
 her *character or loyalty*. The toolsmith (``agency/toolsmith.py``) grows new tools by
-**composing existing ones**; the model foundry (``growth/foundry.py``) grows her **own
-model weights**. This module fills the remaining gap: when a capability is *missing
-entirely* (e.g. "image skill missing"), NYXARA **designs a brand-new module for herself**
-end-to-end —
+**composing existing ones** (but only from a human-specified pipeline); the model foundry
+(``growth/foundry.py``) grows her **own model weights**. This module fills the remaining gap:
+when a capability is *missing entirely* (e.g. "image skill missing"), NYXARA **designs a
+brand-new module for herself** end-to-end —
+
+She is not limited to picking one tool from a fixed catalogue. The **compositional
+synthesizer** (:func:`_compositional_recipe`) lets her *invent* a genuinely new capability by
+decomposing a free-text need ("reverse a string then uppercase it then sha256 it") into a
+chain of known primitives and writing the real composed source for it — a combinatorially
+unbounded space of capabilities the catalogue never enumerated. Every composition proves
+itself on an example computed from the same logic before it can deploy, so the invention is
+real, deterministic and offline (no LLM, no echo placeholder) — the honest ``generic``
+scaffold remains only as the true last resort. The pipeline is —
 
     1. plan       — turn the gap into a typed :class:`CapabilityPlan` (name, params, examples)
     2. synthesize — write the actual Python source of a ``handle(...)`` function
@@ -31,11 +40,14 @@ module stays keyless and offline by default.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import math
 import re
+import string as _string
 import time
+import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1066,8 +1078,399 @@ def _parametric_data_op(low: str) -> Optional[_Recipe]:
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Compositional synthesis — INVENT a new capability by chaining primitives
+#
+# This is the heart of "novel capability creation": rather than only ever picking one recipe
+# from the fixed catalogue, NYXARA decomposes a free-text need into a *sequence* of known
+# value->value primitives ("reverse a string then uppercase it then sha256 it") and writes the
+# real composed source for it. The space of compositions is combinatorially unbounded, so this
+# genuinely invents capabilities the catalogue never enumerated — yet stays deterministic and
+# offline: every composition is proven on an example computed by the same primitives before it
+# can deploy, and the generated source only ever touches the sandbox-safe stdlib allowlist.
+# --------------------------------------------------------------------------- #
+@dataclass
+class _Primitive:
+    """One composable value->value operation: real source fragment + a mirror callable.
+
+    ``body_lines`` form the body of a generated ``def _op(v): ...`` helper (sandbox-safe,
+    allowlisted imports only); ``fn`` is the pure-Python mirror used to *compute the example*
+    at build time so a composition always passes its own test.
+    """
+    key: str
+    keywords: Tuple[str, ...]
+    param_name: str
+    param_type: str
+    imports: Tuple[str, ...]
+    body_lines: Tuple[str, ...]
+    desc: str
+    fn: Callable[[Any], Any]
+
+
+def _p_slugify(v: str) -> str:
+    out = [c.lower() if c.isalnum() else "-" for c in v]
+    s = "".join(out)
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s.strip("-")
+
+
+def _p_unique(v: List[Any]) -> List[Any]:
+    seen: List[Any] = []
+    for x in v:
+        if x not in seen:
+            seen.append(x)
+    return seen
+
+
+def _p_flatten(v: List[Any]) -> List[Any]:
+    out: List[Any] = []
+    for x in v:
+        out.extend(x) if isinstance(x, list) else out.append(x)
+    return out
+
+
+def _p_factorial(v: Any) -> int:
+    v = int(v)
+    r = 1
+    for i in range(2, v + 1):
+        r *= i
+    return r
+
+
+def _p_is_prime(v: Any) -> bool:
+    v = int(v)
+    if v < 2:
+        return False
+    i = 2
+    while i * i <= v:
+        if v % i == 0:
+            return False
+        i += 1
+    return True
+
+
+# Each primitive's ``body_lines`` mirror an already-proven recipe body (one source of truth),
+# and ``fn`` mirrors it exactly so the composed example is computed by identical logic.
+_PRIMITIVES: List[_Primitive] = [
+    # ---- string -> string ----
+    _Primitive("reverse", ("reverse", "reverse the string", "reverse a string"),
+               "text", "str", (), ("return v[::-1]",),
+               "reverse it", lambda v: v[::-1]),
+    _Primitive("upper", ("uppercase", "upper", "upper case", "to upper"),
+               "text", "str", (), ("return v.upper()",),
+               "uppercase it", lambda v: v.upper()),
+    _Primitive("lower", ("lowercase", "lower", "lower case", "to lower"),
+               "text", "str", (), ("return v.lower()",),
+               "lowercase it", lambda v: v.lower()),
+    _Primitive("title", ("titlecase", "title case", "capitalize each"),
+               "text", "str", (), ("return v.title()",),
+               "title-case it", lambda v: v.title()),
+    _Primitive("swapcase", ("swapcase", "swap case", "invert case"),
+               "text", "str", (), ("return v.swapcase()",),
+               "swap its case", lambda v: v.swapcase()),
+    _Primitive("strip", ("trim whitespace", "strip whitespace", "strip it"),
+               "text", "str", (), ("return v.strip()",),
+               "strip it", lambda v: v.strip()),
+    _Primitive("slugify", ("slugify", "slug", "url slug", "url friendly"),
+               "text", "str", (),
+               ("out = [c.lower() if c.isalnum() else '-' for c in v]",
+                "s = ''.join(out)",
+                "while '--' in s:",
+                "    s = s.replace('--', '-')",
+                "return s.strip('-')"),
+               "slugify it", _p_slugify),
+    _Primitive("snake_case", ("snake case", "snakecase", "to snake_case"),
+               "text", "str", ("re",),
+               ("return re.sub(r'[^a-z0-9]+', '_', v.lower()).strip('_')",),
+               "snake_case it", lambda v: re.sub(r"[^a-z0-9]+", "_", v.lower()).strip("_")),
+    _Primitive("rot13", ("rot13", "rot 13"),
+               "text", "str", (),
+               ("out = []",
+                "for c in v:",
+                "    if 'a' <= c <= 'z':",
+                "        out.append(chr((ord(c) - 97 + 13) % 26 + 97))",
+                "    elif 'A' <= c <= 'Z':",
+                "        out.append(chr((ord(c) - 65 + 13) % 26 + 65))",
+                "    else:",
+                "        out.append(c)",
+                "return ''.join(out)"),
+               "rot13 it", lambda v: _caesar(v, 13)),
+    _Primitive("reverse_words", ("reverse words", "reverse word order"),
+               "text", "str", (), ("return ' '.join(v.split()[::-1])",),
+               "reverse its words", lambda v: " ".join(v.split()[::-1])),
+    _Primitive("remove_vowels", ("remove vowels", "strip vowels", "without vowels"),
+               "text", "str", (),
+               ("return ''.join(c for c in v if c.lower() not in 'aeiou')",),
+               "remove its vowels",
+               lambda v: "".join(c for c in v if c.lower() not in "aeiou")),
+    _Primitive("remove_whitespace", ("remove whitespace", "remove spaces", "no spaces"),
+               "text", "str", (), ("return ''.join(v.split())",),
+               "remove its whitespace", lambda v: "".join(v.split())),
+    _Primitive("remove_punctuation", ("remove punctuation", "strip punctuation"),
+               "text", "str", ("string",),
+               ("return ''.join(c for c in v if c not in string.punctuation)",),
+               "remove its punctuation",
+               lambda v: "".join(c for c in v if c not in _string.punctuation)),
+    _Primitive("initials", ("initials", "acronym"),
+               "text", "str", (),
+               ("return ''.join(w[0].upper() for w in v.split() if w)",),
+               "take its initials",
+               lambda v: "".join(w[0].upper() for w in v.split() if w)),
+    # ---- string -> int ----
+    _Primitive("word_count", ("word count", "count words", "count the words", "number of words"),
+               "text", "str", (), ("return len(v.split())",),
+               "count its words", lambda v: len(v.split())),
+    _Primitive("char_count", ("character count", "count characters", "char count",
+                              "number of characters", "length of the string"),
+               "text", "str", (), ("return len(v)",),
+               "count its characters", lambda v: len(v)),
+    _Primitive("count_vowels", ("count vowels", "vowel count", "number of vowels"),
+               "text", "str", (),
+               ("return sum(1 for c in v.lower() if c in 'aeiou')",),
+               "count its vowels", lambda v: sum(1 for c in v.lower() if c in "aeiou")),
+    _Primitive("count_lines", ("count lines", "line count", "number of lines"),
+               "text", "str", (), ("return len(v.splitlines())",),
+               "count its lines", lambda v: len(v.splitlines())),
+    # ---- string -> string (encode / decode / hash) ----
+    _Primitive("base64_encode", ("base64 encode", "base64", "encode base64", "to base64"),
+               "text", "str", ("base64",),
+               ("return base64.b64encode(v.encode('utf-8')).decode('ascii')",),
+               "base64-encode it",
+               lambda v: base64.b64encode(v.encode("utf-8")).decode("ascii")),
+    _Primitive("base64_decode", ("base64 decode", "decode base64", "from base64"),
+               "text", "str", ("base64",),
+               ("return base64.b64decode(v).decode('utf-8')",),
+               "base64-decode it", lambda v: base64.b64decode(v).decode("utf-8")),
+    _Primitive("hex_encode", ("hex encode", "to hex", "hexadecimal encode"),
+               "text", "str", (), ("return v.encode('utf-8').hex()",),
+               "hex-encode it", lambda v: v.encode("utf-8").hex()),
+    _Primitive("hex_decode", ("hex decode", "from hex", "decode hex"),
+               "text", "str", (), ("return bytes.fromhex(v).decode('utf-8')",),
+               "hex-decode it", lambda v: bytes.fromhex(v).decode("utf-8")),
+    _Primitive("url_encode", ("url encode", "urlencode", "percent encode"),
+               "text", "str", ("urllib.parse",), ("return urllib.parse.quote(v)",),
+               "url-encode it", lambda v: urllib.parse.quote(v)),
+    _Primitive("url_decode", ("url decode", "percent decode", "unquote"),
+               "text", "str", ("urllib.parse",), ("return urllib.parse.unquote(v)",),
+               "url-decode it", lambda v: urllib.parse.unquote(v)),
+    _Primitive("sha256", ("sha256", "sha-256", "sha 256"),
+               "text", "str", ("hashlib",),
+               ("return hashlib.sha256(v.encode('utf-8')).hexdigest()",),
+               "sha256 it", lambda v: hashlib.sha256(v.encode("utf-8")).hexdigest()),
+    _Primitive("sha1", ("sha1", "sha-1"),
+               "text", "str", ("hashlib",),
+               ("return hashlib.sha1(v.encode('utf-8')).hexdigest()",),
+               "sha1 it", lambda v: hashlib.sha1(v.encode("utf-8")).hexdigest()),
+    _Primitive("md5", ("md5",),
+               "text", "str", ("hashlib",),
+               ("return hashlib.md5(v.encode('utf-8')).hexdigest()",),
+               "md5 it", lambda v: hashlib.md5(v.encode("utf-8")).hexdigest()),
+    # ---- list -> list / scalar ----
+    _Primitive("sort", ("sort", "sort the list", "order ascending"),
+               "items", "list", (), ("return sorted(v)",),
+               "sort it", lambda v: sorted(v)),
+    _Primitive("unique", ("unique", "deduplicate", "remove duplicates", "distinct"),
+               "items", "list", (),
+               ("seen = []",
+                "for x in v:",
+                "    if x not in seen:",
+                "        seen.append(x)",
+                "return seen"),
+               "deduplicate it", _p_unique),
+    _Primitive("flatten", ("flatten",),
+               "items", "list", (),
+               ("out = []",
+                "for x in v:",
+                "    out.extend(x) if isinstance(x, list) else out.append(x)",
+                "return out"),
+               "flatten it", _p_flatten),
+    _Primitive("sum_items", ("sum", "total", "add up"),
+               "items", "list", (), ("return sum(v)",),
+               "sum it", lambda v: sum(v)),
+    # ---- number -> number / bool ----
+    _Primitive("square", ("square", "squared"),
+               "x", "float", (), ("return v * v",),
+               "square it", lambda v: v * v),
+    _Primitive("cube", ("cube", "cubed"),
+               "x", "float", (), ("return v * v * v",),
+               "cube it", lambda v: v * v * v),
+    _Primitive("absolute", ("absolute value", "abs", "magnitude"),
+               "x", "float", (), ("return abs(v)",),
+               "take its absolute value", lambda v: abs(v)),
+    _Primitive("negate", ("negate", "negative of"),
+               "x", "float", (), ("return -v",),
+               "negate it", lambda v: -v),
+    _Primitive("double", ("double",),
+               "x", "float", (), ("return v * 2",),
+               "double it", lambda v: v * 2),
+    _Primitive("sum_digits", ("sum of digits", "digit sum", "add the digits"),
+               "n", "int", (),
+               ("return sum(int(d) for d in str(abs(int(v))))",),
+               "sum its digits", lambda v: sum(int(d) for d in str(abs(int(v))))),
+    _Primitive("to_binary", ("to binary", "binary representation", "in binary"),
+               "n", "int", (), ("return bin(int(v))[2:]",),
+               "convert it to binary", lambda v: _int_to_base(int(v), 2)),
+    _Primitive("factorial", ("factorial",),
+               "n", "int", (),
+               ("v = int(v)",
+                "r = 1",
+                "for i in range(2, v + 1):",
+                "    r *= i",
+                "return r"),
+               "take its factorial", _p_factorial),
+    _Primitive("is_even", ("is even", "even number"),
+               "n", "int", (), ("return int(v) % 2 == 0",),
+               "test if it is even", lambda v: int(v) % 2 == 0),
+    _Primitive("is_prime", ("is prime", "prime number", "primality"),
+               "n", "int", (),
+               ("v = int(v)",
+                "if v < 2:",
+                "    return False",
+                "i = 2",
+                "while i * i <= v:",
+                "    if v % i == 0:",
+                "        return False",
+                "    i += 1",
+                "return True"),
+               "test if it is prime", _p_is_prime),
+]
+
+
+def _match_primitive(clause: str) -> Optional[_Primitive]:
+    """Best primitive for a single clause, using the same word-boundary scoring as ``_classify``."""
+    low = (clause or "").lower()
+    toks = set(re.findall(r"[a-z0-9]+", low))
+    if not toks:
+        return None
+
+    def word_matches(w: str) -> bool:
+        if w in toks:
+            return True
+        if len(w) >= 5:
+            for t in toks:
+                if t.startswith(w) or (len(t) >= 5 and w.startswith(t)):
+                    return True
+        return False
+
+    best: Optional[_Primitive] = None
+    best_score = 0
+    for prim in _PRIMITIVES:
+        for kw in prim.keywords:
+            words = kw.split()
+            if words and all(word_matches(w) for w in words):
+                score = sum(len(w) for w in words) + (100 if kw in low else 0)
+                if score > best_score:
+                    best, best_score = prim, score
+    return best
+
+
+def _arith_primitive(clause: str) -> Optional[_Primitive]:
+    """A constant-arithmetic clause ("multiply by 3", "add 5") as a composable primitive."""
+    m = re.search(
+        r"(multiply|times|add|plus|subtract|minus|divide)\s*(?:by\s*)?(-?\d+(?:\.\d+)?)",
+        (clause or "").lower())
+    if not m:
+        return None
+    op, raw = m.group(1), float(m.group(2))
+    num: Any = int(raw) if raw.is_integer() else raw
+    if op == "divide" and num == 0:
+        return None
+    expr = {"multiply": f"v * {num}", "times": f"v * {num}",
+            "add": f"v + {num}", "plus": f"v + {num}",
+            "subtract": f"v - {num}", "minus": f"v - {num}",
+            "divide": f"v / {num}"}[op]
+    verb = {"multiply": "multiply_by", "times": "multiply_by", "add": "add",
+            "plus": "add", "subtract": "subtract", "minus": "subtract",
+            "divide": "divide_by"}[op]
+
+    def fn(v: Any, _e: str = expr) -> Any:
+        return eval(_e, {"__builtins__": {}}, {"v": v})  # noqa: S307 - trusted constant expr
+
+    key = f"{verb}_{str(num).replace('.', '_').replace('-', 'neg')}"
+    return _Primitive(key, (), "x", "float", (), (f"return {expr}",),
+                      f"{op} it by {num}", fn)
+
+
+def _resolve_clause(clause: str) -> Optional[_Primitive]:
+    return _match_primitive(clause) or _arith_primitive(clause)
+
+
+_SEED_BY_TYPE: Dict[str, Any] = {"str": "Hello", "int": 5, "float": 3.0, "list": [3, 1, 2]}
+
+
+def _compose_source(prims: List[_Primitive]) -> str:
+    """Emit a single sandbox-safe module: deduped imports, one helper per step, then ``handle``."""
+    imports = sorted({imp for p in prims for imp in p.imports})
+    lines: List[str] = [f"import {imp}" for imp in imports]
+    if imports:
+        lines.append("")
+    for i, p in enumerate(prims):
+        lines.append(f"def _op{i}(v):")
+        lines.extend("    " + b for b in p.body_lines)
+        lines.append("")
+    first = prims[0]
+    lines.append(f"def handle({first.param_name}):")
+    lines.append(f"    v = {first.param_name}")
+    for i in range(len(prims)):
+        lines.append(f"    v = _op{i}(v)")
+    lines.append("    return v")
+    return "\n".join(lines) + "\n"
+
+
+def _compose_example(prims: List[_Primitive]) -> Optional[Dict[str, Any]]:
+    """Run the mirror callables on a typed seed to compute a self-proving example.
+
+    Returns ``None`` if the chain raises (incompatible types — e.g. uppercase->factorial) or
+    yields a non-JSON-serialisable value, so a composition that cannot pass its own test is
+    aborted before it ever deploys. Honesty over confidence."""
+    first = prims[0]
+    seed = _SEED_BY_TYPE.get(first.param_type)
+    if seed is None and first.param_type != "any":
+        return None
+    seed = seed if not isinstance(seed, list) else list(seed)
+    value: Any = seed if not isinstance(seed, list) else list(seed)
+    try:
+        for p in prims:
+            value = p.fn(value)
+        json.dumps(value)
+    except Exception:  # noqa: BLE001 — an invalid chain is simply not composable
+        return None
+    return {"args": {first.param_name: seed}, "expect": value}
+
+
+# Sequential connectors that signal "do X, then do Y". Bare "and"/"," are intentionally
+# excluded to avoid false splits ("gcd of a and b", "celsius to fahrenheit").
+_COMPOSE_SPLIT = re.compile(
+    r"\s+(?:and\s+then|then|followed\s+by|after\s+that)\s+|\s*(?:->|\||;)\s*")
+
+
+def _compositional_recipe(need: str) -> Optional[_Recipe]:
+    """INVENT a capability by chaining ≥2 known primitives parsed from a free-text need."""
+    low = (need or "").lower()
+    parts = [p.strip() for p in _COMPOSE_SPLIT.split(low) if p.strip()]
+    if len(parts) < 2:
+        return None
+    prims: List[_Primitive] = []
+    for part in parts:
+        prim = _resolve_clause(part)
+        if prim is None:
+            return None
+        prims.append(prim)
+    if len(prims) < 2:
+        return None
+    example = _compose_example(prims)
+    if example is None:
+        return None
+    first = prims[0]
+    key = "compose_" + "_".join(p.key for p in prims)
+    desc = "compose: " + " then ".join(p.desc for p in prims)
+    return _Recipe(key, (), desc, [ToolParam(first.param_name, first.param_type)],
+                   _compose_source(prims), [example])
+
+
 def best_recipe(need: str) -> _Recipe:
-    """Resolve a capability gap to its best recipe (fixed → parametric → generic).
+    """Resolve a capability gap to its best recipe (compositional → fixed → parametric → generic).
 
     Exposed so other faculties (e.g. ``mind/creative.py`` code-gen) can reuse the foundry's
     deterministic, offline synthesis for real working code without constructing a whole
@@ -1133,7 +1536,16 @@ class CapabilityFoundry:
 
     @staticmethod
     def _resolve_recipe(need: str) -> _Recipe:
-        """Fixed recipe (keyword) → parametric synthesis → generic scaffold (last resort)."""
+        """Compositional invention → fixed recipe → parametric synthesis → generic (last resort).
+
+        Compositional detection runs *first* so a multi-step need ("reverse then uppercase") is
+        invented as a real chained tool instead of being collapsed to whichever single keyword
+        the classifier happened to score highest. It only fires when ≥2 connected primitives
+        parse out, so single-op needs fall straight through to the existing paths unchanged.
+        """
+        comp = _compositional_recipe(need)
+        if comp is not None:
+            return comp
         fixed = CapabilityFoundry._classify(need)
         if fixed.key != "generic":
             return fixed
@@ -1145,9 +1557,13 @@ class CapabilityFoundry:
     def _resolve_recipe_learned(self, need: str) -> _Recipe:
         """As :meth:`_resolve_recipe`, but consult the learned ranker before the scaffold.
 
-        Keyword and parametric matches are high-confidence and win first; only when both miss
-        does the :class:`RecipeLearner` get to map the gap to a recipe learned from past
-        successful forges — shrinking how often the honest ``generic`` echo scaffold is used."""
+        Compositional invention wins first (a multi-step need becomes a real chained tool), then
+        keyword and parametric matches; only when all miss does the :class:`RecipeLearner` get to
+        map the gap to a recipe learned from past successful forges — shrinking how often the
+        honest ``generic`` echo scaffold is used."""
+        comp = _compositional_recipe(need)
+        if comp is not None:
+            return comp
         fixed = self._classify(need)
         if fixed.key != "generic":
             return fixed

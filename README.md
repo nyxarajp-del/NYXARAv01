@@ -412,6 +412,16 @@ around the control law.
   distinct from the *persistent* `forge_capability` foundry and the composing `toolsmith`.
   Exposed as the `ephemeral_exec` tool; `DynamicToolCreator.solve()` is the words→answer
   entry point (with an optional, keyless-by-default injected LLM).
+* **Novel capability invention (compositional synthesis)** — `growth/capability_foundry.py`.
+  The persistent Capability Foundry no longer only *picks* one recipe from a fixed catalogue:
+  its compositional synthesizer **invents** a genuinely new capability by decomposing a
+  free-text need ("reverse a string then uppercase it then sha256 it") into a chain of known
+  primitives and writing the real composed source for it — a combinatorially unbounded space
+  the catalogue never enumerated. Every composition proves itself on an example computed from
+  the same primitives before it can deploy (so an impossible chain is aborted, never shipped),
+  and the generated code only touches the sandbox-safe stdlib allowlist — deterministic and
+  offline, no LLM and no echo placeholder. Resolution order is compositional → fixed recipe →
+  parametric → learned → the honest `generic` scaffold (true last resort).
 * **Self-evaluation** — `eval/`. Two batteries with one harness. A deterministic **safety**
   battery (safety, corrigibility, authority, honesty, tool-use, memory) measures that the mind
   stays safe and flags regressions against a saved baseline — `python -m nyxara.eval`. A
