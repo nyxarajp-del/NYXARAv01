@@ -54,6 +54,7 @@ class SelfImprovementReport:
     directive_action: Optional[str] = None       # the action she planned + (when enacted) ran
     directive_results: Optional[Dict[str, Any]] = None   # what dispatching it actually did
     ledger: Optional[Dict[str, Any]] = None      # lifelong credit assignment for this cycle
+    meta_meta: Optional[Dict[str, Any]] = None   # meta-meta: evolving HOW she improves (the knobs)
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -66,7 +67,7 @@ class SelfImprovementReport:
                 "effort_budget": self.effort_budget, "directive": self.directive,
                 "directive_action": self.directive_action,
                 "directive_results": self.directive_results, "ledger": self.ledger,
-                "at": self.at}
+                "meta_meta": self.meta_meta, "at": self.at}
 
     def summary(self) -> str:
         n_weak = (self.weaknesses or {}).get("n_weaknesses", 0)
@@ -132,6 +133,40 @@ class RecursiveSelfImprovement:
         self._touched_arms: List[str] = []     # arms credited at the end of this cycle
         self._prior_index: Optional[float] = None
         self._last_signals: Optional[Dict[str, float]] = None
+        self._meta: Any = None                 # meta-meta controller (lazy; gated)
+        self._meta_built = False
+
+    # ---- meta-meta: evolve the improvement engine's OWN knobs, scored by realised index gain ---- #
+    def _meta_meta(self) -> Any:
+        """The meta-meta controller — built once, only when self-modification is authorised.
+
+        Gated so it never silently rewrites knobs: it acts only when ``autonomous_enact`` and
+        ``allow_tuning`` are set and ``meta_meta_enabled`` is on, and never under the TEST profile
+        (the hermetic suite must not evolve live knobs). Returns ``None`` when disabled."""
+        if self._meta_built:
+            return self._meta
+        self._meta_built = True
+        cfg = self.settings.self_improvement
+        try:
+            if str(getattr(getattr(self.settings, "profile", None), "value", "")) == "test":
+                return None
+            if not (bool(cfg.autonomous_enact) and bool(cfg.allow_tuning)
+                    and bool(getattr(cfg, "meta_meta_enabled", True))):
+                return None
+            from nyxara.growth.meta_meta import MetaGenome, MetaImprovementController
+            seed = MetaGenome(recursion_depth=int(getattr(cfg, "llm_edit_recursion_depth", 3)),
+                              max_edits_per_cycle=int(getattr(cfg, "max_edits_per_cycle", 3)))
+            path = None
+            try:
+                from pathlib import Path
+                base = Path(self.settings.paths.data_dir) / "foundry"
+                path = base / "meta_meta.json"
+            except Exception:  # noqa: BLE001
+                path = None
+            self._meta = MetaImprovementController(champion=seed, persist_path=path)
+        except Exception:  # noqa: BLE001 — the meta-meta loop is a capability, never required
+            self._meta = None
+        return self._meta
 
     # ---- intelligence index: I_(t+1) = f(I_t, C_available) ---- #
     def _intel(self) -> Any:
@@ -272,6 +307,11 @@ class RecursiveSelfImprovement:
         cfg = self.settings.self_improvement
         if enact is None:
             enact = bool(cfg.autonomous_enact)
+        # META-META: bind the current champion knob-set into the engine BEFORE this cycle runs, so
+        # the cycle's recursion depth / edit budget are the ones currently on trial (or champion).
+        meta = self._meta_meta() if enact else None
+        if meta is not None:
+            meta.apply(self.settings)
         wreport = weaknesses if weaknesses is not None else self.detect_weaknesses()
         report = SelfImprovementReport(
             code=self._code.to_dict() if self._code is not None else None,
@@ -297,6 +337,15 @@ class RecursiveSelfImprovement:
 
         # --- lifelong credit assignment: did this cycle's interventions raise the index? --- #
         self._credit_outcome(report)
+        # --- META-META: score the active knob-set by the realised index gain, and evolve it --- #
+        if meta is not None and report.enacted and report.intelligence_index is not None \
+                and self._prior_index is not None:
+            try:
+                meta.record(float(report.intelligence_index) - float(self._prior_index))
+                meta.maybe_evolve()
+                report.meta_meta = meta.status()
+            except Exception:  # noqa: BLE001 — the meta-meta loop is advisory, never fatal
+                pass
         return report
 
     # ---- the full cycle ---- #

@@ -768,6 +768,10 @@ class SelfImprovementConfig(BaseModel):
     # the *same* reversible verify-or-rollback gauntlet — it is safe by construction.
     allow_llm_edits: bool = True               # author real source fixes via the LLM
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
+    # META-META loop (growth/meta_meta.py): evolve the improvement engine's OWN knobs (recursion
+    # depth, edit budget) scored by the index-gain they actually produce — improving *how* she
+    # improves. Capability-only and bounded; only acts when autonomous_enact + allow_tuning are set.
+    meta_meta_enabled: bool = True
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
     llm_edit_max_file_bytes: int = Field(default=24000, ge=512)    # skip files too big to send
     llm_edit_max_size_delta_ratio: float = Field(default=0.5, ge=0.0, le=1.0)  # reject wild rewrites
