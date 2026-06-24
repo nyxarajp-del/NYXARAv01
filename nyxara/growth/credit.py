@@ -255,14 +255,22 @@ class EditStrategyBandit:
         if not weaknesses:
             return list(weaknesses)
         st = state if state is not None else self.ledger.load()
+        # blend the learned score with the weakness's own severity so a brand-new, never-tried
+        # high-severity weakness is not buried under a marginally-favoured trivial one. The blend is
+        # a real, evolvable *algorithm* knob (the meta tower tunes what-to-fix-first); 1.0 ⇒ pure
+        # learned payoff, 0.0 ⇒ pure severity. Falls back to the historical 0.7 when unset.
+        try:
+            blend = float(getattr(self.ledger.settings.self_improvement,
+                                  "bandit_severity_blend", 0.7))
+        except Exception:  # noqa: BLE001 — a missing setting just uses the historical default
+            blend = 0.7
+        blend = max(0.0, min(1.0, blend))
         scored: List[Tuple[float, int, Any]] = []
         for i, w in enumerate(weaknesses):
             key = self.weakness_key(w)
             score = self._score(st, key, features)
-            # blend the learned score with the weakness's own severity so a brand-new, never-tried
-            # high-severity weakness is not buried under a marginally-favoured trivial one
             sev = float(getattr(w, "severity", 0.0) or 0.0)
-            scored.append((0.7 * score + 0.3 * sev, -i, w))
+            scored.append((blend * score + (1.0 - blend) * sev, -i, w))
         scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
         return [w for _, _, w in scored]
 

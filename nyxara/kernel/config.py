@@ -776,10 +776,17 @@ class SelfImprovementConfig(BaseModel):
     # also permit a configured external provider as the author.
     self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
-    # META-META loop (growth/meta_meta.py): evolve the improvement engine's OWN knobs (recursion
-    # depth, edit budget) scored by the index-gain they actually produce — improving *how* she
-    # improves. Capability-only and bounded; only acts when autonomous_enact + allow_tuning are set.
+    # META-META loop (growth/meta_meta.py): a recursive tower that evolves the improvement
+    # ALGORITHM itself — not just execution knobs (recursion depth, edit budget) but the
+    # credit-assignment sharpness, bandit exploration, the what-to-fix-first blend, and the index
+    # smoothing — scored by the real capability gain they produce. Each level improves *how the
+    # level below searches* → recursion at every level → compounding. Capability/measurement-only
+    # and bounded; only acts when autonomous_enact + allow_tuning are set.
     meta_meta_enabled: bool = True
+    # Height of the recursive meta tower: level 0 evolves the engine's algorithm/knobs, each higher
+    # level evolves how the level below searches. 1 ⇒ the classic single meta loop. Bounded so the
+    # tower can never grow unboundedly deep.
+    meta_levels: int = Field(default=3, ge=1, le=4)
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
     # File-size ceiling for a self-authored rewrite. Generous so the real algorithm/architecture
     # files (foundry, recursive_improvement, autolearn, the orchestrator) are eligible for a true
@@ -822,6 +829,10 @@ class SelfImprovementConfig(BaseModel):
     enable_improvement_ledger: bool = True
     ledger_prior_strength: float = Field(default=1.0, ge=0.1, le=50.0)
     ledger_reward_scale: float = Field(default=40.0, ge=1.0, le=1000.0)
+    # How the bandit blends learned payoff against a weakness's raw severity when prioritising what
+    # to fix first: blended_score = blend·learned + (1−blend)·severity. 1.0 ⇒ pure learned payoff,
+    # 0.0 ⇒ pure severity. A real *algorithm* knob the meta tower evolves (was hardcoded at 0.7).
+    bandit_severity_blend: float = Field(default=0.7, ge=0.0, le=1.0)
     # --- optional heavy-ML payoff forecaster (growth/forecaster.py) --- #
     # A small torch MLP that sharpens the ledger's ranking with context (signals + arm). Opt-in;
     # with no torch it is simply unavailable and the dependency-free ledger path stands.
