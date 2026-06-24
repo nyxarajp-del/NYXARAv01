@@ -337,6 +337,8 @@ class RecursiveSelfImprovement:
 
         # --- lifelong credit assignment: did this cycle's interventions raise the index? --- #
         self._credit_outcome(report)
+        # --- cross-module bus: publish what the CODE channel learned for the other faculties --- #
+        self._publish_signals(report)
         # --- META-META: score the active knob-set by the realised index gain, and evolve it --- #
         if meta is not None and report.enacted and report.intelligence_index is not None \
                 and self._prior_index is not None:
@@ -545,15 +547,62 @@ class RecursiveSelfImprovement:
     # lifelong credit assignment — learn which interventions raise the index
     # ------------------------------------------------------------------ #
     def _prioritize(self, ranked: List[Any]) -> List[Any]:
-        """Reorder weaknesses by the ledger's learned payoff (no-op when the ledger is off)."""
-        if not self._ledger_enabled():
-            return list(ranked)
+        """Reorder weaknesses by the ledger's learned payoff, then by cross-module relevance.
+
+        Two influences compose: the ledger's *learned* payoff (which intervention classes have
+        actually raised the index), and the **cross-module signal bus** — what OTHER faculties
+        flagged this cycle (a recurring failure reflection noticed, a blind spot the world model
+        reported, the weakest benchmark category). So the code channel fixes what reflection and
+        the world model are worried about, not only what it independently scored highest."""
+        ordered = list(ranked)
+        if self._ledger_enabled():
+            try:
+                feats = self._last_signals or {}
+                ordered = self._bandit_obj().prioritize(
+                    ordered, state=self._ledger_state_obj(), features=feats)
+            except Exception:  # noqa: BLE001 — ranking is an optimisation, never required
+                ordered = list(ranked)
+        return self._cross_module_boost(ordered)
+
+    def _cross_module_boost(self, ranked: List[Any]) -> List[Any]:
+        """Stable-reorder weaknesses so those the OTHER faculties flagged rise to the front.
+
+        Reads the shared signal bus's aggregated focus terms (posted by reflection, the world
+        model and the benchmark) and moves matching weaknesses forward, preserving the incoming
+        (ledger) order on ties. A no-op when nothing has been posted, so it never hurts."""
         try:
-            feats = self._last_signals or {}
-            return self._bandit_obj().prioritize(
-                list(ranked), state=self._ledger_state_obj(), features=feats)
-        except Exception:  # noqa: BLE001 — ranking is an optimisation, never required
-            return list(ranked)
+            from nyxara.growth.signal_bus import get_signal_bus
+            terms = get_signal_bus().focus_terms()
+            if not terms:
+                return ranked
+            order = {id(w): i for i, w in enumerate(ranked)}
+
+            def relevance(w: Any) -> float:
+                text = (f"{getattr(w, 'title', '')} {getattr(w, 'source', '')} "
+                        f"{getattr(w, 'remediation', '')}").lower()
+                return sum(wt for t, wt in terms.items() if t in text)
+
+            return sorted(ranked, key=lambda w: (-relevance(w), order[id(w)]))
+        except Exception:  # noqa: BLE001 — cross-module steering is advisory, never required
+            return ranked
+
+    def _publish_signals(self, report: SelfImprovementReport) -> None:
+        """Publish the code channel's findings onto the shared bus for the other faculties.
+
+        Closes the feedback loop in the other direction: the weakest benchmark categories become
+        focus terms that steer the *next* cycle's editing AND any other reader (research, foundry),
+        and the realised index delta is posted as a health signal. Best-effort; never fatal."""
+        try:
+            from nyxara.growth.signal_bus import get_signal_bus
+            bus = get_signal_bus()
+            for topic in self._weakest_categories(limit=3):
+                bus.post("weak_category", topic, source="benchmark", weight=1.0)
+            if report.intelligence_index is not None and self._prior_index is not None:
+                bus.post("index_delta",
+                         float(report.intelligence_index) - float(self._prior_index),
+                         source="code", weight=1.0)
+        except Exception:  # noqa: BLE001 — publishing is advisory, never fatal
+            pass
 
     def _mark_arm(self, weakness: Any) -> None:
         """Remember that this weakness-class was acted on, to credit it at cycle end."""

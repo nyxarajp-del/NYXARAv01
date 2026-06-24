@@ -3106,7 +3106,35 @@ class NyxaraCore:
                             self._insight_q.put(top.text)
                         except Exception:  # noqa: BLE001
                             pass
+                    # CROSS-MODULE BUS: publish what reflection noticed so the code channel's
+                    # self-improvement steers its edits toward the modules failing in practice.
+                    try:
+                        from nyxara.growth.signal_bus import get_signal_bus
+                        bus = get_signal_bus()
+                        for lesson in lessons[:5]:
+                            bus.post("reflection_focus", getattr(lesson, "text", ""),
+                                     source="reflector",
+                                     weight=float(getattr(lesson, "confidence", 0.5) or 0.5))
+                    except Exception:  # noqa: BLE001 — posting is best-effort
+                        pass
             except Exception:  # noqa: BLE001
+                pass
+        # 4a2) CROSS-MODULE BUS — the world model reports its blind spots (high epistemic
+        #      uncertainty) so the weights/code channels can target what it cannot yet predict.
+        if self.world_model is not None:
+            try:
+                gap = None
+                for attr in ("mean_epistemic", "epistemic", "uncertainty"):
+                    fn = getattr(self.world_model, attr, None)
+                    if callable(fn):
+                        gap = float(fn())
+                        break
+                if gap is not None and gap > 0.4:
+                    from nyxara.growth.signal_bus import get_signal_bus
+                    get_signal_bus().post("world_model_gap",
+                                          "world model prediction uncertainty is high",
+                                          source="world_model", weight=min(1.0, gap))
+            except Exception:  # noqa: BLE001 — the world-model signal is advisory
                 pass
         # 4b2) EMERGENT GOALS — curiosity becomes a real objective. Topics NYXARA could not
         #      answer well (low-confidence turns) and INVESTIGATE lessons turn into self-set

@@ -26,3 +26,21 @@ from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow t
 # Rebuild the cached singleton so the env overrides above take effect for every test that calls
 # get_settings(). Tests that need a different posture build their own settings explicitly.
 reload_settings()
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_signal_bus():
+    """Reset the process-shared cross-module signal bus around each test (no cross-test leakage)."""
+    try:
+        from nyxara.growth.signal_bus import reset_signal_bus
+        reset_signal_bus()
+    except Exception:  # noqa: BLE001
+        pass
+    yield
+    try:
+        from nyxara.growth.signal_bus import reset_signal_bus
+        reset_signal_bus()
+    except Exception:  # noqa: BLE001
+        pass
