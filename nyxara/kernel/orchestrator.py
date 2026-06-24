@@ -436,6 +436,9 @@ class NyxaraCore:
         # reads for multi-turn coherence, complementing semantic memory recall.
         from collections import deque
         self.history: Any = deque(maxlen=2 * max(1, history_turns))
+        # Emergent curiosity: stimuli NYXARA could not answer well become candidate topics for
+        # self-set "understand X" goals on the next idle tick (Rule 1: owner-aligned by construction).
+        self._curiosity_seeds: Any = deque(maxlen=32)
         # background default-mode cognition (Layer 5): off until started
         self._engaged = False
         self._cognition_thread: Any = None
@@ -2701,6 +2704,53 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _spawn_emergent_goals(self, *, max_new: int = 2) -> List[str]:
+        """Turn genuine curiosity into self-set goals — owner-aligned, deduped, bounded.
+
+        Sources are real internal signals, not a script: stimuli answered with low confidence
+        (``_curiosity_seeds``) and the reflector's INVESTIGATE lessons. Novelty is read from the
+        motivation system's visit counts when present, so a theme already explored does not respawn.
+        Each topic becomes a ``understand: X`` goal via :meth:`GoalSystem.spawn_curiosity_goal`
+        (rejected if it fails owner-alignment) and is also enqueued for research.
+        """
+        topics: List[str] = []
+        seen = set()
+        # 1) low-confidence turns she could learn from
+        while self._curiosity_seeds and len(topics) < max_new * 2:
+            t = str(self._curiosity_seeds.popleft()).strip()
+            k = t.lower()
+            if t and k not in seen:
+                seen.add(k)
+                topics.append(t)
+        # 2) INVESTIGATE lessons from reflection
+        if self.reflector is not None and len(topics) < max_new * 2:
+            try:
+                for lesson in self.reflector.lessons():
+                    if str(getattr(lesson, "kind", "")).upper().endswith("INVESTIGATE"):
+                        t = str(getattr(lesson, "text", "")).strip()
+                        if t and t.lower() not in seen:
+                            seen.add(t.lower())
+                            topics.append(t)
+            except Exception:  # noqa: BLE001 — lessons are advisory
+                pass
+        spawned: List[str] = []
+        for topic in topics:
+            if len(spawned) >= max_new:
+                break
+            novelty = 0.6
+            if self.motivation is not None:
+                try:
+                    visits = self.motivation.visits(topic) if hasattr(self.motivation, "visits") else 0
+                    novelty = 1.0 / (1.0 + float(visits))
+                except Exception:  # noqa: BLE001
+                    novelty = 0.6
+            goal = self.goals.spawn_curiosity_goal(topic, info_gain=0.55, novelty=novelty)
+            if goal is not None:
+                spawned.append(goal.name)
+                if topic[:60] not in self._research_queue:
+                    self._research_queue.append(topic[:60])
+        return spawned
+
     def _compound_own_models(self, stimulus: str, candidate: Candidate, success: bool) -> None:
         """Feed this lived exchange back into NYXARA's OWN learned models so they compound.
 
@@ -2719,6 +2769,14 @@ class NyxaraCore:
         docs = [d for d in (text, reply) if d]
         if not docs:
             return
+        # emergent curiosity: a question she answered with low confidence is something she could
+        # learn — remember it as a seed for a self-set "understand X" goal on the next idle tick.
+        try:
+            if text and len(text) >= 8 and float(getattr(candidate, "confidence", 1.0) or 1.0) < 0.4 \
+                    and getattr(candidate, "kind", "respond") == "respond":
+                self._curiosity_seeds.append(text)
+        except Exception:  # noqa: BLE001 — curiosity tracking is best-effort
+            pass
         # 1) the own brain learns the exchange (teach reaches the inner LLMReasoner's SelfBrain)
         teach = getattr(self.reasoner, "teach_self_brain", None)
         if teach is None:
@@ -3033,6 +3091,20 @@ class NyxaraCore:
                         except Exception:  # noqa: BLE001
                             pass
             except Exception:  # noqa: BLE001
+                pass
+        # 4b2) EMERGENT GOALS — curiosity becomes a real objective. Topics NYXARA could not
+        #      answer well (low-confidence turns) and INVESTIGATE lessons turn into self-set
+        #      "understand X" goals in the objective space, owner-aligned by construction and
+        #      pursued via the normal priority machinery. This is goal *emergence*, not seeding.
+        if self.goals is not None and hasattr(self.goals, "spawn_curiosity_goal"):
+            try:
+                spawned = self._spawn_emergent_goals()
+                if spawned:
+                    report["emergent_goals"] = spawned
+                    for name in spawned:
+                        self.mind.record(ThoughtKind.GOAL, f"curiosity: {name}"[:80],
+                                         salience=0.55)
+            except Exception:  # noqa: BLE001 — emergent goals are a capability, never required
                 pass
         # 4c) Level 9 — civilization: fold any recent micro-agent reports into MindScope
         if self.civilization is not None:

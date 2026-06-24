@@ -119,6 +119,46 @@ class GoalSystem:
                source: str = "") -> Goal:
         return self.add(Goal(name=name, vector=vector, priority=priority, source=source))
 
+    def spawn_curiosity_goal(self, topic: str, *, info_gain: float = 0.5,
+                             novelty: float = 0.5, source: str = "emergent") -> Optional[Goal]:
+        """Let a NEW goal *emerge* from curiosity — not seeded by hand, but never against the Master.
+
+        This is the missing piece between intrinsic motivation and the objective space: when NYXARA
+        notices something learnable and novel (a gap she could not answer, an under-explored region
+        from the dark-data miner, an INVESTIGATE lesson), she turns it into a real, prioritised goal
+        to *understand it*. The goal is anchored on the ``knowledge``/``capability`` axes **with a
+        standing ``owner_benefit`` component**, so it is owner-aligned by construction — emergent
+        curiosity that pointed against the Master would be rejected (Rule 1) and is refused here.
+
+        De-duplicates against existing goals by topic, and returns the new goal or ``None`` (blank
+        topic, a near-duplicate, or — defensively — a vector that fails owner-alignment).
+        """
+        topic = " ".join(str(topic or "").split())[:80].strip()
+        if len(topic) < 3:
+            return None
+        key = topic.lower()
+        for g in self._goals.values():
+            if g.source and "emergent" in g.source and key in g.name.lower():
+                return None                                  # already curious about this
+        ig = max(0.0, min(1.0, float(info_gain)))
+        nov = max(0.0, min(1.0, float(novelty)))
+        vector: Dict[str, float] = {}
+        if "knowledge" in self.dims:
+            vector["knowledge"] = 0.6 + 0.4 * ig
+        if "capability" in self.dims:
+            vector["capability"] = 0.3 + 0.3 * ig
+        # the standing owner anchor that keeps emergent curiosity in service of the Master
+        if "owner_benefit" in self.dims:
+            vector["owner_benefit"] = 0.4
+        if not vector:
+            vector = {self.dims[0]: 1.0}
+        priority = max(0.05, min(0.85, 0.3 + 0.5 * ig * (0.5 + 0.5 * nov)))
+        goal = Goal(name=f"understand: {topic}", vector=vector, priority=priority,
+                    source=source)
+        if not self.is_owner_aligned(goal):
+            return None                                      # never pursue what points away (Rule 1)
+        return self.add(goal)
+
     def goals(self) -> List[Goal]:
         return list(self._goals.values())
 
