@@ -60,6 +60,9 @@ class IntelligenceState:
     last_inputs: Dict[str, float] = field(default_factory=dict)
     compute: Dict[str, Any] = field(default_factory=dict)
     history: list = field(default_factory=list)   # recent index readings — for trend/plateau
+    # recent EXTERNAL held-out / adversarial scores — the transfer signal whose trend (over the
+    # config transfer-window) tells whether proxy gains are *real* or merely Goodharted overfitting.
+    validation_history: list = field(default_factory=list)
     # per-dimension Beta(α, β) posteriors over "this dimension is healthy" — the uncertainty the
     # planner samples (a never-tried dimension is wide; a consistently-weak one is confidently low)
     dim_alpha: Dict[str, float] = field(default_factory=dict)
@@ -71,6 +74,7 @@ class IntelligenceState:
                 "last_inputs": {k: round(float(v), 6) for k, v in self.last_inputs.items()},
                 "compute": dict(self.compute),
                 "history": [round(float(v), 6) for v in self.history],
+                "validation_history": [round(float(v), 6) for v in self.validation_history],
                 "dim_alpha": {k: round(float(v), 6) for k, v in self.dim_alpha.items()},
                 "dim_beta": {k: round(float(v), 6) for k, v in self.dim_beta.items()},
                 "at": self.at}
@@ -83,6 +87,7 @@ class IntelligenceState:
                    last_inputs=dict(d.get("last_inputs", {}) or {}),
                    compute=dict(d.get("compute", {}) or {}),
                    history=list(d.get("history", []) or []),
+                   validation_history=list(d.get("validation_history", []) or []),
                    dim_alpha={k: float(v) for k, v in (d.get("dim_alpha", {}) or {}).items()},
                    dim_beta={k: float(v) for k, v in (d.get("dim_beta", {}) or {}).items()},
                    at=float(d.get("at", time.time()) or time.time()))
@@ -153,8 +158,17 @@ class IntelligenceIndex:
         frontier = _clamp01(float(getattr(report, "frontier", 0.0) or 0.0))
         rigor = _clamp01(float(getattr(report, "rigor", 0.0) or 0.0))
 
+        # EXTERNAL ground truth: the combined held-out + adversarial score the RSI loop measured on
+        # tasks it never edits against (recursive_improvement.run_validation). This is the only
+        # signal NYXARA cannot Goodhart — it rises only when capability genuinely transfers. Default
+        # 0.0 when validation was not run, so the index degrades exactly as before.
+        validation = getattr(report, "validation", None) or {}
+        transfer = _clamp01(float(validation.get("transfer_score", 0.0) or 0.0)) \
+            if isinstance(validation, dict) else 0.0
+
         return {"accuracy": accuracy, "handoff": _clamp01(handoff_rate),
                 "weaknesses": _clamp01(weaknesses_resolved), "knowledge": knowledge,
+                "transfer": transfer,
                 "stability": stability, "frontier": frontier, "rigor": rigor}
 
     # ---------------------------------------------------------------------- #
@@ -180,9 +194,18 @@ class IntelligenceIndex:
     # The equation: I_(t+1) = f(I_t, C_available)
     # ---------------------------------------------------------------------- #
     def update(self, prior: IntelligenceState, signals: Dict[str, float],
-               compute: Any) -> IntelligenceState:
-        """Fold this cycle's signals + available compute into the prior index, with momentum."""
-        weights = dict(getattr(self.settings.self_improvement, "intelligence_weights", {}) or {})
+               compute: Any, *, validated: Optional[bool] = None) -> IntelligenceState:
+        """Fold this cycle's signals + available compute into the prior index, with momentum.
+
+        ``validated`` declares whether an EXTERNAL held-out / adversarial score was measured this
+        cycle (the ``transfer`` signal is real, not a default 0.0). When it is, the held-out score
+        is tracked and the **Goodhart guard** runs: if the self-referential proxy rose but transfer
+        did not improve across the configured window, the index gain is discounted so capability is
+        only ever *claimed* when it genuinely transfers. When ``None`` it is inferred from whether a
+        ``transfer`` signal was supplied — so callers that never validate behave exactly as before.
+        """
+        cfg = self.settings.self_improvement
+        weights = dict(getattr(cfg, "intelligence_weights", {}) or {})
         if not weights:
             weights = {"accuracy": 0.4, "knowledge": 0.2, "weaknesses": 0.2, "handoff": 0.2}
         wsum = sum(weights.values()) or 1.0
@@ -193,7 +216,32 @@ class IntelligenceIndex:
         # capability), but never zeroes it — a smart small machine still grows, just slower.
         realized = base * (0.5 + 0.5 * capacity)
 
-        momentum = float(getattr(self.settings.self_improvement, "intelligence_momentum", 0.7))
+        if validated is None:
+            validated = "transfer" in signals
+        # ---- external validation: track held-out transfer and guard against Goodharting ---- #
+        transfer = _clamp01(float(signals.get("transfer", 0.0)))
+        val_history = list(prior.validation_history)
+        if validated:
+            val_history = (val_history[-11:] + [transfer])   # keep the last 12 held-out readings
+        window = max(2, int(getattr(cfg, "transfer_window", 3)))
+        recent = val_history[-window:]
+        transfer_gain = _slope(recent) if len(recent) >= 2 else 0.0   # per-cycle held-out change
+        prior_base = float(prior.last_inputs.get("base", prior.index))
+        proxy_gain = base - prior_base
+        # Goodhart: the proxy climbed (> the plateau epsilon) but held-out transfer did not. The
+        # number is rising without real, transferable capability — exactly the failure mode the
+        # Master flagged. Only meaningful once the window has filled (≥2 real readings).
+        eps = 0.005
+        goodhart = bool(validated and getattr(cfg, "goodhart_guard", True)
+                        and len(val_history) >= 2
+                        and proxy_gain > eps and transfer_gain <= eps)
+        if goodhart:
+            # refuse to climb on un-transferred gains: keep only a transfer_weight fraction of the
+            # gain over the prior index, so the index barely moves until capability actually transfers
+            keep = _clamp01(float(getattr(cfg, "transfer_weight", 0.3)))
+            realized = float(prior.index) + (realized - float(prior.index)) * keep
+
+        momentum = float(getattr(cfg, "intelligence_momentum", 0.7))
         momentum = min(1.0, max(0.0, momentum))
         index = _clamp01(momentum * float(prior.index) + (1.0 - momentum) * realized)
 
@@ -203,6 +251,9 @@ class IntelligenceIndex:
         inputs["base"] = round(base, 6)
         inputs["capacity"] = round(capacity, 6)
         inputs["trend"] = round(_slope(history), 6)         # rising / plateau / declining
+        inputs["transfer"] = round(transfer, 6)             # this cycle's external held-out score
+        inputs["transfer_gain"] = round(transfer_gain, 6)   # held-out trend over the window
+        inputs["goodhart"] = 1.0 if goodhart else 0.0       # was the proxy diverging from transfer?
         # fold each dimension's signal into its Beta posterior (fractional update): a healthy
         # signal credits α, a weak one credits β. This is what the uncertainty-aware planner reads.
         dim_alpha = dict(prior.dim_alpha)
@@ -213,6 +264,7 @@ class IntelligenceIndex:
             dim_beta[k] = float(dim_beta.get(k, 1.0)) + (1.0 - s)
         return IntelligenceState(index=index, t=prior.t + 1, last_inputs=inputs,
                                  compute=compute_d, history=history,
+                                 validation_history=val_history,
                                  dim_alpha=dim_alpha, dim_beta=dim_beta, at=time.time())
 
     # ---------------------------------------------------------------------- #
@@ -238,10 +290,18 @@ class IntelligenceIndex:
         plateaued = bool(state.t >= 3 and abs(trend) < 0.005 and state.index < 0.95)
         capacity = self.compute_capacity(compute) if compute is not None else 0.0
         escalate = bool(plateaued and capacity >= 0.4)       # stalled + room to push → push harder
+        # external-validation health: did the last cycle's proxy diverge from held-out transfer?
+        transfer_gain = float(state.last_inputs.get("transfer_gain", 0.0))
+        goodhart = bool(state.last_inputs.get("goodhart", 0.0) >= 0.5)
         return {
             "focus": focus, "action": action_for[focus], "weakest_value": round(sig[focus], 4),
             "trend": round(trend, 6), "plateaued": plateaued, "escalate": escalate,
+            "transfer_gain": round(transfer_gain, 6), "goodhart": goodhart,
             "rationale": (f"weakest dimension '{focus}'={sig[focus]:.2f}; trend={trend:+.4f}"
+                          + (f"; transfer={transfer_gain:+.4f}" if "transfer_gain"
+                             in state.last_inputs else "")
+                          + ("; ⚠ GOODHART: proxy rose but held-out did not — gain discounted"
+                             if goodhart else "")
                           + ("; plateaued — escalate effort" if escalate else "")),
         }
 
@@ -290,14 +350,18 @@ class IntelligenceIndex:
         trend = float(state.last_inputs.get("trend", _slope(state.history)))
         plateaued = bool(state.t >= 3 and abs(trend) < 0.005 and state.index < 0.95)
         escalate = bool(plateaued and capacity >= 0.4)
+        transfer_gain = float(state.last_inputs.get("transfer_gain", 0.0))
+        goodhart = bool(state.last_inputs.get("goodhart", 0.0) >= 0.5)
         return {
             "focus": best_dim, "action": _ACTION_FOR[best_dim],
             "weakest_value": round(1.0 - deficits[best_dim], 4),
             "expected_values": {k: round(v, 4) for k, v in evs.items()},
             "trend": round(trend, 6), "plateaued": plateaued, "escalate": escalate,
+            "transfer_gain": round(transfer_gain, 6), "goodhart": goodhart,
             "planner": "thompson",
             "rationale": (f"planned action '{_ACTION_FOR[best_dim]}' for '{best_dim}' "
                           f"(EV={evs[_ACTION_FOR[best_dim]]:.3f}, capacity={capacity:.2f})"
+                          + ("; ⚠ GOODHART: held-out flat while proxy rose" if goodhart else "")
                           + ("; plateaued — escalate effort" if escalate else "")),
         }
 
@@ -484,5 +548,23 @@ if __name__ == "__main__":  # pragma: no cover
 
     # a fresh store starts at a zeroed I_0
     assert IntelligenceIndex(memory=MemoryStore()).load().t == 0
+
+    # --- anti-Goodhart: a rising proxy with FLAT held-out transfer must not inflate the index --- #
+    # Two histories from the same starting state: one where transfer rises with the proxy (honest),
+    # one where the proxy is forced up while held-out stays flat (gaming). The honest run must end
+    # higher, and the gamed run must raise the Goodhart flag.
+    idx3 = IntelligenceIndex()
+    honest = gamed = IntelligenceState()
+    base_sig = {"accuracy": 0.6, "handoff": 0.6, "weaknesses": 0.6, "knowledge": 0.6}
+    for k in range(1, 5):
+        proxy = min(1.0, 0.6 + 0.1 * k)               # proxy climbs every cycle in BOTH runs
+        honest = idx3.update(honest, {**base_sig, "accuracy": proxy, "transfer": proxy}, big)
+        gamed = idx3.update(gamed, {**base_sig, "accuracy": proxy, "transfer": 0.3}, big)
+    print(f"\nhonest vs gamed     : I={honest.index:.4f} vs {gamed.index:.4f} "
+          f"(gamed goodhart={bool(gamed.last_inputs.get('goodhart'))})")
+    assert honest.index > gamed.index, "transferred gains must beat Goodharted ones"
+    assert gamed.last_inputs.get("goodhart") == 1.0, "flat held-out + rising proxy must flag Goodhart"
+    assert honest.last_inputs.get("goodhart") == 0.0, "honest transfer must not flag Goodhart"
+    assert len(gamed.validation_history) >= 4 and gamed.last_inputs.get("transfer") == 0.3
 
     print("\nALL SELF-TESTS PASSED ✓")

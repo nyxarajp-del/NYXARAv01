@@ -43,11 +43,23 @@ def _small() -> ComputeReport:
 # --------------------------------------------------------------------------- #
 def test_signals_are_bounded_fractions():
     sig = IntelligenceIndex(memory=MemoryStore()).compute_signals(_Report())
-    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge", "stability",
-                        "frontier", "rigor"}
+    assert set(sig) == {"accuracy", "handoff", "weaknesses", "knowledge", "transfer",
+                        "stability", "frontier", "rigor"}
     assert all(0.0 <= v <= 1.0 for v in sig.values())
     assert sig["accuracy"] == 0.8
     assert abs(sig["handoff"] - 0.6) < 1e-9          # 6 self / 10 total
+    assert sig["transfer"] == 0.0                    # no validation block on the bare report
+
+
+def test_transfer_signal_read_from_validation_block():
+    class _V:
+        benchmark = {"accuracy": 0.8, "handoff": {"self": 6, "teacher": 4}}
+        weaknesses = {"n_weaknesses": 2}
+        kept = 1
+        lessons_stored = 10
+        validation = {"transfer_score": 0.42}
+    sig = IntelligenceIndex().compute_signals(_V())
+    assert abs(sig["transfer"] - 0.42) < 1e-9
 
 
 def test_signals_survive_empty_report():
@@ -264,3 +276,75 @@ def test_slope_detects_direction():
     assert _slope([0.1, 0.2, 0.3, 0.4]) > 0
     assert _slope([0.4, 0.3, 0.2, 0.1]) < 0
     assert abs(_slope([0.5, 0.5, 0.5])) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# external validation: the anti-Goodhart guard (the heart of this change)
+# --------------------------------------------------------------------------- #
+def _drive(idx, *, proxy, transfer, cycles=4, validated=True):
+    """Run `cycles` updates with a fixed proxy/transfer schedule; return the final state.
+
+    `proxy` and `transfer` are callables cycle->[0,1] so a test can climb one while holding the
+    other flat. Both runs start from a zeroed state on a capable machine.
+    """
+    s = IntelligenceState()
+    base = {"accuracy": 0.5, "handoff": 0.5, "weaknesses": 0.5, "knowledge": 0.5}
+    for k in range(1, cycles + 1):
+        sig = {**base, "accuracy": proxy(k), "transfer": transfer(k)}
+        s = idx.update(s, sig, _big(), validated=validated)
+    return s
+
+
+def test_goodhart_guard_discounts_untransferred_gains():
+    idx = IntelligenceIndex()
+    # honest: proxy AND held-out transfer climb together
+    honest = _drive(idx, proxy=lambda k: min(1.0, 0.5 + 0.1 * k),
+                    transfer=lambda k: min(1.0, 0.5 + 0.1 * k))
+    # gamed: proxy climbs, held-out transfer pinned flat (overfitting the proxy)
+    gamed = _drive(idx, proxy=lambda k: min(1.0, 0.5 + 0.1 * k),
+                   transfer=lambda k: 0.3)
+    assert honest.index > gamed.index               # transferred gains beat Goodharted ones
+    assert gamed.last_inputs["goodhart"] == 1.0      # the divergence was caught
+    assert honest.last_inputs["goodhart"] == 0.0     # honest transfer is not penalised
+
+
+def test_transfer_gain_measured_over_window():
+    idx = IntelligenceIndex()
+    s = _drive(idx, proxy=lambda k: 0.6, transfer=lambda k: min(1.0, 0.2 + 0.1 * k))
+    assert s.last_inputs["transfer_gain"] > 0         # rising held-out => positive transfer gain
+    assert abs(s.last_inputs["transfer"] - s.validation_history[-1]) < 1e-6
+    # the window is bounded by config; only the most recent readings drive the gain
+    window = idx.settings.self_improvement.transfer_window
+    assert window >= 2 and len(s.validation_history) >= window
+
+
+def test_validation_history_round_trips_through_state_and_memory():
+    store = MemoryStore()
+    idx = IntelligenceIndex(memory=store)
+    s = _drive(idx, proxy=lambda k: 0.6, transfer=lambda k: 0.4 + 0.05 * k)
+    assert idx.save(s)
+    loaded = IntelligenceIndex(memory=store).load()
+    assert len(loaded.validation_history) == len(s.validation_history)
+    assert all(abs(a - b) < 1e-6 for a, b in zip(loaded.validation_history, s.validation_history))
+    # and a plain dict round-trip preserves it too (back-compat: missing key -> empty list)
+    rt = IntelligenceState.from_dict(s.to_dict()).validation_history
+    assert all(abs(a - b) < 1e-6 for a, b in zip(rt, s.validation_history))
+    assert IntelligenceState.from_dict({"index": 0.5}).validation_history == []
+
+
+def test_unvalidated_cycles_behave_exactly_as_before():
+    # with no transfer signal supplied, validation_history stays empty and no Goodhart guard fires
+    idx = IntelligenceIndex()
+    s = IntelligenceState()
+    sig = {"accuracy": 0.8, "handoff": 0.6, "weaknesses": 0.5, "knowledge": 0.3}
+    for _ in range(4):
+        s = idx.update(s, sig, _big())               # validated inferred False (no "transfer" key)
+    assert s.validation_history == []
+    assert s.last_inputs["goodhart"] == 0.0
+
+
+def test_directive_surfaces_goodhart_warning():
+    idx = IntelligenceIndex()
+    gamed = _drive(idx, proxy=lambda k: min(1.0, 0.5 + 0.1 * k), transfer=lambda k: 0.3)
+    d = idx.growth_directive(gamed, _big())
+    assert d["goodhart"] is True and "GOODHART" in d["rationale"]

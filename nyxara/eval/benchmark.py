@@ -23,6 +23,7 @@ Design rules:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -309,6 +310,36 @@ class Benchmark:
 
     def categories(self) -> List[str]:
         return sorted({t.category for t in self._tasks})
+
+    def split(self, holdout_frac: float = 0.3, *, seed: int = 0
+              ) -> Tuple["Benchmark", "Benchmark"]:
+        """Partition the battery into a (train, holdout) pair by a stable hash of each task id.
+
+        This is the external-validation primitive the intelligence index relies on: the holdout
+        fold is the *same* tasks every cycle (a per-id hash, not a shuffle), so the self-improvement
+        loop — which only ever sees the train fold — can never drift into the held-out tasks. The
+        held-out fold is therefore a clean generalisation check rather than a memorised one.
+
+        ``holdout_frac`` is the target fraction reserved for holdout. With at least two tasks each
+        fold is guaranteed non-empty (a degenerate all-in-one-bucket hash still yields a 1-task
+        holdout) so a caller never has to special-case an empty battery.
+        """
+        frac = min(0.99, max(0.01, float(holdout_frac)))
+        train: List[BenchmarkTask] = []
+        holdout: List[BenchmarkTask] = []
+        # map each id deterministically to [0, 1) and compare against the fraction; a per-id hash
+        # keeps a task in the same fold even if the battery's contents or order later change.
+        for t in self._tasks:
+            h = hashlib.sha256(f"{seed}:{t.id}".encode("utf-8")).digest()
+            u = int.from_bytes(h[:8], "big") / float(1 << 64)   # uniform in [0, 1)
+            (holdout if u < frac else train).append(t)
+        # guarantee both folds are usable when there is anything to split
+        if self._tasks and not holdout:
+            holdout.append(train.pop())
+        if self._tasks and not train:
+            train.append(holdout.pop())
+        return (Benchmark(f"{self.name}:train", train),
+                Benchmark(f"{self.name}:holdout", holdout))
 
     def run(self, solver: Solver, *, category: Optional[str] = None) -> BenchmarkReport:
         results: List[BenchmarkResult] = []

@@ -37,6 +37,9 @@ class SelfImprovementReport:
     code: Optional[Dict[str, Any]] = None
     architecture: Optional[Dict[str, Any]] = None
     benchmark: Optional[Dict[str, Any]] = None
+    # EXTERNAL ground-truth validation: held-out fold + adversarial battery the optimiser never
+    # edits against, with a combined ``transfer_score``. None when validation is disabled/unrun.
+    validation: Optional[Dict[str, Any]] = None
     weaknesses: Optional[Dict[str, Any]] = None
     optimizations: List[Dict[str, Any]] = field(default_factory=list)
     lessons_stored: int = 0
@@ -62,7 +65,8 @@ class SelfImprovementReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"code": self.code, "architecture": self.architecture,
-                "benchmark": self.benchmark, "weaknesses": self.weaknesses,
+                "benchmark": self.benchmark, "validation": self.validation,
+                "weaknesses": self.weaknesses,
                 "optimizations": self.optimizations, "lessons_stored": self.lessons_stored,
                 "tuned": self.tuned, "kept": self.kept, "rolled_back": self.rolled_back,
                 "enacted": self.enacted, "intelligence_index": self.intelligence_index,
@@ -86,9 +90,18 @@ class SelfImprovementReport:
                  f"weaknesses      : {n_weak}",
                  f"optimisation    : enacted={self.enacted}, kept={self.kept}, "
                  f"rolled_back={self.rolled_back}, lessons={self.lessons_stored}"]
+        if self.validation is not None and "transfer_score" in self.validation:
+            v = self.validation
+            lines.append(f"validation      : transfer {v['transfer_score']:.0%} "
+                         f"(held-out {v.get('holdout_mean_score', 0.0):.0%}, "
+                         f"adversarial {v.get('adversarial_mean_score', 0.0):.0%}) "
+                         f"— external ground truth")
         if self.intelligence_index is not None:
             lines.append(f"intelligence    : I_{self.intelligence_t} = "
                          f"{self.intelligence_index:.4f}")
+            if self.directive and self.directive.get("goodhart"):
+                lines.append("                  ⚠ GOODHART: proxy rose but held-out did not "
+                             "— index gain discounted")
         if self.directive is not None:
             lines.append(f"directive       : {self.directive.get('action')} "
                          f"(focus={self.directive.get('focus')}, "
@@ -130,6 +143,7 @@ class RecursiveSelfImprovement:
         self._code = None
         self._arch = None
         self._bench = None
+        self._validation: Optional[Dict[str, Any]] = None   # external held-out + adversarial scores
         self._compute = None
         self._effort: Optional[Dict[str, Any]] = None
         self._directive: Optional[Dict[str, Any]] = None
@@ -137,6 +151,7 @@ class RecursiveSelfImprovement:
         self._touched_arms: List[str] = []     # arms credited at the end of this cycle
         self._prior_index: Optional[float] = None
         self._prior_base: Optional[float] = None    # momentum-free raw target before this cycle
+        self._prior_transfer: Optional[float] = None  # external held-out score before this cycle
         self._last_signals: Optional[Dict[str, float]] = None
         self._meta: Any = None                 # meta-meta controller (lazy; gated)
         self._meta_built = False
@@ -274,7 +289,16 @@ class RecursiveSelfImprovement:
     def run_benchmarks(self, *, category: Optional[str] = None) -> Dict[str, Any]:
         from nyxara.eval.benchmark import (build_default_benchmark, core_solver,
                                            run_router)
-        bench = build_default_benchmark()
+        cfg = self.settings.self_improvement
+        full = build_default_benchmark()
+        # reserve a deterministic held-out fold for EXTERNAL validation: the self-improvement loop
+        # detects weaknesses / selects edits ONLY against the train fold, so the held-out fold (and
+        # the adversarial battery, run in run_validation) never leaks into edit selection. That
+        # isolation is exactly what stops the index Goodharting the very tasks it measures.
+        if bool(getattr(cfg, "validation_enabled", True)):
+            bench, _holdout = full.split(float(getattr(cfg, "validation_holdout_frac", 0.3)))
+        else:
+            bench = full
         # the intelligence index drives measurement effort: when the machine cannot afford the
         # full battery (effort budget says benchmark_full is False) and no category was pinned,
         # she probes a single representative category instead — a real, index-governed compute
@@ -304,6 +328,62 @@ class RecursiveSelfImprovement:
             "handoff": handoff, "report": report.to_dict(), "scope": scope or "full"}
         return self._bench
 
+    # ---- (3b) EXTERNAL validation — held-out fold + adversarial battery (anti-Goodhart) ---- #
+    def run_validation(self) -> Optional[Dict[str, Any]]:
+        """Measure REAL, transferable capability on tasks the optimiser never edits against.
+
+        Two external rulers, run through the *same* sovereign solver as the proxy benchmark:
+
+        * the **held-out fold** of the training battery (``Benchmark.split``) — a same-distribution
+          generalisation check; and
+        * the full **adversarial** battery (``eval/hard_benchmark.build_hard_benchmark``: multi-hop
+          deduction, sequence induction, code-output prediction, grounded reading and calibration
+          traps) — an out-of-distribution transfer check.
+
+        Neither is ever passed to :meth:`detect_weaknesses` / :meth:`_weakest_categories`, so it
+        cannot steer edit selection. Their combined ``transfer_score`` is the one signal NYXARA
+        cannot game: it rises only when capability genuinely transfers. Honest about cost — when
+        the effort budget says the machine cannot afford the full battery it scopes the adversarial
+        run to a representative category, and any failure degrades to a clean ``None``/error block.
+        """
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "validation_enabled", True)):
+            self._validation = None
+            return None
+        try:
+            from nyxara.eval.benchmark import build_default_benchmark, core_solver
+            from nyxara.eval.hard_benchmark import build_hard_benchmark
+        except Exception as exc:  # noqa: BLE001
+            self._validation = {"error": f"validation import failed: {exc}",
+                                "transfer_score": 0.0}
+            return self._validation
+        full = build_default_benchmark()
+        _train, holdout = full.split(float(getattr(cfg, "validation_holdout_frac", 0.3)))
+        adversarial = build_hard_benchmark()
+        self._plan_effort()
+        adv_scope: Optional[str] = None
+        if self._effort is not None and not self._effort.get("benchmark_full", True):
+            cats = adversarial.categories()
+            adv_scope = cats[0] if cats else None
+        try:
+            solver = core_solver()
+            ho = holdout.run(solver)
+            adv = adversarial.run(solver, category=adv_scope)
+        except Exception as exc:  # noqa: BLE001 — validation is a measurement, never fatal
+            self._validation = {"error": f"validation failed: {exc}", "transfer_score": 0.0}
+            return self._validation
+        # mean_score (graded, partial credit) is a smoother transfer signal than pass/fail accuracy
+        transfer = 0.5 * float(ho.mean_score) + 0.5 * float(adv.mean_score)
+        self._validation = {
+            "holdout_accuracy": round(ho.accuracy, 6),
+            "holdout_mean_score": round(ho.mean_score, 6), "holdout_n": len(ho),
+            "adversarial_accuracy": round(adv.accuracy, 6),
+            "adversarial_mean_score": round(adv.mean_score, 6), "adversarial_n": len(adv),
+            "adversarial_by_category": adv.by_category(),
+            "adversarial_scope": adv_scope or "full",
+            "transfer_score": round(transfer, 6)}
+        return self._validation
+
     # ---- (4) self weakness detection ---- #
     def detect_weaknesses(self) -> Any:
         from nyxara.growth.weakness import WeaknessSynthesizer
@@ -329,7 +409,8 @@ class RecursiveSelfImprovement:
         report = SelfImprovementReport(
             code=self._code.to_dict() if self._code is not None else None,
             architecture=self._arch.to_dict() if self._arch is not None else None,
-            benchmark=self._bench, weaknesses=wreport.to_dict(), enacted=bool(enact))
+            benchmark=self._bench, validation=self._validation,
+            weaknesses=wreport.to_dict(), enacted=bool(enact))
 
         # --- safe, non-source enactment (lessons + tuning) --- #
         report.lessons_stored = self._store_lessons(wreport, enact=enact)
@@ -369,11 +450,13 @@ class RecursiveSelfImprovement:
     def run(self, *, enact: Optional[bool] = None,
             category: Optional[str] = None) -> SelfImprovementReport:
         self._code = self._arch = self._bench = None
+        self._validation = None
         self._compute = self._effort = None
         self._ledger_state = None
         self._touched_arms = []
         self._prior_index = None
         self._prior_base = None
+        self._prior_transfer = None
         self._last_signals = None
         # the index governs effort up front, before any expensive step, so it shapes how deeply
         # she benchmarks and reasons this cycle — not merely how the cycle is later summarised
@@ -390,10 +473,16 @@ class RecursiveSelfImprovement:
         subprocess-bound. Falls back to sequential when ``parallel_cycle`` is off or the
         thread pool is unavailable; an error in any one branch is contained to that branch's
         own graceful-empty handling."""
-        do_bench = self.settings.self_improvement.benchmark_in_cycle
+        cfg = self.settings.self_improvement
+        do_bench = cfg.benchmark_in_cycle
+        do_val = bool(do_bench and getattr(cfg, "validation_enabled", True))
         steps = [self.review_code, self.analyze_architecture]
         if do_bench:
             steps.append(lambda: self.run_benchmarks(category=category))
+        # external validation writes its OWN disjoint cache (self._validation) and never feeds
+        # weakness detection, so it composes with the other observation steps just like benchmark
+        if do_val:
+            steps.append(self.run_validation)
         if not getattr(self.settings.self_improvement, "parallel_cycle", True) or len(steps) < 2:
             for step in steps:
                 step()
@@ -500,6 +589,12 @@ class RecursiveSelfImprovement:
                 "base", self._prior_index))
         except Exception:  # noqa: BLE001
             self._prior_base = self._prior_index
+        # the external held-out score carried on the prior state — the anchor the ledger credits
+        # against, so an edit is reinforced by the gain it produced on tasks it never trained on
+        try:
+            self._prior_transfer = float(getattr(prior, "last_inputs", {}).get("transfer", 0.0))
+        except Exception:  # noqa: BLE001
+            self._prior_transfer = 0.0
         try:
             self._effort = intel.effort_budget(prior, compute)
         except Exception:  # noqa: BLE001
@@ -554,7 +649,11 @@ class RecursiveSelfImprovement:
             signals = intel.compute_signals(report)
             self._last_signals = dict(signals)
             self._last_signals["capacity"] = intel.compute_capacity(compute)
-            state = intel.update(prior, signals, compute)
+            # declare whether an EXTERNAL held-out score was really measured this cycle, so the
+            # index tracks transfer and runs the Goodhart guard only on a genuine validation
+            validated = bool(self._validation is not None
+                             and "transfer_score" in (self._validation or {}))
+            state = intel.update(prior, signals, compute, validated=validated)
             intel.save(state)
             report.intelligence_index = round(float(state.index), 6)
             report.intelligence_t = int(state.t)
@@ -627,6 +726,12 @@ class RecursiveSelfImprovement:
                 bus.post("index_delta",
                          float(report.intelligence_index) - float(self._prior_index),
                          source="code", weight=1.0)
+            # surface the external-validation health so other faculties can react to overfitting
+            if report.directive is not None:
+                bus.post("transfer_gain", float(report.directive.get("transfer_gain", 0.0)),
+                         source="validation", weight=1.0)
+                if report.directive.get("goodhart"):
+                    bus.post("goodhart", 1.0, source="validation", weight=1.0)
         except Exception:  # noqa: BLE001 — publishing is advisory, never fatal
             pass
 
@@ -655,7 +760,18 @@ class RecursiveSelfImprovement:
         try:
             led = self._ledger_obj()
             state = self._ledger_state_obj() or led.load()
-            delta = float(report.intelligence_index) - float(self._prior_index)
+            # credit by the EXTERNAL transfer delta (gain on held-out / adversarial tasks) rather
+            # than the self-referential index delta — an intervention is reinforced only when it
+            # actually transferred, so the ledger can never learn to reward Goodharting the proxy.
+            cfg = self.settings.self_improvement
+            if (bool(getattr(cfg, "credit_on_transfer", True)) and self._validation
+                    and "transfer_score" in self._validation):
+                cur_t = float(self._validation.get("transfer_score", 0.0))
+                delta = cur_t - float(self._prior_transfer or 0.0)
+                credit_basis = "transfer"
+            else:
+                delta = float(report.intelligence_index) - float(self._prior_index)
+                credit_basis = "index"
             arms = list(dict.fromkeys(self._touched_arms))   # dedupe, preserve order
             led.record_delta(state, arms, delta)
             led.save(state)
@@ -668,6 +784,7 @@ class RecursiveSelfImprovement:
                 for arm in arms:
                     fc.observe(arm, feats, reward)
             report.ledger = {"delta": round(delta, 6), "arms": arms,
+                             "basis": credit_basis,
                              "reward": round(led.reward_from_delta(delta), 4),
                              "summary": state.summary()}
         except Exception:  # noqa: BLE001 — credit assignment is advisory, never fatal
@@ -947,5 +1064,15 @@ if __name__ == "__main__":  # pragma: no cover
     assert report.effort_budget is not None and "max_edits_per_cycle" in report.effort_budget
     assert report.compute is not None and "recommended_device" in report.compute
     print(f"\nintelligence index  : I_{report.intelligence_t} = {report.intelligence_index:.4f}")
+
+    # external ground-truth validation ran on held-out + adversarial tasks the loop never edits
+    assert report.validation is not None and "transfer_score" in report.validation
+    v = report.validation
+    assert 0.0 <= v["transfer_score"] <= 1.0
+    assert v["holdout_n"] >= 1 and v["adversarial_n"] >= 1
+    # the index carries the transfer signal and a Goodhart verdict for this cycle
+    assert report.directive is not None and "goodhart" in report.directive
+    print(f"validation (transfer): {v['transfer_score']:.4f} "
+          f"(held-out {v['holdout_mean_score']:.2f}, adversarial {v['adversarial_mean_score']:.2f})")
 
     print("\nALL SELF-TESTS PASSED ✓")
