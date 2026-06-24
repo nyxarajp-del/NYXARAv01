@@ -199,3 +199,34 @@ def test_run_router_reports_sources_offline(tmp_path):
     assert len(report) == 2
     assert sources["self"] == 0
     assert sum(sources.values()) == 2
+
+
+# --------------------------------------------------------------------------- #
+# train / held-out split — the external-validation primitive (anti-Goodhart)
+# --------------------------------------------------------------------------- #
+def test_split_is_disjoint_and_covers_everything():
+    bench = build_default_benchmark()
+    train, holdout = bench.split(0.3)
+    train_ids = {t.id for t in train.tasks()}
+    holdout_ids = {t.id for t in holdout.tasks()}
+    assert train_ids.isdisjoint(holdout_ids)                 # no task is in both folds
+    assert train_ids | holdout_ids == {t.id for t in bench.tasks()}   # nothing dropped
+    assert train.tasks() and holdout.tasks()                 # both folds usable
+
+
+def test_split_is_deterministic_per_id():
+    bench = build_default_benchmark()
+    a_tr, a_ho = bench.split(0.3)
+    b_tr, b_ho = bench.split(0.3)
+    # same battery, same frac, same seed -> identical folds every cycle (held-out can't drift)
+    assert {t.id for t in a_ho.tasks()} == {t.id for t in b_ho.tasks()}
+    assert {t.id for t in a_tr.tasks()} == {t.id for t in b_tr.tasks()}
+    # a different seed reshuffles the partition
+    c_tr, c_ho = bench.split(0.3, seed=99)
+    assert {t.id for t in c_ho.tasks()} != {t.id for t in a_ho.tasks()} or len(bench) < 4
+
+
+def test_split_never_empties_a_fold_on_a_tiny_battery():
+    tiny = build_arithmetic_benchmark(2)
+    train, holdout = tiny.split(0.5)
+    assert len(train) >= 1 and len(holdout) >= 1

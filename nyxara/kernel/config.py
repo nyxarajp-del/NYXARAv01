@@ -811,8 +811,23 @@ class SelfImprovementConfig(BaseModel):
     scale_effort_by_compute: bool = True
     intelligence_momentum: float = Field(default=0.7, ge=0.0, le=1.0)
     intelligence_weights: Dict[str, float] = Field(
-        default_factory=lambda: {"accuracy": 0.4, "knowledge": 0.2,
-                                 "weaknesses": 0.2, "handoff": 0.2})
+        default_factory=lambda: {"accuracy": 0.3, "knowledge": 0.15,
+                                 "weaknesses": 0.15, "handoff": 0.15, "transfer": 0.25})
+    # --- external ground-truth validation (anti-Goodhart) --- #
+    # The index above is built from signals NYXARA can directly optimise against (her training
+    # benchmark, her own counters). On its own it is *self-referential* — a number she can raise by
+    # overfitting the very tasks it measures. These knobs add an EXTERNAL validator: a deterministic
+    # held-out fold of the training battery PLUS the adversarial hard battery (eval/hard_benchmark),
+    # neither of which is ever fed to weakness-detection / edit-selection. Real, transferable gains
+    # are measured there over a rolling window; when the proxy rises but transfer stalls, the index
+    # gain is discounted and a Goodhart flag is raised, so capability can only be *claimed* when it
+    # actually transfers. All measurement-only; degrades to the prior behaviour when disabled.
+    validation_enabled: bool = True            # run held-out + adversarial validation each cycle
+    validation_holdout_frac: float = Field(default=0.3, gt=0.0, lt=1.0)  # training fold reserved
+    transfer_window: int = Field(default=3, ge=2, le=50)   # the N-cycle transfer-gain window
+    goodhart_guard: bool = True                # discount index gain when proxy rises, transfer stalls
+    credit_on_transfer: bool = True            # ledger reward = held-out delta, not proxy delta
+    transfer_weight: float = Field(default=0.3, ge=0.0, le=1.0)  # transfer's pull in the guard
     # --- full wire: the index's directive drives a real cross-system action --- #
     # When ON, the planned growth directive (train_self_model / acquire_knowledge / …) is actually
     # dispatched — foundry forge, research-queue enqueue — instead of merely logged. Each dispatch

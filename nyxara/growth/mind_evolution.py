@@ -493,7 +493,10 @@ class MindEvolutionEngine:
             compute = {}
         shim = _ReportShim(accuracy=accuracy)
         signals = self._intel.compute_signals(shim)
-        state = self._intel.update(prior_state, signals, compute)
+        # mind-evolution measures its own benchmark accuracy; it runs no external held-out
+        # validation, so it must not track a (default-zero) transfer signal nor trip the Goodhart
+        # guard — validated=False keeps this faculty's index update exactly as it was before.
+        state = self._intel.update(prior_state, signals, compute, validated=False)
         return state, float(state.index)
 
     # ---------------------------------------------------------------------- #

@@ -221,3 +221,55 @@ def test_disabled_index_leaves_behavior_unscaled():
     rsi = RecursiveSelfImprovement(settings=s)
     bench = rsi.run_benchmarks()
     assert bench["scope"] == "full"                 # no index → full battery, full depth ceiling
+
+
+# --------------------------------------------------------------------------- #
+# external validation: held-out / adversarial scores never steer edit selection,
+# and the ledger is credited by the TRANSFER delta (anti-Goodhart, the heart of
+# this change)
+# --------------------------------------------------------------------------- #
+def test_validation_never_feeds_weakness_selection():
+    """The validation block (held-out + adversarial) must not influence what gets edited."""
+    rsi = _rsi()
+    rsi.settings = get_settings()
+    # the proxy benchmark (drives edits) has two weak training categories...
+    rsi._bench = {"by_category": {"arithmetic": {"accuracy": 0.2},
+                                  "logic": {"accuracy": 0.4}}}
+    # ...and the validation block reports adversarial categories that exist NOWHERE in _bench
+    rsi._validation = {"transfer_score": 0.1,
+                       "adversarial_by_category": {"calibration": {"accuracy": 0.0},
+                                                   "deduction": {"accuracy": 0.1}}}
+    weak = rsi._weakest_categories(limit=5)
+    blob = " ".join(weak)
+    assert "calibration" not in blob and "deduction" not in blob   # validation can't steer edits
+    assert "arithmetic" in blob                                    # only the proxy fold does
+
+
+def test_credit_outcome_rewards_transfer_delta_not_proxy():
+    from nyxara.memory.store import MemoryStore
+    rsi = RecursiveSelfImprovement(memory=MemoryStore())
+    rsi.settings.self_improvement.credit_on_transfer = True
+    # held-out transfer rose from 0.40 -> 0.55 even though we won't look at the proxy index delta
+    rsi._prior_transfer = 0.40
+    rsi._prior_index = 0.90              # proxy FELL — if credit used the index it would be negative
+    rsi._validation = {"transfer_score": 0.55}
+    rsi._touched_arms = ["arm:deepen_reasoning"]
+    report = SelfImprovementReport(enacted=True, intelligence_index=0.80)
+    rsi._credit_outcome(report)
+    assert report.ledger is not None
+    assert report.ledger["basis"] == "transfer"
+    assert abs(report.ledger["delta"] - 0.15) < 1e-6     # 0.55 - 0.40, NOT the index drop
+    assert report.ledger["reward"] > 0                   # a real transferred gain is reinforced
+
+
+def test_credit_falls_back_to_index_when_transfer_disabled():
+    from nyxara.memory.store import MemoryStore
+    rsi = RecursiveSelfImprovement(memory=MemoryStore())
+    rsi.settings.self_improvement.credit_on_transfer = False
+    rsi._prior_index = 0.50
+    rsi._validation = {"transfer_score": 0.99}           # present but must be ignored
+    rsi._touched_arms = ["arm:deepen_reasoning"]
+    report = SelfImprovementReport(enacted=True, intelligence_index=0.60)
+    rsi._credit_outcome(report)
+    assert report.ledger["basis"] == "index"
+    assert abs(report.ledger["delta"] - 0.10) < 1e-6     # 0.60 - 0.50
