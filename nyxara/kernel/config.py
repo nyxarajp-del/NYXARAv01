@@ -651,6 +651,11 @@ class RouterConfig(BaseModel):
     use_faculties: bool = True
     # With no teacher to consult, an own answer this weak is declined honestly ("I don't know").
     abstain_below: float = Field(default=0.15, ge=0.0, le=1.0)
+    # INTROSPECTION (metacognition): sample NYXARA's own model this many times and measure how
+    # consistent the answers are. Low agreement = high epistemic uncertainty she measured about
+    # *herself*, which discounts her confidence and makes her defer/abstain more readily. 1 = off
+    # (single draft, no self-consistency probe); 3 is a cheap, effective default once enabled.
+    self_consistency_samples: int = Field(default=1, ge=1, le=9)
 
 
 class SelfModelRouterConfig(BaseModel):
