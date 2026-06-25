@@ -1982,6 +1982,39 @@ class NyxaraCore:
                          skill_memory=self.skills)
         return loop.run(goal)
 
+    def _mission_exec(self, *, authority: Authority = Authority.OWNER) -> Any:
+        """Lazily build (and cache) the long-horizon executive bound to this kernel."""
+        exe = getattr(self, "_mission_executive", None)
+        if exe is None or exe.authority is not authority:
+            from nyxara.agency.mission import MissionExecutive
+            exe = MissionExecutive(self, authority=authority)
+            self._mission_executive = exe
+        return exe
+
+    def mission(self, goal: str, *, authority: Authority = Authority.OWNER,
+                deadline: Optional[float] = None, max_milestones: Optional[int] = None,
+                vector: Optional[Dict[str, float]] = None) -> Any:
+        """Pursue a *long-horizon* ``goal`` across many gated cycles (the executive).
+
+        Unlike :meth:`agent` (one bounded reactive burst), a mission decomposes the goal into
+        milestones, advances them through the full gate pipeline, **checkpoints to disk so it
+        survives restarts**, re-plans on stalls and defers (never abandons) work that hits a
+        gate. Returns the :class:`~nyxara.agency.mission.Mission`; resume later with
+        :meth:`resume_mission`.
+        """
+        return self._mission_exec(authority=authority).run(
+            goal, deadline=deadline, max_milestones=max_milestones, vector=vector)
+
+    def resume_mission(self, mission_id: str, *, authority: Authority = Authority.OWNER,
+                       max_milestones: Optional[int] = None) -> Any:
+        """Load a persisted mission and advance it further (cross-restart continuity)."""
+        return self._mission_exec(authority=authority).resume(
+            mission_id, max_milestones=max_milestones)
+
+    def active_missions(self, *, authority: Authority = Authority.OWNER) -> Any:
+        """Every persisted mission still ACTIVE or BLOCKED (awaiting the Master)."""
+        return self._mission_exec(authority=authority).active_missions()
+
     # ---- the control-law gate pipeline ---- #
     def _gate(self, c: Candidate, authority: Authority, gates: Dict[str, str]):
         # corrigibility — never act in a way that resists correction

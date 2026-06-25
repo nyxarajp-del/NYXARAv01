@@ -39,6 +39,7 @@ DEFAULT_PROMPTS: Sequence[str] = (
     "Review your recent memories for anything that may need the Master's attention.",
     "Consider whether any standing goal or concern needs progress right now.",
     "Consolidate what you have learned so far into one clear, durable lesson.",
+    "Advance your highest-priority standing mission by one concrete step.",
 )
 
 
@@ -57,10 +58,13 @@ class AutonomicLoop:
     prospective: Any = None               # ProspectiveMemory — standing intentions that come due
     proactive: Any = None                 # ProactiveEngine (auto-wired from core if inner_life)
     proactive_allowed: bool = True        # gate self-initiated proposals (presence/oversight)
+    advance_missions: bool = True         # advance a standing long-horizon mission each tick
+    mission_executive: Any = None         # MissionExecutive (auto-wired from core)
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[CycleResult] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
     prompt_sources: List[str] = field(default_factory=list)
+    missions_advanced: int = 0
     ticks: int = 0
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
@@ -80,6 +84,14 @@ class AutonomicLoop:
         # and acts on her own initiative through the core's governed proactive engine
         if self.inner_life and self.proactive is None:
             self.proactive = getattr(self.core, "proactive", None)
+        # the background mind also nudges her standing long-horizon missions forward, one
+        # gated milestone at a time, on her own cadence (months-long goals advance unattended)
+        if self.advance_missions and self.mission_executive is None:
+            try:
+                from nyxara.agency.mission import MissionExecutive
+                self.mission_executive = MissionExecutive(self.core, authority=self.authority)
+            except Exception:  # noqa: BLE001 — missions are a capability, never required
+                self.mission_executive = None
 
     def _maybe_grow(self) -> None:
         if not self.growth_every or self.growth_engine is None:
@@ -89,6 +101,29 @@ class AutonomicLoop:
         try:
             self.growth_reports.append(self.growth_engine.run())
         except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+            pass
+
+    def _advance_mission(self) -> None:
+        """Advance the highest-priority standing mission by one gated milestone.
+
+        Best-effort and fully gated: each milestone still runs the sovereign cycle, and a
+        scram already no-ops the whole tick before this is reached. A mission that hits a gate
+        defers (its work is parked and surfaced) so the background loop never stalls on it."""
+        if not self.advance_missions or self.mission_executive is None:
+            return
+        try:
+            active = self.mission_executive.active_missions()
+        except Exception:  # noqa: BLE001 — missions are best-effort, never crash the loop
+            return
+        # prefer a mission with runnable work over one merely waiting on the Master
+        runnable = [m for m in active if m.has_ready()]
+        target = (runnable or active)
+        if not target:
+            return
+        try:
+            self.mission_executive.advance(target[0], max_milestones=1)
+            self.missions_advanced += 1
+        except Exception:  # noqa: BLE001
             pass
 
     # ---- choosing what to think about ---- #
@@ -184,6 +219,7 @@ class AutonomicLoop:
         self.history.append(result)
         if result.disposition is Disposition.ESCALATE:
             self.escalations.append(result)
+        self._advance_mission()
         self._maybe_grow()
         return result
 
@@ -214,6 +250,7 @@ class AutonomicLoop:
                     self.history.append(result)
                     if result.disposition is Disposition.ESCALATE:
                         self.escalations.append(result)
+                    self._advance_mission()
                     self._maybe_grow()
                 done += 1
                 if max_ticks is not None and done >= max_ticks:
@@ -249,6 +286,7 @@ class AutonomicLoop:
                 "interval_s": self.interval_s, "inner_life": self.inner_life,
                 "acted": sum(1 for r in self.history if r.disposition is Disposition.ACT),
                 "escalations": len(self.escalations),
+                "missions_advanced": self.missions_advanced,
                 "growth_passes": len(self.growth_reports),
                 "sources": {s: self.prompt_sources.count(s)
                             for s in sorted(set(self.prompt_sources))}}
