@@ -19,6 +19,14 @@ from nyxara.agency.dynamic_tool_creator import (
     EphemeralResult,
     Language,
 )
+from nyxara.agency.mission import (
+    Milestone,
+    MilestoneStatus,
+    Mission,
+    MissionBudgets,
+    MissionExecutive,
+    MissionStatus,
+)
 from nyxara.agency.proactive import (
     Initiative,
     ProactiveEngine,
@@ -31,6 +39,12 @@ __all__ = [
     "AgentLoop",
     "AgentRun",
     "AgentStep",
+    "Mission",
+    "Milestone",
+    "MissionExecutive",
+    "MissionStatus",
+    "MilestoneStatus",
+    "MissionBudgets",
     "DynamicToolCreator",
     "EphemeralResult",
     "Language",

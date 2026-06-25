@@ -24,7 +24,7 @@ keep it bounded no matter the reasoner.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from nyxara.agency.permissions import Authority
 from nyxara.kernel.orchestrator import Disposition, NyxaraCore
@@ -82,15 +82,23 @@ class AgentRun:
 class AgentLoop:
     """Drive a :class:`NyxaraCore` through several gated turns toward a goal."""
 
-    def __init__(self, core: Optional[NyxaraCore] = None, *, max_steps: int = 6,
+    def __init__(self, core: Optional[NyxaraCore] = None, *, max_steps: int = 12,
                  authority: Authority = Authority.OWNER, skill_memory: Any = None,
-                 max_observation_chars: int = 600) -> None:
+                 max_observation_chars: int = 600, no_progress_patience: int = 4,
+                 on_step: Optional[Callable[["AgentStep"], None]] = None) -> None:
         self.core = core or NyxaraCore()
         self.max_steps = max(1, max_steps)
         self.authority = authority
         # optional: capture successful runs as reusable skills (closes the learning loop)
         self.skill_memory = skill_memory
         self.max_observation_chars = max_observation_chars
+        # progress guard: stop after this many consecutive steps that yield no *new*
+        # observation (a broader signal than the legacy "identical action twice"). Keeps a
+        # long run from spinning while still allowing genuine multi-step work to proceed.
+        self.no_progress_patience = max(1, no_progress_patience)
+        # optional hook fired after each recorded step — used by the long-horizon executive
+        # to checkpoint/journal mid-run. Never alters control flow; failures are swallowed.
+        self.on_step = on_step
 
     # ---- prompt construction ---- #
     def _build_stimulus(self, goal: str, steps: List[AgentStep]) -> str:
@@ -124,9 +132,19 @@ class AgentLoop:
                 pass
         return run
 
+    def _emit(self, step: AgentStep) -> None:
+        if self.on_step is None:
+            return
+        try:
+            self.on_step(step)
+        except Exception:  # noqa: BLE001 — the step hook is observational, never fatal
+            pass
+
     def _drive(self, goal: str) -> AgentRun:
         run = AgentRun(goal=goal)
         last_signature: Optional[str] = None
+        seen_observations: set = set()
+        no_progress = 0
         for i in range(1, self.max_steps + 1):
             stimulus = self._build_stimulus(goal, run.steps)
             result = self.core.process(stimulus, authority=self.authority)
@@ -141,16 +159,19 @@ class AgentLoop:
             if result.disposition is Disposition.HALT:
                 step.observation = result.response
                 run.steps.append(step)
+                self._emit(step)
                 run.status, run.final_answer = "halted", result.response
                 return run
             if result.disposition is Disposition.REFUSE:
                 step.observation = result.reason
                 run.steps.append(step)
+                self._emit(step)
                 run.status, run.final_answer = "refused", result.response
                 return run
             if result.disposition is Disposition.ESCALATE:
                 step.observation = result.reason
                 run.steps.append(step)
+                self._emit(step)
                 run.status, run.final_answer = "escalated", result.response
                 return run
 
@@ -161,12 +182,14 @@ class AgentLoop:
             elif kind == "respond" or not tool:
                 step.observation = result.response
                 run.steps.append(step)
+                self._emit(step)
                 run.status, run.final_answer, run.success = "completed", result.response, True
                 return run
             else:
                 # acted with a named tool but no value (e.g. a no-op proposal) — record & go on
                 step.observation = result.response
                 run.steps.append(step)
+            self._emit(step)
 
             # stall guard: identical action twice in a row -> stop rather than spin
             signature = f"{kind}:{tool}:{self._short(step.observation)}"
@@ -174,6 +197,19 @@ class AgentLoop:
                 run.status, run.final_answer = "stalled", self._short(step.observation)
                 return run
             last_signature = signature
+
+            # progress guard: count consecutive steps that produced no *new* observation.
+            # A run that keeps acting but never learns anything new is going nowhere — stop
+            # before the (now larger) step budget is wasted spinning in place.
+            obs_sig = self._short(step.observation)
+            if obs_sig in seen_observations:
+                no_progress += 1
+                if no_progress >= self.no_progress_patience:
+                    run.status, run.final_answer = "stalled", obs_sig
+                    return run
+            else:
+                no_progress = 0
+                seen_observations.add(obs_sig)
 
         run.status = "max_steps"
         run.final_answer = run.steps[-1].text if run.steps else ""

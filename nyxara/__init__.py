@@ -18,6 +18,7 @@ Or run the interactive console with ``python -m nyxara`` (see
 from __future__ import annotations
 
 from nyxara.agency.agent_loop import AgentLoop, AgentRun
+from nyxara.agency.mission import Mission, MissionExecutive, MissionStatus
 from nyxara.agency.permissions import Authority
 from nyxara.eval import EvalSuite, build_default_suite
 from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryReport
@@ -123,6 +124,9 @@ __all__ = [
     # multi-step agency + experiential learning
     "AgentLoop",
     "AgentRun",
+    "Mission",
+    "MissionExecutive",
+    "MissionStatus",
     "SkillMemory",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",

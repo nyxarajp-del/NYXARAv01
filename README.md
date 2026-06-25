@@ -102,6 +102,17 @@ The sovereign cycle is fully wired end to end:
   small low-rank adapter on top of a model that already speaks the language. Set
   `NYXARA_FOUNDRY__BASE_MODEL` to a real base (e.g. `Qwen/Qwen2.5-0.5B`) and use a GPU; the
   tiny default keeps it runnable on CPU. Every candidate still clears the promotion gauntlet.
+* **Long-horizon missions** — `core.mission(goal)` (the `MissionExecutive`,
+  `agency/mission.py`) pursues an *open-ended* objective over days or months, not one
+  reactive burst. It **decomposes** the goal into ordered milestones, **advances** each
+  through the full `AgentLoop` gate pipeline, **checkpoints to JSON after every milestone**
+  (so a mission resumes exactly where it left off across restarts — `core.resume_mission(id)`),
+  **re-plans** stalled milestones into sub-steps, and **defers-and-continues** when a step
+  needs the Master: that milestone parks `BLOCKED` and is surfaced (`mission.escalations`)
+  while the rest keep moving, resuming once you `approve` it. The `AutonomicLoop` advances a
+  standing mission one gated milestone per background tick, and every action is written to a
+  tamper-evident hash-chained `Journal`. Hard budgets + a no-progress guard mean it never
+  spins. Autonomy buys horizon and persistence — never extra power; every step still gates.
 
 ### Grow her own brain
 
