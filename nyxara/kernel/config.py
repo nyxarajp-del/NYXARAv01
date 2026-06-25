@@ -53,6 +53,7 @@ __all__ = [
     "RoleCouncilConfig",
     "SwarmConfig",
     "MemoryConfig",
+    "CausalConfig",
     "SelfImprovementConfig",
     "MetaResearchConfig",
     "GuardConfig",
@@ -1148,6 +1149,31 @@ class TemporalHierarchyConfig(BaseModel):
     meso_window: int = Field(default=512, ge=8)
 
 
+class CausalConfig(BaseModel):
+    """Causal World Model (mind/causal_world_model.py) — causation, not just correlation.
+
+    NYXARA learns which events *cause* which from the stream of what she observes and does,
+    separating real causes from mere co-occurrence with temporal precedence, contingency,
+    confounder screening (conditional independence) and — the gold standard —
+    interventions (the actions she takes are natural ``do``-experiments).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    window_s: float = Field(default=300.0, gt=0)       # causal lag window: effects within this of a cause
+    min_support: int = Field(default=4, ge=1)          # min cause-events before a link is considered
+    min_observations: int = Field(default=8, ge=1)     # min total events before any verdict is trusted
+    min_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
+    min_contingency: float = Field(default=0.10, ge=0.0, le=1.0)  # min ΔP to clear "coincidence"
+    confounder_screening: bool = True                  # screen out hidden-common-cause spuriousness
+    use_interventions: bool = True                     # weigh her own actions as do-experiments
+    discover_every: int = Field(default=20, ge=1)      # rebuild the graph every N learning turns
+    max_vars: int = Field(default=512, ge=8)
+    max_events: int = Field(default=20000, ge=64)
+    persist: bool = True                               # carry the learned graph across restarts
+
+
 class GuardConfig(BaseModel):
     """Zero-trust / safety posture. The hardest part of the system."""
 
@@ -1385,6 +1411,7 @@ class NyxaraSettings(BaseSettings):
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
+    causal: CausalConfig = Field(default_factory=CausalConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
