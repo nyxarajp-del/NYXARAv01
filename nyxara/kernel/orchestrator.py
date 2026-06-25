@@ -298,6 +298,13 @@ class NyxaraCore:
         # transitions, so it learns real dynamics rather than a synthetic toy signal.
         self.real_environment = (self._build_real_environment()
                                  if enable_growth and self.world_model is not None else None)
+        # embodied agent — a genuine perceive→decide→act→consequence→learn loop that wires the
+        # senses (vision/nlp/web) into the real environment: it authors perceivable content,
+        # reads it back, scores curiosity/surprise, and feeds the world model real lived
+        # transitions. The missing closed loop that turns one-shot senses into embodiment.
+        self.embodied_agent = (self._build_embodied_agent()
+                               if (enable_growth and self.world_model is not None
+                                   and self.real_environment is not None) else None)
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
@@ -764,6 +771,31 @@ class NyxaraCore:
             return RealEnvironment()
         except Exception:  # noqa: BLE001 — a real sensorimotor body is a capability, never required
             return None
+
+    def _build_embodied_agent(self) -> Any:
+        try:
+            import os
+            from nyxara.sim.embodied import EmbodiedAgent
+            # Live-web perception is part of NYXARA's world but is data-only and twice-gated:
+            # the oversight gate below AND an env toggle (default on). URLs come from
+            # NYXARA_EMBODIED_WEB_URLS (comma-separated); empty ⇒ the capability stays idle.
+            web_on = os.environ.get("NYXARA_EMBODIED_WEB", "1").strip().lower() not in (
+                "0", "false", "no", "off")
+            raw_urls = os.environ.get("NYXARA_EMBODIED_WEB_URLS", "").strip()
+            urls = [u.strip() for u in raw_urls.split(",") if u.strip()]
+            return EmbodiedAgent(
+                world_model=self.world_model, env=self.real_environment,
+                web_enabled=web_on, web_urls=urls,
+                gate=lambda: self._embodied_gate())
+        except Exception:  # noqa: BLE001 — embodiment is a capability, never a hard dependency
+            return None
+
+    def _embodied_gate(self) -> bool:
+        """Oversight gate for the embodied loop's outward actions (e.g. live-web perception)."""
+        try:
+            return bool(self.oversight.gate())
+        except Exception:  # noqa: BLE001 — fail closed: no gate, no outward action
+            return False
 
     def _build_stream(self) -> Any:
         try:
@@ -3377,31 +3409,44 @@ class NyxaraCore:
                             f"learned to solve [{task[:28]}] via {xr.origin}", salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
-        # 4f+) Real-environment sensorimotor tick — feed the world model a GENUINE
-        #      (state, action, next_state, reward) transition from the real machine (a
-        #      scratch-dir filesystem + live CPU/RAM), so its learned dynamics reflect a
-        #      real environment rather than a synthetic toy signal. Oversight-gated: a
-        #      paused/scrammed mind takes no autonomous action on the real filesystem.
-        if self.real_environment is not None and self.world_model is not None:
+        # 4f+) Embodied sensorimotor burst — a real perceive→decide→act→consequence→learn loop.
+        #      The agent senses its scratch world *with the senses* (it authors perceivable
+        #      notes/images, reads them back with NLP/vision, scores curiosity & surprise, and —
+        #      oversight-gated — perceives the live web as low-trust data), choosing each action
+        #      via the world model + intrinsic motivation, then learns the genuine transition.
+        #      This is the closed loop that turns one-shot senses into embodiment. Oversight-
+        #      gated: a paused/scrammed mind takes no autonomous action on the world.
+        if self.embodied_agent is not None:
             try:
                 if self.oversight.gate():
-                    from nyxara.sim.real_environment import sensorimotor_stream
-                    # a short CONTINUOUS burst (a trajectory), not one isolated snapshot — the
-                    # world model learns action-conditioned dynamics from a real sequence.
-                    stream = sensorimotor_stream(self.real_environment, self.world_model, steps=4)
+                    from nyxara.sim.embodied import embodied_stream
+                    stream = embodied_stream(self.embodied_agent, steps=6)
                     if stream:
                         tr = stream[-1]
-                        dyn = self.real_environment.dynamics()
-                        report["sensorimotor"] = {"action": tr.action,
-                                                  "reward": round(tr.reward, 3),
-                                                  "stream": len(stream),
-                                                  "dfiles_per_step": round(dyn[0], 3)}
+                        st = self.embodied_agent.status()
+                        novel = sum(1 for t in stream if t.novelty)
+                        report["embodiment"] = {
+                            "action": tr.action, "reward": round(tr.reward, 3),
+                            "stream": len(stream), "novel_percepts": novel,
+                            "distinct_entities": st["distinct_entities"],
+                            "perceived": st["perceived_artifacts"]}
                         report["world_transitions"] = len(self.world_model)
-                        self.mind.record(ThoughtKind.INFERENCE,
-                                         f"sensorimotor stream x{len(stream)}: "
-                                         f"{tr.action} r={tr.reward:.2f}",
-                                         salience=0.4)
-            except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"embodied burst x{len(stream)}: {tr.action} r={tr.reward:.2f} "
+                            f"({st['distinct_entities']} entities grounded)", salience=0.4)
+                        # lived experience that grounded new meaning becomes episodic memory
+                        if self.memory is not None and novel > 0:
+                            try:
+                                from nyxara.memory.store import MemoryType
+                                self.memory.remember(
+                                    f"Embodied: perceived {novel} novel thing(s) in my world; "
+                                    f"now grounding {st['distinct_entities']} concepts.",
+                                    mem_type=MemoryType.EPISODIC, importance=0.4,
+                                    tags=["embodiment", "perception"])
+                            except Exception:  # noqa: BLE001 — memory write is best-effort
+                                pass
+            except Exception:  # noqa: BLE001 — an embodied burst is a capability, never required
                 pass
         # 4g) Read & model — learn dynamics from LANGUAGE, not just from doing. Pull one
         #      ingested passage and let the language-grounding bridge turn it into transitions

@@ -177,6 +177,31 @@ class RealEnvironment:
         n = len(self._history) - 1
         return tuple((last[i] - first[i]) / n for i in range(len(first)))
 
+    # ------------------------------------------------------------------ #
+    # Authored content — perceivable artifacts (for the embodied loop)
+    # ------------------------------------------------------------------ #
+    def write_text(self, name: str, text: str) -> Optional[str]:
+        """Create a scratch file holding real *text* (so a sense can later read meaning).
+
+        Unlike :meth:`_apply`'s ``create_file`` (random bytes — perceivable as nothing), this
+        writes authored content an NLP/vision pass can actually understand. Journaled and
+        guarded exactly like every other artifact, so it stays reversible and scratch-confined.
+        Returns the path, or ``None`` if the file cap is reached. Never escapes the root.
+        """
+        return self.write_bytes(name, text.encode("utf-8"))
+
+    def write_bytes(self, name: str, data: bytes) -> Optional[str]:
+        """Create a scratch file holding raw ``data`` (e.g. a generated PNG/WAV). Reversible."""
+        if sum(1 for p in self._created if os.path.isfile(p)) >= self.max_files:
+            return None
+        path = self._guard(os.path.join(self._root, name))
+        with open(path, "wb") as fh:
+            fh.write(data)
+        if path not in self._created:
+            self._created.append(path)
+        self._journal[path] = data
+        return path
+
     def _apply(self, action: str) -> bool:
         """Execute one action for real in the scratch dir. Returns True if it did something."""
         if action == "noop":
