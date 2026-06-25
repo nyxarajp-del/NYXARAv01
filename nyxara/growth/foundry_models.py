@@ -492,17 +492,28 @@ class WordKNGramLM(BaseLanguageModel):
         cands.discard(self._bos)
         return list(cands)
 
-    def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
+    def generate(self, prompt: str, *, max_tokens: int = 128, top_k: int = 0,
+                 top_p: float = 0.0, repetition_penalty: float = 1.0) -> str:
+        """Sample a continuation. The defaults (``top_k=0, top_p=0.0,
+        repetition_penalty=1.0``) reproduce the historical pure interpolated-KN sampling exactly;
+        enabling them trims the long improbable tail (``top_k``/``top_p`` nucleus) and discourages
+        immediate loops (``repetition_penalty`` > 1), so the n-gram reads more coherently."""
         if not self.id2tok or not self.hi:
             return ""
         rng = random.Random(self.seed)
         ctx = self._encode(prompt, intern=False)[:-1]      # drop the trailing EOS of the prompt
         out_ids: List[int] = []
+        recent: List[int] = []                              # tail used for the repetition penalty
         for _ in range(max_tokens):
             cands = self._candidates(tuple(ctx))
             if not cands:
                 break
             weights = [self._prob(tuple(ctx), w) for w in cands]
+            if repetition_penalty and repetition_penalty != 1.0 and recent:
+                penal = set(recent)
+                weights = [(wt / repetition_penalty) if c in penal else wt
+                           for c, wt in zip(cands, weights)]
+            cands, weights = self._restrict(cands, weights, top_k, top_p)
             wsum = sum(weights)
             if wsum <= 0:
                 break
@@ -511,8 +522,36 @@ class WordKNGramLM(BaseLanguageModel):
                 break
             out_ids.append(nxt)
             ctx.append(nxt)
+            recent.append(nxt)
+            if len(recent) > 8:                             # bounded window keeps the penalty local
+                recent.pop(0)
         return _word_detokenize([self.id2tok[i] for i in out_ids
                                  if 0 <= i < len(self.id2tok)])
+
+    @staticmethod
+    def _restrict(cands: List[int], weights: List[float], top_k: int,
+                  top_p: float) -> Tuple[List[int], List[float]]:
+        """Keep only the most-probable candidates (top-k count and/or top-p nucleus mass).
+
+        Disabled (``top_k<=0`` and ``top_p<=0``) it returns the inputs untouched, so the default
+        sampling path is byte-for-byte the historical one. Order is preserved on ties so a fixed
+        seed stays deterministic."""
+        if (top_k <= 0 and top_p <= 0.0) or len(cands) <= 1:
+            return cands, weights
+        order = sorted(range(len(cands)), key=lambda i: weights[i], reverse=True)
+        if top_k > 0:
+            order = order[:top_k]
+        if top_p and top_p > 0.0:
+            total = sum(weights[i] for i in order) or 1.0
+            kept, acc = [], 0.0
+            for i in order:
+                kept.append(i)
+                acc += weights[i] / total
+                if acc >= top_p:
+                    break
+            order = kept
+        keep = sorted(order)                                # restore candidate order for determinism
+        return [cands[i] for i in keep], [weights[i] for i in keep]
 
     # ---- introspection & persistence ---- #
     def param_count(self) -> int:

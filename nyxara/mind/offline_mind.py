@@ -119,9 +119,19 @@ class OfflineMind:
         if chained is not None:
             return chained
 
+        # 2c. a single verifiable faculty (arithmetic, %, units, algebra, calculus, sequences,
+        #     dates, propositional logic, syllogisms, comparisons): exact computation/proof beats
+        #     any neural guess, so she answers it herself even with no LLM and no grounding.
+        faculty = self._faculty_answer(text)
+        if faculty is not None:
+            reply, conf = faculty
+            return self._reply(reply, conf, "offline: exact verifiable faculty")
+
         # 3. a declarative the Master told her -> acknowledge it (the Master is *telling*, not
-        #    asking; she doesn't answer a statement with a knowledge dump).
-        if intent.kind == "statement":
+        #    asking; she doesn't answer a statement with a knowledge dump). But an imperative
+        #    *request* ("describe/explain/tell me how …") only looks declarative — it wants a real
+        #    answer, so it falls through to grounding + her learned brain instead of being noted.
+        if intent.kind == "statement" and not self._is_request(text):
             return self._reply(f"I've noted that, {self._owner()}.", 0.6,
                                "offline: acknowledged a statement")
 
@@ -174,6 +184,20 @@ class OfflineMind:
             return None
         return self._reply(f"{res.answer}\n\nWorking:\n{res.render()}", res.confidence,
                            "offline: multi-step verifiable reasoning chain")
+
+    @staticmethod
+    def _faculty_answer(text: str) -> Optional[Tuple[str, float]]:
+        """Exact answer from a single verifiable faculty, or None to defer.
+
+        Wires the whole neuro-symbolic faculty suite (mind/reasoning_faculties.py) into the
+        sovereign offline mind so it is self-sufficient: computation and proof beat any guess,
+        with or without a language model. Returns None on anything not structured, so the normal
+        grounded / learned / honest ladder still runs."""
+        try:
+            from nyxara.mind.reasoning_faculties import solve_with_faculties
+            return solve_with_faculties(text)
+        except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            return None
 
     def _nlp_request(self, text: str, nlp: Any) -> Optional[Tuple[str, float, str]]:
         """Summary / keyphrase / sentiment requests, answered by the real NLP module."""
@@ -313,6 +337,24 @@ class OfflineMind:
             return getattr(o, "name", None) or getattr(o, "handle", None) or "Master"
         except Exception:  # noqa: BLE001
             return "Master"
+
+    # instructional verbs that open an imperative *request* (answer it, don't just note it)
+    _REQUEST_VERBS = frozenset((
+        "describe", "explain", "tell", "define", "list", "outline", "summarize",
+        "summarise", "walk", "give", "show", "teach", "elaborate", "clarify", "compare",
+        "discuss", "recommend", "suggest", "help", "name", "state", "identify", "analyze",
+        "analyse", "expand", "detail", "report", "answer",
+    ))
+
+    @classmethod
+    def _is_request(cls, text: str) -> bool:
+        """True iff a declarative-looking line is really an instruction that wants an answer.
+
+        Keyed off the FIRST word only ("Describe …", "Explain …"), so a genuine declarative the
+        Master is *telling* her ("I prefer tea", "The sky is blue") is never mistaken for a
+        request — only a leading imperative verb routes to a real grounded/learned answer."""
+        first = re.findall(r"[a-z]+", text.strip().lower()[:24])
+        return bool(first and first[0] in cls._REQUEST_VERBS)
 
     @staticmethod
     def _content_tokens(text: str) -> set:
