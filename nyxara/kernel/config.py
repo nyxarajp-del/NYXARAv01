@@ -308,6 +308,16 @@ class FoundryConfig(BaseModel):
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
+    # ---- Always-on offline brain (mind/self_reasoner.SelfBrain) ---- #
+    # NYXARA's keyless general-intelligence: a retrieval-augmented brain over everything she has
+    # learned (pure-stdlib LearnedEmbedder), with a hardened generative backend as the fallback.
+    # On by default — these knobs only tune it; the whole thing degrades to pure n-gram on a bare
+    # box and to a real neural backend (nanogpt) when torch is present.
+    self_brain_retrieval: bool = True               # answer from learned sentences before generating
+    self_brain_top_k: int = Field(default=4, ge=1, le=16)        # retrieved sentences considered
+    self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
+    # Generative fallback backend: "auto" => nano-GPT when torch is present, else word-KN n-gram.
+    self_brain_backend: Literal["auto", "kngram", "nanogpt"] = "auto"
     # Optional torch nano-GPT dimensions (only used when torch is present, and only when
     # profile == "custom"; a named profile overrides these).
     block_size: int = Field(default=64, ge=8, le=1024)

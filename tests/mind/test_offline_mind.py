@@ -69,6 +69,46 @@ def test_ungrounded_is_honest_admission_not_echo():
     assert "i understand:" not in c.text.lower()
 
 
+def test_imperative_request_is_answered_not_just_noted():
+    kb = KnowledgeBase()
+    kb.ingest_text("NYXARA reasons by proposing a candidate the kernel disposes through "
+                   "ordered gates; verifiable beats probabilistic.", source="arch")
+    mind = OfflineMind(knowledge=kb, settings=_settings())
+    c = mind.respond("Describe how you reason about a problem.", [])
+    # an imperative request gets a real grounded answer, not the bland "I've noted that"
+    assert "noted that" not in c.text.lower()
+    assert len(c.text) > 30
+
+
+def test_genuine_declarative_is_acknowledged():
+    mind = OfflineMind(settings=_settings())
+    c = mind.respond("I prefer tea in the morning.", [])
+    assert "noted that" in c.text.lower()
+
+
+def test_arithmetic_answered_exactly_offline():
+    mind = OfflineMind(settings=_settings())
+    c = mind.respond("what is 12 * 8?", [])
+    assert c.kind == "respond"
+    assert c.text.strip() == "96"
+    assert c.confidence >= 0.9
+
+
+def test_unit_conversion_answered_exactly_offline():
+    mind = OfflineMind(settings=_settings())
+    c = mind.respond("convert 5 km to miles", [])
+    assert "mile" in c.text.lower()
+    assert c.confidence >= 0.9
+
+
+def test_syllogism_answered_by_proof_offline():
+    mind = OfflineMind(settings=_settings())
+    c = mind.respond(
+        "All cats are mammals, all mammals are animals. Are all cats animals?", [])
+    assert c.text.strip().lower() == "yes"
+    assert c.confidence >= 0.9
+
+
 def test_command_maps_to_real_tool():
     tools = build_default_tools(ToolRegistry(), memory=None)
     mind = OfflineMind(tools=tools, settings=_settings())

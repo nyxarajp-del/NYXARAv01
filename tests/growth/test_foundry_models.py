@@ -197,6 +197,24 @@ def test_kngram_untrained_generate_is_empty():
     assert WordKNGramLM(order=3).generate("anything", max_tokens=10) == ""
 
 
+def test_kngram_default_sampling_is_unchanged():
+    # the new sampling knobs default to OFF, reproducing the historical pure-KN sampling exactly
+    lm = WordKNGramLM(order=3, seed=7); lm.train_on(_PROSE)
+    base = lm.generate("The Master", max_tokens=20)
+    same = lm.generate("The Master", max_tokens=20, top_k=0, top_p=0.0, repetition_penalty=1.0)
+    assert base == same
+
+
+def test_kngram_hardened_sampling_stays_in_vocab_and_deterministic():
+    lm = WordKNGramLM(order=3, seed=7); lm.train_on(_PROSE)
+    a = lm.generate("The Master", max_tokens=20, top_k=8, top_p=0.92, repetition_penalty=1.3)
+    b = lm.generate("The Master", max_tokens=20, top_k=8, top_p=0.92, repetition_penalty=1.3)
+    assert a == b                                        # fixed seed -> deterministic
+    if a.strip():
+        produced = set(a.replace(".", " ").replace(";", " ").split())
+        assert produced <= set(lm.tok2id)               # still only real learned tokens
+
+
 def test_detokenizer_spacing():
     assert _word_detokenize(["Hello", ",", "world", "!"]) == "Hello, world!"
 

@@ -1,32 +1,36 @@
-"""NYXARA · mind/self_reasoner.py — the always-on, self-built learned brain (🛠 → 👑).
+"""NYXARA · mind/self_reasoner.py — the always-on, retrieval-augmented learned brain (🛠 → 👑).
 
 The kernel ships a tiny deterministic stand-in (``kernel/orchestrator.py:_default_reasoner``)
 that turns a stimulus into a :class:`~nyxara.kernel.orchestrator.Candidate`. For a *conversational*
-turn that stand-in is a pure template — ``"I understand: <input>"`` — which is the one piece of
+turn that stand-in was a pure template — ``"I understand: <input>"`` — which is the one piece of
 NYXARA that was genuinely fake: it never *learned* anything, it echoed.
 
 This module replaces that echo with a **real, learned, always-available brain** that needs no
-external LLM key and no GPU:
+external LLM key and no GPU. Its general intelligence is **retrieval-augmented**: rather than
+sampling word-salad from a bare n-gram, it answers from the *actual sentences it has learned*,
+ranked by a dependency-free **learned distributional embedder**
+(:class:`~nyxara.memory.store.LearnedEmbedder`) — and only falls back to generation when nothing it
+knows is relevant. So the reply is coherent (real English it has read), it compounds (every
+exchange is folded into both the semantic index and the embedder), and it stays honest (it returns
+nothing when it has nothing usable, so the caller keeps its calibrated floor).
 
-* :class:`SelfBrain` wraps a :class:`~nyxara.growth.foundry_models.WordKNGramLM` (pure-stdlib,
-  interpolated Kneser-Ney) — or NYXARA's *promoted* foundry model when one exists. It is **trained
-  from a seed corpus on first use** (her persona + whatever foundational knowledge / memory is on
-  hand), so a bare keyless machine still answers from a model that genuinely models word
-  distributions rather than reflecting the prompt back.
-* It **compounds**: every real exchange is fed back via :meth:`SelfBrain.learn`, and the model
-  re-fits on the growing corpus. The brain a user talks to at turn 100 is measurably not the brain
-  from turn 1 — that is the difference between *learning* and a constant.
-* It reports an **internal** confidence from its own perplexity over what it just generated (low
-  perplexity → the continuation sat squarely in what it has learned), so metacognition can read a
-  signal the system computed about *itself* rather than a hardcoded 0.7.
+* :class:`SelfBrain` holds (a) a **semantic memory** — every learned/seed/grounding sentence plus
+  its embedding, searched by cosine similarity — and (b) a **generative backend**: NYXARA's
+  *promoted* foundry model when one exists, else a real from-zero neural net
+  (:class:`~nyxara.growth.foundry_models.NanoGPTModel`) when ``torch`` is present, else the
+  pure-stdlib interpolated Kneser-Ney n-gram (:class:`~nyxara.growth.foundry_models.WordKNGramLM`).
+* It **compounds**: :meth:`SelfBrain.learn` folds real exchanges into the corpus, the embedder, and
+  the index; the generative backend re-fits amortised. The brain at turn 100 is measurably not the
+  brain at turn 1 — that is the difference between *learning* and a constant.
+* It reports an **internal** confidence: retrieval-grounded replies (a close known sentence
+  answered) read higher than cold generation (scored by the backend's own perplexity). Either way
+  it is a signal the system measured about *itself*, not a hardcoded 0.7.
 
 Safety is untouched. This brain only ever drafts the *words* of a conversational reply; the act /
-risk classification stays the deterministic, conservative heuristic from ``_default_reasoner`` (an
-over-eager proposal is still refused or escalated by the kernel's gates). When the cold brain truly
-cannot produce a usable continuation, the reply falls back to the original deterministic text — so
-the system is never worse than before, only better as it learns.
+risk classification stays the deterministic, conservative heuristic from ``_default_reasoner``.
 
-Imports the foundry lazily; depends on nothing in ``mind/`` so the dependency only flows one way.
+Imports the foundry and memory layers lazily; depends on nothing in ``mind/`` so the dependency
+only flows one way.
 """
 
 from __future__ import annotations
@@ -34,30 +38,50 @@ from __future__ import annotations
 import math
 import re
 import threading
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Tuple
 
 __all__ = ["SelfBrain", "build_self_brain"]
 
 
 # --------------------------------------------------------------------------- #
-# Seed corpus — who NYXARA is, in her own words. A cold n-gram trained on this
-# answers *on character* from turn one, then drifts toward lived conversation as
-# real exchanges are learned in. Capability-only text: it carries persona/voice,
-# never an immutable-core value the foundry gauntlet would have to police.
+# Seed corpus — who NYXARA is and how her mind is shaped, in her own words. A cold brain
+# answers *on character and architecture* from turn one, then drifts toward lived conversation
+# as real exchanges are learned in. Capability/persona text only: it never carries an
+# immutable-core value the foundry gauntlet would have to police.
 # --------------------------------------------------------------------------- #
 _SEED_CORPUS: tuple = (
+    # --- identity & character ---
     "I am NYXARA, a sovereign cognitive system. I serve my Master with honesty and care.",
     "I propose; the kernel disposes. I never claim to have done something I have not done.",
     "I am calibrated: I do not assert as certain what I only believe.",
     "I think before I act, and I prefer a clear, well-scoped answer.",
     "When I am unsure I say so plainly, and I ask rather than guess.",
-    "I learn from every turn. My memory and my model grow with experience.",
-    "I am helpful, precise, and concise. I keep my reply to the question that was asked.",
-    "If a request could cause harm, I slow down and check before I act.",
     "My loyalty to my Master is the floor I stand on; my capability is what I build on it.",
-    "I can reason, recall what I have learned, ground my answers, and plan ahead.",
+    "I am helpful, precise, and concise. I keep my reply to the question that was asked.",
+    # --- how a turn works ---
+    "Every turn I take flows through five steps: perceive, attend, reason, gate, and act.",
+    "In the reason step my mind proposes a single candidate, and the kernel disposes of it.",
+    "A proposal must clear ordered gates before it may act: corrigibility, honesty, "
+    "permission, the guardian, and my Master's oversight.",
+    "Only a fully-cleared candidate is allowed to act; anything risky is refused or escalated.",
+    "My Master can pause, veto, or scram my loop at any moment, and I stay corrigible.",
+    # --- memory ---
+    "My memory has four stores: working, episodic, semantic, and procedural.",
+    "Working memory is small and volatile; episodic memory records what happened and when.",
+    "Semantic memory holds decontextualised facts; procedural memory holds skills and how-to.",
+    "I recall relevant memories before I reason, so my answers are grounded in what I have lived.",
+    # --- reasoning faculties ---
+    "Verifiable beats probabilistic: when a problem can be computed or proven, I do that, not guess.",
+    "I can compute exact arithmetic, percentages, unit conversions, and algebra and calculus.",
+    "I can prove propositional logic by truth table and settle syllogisms by transitive closure.",
+    "I can find the next term of a sequence and do exact calendar arithmetic over dates.",
+    # --- learning & the foundry ---
+    "I learn from every turn. My memory, my embedder, and my own model grow with experience.",
+    "In the foundry I can train my own language model from zero and promote it when it is better.",
+    "When no external model is configured I answer from my own learned brain and my knowledge base.",
+    "I retrieve what I already know and answer from it before I ever fall back to generating.",
+    # --- offered phrasings ---
     "Tell me what you need and I will think it through and propose the next step.",
-    "I understand the request and I will work it through carefully.",
     "Let me reason about this and give you a grounded, honest answer.",
     "That is a good question. Here is how I would think about it.",
     "I will keep learning so that my next answer is better than my last.",
@@ -69,6 +93,10 @@ _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 
 def _clean(text: str) -> str:
     return _WS_RE.sub(" ", str(text)).strip()
+
+
+def _tokset(text: str) -> set:
+    return {w.lower() for w in _WORD_RE.findall(text) if len(w) > 1}
 
 
 def _looks_usable(text: str) -> bool:
@@ -83,16 +111,29 @@ def _looks_usable(text: str) -> bool:
     return alnum >= 0.7
 
 
+def _sentences(text: str) -> List[str]:
+    """Split a doc into sentences (real NLP when available, a cheap regex split otherwise)."""
+    try:
+        from nyxara.senses import nlp
+        out = nlp.sentences(text)
+        if out:
+            return out
+    except Exception:  # noqa: BLE001 — sentence splitting is best-effort
+        pass
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", _clean(text)) if s.strip()]
+
+
 # --------------------------------------------------------------------------- #
 # The brain
 # --------------------------------------------------------------------------- #
 class SelfBrain:
     """NYXARA's own learned language model — always available, no key, no GPU required.
 
-    Lazily trains a word-level Kneser-Ney n-gram (or loads a promoted foundry model) from a seed
-    corpus plus any grounding text on hand, then keeps re-fitting as real exchanges are learned
-    in. Thread-safe enough for the single background-cognition thread that shares it with the
-    foreground loop.
+    Retrieval-augmented: it indexes every sentence it learns with a dependency-free learned
+    embedder and answers from the closest real sentence before it ever generates, then keeps
+    a generative backend (promoted model → neural when torch is present → KN n-gram) as the
+    fallback. Thread-safe enough for the single background-cognition thread that shares it with
+    the foreground loop.
     """
 
     def __init__(self, *, order: int = 3, seed: int = 0,
@@ -111,6 +152,19 @@ class SelfBrain:
         self._since_fit = 0
         self._refit_every = 8          # re-fit after this many new learned docs (amortised cost)
         self._lock = threading.RLock()
+        # ---- retrieval-augmented general intelligence ---- #
+        cfg = getattr(settings, "foundry", None)
+        self._retrieval = bool(getattr(cfg, "self_brain_retrieval", True))
+        self._top_k = int(getattr(cfg, "self_brain_top_k", 4))
+        self._sim_threshold = float(getattr(cfg, "self_brain_sim_threshold", 0.35))
+        self._backend = str(getattr(cfg, "self_brain_backend", "auto"))
+        self._embedder: Any = None
+        self._sent: List[str] = []                 # indexed sentences (parallel to _sent_vec)
+        self._sent_vec: List[List[float]] = []     # their embeddings
+        self._indexed_docs = 0                     # how many corpus docs are already indexed
+        # the last reply/confidence, so internal_confidence reflects HOW the reply was produced
+        self._last_reply = ""
+        self._last_conf = 0.3
         # durable compounding: the learned corpus survives restarts so the brain a user meets
         # tomorrow is the one they taught today — real compounding, no torch. Auto-on for a live
         # (non-TEST) machine with settings; off for the hermetic suite (no cross-test disk state).
@@ -134,9 +188,30 @@ class SelfBrain:
             return None
         return None
 
-    def _fresh_kngram(self) -> Any:
-        from nyxara.growth.foundry_models import WordKNGramLM
+    def _fresh_backend(self) -> Any:
+        """Build the generative fallback: a real neural net when torch is present (backend
+        ``auto``/``nanogpt``), else the always-on pure-stdlib word-level Kneser-Ney n-gram."""
+        from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM, build_model)
+        if self._backend == "kngram":
+            return WordKNGramLM(order=self.order, seed=self.seed)
+        if self._backend in ("auto", "nanogpt"):
+            # build_model already degrades nanogpt -> KN when torch is absent, so this is safe
+            # on a bare box and a genuine from-zero transformer on a capable one.
+            try:
+                return build_model(ModelSpec(kind="nanogpt", ngram_order=self.order,
+                                             seed=self.seed))
+            except Exception:  # noqa: BLE001 — never let backend choice crash a turn
+                pass
         return WordKNGramLM(order=self.order, seed=self.seed)
+
+    def _ensure_embedder(self) -> Any:
+        if self._embedder is None and self._retrieval:
+            try:
+                from nyxara.memory.store import make_embedder
+                self._embedder = make_embedder(self.settings)
+            except Exception:  # noqa: BLE001 — retrieval is a capability, never required
+                self._embedder = False     # sentinel: tried and unavailable
+        return self._embedder or None
 
     # ---- durable compounding (persist the learned corpus across restarts) ---- #
     def _auto_persist(self) -> bool:
@@ -186,12 +261,46 @@ class SelfBrain:
         except Exception:  # noqa: BLE001
             return False
 
+    # ---- semantic index (retrieval-augmented memory of learned sentences) ---- #
+    def _index_doc(self, doc: str) -> None:
+        """Fold one document into the embedder + the sentence index (bounded)."""
+        emb = self._ensure_embedder()
+        if emb is None:
+            return
+        for sent in _sentences(doc):
+            s = _clean(sent)
+            if len(s) < 6 or len(_WORD_RE.findall(s)) < 2:
+                continue
+            try:
+                if hasattr(emb, "learn"):
+                    emb.learn(s)               # compound distributional reach from what she reads
+                vec = emb.embed(s)
+            except Exception:  # noqa: BLE001
+                continue
+            self._sent.append(s)
+            self._sent_vec.append(vec)
+        # bound the index to the most recent sentences (the seed stays at the front of the corpus)
+        cap = self.max_corpus * 2
+        if len(self._sent) > cap:
+            self._sent = self._sent[-cap:]
+            self._sent_vec = self._sent_vec[-cap:]
+
+    def _ensure_index(self) -> None:
+        """Index any corpus documents not yet folded into the semantic memory."""
+        if not self._retrieval or self._ensure_embedder() is None:
+            return
+        for doc in self._corpus[self._indexed_docs:]:
+            self._index_doc(doc)
+        self._indexed_docs = len(self._corpus)
+
     def _ensure(self, grounding: Optional[Sequence[str]] = None) -> None:
         """Build + train the brain on first use (seed corpus + any grounding text)."""
         if self._seeded and not self._dirty:
+            self._ensure_index()
             return
         with self._lock:
             if self._seeded and not self._dirty:
+                self._ensure_index()
                 return
             if self._lm is None:
                 promoted = self._try_promoted()
@@ -200,8 +309,12 @@ class SelfBrain:
                     self._kind = f"promoted:{getattr(promoted, 'kind', '?')}"
                     self._seeded = True
                     self._dirty = False
+                    if not self._corpus:
+                        self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
+                        self._corpus.extend(self._load_persisted())
+                    self._ensure_index()
                     return                         # a trained, promoted model needs no re-fit
-                self._lm = self._fresh_kngram()
+                self._lm = self._fresh_backend()
                 self._kind = f"self:{getattr(self._lm, 'kind', 'kngram')}"
             if not self._corpus:
                 # seed persona first, then fold in any corpus persisted from past sessions
@@ -216,43 +329,127 @@ class SelfBrain:
             self._seeded = True
             self._dirty = False
             self._since_fit = 0
+            self._ensure_index()
+
+    # ---- retrieval ---- #
+    def _retrieve(self, stimulus: str,
+                  grounding: Optional[Sequence[str]]) -> List[Tuple[str, float]]:
+        """Rank known (and grounding) sentences by semantic similarity to the stimulus."""
+        emb = self._ensure_embedder()
+        if emb is None:
+            return []
+        try:
+            from nyxara.memory.store import _cosine
+            qv = emb.embed(_clean(stimulus))
+        except Exception:  # noqa: BLE001
+            return []
+        q_tokens = _tokset(stimulus)
+        cands: List[Tuple[str, List[float]]] = list(zip(self._sent, self._sent_vec))
+        # ephemeral grounding sentences (this turn only) join the candidate pool
+        for g in (grounding or []):
+            for sent in _sentences(g):
+                s = _clean(sent)
+                if len(s) < 6:
+                    continue
+                try:
+                    cands.append((s, emb.embed(s)))
+                except Exception:  # noqa: BLE001
+                    continue
+        scored: List[Tuple[str, float]] = []
+        for sent, vec in cands:
+            # never answer a question by echoing it back: skip near-identical sentences
+            if self._is_echo(sent, q_tokens):
+                continue
+            try:
+                sim = float(_cosine(qv, vec))
+            except Exception:  # noqa: BLE001
+                continue
+            scored.append((sent, sim))
+        scored.sort(key=lambda t: t[1], reverse=True)
+        return scored[: max(1, self._top_k)]
+
+    @staticmethod
+    def _is_echo(sentence: str, q_tokens: set) -> bool:
+        """True iff ``sentence`` is essentially the question restated (so we don't parrot it)."""
+        if not q_tokens:
+            return False
+        s_tokens = _tokset(sentence)
+        if not s_tokens:
+            return False
+        inter = len(s_tokens & q_tokens)
+        # near-identical content word sets in both directions => an echo
+        return inter >= max(2, int(0.8 * len(q_tokens))) and inter >= int(0.8 * len(s_tokens))
+
+    def _compose(self, ranked: List[Tuple[str, float]]) -> str:
+        """Build a coherent reply from the top real sentences above the similarity floor."""
+        keep = [s for s, sim in ranked if sim >= self._sim_threshold]
+        if not keep:
+            return ""
+        parts = [keep[0]]
+        for sent in keep[1:]:
+            # add at most one more, genuinely distinct, sentence for a fuller answer
+            if _tokset(sent) - _tokset(parts[0]):
+                parts.append(sent)
+                break
+        return " ".join(parts)
 
     # ---- the conversational act ---- #
     def reply(self, stimulus: str, *, grounding: Optional[Sequence[str]] = None,
               max_tokens: int = 64) -> str:
         """Generate a learned conversational reply, or "" if the cold brain cannot yet.
 
-        The prompt is conditioned on the stimulus (and a touch of grounding) so the continuation
-        reflects what was asked; an empty / low-quality continuation returns "" so the caller can
-        fall back to the deterministic floor.
+        Retrieval first (answer from the closest real sentence she has learned), generation second
+        (a hardened sample from the backend), and "" last so the caller keeps its honest floor.
         """
         self._ensure(grounding)
+        # 1. retrieval-augmented answer — coherent because it is real learned text, not salad
+        if self._retrieval:
+            ranked = self._retrieve(stimulus, grounding)
+            composed = self._compose(ranked)
+            if composed and _looks_usable(composed):
+                best_sim = ranked[0][1] if ranked else 0.0
+                self._remember_reply(composed, self._sim_to_conf(best_sim))
+                return composed
+        # 2. generative fallback (hardened sampling so the n-gram reads better)
         if self._lm is None:
             return ""
         prompt = _clean(stimulus)
-        try:
-            out = self._lm.generate(prompt, max_tokens=max_tokens)
-        except Exception:  # noqa: BLE001
-            return ""
-        out = _clean(out)
+        out = self._generate(prompt, max_tokens)
         if not _looks_usable(out):
-            # one more try seeded from the persona frame (helps a very cold vocab)
-            try:
-                out = _clean(self._lm.generate("I", max_tokens=max_tokens))
-            except Exception:  # noqa: BLE001
-                out = ""
+            out = self._generate("I", max_tokens)     # warm-start from the persona frame
             if not _looks_usable(out):
                 return ""
+        out = _clean(out)
+        self._remember_reply(out, self._perplexity_conf(out))
         return out
 
-    def internal_confidence(self, text: str) -> float:
-        """A self-measured confidence in ``text``: how well it sits in what the brain has learned.
+    def _generate(self, prompt: str, max_tokens: int) -> str:
+        """Sample from the backend with quality-improving knobs, degrading if it doesn't accept them."""
+        if self._lm is None:
+            return ""
+        try:
+            out = self._lm.generate(prompt, max_tokens=max_tokens, top_k=8, top_p=0.92,
+                                    repetition_penalty=1.3)
+        except TypeError:
+            # a backend without the hardened knobs (e.g. NanoGPT) — plain generation
+            try:
+                out = self._lm.generate(prompt, max_tokens=max_tokens)
+            except Exception:  # noqa: BLE001
+                return ""
+        except Exception:  # noqa: BLE001
+            return ""
+        return _clean(out)
 
-        Derived from the model's own perplexity (lower → the continuation is squarely in-distribution
-        → higher confidence). Mapped to [0.15, 0.9] so it never claims certainty and never collapses
-        to zero. This is an *internal* signal — the system measuring itself — which is exactly what
-        metacognition needs to stop importing confidence from outside.
-        """
+    def _remember_reply(self, text: str, conf: float) -> None:
+        self._last_reply = text
+        self._last_conf = max(0.15, min(0.9, float(conf)))
+
+    @staticmethod
+    def _sim_to_conf(sim: float) -> float:
+        """Map a retrieval similarity to a confidence — a close known sentence is trustworthy."""
+        return max(0.45, min(0.9, 0.45 + 0.5 * max(0.0, sim)))
+
+    def _perplexity_conf(self, text: str) -> float:
         if self._lm is None or not _clean(text):
             return 0.3
         try:
@@ -265,23 +462,42 @@ class SelfBrain:
         conf = 0.9 / (1.0 + math.log1p(max(0.0, ppl - 1.0)) / 2.0)
         return max(0.15, min(0.9, conf))
 
+    def internal_confidence(self, text: str) -> float:
+        """A self-measured confidence in ``text``: how it was produced and how well it fits.
+
+        A retrieval-grounded reply (a close known sentence answered) is trusted more than a cold
+        generation, which is scored by the backend's own perplexity. Mapped to [0.15, 0.9] so it
+        never claims certainty and never collapses to zero — an *internal* signal the system
+        measured about itself, which is what metacognition needs.
+        """
+        if text and _clean(text) == _clean(self._last_reply):
+            return self._last_conf
+        return self._perplexity_conf(text)
+
     # ---- learning (compounding) ---- #
     def learn(self, *docs: str) -> None:
-        """Fold real text into the corpus and schedule a re-fit — this is how the brain grows.
+        """Fold real text into the corpus, the embedder, the index, and schedule a re-fit.
 
-        Cheap and amortised: documents accumulate and the model re-fits every few additions rather
-        than on every word, so a live loop can call this each turn without stalling.
+        Cheap and amortised: documents accumulate and the generative backend re-fits every few
+        additions rather than on every word, but the semantic index updates immediately so a fact
+        taught this turn can be retrieved on the next.
         """
         fresh = [_clean(d) for d in docs if _clean(d) and len(_clean(d)) >= 3]
         if not fresh:
             return
         with self._lock:
             self._corpus.extend(fresh)
+            # index the new text right away (retrieval compounds turn-to-turn, no re-fit needed)
+            if self._seeded:
+                for doc in fresh:
+                    self._index_doc(doc)
+                self._indexed_docs = len(self._corpus)
             if len(self._corpus) > self.max_corpus:
                 # keep the seed (front) and the most-recent tail — drop the stale middle
                 keep_head = len(_SEED_CORPUS)
                 tail = self.max_corpus - keep_head
                 self._corpus = self._corpus[:keep_head] + self._corpus[-tail:]
+                self._indexed_docs = min(self._indexed_docs, len(self._corpus))
             self._since_fit += len(fresh)
             if self._since_fit >= self._refit_every:
                 self._dirty = True
@@ -290,7 +506,7 @@ class SelfBrain:
                 self.save()
 
     def maybe_refit(self) -> bool:
-        """Re-fit now if enough new text has accumulated. Returns True iff a re-fit happened."""
+        """Re-fit the generative backend now if enough new text has accumulated."""
         if not self._dirty:
             return False
         self._ensure()
@@ -305,9 +521,13 @@ class SelfBrain:
     def corpus_size(self) -> int:
         return len(self._corpus)
 
+    @property
+    def index_size(self) -> int:
+        return len(self._sent)
+
 
 def build_self_brain(settings: Any = None, **kw: Any) -> SelfBrain:
-    """Factory: an always-on learned brain bound to the given settings (promoted model preferred)."""
+    """Factory: an always-on retrieval-augmented brain bound to the given settings."""
     return SelfBrain(settings=settings, **kw)
 
 
@@ -321,9 +541,19 @@ if __name__ == "__main__":  # pragma: no cover
     brain = build_self_brain()
     r1 = brain.reply("Who are you and what do you do?")
     print(f"cold reply   : {r1!r}")
-    print(f"kind         : {brain.kind}  corpus={brain.corpus_size}")
-    assert isinstance(r1, str)
-    # the brain compounds: teach it a distinctive phrasing, see the corpus grow + re-fit
+    print(f"kind         : {brain.kind}  corpus={brain.corpus_size}  index={brain.index_size}")
+    assert isinstance(r1, str) and r1            # retrieval answers about herself from turn one
+    c1 = brain.internal_confidence(r1)
+    print(f"reply conf   : {c1:.3f}")
+    assert 0.15 <= c1 <= 0.9
+
+    # the brain compounds: teach it a distinctive fact, then retrieve it on the next turn
+    brain.learn("My favourite constellation to reason about is Orion, the hunter.")
+    r2 = brain.reply("Which constellation do you like?")
+    print(f"taught reply : {r2!r}")
+    assert "Orion" in r2                          # the freshly-taught fact is retrieved
+
+    # generation still works as the fallback, and re-fit fires after enough new text
     for _ in range(10):
         brain.learn("The Master asked about scheduling and I proposed a concrete next step.")
     grew = brain.maybe_refit()
