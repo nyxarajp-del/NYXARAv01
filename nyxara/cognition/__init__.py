@@ -32,6 +32,11 @@ from nyxara.cognition.abstraction import (
     instantiate,
     subsumes,
 )
+from nyxara.cognition.concept_formation import (
+    AbstractionLadder,
+    Concept,
+    Instance,
+)
 from nyxara.cognition.composition import CompositionalGrammar, Interpretation
 from nyxara.cognition.sample_efficient import ConsolidationReport, SampleEfficientMind
 
@@ -56,6 +61,10 @@ __all__ = [
     "instantiate",
     "abstract_text",
     "abstract_by_analogy",
+    # feature-based taxonomic abstraction — the concept-building ladder
+    "AbstractionLadder",
+    "Concept",
+    "Instance",
     "CompositionalGrammar",
     "Interpretation",
     "SampleEfficientMind",
