@@ -1446,6 +1446,13 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
             self.mind_evolution.autonomous_enact = False
+            # The Genesis Protocol designs and micro-trains real neural architectures — far too
+            # heavy to run on every core boot across the suite (and it must stay hermetic). Keep the
+            # boot kickoff OFF and pin the always-fast pure-stdlib n-gram substrate under TEST; a
+            # test that wants the real torch path builds its own GenesisConfig (see
+            # tests/growth/test_genesis.py, which sets backend="torch" explicitly).
+            self.genesis.run_on_boot = False
+            self.genesis.backend = "stdlib"
         return self
 
     # ---- convenience ---- #

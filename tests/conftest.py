@@ -20,6 +20,11 @@ os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_TUNING", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_LLM_EDITS", "false")
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
+# The Genesis Protocol's boot kickoff (run_on_boot, ON for live DEV/PROD) designs and micro-trains
+# a real neural architecture on the first idle tick — minutes of compute that every core-booting
+# test would otherwise pay. Same hermetic rationale as the enactment flags above: keep it OFF for
+# the suite. The genesis tests build their own GenesisConfig (and set backend="torch" explicitly).
+os.environ.setdefault("NYXARA_GENESIS__RUN_ON_BOOT", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 
