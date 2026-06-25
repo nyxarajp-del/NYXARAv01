@@ -377,6 +377,91 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[ToolParam("phrase", "str")],
                       capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
 
+        # ---- abstraction ladder: build concepts from things, then climb (Car/Bike/Truck
+        #      -> Vehicle -> Transport). Knowledge-only; she forms & ascends concepts herself.
+        _ladder_state: Dict[str, Any] = {"ladder": None}
+
+        def _ladder() -> Any:
+            lad = _ladder_state["ladder"]
+            if lad is None:
+                from nyxara.cognition.concept_formation import AbstractionLadder
+                lad = AbstractionLadder()
+                _ladder_state["ladder"] = lad
+            return lad
+
+        def _split_features(raw: str) -> List[str]:
+            return [f.strip() for f in re.split(r"\s*(?:\|\||,|\n)\s*", str(raw)) if f.strip()]
+
+        def _observe_instance(name: str, features: str) -> Dict[str, Any]:
+            feats = _split_features(features)
+            inst = _ladder().observe(str(name).strip(), feats)
+            return {"observed": inst.name, "features": sorted(inst.features),
+                    "instances": len(_ladder().instances())}
+
+        _add(ToolSpec("observe_instance", handler=_observe_instance,
+                      description="register a concrete thing by its features (split by ',' or "
+                                  "'||') so it can be abstracted — e.g. name='Car', features="
+                                  "'has_wheels, has_engine, moves, road'",
+                      params=[ToolParam("name", "str"), ToolParam("features", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _form_concept(instances: str, name: str = "") -> Dict[str, Any]:
+            members = _split_features(instances)
+            concept = _ladder().abstract(members, name=(name.strip() or None))
+            if concept is None:
+                return {"formed": None, "note": "give >=2 known instance names (split with ',')"}
+            return {"formed": concept.name, "defining_features": sorted(concept.features),
+                    "members": list(concept.members), "level": concept.level,
+                    "support": concept.support}
+
+        _add(ToolSpec("form_concept", handler=_form_concept,
+                      description="abstract >=2 observed things into ONE superordinate concept "
+                                  "(their shared features) — e.g. instances='Car,Bike,Truck', "
+                                  "name='Vehicle'. Auto-names from shared features if omitted.",
+                      params=[ToolParam("instances", "str"),
+                              ToolParam("name", "str", required=False, default="")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _ascend_abstraction() -> Dict[str, Any]:
+            formed = _ladder().ascend()
+            return {"new_concepts": [{"name": c.name, "members": list(c.members),
+                                      "defining_features": sorted(c.features), "level": c.level}
+                                     for c in formed],
+                    "note": None if formed else "nothing clustered at the current top level yet"}
+
+        _add(ToolSpec("ascend_abstraction", handler=_ascend_abstraction,
+                      description="climb the abstraction ladder one level: she clusters the "
+                                  "current top concepts/things by overlap and forms the next "
+                                  "meta-concept herself (e.g. Vehicle,Plane,Ship -> Transport)",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _classify_instance(features: str) -> Dict[str, Any]:
+            feats = _split_features(features)
+            hit = _ladder().classify(feats)
+            if hit is None:
+                return {"concept": None, "note": "no concept subsumes these features yet"}
+            name, concept = hit
+            return {"concept": name, "defining_features": sorted(concept.features),
+                    "level": concept.level}
+
+        _add(ToolSpec("classify_instance", handler=_classify_instance,
+                      description="recognise a (possibly unseen) thing by its features — returns "
+                                  "the MOST-SPECIFIC concept that subsumes it (e.g. a fresh "
+                                  "'has_wheels, has_engine, moves, road' -> Vehicle)",
+                      params=[ToolParam("features", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        def _abstraction_ladder() -> Dict[str, Any]:
+            lad = _ladder()
+            return {"report": lad.report(), **lad.to_dict()}
+
+        _add(ToolSpec("abstraction_ladder", handler=_abstraction_ladder,
+                      description="introspect the whole concept taxonomy she has built so far "
+                                  "(the instance -> concept -> meta-concept tree)",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
         # ---- forge her own model from lived memory (Master-gated, gauntlet-protected) ---- #
         def _train_self_model(generations: int = 1) -> Dict[str, Any]:
             from nyxara.growth.autolearn import GrowthEngine
