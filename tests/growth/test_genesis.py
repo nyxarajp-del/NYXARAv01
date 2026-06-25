@@ -265,6 +265,31 @@ def test_maybe_run_triggers_on_new_data(tmp_path):
     assert nas.maybe_run() is None
 
 
+def test_maybe_boot_fires_once_on_a_fresh_machine(tmp_path):
+    """A fresh machine has no flywheel data, so maybe_run can never fire on its own. maybe_boot
+    runs exactly one real search+promote on the first idle tick, then reverts to lazy cadence."""
+    foundry = _foundry(tmp_path)
+    nas = NeuralArchitectureSearch(cfg=_cfg(run_on_boot=True), foundry=foundry,
+                                   flywheel=None, seed_corpus=_CORPUS)
+    # the lazy new-experience trigger could never fire here (no flywheel) ...
+    assert nas.maybe_run() is None
+    # ... but the boot kickoff runs one real cycle, seeded from her own corpus
+    out = nas.maybe_boot()
+    assert out is not None and out.get("promoted") is True
+    assert nas.all_reports()                       # a real search actually ran
+    # fires at most once per process; the lazy cadence stays quiet without new data
+    assert nas.maybe_boot() is None
+    assert nas.maybe_run() is None
+
+
+def test_maybe_boot_respects_disabled_flag(tmp_path):
+    foundry = _foundry(tmp_path)
+    nas = NeuralArchitectureSearch(cfg=_cfg(run_on_boot=False), foundry=foundry,
+                                   flywheel=None, seed_corpus=_CORPUS)
+    assert nas.maybe_boot() is None
+    assert not nas.all_reports()
+
+
 def test_core_wires_genesis(tmp_path, monkeypatch):
     monkeypatch.setenv("NYXARA_FLYWHEEL__STORE_PATH", str(tmp_path / "fw.jsonl"))
     monkeypatch.setenv("NYXARA_FOUNDRY__BACKEND", "ngram")

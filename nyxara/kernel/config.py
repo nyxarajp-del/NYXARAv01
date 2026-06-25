@@ -472,8 +472,13 @@ class GenesisConfig(BaseModel):
     quality_weight: float = Field(default=1.0, ge=0.0)         # smartness vs …
     speed_weight: float = Field(default=0.25, ge=0.0)         # … speed in the fitness blend
     min_new_examples: int = Field(default=20, ge=1)           # idle trigger, like AutoForge
+    # First-run kickoff: on a fresh boot the flywheel is empty, so the new-experience trigger above
+    # can never fire (0 - 0 < min_new_examples) and she would never actually search. When True she
+    # runs exactly ONE search+promote cycle on her first idle tick, seeded from her own corpus, then
+    # reverts to the new-experience cadence. Oversight-gated upstream; off → classic lazy behaviour.
+    run_on_boot: bool = True
     seed: int = 0
-    # ---- Max-level search engine (all optional; defaults reproduce the classic GA path) ---- #
+    # ---- Max-level search engine (defaults now run the strong multi-objective path) ---- #
     # How the population evolves between generations:
     #   "elitism"      — the original: keep top third, breed by mutation/crossover.
     #   "tournament"   — pick parents by k-way tournaments (more selection pressure, less elitist).
@@ -481,9 +486,9 @@ class GenesisConfig(BaseModel):
     #                    search keeps exploring instead of locking onto an early lucky genome.
     #   "nsga2"        — NSGA-II elitist multi-objective evolution: rank by Pareto front + crowding
     #                    distance, driving the population toward the whole speed↔smartness↔cost front.
-    search_strategy: Literal["elitism", "tournament", "regularized", "nsga2"] = "elitism"
+    search_strategy: Literal["elitism", "tournament", "regularized", "nsga2"] = "nsga2"
     tournament_k: int = Field(default=3, ge=2, le=32)         # k-way tournament size
-    adaptive_mutation: bool = False     # raise the mutation rate when best-so-far stalls (anti-collapse)
+    adaptive_mutation: bool = True      # raise the mutation rate when best-so-far stalls (anti-collapse)
     novelty_weight: float = Field(default=0.0, ge=0.0)        # reward genomes far from the population
     # Successive-halving bracket (Hyperband-flavoured): cheap-screen the whole population at a
     # fraction of micro_train_steps, then spend full training only on the top survivors.
@@ -491,7 +496,7 @@ class GenesisConfig(BaseModel):
     halving_factor: int = Field(default=3, ge=2, le=8)        # keep 1/factor each rung
     # A tiny ridge-regression surrogate over genome features, trained on already-scored candidates,
     # used only to ORDER which genomes to evaluate first — never to crown a champion (honest).
-    surrogate: bool = False
+    surrogate: bool = True
     surrogate_min_train: int = Field(default=8, ge=2)         # candidates needed before it predicts
     # UCB acquisition: order/breed by predicted-mean + ucb_beta·uncertainty (0 = pure exploit).
     ucb_beta: float = Field(default=0.0, ge=0.0, le=10.0)
