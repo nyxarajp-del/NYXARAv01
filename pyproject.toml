@@ -87,3 +87,8 @@ ignore = [
 
 [tool.setuptools.packages.find]
 include = ["nyxara*"]
+
+[tool.setuptools.package-data]
+# Ship the curated real-world held-out validation corpus (eval/datasets.py loads it via
+# importlib.resources) so external validation works from an installed wheel, not only the repo.
+"nyxara.eval" = ["data/*.jsonl"]

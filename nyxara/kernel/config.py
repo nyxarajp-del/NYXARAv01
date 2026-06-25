@@ -851,6 +851,17 @@ class SelfImprovementConfig(BaseModel):
     goodhart_guard: bool = True                # discount index gain when proxy rises, transfer stalls
     credit_on_transfer: bool = True            # ledger reward = held-out delta, not proxy delta
     transfer_weight: float = Field(default=0.3, ge=0.0, le=1.0)  # transfer's pull in the guard
+    # --- REAL external validation: a curated, externally-true held-out corpus (eval/datasets.py) --- #
+    # The toy split-holdout and the hand-coded adversarial battery are still self-generated rulers;
+    # this is the genuinely-external one. NYXARA ships ``nyxara/eval/data/holdout_realworld.jsonl``
+    # (real facts + multi-step problems she never trains on); point ``validation_realworld_path`` at a
+    # JSONL to substitute a real standard dataset (GSM8K/MMLU). It is the DOMINANT transfer ruler:
+    # transfer_score = w_real·realworld + w_holdout·split-holdout + w_adv·adversarial. Measurement-only.
+    validation_realworld_enabled: bool = True
+    validation_realworld_path: Optional[str] = None      # external JSONL override (else the bundled set)
+    transfer_weight_realworld: float = Field(default=0.5, ge=0.0, le=1.0)
+    transfer_weight_holdout: float = Field(default=0.2, ge=0.0, le=1.0)
+    transfer_weight_adversarial: float = Field(default=0.3, ge=0.0, le=1.0)
     # --- full wire: the index's directive drives a real cross-system action --- #
     # When ON, the planned growth directive (train_self_model / acquire_knowledge / …) is actually
     # dispatched — foundry forge, research-queue enqueue — instead of merely logged. Each dispatch

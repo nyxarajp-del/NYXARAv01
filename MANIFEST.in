@@ -1,0 +1,3 @@
+# Ship NYXARA's bundled evaluation datasets (the real-world held-out validation corpus)
+# inside source distributions as well as wheels (see pyproject.toml package-data).
+recursive-include nyxara/eval/data *.jsonl

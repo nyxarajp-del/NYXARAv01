@@ -10,7 +10,8 @@ import pytest
 from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkTask, Grader,
                                    build_arithmetic_benchmark, build_default_benchmark,
                                    build_logic_benchmark, core_solver, grade_contains,
-                                   grade_exact, grade_multiple_choice, grade_numeric)
+                                   grade_exact, grade_final_numeric, grade_multiple_choice,
+                                   grade_numeric)
 
 
 def _task(**kw) -> BenchmarkTask:
@@ -40,6 +41,42 @@ def test_numeric_tolerance():
 
 def test_numeric_no_number_scores_zero():
     assert grade_numeric("no digits here", _task(answer="1", grader=Grader.NUMERIC))[0] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Robust final-answer numeric grader (numeric_final)
+# --------------------------------------------------------------------------- #
+def test_final_numeric_prefers_marked_answer_over_trailing_number():
+    # The working ends on a wrong number, but the solver MARKS its real answer earlier — a bare
+    # last-number grader would mark this wrong; numeric_final reads the stated conclusion.
+    t = _task(answer="42", grader=Grader.NUMERIC_FINAL)
+    assert grade_final_numeric("The answer is 42. (scratch work below: 7, 6, 99)", t)[0] == 1.0
+    assert grade_final_numeric("... so 12 + 30 = 42", t)[0] == 1.0
+    assert grade_final_numeric("steps: 100, 58 ... #### 42", t)[0] == 1.0
+
+
+def test_final_numeric_resists_a_gamed_trailing_number():
+    # A confident wrong final marker must FAIL even if the correct value appears earlier as working.
+    t = _task(answer="42", grader=Grader.NUMERIC_FINAL)
+    assert grade_final_numeric("we compute 42 along the way; answer: 99", t)[0] == 0.0
+
+
+def test_final_numeric_falls_back_to_last_number_when_unmarked():
+    t = _task(answer="42", grader=Grader.NUMERIC_FINAL)
+    assert grade_final_numeric("first 7, then 42", t)[0] == 1.0
+    assert grade_final_numeric("no digits here", t)[0] == 0.0
+
+
+def test_final_numeric_honours_tolerance_and_commas():
+    t = _task(answer="1234", grader=Grader.NUMERIC_FINAL)
+    assert grade_final_numeric("answer: 1,234", t)[0] == 1.0
+    t2 = _task(answer="10", grader=Grader.NUMERIC_FINAL, tolerance=0.5)
+    assert grade_final_numeric("= 10.4", t2)[0] == 1.0
+    assert grade_final_numeric("= 11", t2)[0] == 0.0
+
+
+def test_final_numeric_registered_in_grader_registry():
+    assert Grader.get(Grader.NUMERIC_FINAL) is grade_final_numeric
 
 
 # --------------------------------------------------------------------------- #

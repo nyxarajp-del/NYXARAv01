@@ -9,6 +9,10 @@ Two batteries, one entry point:
   the mind is (arithmetic + logic), graded against known answers. By default it measures
   the offline reasoner (so it runs anywhere); add ``--llm`` to measure the configured
   provider, or ``--bare-llm`` to measure the model directly (bypassing the loop).
+* **Real-world held-out validation** — ``python -m nyxara.eval --benchmark --realworld`` runs the
+  genuinely-external corpus (``eval/datasets.py``: real facts + multi-step problems NYXARA never
+  trains on). Point ``NYXARA_EVAL_HOLDOUT_PATH`` at a JSONL to validate against a real standard
+  dataset (GSM8K/MMLU) instead of the bundled set.
 
 Both support baseline regression tracking::
 
@@ -97,7 +101,47 @@ def _run_router(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_realworld(args: argparse.Namespace) -> int:
+    """Run the REAL, externally-true held-out validation corpus (eval/datasets.py).
+
+    This is the genuinely-external ruler — real facts and multi-step problems NYXARA never trains on,
+    or any standard dataset pointed at by ``$NYXARA_EVAL_HOLDOUT_PATH``. It measures the offline
+    reasoner by default; ``--bare-llm`` / ``--self`` swap in the configured / own model instead."""
+    from nyxara.eval.benchmark import core_solver, llm_solver, self_solver
+    from nyxara.eval.datasets import build_realworld_benchmark
+    try:
+        bench = build_realworld_benchmark()
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not load the real-world held-out set: {exc}")
+        return 1
+    solver = (self_solver() if args.self_model
+              else llm_solver() if args.bare_llm
+              else core_solver())
+    report = bench.run(solver, category=args.category)
+    print(report.summary())
+    exit_code = 0
+    if args.baseline:
+        from nyxara.eval.benchmark import BenchmarkReport
+        try:
+            baseline = BenchmarkReport.load(args.baseline)
+        except FileNotFoundError:
+            print(f"\n(no baseline at {args.baseline}; skipping regression check)")
+        else:
+            regressions = report.regression_vs(baseline)
+            if regressions:
+                print(f"\nREGRESSIONS vs baseline: {', '.join(regressions)}")
+                exit_code = 1
+            else:
+                print("\nno regressions vs baseline ✓")
+    if args.save:
+        report.save(args.save)
+        print(f"\nbaseline (real-world held-out) saved -> {args.save}")
+    return exit_code
+
+
 def _run_benchmark(args: argparse.Namespace) -> int:
+    if args.realworld:
+        return _run_realworld(args)
     if args.ab:
         return _run_ab(args)
     if args.router:
@@ -156,6 +200,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="benchmark: A/B the external teacher vs NYXARA's own model")
     parser.add_argument("--router", action="store_true",
                         help="benchmark: run the confidence router and report the handoff rate")
+    parser.add_argument("--realworld", action="store_true",
+                        help="benchmark: run the REAL held-out validation corpus (eval/datasets.py); "
+                             "set NYXARA_EVAL_HOLDOUT_PATH to use an external dataset")
     parser.add_argument("--category", default=None, help="run only one category")
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")

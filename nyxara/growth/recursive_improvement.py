@@ -332,19 +332,25 @@ class RecursiveSelfImprovement:
     def run_validation(self) -> Optional[Dict[str, Any]]:
         """Measure REAL, transferable capability on tasks the optimiser never edits against.
 
-        Two external rulers, run through the *same* sovereign solver as the proxy benchmark:
+        Three external rulers, run through the *same* sovereign solver as the proxy benchmark:
 
+        * the **real-world held-out corpus** (``eval/datasets.build_realworld_benchmark``) — a
+          curated, externally-true set of real facts and multi-step problems NYXARA never trains on
+          (or any standard dataset the Master points ``validation_realworld_path`` at). This is the
+          genuinely-external ruler and, by default, the **dominant** term in the score;
         * the **held-out fold** of the training battery (``Benchmark.split``) — a same-distribution
           generalisation check; and
         * the full **adversarial** battery (``eval/hard_benchmark.build_hard_benchmark``: multi-hop
           deduction, sequence induction, code-output prediction, grounded reading and calibration
           traps) — an out-of-distribution transfer check.
 
-        Neither is ever passed to :meth:`detect_weaknesses` / :meth:`_weakest_categories`, so it
-        cannot steer edit selection. Their combined ``transfer_score`` is the one signal NYXARA
-        cannot game: it rises only when capability genuinely transfers. Honest about cost — when
-        the effort budget says the machine cannot afford the full battery it scopes the adversarial
-        run to a representative category, and any failure degrades to a clean ``None``/error block.
+        None is ever passed to :meth:`detect_weaknesses` / :meth:`_weakest_categories`, so none can
+        steer edit selection. Their weighted ``transfer_score`` is the one signal NYXARA cannot
+        game: it rises only when capability genuinely transfers to data she did not author. Honest
+        about cost — when the effort budget says the machine cannot afford the full battery it scopes
+        the adversarial run to a representative category, and any failure degrades to a clean
+        ``None``/error block. The real-world corpus degrades cleanly on its own too: if it is
+        unavailable (or disabled) its weight is dropped and the remaining rulers are renormalised.
         """
         cfg = self.settings.self_improvement
         if not bool(getattr(cfg, "validation_enabled", True)):
@@ -365,15 +371,36 @@ class RecursiveSelfImprovement:
         if self._effort is not None and not self._effort.get("benchmark_full", True):
             cats = adversarial.categories()
             adv_scope = cats[0] if cats else None
+        # The real, externally-true held-out corpus — loaded only if enabled and available. Its
+        # absence is not an error (the bundled file may be missing in a stripped install); we simply
+        # drop its weight below and lean on the other two rulers.
+        realworld = None
+        rw_error: Optional[str] = None
+        if bool(getattr(cfg, "validation_realworld_enabled", True)):
+            try:
+                from nyxara.eval.datasets import build_realworld_benchmark
+                realworld = build_realworld_benchmark(self.settings)
+            except Exception as exc:  # noqa: BLE001 — a missing corpus must never break the cycle
+                rw_error = str(exc)
         try:
             solver = core_solver()
             ho = holdout.run(solver)
             adv = adversarial.run(solver, category=adv_scope)
+            rw = realworld.run(solver) if realworld is not None else None
         except Exception as exc:  # noqa: BLE001 — validation is a measurement, never fatal
             self._validation = {"error": f"validation failed: {exc}", "transfer_score": 0.0}
             return self._validation
-        # mean_score (graded, partial credit) is a smoother transfer signal than pass/fail accuracy
-        transfer = 0.5 * float(ho.mean_score) + 0.5 * float(adv.mean_score)
+        # mean_score (graded, partial credit) is a smoother transfer signal than pass/fail accuracy.
+        # Blend the rulers by configured weight, dropping (and renormalising over) any absent ruler so
+        # the score is always a clean convex combination of what was actually measured.
+        w_rw = float(getattr(cfg, "transfer_weight_realworld", 0.5))
+        w_ho = float(getattr(cfg, "transfer_weight_holdout", 0.2))
+        w_adv = float(getattr(cfg, "transfer_weight_adversarial", 0.3))
+        terms = [(w_ho, float(ho.mean_score)), (w_adv, float(adv.mean_score))]
+        if rw is not None:
+            terms.append((w_rw, float(rw.mean_score)))
+        wsum = sum(w for w, _ in terms) or 1.0
+        transfer = sum(w * s for w, s in terms) / wsum
         self._validation = {
             "holdout_accuracy": round(ho.accuracy, 6),
             "holdout_mean_score": round(ho.mean_score, 6), "holdout_n": len(ho),
@@ -382,6 +409,14 @@ class RecursiveSelfImprovement:
             "adversarial_by_category": adv.by_category(),
             "adversarial_scope": adv_scope or "full",
             "transfer_score": round(transfer, 6)}
+        if rw is not None:
+            self._validation.update({
+                "realworld_accuracy": round(rw.accuracy, 6),
+                "realworld_mean_score": round(rw.mean_score, 6), "realworld_n": len(rw),
+                "realworld_by_category": rw.by_category(),
+                "realworld_source": getattr(cfg, "validation_realworld_path", None) or "bundled"})
+        elif rw_error is not None:
+            self._validation["realworld_error"] = rw_error
         return self._validation
 
     # ---- (4) self weakness detection ---- #

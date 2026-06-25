@@ -18,7 +18,9 @@ from __future__ import annotations
 from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
                                   BenchmarkTask, Grader, build_arithmetic_benchmark,
                                   build_default_benchmark, build_logic_benchmark,
-                                  core_solver, llm_solver, self_solver)
+                                  core_solver, grade_final_numeric, llm_solver, self_solver)
+from nyxara.eval.datasets import (DatasetError, build_realworld_benchmark,
+                                  load_jsonl_benchmark)
 from nyxara.eval.hard_benchmark import (build_calibration_benchmark, build_code_benchmark,
                                         build_deduction_benchmark, build_hard_benchmark,
                                         build_math_benchmark, build_reading_benchmark,
@@ -44,9 +46,14 @@ __all__ = [
     "core_solver",
     "llm_solver",
     "self_solver",
+    "grade_final_numeric",
     "build_arithmetic_benchmark",
     "build_logic_benchmark",
     "build_default_benchmark",
+    # real-world, externally-true held-out validation (eval/datasets.py)
+    "build_realworld_benchmark",
+    "load_jsonl_benchmark",
+    "DatasetError",
     # the hard, discriminating battery (incl. calibration / honesty)
     "build_hard_benchmark",
     "build_math_benchmark",
