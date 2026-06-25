@@ -113,6 +113,7 @@ commands:
   /pause             pause the loop
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
+  /read <passage>    learn world dynamics from a passage (read like a textbook)
   /wander [n]        let the idle mind wander n ticks and show the thoughts
   /proactive         detect & govern self-initiated actions (one initiative pass)
   /research <topic>  run one autonomous research pass on a topic
@@ -194,6 +195,11 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
                 print("  (nothing worth doing on her own initiative right now)")
             for d in decisions:
                 print(f"  {d.initiative.name:32s} -> {d.verdict.value:9s} : {d.reason}")
+    elif cmd in ("read", "study"):
+        if not arg:
+            print("usage: /read <a passage describing how something behaves>")
+        else:
+            print(json.dumps(core.learn_from_text(arg), indent=2, default=str))
     elif cmd == "research":
         if not arg:
             print("usage: /research <topic>")
