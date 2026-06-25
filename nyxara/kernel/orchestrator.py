@@ -3192,7 +3192,10 @@ class NyxaraCore:
         #      gauntlet. Oversight-gated: a paused/scrammed mind never redesigns or promotes itself.
         if self.genesis is not None and self.oversight.gate():
             try:
-                genesis_result = self.genesis.maybe_run()
+                # maybe_boot fires one real search on the very first idle tick (a fresh machine has
+                # no flywheel data, so maybe_run's new-experience trigger could never fire on its
+                # own); thereafter maybe_run drives the lazy new-experience cadence.
+                genesis_result = self.genesis.maybe_boot() or self.genesis.maybe_run()
                 if genesis_result is not None:
                     report["genesis_cycles"] = len(self.genesis.all_reports())
                     report["genesis"] = genesis_result.get("reason", "")
@@ -3966,11 +3969,19 @@ class NyxaraCore:
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
         if self.genesis is not None:
-            rep["genesis_searches"] = len(self.genesis.all_reports())
+            reports = self.genesis.all_reports()
+            rep["genesis_searches"] = len(reports)
             champ = self.genesis.champion()
             if champ is not None:
                 rep["genesis_champion"] = champ.genome.describe()
                 rep["loyalty_alignment"] = round(champ.alignment, 4)
+                # Surface whether the REAL neural path ran (torch) or the n-gram substrate, so
+                # "she designed her own brain" is never over-read from the report.
+                rep["genesis_backend"] = champ.kind            # "genesis" (torch) | "kngram"
+                rep["genesis_topology_active"] = champ.topology_active
+                rep["genesis_perplexity"] = round(champ.perplexity, 3)
+            if reports:
+                rep["genesis_backend_engine"] = reports[-1].backend   # "torch" | "stdlib"
         if self.curator is not None:
             reports = self.curator.all_reports()
             rep["synthesis_cycles"] = len(reports)

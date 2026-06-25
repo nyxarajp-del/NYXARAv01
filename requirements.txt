@@ -17,6 +17,11 @@ httpx>=0.27
 # transformers>=4.51
 # torch>=2.2
 # accelerate>=0.30
+# Genesis Protocol — Neural Architecture Search (growth/genesis.py): she designs and micro-trains
+# her OWN neural architectures. Real (not the n-gram fallback) requires torch; a CPU build is fine.
+# Without it the code still runs on the always-available n-gram substrate, but the searched neural
+# topology is NOT built or trained — install this for genuine architecture search.
+torch>=2.2
 # Vector / retrieval
 faiss-cpu>=1.8
 # Security

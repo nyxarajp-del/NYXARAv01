@@ -1117,11 +1117,18 @@ class GenesisModel(BaseLanguageModel):
         start = time.monotonic()
         data = self._encode("\n".join(corpus))
         bs = self.genome.block_size
-        if len(data) <= bs + 1:
-            data = (data * (bs * 2 // max(1, len(data)) + 2))[: bs * 4]
+        # Largest future offset any head needs: the main head predicts +1; each multi-token-
+        # prediction head predicts a further-future token (offsets 2 … 1+len(mtp_heads)). Every
+        # sampled window must leave room for the furthest target, or torch.stack on the MTP targets
+        # gets a ragged batch (one short row at the tail of the data).
+        max_off = max(1, 1 + len(self.net.mtp_heads))
+        if len(data) < bs + max_off + 1:
+            reps = (bs + max_off + 1) // max(1, len(data)) + 2
+            data = (data * reps)[: max(bs * 4, bs + max_off + 1)]
         t = torch.tensor(data, dtype=torch.long, device=self.device)
         steps = max(1, steps)
-        n_batch = max(1, min(batch_size, len(data) - bs - 1))
+        hi = len(data) - bs - max_off          # inclusive upper bound for a window start
+        n_batch = max(1, min(batch_size, hi + 1))
         opt = torch.optim.AdamW(self.net.parameters(), lr=lr, weight_decay=weight_decay)
         warm = max(1, int(steps * warmup))
         def lr_at(s: int) -> float:                          # linear warmup → cosine decay
@@ -1131,17 +1138,17 @@ class GenesisModel(BaseLanguageModel):
             return 0.5 * (1.0 + math.cos(math.pi * min(1.0, prog)))
         sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_at)
         use_amp = self.device == "cuda"
-        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
         rng = random.Random(seed or self.genome.seed)
         torch.manual_seed(seed or self.genome.seed)
         self.net.train()
         last = 0.0
         for s in range(steps):
-            ix = [rng.randint(0, len(data) - bs - 1) for _ in range(n_batch)]
+            ix = [rng.randint(0, hi) for _ in range(n_batch)]
             x = torch.stack([t[i:i + bs] for i in ix])
             y = torch.stack([t[i + 1:i + 1 + bs] for i in ix])
             opt.zero_grad(set_to_none=True)
-            with torch.autocast(device_type="cuda", enabled=use_amp):
+            with torch.autocast(device_type=self.device, enabled=use_amp):
                 logits, aux = self.net(x)
                 loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.reshape(-1))
                 if aux is not None:                          # MoE load-balance term
@@ -2215,7 +2222,25 @@ class NeuralArchitectureSearch:
                 "perplexity": version.metrics.get("perplexity"),
                 "describe": self._champion.genome.describe()}
 
-    # ---- the autonomous trigger (mirrors AutoForge): forge on enough NEW data ---- #
+    # ---- the autonomous triggers (mirror AutoForge) ---- #
+    def maybe_boot(self) -> Optional[Dict[str, Any]]:
+        """Run exactly ONE search+promote cycle on the first idle tick after boot.
+
+        On a fresh machine the flywheel is empty, so :meth:`maybe_run`'s new-experience trigger can
+        never fire (``0 - 0 < min_new_examples``) and she would never actually design a brain. This
+        fires once — seeded from her own corpus — so the very first boot produces a real searched
+        architecture, then reverts to the lazy new-experience cadence. Gated by ``cfg.run_on_boot``
+        and fired at most once per process; oversight gates it upstream in the idle loop."""
+        if getattr(self, "_boot_done", False):
+            return None
+        if not bool(getattr(self.cfg, "run_on_boot", True)):
+            return None
+        if self._reports:                       # a search already ran (e.g. via maybe_run) — done
+            self._boot_done = True
+            return None
+        self._boot_done = True
+        return self._run_cycle()
+
     def maybe_run(self) -> Optional[Dict[str, Any]]:
         """Run one search+promote cycle iff enough new verified experience has accrued.
 
@@ -2224,6 +2249,11 @@ class NeuralArchitectureSearch:
         if count - self._last_example_count < int(getattr(self.cfg, "min_new_examples", 20)):
             return None
         self._last_example_count = count
+        return self._run_cycle()
+
+    def _run_cycle(self) -> Dict[str, Any]:
+        """Search, then promote the champion through the Foundry gauntlet. Never crashes the idle
+        loop — a failed search reports the reason instead of raising."""
         try:
             self.search()
             if self.foundry is not None:
