@@ -525,6 +525,38 @@ around the control law.
   ```
 
   From the console: `/strategize <problem>`.
+* **Causal world model — *why*, not just *what*** — `mind/causal_world_model.py`. A pattern
+  matcher only ever learns *"A and B are often seen together"* (correlation). To plan, to
+  explain, and to imagine *"what if I had not done that?"*, NYXARA must learn the stronger
+  thing — **"A hua, isliye B hua"** (A happened, *therefore* B happened). From the time-ordered
+  stream of what she **observes** and what she **does**, the model discovers genuine causal
+  structure and — the hard part — tells causation apart from mere correlation, fusing several
+  convergent criteria so no single one is trusted alone:
+
+  > **temporal precedence** (a cause precedes its effect) · **contingency ΔP** (B actually
+  > *depends* on A, not just co-occurs) · **direction** (the forward link must beat the reverse)
+  > · **confounder screening** (if A⊥B once a common cause C is fixed, the link is *spurious* —
+  > the ice-cream-and-drownings trap, both caused by *summer*) · **intervention / the
+  > do-operator** (the gold standard: she generates it for free — every turn she *acts*, a
+  > natural `do`-experiment, so she can learn that *forcing* A does not move B even when they
+  > correlate).
+
+  The result is a directed, weighted causal graph with **honest** confidence (thin evidence →
+  low confidence; confounded links demoted — never hallucinated certainty). It answers the
+  questions correlation cannot: `why(effect)` (the genuine causes, ranked), `is_causal(a, b)`
+  (a verdict — *causal / correlational / confounded / coincidental / reverse* — **with the
+  reason**), `effects_of` / `predict_effects` (forward `do`-propagation), and `counterfactual`
+  ("had A not happened, would B?"). Forward propagation and counterfactuals **reuse**
+  `mind/strategies.py`'s `CausalModel`; precedence reuses `mind/temporal.py`. It learns live
+  inside the sovereign loop (each turn's action⇒outcome is recorded as a `do`-experiment), is
+  gated by `NYXARA_CAUSAL__*`, persists across restarts, and runs on the pure-stdlib floor.
+
+  ```python
+  cwm = core.causal_world_model
+  cwm.is_causal("ice_cream", "drowning").verdict   # -> "confounded" (common cause: summer)
+  cwm.is_causal("summer", "drowning").verdict      # -> "causal"
+  cwm.why("slippery")                              # -> [rain→slippery, wet_ground→slippery, ...]
+  ```
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).
@@ -727,7 +759,7 @@ pytest -q
 nyxara/
   kernel/      sovereign loop, config, runtime, rules, bus, workspace
   senses/      perception & input binding (import-guarded heavy ML)
-  mind/        reasoning, math, council, RAG, world model, creativity
+  mind/        reasoning, math, council, RAG, world model, causal world model, creativity
   identity/    values, affect, narrative, motivation, soul
   planning/    goals, foresight, scenarios, decisions, journal
   agency/      tools, agents, permissions, governor, scheduler

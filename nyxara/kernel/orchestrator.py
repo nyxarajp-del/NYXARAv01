@@ -335,6 +335,11 @@ class NyxaraCore:
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
+        # causal world model — *why*, not just *what*: she learns which events genuinely
+        # cause which (correlation ≠ causation), screening confounders and weighing her own
+        # actions as do-experiments. "A hua, isliye B hua" — not "A aur B saath dikhte hain".
+        self.causal_world_model = self._build_causal_world_model() if enable_growth else None
+        self._causal_turns = 0
         # Fractal Temporal Hierarchies — the multi-dimensional mind: loops within loops at
         # three time scales at once. A millisecond hardware/network monitor (Layer 1) nested
         # inside a second-scale turn observer (Layer 2) nested inside a day/month "Master AI"
@@ -1020,6 +1025,34 @@ class NyxaraCore:
             from nyxara.mind.temporal import TemporalReasoner
             return TemporalReasoner()
         except Exception:  # noqa: BLE001 — temporal reasoning is a capability, never required
+            return None
+
+    def _build_causal_world_model(self) -> Any:
+        """The causal world model: she learns *why* things happen — which events cause which
+        — from what she observes and does, telling causation apart from mere correlation."""
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.mind.causal_world_model import CausalWorldModel
+            cfg = get_settings().causal
+            if not cfg.enabled:
+                return None
+            path = None
+            if cfg.persist:
+                try:
+                    data_dir = get_settings().paths.data_dir
+                    path = str(data_dir / "causal_world_model.json") if data_dir else None
+                except Exception:  # noqa: BLE001
+                    path = None
+            kwargs = dict(window=cfg.window_s, min_support=cfg.min_support,
+                          min_observations=cfg.min_observations, min_confidence=cfg.min_confidence,
+                          min_contingency=cfg.min_contingency,
+                          confounder_screening=cfg.confounder_screening,
+                          use_interventions=cfg.use_interventions, max_vars=cfg.max_vars,
+                          max_events=cfg.max_events)
+            if path:
+                return CausalWorldModel.load(path, **kwargs)
+            return CausalWorldModel(**kwargs)
+        except Exception:  # noqa: BLE001 — causal reasoning is a capability, never required
             return None
 
     def _build_fractal_temporal(self) -> Any:
@@ -2951,6 +2984,24 @@ class NyxaraCore:
             try:
                 self.temporal.observe(action)
             except Exception:  # noqa: BLE001 — the sense of time is best-effort, never fatal
+                pass
+        # causal world model: this turn is a natural do-experiment — she *did* `action`, and
+        # an outcome followed. Recording (action ⇒ outcome) over many turns lets her learn
+        # which actions genuinely *cause* success, not merely correlate with it (and, over a
+        # rich event stream, the wider causal structure of her world).
+        if self.causal_world_model is not None:
+            try:
+                import time as _time
+                now = _time.time()
+                outcome = ("outcome:success" if (disp is Disposition.ACT and success)
+                           else "outcome:failure")
+                self.causal_world_model.observe(f"act:{action}", at=now, intervention=True)
+                self.causal_world_model.observe(outcome, at=now + 1e-3)
+                self._causal_turns += 1
+                from nyxara.kernel.config import get_settings
+                if self._causal_turns % max(1, get_settings().causal.discover_every) == 0:
+                    self.causal_world_model.discover()
+            except Exception:  # noqa: BLE001 — causal learning is best-effort, never fatal
                 pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
