@@ -32,6 +32,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = [
     "Grader", "BenchmarkTask", "BenchmarkResult", "BenchmarkReport", "Benchmark",
+    "grade_numeric", "grade_final_numeric", "grade_exact", "grade_contains",
+    "grade_multiple_choice",
     "Solver", "core_solver", "llm_solver", "self_solver", "run_router",
     "build_arithmetic_benchmark", "build_logic_benchmark", "build_reasoning_benchmark",
     "build_default_benchmark",
@@ -41,6 +43,13 @@ Solver = Callable[[str], str]
 GraderFn = Callable[[str, "BenchmarkTask"], Tuple[float, str]]
 
 _NUMBER = re.compile(r"-?\d[\d,]*\.?\d*")
+# A number that the solver explicitly flags as its FINAL answer, in the forms a real solver uses:
+# "answer: 42", "the answer is 42", "= 42", "#### 42" (GSM8K gold marker), "final: 42". We take the
+# number that follows such a marker in preference to an incidental trailing number, so a chain of
+# working ("... so 12, but actually 42") is graded on the stated conclusion, not the last digit seen.
+_FINAL_MARKER = re.compile(
+    r"(?:answer|result|final|total|equals?|####|=)\s*(?:is|:|=|of)?\s*"
+    r"\$?\s*(-?\d[\d,]*\.?\d*)", re.I)
 
 
 # --------------------------------------------------------------------------- #
@@ -61,6 +70,34 @@ def grade_numeric(response: str, task: "BenchmarkTask") -> Tuple[float, str]:
     if abs(got - want) <= tol:
         return 1.0, f"{got} == {want}"
     return 0.0, f"{got} != {want}"
+
+
+def grade_final_numeric(response: str, task: "BenchmarkTask") -> Tuple[float, str]:
+    """Score by the solver's *stated final* number, not merely the last digit on the line.
+
+    A bare last-number grader (``grade_numeric``) is brittle and gameable: any trailing digit —
+    a step in the working, an echoed quantity from the prompt — is read as the answer. This grader
+    is the honest upgrade the real held-out battery uses. It prefers a number the solver explicitly
+    marks as final ("answer: X", "the result is X", "= X", GSM-style "#### X"); only when no marker
+    is present does it fall back to the last number. Tolerance and comma/decimal handling match
+    ``grade_numeric`` so the two are interchangeable on well-formed answers.
+    """
+    text = response or ""
+    markers = _FINAL_MARKER.findall(text)
+    if markers:
+        got = float(markers[-1].replace(",", ""))
+        how = "marked final answer"
+    else:
+        matches = _NUMBER.findall(text)
+        if not matches:
+            return 0.0, "no number found in response"
+        got = float(matches[-1].replace(",", ""))
+        how = "last number (no final-answer marker)"
+    want = float(task.answer)
+    tol = task.tolerance if task.tolerance is not None else 1e-6
+    if abs(got - want) <= tol:
+        return 1.0, f"{got} == {want} ({how})"
+    return 0.0, f"{got} != {want} ({how})"
 
 
 def grade_exact(response: str, task: "BenchmarkTask") -> Tuple[float, str]:
@@ -129,12 +166,13 @@ class Grader:
     """Named graders. ``Grader.get(name)`` resolves the function used by a task."""
 
     NUMERIC = "numeric"
+    NUMERIC_FINAL = "numeric_final"
     EXACT = "exact"
     CONTAINS = "contains"
     MULTIPLE_CHOICE = "multiple_choice"
 
     _FNS: Dict[str, GraderFn] = {
-        NUMERIC: grade_numeric, EXACT: grade_exact,
+        NUMERIC: grade_numeric, NUMERIC_FINAL: grade_final_numeric, EXACT: grade_exact,
         CONTAINS: grade_contains, MULTIPLE_CHOICE: grade_multiple_choice,
     }
 

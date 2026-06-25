@@ -273,3 +273,31 @@ def test_credit_falls_back_to_index_when_transfer_disabled():
     rsi._credit_outcome(report)
     assert report.ledger["basis"] == "index"
     assert abs(report.ledger["delta"] - 0.10) < 1e-6     # 0.60 - 0.50
+
+
+# --------------------------------------------------------------------------- #
+# run_validation now includes the REAL, externally-true held-out corpus as the
+# dominant transfer ruler — and degrades cleanly when it is disabled.
+# --------------------------------------------------------------------------- #
+def test_run_validation_includes_realworld_and_blends_transfer():
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.validation_realworld_enabled = True
+    val = RecursiveSelfImprovement(settings=s).run_validation()
+    assert val is not None and "error" not in val
+    # the real corpus was measured and surfaced...
+    for key in ("realworld_accuracy", "realworld_mean_score", "realworld_n"):
+        assert key in val, val
+    assert val["realworld_n"] >= 40
+    assert val["realworld_source"] == "bundled"
+    # ...and transfer_score is a clean convex blend of the three rulers (always in [0, 1]).
+    assert 0.0 <= val["transfer_score"] <= 1.0
+
+
+def test_run_validation_degrades_when_realworld_disabled():
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.validation_realworld_enabled = False
+    val = RecursiveSelfImprovement(settings=s).run_validation()
+    assert val is not None and "error" not in val
+    assert "realworld_accuracy" not in val          # dropped cleanly
+    assert "transfer_score" in val                  # the other two rulers still produce a score
+    assert 0.0 <= val["transfer_score"] <= 1.0
