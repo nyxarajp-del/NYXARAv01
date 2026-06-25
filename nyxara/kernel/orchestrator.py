@@ -3403,6 +3403,26 @@ class NyxaraCore:
                                          salience=0.4)
             except Exception:  # noqa: BLE001 — a sensorimotor tick is a capability, never required
                 pass
+        # 4g) Read & model — learn dynamics from LANGUAGE, not just from doing. Pull one
+        #      ingested passage and let the language-grounding bridge turn it into transitions
+        #      the world model learns from. So NYXARA grows a model by *reading*, the way a
+        #      student learns from a textbook. Oversight-gated and bounded to one chunk/idle.
+        if (getattr(self, "knowledge", None) is not None
+                and self.world_model is not None):
+            try:
+                if self.oversight.gate() and len(self.knowledge) > 0:
+                    src = self.knowledge.sources()
+                    chunks = self.knowledge.retrieve(src[0] if src else "", k=1)
+                    if chunks:
+                        rep = self.learn_from_text(chunks[0].text)
+                        if rep.get("transitions"):
+                            report["read_and_modelled"] = {
+                                "transitions": rep["transitions"],
+                                "actions": rep.get("actions", []),
+                                "world_transitions": rep.get("world_transitions"),
+                            }
+            except Exception:  # noqa: BLE001 — reading is a capability, never required
+                pass
         # 5) curiosity — close a known-unknown by a safe, internal investigation
         try:
             cur = self.curiosity_pass()
@@ -3497,6 +3517,53 @@ class NyxaraCore:
             return self.researcher.research(topic).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"topic": topic, "error": str(exc)}
+
+    def _grounding_llm(self) -> Any:
+        """An LLM for language-grounding's optional ceiling — reused once built, lazy."""
+        if getattr(self, "_lang_llm", None) is None:
+            try:
+                from nyxara.mind.llm import LLM
+                cfg = self.settings if getattr(self, "settings", None) is not None else None
+                self._lang_llm = LLM(settings=cfg) if cfg is not None else LLM()
+            except Exception:  # noqa: BLE001 — the deterministic floor never needs an LLM
+                self._lang_llm = None
+        return self._lang_llm
+
+    def _grounder(self) -> Any:
+        """The language→dynamics bridge, built once and kept (so its variable registry
+        persists across calls — "temperature" stays the same dimension every read)."""
+        if getattr(self, "_lang_grounder", None) is None:
+            from nyxara.cognition.language_grounding import LanguageGrounder
+            self._lang_grounder = LanguageGrounder(llm=self._grounding_llm())
+        return self._lang_grounder
+
+    def learn_from_text(self, text: str) -> Dict[str, Any]:
+        """Learn world dynamics from a natural-language passage — read a "textbook".
+
+        Turns prose describing how a world behaves ("heating raises the temperature from 20
+        to 80") into ``(state, action, next_state, reward)`` transitions and feeds them to the
+        world model, which forms concepts and learns dynamics exactly as it does from real
+        sensorimotor experience — no hand-fed numeric tuples required. Best-effort; the
+        deterministic extractor is always available, the LLM ceiling is used only when a real
+        provider is configured. Returns the learning report as a dict.
+        """
+        if not text or not text.strip():
+            return {"error": "empty text"}
+        if self.world_model is None:
+            return {"error": "world model unavailable", "transitions": 0}
+        try:
+            report = self._grounder().learn(text, self.world_model)
+        except Exception as exc:  # noqa: BLE001 — reading is a capability, never required
+            return {"error": str(exc), "transitions": 0}
+        try:
+            if report.get("transitions"):
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"read & modelled: {report['transitions']} transitions "
+                                 f"over {report.get('actions', [])} via {report.get('via')}",
+                                 salience=0.5)
+        except Exception:  # noqa: BLE001
+            pass
+        return report
 
     def bootstrap(self, task: str) -> Dict[str, Any]:
         """Self-bootstrap a solution to ``task`` she doesn't yet know (Environment-Driven Learning).
