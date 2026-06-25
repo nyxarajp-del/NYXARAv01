@@ -27,6 +27,13 @@ Three learners share one surface (``observe`` then ``predict``), so all of them 
   disagreement**: where the members agree it is confident; where they diverge (novel states) it
   honestly is not. Requires numpy; :func:`build_world_model` falls back automatically when it is
   absent, so the system never hard-depends on it.
+* :class:`TransferWorldModel` — **cross-domain transfer**. The models above keep a *separate*
+  model per action, so nothing learned about one action helps another. This one trains **a single
+  shared ensemble** conditioned on a **learned action embedding** (``[state ⊕ e(action)]``), with
+  a :class:`~nyxara.mind.concept_hierarchy.ConceptHierarchy` that clusters actions by effect and
+  **seeds a new action's embedding near its concept-mates** — so knowledge transfers across actions
+  and even across domains, while confidence stays honest. The default (``backend="auto"``) when
+  numpy is present.
 
 Pairs with :mod:`mind.predictive_core` (the per-step prediction-error loop) and feeds
 :mod:`planning`.
@@ -57,6 +64,7 @@ __all__ = [
     "WorldModel",
     "NeuralWorldModel",
     "EnsembleWorldModel",
+    "TransferWorldModel",
     "build_world_model",
 ]
 
@@ -512,6 +520,22 @@ class _MLP:
         self._adam(gW, gb)
         return loss
 
+    def input_grad(self, X: Any, Y: Any) -> Any:
+        """Gradient of the loss w.r.t. the *input* ``X`` (weights untouched).
+
+        Lets the owning model learn an **action embedding** packed into ``X``: the
+        embedding columns get a real gradient signal, so similar-effect actions drift to
+        similar embeddings and the single shared net transfers across them."""
+        out, acts = self.forward(X)
+        n = X.shape[0]
+        delta = (2.0 / n) * (out - Y)                  # dL/d(out)
+        for i in reversed(range(len(self.W))):
+            if i > 0:
+                delta = (delta @ self.W[i].T) * (1.0 - acts[i] ** 2)
+            else:
+                return delta @ self.W[0].T             # dL/d(input)
+        return delta @ self.W[0].T
+
     def _adam(self, gW: List[Any], gb: List[Any],
               b1: float = 0.9, b2: float = 0.999, eps: float = 1e-8) -> None:
         self._t += 1
@@ -709,13 +733,246 @@ class EnsembleWorldModel(WorldModel):
 
 
 # --------------------------------------------------------------------------- #
+# Transfer model — ONE shared encoder over (state ⊕ learned action embedding),
+# with a concept hierarchy so knowledge transfers across actions and domains
+# --------------------------------------------------------------------------- #
+class TransferWorldModel(WorldModel):
+    """Cross-domain transfer: a **single shared deep ensemble** conditioned on a **learned
+    action embedding**, instead of one isolated model per action.
+
+    The previous models partitioned everything by action — learning ``left`` taught
+    ``move_left`` nothing, and a novel action was a zero-confidence blank. Here, all actions
+    train **one** numpy ensemble whose input is ``[normalised_state ⊕ e(action)]``. The
+    embedding ``e(action)`` is *learned by gradient* (the embedding columns receive a real
+    error signal via :meth:`_MLP.input_grad`), so actions with the same effect drift to nearby
+    embeddings and the shared weights generalise across them — genuine transfer.
+
+    A :class:`~nyxara.mind.concept_hierarchy.ConceptHierarchy` sits on top: it clusters actions
+    by effect signature, so a brand-new action's embedding is **seeded near its concept-mates**
+    (few-shot, even cross-domain transfer) and confidence stays **honest** — discounted while an
+    action leans on borrowed (sibling) evidence, rising as it accrues its own. Symbolic /
+    odd-dimension transitions fall back to an exact-memory kNN :class:`WorldModel`, so it is a
+    strict superset, never a regression. Drop-in for :class:`WorldModel` (same
+    ``observe``/``predict`` surface ⇒ inherits ``rollout``/``counterfactual``/``intervene``).
+    Requires numpy."""
+
+    def __init__(self, *, ensemble: int = 5, hidden: Sequence[int] = (64, 64),
+                 lr: float = 1e-3, batch: int = 32, iters: int = 4, train_every: int = 1,
+                 max_transitions: int = 50_000, experience_full: int = 64,
+                 embed_dim: int = 8, embed_lr: float = 0.05, transfer_weight: float = 0.5,
+                 concept_threshold: float = 0.4, seed: int = 0) -> None:
+        if not _HAS_NUMPY:
+            raise RuntimeError("TransferWorldModel requires numpy")
+        from nyxara.mind.concept_hierarchy import ConceptHierarchy
+        self.ensemble = max(1, ensemble)
+        self.hidden = tuple(hidden)
+        self.lr = lr
+        self.batch = batch
+        self.iters = iters
+        self.train_every = max(1, train_every)
+        self.max_transitions = max_transitions
+        self.experience_full = max(1, experience_full)
+        self.embed_dim = max(1, embed_dim)
+        self.embed_lr = embed_lr
+        self.transfer_weight = max(0.0, min(1.0, transfer_weight))
+        self.seed = seed
+        self._rng = np.random.default_rng(seed)
+        self.concepts = ConceptHierarchy(threshold=concept_threshold)
+        # per-action embeddings + their Adam moments
+        self._embed: Dict[Action, Any] = {}
+        self._embed_m: Dict[Action, Any] = {}
+        self._embed_v: Dict[Action, Any] = {}
+        self._embed_t: Dict[Action, int] = {}
+        self._own_samples: Dict[Action, int] = {}
+        self._members: Optional[List[_MLP]] = None
+        self._state_dim: Optional[int] = None
+        # ONE shared replay buffer across all actions (states, actions, targets)
+        self._S: List[List[float]] = []
+        self._A: List[Action] = []
+        self._T: List[List[float]] = []
+        self._count = 0
+        self._since_train = 0
+        # shared normalisation stats
+        self._in_mean = self._in_std = None            # over the state part
+        self._out_mean = self._out_std = None          # over the target [Δstate, reward]
+        self.err_ema = 1.0
+        # exact-memory fallback for symbolic / inconsistent-dimension transitions
+        self._knn = WorldModel(max_transitions=max_transitions)
+
+    def __len__(self) -> int:
+        return self._count
+
+    def actions(self) -> List[Action]:
+        return list({*self._embed.keys(), *self._knn.actions()})
+
+    @staticmethod
+    def _numeric(state: Sequence[Any]) -> bool:
+        return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in state)
+
+    def _ensure_embed(self, action: Action) -> None:
+        """Create an embedding for a new action, seeded near its concept-mates (transfer)."""
+        if action in self._embed:
+            return
+        # concept-mates are homogeneous → average them; otherwise borrow the single nearest
+        # action by dynamics (averaging dissimilar actions would dilute the transfer)
+        siblings = self.concepts.siblings(action)
+        neighbours = siblings if siblings else self.concepts.nearest_actions(action, k=1)
+        seeds = [self._embed[a] for a in neighbours if a in self._embed]
+        if seeds:                                      # borrow the concept's region of space
+            base = np.mean(np.asarray(seeds), axis=0)
+            e = base + 0.01 * self._rng.standard_normal(self.embed_dim)
+        else:
+            e = 0.1 * self._rng.standard_normal(self.embed_dim)
+        self._embed[action] = e
+        self._embed_m[action] = np.zeros(self.embed_dim)
+        self._embed_v[action] = np.zeros(self.embed_dim)
+        self._embed_t[action] = 0
+
+    def observe(self, state: Sequence[Any], action: Action,
+                next_state: Sequence[Any], reward: float = 0.0) -> None:
+        state = tuple(state)
+        next_state = tuple(next_state)
+        if not (self._numeric(state) and self._numeric(next_state)):
+            self._knn.observe(state, action, next_state, reward)
+            self._count += 1
+            return
+        if self._state_dim is None:
+            self._state_dim = len(state)
+        if len(state) != self._state_dim or len(next_state) != self._state_dim:
+            self._knn.observe(state, action, next_state, reward)
+            self._count += 1
+            return
+        # update the concept hierarchy *first* so a new action seeds near the right concept
+        self.concepts.update(action, state, next_state, reward)
+        self._ensure_embed(action)
+        delta = [next_state[i] - state[i] for i in range(self._state_dim)]
+        self._S.append(list(state))
+        self._A.append(action)
+        self._T.append([*delta, float(reward)])
+        if len(self._S) > self.max_transitions:
+            self._S.pop(0)
+            self._A.pop(0)
+            self._T.pop(0)
+        self._own_samples[action] = self._own_samples.get(action, 0) + 1
+        self._count += 1
+        self._since_train += 1
+        if self._members is None:
+            in_dim = self._state_dim + self.embed_dim
+            self._members = [_MLP(in_dim, self._state_dim + 1, self.hidden, self.lr,
+                                  self.seed + 101 * (i + 1)) for i in range(self.ensemble)]
+        if self._since_train >= self.train_every:
+            self._train()
+            self._since_train = 0
+
+    def _embed_matrix(self) -> Any:
+        return np.asarray([self._embed[a] for a in self._A], dtype=np.float64)
+
+    def _train(self) -> None:
+        if not self._S or self._members is None:
+            return
+        S = np.asarray(self._S, dtype=np.float64)
+        T = np.asarray(self._T, dtype=np.float64)
+        self._in_mean = S.mean(axis=0)
+        self._in_std = S.std(axis=0) + 1e-6
+        self._out_mean = T.mean(axis=0)
+        self._out_std = T.std(axis=0) + 1e-6
+        Sn = (S - self._in_mean) / self._in_std
+        Yn = (T - self._out_mean) / self._out_std
+        n = Sn.shape[0]
+        bs = min(self.batch, n)
+        X = np.concatenate([Sn, self._embed_matrix()], axis=1)   # [state ⊕ embedding]
+        last = self.err_ema
+        for m in self._members:
+            for _ in range(self.iters):
+                idx = self._rng.integers(0, n, size=bs)           # bootstrap mini-batch (replay)
+                last = m.train_batch(X[idx], Yn[idx])
+        self.err_ema = 0.9 * self.err_ema + 0.1 * last
+        self._update_embeddings(Sn, Yn, bs)
+
+    def _update_embeddings(self, Sn: Any, Yn: Any, bs: int) -> None:
+        """One Adam step on each action's embedding from the shared net's input gradient."""
+        n = Sn.shape[0]
+        X = np.concatenate([Sn, self._embed_matrix()], axis=1)
+        grad: Dict[Action, Any] = {}
+        cnt: Dict[Action, int] = {}
+        for m in self._members:
+            idx = self._rng.integers(0, n, size=bs)
+            demb = m.input_grad(X[idx], Yn[idx])[:, self._state_dim:]   # grad on embed cols
+            for r, row in enumerate(idx):
+                a = self._A[row]
+                if a not in grad:
+                    grad[a] = np.zeros(self.embed_dim)
+                    cnt[a] = 0
+                grad[a] += demb[r]
+                cnt[a] += 1
+        for a, g in grad.items():
+            self._adam_embed(a, g / (max(1, cnt[a]) * len(self._members)))
+
+    def _adam_embed(self, action: Action, g: Any, b1: float = 0.9, b2: float = 0.999,
+                    eps: float = 1e-8) -> None:
+        self._embed_t[action] += 1
+        t = self._embed_t[action]
+        self._embed_m[action] = b1 * self._embed_m[action] + (1 - b1) * g
+        self._embed_v[action] = b2 * self._embed_v[action] + (1 - b2) * (g * g)
+        mhat = self._embed_m[action] / (1 - b1 ** t)
+        vhat = self._embed_v[action] / (1 - b2 ** t)
+        self._embed[action] -= self.embed_lr * mhat / (np.sqrt(vhat) + eps)
+
+    def predict(self, state: Sequence[Any], action: Action) -> Prediction:
+        state = tuple(state)
+        if (self._members is not None and action in self._embed and self._in_mean is not None
+                and self._state_dim == len(state) and self._numeric(state)):
+            sn = (np.asarray(state, dtype=np.float64) - self._in_mean) / self._in_std
+            x = np.concatenate([sn, self._embed[action]])
+            outs = np.asarray([m.forward(x[None, :])[0][0] for m in self._members])
+            mean_n = outs.mean(axis=0)
+            disagree_n = outs.std(axis=0)
+            mean = mean_n * self._out_std + self._out_mean
+            delta = [float(v) for v in mean[: self._state_dim]]
+            reward = float(mean[self._state_dim])
+            next_state: State = tuple(state[i] + delta[i] for i in range(self._state_dim))
+            epistemic = float(np.mean(disagree_n[: self._state_dim]
+                                      * self._out_std[: self._state_dim]))
+            epistemic_norm = float(np.mean(disagree_n[: self._state_dim]))
+            deviation = float(np.mean(np.abs(sn)))
+            reliability = _pack_conf(epistemic_norm, deviation)
+            # honest confidence: own evidence counts fully, borrowed (sibling) evidence is
+            # discounted by ``transfer_weight`` — so a transferring action is confident but
+            # never *more* certain than one that learned the dynamics first-hand.
+            own = self._own_samples.get(action, 0)
+            borrowed = max(0, self.concepts.concept_support(action) - own)
+            effective = own + self.transfer_weight * borrowed
+            experience = min(1.0, effective / float(self.experience_full))
+            fit = 1.0 / (1.0 + self.err_ema)
+            conf = max(0.0, min(1.0, experience * fit * reliability))
+            return Prediction(next_state=next_state, reward=reward, confidence=conf,
+                              neighbors=own, epistemic=epistemic)
+        return self._knn.predict(state, action)        # symbolic / unknown → exact memory
+
+    def stats(self) -> Dict[str, Any]:
+        return {"transitions": self._count, "backend": "shared-encoder+concept-hierarchy",
+                "ensemble": self.ensemble, "hidden": list(self.hidden),
+                "embed_dim": self.embed_dim,
+                "concepts": len(self.concepts.concepts()),
+                "numeric_actions": dict(self._own_samples),
+                "symbolic_transitions": len(self._knn)}
+
+    def concept_report(self) -> str:
+        """Human-readable view of the learned concept hierarchy over actions."""
+        return self.concepts.report()
+
+
+# --------------------------------------------------------------------------- #
 # Factory — pick the strongest learner the machine can support, never crash
 # --------------------------------------------------------------------------- #
 def build_world_model(backend: str = "auto", **kwargs: Any) -> WorldModel:
     """Build the best world model available. ``backend``:
 
-    * ``"auto"`` / ``"ensemble"`` → :class:`EnsembleWorldModel` when numpy is present, else the
-      pure-Python :class:`NeuralWorldModel` (and the kNN :class:`WorldModel` as the final floor);
+    * ``"auto"`` / ``"transfer"`` → :class:`TransferWorldModel` (one shared encoder + concept
+      hierarchy ⇒ cross-domain transfer) when numpy is present, else the pure-Python
+      :class:`NeuralWorldModel` (and the kNN :class:`WorldModel` as the final floor);
+    * ``"ensemble"`` → :class:`EnsembleWorldModel` (per-action deep ensembles) when numpy is
+      present, else the stdlib learners;
     * ``"neural"`` → :class:`NeuralWorldModel`;
     * ``"knn"`` → :class:`WorldModel`.
 
@@ -726,16 +983,26 @@ def build_world_model(backend: str = "auto", **kwargs: Any) -> WorldModel:
         allowed = set(inspect.signature(cls.__init__).parameters) - {"self"}
         return {k: v for k, v in kwargs.items() if k in allowed}
 
-    if backend in ("auto", "ensemble"):
+    def _stdlib_floor() -> WorldModel:
+        try:
+            return NeuralWorldModel(**_filtered(NeuralWorldModel))
+        except Exception:  # noqa: BLE001
+            return WorldModel(**_filtered(WorldModel))
+
+    if backend in ("auto", "transfer"):
+        if _HAS_NUMPY:
+            try:
+                return TransferWorldModel(**_filtered(TransferWorldModel))
+            except Exception:  # noqa: BLE001 — fall through to the stdlib learners
+                pass
+        return _stdlib_floor()
+    if backend == "ensemble":
         if _HAS_NUMPY:
             try:
                 return EnsembleWorldModel(**_filtered(EnsembleWorldModel))
             except Exception:  # noqa: BLE001 — fall through to the stdlib learners
                 pass
-        try:
-            return NeuralWorldModel(**_filtered(NeuralWorldModel))
-        except Exception:  # noqa: BLE001
-            return WorldModel(**_filtered(WorldModel))
+        return _stdlib_floor()
     if backend == "neural":
         return NeuralWorldModel(**_filtered(NeuralWorldModel))
     return WorldModel(**_filtered(WorldModel))
@@ -825,6 +1092,28 @@ if __name__ == "__main__":  # pragma: no cover
         assert abs(traj_e.final_state[0]) < 1.5          # imagined its way home
         print(f"ensemble rollout    : final x={traj_e.final_state[0]:.2f}")
         print(f"ensemble stats      : {em.stats()}")
+
+        # ---- transfer model: ONE shared encoder + concept hierarchy ⇒ cross-domain ---- #
+        tm = build_world_model("auto", seed=0)
+        assert isinstance(tm, TransferWorldModel)        # the default when numpy is present
+        rng3 = random.Random(2)
+        for _ in range(600):                             # master three actions thoroughly
+            x = rng3.uniform(-10, 10)
+            a = rng3.choice(["left", "right", "stay"])
+            tm.observe((x,), a, (true_step(x, a),), reward=-abs(true_step(x, a)))
+        # a BRAND-NEW action 'descend' that behaves exactly like 'left' — only 8 samples
+        for _ in range(8):
+            x = rng3.uniform(-10, 10)
+            tm.observe((x,), "descend", (x - 1.0,), reward=-abs(x - 1.0))
+        pt = tm.predict((4.0,), "descend")
+        print(f"\ntransfer (4,descend): next={tuple(round(v,2) for v in pt.next_state)} "
+              f"conf={pt.confidence:.2f}  (8 samples, want 3.0)")
+        # few-shot transfer: 'descend' inherits 'left''s dynamics via its shared concept
+        assert abs(pt.next_state[0] - 3.0) < 0.4 and pt.confidence > 0.5
+        assert tm.concepts.concept_of("descend") == tm.concepts.concept_of("left")
+        assert tm.predict((0.0,), "teleport").confidence == 0.0   # honest about the unknown
+        print(tm.concept_report())
+        print(f"transfer stats      : {tm.stats()}")
     else:
         print("\nensemble            : numpy absent → factory falls back (stdlib learners)")
 
