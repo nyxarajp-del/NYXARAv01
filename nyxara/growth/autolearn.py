@@ -50,6 +50,7 @@ class GrowthReport:
     rivalry: Optional[Dict[str, Any]] = None
     adversarial: Optional[Dict[str, Any]] = None
     metaprompt_insights: List[str] = field(default_factory=list)
+    concept_abstraction: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
@@ -61,7 +62,8 @@ class GrowthReport:
                 "mind_evolution": self.mind_evolution,
                 "meta_research": self.meta_research, "rivalry": self.rivalry,
                 "adversarial": self.adversarial,
-                "metaprompt_insights": self.metaprompt_insights}
+                "metaprompt_insights": self.metaprompt_insights,
+                "concept_abstraction": self.concept_abstraction}
 
 
 class GrowthEngine:
@@ -230,6 +232,25 @@ class GrowthEngine:
         try:
             return cons.run_cycle()
         except Exception:  # noqa: BLE001
+            return None
+
+    # ---- abstract few-shot concepts into schemas ---- #
+    def abstract_concepts(self) -> Optional[Dict[str, Any]]:
+        """Fold accumulated few-shot concepts into abstract templates (instances → schemas).
+
+        Uses the live core's :class:`~nyxara.cognition.sample_efficient.SampleEfficientMind`
+        when available, otherwise builds one over this engine's memory. Best-effort: any
+        failure (or no faculty) returns None and never disturbs the growth pass."""
+        mind = getattr(self.core, "sample_efficient", None) if self.core is not None else None
+        try:
+            if mind is None:
+                if self.memory is None:
+                    return None
+                from nyxara.cognition.sample_efficient import SampleEfficientMind
+                mind = SampleEfficientMind(getattr(self.memory, "embedder", None),
+                                           store=self.memory)
+            return mind.consolidate().to_dict()
+        except Exception:  # noqa: BLE001 — concept abstraction is best-effort, never fatal
             return None
 
     # ---- forge (opt-in, gated) ---- #
@@ -471,6 +492,10 @@ class GrowthEngine:
             report.replayed = len(getattr(creport, "replayed", []) or [])
             report.abstractions = len(getattr(creport, "abstractions", []) or [])
             report.forgotten = len(getattr(creport, "forgotten", []) or [])
+
+        # Concept abstraction (Rule 4): fold the few-shot concepts learned this period into
+        # abstract templates — closing the loop instances → concepts → schemas. Best-effort.
+        report.concept_abstraction = self.abstract_concepts()
 
         # Rivalry (Edge 4): measure against a peer AGI first, so its lead becomes the curiosity
         # focus for this pass's self-play. Default off; never acts on anything external.

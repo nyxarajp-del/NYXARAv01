@@ -174,6 +174,19 @@ class _GraphFact:
         return self._text
 
 
+class _LearnedGround:
+    """Wraps a sample-efficient grounding block (a few-shot concept recognised, or a
+    once-told fact recalled) as a memory item the reasoner consumes via .text()."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, text: str) -> None:
+        self._text = text.strip()
+
+    def text(self) -> str:
+        return self._text
+
+
 class _SelfKnowledgeEntry:
     """Level 2 — wraps a SelfKnowledgeReport as a high-priority memory item so the
     reasoner always sees a formatted self-model summary at the top of its context."""
@@ -252,6 +265,10 @@ class NyxaraCore:
         # learned procedural skills (experiential learning) — persisted via memory
         self.skills = skills if skills is not None else (
             self._build_skills() if enable_skills else None)
+        # sample-efficient cognition (Rule 4): few-shot/one-shot concept learning, abstraction
+        # (least-general generalization), and compositional generalization — knowledge/skill
+        # only, never the protected core. Shares the memory embedder; persisted via memory.
+        self.sample_efficient = self._build_sample_efficient() if enable_skills else None
         # identity — a stable personality (the voice she speaks in) and an affective
         # state (emotion/mood/homeostatic drives) that colours, but never governs, the loop.
         self.soul = soul if soul is not None else (self._build_soul() if enable_identity else None)
@@ -562,6 +579,14 @@ class NyxaraCore:
             from nyxara.growth.skill_memory import SkillMemory
             return SkillMemory(store=self.memory)
         except Exception:  # noqa: BLE001 — skills are a capability, never a hard dependency
+            return None
+
+    def _build_sample_efficient(self) -> Any:
+        try:
+            from nyxara.cognition.sample_efficient import SampleEfficientMind
+            embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
+            return SampleEfficientMind(embedder, store=self.memory)
+        except Exception:  # noqa: BLE001 — a capability, never a hard dependency
             return None
 
     def _build_reasoner(self, llm: Any, use_council: bool, skills: Any = None,
@@ -2029,6 +2054,15 @@ class NyxaraCore:
         try:
             improved = self._invoke_reasoner(stimulus, focus, self._recall_for(stimulus))
             if improved.confidence >= candidate.confidence:
+                # sample-efficient retention: the hard-won answer is bound one-shot so the
+                # next similar question is answered immediately, without re-exploring.
+                if getattr(self, "sample_efficient", None) is not None and improved.text:
+                    try:
+                        epi = self.sample_efficient.episodic
+                        if epi is not None:
+                            epi.remember(stimulus, improved.text)
+                    except Exception:  # noqa: BLE001 — retention is best-effort, never fatal
+                        pass
                 return improved
         except Exception:  # noqa: BLE001
             pass
@@ -2073,6 +2107,15 @@ class NyxaraCore:
                         fact_text = f"{subj} {triple.predicate} {obj_}"
                         results.append(_GraphFact(fact_text))
             except Exception:  # noqa: BLE001 — graph recall is best-effort
+                pass
+        # Sample-efficient grounding: a concept learned from a few examples, or a fact told
+        # once, surfaces here so a single teaching measurably biases this very turn's answer.
+        if getattr(self, "sample_efficient", None) is not None:
+            try:
+                block = self.sample_efficient.as_prompt(stimulus)
+                if block:
+                    results.append(_LearnedGround(block))
+            except Exception:  # noqa: BLE001 — sample-efficient grounding is best-effort
                 pass
         return results
 
@@ -2849,6 +2892,16 @@ class NyxaraCore:
             try:
                 self.affect.note_success()
             except Exception:  # noqa: BLE001
+                pass
+        # sample-efficient retention (Rule 4): bind a successful Master exchange as a one-shot
+        # (cue → response) pair, so a single answer can be recalled verbatim on a similar ask.
+        if (getattr(self, "sample_efficient", None) is not None and owner and success
+                and candidate.kind == "respond" and stimulus and candidate.text):
+            try:
+                epi = self.sample_efficient.episodic
+                if epi is not None:
+                    epi.remember(stimulus, candidate.text)
+            except Exception:  # noqa: BLE001 — one-shot retention is best-effort, never fatal
                 pass
         # meta-learning: credit the reasoning process this turn used with the outcome,
         # so the arbitrator's choice (fast vs deliberate) self-tunes over time

@@ -18,6 +18,22 @@ from nyxara.cognition.hyper_dimensional_vectors import (
     RandomProjector,
     has_numpy,
 )
+from nyxara.cognition.few_shot import (
+    FewShotLearner,
+    OneShotEpisodicMemory,
+    Prototype,
+)
+from nyxara.cognition.abstraction import (
+    Schema,
+    SchemaInducer,
+    abstract_by_analogy,
+    abstract_text,
+    anti_unify,
+    instantiate,
+    subsumes,
+)
+from nyxara.cognition.composition import CompositionalGrammar, Interpretation
+from nyxara.cognition.sample_efficient import ConsolidationReport, SampleEfficientMind
 
 __all__ = [
     "Hypervector",
@@ -29,4 +45,19 @@ __all__ = [
     "NoveltyResult",
     "LatentSpaceMap",
     "has_numpy",
+    # sample-efficient learning, abstraction, compositional generalization
+    "FewShotLearner",
+    "OneShotEpisodicMemory",
+    "Prototype",
+    "Schema",
+    "SchemaInducer",
+    "anti_unify",
+    "subsumes",
+    "instantiate",
+    "abstract_text",
+    "abstract_by_analogy",
+    "CompositionalGrammar",
+    "Interpretation",
+    "SampleEfficientMind",
+    "ConsolidationReport",
 ]

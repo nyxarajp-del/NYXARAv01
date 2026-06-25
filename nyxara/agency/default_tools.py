@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import operator
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -298,6 +299,82 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       description="commit a fact to NYXARA's semantic long-term memory",
                       params=[ToolParam("text", "str"),
                               ToolParam("importance", "float", required=False, default=0.6)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        # ---- sample-efficient cognition: few-shot, abstraction, compositional generalization ----
+        # Knowledge/skill learning only (never the protected core); persisted via memory.
+        _se_state: Dict[str, Any] = {"mind": None}
+
+        def _se_mind() -> Any:
+            mind = _se_state["mind"]
+            if mind is None:
+                from nyxara.cognition.sample_efficient import SampleEfficientMind
+                from nyxara.mind.lot import Lambda, func, var as _lvar
+                mind = SampleEfficientMind(getattr(memory, "embedder", None), store=memory)
+                # seed two generic, domain-free modifiers so composition is usable out of the box
+                try:
+                    mind.composer.learn("twice", Lambda(_lvar("a"), func("seq", _lvar("a"), _lvar("a"))))
+                    mind.composer.learn("thrice", Lambda(_lvar("a"),
+                                        func("seq", _lvar("a"), func("seq", _lvar("a"), _lvar("a")))))
+                except Exception:  # noqa: BLE001
+                    pass
+                _se_state["mind"] = mind
+            return mind
+
+        def _teach_concept(label: str, example: str) -> Dict[str, Any]:
+            mind = _se_mind()
+            proto = mind.learn_concept(label, example)
+            return {"learned": label, "support": getattr(proto, "support", 0),
+                    "concepts": mind.stats().get("concepts", 0)}
+
+        _add(ToolSpec("teach_concept", handler=_teach_concept,
+                      description="teach a new concept from a single example (one-shot/few-shot "
+                                  "prototype learning); the concept is recognised on later inputs",
+                      params=[ToolParam("label", "str"), ToolParam("example", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        def _classify_concept(text: str) -> Dict[str, Any]:
+            best = _se_mind().classify(text)
+            if not best:
+                return {"label": None, "confidence": 0.0, "note": "no concepts learned yet"}
+            return {"label": best[0], "confidence": round(best[1], 3)}
+
+        _add(ToolSpec("classify_concept", handler=_classify_concept,
+                      description="classify text against the concepts learned so far "
+                                  "(nearest-prototype, returns label + confidence)",
+                      params=[ToolParam("text", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        def _induce_schema(examples: str) -> Dict[str, Any]:
+            from nyxara.cognition.abstraction import abstract_text
+            items = [s.strip() for s in re.split(r"\s*(?:\|\||\n)\s*", str(examples)) if s.strip()]
+            template = abstract_text(items) if len(items) >= 2 else None
+            return {"examples": items, "schema": template,
+                    "note": None if template else "give >=2 same-length examples (split with || )"}
+
+        _add(ToolSpec("induce_schema", handler=_induce_schema,
+                      description="abstract a slot template (schema) from several example strings "
+                                  "split by '||' — e.g. 'the cat sat || the dog sat' -> 'the ? sat'",
+                      params=[ToolParam("examples", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        def _compose_interpret(phrase: str) -> Dict[str, Any]:
+            from nyxara.mind.lot import const
+            mind = _se_mind()
+            # auto-register unseen bare words as primitive actions so composition is usable;
+            # known modifiers (twice/thrice/…) are left to do their higher-order work.
+            for tok in re.findall(r"[a-zA-Z0-9_]+", str(phrase).lower()):
+                if not mind.composer.known(tok):
+                    mind.composer.learn(tok, const(tok.upper()))
+            result = mind.interpret(phrase)
+            return {"phrase": phrase, "meaning": str(result.meaning) if result.ok else None,
+                    "unknown": result.unknown}
+
+        _add(ToolSpec("compose_interpret", handler=_compose_interpret,
+                      description="interpret a phrase by COMPOSING the meanings of its words "
+                                  "(handles novel combinations of known primitives, e.g. "
+                                  "'jump twice' -> seq(JUMP, JUMP))",
+                      params=[ToolParam("phrase", "str")],
                       capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
 
         # ---- forge her own model from lived memory (Master-gated, gauntlet-protected) ---- #
