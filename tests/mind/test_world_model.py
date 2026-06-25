@@ -283,7 +283,11 @@ def test_neural_ignores_symbolic_states():
 # --------------------------------------------------------------------------- #
 np = pytest.importorskip("numpy")  # the ensemble model requires numpy
 
-from nyxara.mind.world_model import EnsembleWorldModel, build_world_model  # noqa: E402
+from nyxara.mind.world_model import (  # noqa: E402
+    EnsembleWorldModel,
+    TransferWorldModel,
+    build_world_model,
+)
 
 
 def _train_1d_ens(wm, n=600, seed=0):
@@ -368,9 +372,12 @@ def test_ensemble_generalises_to_unseen_states():
     assert abs(p.next_state[0] - 7.5) < 0.8
 
 
-def test_build_world_model_factory_prefers_ensemble_with_numpy():
-    wm = build_world_model("auto")
-    assert isinstance(wm, EnsembleWorldModel)
+def test_build_world_model_factory_backends_with_numpy():
+    # "auto" now prefers the cross-domain TransferWorldModel (still a WorldModel drop-in)
+    auto = build_world_model("auto")
+    assert isinstance(auto, TransferWorldModel) and isinstance(auto, WorldModel)
+    # the per-action deep ensemble is still available explicitly
+    assert isinstance(build_world_model("ensemble"), EnsembleWorldModel)
     assert isinstance(build_world_model("knn"), WorldModel)
     assert isinstance(build_world_model("neural"), NeuralWorldModel)
     # unknown kwargs are filtered per backend (callers may pass a superset safely)
