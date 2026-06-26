@@ -453,6 +453,11 @@ class NyxaraCore:
         # Observe → Hypothesis → Experiment → Result → Update-model cycle.
         self.autonomous_scientist = (
             self._build_autonomous_scientist() if enable_memory else None)
+        # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
+        # self-designs the experiment (causal model / world-simulation / Scientist) and folds
+        # the answer back. Built after the causal model, world simulator and scientist it
+        # composes. Event-driven sibling of ``curiosity_pass`` (which drains self-knowledge gaps).
+        self.active_curiosity = self._build_active_curiosity() if enable_growth else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -1640,6 +1645,58 @@ class NyxaraCore:
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
             return None
+
+    def _build_active_curiosity(self) -> Any:
+        """Active Curiosity: NYXARA asks her own WHY / WHAT-IF questions and self-experiments.
+
+        Composes the faculties she reuses — the causal world model (to answer "why did X
+        happen?"), the world simulator (to *imagine* "what if I do Y?" without acting), the
+        Scientist (to hypothesise + test when neither can settle it), the VoI engine and the
+        motivation system (to value/novelty-rank her questions), and the self-model / knowledge
+        base / memory (to fold findings back). Salient recent events come from
+        ``_recent_salient_events``. A capability, never required.
+        """
+        try:
+            from nyxara.growth.active_curiosity import ActiveCuriosity
+            return ActiveCuriosity(
+                causal_model=getattr(self, "causal_world_model", None),
+                world_simulator=getattr(self, "world_simulator", None),
+                world_model=getattr(self, "world_model", None),
+                scientist=getattr(self, "scientist", None),
+                voi=self._voi(),
+                motivation=getattr(self, "motivation", None),
+                predictive=getattr(self, "predictive", None),
+                self_model=getattr(self, "self_model", None),
+                knowledge=getattr(self, "knowledge", None),
+                memory=getattr(self, "memory", None),
+                events_source=self._recent_salient_events,
+            )
+        except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
+            return None
+
+    def _recent_salient_events(self) -> List[str]:
+        """Recent things-that-happened worth wondering about: the most salient thoughts in the
+        mindscope, then recent episodic memories. Best-effort, deduped, never raises."""
+        out: List[str] = []
+        try:
+            for t in self.mind.attention(6):
+                content = str(getattr(t, "content", "")).strip()
+                if content:
+                    out.append(content)
+        except Exception:  # noqa: BLE001
+            pass
+        if len(out) < 3 and getattr(self, "memory", None) is not None:
+            try:
+                from nyxara.memory.store import MemoryType
+                episodic = self.memory.by_type(MemoryType.EPISODIC)
+                for rec in (episodic or [])[-4:]:
+                    txt = str(getattr(rec, "content", rec)).strip()
+                    if txt:
+                        out.append(txt)
+            except Exception:  # noqa: BLE001
+                pass
+        # de-dupe while preserving order
+        return list(dict.fromkeys(out))[:8]
 
     def _build_meta_researcher(self) -> Any:
         """Level 10d — MetaResearcher: invent → sandbox-test → (gated) integrate.
@@ -3476,6 +3533,24 @@ class NyxaraCore:
                             salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
+        #       event, self-designs the experiment (her causal model, an imagined world-
+        #       simulation, or the Scientist) and folds the answer back as a belief + memory,
+        #       queuing the next question. Oversight-gated; WHAT-IF is *simulated*, never acted.
+        if getattr(self, "active_curiosity", None) is not None:
+            try:
+                if self.oversight.gate():
+                    cp = self.active_curiosity.tick()
+                    if cp is not None:
+                        report["active_curiosity"] = cp.to_dict()
+                        if cp.chosen is not None and cp.finding is not None:
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"wondered [{cp.chosen.kind}]: {cp.chosen.text[:32]} → "
+                                f"{cp.finding.answer[:40]}", salience=0.6,
+                                confidence=cp.finding.confidence)
+            except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
+                pass
         # 4f-) Infinite Explorer — drain a queued unknown and self-bootstrap a solution on
         #      idle (write→run→debug→learn permanently). Oversight-gated: a paused/scrammed
         #      mind takes no autonomous action, and the code only ever runs in the sandbox.
@@ -3628,6 +3703,34 @@ class NyxaraCore:
                 if self._learn_self_fact(*finding, topic=topic):
                     report["resolved"] = True
                     break
+        except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
+            pass
+        return report
+
+    # ---- active curiosity: ask her own WHY / WHAT-IF and self-experiment ---- #
+    def active_curiosity_pass(self) -> Dict[str, Any]:
+        """One Active-Curiosity pass: notice a salient event, ask her own WHY / WHAT-IF
+        question, self-design and run a *safe, internal* experiment (her causal model, an
+        imagined world-simulation, or the Scientist), and fold any finding back as a belief +
+        memory. A WHAT-IF is *simulated*, never enacted — an external action would still go
+        through the Master. Gated by oversight; wholly best-effort."""
+        report: Dict[str, Any] = {"wondered": False, "question": None, "resolved": False}
+        if getattr(self, "active_curiosity", None) is None:
+            return report
+        try:
+            if not self.oversight.gate():        # a paused/scrammed mind does not wander
+                return report
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            cp = self.active_curiosity.wonder()
+            report["wondered"] = cp.wondered
+            report["resolved"] = cp.resolved
+            if cp.chosen is not None:
+                report["question"] = cp.chosen.text
+            if cp.finding is not None:
+                report["answer"] = cp.finding.answer
+                report["method"] = cp.finding.method
         except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
             pass
         return report

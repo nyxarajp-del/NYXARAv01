@@ -135,6 +135,12 @@ from nyxara.growth.skilltree import (
 )
 from nyxara.growth.researcher import AutonomousResearcher, ResearchReport
 from nyxara.growth.explorer import ExploreResult, InfiniteExplorer
+from nyxara.growth.active_curiosity import (
+    ActiveCuriosity,
+    CuriosityFinding,
+    CuriosityPass,
+    Question,
+)
 from nyxara.growth.scientist import (
     Conclusion,
     Experiment,
@@ -151,6 +157,10 @@ __all__ = [
     "ResearchReport",
     "InfiniteExplorer",
     "ExploreResult",
+    "ActiveCuriosity",
+    "CuriosityFinding",
+    "CuriosityPass",
+    "Question",
     "Scientist",
     "Hypothesis",
     "Experiment",
