@@ -620,3 +620,152 @@ def test_torch_kv_cache_decode_matches_full_decode():
     full = model.generate("the master", max_tokens=20, greedy=True, use_cache=False)
     cached = model.generate("the master", max_tokens=20, greedy=True, use_cache=True)
     assert full == cached                                 # KV-cache is bit-identical (≤ block_size)
+
+
+# --------------------------------------------------------------------------- #
+# Open-ended invention: a searchable LEARNING RULE + synthesised operators
+# (she invents not just the architecture but *how she learns* — Rule 4, max level)
+# --------------------------------------------------------------------------- #
+def test_learning_rule_roundtrips_through_dict():
+    from nyxara.growth.genesis import LearningRule
+    rng = random.Random(3)
+    for _ in range(50):
+        lr = LearningRule.random(rng)
+        assert LearningRule.from_dict(lr.to_dict()).to_dict() == lr.to_dict()
+        assert lr.optimizer in ("adamw", "lion", "sgd_momentum", "rmsprop")
+        assert lr.schedule in ("cosine", "linear", "wsd", "constant")
+        assert lr.smoothing in ("kneser_ney", "add_k", "interpolated", "stupid_backoff")
+        assert all(w > 0.0 for w in lr.aux.values())     # only enabled objectives are kept
+
+
+def test_mixer_program_roundtrips_and_stays_valid():
+    from nyxara.growth.genesis import MixerProgram, _SYNTH_PRIMS
+    rng = random.Random(4)
+    for _ in range(50):
+        p = MixerProgram.random(rng)
+        p.mutate(rng)
+        assert MixerProgram.from_dict(p.to_dict()).to_dict() == p.to_dict()
+        assert 1 <= len(p.steps) <= 6
+        assert all(s in _SYNTH_PRIMS for s in p.steps)
+
+
+def test_genome_carries_learning_rule_and_synth_roundtrips():
+    from nyxara.growth.genesis import LayerGene
+    rng = random.Random(5)
+    g = ArchitectureGenome(n_embd=64, block_size=16,
+                           layers=[LayerGene.random(rng, 64, ops=("synth",)),
+                                   LayerGene(op="gated_mlp")])
+    assert g.layers[0].op == "synth" and g.layers[0].program is not None
+    assert ArchitectureGenome.from_dict(g.to_dict()).to_dict() == g.to_dict()
+    assert g.estimated_flops() > 0                        # synth cost is accounted for
+
+
+def test_mutate_can_evolve_learning_rule_and_programs():
+    """Over many mutations the learning rule and synth programs both change — the search really
+    explores *how she learns* and *what mixer she invents*, not only the layer stack."""
+    rng = random.Random(6)
+    g = ArchitectureGenome.random(rng)
+    seen_rules, seen_progs = set(), set()
+    for _ in range(300):
+        g = g.mutate(rng)
+        seen_rules.add(repr(sorted(g.learning_rule.to_dict().items())))
+        for ly in g.layers:
+            if ly.op == "synth" and ly.program is not None:
+                seen_progs.add(ly.program.fingerprint())
+        assert ArchitectureGenome.from_dict(g.to_dict()).to_dict() == g.to_dict()
+    assert len(seen_rules) > 5                            # learning rule is genuinely searched
+    assert len(seen_progs) > 1                            # synthesised mixers are genuinely searched
+
+
+def test_feature_vector_includes_learning_rule_and_is_fixed_width():
+    rng = random.Random(7)
+    a = ArchitectureGenome.random(rng)
+    b = ArchitectureGenome.random(rng, max_layers=3)
+    assert len(a.feature_vector()) == len(b.feature_vector())   # surrogate needs fixed width
+    # a classic genome (default rule, no aux) has a shorter aux-on signature than a rich one
+    classic = ArchitectureGenome(n_embd=64, layers=a.layers)
+    assert len(classic.feature_vector()) == len(a.feature_vector())
+
+
+def test_stdlib_search_evolves_the_smoothing_learning_rule():
+    """On a bare machine the learning rule's smoothing method is a real, scored search dimension."""
+    nas = NeuralArchitectureSearch(cfg=_cfg(generations=3, population_size=8), seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.backend == "stdlib"
+    assert report.champion.learning_rule.smoothing in (
+        "kneser_ney", "add_k", "interpolated", "stupid_backoff")
+    # at least two distinct smoothing methods were actually built & scored across the population
+    methods = {c.genome.learning_rule.smoothing for c in report.leaderboard}
+    assert len(methods) >= 2
+
+
+def test_disabling_search_recovers_the_classic_space():
+    """Flags off → the classic fixed-palette + AdamW/CE search is recovered (legacy behaviour)."""
+    nas = NeuralArchitectureSearch(
+        cfg=_cfg(generations=2, population_size=6, search_learning_rule=False,
+                 search_operators=False, plasticity_enabled=False),
+        seed_corpus=_CORPUS)
+    report = nas.search()
+    for c in report.leaderboard:
+        assert c.genome.learning_rule.optimizer == "adamw"       # classic optimizer
+        assert c.genome.learning_rule.aux == {}                  # no auxiliary objectives
+        assert c.genome.learning_rule.plasticity is False        # no Hebbian plasticity
+        assert all(ly.op != "synth" for ly in c.genome.layers)   # no synthesised ops
+
+
+def test_synth_op_kngram_substrate_still_crowns_a_champion():
+    """A population forced toward synth ops still crowns a champion on the stdlib substrate
+    (the neural op is latent without torch, but the genome stays buildable and scorable)."""
+    nas = NeuralArchitectureSearch(cfg=_cfg(generations=2, population_size=6), seed_corpus=_CORPUS)
+    report = nas.search()
+    assert report.champion is not None
+    assert ArchitectureGenome.from_dict(report.champion.to_dict()).to_dict() == \
+        report.champion.to_dict()
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+@pytest.mark.parametrize("optimizer", ["adamw", "lion", "sgd_momentum", "rmsprop"])
+def test_torch_every_optimizer_trains(optimizer):
+    from nyxara.growth.genesis import LearningRule
+    g = ArchitectureGenome.random(random.Random(7), block_size=16)
+    g.learning_rule = LearningRule(optimizer=optimizer)
+    g._fixup()
+    model = GenesisModel(g)
+    stats = model.train_on(_CORPUS, steps=20, seed=1)
+    import math as _m
+    assert _m.isfinite(stats.final_loss)
+    assert model.param_count() > 0
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+@pytest.mark.parametrize("objective", ["denoise", "contrastive", "self_distill", "entropy_reg", "sam"])
+def test_torch_each_aux_objective_trains(objective):
+    from nyxara.growth.genesis import LearningRule
+    g = ArchitectureGenome.random(random.Random(8), block_size=16)
+    g.learning_rule = LearningRule(aux={objective: 0.3})
+    g._fixup()
+    model = GenesisModel(g)
+    stats = model.train_on(_CORPUS, steps=15, seed=1)
+    import math as _m
+    assert _m.isfinite(stats.final_loss)
+
+
+@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
+def test_torch_plasticity_and_synth_op_train_and_roundtrip(tmp_path):
+    from nyxara.growth.genesis import LayerGene, LearningRule, MixerProgram
+    g = ArchitectureGenome(
+        n_embd=32, block_size=16, pos_encoding="learned",
+        layers=[LayerGene(op="synth", n_head=2,
+                          program=MixerProgram(steps=["conv", "gate", "attn", "norm"])),
+                LayerGene(op="swiglu")],
+        learning_rule=LearningRule(optimizer="lion", plasticity=True, schedule="wsd"))
+    model = GenesisModel(g)
+    before = model.perplexity(_CORPUS[0])
+    model.train_on(_CORPUS, steps=30, seed=1)
+    after = model.perplexity(_CORPUS[0])
+    assert after <= before                                # the invented brain + paradigm learned
+    path = tmp_path / "synth"
+    model.save(path)
+    reloaded = build_model(model.spec)
+    reloaded.load(path)
+    assert reloaded.param_count() == model.param_count()
