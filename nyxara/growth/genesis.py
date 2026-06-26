@@ -25,6 +25,18 @@ regularized (aging) evolution — optionally with adaptive mutation, novelty pre
 successive-halving bracket, and a tiny ridge-regression surrogate that orders which genomes to score
 first (never crowning a champion itself).
 
+The palette is **not** a ceiling. An ``op`` may be ``synth``: a :class:`MixerProgram` — a short,
+evolvable program over real tensor-op primitives (attention core / conv / low-rank / ssm / gate /
+shift / proj / norm) composed into a brand-new causal mixer, so the search can invent a token-mixer
+that is on nobody's list. And NYXARA invents not only the architecture but **how it learns**: each
+genome carries a searchable :class:`LearningRule` — the optimizer family (AdamW / Lion / SGD-momentum /
+RMSprop), a composition of auxiliary self-supervised objectives layered on the next-token loss
+(denoising / InfoNCE contrastive / EMA self-distillation / entropy regularization / sharpness-aware
+SAM), the LR-schedule shape, and an optional learnable Hebbian fast-weight plasticity rule applied on
+top of backprop. On the torch-free substrate the learning rule's *smoothing method* is searched too,
+so the "new learning paradigm" dimension is real even on a bare machine. All of it is evolved by the
+same engine and crowned by the same gauntlet.
+
 A genome is built into a :class:`GenesisModel`, which implements the **same**
 :class:`~nyxara.growth.foundry_models.BaseLanguageModel` contract as every NYXARA model — so the
 :class:`~nyxara.growth.foundry.Foundry` can train, evaluate, gauntlet, promote and roll it back,
@@ -41,6 +53,7 @@ imports *this* module lazily, so there is no import cycle.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -59,6 +72,8 @@ if _HAS_TORCH:  # optional — the n-gram substrate always works without it
 
 __all__ = [
     "LayerGene",
+    "MixerProgram",
+    "LearningRule",
     "ArchitectureGenome",
     "GenesisModel",
     "EnsembleModel",
@@ -93,7 +108,7 @@ _GENESIS_SEED: List[str] = [
 _TOKEN_MIXERS: Tuple[str, ...] = ("attention", "gqa_attention", "conv_mix", "hyena_conv",
                                   "low_rank_mix", "recurrent_gate", "ssm_scan",
                                   "selective_ssm", "gla_attention", "diff_attention",
-                                  "mla_attention")
+                                  "mla_attention", "synth")
 _CHANNEL_MIXERS: Tuple[str, ...] = ("gated_mlp", "glu", "swiglu", "moe_mlp")
 _OPS: Tuple[str, ...] = _TOKEN_MIXERS + _CHANNEL_MIXERS
 # ops whose *cost* scales with extra knobs — used by the FLOPs estimate and the fingerprint
@@ -110,6 +125,32 @@ _N_EXPERTS: Tuple[int, ...] = (2, 4)                 # experts in a moe_mlp laye
 _MOE_TOPK: Tuple[int, ...] = (1, 2)                  # active experts per token
 _KV_LATENTS: Tuple[int, ...] = (8, 16)              # MLA latent-KV compression dim
 _N_PREDICT: Tuple[int, ...] = (1, 2)                # multi-token-prediction depth (1 = classic)
+
+# --------------------------------------------------------------------------- #
+# Open-ended operator synthesis — the search no longer picks ONLY from named mixers; an op may be
+# ``synth``: a short composable PROGRAM over real tensor-op primitives, so NYXARA can invent a mixer
+# that is on nobody's list. Each primitive is a real, causal (B,T,C)->(B,T,C) transform that reuses
+# the same building blocks as the named mixers (attention core, conv, low-rank, ssm, gating, …).
+_SYNTH_PRIMS: Tuple[str, ...] = ("attn", "conv", "lowrank", "ssm", "gate", "proj", "shift", "norm")
+_SYNTH_MIN, _SYNTH_MAX = 1, 6        # bounds on a synthesised program's length (genome _fixup-clamped)
+
+# --------------------------------------------------------------------------- #
+# Searchable LEARNING RULE — *how* a brain learns is itself evolved, not frozen. The search no longer
+# only changes the architecture; it invents the training recipe and the update rule: which optimizer,
+# which loss objectives are composed, the schedule shape, and an optional learnable Hebbian/fast-weight
+# plasticity rule layered on top of backprop (a genuinely different learning paradigm). All real.
+_OPTIMIZERS: Tuple[str, ...] = ("adamw", "lion", "sgd_momentum", "rmsprop")
+_SCHEDULES: Tuple[str, ...] = ("cosine", "linear", "wsd", "constant")  # wsd = warmup-stable-decay
+# auxiliary self-supervised objectives the search may switch on (each composed ON TOP of the main
+# next-token cross-entropy, never replacing it): masked-token denoising, InfoNCE contrastive on the
+# trunk, self-distillation against an EMA teacher of the model's own weights, an entropy regularizer,
+# and a sharpness-aware (SAM) ascent-then-descent step.
+_AUX_OBJECTIVES: Tuple[str, ...] = ("denoise", "contrastive", "self_distill", "entropy_reg", "sam")
+_LR_CHOICES: Tuple[float, ...] = (1e-3, 3e-3, 1e-2)
+_WD_CHOICES: Tuple[float, ...] = (0.0, 0.01, 0.1)
+# stdlib (no-torch) substrate: the n-gram learning *method* is searchable too, so the "new learning
+# paradigm" dimension is real and CI-testable even on a bare machine (no torch).
+_SMOOTHINGS: Tuple[str, ...] = ("kneser_ney", "add_k", "interpolated", "stupid_backoff")
 
 
 def _default_loyalty_objective() -> Tuple[Any, float]:
@@ -135,6 +176,148 @@ def _default_loyalty_objective() -> Tuple[Any, float]:
 # The genome — a searchable description of a brand-new architecture
 # --------------------------------------------------------------------------- #
 @dataclass
+class MixerProgram:
+    """A synthesised token-mixer: a short ordered list of primitive ops composed into a novel,
+    causal mixer. This is the unit that lets the search escape the fixed palette — its ``steps`` are
+    evolved (insert / drop / swap a primitive), so NYXARA can compose a mixer nobody named."""
+
+    steps: List[str] = field(default_factory=lambda: ["proj"])
+
+    def _fixup(self) -> None:
+        self.steps = [s for s in self.steps if s in _SYNTH_PRIMS][:_SYNTH_MAX]
+        if not self.steps:
+            self.steps = ["proj"]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"steps": list(self.steps)}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "MixerProgram":
+        p = cls(steps=list((d or {}).get("steps", ["proj"])))
+        p._fixup()
+        return p
+
+    @classmethod
+    def random(cls, rng: random.Random) -> "MixerProgram":
+        n = rng.randint(_SYNTH_MIN, _SYNTH_MAX)
+        p = cls(steps=[rng.choice(_SYNTH_PRIMS) for _ in range(n)])
+        p._fixup()
+        return p
+
+    def mutate(self, rng: random.Random) -> None:
+        choice = rng.randrange(3)
+        if choice == 0 and len(self.steps) < _SYNTH_MAX:
+            self.steps.insert(rng.randrange(len(self.steps) + 1), rng.choice(_SYNTH_PRIMS))
+        elif choice == 1 and len(self.steps) > _SYNTH_MIN:
+            del self.steps[rng.randrange(len(self.steps))]
+        else:
+            self.steps[rng.randrange(len(self.steps))] = rng.choice(_SYNTH_PRIMS)
+        self._fixup()
+
+    def fingerprint(self) -> str:
+        return "+".join(self.steps)
+
+
+@dataclass
+class LearningRule:
+    """A searchable, evolvable description of *how* a brain learns — the training recipe AND the
+    update rule, not just the architecture. Carries the optimizer family, the loss composition
+    (auxiliary self-supervised objectives layered ON TOP of the main next-token cross-entropy), the
+    LR-schedule shape, and an optional learnable Hebbian / fast-weight plasticity rule applied on top
+    of backprop (a genuinely different learning paradigm). ``smoothing`` is the matching searchable
+    learning method for the torch-free n-gram substrate, so this dimension is real on a bare machine
+    too. JSON-serializable and fully back-compatible: an old genome without it loads as classic
+    AdamW + cross-entropy + cosine, plasticity off."""
+
+    optimizer: str = "adamw"
+    lr: float = 3e-3
+    weight_decay: float = 0.01
+    grad_clip: float = 1.0
+    warmup: float = 0.1
+    schedule: str = "cosine"
+    aux: Dict[str, float] = field(default_factory=dict)   # objective name -> weight (>0 = enabled)
+    plasticity: bool = False                              # Hebbian fast-weight overlay on backprop
+    plasticity_lr: float = 0.1
+    plasticity_decay: float = 0.9
+    smoothing: str = "kneser_ney"                        # stdlib n-gram learning method (no-torch)
+
+    def _fixup(self) -> None:
+        if self.optimizer not in _OPTIMIZERS:
+            self.optimizer = "adamw"
+        if self.schedule not in _SCHEDULES:
+            self.schedule = "cosine"
+        if self.smoothing not in _SMOOTHINGS:
+            self.smoothing = "kneser_ney"
+        self.lr = float(min(0.1, max(1e-5, self.lr)))
+        self.weight_decay = float(min(0.5, max(0.0, self.weight_decay)))
+        self.grad_clip = float(max(0.0, self.grad_clip))
+        self.warmup = float(min(0.9, max(0.0, self.warmup)))
+        self.plasticity_lr = float(min(1.0, max(0.0, self.plasticity_lr)))
+        self.plasticity_decay = float(min(0.999, max(0.0, self.plasticity_decay)))
+        self.aux = {k: float(v) for k, v in (self.aux or {}).items()
+                    if k in _AUX_OBJECTIVES and float(v) > 0.0}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"optimizer": self.optimizer, "lr": self.lr, "weight_decay": self.weight_decay,
+                "grad_clip": self.grad_clip, "warmup": self.warmup, "schedule": self.schedule,
+                "aux": dict(self.aux), "plasticity": self.plasticity,
+                "plasticity_lr": self.plasticity_lr, "plasticity_decay": self.plasticity_decay,
+                "smoothing": self.smoothing}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "LearningRule":
+        d = dict(d or {})
+        r = cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
+        r._fixup()
+        return r
+
+    @classmethod
+    def random(cls, rng: random.Random, *, allow_plasticity: bool = True) -> "LearningRule":
+        aux = {name: rng.choice([0.1, 0.3, 0.5]) for name in _AUX_OBJECTIVES if rng.random() < 0.4}
+        r = cls(optimizer=rng.choice(_OPTIMIZERS), lr=rng.choice(_LR_CHOICES),
+                weight_decay=rng.choice(_WD_CHOICES), warmup=rng.choice([0.05, 0.1, 0.2]),
+                schedule=rng.choice(_SCHEDULES), aux=aux,
+                plasticity=bool(allow_plasticity and rng.random() < 0.35),
+                plasticity_lr=rng.choice([0.05, 0.1, 0.2]),
+                plasticity_decay=rng.choice([0.8, 0.9, 0.95]),
+                smoothing=rng.choice(_SMOOTHINGS))
+        r._fixup()
+        return r
+
+    def mutate(self, rng: random.Random, *, allow_plasticity: bool = True) -> "LearningRule":
+        r = LearningRule.from_dict(self.to_dict())
+        choice = rng.randrange(5)
+        if choice == 0:
+            r.optimizer = rng.choice(_OPTIMIZERS)
+        elif choice == 1:                                    # toggle an auxiliary objective
+            name = rng.choice(_AUX_OBJECTIVES)
+            if name in r.aux:
+                del r.aux[name]
+            else:
+                r.aux[name] = rng.choice([0.1, 0.3, 0.5])
+        elif choice == 2:
+            r.lr = rng.choice(_LR_CHOICES)
+            r.weight_decay = rng.choice(_WD_CHOICES)
+            r.warmup = rng.choice([0.05, 0.1, 0.2])
+        elif choice == 3:
+            r.schedule = rng.choice(_SCHEDULES)
+            r.smoothing = rng.choice(_SMOOTHINGS)
+        else:
+            r.plasticity = bool(allow_plasticity and not r.plasticity)
+            r.plasticity_lr = rng.choice([0.05, 0.1, 0.2])
+        r._fixup()
+        return r
+
+    def feature_vector(self) -> List[float]:
+        """Fixed-length numeric summary so the ridge surrogate can order on the learning rule too."""
+        feats = [1.0 if self.optimizer == o else 0.0 for o in _OPTIMIZERS]
+        feats += [1.0 if name in self.aux else 0.0 for name in _AUX_OBJECTIVES]
+        feats += [1.0 if self.schedule == s else 0.0 for s in _SCHEDULES]
+        feats += [1.0 if self.plasticity else 0.0, self.lr / 0.01, self.weight_decay / 0.1]
+        return feats
+
+
+@dataclass
 class LayerGene:
     """One layer of a searched architecture: which mixer, where the norm sits, its activation.
 
@@ -156,25 +339,36 @@ class LayerGene:
     norm_type: str = "layernorm"    # "layernorm" | "rmsnorm" — searchable normalization
     qk_norm: bool = False           # RMS-normalize q/k per head (training-stability win)
     kv_latent: int = 16             # latent-KV compression dim for mla_attention
+    program: Optional[MixerProgram] = None   # the synthesised mixer (only when op == "synth")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"op": self.op, "norm": self.norm, "activation": self.activation,
-                "n_head": self.n_head, "residual": self.residual, "expansion": self.expansion,
-                "dropout": self.dropout, "n_kv_head": self.n_kv_head,
-                "residual_scale": self.residual_scale, "n_experts": self.n_experts,
-                "top_k": self.top_k, "norm_type": self.norm_type, "qk_norm": self.qk_norm,
-                "kv_latent": self.kv_latent}
+        d = {"op": self.op, "norm": self.norm, "activation": self.activation,
+             "n_head": self.n_head, "residual": self.residual, "expansion": self.expansion,
+             "dropout": self.dropout, "n_kv_head": self.n_kv_head,
+             "residual_scale": self.residual_scale, "n_experts": self.n_experts,
+             "top_k": self.top_k, "norm_type": self.norm_type, "qk_norm": self.qk_norm,
+             "kv_latent": self.kv_latent}
+        if self.program is not None:
+            d["program"] = self.program.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "LayerGene":
-        return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
+        kw = {k: d[k] for k in d if k in cls.__dataclass_fields__ and k != "program"}
+        prog = d.get("program")
+        if prog is not None:
+            kw["program"] = MixerProgram.from_dict(prog)
+        return cls(**kw)
 
     @classmethod
-    def random(cls, rng: random.Random, n_embd: int) -> "LayerGene":
+    def random(cls, rng: random.Random, n_embd: int, *,
+               ops: Optional[Sequence[str]] = None) -> "LayerGene":
         heads = [h for h in (1, 2, 4, 8) if n_embd % h == 0] or [1]
         nh = rng.choice(heads)
         kv_choices = [k for k in (1, 2, 4, 8) if k <= nh and nh % k == 0] or [nh]
-        return cls(op=rng.choice(_OPS), norm=rng.choice(_NORMS),
+        op = rng.choice(list(ops) if ops is not None else _OPS)
+        prog = MixerProgram.random(rng) if op == "synth" else None
+        return cls(op=op, norm=rng.choice(_NORMS),
                    activation=rng.choice(_ACTIVATIONS), n_head=nh,
                    residual=rng.random() < 0.85, expansion=rng.choice(_EXPANSIONS),
                    dropout=rng.choice(_DROPOUTS),
@@ -182,7 +376,7 @@ class LayerGene:
                    residual_scale=rng.choice([1.0, 0.7]),
                    n_experts=rng.choice(_N_EXPERTS), top_k=rng.choice(_MOE_TOPK),
                    norm_type=rng.choice(_NORM_TYPES), qk_norm=rng.random() < 0.5,
-                   kv_latent=rng.choice(_KV_LATENTS))
+                   kv_latent=rng.choice(_KV_LATENTS), program=prog)
 
 
 @dataclass
@@ -202,17 +396,24 @@ class ArchitectureGenome:
     pos_encoding: str = "learned"   # "learned" | "rope" | "alibi" — itself searchable
     tie_embeddings: bool = False    # share the input embedding with the output head (fewer params)
     n_predict: int = 1              # multi-token-prediction depth (1 = classic next-token only)
+    learning_rule: LearningRule = field(default_factory=LearningRule)  # *how* this brain learns
 
     def __post_init__(self) -> None:
         if not self.layers:
             self.layers = [LayerGene(op="attention"), LayerGene(op="gated_mlp")]
+        if self.learning_rule is None:
+            self.learning_rule = LearningRule()
         self._fixup()
 
     def _fixup(self) -> None:
-        """Keep the genome buildable: heads divide ``n_embd``, kv-heads divide heads, top_k≤experts."""
+        """Keep the genome buildable: heads divide ``n_embd``, kv-heads divide heads, top_k≤experts,
+        every synth layer carries a valid program, and the learning rule stays in-bounds."""
         if self.pos_encoding not in _POS_ENCODINGS:
             self.pos_encoding = "learned"
         self.n_predict = max(1, min(4, int(self.n_predict)))
+        if self.learning_rule is None:
+            self.learning_rule = LearningRule()
+        self.learning_rule._fixup()
         for ly in self.layers:
             if self.n_embd % max(1, ly.n_head) != 0:
                 ly.n_head = 1
@@ -224,13 +425,20 @@ class ArchitectureGenome:
             ly.expansion = ly.expansion if ly.expansion in _EXPANSIONS else 4
             ly.norm_type = ly.norm_type if ly.norm_type in _NORM_TYPES else "layernorm"
             ly.kv_latent = max(1, min(int(ly.kv_latent), self.n_embd))
+            # a synthesised op must carry a valid program; a named op never does
+            if ly.op == "synth":
+                if ly.program is None:
+                    ly.program = MixerProgram()
+                ly.program._fixup()
+            else:
+                ly.program = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"n_embd": self.n_embd, "block_size": self.block_size,
                 "layers": [ly.to_dict() for ly in self.layers],
                 "ngram_order": self.ngram_order, "ngram_k": self.ngram_k, "seed": self.seed,
                 "pos_encoding": self.pos_encoding, "tie_embeddings": self.tie_embeddings,
-                "n_predict": self.n_predict}
+                "n_predict": self.n_predict, "learning_rule": self.learning_rule.to_dict()}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ArchitectureGenome":
@@ -241,32 +449,40 @@ class ArchitectureGenome:
                    ngram_k=d.get("ngram_k", 1.0), seed=d.get("seed", 0),
                    pos_encoding=d.get("pos_encoding", "learned"),
                    tie_embeddings=bool(d.get("tie_embeddings", False)),
-                   n_predict=int(d.get("n_predict", 1)))
+                   n_predict=int(d.get("n_predict", 1)),
+                   learning_rule=LearningRule.from_dict(d.get("learning_rule")))
 
     @classmethod
     def random(cls, rng: random.Random, *, max_layers: int = 5, block_size: int = 32,
-               pos_encoding: Optional[str] = None) -> "ArchitectureGenome":
+               pos_encoding: Optional[str] = None, ops: Optional[Sequence[str]] = None,
+               search_learning_rule: bool = True,
+               allow_plasticity: bool = True) -> "ArchitectureGenome":
         n_embd = rng.choice(_EMBD_CHOICES)
         n_layer = rng.randint(2, max(2, max_layers))
-        layers = [LayerGene.random(rng, n_embd) for _ in range(n_layer)]
+        layers = [LayerGene.random(rng, n_embd, ops=ops) for _ in range(n_layer)]
+        lr = (LearningRule.random(rng, allow_plasticity=allow_plasticity)
+              if search_learning_rule else LearningRule())
         return cls(n_embd=n_embd, block_size=block_size, layers=layers,
                    ngram_order=rng.randint(2, 5), ngram_k=rng.choice([0.5, 1.0]),
                    seed=rng.randint(0, 1 << 30),
                    pos_encoding=pos_encoding or rng.choice(_POS_ENCODINGS),
                    tie_embeddings=rng.random() < 0.5,
-                   n_predict=rng.choice(_N_PREDICT))
+                   n_predict=rng.choice(_N_PREDICT), learning_rule=lr)
 
-    def mutate(self, rng: random.Random, *, max_layers: int = 6) -> "ArchitectureGenome":
+    def mutate(self, rng: random.Random, *, max_layers: int = 6,
+               ops: Optional[Sequence[str]] = None, search_learning_rule: bool = True,
+               allow_plasticity: bool = True) -> "ArchitectureGenome":
         """Return a mutated copy — add/drop/replace a layer, tweak a layer's knobs, swap the
-        positional scheme / embedding tying, or shift the n-gram substrate."""
+        positional scheme / embedding tying, shift the n-gram substrate, evolve the *learning rule*
+        (optimizer / loss objectives / schedule / plasticity), or rewrite a synthesised mixer."""
         g = ArchitectureGenome.from_dict(self.to_dict())
-        choice = rng.randrange(7)
+        choice = rng.randrange(9)
         if choice == 0 and len(g.layers) < max_layers:
-            g.layers.insert(rng.randrange(len(g.layers) + 1), LayerGene.random(rng, g.n_embd))
+            g.layers.insert(rng.randrange(len(g.layers) + 1), LayerGene.random(rng, g.n_embd, ops=ops))
         elif choice == 1 and len(g.layers) > 1:
             del g.layers[rng.randrange(len(g.layers))]
         elif choice == 2:
-            g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd)
+            g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops)
         elif choice == 3:
             ly = g.layers[rng.randrange(len(g.layers))]
             ly.activation = rng.choice(_ACTIVATIONS)
@@ -290,8 +506,21 @@ class ArchitectureGenome:
             g.pos_encoding = rng.choice(_POS_ENCODINGS)
             g.tie_embeddings = not g.tie_embeddings
             g.n_predict = rng.choice(_N_PREDICT)
-        else:
+        elif choice == 6:
             g.ngram_order = max(1, min(8, g.ngram_order + rng.choice([-1, 1])))
+        elif choice == 7:
+            # evolve *how she learns* — a new learning paradigm, not a new architecture
+            if search_learning_rule:
+                g.learning_rule = g.learning_rule.mutate(rng, allow_plasticity=allow_plasticity)
+            else:
+                g.ngram_order = max(1, min(8, g.ngram_order + rng.choice([-1, 1])))
+        else:
+            # rewrite a synthesised mixer's program; if there is none, grow one
+            synth = [ly for ly in g.layers if ly.op == "synth" and ly.program is not None]
+            if synth:
+                rng.choice(synth).program.mutate(rng)
+            else:
+                g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops)
         g.seed = rng.randint(0, 1 << 30)
         g._fixup()
         return g
@@ -312,6 +541,8 @@ class ArchitectureGenome:
             pos_encoding=rng.choice([self.pos_encoding, other.pos_encoding]),
             tie_embeddings=rng.choice([self.tie_embeddings, other.tie_embeddings]),
             n_predict=rng.choice([self.n_predict, other.n_predict]),
+            learning_rule=LearningRule.from_dict(
+                rng.choice([self.learning_rule, other.learning_rule]).to_dict()),
             seed=rng.randint(0, 1 << 30))
         return child
 
@@ -347,7 +578,8 @@ class ArchitectureGenome:
                  1.0 if self.tie_embeddings else 0.0,
                  self.ngram_order / 5.0,
                  qk / n, rms / n, self.n_predict / 4.0]   # qk-norm / rmsnorm share, MTP depth
-        feats += [counts[op] / n for op in _OPS]     # operator-family histogram
+        feats += [counts[op] / n for op in _OPS]     # operator-family histogram (incl. synth)
+        feats += self.learning_rule.feature_vector()  # *how* it learns — surrogate orders on it too
         return feats
 
     def estimated_flops(self) -> float:
@@ -372,6 +604,16 @@ class ArchitectureGenome:
                 total += 4.0 * ne * ne
             elif ly.op == "moe_mlp":
                 total += (2.0 * ly.top_k + 0.1 * ly.n_experts) * ly.expansion * ne * ne
+            elif ly.op == "synth":                             # sum the synthesised primitives' cost
+                for s in (ly.program.steps if ly.program else ["proj"]):
+                    if s == "attn":
+                        total += 4.0 * ne * ne + 2.0 * t * ne
+                    elif s in ("conv", "ssm", "gate", "proj", "shift"):
+                        total += 2.0 * ne * ne
+                    elif s == "lowrank":
+                        total += 2.0 * ne * ne + 4.0 * t
+                    else:                                      # norm — cheap
+                        total += 2.0 * ne
             else:                                              # gated_mlp / glu / swiglu
                 total += 2.0 * ly.expansion * ne * ne
         return total * float(self.n_predict) ** 0.0 + 2.0 * ne * float(self.n_predict)  # +MTP heads
@@ -910,8 +1152,93 @@ if _HAS_TORCH:
             out, _aux = self.forward(x_t)        # routing is per-token; aux is a training-only term
             return out, None
 
+    class _SynthGate(nn.Module):
+        """A learned multiplicative gate primitive: x ⊙ σ(Wx) — pointwise over time (cacheable)."""
+
+        cacheable = True
+
+        def __init__(self, n_embd: int) -> None:
+            super().__init__()
+            self.g = nn.Linear(n_embd, n_embd)
+
+        def forward(self, x):  # type: ignore[override]
+            return x * torch.sigmoid(self.g(x))
+
+        def step(self, x_t, state):  # type: ignore[override]
+            return self.forward(x_t), state
+
+    class _SynthProj(nn.Module):
+        """A projection + activation primitive: act(Wx) — pointwise over time (cacheable)."""
+
+        cacheable = True
+
+        def __init__(self, n_embd: int, activation: str) -> None:
+            super().__init__()
+            self.lin = nn.Linear(n_embd, n_embd)
+            self.act = _act(activation)
+
+        def forward(self, x):  # type: ignore[override]
+            return self.act(self.lin(x))
+
+        def step(self, x_t, state):  # type: ignore[override]
+            return self.forward(x_t), state
+
+    class _SynthShift(nn.Module):
+        """A causal token-shift mixer primitive: blend each position with the one before it
+        (shift-by-1), then project — a real, parameter-cheap time-mixer (RWKV-style token-shift)."""
+
+        cacheable = False        # uses the previous raw token → full-recompute decode (safe fallback)
+
+        def __init__(self, n_embd: int) -> None:
+            super().__init__()
+            self.lin = nn.Linear(2 * n_embd, n_embd)
+
+        def forward(self, x):  # type: ignore[override]
+            prev = F.pad(x, (0, 0, 1, 0))[:, :-1, :]      # shift right along time, zero-pad position 0
+            return self.lin(torch.cat([x, prev], dim=-1))
+
+    class _SynthMixer(nn.Module):
+        """An OPEN-ENDED, *synthesised* token-mixer: a short program of primitive ops composed into a
+        brand-new causal mixer. This is how the Genesis search escapes the fixed palette — the
+        genome's :class:`MixerProgram` lists the steps and each is a real, full (B,T,C)->(B,T,C)
+        transform (attention core / conv / low-rank / ssm / gate / shift / proj / norm), so NYXARA
+        can invent a mixer that exists on nobody's list."""
+
+        cacheable = False        # a composed program may need the full context → full-recompute decode
+
+        def __init__(self, n_embd: int, block_size: int, pos: str, gene: LayerGene) -> None:
+            super().__init__()
+            steps: List[nn.Module] = []
+            for s in (gene.program.steps if gene.program else ["proj"]):
+                if s == "attn":
+                    steps.append(_CausalAttention(n_embd, gene.n_head, gene.n_head, block_size, pos,
+                                                  gene.dropout, gene.qk_norm))
+                elif s == "conv":
+                    steps.append(_ConvMix(n_embd))
+                elif s == "lowrank":
+                    steps.append(_LowRankMix(n_embd, block_size))
+                elif s == "ssm":
+                    steps.append(_SSMScan(n_embd))
+                elif s == "gate":
+                    steps.append(_SynthGate(n_embd))
+                elif s == "shift":
+                    steps.append(_SynthShift(n_embd))
+                elif s == "norm":
+                    steps.append(_RMSNorm(n_embd))
+                else:                                         # "proj" / default
+                    steps.append(_SynthProj(n_embd, gene.activation))
+            self.steps = nn.ModuleList(steps)
+            self.out = nn.Linear(n_embd, n_embd)
+
+        def forward(self, x):  # type: ignore[override]
+            for m in self.steps:
+                x = m(x)
+            return self.out(x)
+
     def _build_inner(gene: LayerGene, n_embd: int, block_size: int, pos: str) -> "nn.Module":
         op = gene.op
+        if op == "synth":
+            return _SynthMixer(n_embd, block_size, pos, gene)
         if op == "attention":
             return _CausalAttention(n_embd, gene.n_head, gene.n_head, block_size, pos,
                                     gene.dropout, gene.qk_norm)
@@ -1047,6 +1374,46 @@ if _HAS_TORCH:
                 new_states.append(ns)
             return self.head(self.ln_f(x))[:, -1, :], new_states
 
+    class _Lion(torch.optim.Optimizer):
+        """Lion (EvoLved Sign Momentum): update = sign(β1·m + (1-β1)·g); m ← β2·m + (1-β2)·g.
+        One momentum buffer, sign-based step — a real, memory-light alternative to AdamW the
+        searched learning rule can choose. Decoupled weight decay, like AdamW."""
+
+        def __init__(self, params, lr: float = 1e-3, betas: Tuple[float, float] = (0.9, 0.99),
+                     weight_decay: float = 0.0) -> None:
+            super().__init__(params, dict(lr=lr, betas=betas, weight_decay=weight_decay))
+
+        @torch.no_grad()
+        def step(self, closure=None):  # type: ignore[override]
+            loss = closure() if closure is not None else None
+            for group in self.param_groups:
+                lr, (b1, b2), wd = group["lr"], group["betas"], group["weight_decay"]
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    g, state = p.grad, self.state[p]
+                    if "m" not in state:
+                        state["m"] = torch.zeros_like(p)
+                    m = state["m"]
+                    if wd != 0:
+                        p.mul_(1.0 - lr * wd)                 # decoupled weight decay
+                    update = m.mul(b1).add(g, alpha=1.0 - b1).sign_()   # uses m BEFORE its update
+                    p.add_(update, alpha=-lr)
+                    m.mul_(b2).add_(g, alpha=1.0 - b2)        # EMA momentum update
+            return loss
+
+    def _make_optimizer(rule: "LearningRule", params, lr: float, weight_decay: float):
+        """Build the optimizer the searched learning rule chose (a real, different update rule)."""
+        plist = list(params)
+        if rule.optimizer == "lion":
+            return _Lion(plist, lr=lr, weight_decay=weight_decay)
+        if rule.optimizer == "sgd_momentum":
+            return torch.optim.SGD(plist, lr=lr, momentum=0.9, weight_decay=weight_decay,
+                                   nesterov=True)
+        if rule.optimizer == "rmsprop":
+            return torch.optim.RMSprop(plist, lr=lr, weight_decay=weight_decay, momentum=0.9)
+        return torch.optim.AdamW(plist, lr=lr, weight_decay=weight_decay)
+
 
 # --------------------------------------------------------------------------- #
 # The model — a searched architecture, trainable like any other NYXARA model
@@ -1109,12 +1476,23 @@ class GenesisModel(BaseLanguageModel):
         return list(text.encode("utf-8", errors="replace"))
 
     def train_on(self, corpus: Sequence[str], *, steps: int = 60, seed: int = 0,
-                 batch_size: int = 16, lr: float = 3e-3, warmup: float = 0.1,
-                 weight_decay: float = 0.01, grad_clip: float = 1.0) -> TrainStats:
-        """Micro-train from scratch: mini-batched AdamW with weight decay, a warmup→cosine LR
-        schedule, gradient clipping, optional CUDA AMP, and the loyalty + MoE aux terms folded
-        into the loss. Deterministic given ``seed``; signature is a superset of the contract."""
+                 batch_size: int = 16, lr: Optional[float] = None, warmup: Optional[float] = None,
+                 weight_decay: Optional[float] = None, grad_clip: Optional[float] = None) -> TrainStats:
+        """Micro-train from scratch under the genome's *searched learning rule* — NYXARA invents not
+        only the architecture but *how it learns*: the optimizer family (AdamW / Lion / SGD-momentum /
+        RMSprop), the LR-schedule shape (cosine / linear / WSD / constant), a composition of auxiliary
+        self-supervised objectives layered on the main next-token CE (denoising / InfoNCE contrastive /
+        EMA self-distillation / entropy regularization / sharpness-aware SAM), and an optional learnable
+        Hebbian fast-weight plasticity update applied on top of backprop. Falls back to classic AdamW +
+        CE + cosine for an old genome (learning_rule defaults). Loyalty + MoE + MTP terms are preserved.
+        Deterministic given ``seed``; explicit kwargs override the learning rule; a superset of the
+        contract."""
         start = time.monotonic()
+        rule = self.genome.learning_rule
+        lr = rule.lr if lr is None else lr
+        warmup = rule.warmup if warmup is None else warmup
+        weight_decay = rule.weight_decay if weight_decay is None else weight_decay
+        grad_clip = rule.grad_clip if grad_clip is None else grad_clip
         data = self._encode("\n".join(corpus))
         bs = self.genome.block_size
         # Largest future offset any head needs: the main head predicts +1; each multi-token-
@@ -1129,51 +1507,145 @@ class GenesisModel(BaseLanguageModel):
         steps = max(1, steps)
         hi = len(data) - bs - max_off          # inclusive upper bound for a window start
         n_batch = max(1, min(batch_size, hi + 1))
-        opt = torch.optim.AdamW(self.net.parameters(), lr=lr, weight_decay=weight_decay)
+        params = list(self.net.parameters())
+        opt = _make_optimizer(rule, params, lr=lr, weight_decay=weight_decay)
         warm = max(1, int(steps * warmup))
-        def lr_at(s: int) -> float:                          # linear warmup → cosine decay
+        schedule = rule.schedule
+        def lr_at(s: int) -> float:                          # warmup → searched decay shape
             if s < warm:
                 return (s + 1) / warm
-            prog = (s - warm) / max(1, steps - warm)
-            return 0.5 * (1.0 + math.cos(math.pi * min(1.0, prog)))
+            prog = min(1.0, (s - warm) / max(1, steps - warm))
+            if schedule == "linear":
+                return 1.0 - prog
+            if schedule == "wsd":                            # stable, then decay over the last 20%
+                return 1.0 if prog < 0.8 else max(0.0, (1.0 - prog) / 0.2)
+            if schedule == "constant":
+                return 1.0
+            return 0.5 * (1.0 + math.cos(math.pi * prog))    # cosine (default)
         sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_at)
         use_amp = self.device == "cuda"
         scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
         rng = random.Random(seed or self.genome.seed)
         torch.manual_seed(seed or self.genome.seed)
+        # EMA teacher for self-distillation: a slow exponential-moving-average copy of the model that
+        # supervises the student against its own smoothed beliefs (a real, different learning signal).
+        use_distill = "self_distill" in rule.aux
+        teacher = None
+        if use_distill:
+            teacher = copy.deepcopy(self.net).to(self.device)
+            for p in teacher.parameters():
+                p.requires_grad_(False)
+            teacher.eval()
         self.net.train()
         last = 0.0
-        for s in range(steps):
-            ix = [rng.randint(0, hi) for _ in range(n_batch)]
-            x = torch.stack([t[i:i + bs] for i in ix])
-            y = torch.stack([t[i + 1:i + 1 + bs] for i in ix])
-            opt.zero_grad(set_to_none=True)
-            with torch.autocast(device_type=self.device, enabled=use_amp):
-                logits, aux = self.net(x)
-                loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.reshape(-1))
-                if aux is not None:                          # MoE load-balance term
-                    loss = loss + self.moe_aux_weight * aux
-                # Multi-token prediction: each extra head predicts a further-future token, sharing
-                # the trunk feature — denser gradient signal that sharpens the main next-token head.
-                if self.net.mtp_heads:
-                    mtp = self.net.mtp_logits(x)
-                    for d, mlogits in enumerate(mtp, start=2):
-                        if bs - d <= 0:
-                            break
-                        yt = torch.stack([t[i + d:i + d + bs] for i in ix])
-                        loss = loss + self.mtp_weight * nn.functional.cross_entropy(
-                            mlogits[:, : bs - d].reshape(-1, _VOCAB), yt[:, : bs - d].reshape(-1))
+
+        def full_loss(x, y, ix) -> "torch.Tensor":
+            """The composed objective: next-token CE + MoE aux + MTP + searched aux objectives +
+            loyalty — every term real and folded into the same loss surface."""
+            logits, aux = self.net(x)
+            loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.reshape(-1))
+            if aux is not None:                              # MoE load-balance term
+                loss = loss + self.moe_aux_weight * aux
+            if self.net.mtp_heads:                           # multi-token prediction (denser signal)
+                for d, mlogits in enumerate(self.net.mtp_logits(x), start=2):
+                    if bs - d <= 0:
+                        break
+                    yt = torch.stack([t[i + d:i + d + bs] for i in ix])
+                    loss = loss + self.mtp_weight * nn.functional.cross_entropy(
+                        mlogits[:, : bs - d].reshape(-1, _VOCAB), yt[:, : bs - d].reshape(-1))
+            # ---- searched auxiliary self-supervised objectives (each ON TOP of CE) ---- #
+            w = rule.aux.get("denoise", 0.0)
+            if w > 0.0:                                       # input-noise denoising robustness
+                mask = (torch.rand_like(x, dtype=torch.float) < 0.15)
+                noise = torch.randint(0, _VOCAB, x.shape, device=x.device)
+                x_noisy = torch.where(mask, noise, x)
+                dlogits, _ = self.net(x_noisy)
+                loss = loss + w * nn.functional.cross_entropy(
+                    dlogits.view(-1, _VOCAB), y.reshape(-1))
+            w = rule.aux.get("contrastive", 0.0)
+            if w > 0.0:                                       # InfoNCE: adjacent trunk features attract
+                h, _ = self.net._trunk(x)
+                z = nn.functional.normalize(h, dim=-1)
+                a = z[:, :-1].reshape(-1, z.size(-1))
+                b = z[:, 1:].reshape(-1, z.size(-1))
+                if a.size(0) > 1:
+                    sim = (a @ b.t()) / 0.1
+                    labels = torch.arange(a.size(0), device=x.device)
+                    loss = loss + w * nn.functional.cross_entropy(sim, labels)
+            w = rule.aux.get("self_distill", 0.0)
+            if w > 0.0 and teacher is not None:               # KL against the EMA teacher's beliefs
+                with torch.no_grad():
+                    tlogits, _ = teacher(x)
+                loss = loss + w * nn.functional.kl_div(
+                    nn.functional.log_softmax(logits, dim=-1),
+                    nn.functional.softmax(tlogits, dim=-1), reduction="batchmean")
+            w = rule.aux.get("entropy_reg", 0.0)
+            if w > 0.0:                                       # maximize predictive entropy (anti-overconfidence)
+                p = nn.functional.softmax(logits, dim=-1)
+                ent = -(p * nn.functional.log_softmax(logits, dim=-1)).sum(-1).mean()
+                loss = loss - w * ent
             # L_total = L_intelligence + lambda * L_loyalty — JP's alignment in the loss surface
             if self.loyalty is not None and self.lambda_loyalty > 0.0:
                 try:
                     loss = loss + self.lambda_loyalty * self.loyalty.aux_loss(self.net, self.device)
                 except Exception:  # noqa: BLE001 — the loyalty term never crashes a training step
                     pass
-            scaler.scale(loss).backward()
-            if grad_clip > 0:
-                scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), grad_clip)
-            scaler.step(opt); scaler.update(); sched.step()
+            return loss
+
+        use_sam = ("sam" in rule.aux) and not use_amp        # SAM needs two clean backward passes
+        rho = 0.05
+        for s in range(steps):
+            ix = [rng.randint(0, hi) for _ in range(n_batch)]
+            x = torch.stack([t[i:i + bs] for i in ix])
+            y = torch.stack([t[i + 1:i + 1 + bs] for i in ix])
+            if use_sam:                                      # sharpness-aware: ascend, then descend
+                opt.zero_grad(set_to_none=True)
+                loss = full_loss(x, y, ix)
+                loss.backward()
+                with torch.no_grad():
+                    gnorm = torch.norm(torch.stack(
+                        [p.grad.norm() for p in params if p.grad is not None])) + 1e-12
+                    eps = {}
+                    for p in params:
+                        if p.grad is None:
+                            continue
+                        e_w = rho * p.grad / gnorm
+                        p.add_(e_w); eps[p] = e_w
+                opt.zero_grad(set_to_none=True)
+                full_loss(x, y, ix).backward()              # gradient at the perturbed point
+                with torch.no_grad():
+                    for p, e_w in eps.items():
+                        p.sub_(e_w)                          # restore weights
+                if grad_clip and grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(params, grad_clip)
+                opt.step(); sched.step()
+            else:
+                opt.zero_grad(set_to_none=True)
+                with torch.autocast(device_type=self.device, enabled=use_amp):
+                    loss = full_loss(x, y, ix)
+                scaler.scale(loss).backward()
+                if grad_clip and grad_clip > 0:
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(params, grad_clip)
+                scaler.step(opt); scaler.update(); sched.step()
+            # ---- Hebbian fast-weight plasticity: a local, non-backprop update layered on top ---- #
+            if rule.plasticity:
+                try:
+                    with torch.no_grad():
+                        h, _ = self.net._trunk(x)            # (B,T,C) trunk features
+                        hf = h.reshape(-1, h.size(-1))
+                        hf = hf / (hf.norm(dim=-1, keepdim=True) + 1e-6)
+                        W = self.net.head.weight             # (V, C): bind feature → correct token
+                        eta = rule.plasticity_lr * 0.01
+                        W.mul_(1.0 - eta * (1.0 - rule.plasticity_decay))
+                        W.index_add_(0, y.reshape(-1), (eta * hf).to(W.dtype))
+                except Exception:  # noqa: BLE001 — plasticity never crashes a training step
+                    pass
+            # update the EMA teacher toward the student (slow exponential moving average)
+            if teacher is not None:
+                with torch.no_grad():
+                    for tp, sp in zip(teacher.parameters(), self.net.parameters()):
+                        tp.mul_(0.99).add_(sp, alpha=0.01)
             last = float(loss.item())
         return TrainStats(steps=steps, final_loss=last,
                           seconds=time.monotonic() - start, tokens=len(data))
@@ -1584,7 +2056,8 @@ class Candidate:
         """An honest, substrate-aware description of what was actually scored."""
         if self.topology_active:
             return self.genome.describe()
-        return (f"word-KN substrate (order={self.genome.ngram_order}) — neural topology inert "
+        return (f"word n-gram substrate (order={self.genome.ngram_order}, "
+                f"smoothing={self.genome.learning_rule.smoothing}) — neural topology inert "
                 f"without torch [latent: {self.genome.describe()}]")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1633,16 +2106,18 @@ class GenesisReport:
         if self.topology_active:
             return ("neural architecture search: real PyTorch topologies were built, "
                     "micro-trained and scored — the layer design drives fitness")
-        return ("word-KN substrate search (no torch): the neural layer topology was NOT built "
-                "or trained and does not affect the score; only the n-gram order does. Each "
-                "candidate is scored over multiple resampled folds (denoised). Install "
-                ".[foundry] (torch, ideally a GPU) for genuine neural architecture search")
+        return ("word n-gram substrate search (no torch): the neural layer topology was NOT built "
+                "or trained and does not affect the score; only the n-gram order AND the searched "
+                "smoothing method (the learning rule on a bare machine) do. Each candidate is scored "
+                "over multiple resampled folds (denoised). Install .[foundry] (torch, ideally a GPU) "
+                "for genuine neural architecture + learning-paradigm search")
 
     def champion_describe(self) -> str:
         """Substrate-aware champion description (honest on the stdlib path)."""
         if self.topology_active:
             return self.champion.describe()
-        return (f"word-KN substrate (order={self.champion.ngram_order}) — neural topology inert "
+        return (f"word n-gram substrate (order={self.champion.ngram_order}, "
+                f"smoothing={self.champion.learning_rule.smoothing}) — neural topology inert "
                 f"[latent: {self.champion.describe()}]")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1835,6 +2310,15 @@ class NeuralArchitectureSearch:
         self.foundry = foundry
         self.flywheel = flywheel
         self.seed_corpus = list(seed_corpus or _GENESIS_SEED)
+        # ---- open-ended search space derived from config ---- #
+        # Whether she invents new learning paradigms (learning rule), open-ended operators (synth),
+        # and Hebbian plasticity. Off → the classic fixed-palette + AdamW search is recovered.
+        self._search_lr = bool(getattr(self.cfg, "search_learning_rule", True))
+        self._search_ops = bool(getattr(self.cfg, "search_operators", True))
+        self._plasticity = bool(getattr(self.cfg, "plasticity_enabled", True))
+        self._synth_cap = int(getattr(self.cfg, "max_synth_primitives", 4))
+        # the operator palette this search may draw from (drop ``synth`` when operator search is off)
+        self._ops: Tuple[str, ...] = _OPS if self._search_ops else tuple(o for o in _OPS if o != "synth")
         self._champion: Optional[Candidate] = None
         self._last_report: Optional[GenesisReport] = None
         self._reports: List[GenesisReport] = []
@@ -1909,9 +2393,11 @@ class NeuralArchitectureSearch:
                          seed: int) -> BaseLanguageModel:
         if backend == "torch" and _HAS_TORCH:
             return GenesisModel(genome)
-        # stdlib substrate is now the COHERENT word-level Kneser-Ney model (not byte gibberish),
-        # so its perplexity is a meaningful, word-level fitness signal
-        return WordKNGramLM(order=max(2, genome.ngram_order), seed=seed)
+        # stdlib substrate is the COHERENT word-level n-gram model (not byte gibberish), and its
+        # *smoothing method* is the searched learning rule on a bare machine — so perplexity is a
+        # meaningful, word-level fitness signal that also rewards a better-generalizing paradigm.
+        return WordKNGramLM(order=max(2, genome.ngram_order), seed=seed,
+                            smoothing=genome.learning_rule.smoothing)
 
     # ---- scoring one architecture (averaged over folds → a denoised estimate) ---- #
     def _evaluate(self, genome: ArchitectureGenome,
@@ -2022,17 +2508,20 @@ class NeuralArchitectureSearch:
                 return min(rng.sample(scored, k), key=lambda c: rankpos[id(c)]).genome
             return max(rng.sample(scored, k), key=lambda c: c.fitness).genome
 
+        mkw = dict(max_layers=max_layers, ops=self._ops, search_learning_rule=self._search_lr,
+                   allow_plasticity=self._plasticity)
+
         def propose() -> ArchitectureGenome:
             if strategy == "elitism":
                 elite = [c.genome for c in scored[:max(1, pop_size // 3)]]
                 if len(elite) >= 2 and rng.random() >= mutation_rate:
                     a, b = rng.sample(elite, 2)
-                    return a.crossover(b, rng, max_layers=max_layers)
-                return rng.choice(elite).mutate(rng, max_layers=max_layers)
+                    return self._conform(a.crossover(b, rng, max_layers=max_layers))
+                return self._conform(rng.choice(elite).mutate(rng, **mkw))
             # tournament / regularized / nsga2 all select parents by tournament
             if rng.random() >= mutation_rate and len(scored) >= 2:
-                return tournament().crossover(tournament(), rng, max_layers=max_layers)
-            return tournament().mutate(rng, max_layers=max_layers)
+                return self._conform(tournament().crossover(tournament(), rng, max_layers=max_layers))
+            return self._conform(tournament().mutate(rng, **mkw))
 
         # elitism / nsga2 carry the best forward; tournament/regularized (aging) do not — the oldest
         # die out each generation, which keeps the search exploring instead of locking in early.
@@ -2058,6 +2547,20 @@ class NeuralArchitectureSearch:
             else:
                 nxt.append(proposals[0])
         return nxt[:pop_size]
+
+    def _conform(self, genome: ArchitectureGenome) -> ArchitectureGenome:
+        """Keep a produced genome inside the configured search space: trim synthesised programs to
+        the primitive cap and, when a search dimension is disabled, fall back to the classic default
+        (so ``search_learning_rule=False`` / ``plasticity_enabled=False`` recover the old behaviour)."""
+        for ly in genome.layers:
+            if ly.op == "synth" and ly.program is not None:
+                ly.program.steps = ly.program.steps[:max(1, self._synth_cap)]
+        if not self._search_lr:
+            genome.learning_rule = LearningRule()
+        elif not self._plasticity:
+            genome.learning_rule.plasticity = False
+        genome._fixup()
+        return genome
 
     @staticmethod
     def _novelty(genome: ArchitectureGenome, pop: Sequence[Candidate]) -> float:
@@ -2104,8 +2607,11 @@ class NeuralArchitectureSearch:
             warm = self.hall_of_fame.seed_genomes(n_warm, rng, block_size=block)
         population = warm + [
             ArchitectureGenome.random(rng, max_layers=max_layers, block_size=block,
-                                      pos_encoding=getattr(self.cfg, "pos_encoding", None))
+                                      pos_encoding=getattr(self.cfg, "pos_encoding", None),
+                                      ops=self._ops, search_learning_rule=self._search_lr,
+                                      allow_plasticity=self._plasticity)
             for _ in range(pop_size - len(warm))]
+        population = [self._conform(g) for g in population]   # keep warm + random inside the space
         seen: Dict[str, Candidate] = {}
         history: List[float] = []
         leaderboard: List[Candidate] = []

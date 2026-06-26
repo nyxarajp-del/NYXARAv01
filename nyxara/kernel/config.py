@@ -528,6 +528,18 @@ class GenesisConfig(BaseModel):
     n_predict: int = Field(default=1, ge=1, le=4)            # multi-token-prediction depth (1=classic)
     kv_latent: int = Field(default=16, ge=1, le=256)        # latent-KV width for mla_attention
     inherit_weights: bool = False                            # Lamarckian warm-start (network morphism)
+    # ---- Open-ended invention: she searches not just the architecture but a NEW LEARNING PARADIGM ---- #
+    # search_learning_rule: evolve *how* a brain learns — optimizer (AdamW/Lion/SGD-momentum/RMSprop),
+    #   composed auxiliary objectives (denoise/contrastive/self-distill/entropy/SAM), schedule shape,
+    #   and (on the stdlib substrate) the n-gram smoothing method.
+    # search_operators: allow the ``synth`` op — a mixer composed from primitives, so the search
+    #   escapes the fixed palette and can invent a token-mixer that is on nobody's list.
+    # plasticity_enabled: allow the learnable Hebbian fast-weight update layered on top of backprop.
+    # All default ON but cheap/CI-safe; set False to recover the classic fixed-palette + AdamW search.
+    search_learning_rule: bool = True
+    search_operators: bool = True
+    plasticity_enabled: bool = True
+    max_synth_primitives: int = Field(default=4, ge=1, le=12)   # cap on a synthesised program's length
     # ---- Lifelong Hall-of-Fame memory: remember the best brains, warm-start future searches ---- #
     hall_of_fame: bool = True
     hall_of_fame_size: int = Field(default=32, ge=1, le=512)

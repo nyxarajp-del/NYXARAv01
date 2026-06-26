@@ -363,10 +363,21 @@ class WordKNGramLM(BaseLanguageModel):
 
     kind = "kngram"
 
-    def __init__(self, order: int = 3, *, discount: float = 0.75, seed: int = 0) -> None:
+    # the searchable learning *method* — Genesis evolves which smoothing (i.e., how the model
+    # generalizes from counts) wins, so the "new learning paradigm" dimension is real on a bare
+    # machine too, not only on the torch path.
+    _SMOOTHINGS: Tuple[str, ...] = ("kneser_ney", "add_k", "interpolated", "stupid_backoff")
+
+    def __init__(self, order: int = 3, *, discount: float = 0.75, seed: int = 0,
+                 smoothing: str = "kneser_ney", k: float = 1.0) -> None:
         self.order = max(2, int(order))
         self.D = min(0.99, max(0.1, float(discount)))
+        self.smoothing = smoothing if smoothing in self._SMOOTHINGS else "kneser_ney"
+        self.k = max(1e-3, float(k))               # add-k pseudo-count
         self.seed = int(seed)
+        # raw m-gram counts (all orders) — used by add-k / interpolation / stupid-backoff smoothing
+        self.raw: Dict[int, Dict[Tuple[int, ...], Dict[int, int]]] = {}
+        self.raw_tot: Dict[int, Dict[Tuple[int, ...], int]] = {}
         self.tok2id: Dict[str, int] = {}
         self.id2tok: List[str] = []
         self._bos = self._intern(_BOS_TOK)
@@ -413,6 +424,11 @@ class WordKNGramLM(BaseLanguageModel):
                     ctx = tuple(ids[i - m + 1:i])
                     raw[m][ctx][ids[i]] += 1
             tokens += len(ids)
+        # keep the raw m-gram counts (all orders) for the non-KN smoothing methods
+        self.raw = {m: {ctx: dict(row) for ctx, row in raw[m].items()}
+                    for m in range(1, self.order + 1)}
+        self.raw_tot = {m: {ctx: sum(row.values()) for ctx, row in self.raw[m].items()}
+                        for m in range(1, self.order + 1)}
         # highest order uses raw counts directly
         self.hi = {ctx: dict(row) for ctx, row in raw[self.order].items()}
         # lower orders use Kneser-Ney *continuation* counts (distinct left-extensions)
@@ -458,9 +474,43 @@ class WordKNGramLM(BaseLanguageModel):
         lam = self.D * len(row) / total
         return max(row.get(w, 0) - self.D, 0.0) / total + lam * self._p(m - 1, ctx[1:], w)
 
+    # ---- alternative searchable smoothing methods (all real, all from-scratch) ---- #
+    def _p_addk(self, m: int, ctx: Tuple[int, ...], w: int) -> float:
+        """Add-k (Lidstone) smoothing with shorten-context backoff when a context is unseen."""
+        total = self.raw_tot.get(m, {}).get(ctx, 0)
+        if total <= 0:
+            return 1.0 / self.vocab_size if m == 1 else self._p_addk(m - 1, ctx[1:], w)
+        cnt = self.raw.get(m, {}).get(ctx, {}).get(w, 0)
+        return (cnt + self.k) / (total + self.k * self.vocab_size)
+
+    def _p_interp(self, m: int, ctx: Tuple[int, ...], w: int) -> float:
+        """Jelinek-Mercer linear interpolation across orders down to a uniform base."""
+        base = 1.0 / self.vocab_size
+        if m < 1:
+            return base
+        total = self.raw_tot.get(m, {}).get(ctx, 0)
+        ml = (self.raw.get(m, {}).get(ctx, {}).get(w, 0) / total) if total > 0 else 0.0
+        lam = 0.7
+        lower = base if m == 1 else self._p_interp(m - 1, ctx[1:], w)
+        return lam * ml + (1.0 - lam) * lower
+
+    def _p_backoff(self, m: int, ctx: Tuple[int, ...], w: int) -> float:
+        """Stupid backoff (Brants et al.): use the ML estimate where seen, else discount and back off."""
+        total = self.raw_tot.get(m, {}).get(ctx, 0)
+        cnt = self.raw.get(m, {}).get(ctx, {}).get(w, 0) if total > 0 else 0
+        if cnt > 0:
+            return cnt / total
+        return 0.4 * (1.0 / self.vocab_size if m == 1 else self._p_backoff(m - 1, ctx[1:], w))
+
     def _prob(self, ctx_full: Tuple[int, ...], w: int) -> float:
         ctx = ctx_full[-(self.order - 1):] if self.order > 1 else ()
-        return self._p(self.order, ctx, w)
+        if self.smoothing == "add_k":
+            return self._p_addk(self.order, ctx, w)
+        if self.smoothing == "interpolated":
+            return self._p_interp(self.order, ctx, w)
+        if self.smoothing == "stupid_backoff":
+            return self._p_backoff(self.order, ctx, w)
+        return self._p(self.order, ctx, w)          # interpolated Kneser-Ney (default)
 
     def _corpus_cross_entropy(self, corpus: Sequence[str]) -> float:
         total_nll, n = 0.0, 0
@@ -567,14 +617,18 @@ class WordKNGramLM(BaseLanguageModel):
                     for ctx, row in table.items()}
 
         blob = {"kind": self.kind, "order": self.order, "discount": self.D, "seed": self.seed,
+                "smoothing": self.smoothing, "k": self.k,
                 "id2tok": self.id2tok, "hi": _enc(self.hi),
-                "lo": {str(m): _enc(self.lo[m]) for m in self.lo}}
+                "lo": {str(m): _enc(self.lo[m]) for m in self.lo},
+                "raw": {str(m): _enc(self.raw[m]) for m in self.raw}}
         (directory / "model.json").write_text(json.dumps(blob), encoding="utf-8")
 
     def load(self, directory: Path) -> None:
         blob = json.loads((Path(directory) / "model.json").read_text(encoding="utf-8"))
         self.order = int(blob["order"]); self.D = float(blob["discount"])
         self.seed = int(blob.get("seed", 0))
+        self.smoothing = blob.get("smoothing", "kneser_ney")
+        self.k = float(blob.get("k", 1.0))
         self.id2tok = list(blob["id2tok"])
         self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
         self._bos = self.tok2id.get(_BOS_TOK, 0)
@@ -588,6 +642,9 @@ class WordKNGramLM(BaseLanguageModel):
 
         self.hi = _dec(blob["hi"])
         self.lo = {int(m): _dec(tbl) for m, tbl in blob["lo"].items()}
+        self.raw = {int(m): _dec(tbl) for m, tbl in blob.get("raw", {}).items()}
+        self.raw_tot = {m: {ctx: sum(row.values()) for ctx, row in self.raw[m].items()}
+                        for m in self.raw}
         self._recompute_totals()
 
 
