@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from nyxara.agency.permissions import Authority
 from nyxara.growth.autolearn import GrowthEngine, GrowthReport
+from nyxara.kernel.config import NyxaraSettings, Profile
 from nyxara.kernel.orchestrator import NyxaraCore
+
+
+def _engine_with_tmp_flywheel(tmp_path, **kw) -> GrowthEngine:
+    """A growth engine whose verified-data flywheel writes to a temp file (hermetic)."""
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.flywheel.store_path = tmp_path / "flywheel.jsonl"
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    return GrowthEngine(settings=settings, **kw)
 
 
 def _core_with_experience(n: int = 5) -> NyxaraCore:
@@ -108,6 +117,47 @@ def _arena_with_lang_gap():
                       grader="contains"),
     ])
     return Arena(benchmark=bench)
+
+
+# --------------------------------------------------------------------------- #
+# The ceiling-break — verifiable self-play + synthesis fold GROUND TRUTH into the
+# flywheel the foundry forges from, so the model's target is correctness, not the teacher.
+# --------------------------------------------------------------------------- #
+def test_play_verifiable_collects_ground_truth_into_shared_flywheel(tmp_path):
+    engine = _engine_with_tmp_flywheel(tmp_path)
+    out = engine.play_verifiable(n=24)
+    assert out is not None
+    assert out["collected"] > 0                         # exact-oracle pairs, no teacher needed
+    fw = engine._shared_flywheel()
+    assert fw.count() > 0
+    # and these are exactly the docs the foundry will train on
+    from nyxara.growth.distill import load_distillation_docs
+    assert len(load_distillation_docs(fw.store_path)) > 0
+
+
+def test_curate_synthetic_feeds_verified_items(tmp_path):
+    engine = _engine_with_tmp_flywheel(tmp_path)
+    out = engine.curate_synthetic(rounds=2)
+    assert out is not None
+    assert out["generated"] > 0
+    assert out["accepted"] >= 0                          # prover-verified survivors only
+
+
+def test_verifiable_selfplay_on_by_default_when_foundry_on(tmp_path):
+    # default: verifiable self-play + synthesis ride along whenever the foundry runs
+    engine = _engine_with_tmp_flywheel(tmp_path, enable_foundry=True)
+    assert engine.enable_verifiable_selfplay is True
+    assert engine.enable_synthesis is True
+
+
+def test_forge_pass_reports_ground_truth_generation(tmp_path, monkeypatch):
+    engine = _engine_with_tmp_flywheel(tmp_path, enable_foundry=True)
+    # skip the heavy train/promote; we only assert the ground-truth data was manufactured first
+    monkeypatch.setattr(engine, "improve_self", lambda *a, **k: [])
+    rep = engine.run(do_foundry=True)
+    assert rep.verifiable_selfplay is not None
+    assert rep.verifiable_selfplay["collected"] > 0
+    assert rep.synthesis is not None
 
 
 def test_rivalry_off_by_default():

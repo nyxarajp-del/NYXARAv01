@@ -362,6 +362,14 @@ class FoundryConfig(BaseModel):
     # benchmark, not merely lower perplexity. Tolerant of tiny noise via the margin.
     capability_gate: bool = True
     capability_regression_tol: float = Field(default=1e-6, ge=0.0)
+    # Teacher-relative audit (the visible ceiling-break): when on, every forged candidate is also
+    # A/B'd against the external teacher on the SAME oracle-graded battery and the gap
+    # (own_accuracy − teacher_accuracy) is recorded as ``accuracy_vs_teacher`` in the version's
+    # metrics — so "she went above the teacher" is measured, not asserted. Measurement-only: it
+    # never gates promotion (capability is already gated by the oracle benchmark above) and is a
+    # no-op when no real teacher is configured. Off by default since it spends a teacher call per
+    # forge; turn on to watch the gap close and cross zero.
+    measure_vs_teacher: bool = False
     # Efficiency gate (Pillar F · Edge 3): when on, a candidate that does NOT lower perplexity may
     # still be promoted if it is *cheaper* (fewer params) while keeping capability within
     # ``efficiency_epsilon`` of the active model — capability compression (growth/efficiency.py).
@@ -690,6 +698,14 @@ class RouterConfig(BaseModel):
     # *herself*, which discounts her confidence and makes her defer/abstain more readily. 1 = off
     # (single draft, no self-consistency probe); 3 is a cheap, effective default once enabled.
     self_consistency_samples: int = Field(default=1, ge=1, le=9)
+    # INFERENCE-TIME CEILING-BREAK (mind/verified_answer.py): instead of a single greedy draft,
+    # sample several candidates from her OWN model and select by GROUND TRUTH — an exact oracle
+    # (Prover / reasoning faculties) certifies a provably-correct candidate when the domain is
+    # decidable, else self-consistency majority vote picks the most agreed answer. Search +
+    # verification lets her exceed any single teacher sample on verifiable/reasoning tasks. On by
+    # default; fail-open (degrades to the single-draft path on any error). 1 sample = disabled.
+    verify_rerank: bool = True
+    rerank_samples: int = Field(default=5, ge=1, le=16)
 
 
 class SelfModelRouterConfig(BaseModel):

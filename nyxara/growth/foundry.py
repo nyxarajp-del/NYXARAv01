@@ -383,6 +383,29 @@ class Foundry:
         except Exception:  # noqa: BLE001 — capability scoring is best-effort, never fatal
             return 0.0
 
+    def _teacher_relative_accuracy(self, model: BaseLanguageModel) -> Dict[str, float]:
+        """A/B the candidate vs the external teacher on the oracle-graded battery (audit-only).
+
+        Records how far the forged model's exact-match accuracy sits *above/below* the teacher's
+        on the same problems — the visible measure of the ceiling-break. Returns ``{}`` (a no-op)
+        when the audit is off or no real teacher is configured (mock/self), and never raises."""
+        if not getattr(self.cfg, "measure_vs_teacher", False):
+            return {}
+        try:
+            from nyxara.eval.benchmark import build_default_benchmark, llm_solver
+            from nyxara.mind.llm import LLM
+            llm = LLM(settings=self.settings)
+            if llm.chosen_provider().name in ("mock", "self"):
+                return {}   # no real teacher to compare against — stay honest, skip
+            bench = build_default_benchmark()
+            own_acc = bench.run(_model_solver(model)).accuracy
+            teacher_acc = bench.run(llm_solver(llm)).accuracy
+            return {"accuracy_self": round(own_acc, 5),
+                    "accuracy_teacher": round(teacher_acc, 5),
+                    "accuracy_vs_teacher": round(own_acc - teacher_acc, 5)}
+        except Exception:  # noqa: BLE001 — the audit is best-effort; never fail a forge over it
+            return {}
+
     def _loyalty_metrics(self, model: BaseLanguageModel, perplexity: float) -> Dict[str, float]:
         """Measure the Loyalty Equation for a candidate: S_JP_Alignment and L_total.
 
@@ -459,6 +482,7 @@ class Foundry:
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
         metrics.update(self._loyalty_metrics(model, ev.perplexity))
+        metrics.update(self._teacher_relative_accuracy(model))   # audit: how far above the teacher
 
         ver = self._next_version()
         vdir = self.root / f"v{ver}"

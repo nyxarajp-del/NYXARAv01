@@ -42,6 +42,10 @@ class GrowthReport:
     abstractions: int = 0
     forgotten: int = 0
     selfplay: Optional[Dict[str, Any]] = None
+    # Exact-oracle-verified data she manufactures herself (the AlphaZero ceiling-break):
+    # ground truth, not teacher imitation, so the forged model can exceed the teacher.
+    verifiable_selfplay: Optional[Dict[str, Any]] = None
+    synthesis: Optional[Dict[str, Any]] = None
     acquisition: Optional[Dict[str, Any]] = None
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
@@ -56,7 +60,10 @@ class GrowthReport:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
                 "lessons_stored": self.lessons_stored, "replayed": self.replayed,
                 "abstractions": self.abstractions, "forgotten": self.forgotten,
-                "selfplay": self.selfplay, "acquisition": self.acquisition,
+                "selfplay": self.selfplay,
+                "verifiable_selfplay": self.verifiable_selfplay,
+                "synthesis": self.synthesis,
+                "acquisition": self.acquisition,
                 "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
                 "mind_evolution": self.mind_evolution,
@@ -74,7 +81,12 @@ class GrowthEngine:
                  consolidator: Any = None, foundry: Any = None,
                  enable_foundry: Optional[bool] = None,
                  enable_selfplay: bool = False, selfplay_n: int = 6,
-                 selfplay: Any = None, enable_self_improvement: Optional[bool] = None,
+                 selfplay: Any = None,
+                 enable_verifiable_selfplay: Optional[bool] = None,
+                 verifiable_n: Optional[int] = None,
+                 enable_synthesis: Optional[bool] = None,
+                 synthesis_rounds: Optional[int] = None, curator: Any = None,
+                 enable_self_improvement: Optional[bool] = None,
                  self_improvement_every: Optional[int] = None,
                  self_improver: Any = None, enable_meta_research: Optional[bool] = None,
                  meta_research_every: Optional[int] = None,
@@ -101,6 +113,23 @@ class GrowthEngine:
         self.enable_selfplay = enable_selfplay
         self.selfplay_n = max(1, selfplay_n)
         self._selfplay = selfplay
+        # The ceiling-break: exact-oracle-verified data she manufactures HERSELF (verifiable
+        # self-play + AlphaGo-Zero synthesis). The supervision is ground truth, not the teacher's
+        # answers, so the forged model's target is *correctness*, not imitation — this is how she
+        # can exceed the teacher on verifiable domains. Default ON whenever the foundry is on, so
+        # every forge sees fresh ground truth, not only teacher distillation.
+        self.enable_verifiable_selfplay = (
+            self.enable_foundry if enable_verifiable_selfplay is None
+            else bool(enable_verifiable_selfplay))
+        self.verifiable_n = max(1, int(verifiable_n if verifiable_n is not None else 24))
+        self.enable_synthesis = (
+            bool(getattr(self.settings.synthesis, "enabled", True)) and self.enable_foundry
+            if enable_synthesis is None else bool(enable_synthesis))
+        self.synthesis_rounds = max(
+            1, int(synthesis_rounds if synthesis_rounds is not None
+                   else getattr(self.settings.synthesis, "rounds", 1)))
+        self._curator = curator
+        self._verified_flywheel: Any = None
         # Recursive self-improvement: review/architecture/benchmark/weakness/optimise, throttled
         # to run only every N growth passes (it is heavier than reflection).
         self.enable_self_improvement = (self.settings.self_improvement.enabled
@@ -283,6 +312,49 @@ class GrowthEngine:
                 self._selfplay = SelfPlay(settings=self.settings, frontier=self.frontier)
             return self._selfplay.play(n or self.selfplay_n, topics=topics)
         except Exception:  # noqa: BLE001 — self-play is best-effort, never fatal
+            return None
+
+    # ---- verifiable self-play + synthesis (the ceiling-break: ground-truth, not the teacher) ---- #
+    def _shared_flywheel(self) -> Any:
+        """The data-flywheel the foundry forges from — shared so verified pairs reach training."""
+        if self._verified_flywheel is None:
+            from nyxara.growth.flywheel import DataFlywheel
+            self._verified_flywheel = DataFlywheel.from_settings(self.settings)
+        return self._verified_flywheel
+
+    def play_verifiable(self, *, n: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Pose structured problems and answer them with her own exact faculties (no teacher).
+
+        The oracle is exact, so each ``(prompt, answer)`` is provably correct and is collected
+        ``verified=True`` into the SAME flywheel the foundry trains on. This works on a keyless
+        machine and — crucially — its supervision is ground truth, so the forged model can learn
+        to be *more correct* than the teacher, breaking the distillation ceiling. Best-effort.
+        """
+        try:
+            if self._selfplay is None:
+                from nyxara.growth.selfplay import SelfPlay
+                self._selfplay = SelfPlay(settings=self.settings, frontier=self.frontier,
+                                          flywheel=self._shared_flywheel())
+            return self._selfplay.play_verifiable(n or self.verifiable_n)
+        except Exception:  # noqa: BLE001 — verifiable self-play is best-effort, never fatal
+            return None
+
+    def curate_synthetic(self, *, rounds: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Run the AlphaGo-Zero loop: self-generate logic, rival-verify it, keep only survivors.
+
+        Accepted items are machine-checked by the :class:`~nyxara.growth.prover.Prover` (exact,
+        not a teacher's opinion) and folded ``verified=True`` into the foundry's flywheel corpus
+        plus her grounded knowledge. Pure ground-truth supervision — the second ceiling-break
+        engine. Best-effort; never fatal.
+        """
+        try:
+            if self._curator is None:
+                from nyxara.growth.synthesis import SyntheticCurator
+                self._curator = SyntheticCurator(
+                    settings=self.settings, flywheel=self._shared_flywheel(),
+                    knowledge=getattr(self.core, "knowledge", None))
+            return self._curator.curate(rounds=rounds or self.synthesis_rounds).to_dict()
+        except Exception:  # noqa: BLE001 — synthesis is best-effort, never fatal
             return None
 
     # ---- rivalry (opt-in, Edge 4): turn a peer AGI's lead into targeted curiosity ---- #
@@ -507,7 +579,15 @@ class GrowthEngine:
 
         run_foundry = self.enable_foundry if do_foundry is None else do_foundry
         if run_foundry:
-            # manufacture fresh training data first, so the forge learns something new
+            # manufacture fresh training data first, so the forge learns something new.
+            # GROUND TRUTH FIRST (the ceiling-break): exact-oracle self-play + AlphaGo-Zero
+            # synthesis fold provably-correct pairs into the flywheel the foundry trains on, so
+            # the model's target is correctness — letting it exceed the teacher, not just copy it.
+            if self.enable_verifiable_selfplay:
+                report.verifiable_selfplay = self.play_verifiable()
+            if self.enable_synthesis:
+                report.synthesis = self.curate_synthetic()
+            # Teacher distillation self-play (imitation) is additive breadth, kept opt-in.
             if self.enable_selfplay:
                 report.selfplay = self.self_play(topics=rival_topics)
             results = self.improve_self()

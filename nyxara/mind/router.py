@@ -148,6 +148,33 @@ class Router:
                                      max_tokens=self.cfg.max_tokens)
         return (self._self.complete(req).text or "").strip()
 
+    def _own_answer_reranked(self, prompt: str, system: Optional[str]) -> str:
+        """Draw several own-model samples and select by ground truth (the ceiling-break).
+
+        An exact oracle certifies a provably-correct candidate when the domain is decidable;
+        otherwise self-consistency majority vote picks the most-agreed answer — best-of-N lifts
+        accuracy above the single greedy draft (and above any single teacher sample) on
+        verifiable / reasoning prompts. Falls back to the plain greedy draft on any error."""
+        from nyxara.mind.llm import LLMRequest
+        from nyxara.mind.verified_answer import best_verified_answer, faculty_oracle
+
+        def _gen() -> str:
+            req = LLMRequest.from_prompt(prompt, system=system, temperature=0.7,
+                                         max_tokens=self.cfg.max_tokens)
+            return (self._self.complete(req).text or "").strip()
+
+        n = int(getattr(self.cfg, "rerank_samples", 5) or 5)
+        # Faculties are already short-circuited in draft(); pass the oracle only when they are on
+        # so this stays consistent with the operator's use_faculties choice.
+        oracle = faculty_oracle if self.cfg.use_faculties else None
+        try:
+            va = best_verified_answer(prompt, _gen, samples=n, oracle=oracle)
+        except Exception:  # noqa: BLE001 — rerank is best-effort; never break a turn
+            va = None
+        if va is not None and va.text:
+            return va.text
+        return self._own_answer(prompt, system)
+
     def _teacher_answer(self, prompt: str, system: Optional[str], name: str) -> str:
         from nyxara.mind.llm import LLMRequest
         req = LLMRequest.from_prompt(prompt, system=system, temperature=0.3,
@@ -217,7 +244,11 @@ class Router:
         confidence = 0.0
         if self.self_available():
             try:
-                own = self._own_answer(prompt, system)
+                if getattr(self.cfg, "verify_rerank", False) and \
+                        int(getattr(self.cfg, "rerank_samples", 1) or 1) > 1:
+                    own = self._own_answer_reranked(prompt, system)
+                else:
+                    own = self._own_answer(prompt, system)
                 confidence = float(self.verifier(prompt, own))
             except Exception:  # noqa: BLE001 — a failed own attempt simply defers downstream
                 own, confidence = None, 0.0
@@ -256,7 +287,11 @@ class Router:
         if not self.self_available():
             return None
         try:
-            own = self._own_answer(prompt, system)
+            if getattr(self.cfg, "verify_rerank", False) and \
+                    int(getattr(self.cfg, "rerank_samples", 1) or 1) > 1:
+                own = self._own_answer_reranked(prompt, system)
+            else:
+                own = self._own_answer(prompt, system)
         except Exception:  # noqa: BLE001 — a failed own attempt simply defers to the teacher
             return None
         if not own:
