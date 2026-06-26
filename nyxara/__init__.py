@@ -45,6 +45,7 @@ from nyxara.growth.scientist import (
     Verdict,
 )
 from nyxara.growth.skill_memory import SkillMemory
+from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.memory.elastic_synapses import (
     ConsolidatedTask,
     ElasticSynapses,
@@ -147,6 +148,9 @@ __all__ = [
     "Conclusion",
     "InvestigationReport",
     "Verdict",
+    # active curiosity (ask her own WHY / WHAT-IF, self-design the experiment)
+    "ActiveCuriosity",
+    "CuriosityFinding",
     # the self-driven discovery loop (observe → hypothesis → experiment → result → update)
     "AutonomousScientist",
     "DiscoveryReport",
