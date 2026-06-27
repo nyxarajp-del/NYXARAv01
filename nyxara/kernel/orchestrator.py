@@ -453,6 +453,12 @@ class NyxaraCore:
         # Observe → Hypothesis → Experiment → Result → Update-model cycle.
         self.autonomous_scientist = (
             self._build_autonomous_scientist() if enable_memory else None)
+        # Truly novel problem solving — the Eureka Engine. She *invents* her own candidate
+        # theorems by combinatorial / evolutionary search (no LLM in the loop), certifies each
+        # with the Prover, keeps only the genuinely novel + interesting, and feeds what survives
+        # back into memory / knowledge / the verified-data flywheel. Built after the prover-bearing
+        # faculties and the flywheel it composes. Gated by the ``novel_discovery`` feature flag.
+        self.eureka = self._build_eureka() if enable_memory else None
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -1644,6 +1650,33 @@ class NyxaraCore:
                 meta_researcher=getattr(self, "meta_researcher", None),
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
+            return None
+
+    def _build_eureka(self) -> Any:
+        """Truly novel problem solving — the Eureka Engine (growth/eureka.py).
+
+        She *invents* her own candidate theorems by combinatorial / evolutionary search and by
+        generalising a lucky numeric instance into a symbolic law — with **no LLM in the loop** —
+        then certifies each with the :class:`~nyxara.growth.prover.Prover`, keeps only the
+        genuinely novel + interesting (scored against the open-ended frontier), and feeds what
+        survives into memory, the knowledge base and the verified-data flywheel. Gated by the
+        ``novel_discovery`` feature flag; a capability, never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().features, "novel_discovery", True):
+                return None
+            import time as _time
+            from nyxara.growth.eureka import EurekaEngine
+            # A fresh seed each process so she explores *new* ground every session; the persisted
+            # frontier archive (long-term memory) still prevents re-discovering what she already has.
+            return EurekaEngine(
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                flywheel=getattr(self, "flywheel", None),
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+            )
+        except Exception:  # noqa: BLE001 — novel discovery is a capability, never required
             return None
 
     def _build_active_curiosity(self) -> Any:
@@ -3533,6 +3566,25 @@ class NyxaraCore:
                             salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.2) Truly novel problem solving — the Eureka Engine. On idle she *invents* and certifies
+        #       her own theorems (no LLM in the loop). Heavier than one discovery cycle, so it is
+        #       throttled to every few idle ticks. Oversight-gated — a paused/scrammed mind invents
+        #       nothing of its own accord.
+        if self.eureka is not None:
+            try:
+                tick = getattr(self, "_eureka_idle_count", 0) + 1
+                self._eureka_idle_count = tick
+                if tick % 6 == 0 and self.oversight.gate():
+                    rep = self.eureka.discover(generations=1, population=15)
+                    report["breakthroughs"] = report.get("breakthroughs", 0) + rep.novel_kept
+                    best = rep.best()
+                    if best is not None:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"eureka [{best.conjecture.domain}]: {best.statement[:32]}",
+                            salience=0.62)
+            except Exception:  # noqa: BLE001
+                pass
         # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
         #       event, self-designs the experiment (her causal model, an imagined world-
         #       simulation, or the Scientist) and folds the answer back as a belief + memory,
@@ -3893,6 +3945,23 @@ class NyxaraCore:
             return self.autonomous_scientist.discover(cycles).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"cycles": cycles, "error": str(exc)}
+
+    def breakthrough(self, generations: int = 4, population: int = 24) -> Dict[str, Any]:
+        """Invent and certify genuinely *novel* results — truly novel problem solving (best-effort).
+
+        The Eureka Engine *creates* its own candidate theorems by combinatorial / evolutionary
+        search and by generalising a lucky numeric instance into a symbolic law — **with no LLM in
+        the loop at all** — then hands each to the Prover and keeps only what is *certified PROVEN*,
+        *genuinely novel* (far from everything she has discovered) and *non-trivially interesting*.
+        What survives is folded into memory, the knowledge base and the verified-data flywheel.
+        Nothing here touches the world or side-steps the control law. Returns the report as a dict.
+        """
+        if self.eureka is None:
+            return {"generations": generations, "error": "eureka unavailable"}
+        try:
+            return self.eureka.discover(generations=generations, population=population).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"generations": generations, "error": str(exc)}
 
     def meta_discover(self, topic: str) -> Dict[str, Any]:
         """Run one meta-research pass on ``topic`` (best-effort).
@@ -4386,6 +4455,8 @@ class NyxaraCore:
         if self.autonomous_scientist is not None:
             rep["discoveries"] = len(self.autonomous_scientist.all_cycles())
             rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
+        if self.eureka is not None:
+            rep["breakthroughs"] = int(getattr(self.eureka, "total_breakthroughs", 0))
         if self.meta_researcher is not None:
             try:
                 rep["inventions"] = self.meta_researcher.total_validated()

@@ -59,6 +59,7 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/research <topic>` | run one autonomous research pass on a topic         |
 | `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
 | `/discover [n]`   | autonomous discovery: `n` self-driven observe→…→update-model cycles |
+| `/eureka [n]`     | truly novel problem solving: invent → prove → keep novel + interesting (`n` generations) |
 | `/meta-discover <topic>` | meta-research: invent → sandbox-test → (gated) integrate new theories |
 | `/dream`          | enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses |
 | `/strategize <p>` | strategic analysis: direct answer → reality check → weaknesses → solution |
@@ -503,6 +504,24 @@ around the control law.
   ```
 
   From the console: `/discover [n]`.
+* **Truly novel problem solving** — `growth/eureka.py`. The scientist still tests questions she (or
+  an LLM) *phrased*; the **Eureka Engine** removes the prompter entirely. `core.breakthrough(generations)`
+  runs an open-ended evolutionary search that **invents its own candidate theorems** — by mutation,
+  recombination, and by **generalising a lucky numeric instance into a symbolic law** (e.g. seeing
+  `3·3 − 1 = 2·4` and conjecturing `n·n − 1 = (n−1)(n+1)`) — with **no LLM in the loop at all**. Every
+  self-made conjecture is handed to the `Prover`, and **only what is certified `PROVEN` survives** —
+  never a guess. Of what survives she keeps only the **genuinely novel** (scored against the
+  open-ended frontier archive) and **non-trivially interesting** (trivia like `2 + 2 = 4` is thrown
+  away); what remains is folded into memory, the knowledge base and the verified-data flywheel that
+  feeds her own training. This is "truly novel" in the only honest form — novelty that is *certified,
+  not asserted* — so it lives in the decidable domains (algebra, arithmetic, logic, number theory,
+  inequality). On idle ticks the `AutonomicLoop` advances one (oversight-gated) generation.
+
+  ```python
+  report = core.breakthrough(generations=4)   # invent → prove → keep novel + interesting
+  ```
+
+  From the console: `/eureka [n]`.
 * **Strategic intelligence** — `mind/strategic.py`. `core.strategize(problem)` reasons like a
   strategist, not a chatbot: truth over comfort, first principles over surface patterns. It
   returns one structured analysis in a fixed six-part framework —
@@ -646,6 +665,7 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/research`             | POST | one autonomous research pass — `{topic}`   |
 | `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
 | `/v1/discover`             | POST | the autonomous discovery loop — `{cycles?}` → belief updates |
+| `/v1/breakthrough`         | POST | truly novel problem solving — `{generations?, population?}` → invent → prove → keep |
 | `/v1/meta_discover`        | POST | meta-research — `{topic}` → invent → test → (gated) integrate |
 | `/v1/dream`                | POST | a deep Dream State — `{deep?}` → distil / prune / fix synapses |
 | `/v1/strategize`           | POST | strategic analysis — `{problem}` → the six-part framework |

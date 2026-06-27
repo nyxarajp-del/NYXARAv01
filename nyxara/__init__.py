@@ -22,6 +22,7 @@ from nyxara.agency.mission import Mission, MissionExecutive, MissionStatus
 from nyxara.agency.permissions import Authority
 from nyxara.eval import EvalSuite, build_default_suite
 from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryReport
+from nyxara.growth.eureka import BreakthroughReport, EurekaEngine
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
 from nyxara.growth.meta_research import MetaResearcher, MetaResearchReport
 from nyxara.growth.genesis import (
@@ -154,6 +155,9 @@ __all__ = [
     # the self-driven discovery loop (observe → hypothesis → experiment → result → update)
     "AutonomousScientist",
     "DiscoveryReport",
+    # truly novel problem solving (self-generated, prover-certified, novelty-filtered discovery)
+    "EurekaEngine",
+    "BreakthroughReport",
     "MetaResearcher",
     "MetaResearchReport",
     "IntelligenceIndex",

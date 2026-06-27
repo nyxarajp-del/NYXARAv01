@@ -467,6 +467,23 @@ loop + the ToM — nothing touches a tool directly or weakens a gate. Verified (
 multi-step tool use tracked, risky delegate escalates and never acts); 5 new tests; suite 3309 green.
 (E3 real multimodal-on-GPU remains — it needs the Master's GPU box, not this CI container.)
 
+### 2026-06 — Pillar B (truly novel): the Eureka Engine
+
+The honest gap that remained after B1–B6: every faculty still verified a question someone — a user, a
+gap-miner, or the LLM — had *phrased*. `growth/eureka.py` (`EurekaEngine`, `core.breakthrough(...)`, `/eureka`,
+`POST /v1/breakthrough`) removes the prompter. It runs an open-ended evolutionary search that **invents
+its own candidate theorems** — mutation, recombination, and **generalising a lucky numeric instance into a
+symbolic law** (e.g. `3·3−1 = 2·4` → conjecture `n·n−1 = (n−1)(n+1)`) — with **no LLM in the loop**. Each
+self-made conjecture goes to the existing `Prover`; **only what is certified `PROVEN` survives**. Of those it
+keeps only the *novel* (scored against the `frontier` QD archive) and *non-trivially interesting* (a
+surprise/compression/generality score that discards `2+2=4`), then folds survivors into memory, the
+knowledge base, and the verified-data flywheel. "Truly novel" in the only honest form — novelty that is
+**certified, not asserted** — so it is confined to the decidable domains (algebra, arithmetic, logic, number
+theory, inequality). A fresh seed per process explores new ground each session while the persisted frontier
+prevents re-discovering what she already holds; on idle ticks the `AutonomicLoop` advances one
+(oversight-gated) generation. Pure-stdlib core; `sympy`/`z3` reached only through the `Prover` and only ever
+strengthen a verdict; touches no source, no weights, no gate. 12 new tests.
+
 ---
 
 ## 12. Where things stand
