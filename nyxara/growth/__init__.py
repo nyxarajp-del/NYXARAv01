@@ -45,6 +45,12 @@ from nyxara.growth.frontier import (
     NoveltyArchive,
 )
 from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover
+from nyxara.growth.eureka import (
+    Breakthrough,
+    BreakthroughReport,
+    Conjecture,
+    EurekaEngine,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -201,6 +207,11 @@ __all__ = [
     "ProofClaim",
     "ProofResult",
     "ProofVerdict",
+    # truly novel problem solving — self-generated, prover-certified, novelty-filtered discovery
+    "EurekaEngine",
+    "Conjecture",
+    "Breakthrough",
+    "BreakthroughReport",
     "ComputeLedger",
     "EfficiencyFrontier",
     "EfficiencyPoint",

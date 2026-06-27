@@ -9,6 +9,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
 * ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
+* ``POST /v1/breakthrough``      — truly novel problem solving: ``{generations?, population?}``
+  → invent → prove → keep novel + interesting.
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
@@ -58,6 +60,12 @@ class InvestigateRequest(BaseModel):
 class DiscoverRequest(BaseModel):
     # How many self-driven discovery cycles to run; the server keeps this bounded.
     cycles: int = Field(default=3, ge=1, le=50)
+
+
+class BreakthroughRequest(BaseModel):
+    # Open-ended novel-discovery generations and per-generation population; both kept bounded.
+    generations: int = Field(default=4, ge=1, le=50)
+    population: int = Field(default=24, ge=5, le=200)
 
 
 class MetaDiscoverRequest(BaseModel):
@@ -186,6 +194,10 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/discover", dependencies=auth)
     def discover(req: DiscoverRequest) -> dict:
         return core.discover(req.cycles)
+
+    @app.post("/v1/breakthrough", dependencies=auth)
+    def breakthrough(req: BreakthroughRequest) -> dict:
+        return core.breakthrough(req.generations, req.population)
 
     @app.post("/v1/meta_discover", dependencies=auth)
     def meta_discover(req: MetaDiscoverRequest) -> dict:
