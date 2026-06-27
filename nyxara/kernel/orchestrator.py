@@ -475,6 +475,13 @@ class NyxaraCore:
         # back into memory / knowledge / the verified-data flywheel. Built after the prover-bearing
         # faculties and the flywheel it composes. Gated by the ``novel_discovery`` feature flag.
         self.eureka = self._build_eureka() if enable_memory else None
+        # Genuine invention — the Invention Engine. Where Eureka invents *theorems*, this invents
+        # *engineering & algorithmic artifacts* (a new battery chemistry, aircraft structure, or
+        # algorithm): she searches a real design space (no LLM in the loop), evaluates each against
+        # a grounded physical / computational model, and keeps only the feasible + genuinely novel +
+        # better-than-baseline — folding survivors back into memory / knowledge / the flywheel.
+        # Gated by the ``genuine_invention`` feature flag; a capability, never required.
+        self.invention = self._build_invention_engine() if enable_memory else None
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -1706,6 +1713,33 @@ class NyxaraCore:
                 seed=int(_time.time() * 1000) & 0x7FFFFFFF,
             )
         except Exception:  # noqa: BLE001 — novel discovery is a capability, never required
+            return None
+
+    def _build_invention_engine(self) -> Any:
+        """Genuine invention — the Invention Engine (growth/invention.py).
+
+        She *invents* candidate engineering & algorithmic designs (a new battery chemistry, aircraft
+        structure, or algorithm) by combinatorial / evolutionary search — **with no LLM in the loop** —
+        evaluates each against a grounded, first-principles model (electrochemistry / aerodynamics /
+        an executed-and-oracle-checked algorithm), and keeps only the feasible, genuinely novel (far
+        from the real known art) and *better-than-the-best-baseline*. Survivors fold into memory, the
+        knowledge base and the verified-data flywheel. Gated by ``genuine_invention``; a capability,
+        never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().features, "genuine_invention", True):
+                return None
+            import time as _time
+            from nyxara.growth.invention import InventionEngine
+            # A fresh seed each process so she explores *new* ground every session.
+            return InventionEngine(
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                flywheel=getattr(self, "flywheel", None),
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+            )
+        except Exception:  # noqa: BLE001 — genuine invention is a capability, never required
             return None
 
     def _build_active_curiosity(self) -> Any:
@@ -3707,6 +3741,25 @@ class NyxaraCore:
                             salience=0.62)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.3) Genuine invention — the Invention Engine. On idle she *invents* and evaluates her own
+        #       engineering / algorithmic designs (no LLM in the loop). Heavier than one discovery
+        #       cycle, so it is throttled to every few idle ticks and oversight-gated — a paused mind
+        #       invents nothing of its own accord.
+        if self.invention is not None:
+            try:
+                tick = getattr(self, "_invention_idle_count", 0) + 1
+                self._invention_idle_count = tick
+                if tick % 7 == 0 and self.oversight.gate():
+                    rep = self.invention.invent(generations=1, population=15)
+                    report["inventions"] = report.get("inventions", 0) + rep.novel_kept
+                    best = rep.best()
+                    if best is not None:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"invention [{best.domain}]: {best.summary[:32]}",
+                            salience=0.62)
+            except Exception:  # noqa: BLE001
+                pass
         # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
         #       event, self-designs the experiment (her causal model, an imagined world-
         #       simulation, or the Scientist) and folds the answer back as a belief + memory,
@@ -4082,6 +4135,29 @@ class NyxaraCore:
             return {"generations": generations, "error": "eureka unavailable"}
         try:
             return self.eureka.discover(generations=generations, population=population).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"generations": generations, "error": str(exc)}
+
+    def invent(self, generations: int = 4, population: int = 24,
+               domain: Optional[str] = None) -> Dict[str, Any]:
+        """Invent genuinely *new* engineering / algorithmic designs — beyond remix (best-effort).
+
+        The Invention Engine *creates* its own candidate designs — a new battery chemistry, aircraft
+        structure, or algorithm — by combinatorial / evolutionary search **with no LLM in the loop**,
+        evaluates each against a grounded first-principles model (electrochemistry / aerodynamics /
+        an executed-and-oracle-checked algorithm), and keeps only what is *feasible*, *genuinely
+        novel* (far from the real known art) and *better than the best known baseline*. Survivors
+        fold into memory, the knowledge base and the verified-data flywheel. Nothing here touches the
+        world or side-steps the control law — every design is invented and judged *in silico*. With
+        ``domain`` given (``battery`` | ``aircraft`` | ``algorithm``) she focuses there; otherwise she
+        invents across all three. Returns the report as a dict.
+        """
+        if self.invention is None:
+            return {"generations": generations, "error": "invention engine unavailable"}
+        try:
+            domains = (domain,) if domain else None
+            return self.invention.invent(generations=generations, population=population,
+                                         domains=domains).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
 

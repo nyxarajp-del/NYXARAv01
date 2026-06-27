@@ -11,6 +11,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
 * ``POST /v1/breakthrough``      — truly novel problem solving: ``{generations?, population?}``
   → invent → prove → keep novel + interesting.
+* ``POST /v1/invent``            — genuine invention: ``{generations?, population?, domain?}``
+  (battery|aircraft|algorithm) → invent → evaluate → keep feasible + novel + better-than-baseline.
 * ``POST /v1/generalize``        — open-world generalization: ``{budget?}`` → crack a hidden,
   never-before-seen alien machine from first principles (observe→hypothesize→test→model).
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
@@ -75,6 +77,13 @@ class BreakthroughRequest(BaseModel):
     # Open-ended novel-discovery generations and per-generation population; both kept bounded.
     generations: int = Field(default=4, ge=1, le=50)
     population: int = Field(default=24, ge=5, le=200)
+
+
+class InventRequest(BaseModel):
+    # Genuine invention generations + per-generation population; an optional domain focus.
+    generations: int = Field(default=4, ge=1, le=50)
+    population: int = Field(default=24, ge=5, le=200)
+    domain: Optional[str] = Field(default=None, pattern="^(battery|aircraft|algorithm)$")
 
 
 class MetaDiscoverRequest(BaseModel):
@@ -217,6 +226,10 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/breakthrough", dependencies=auth)
     def breakthrough(req: BreakthroughRequest) -> dict:
         return core.breakthrough(req.generations, req.population)
+
+    @app.post("/v1/invent", dependencies=auth)
+    def invent(req: InventRequest = InventRequest()) -> dict:
+        return core.invent(req.generations, req.population, domain=req.domain)
 
     @app.post("/v1/meta_discover", dependencies=auth)
     def meta_discover(req: MetaDiscoverRequest) -> dict:

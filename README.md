@@ -60,6 +60,7 @@ You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 | `/investigate <q>` | reason like a scientist: hypothesis → experiment → conclusion |
 | `/discover [n]`   | autonomous discovery: `n` self-driven observe→…→update-model cycles |
 | `/eureka [n]`     | truly novel problem solving: invent → prove → keep novel + interesting (`n` generations) |
+| `/invent [dom] [n]` | genuine invention (`battery`\|`aircraft`\|`algorithm`): invent → evaluate → keep novel + better-than-baseline |
 | `/meta-discover <topic>` | meta-research: invent → sandbox-test → (gated) integrate new theories |
 | `/dream`          | enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses |
 | `/strategize <p>` | strategic analysis: direct answer → reality check → weaknesses → solution |
@@ -522,6 +523,31 @@ around the control law.
   ```
 
   From the console: `/eureka [n]`.
+* **Genuine invention** — `growth/invention.py`. Where her creative faculty (`mind/creative.py`)
+  *remixes* a concept and the Eureka Engine invents *theorems*, the **Invention Engine** invents
+  **engineering and algorithmic artifacts** — exactly the three things asked of her: a *new battery
+  chemistry*, a *new aircraft structure*, a *new algorithm*. `core.invent(generations, domain?)`
+  runs the same open-ended evolutionary search — mutation, recombination, fresh seeds, **no LLM in
+  the loop** — over a *real design space*, and lives by the same asymmetry as Eureka: *generation is
+  cheap; evaluation is rigorous*. Each candidate is judged by a grounded, first-principles model —
+  **battery**: cell voltage, a series electrode-mass capacity model and active-material specific
+  energy under the electrolyte's stability window; **aircraft**: lift-to-drag `½·√(π·e·AR/C_D₀)` and a
+  beam-bending structural-mass bound; **algorithm**: the candidate is **synthesised, executed, and
+  verified correct against a brute-force oracle**, then timed — a wrong algorithm is discarded, never
+  bluffed, exactly as Eureka discards `REFUTED`. She keeps only what is **feasible ∧ genuinely novel ∧
+  better than the best known baseline**: every *real* known design (LFP, NMC, solid-state; the
+  truss-braced and box wings; insertion/merge/quick/heap sort) is seeded into a quality-diversity
+  archive, so a re-derived textbook design reads as *a remix* (novelty ≈ 0) and is rejected — the
+  literal answer to *"not just remix — a genuinely new invention."* Survivors fold into memory, the
+  knowledge base and the verified-data flywheel; on idle ticks the `AutonomicLoop` advances one
+  (oversight-gated) generation. Gated by the `genuine_invention` feature flag.
+
+  ```python
+  report = core.invent(generations=4)                 # across battery / aircraft / algorithm
+  report = core.invent(generations=6, domain="algorithm")   # focus one domain
+  ```
+
+  From the console: `/invent [battery|aircraft|algorithm] [n]`.
 * **Strategic intelligence** — `mind/strategic.py`. `core.strategize(problem)` reasons like a
   strategist, not a chatbot: truth over comfort, first principles over surface patterns. It
   returns one structured analysis in a fixed six-part framework —
@@ -666,6 +692,7 @@ nyxara-serve                                 # or: python -m nyxara.server
 | `/v1/investigate`          | POST | the scientist loop — `{question}` → hypothesis/conclusion |
 | `/v1/discover`             | POST | the autonomous discovery loop — `{cycles?}` → belief updates |
 | `/v1/breakthrough`         | POST | truly novel problem solving — `{generations?, population?}` → invent → prove → keep |
+| `/v1/invent`               | POST | genuine invention — `{generations?, population?, domain?}` → invent → evaluate → keep novel + better |
 | `/v1/meta_discover`        | POST | meta-research — `{topic}` → invent → test → (gated) integrate |
 | `/v1/dream`                | POST | a deep Dream State — `{deep?}` → distil / prune / fix synapses |
 | `/v1/strategize`           | POST | strategic analysis — `{problem}` → the six-part framework |

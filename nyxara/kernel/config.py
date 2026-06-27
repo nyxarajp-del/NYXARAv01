@@ -178,6 +178,7 @@ class FeatureFlags(BaseModel):
     synthetic_self_curation: bool = True     # growth/synthesis.py — AlphaGo-Zero synthetic data (Rule 4)
     dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
+    genuine_invention: bool = True           # growth/invention.py — new battery/aircraft/algorithm designs, beyond remix (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools

@@ -51,6 +51,12 @@ from nyxara.growth.eureka import (
     Conjecture,
     EurekaEngine,
 )
+from nyxara.growth.invention import (
+    DesignCandidate,
+    Invention,
+    InventionEngine,
+    InventionReport,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -229,6 +235,11 @@ __all__ = [
     "Conjecture",
     "Breakthrough",
     "BreakthroughReport",
+    # genuine invention — feasible, novelty-certified, better-than-baseline engineering/algorithm designs
+    "InventionEngine",
+    "DesignCandidate",
+    "Invention",
+    "InventionReport",
     "ComputeLedger",
     "EfficiencyFrontier",
     "EfficiencyPoint",
