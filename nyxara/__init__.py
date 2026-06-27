@@ -73,6 +73,12 @@ from nyxara.kernel.orchestrator import (
 from nyxara.knowledge import KnowledgeBase
 from nyxara.mind.cost import UsageLedger
 from nyxara.mind.strategic import StrategicAnalysis, StrategicIntelligence
+from nyxara.mind.general_intelligence import (
+    Domain,
+    DomainFrame,
+    DomainSolution,
+    GeneralIntelligence,
+)
 from nyxara.mind.causal_world_model import (
     CausalLink,
     CausalVerdict,
@@ -174,6 +180,11 @@ __all__ = [
     "loyalty_battery",
     # the strategic intelligence faculty (six-part analytical framework)
     "StrategicIntelligence",
+    # domain-aware general intelligence (solve as the right kind of expert)
+    "GeneralIntelligence",
+    "Domain",
+    "DomainFrame",
+    "DomainSolution",
     "StrategicAnalysis",
     "CausalWorldModel",
     "CausalLink",

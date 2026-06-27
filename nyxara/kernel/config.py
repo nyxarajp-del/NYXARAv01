@@ -52,6 +52,7 @@ __all__ = [
     "CouncilConfig",
     "RoleCouncilConfig",
     "SwarmConfig",
+    "GeneralIntelligenceConfig",
     "MemoryConfig",
     "CausalConfig",
     "SelfImprovementConfig",
@@ -794,6 +795,37 @@ class SwarmConfig(BaseModel):
     fold_into_intelligence: bool = False
 
 
+class GeneralIntelligenceConfig(BaseModel):
+    """Domain-aware General Intelligence settings (mind/general_intelligence.py).
+
+    NYXARA classifies each problem into a domain — coding, maths, science, business,
+    robotics, medicine, design, law — frames it with that domain's expert methodology, and
+    routes it to the existing real engine best suited to it (coding→sandbox, maths→verifiable
+    faculties, science→Scientist, medicine/law→RAG+web+cite, business→strategic). Unknown
+    fields are handled from first principles and *learned* so they are recognised next time.
+
+    When ``enabled`` and ``auto_frame`` are on, a lightweight domain frame is prepended to the
+    reasoning context on every turn — strictly advisory; the kernel still disposes. The
+    dedicated ``/v1/solve`` endpoint and ``/solve`` console command run the bound engine
+    end-to-end. Knowledge-heavy domains must cite or abstain (with a professional-consultation
+    caveat); web grounding uses the existing governed tools, gated by permissions."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Prepend the domain frame into the reason step on every turn (advisory).
+    auto_frame: bool = True
+    # Minimum normalised match strength to commit to a built-in domain; below this the
+    # problem is treated as a novel field (and may be refined by the LLM if available).
+    classify_threshold: float = Field(default=0.18, ge=0.0, le=1.0)
+    # Break weak/ambiguous classifications with the LLM when a real provider is present.
+    use_llm_refine: bool = True
+    # Learn (and persist) novel fields so they are recognised and improve over time (Rule 4).
+    auto_discover: bool = True
+    # Allow knowledge-heavy domains to ground answers via the governed web tools (still gated).
+    allow_web_grounding: bool = True
+
+
 class SelfImprovementConfig(BaseModel):
     """Recursive self-improvement settings (growth/recursive_improvement.py).
 
@@ -1436,6 +1468,8 @@ class NyxaraSettings(BaseSettings):
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     swarm: SwarmConfig = Field(default_factory=SwarmConfig)
+    general_intelligence: GeneralIntelligenceConfig = Field(
+        default_factory=GeneralIntelligenceConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)

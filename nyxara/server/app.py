@@ -14,6 +14,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
+* ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
+                                   as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
 * ``POST /v1/memory/save|load``  — persist / restore long-term memory (Rule 7 continuity).
 * ``WS   /v1/ws``                — a streaming chat socket (token via ``?token=``).
@@ -78,6 +80,10 @@ class DreamRequest(BaseModel):
 
 
 class StrategizeRequest(BaseModel):
+    problem: str = Field(..., min_length=1)
+
+
+class SolveRequest(BaseModel):
     problem: str = Field(..., min_length=1)
 
 
@@ -212,6 +218,10 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/strategize", dependencies=auth)
     def strategize(req: StrategizeRequest) -> dict:
         return core.strategize(req.problem)
+
+    @app.post("/v1/solve", dependencies=auth)
+    def solve(req: SolveRequest) -> dict:
+        return core.solve(req.problem)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)
