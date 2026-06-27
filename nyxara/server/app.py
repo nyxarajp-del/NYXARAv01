@@ -11,6 +11,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
 * ``POST /v1/breakthrough``      — truly novel problem solving: ``{generations?, population?}``
   → invent → prove → keep novel + interesting.
+* ``POST /v1/generalize``        — open-world generalization: ``{budget?}`` → crack a hidden,
+  never-before-seen alien machine from first principles (observe→hypothesize→test→model).
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
@@ -62,6 +64,11 @@ class InvestigateRequest(BaseModel):
 class DiscoverRequest(BaseModel):
     # How many self-driven discovery cycles to run; the server keeps this bounded.
     cycles: int = Field(default=3, ge=1, le=50)
+
+
+class GeneralizeRequest(BaseModel):
+    # Probe budget for cracking a hidden alien machine from first principles; kept bounded.
+    budget: int = Field(default=48, ge=8, le=256)
 
 
 class BreakthroughRequest(BaseModel):
@@ -200,6 +207,12 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/discover", dependencies=auth)
     def discover(req: DiscoverRequest) -> dict:
         return core.discover(req.cycles)
+
+    @app.post("/v1/generalize", dependencies=auth)
+    def generalize(req: GeneralizeRequest = GeneralizeRequest()) -> dict:
+        # No system can cross the wire, so this demonstrates the capability on a hidden,
+        # randomly-parameterized alien machine she has never seen — observe→hypothesize→test→model.
+        return core.generalize(budget=req.budget)
 
     @app.post("/v1/breakthrough", dependencies=auth)
     def breakthrough(req: BreakthroughRequest) -> dict:

@@ -23,6 +23,7 @@ from nyxara.agency.permissions import Authority
 from nyxara.eval import EvalSuite, build_default_suite
 from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryReport
 from nyxara.growth.eureka import BreakthroughReport, EurekaEngine
+from nyxara.growth.open_world import OpenWorldGeneralizer, UnderstandingReport
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
 from nyxara.growth.meta_research import MetaResearcher, MetaResearchReport
 from nyxara.growth.genesis import (
@@ -164,6 +165,9 @@ __all__ = [
     # truly novel problem solving (self-generated, prover-certified, novelty-filtered discovery)
     "EurekaEngine",
     "BreakthroughReport",
+    # open-world generalization (crack a never-before-seen system from first principles)
+    "OpenWorldGeneralizer",
+    "UnderstandingReport",
     "MetaResearcher",
     "MetaResearchReport",
     "IntelligenceIndex",

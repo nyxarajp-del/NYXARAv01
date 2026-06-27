@@ -157,6 +157,15 @@ from nyxara.growth.scientist import (
     Scientist,
     Verdict,
 )
+from nyxara.growth.open_world import (
+    CandidateLaw,
+    DomainSpec,
+    LawFamily,
+    OpenWorldGeneralizer,
+    Probe,
+    UnderstandingReport,
+    build_alien_machine,
+)
 
 __all__ = [
     "AutonomousResearcher",
@@ -181,6 +190,14 @@ __all__ = [
     "BeliefModel",
     "Belief",
     "QuestionOrigin",
+    # open-world generalization — crack a never-before-seen system from first principles
+    "OpenWorldGeneralizer",
+    "LawFamily",
+    "DomainSpec",
+    "Probe",
+    "CandidateLaw",
+    "UnderstandingReport",
+    "build_alien_machine",
     "MetaResearcher",
     "MetaResearchReport",
     "CandidateTheory",
