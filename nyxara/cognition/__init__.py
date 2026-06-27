@@ -39,6 +39,14 @@ from nyxara.cognition.concept_formation import (
 )
 from nyxara.cognition.composition import CompositionalGrammar, Interpretation
 from nyxara.cognition.sample_efficient import ConsolidationReport, SampleEfficientMind
+from nyxara.cognition.grounded_understanding import (
+    DESCRIPTOR_ONTOLOGY,
+    GroundedActivation,
+    GroundedConcept,
+    GroundedLexicon,
+    PerceptualSchema,
+    Sense,
+)
 
 __all__ = [
     "Hypervector",
@@ -69,4 +77,11 @@ __all__ = [
     "Interpretation",
     "SampleEfficientMind",
     "ConsolidationReport",
+    # grounded understanding — perceptual symbol grounding (word → multimodal meaning)
+    "Sense",
+    "PerceptualSchema",
+    "GroundedConcept",
+    "GroundedActivation",
+    "GroundedLexicon",
+    "DESCRIPTOR_ONTOLOGY",
 ]

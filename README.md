@@ -557,6 +557,30 @@ around the control law.
   cwm.is_causal("summer", "drowning").verdict      # -> "causal"
   cwm.why("slippery")                              # -> [rain→slippery, wet_ground→slippery, ...]
   ```
+* **Grounded understanding — meaning, not just tokens** — `cognition/grounded_understanding.py`.
+  In an ordinary LLM the word *"apple"* is only a token — a slot in *"what word comes next"*,
+  with no world behind it (the **symbol-grounding problem**). NYXARA grounds a symbol in the
+  **senses**: hearing *"apple"* fires **taste** (sweet), **vision** (red, round), **touch**
+  (smooth), **physics** (≈150 g, and it *falls* — gravity) and **affordance** (edible) *all at
+  once*. Meaning is multimodal activation, not co-occurrence. The floor is a real **seed
+  lexicon** of grounded knowledge plus a **perceptual-descriptor ontology** (`sweet→taste`,
+  `red→vision`, `heavy→weight`, `loud→sound`, `edible→affordance`), so she *knows* offline and
+  **learns new words by reading** ("apples are sweet and red", "you can eat a mango", "a stone
+  falls") — *khud*, by herself; an optional LLM ceiling enriches unknown concepts. Meaning is
+  geometry: two words are compared by the cosine of their perceptual feature vectors
+  (`apple ≈ orange ≫ apple ≈ car`), and grounded percepts feed the `concept_formation`
+  abstraction ladder into an IS-A taxonomy. Complements `cognition/language_grounding.py`
+  (which grounds *verbs* in dynamics); this grounds *nouns* in perception. Exposed as
+  `core.understand(word)` and folded into `core.learn_from_text` (one read both models
+  dynamics **and** grounds the nouns).
+
+  ```python
+  act = core.understand("apple")
+  act["modalities"]                                # -> ['taste','vision','touch','affordance','physics']
+  act["meaning"]                                   # -> "apple → taste: sweet; vision: red, round; ... affordance: edible"
+  lex = core._symbol_grounder()
+  lex.similarity("apple", "orange") > lex.similarity("apple", "car")   # -> True
+  ```
 * **Infrastructure** — `kernel/jobqueue.py` (a bounded async job queue), `mind/cost.py` (an
   LLM token/cost ledger with per-model pricing and a daily budget), and `kernel/compute.py`
   (honest CPU/RAM/GPU introspection, import-guarded on torch).
