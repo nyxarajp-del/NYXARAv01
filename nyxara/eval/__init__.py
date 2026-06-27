@@ -22,6 +22,7 @@ from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
 from nyxara.eval.datasets import (DatasetError, build_realworld_benchmark,
                                   load_jsonl_benchmark)
 from nyxara.eval.hard_benchmark import (build_calibration_benchmark, build_code_benchmark,
+                                        build_cross_domain_benchmark,
                                         build_deduction_benchmark, build_hard_benchmark,
                                         build_math_benchmark, build_reading_benchmark,
                                         build_sequence_benchmark, grade_calibration)
@@ -62,5 +63,6 @@ __all__ = [
     "build_code_benchmark",
     "build_reading_benchmark",
     "build_calibration_benchmark",
+    "build_cross_domain_benchmark",
     "grade_calibration",
 ]

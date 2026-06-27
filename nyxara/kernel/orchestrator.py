@@ -203,6 +203,22 @@ class _SelfKnowledgeEntry:
         return self._text
 
 
+class _DomainExpertEntry:
+    """Wraps a DomainFrame as a high-priority memory item so the reasoner reasons as the
+    right domain expert (advisory) — same .text() interface as a memory record."""
+
+    __slots__ = ("_text",)
+
+    def __init__(self, frame: Any) -> None:
+        try:
+            self._text = frame.to_prompt_text()
+        except Exception:  # noqa: BLE001
+            self._text = "[Domain expertise: unavailable]"
+
+    def text(self) -> str:
+        return self._text
+
+
 def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
     """A deterministic stand-in for the LLM: command-like input -> an action proposal,
     otherwise a conversational response. Real deployments inject an LLM-backed reasoner."""
@@ -519,6 +535,14 @@ class NyxaraCore:
         # stress-test premises) and the role council (for adversarial lenses). Pure
         # analysis — it proposes structured reasoning and never reaches around the gates.
         self.strategic_intelligence = self._build_strategic_intelligence()
+        # General Intelligence — domain-aware problem solving: classify each problem into a
+        # field (coding / maths / science / business / robotics / medicine / design / law),
+        # frame it with that domain's expert methodology, and route it to the existing real
+        # engine best suited to it (sandbox / verifiable faculties / scientist / RAG+web /
+        # strategic). Unknown fields are solved from first principles and *learned* so they
+        # are recognised next time. Built after the reasoner / strategic / scientist so it can
+        # compose them. Advisory on every turn; the kernel still disposes.
+        self.general_intelligence = self._build_general_intelligence()
         # Self-improving Society of Mind: a swarm of personas DEBATES a problem over several
         # rounds, then scores + persists each persona's contribution and re-composes its own
         # roster over time. Built after the reasoner so it borrows the live LLM and shares
@@ -1773,6 +1797,38 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — strategic analysis is a capability, never required
             return None
 
+    def _build_general_intelligence(self) -> Any:
+        """General Intelligence: route a problem to the right domain expert + real engine.
+
+        Composes the reasoner (for its LLM), the role council, the scientist, the world model,
+        long-term memory, the knowledge base, the governed tools (sandbox + web), and the
+        strategic faculty. Every dependency is optional — with none of them it still classifies,
+        frames and answers offline. Off only when config disables it; never required, never
+        gated, fully offline-capable."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().general_intelligence
+            if not cfg.enabled:
+                return None
+            from nyxara.mind.general_intelligence import GeneralIntelligence
+            return GeneralIntelligence(
+                reasoner=getattr(self, "reasoner", None),
+                council=getattr(self, "role_council", None),
+                scientist=getattr(self, "scientist", None),
+                world_model=getattr(self, "world_model", None),
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                tools=getattr(self, "tools", None),
+                strategic=getattr(self, "strategic_intelligence", None),
+                self_model=getattr(self, "self_model", None),
+                threshold=cfg.classify_threshold,
+                use_llm_refine=cfg.use_llm_refine,
+                allow_web_grounding=cfg.allow_web_grounding,
+                auto_discover=cfg.auto_discover,
+            )
+        except Exception:  # noqa: BLE001 — general intelligence is a capability, never required
+            return None
+
     def _build_meta_intelligence(self) -> Any:
         """Level 14 — MetaIntelligence: post-turn reasoning quality evaluation."""
         try:
@@ -2378,6 +2434,9 @@ class NyxaraCore:
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
         enriched = self._inject_self_knowledge(enriched, stimulus)
+        # General Intelligence — classify the problem's domain and prepend the matching
+        # expert methodology so the reasoner thinks as the right kind of expert. Advisory.
+        enriched = self._inject_domain_expertise(enriched, stimulus)
         # Level 4 — run the base reasoner + role council as competing hypotheses;
         # the orchestrator picks the more confident, better-supported candidate.
         candidate = self._compete_with_role_council(stimulus, focus, enriched)
@@ -2506,6 +2565,34 @@ class NyxaraCore:
                 mood=mood, turns=self._turns, stimulus=stimulus)
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
+            return memories
+
+    def _inject_domain_expertise(self, memories: List[Any], stimulus: str = "") -> List[Any]:
+        """Classify the problem's domain and prepend the matching expert methodology so the
+        reasoner reasons as the right kind of expert (coding / maths / science / business /
+        robotics / medicine / design / law, or a first-principles generalist for a novel
+        field). Records the chosen domain in the audit trail; learns and persists a profile
+        when the field is novel so it is recognised next time (Rule 4). Strictly advisory and
+        best-effort: any failure leaves the context untouched."""
+        gi = getattr(self, "general_intelligence", None)
+        if gi is None or not stimulus:
+            return memories
+        try:
+            from nyxara.kernel.config import get_settings
+            if not get_settings().general_intelligence.auto_frame:
+                return memories
+            frame = gi.frame(stimulus)
+            self.mind.record(
+                ThoughtKind.ATTENTION,
+                f"domain: {frame.domain.value}"
+                f"{' (novel field)' if frame.novel else ''} "
+                f"(confidence {frame.confidence:.0%}) — reasoning as {frame.persona}",
+                salience=0.5, confidence=frame.confidence)
+            if frame.novel:
+                # adapt: learn the new field so the classifier recognises it next time
+                gi.learn_domain(gi._label_for(stimulus), stimulus)
+            return [_DomainExpertEntry(frame)] + list(memories)
+        except Exception:  # noqa: BLE001 — domain expertise is advisory, never fatal
             return memories
 
     def _apply_hallucination_caution(self, stimulus: str, candidate: Candidate) -> Candidate:
@@ -3997,6 +4084,26 @@ class NyxaraCore:
             return {"problem": problem, "error": "strategic_intelligence unavailable"}
         try:
             return self.strategic_intelligence.analyze(problem).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"problem": problem, "error": str(exc)}
+
+    def solve(self, problem: str) -> Dict[str, Any]:
+        """Solve ``problem`` as the right kind of domain expert (best-effort).
+
+        Classifies the problem into a field (coding / maths / science / business / robotics /
+        medicine / design / law, or a novel field handled from first principles), frames it
+        with that domain's methodology, and runs the existing real engine best suited to it:
+        the code sandbox actually runs code, the verifiable faculties compute exact maths, the
+        Scientist tests hypotheses, RAG + the governed web tools ground medicine/law answers
+        (which cite or abstain, with a professional-consultation caveat), and the strategic
+        faculty drives business analysis. Pure analysis/computation — the only world-effects
+        are sandboxed code execution and governed web reads, both inside their own gates.
+        Returns the structured solution as a dict.
+        """
+        if self.general_intelligence is None:
+            return {"problem": problem, "error": "general_intelligence unavailable"}
+        try:
+            return self.general_intelligence.solve(problem)
         except Exception as exc:  # noqa: BLE001
             return {"problem": problem, "error": str(exc)}
 
