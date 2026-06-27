@@ -120,6 +120,7 @@ commands:
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
+  /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /meta-discover <t> meta-research: invent → sandbox-test → (gated) integrate new theories
   /dream             enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
@@ -224,6 +225,12 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 4
         print(json.dumps(core.breakthrough(n), indent=2, default=str))
+    elif cmd in ("generalize", "openworld", "open-world"):
+        try:
+            budget = int(arg) if arg else 48
+        except ValueError:
+            budget = 48
+        print(json.dumps(core.generalize(budget=budget), indent=2, default=str))
     elif cmd in ("meta-discover", "metadiscover", "invent"):
         if not arg:
             print("usage: /meta-discover <topic>")

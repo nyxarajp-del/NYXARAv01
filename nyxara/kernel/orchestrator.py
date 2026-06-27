@@ -480,6 +480,11 @@ class NyxaraCore:
         # the answer back. Built after the causal model, world simulator and scientist it
         # composes. Event-driven sibling of ``curiosity_pass`` (which drains self-knowledge gaps).
         self.active_curiosity = self._build_active_curiosity() if enable_growth else None
+        # Open-world generalization: point her at a system she has *never seen* (an alien machine)
+        # and she models it from first principles — observe → hypothesize → test → model — keeping
+        # the simplest law that generalizes, or honestly reporting she could not crack it. Built
+        # after the world / causal / belief models it composes. Gated by ``open_world_generalization``.
+        self.open_world = self._build_open_world_generalizer() if enable_growth else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -1729,6 +1734,36 @@ class NyxaraCore:
                 events_source=self._recent_salient_events,
             )
         except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
+            return None
+
+    def _build_open_world_generalizer(self) -> Any:
+        """Open-world generalization — crack a never-before-seen system from first principles.
+
+        Given an unknown black box she can only *poke*, the
+        :class:`~nyxara.growth.open_world.OpenWorldGeneralizer` runs the real
+        observe→hypothesize→test→model loop: it probes the box, induces candidate laws
+        (constant/affine/polynomial/multiplicative/modular/threshold/boolean/categorical), runs
+        discriminating experiments, and keeps the simplest law that *generalizes* to unseen
+        inputs — honestly reporting ``UNMODELLED`` when nothing fits. Composes the world / causal
+        models (to fold findings in) and reuses the belief model for honest confidence. Gated by
+        the ``open_world_generalization`` feature flag; a capability, never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().features, "open_world_generalization", True):
+                return None
+            import time as _time
+            from nyxara.growth.open_world import OpenWorldGeneralizer
+            return OpenWorldGeneralizer(
+                world_model=getattr(self, "world_model", None),
+                causal_model=getattr(self, "causal_world_model", None),
+                belief_model=getattr(getattr(self, "autonomous_scientist", None), "model", None),
+                novelty=getattr(getattr(self, "eureka", None), "frontier", None),
+                memory=getattr(self, "memory", None),
+                knowledge=getattr(self, "knowledge", None),
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+            )
+        except Exception:  # noqa: BLE001 — open-world generalization is a capability, never required
             return None
 
     def _recent_salient_events(self) -> List[str]:
@@ -4049,6 +4084,32 @@ class NyxaraCore:
             return self.eureka.discover(generations=generations, population=population).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
+
+    def generalize(self, system: Any = None, *, budget: int = 48,
+                   label: str = "unknown-system") -> Dict[str, Any]:
+        """Open-world generalization — model a *never-before-seen* system from first principles.
+
+        ``system`` is any black box she can poke: a callable ``system(action) -> observation`` or
+        an object with ``.interact(action)``. She probes it, induces candidate laws, runs
+        discriminating experiments, and keeps the simplest law that *generalizes* to unseen
+        inputs — or honestly reports ``UNMODELLED`` when nothing fits (she never bluffs). With no
+        ``system`` given she builds a hidden, randomly-parameterized *alien machine* and cracks it
+        live, to demonstrate the capability. Nothing here touches the world or side-steps the
+        control law — every probe is a call into the box she was handed. Returns the report as a dict.
+        """
+        if self.open_world is None:
+            return {"error": "open_world generalizer unavailable"}
+        try:
+            from nyxara.growth.open_world import build_alien_machine
+            if system is None:
+                machine, domain, _secret = build_alien_machine(self._turns)
+                report = self.open_world.understand(machine, domain=domain, budget=budget,
+                                                    label="alien-machine")
+            else:
+                report = self.open_world.understand(system, budget=budget, label=label)
+            return report.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
 
     def meta_discover(self, topic: str) -> Dict[str, Any]:
         """Run one meta-research pass on ``topic`` (best-effort).
