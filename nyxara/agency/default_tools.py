@@ -19,6 +19,8 @@ override freely. The registry, not this module, enforces permission/governance.
 from __future__ import annotations
 
 import ast
+import json
+import math
 import operator
 import os
 import re
@@ -28,7 +30,7 @@ from typing import Any, Dict, List, Optional
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
 
-__all__ = ["build_default_tools", "safe_calculate"]
+__all__ = ["build_default_tools", "safe_calculate", "cad_model"]
 
 # --------------------------------------------------------------------------- #
 # A safe arithmetic evaluator (no builtins, no names, no attribute access)
@@ -56,6 +58,86 @@ def safe_calculate(expression: str) -> float:
 
     tree = ast.parse(expression, mode="eval")
     return _eval(tree)
+
+
+# --------------------------------------------------------------------------- #
+# CAD — a real parametric solid-geometry generator (pure math, deterministic)
+# --------------------------------------------------------------------------- #
+# Given a parametric spec (a primitive, optionally with a subtracted feature), this computes the
+# *actual* geometry — volume, surface area, bounding box, centroid, mass — and emits portable
+# OpenSCAD source + a JSON spec. No heavy CAD kernel is required, so it genuinely works offline;
+# the same JSON spec can later drive a real kernel (OpenSCAD/FreeCAD/CadQuery) unchanged.
+def _primitive_geometry(p: Dict[str, Any]) -> Dict[str, Any]:
+    shape = str(p.get("shape", "box")).lower()
+    if shape in ("box", "cube"):
+        size = p.get("size") or [p.get("x", 1.0), p.get("y", 1.0), p.get("z", 1.0)]
+        x, y, z = (float(size[0]), float(size[1]), float(size[2]))
+        return {"shape": "box", "volume": x * y * z,
+                "surface_area": 2.0 * (x * y + y * z + z * x),
+                "bbox": [x, y, z], "centroid": [x / 2, y / 2, z / 2]}
+    if shape in ("cylinder", "cyl"):
+        r, h = float(p.get("radius", 1.0)), float(p.get("height", 1.0))
+        return {"shape": "cylinder", "volume": math.pi * r * r * h,
+                "surface_area": 2.0 * math.pi * r * r + 2.0 * math.pi * r * h,
+                "bbox": [2 * r, 2 * r, h], "centroid": [0.0, 0.0, h / 2]}
+    if shape in ("sphere", "ball"):
+        r = float(p.get("radius", 1.0))
+        return {"shape": "sphere", "volume": 4.0 / 3.0 * math.pi * r ** 3,
+                "surface_area": 4.0 * math.pi * r * r,
+                "bbox": [2 * r, 2 * r, 2 * r], "centroid": [0.0, 0.0, 0.0]}
+    raise ValueError(f"unsupported CAD shape: {shape!r} (box|cylinder|sphere)")
+
+
+def _scad_for(p: Dict[str, Any]) -> str:
+    shape = str(p.get("shape", "box")).lower()
+    if shape in ("box", "cube"):
+        size = p.get("size") or [p.get("x", 1.0), p.get("y", 1.0), p.get("z", 1.0)]
+        return f"cube([{float(size[0])}, {float(size[1])}, {float(size[2])}], center=false);"
+    if shape in ("cylinder", "cyl"):
+        return f"cylinder(h={float(p.get('height', 1.0))}, r={float(p.get('radius', 1.0))});"
+    if shape in ("sphere", "ball"):
+        return f"sphere(r={float(p.get('radius', 1.0))});"
+    raise ValueError(f"unsupported CAD shape: {shape!r}")
+
+
+def cad_model(spec: str) -> Dict[str, Any]:
+    """Build a parametric solid from a JSON ``spec`` and compute its real geometry.
+
+    ``spec`` example::
+
+        {"shape": "box", "size": [50, 50, 50],
+         "hole": {"shape": "cylinder", "radius": 10, "height": 50},
+         "density": 0.00785, "name": "bracket"}
+
+    Returns volume, surface_area, bounding_box, centroid, mass (when ``density`` is given) and
+    OpenSCAD source. Subtracting a ``hole`` removes its volume (clamped at 0).
+    """
+    data = json.loads(spec) if isinstance(spec, str) else dict(spec)
+    base = _primitive_geometry(data)
+    volume = base["volume"]
+    scad_body = _scad_for(data)
+    hole = data.get("hole")
+    if hole:
+        hg = _primitive_geometry(hole)
+        volume = max(0.0, volume - hg["volume"])
+        # centre the hole on the base by default (a through-feature); honour an explicit "at"
+        at = hole.get("at", [base["centroid"][0], base["centroid"][1], 0.0])
+        scad_body = ("difference() {\n  " + scad_body + "\n  translate(["
+                     f"{float(at[0])}, {float(at[1])}, {float(at[2])}]) "
+                     + _scad_for(hole) + "\n}")
+    out: Dict[str, Any] = {
+        "name": data.get("name", "part"),
+        "shape": base["shape"],
+        "volume": round(volume, 6),
+        "surface_area": round(base["surface_area"], 6),
+        "bounding_box": [round(v, 6) for v in base["bbox"]],
+        "centroid": [round(v, 6) for v in base["centroid"]],
+        "scad": f"// NYXARA cad_model — {data.get('name', 'part')}\n{scad_body}\n",
+        "spec": data,
+    }
+    if "density" in data:
+        out["mass"] = round(volume * float(data["density"]), 6)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -115,6 +197,15 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
     _add(ToolSpec("calculate", handler=safe_calculate,
                   description="evaluate a pure-arithmetic expression, e.g. '2*(3+4)'",
                   params=[ToolParam("expression", "str", description="arithmetic only")],
+                  capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+    # ---- CAD: real parametric geometry from a JSON spec (volume/area/mass + OpenSCAD) ---- #
+    _add(ToolSpec("cad_model", handler=cad_model,
+                  description="build a parametric solid (box/cylinder/sphere, optional hole) and "
+                              "compute its real volume, surface area, bounding box, centroid and "
+                              "mass, returning OpenSCAD source; spec is JSON, e.g. "
+                              "{\"shape\":\"box\",\"size\":[50,50,50]}",
+                  params=[ToolParam("spec", "str", description="JSON parametric model spec")],
                   capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
 
     # ---- filesystem reads: low risk, scoped by target ---- #

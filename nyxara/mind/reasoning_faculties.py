@@ -1005,6 +1005,8 @@ def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, Facult
     reg.register(LogicFaculty())
     reg.register(SyllogismFaculty())
     reg.register(ComparativeFaculty())
+    from nyxara.mind.first_principles import FirstPrinciplesFaculty
+    reg.register(FirstPrinciplesFaculty())
     if llm is not None:
         from nyxara.mind.faculties import LLMFaculty
         reg.register(LLMFaculty(llm))
@@ -1023,8 +1025,11 @@ def solve_with_faculties(text: str) -> Optional[Tuple[str, float]]:
     if _DEFAULT is None:
         _DEFAULT = build_default_faculties()[1]
     # specific structured types first, generic arithmetic last, so a date / equation / sequence
-    # is never mis-grabbed by the bare-expression engine.
-    for ttype in (TaskType.DATE, TaskType.CALCULUS, TaskType.ALGEBRA, TaskType.SEQUENCE,
+    # is never mis-grabbed by the bare-expression engine. First-principles derivation
+    # (physics/chemistry/maths-proof) is tried before the bare engines so "balance …" or
+    # "derive …" reaches the derivation faculty rather than being mis-parsed as arithmetic.
+    for ttype in (TaskType.DATE, TaskType.CHEMISTRY, TaskType.PHYSICS, TaskType.DERIVATION,
+                  TaskType.CALCULUS, TaskType.ALGEBRA, TaskType.SEQUENCE,
                   TaskType.ARITHMETIC, TaskType.LOGIC):
         task = Task(ttype, description=text, payload=text)
         fac = _DEFAULT.select(task)

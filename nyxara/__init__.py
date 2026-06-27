@@ -74,6 +74,14 @@ from nyxara.kernel.orchestrator import (
 from nyxara.knowledge import KnowledgeBase
 from nyxara.mind.cost import UsageLedger
 from nyxara.mind.strategic import StrategicAnalysis, StrategicIntelligence
+from nyxara.mind.first_principles import (
+    Derivation,
+    DerivationStep,
+    FirstPrinciplesEngine,
+    FirstPrinciplesFaculty,
+)
+from nyxara.planning.grand_plan import GrandPlan, GrandPlanner, PlanNode
+from nyxara.agency.tool_router import ToolChoice, ToolRouter
 from nyxara.mind.general_intelligence import (
     Domain,
     DomainFrame,
@@ -142,6 +150,16 @@ __all__ = [
     "Mission",
     "MissionExecutive",
     "MissionStatus",
+    # first-principles derivation · deep planning · tool selection
+    "Derivation",
+    "DerivationStep",
+    "FirstPrinciplesEngine",
+    "FirstPrinciplesFaculty",
+    "GrandPlan",
+    "GrandPlanner",
+    "PlanNode",
+    "ToolChoice",
+    "ToolRouter",
     "SkillMemory",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",

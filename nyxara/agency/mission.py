@@ -367,6 +367,63 @@ class MissionExecutive:
         self.save(mission)
         return mission
 
+    def plan_milestones(self, goal: str, milestones: List[Milestone], *,
+                        deadline: Optional[float] = None,
+                        budgets: Optional[MissionBudgets] = None,
+                        vector: Optional[Dict[str, float]] = None) -> Mission:
+        """Create a mission from a *prebuilt* milestone list (e.g. a deep ``GrandPlan``).
+
+        Same owner-alignment (Rule 1), journalling and persistence as :meth:`plan`, but the
+        decomposition is supplied by the caller instead of the shallow internal split — this is
+        how a connected ~1000-step plan reaches the executor without being truncated. The budget
+        defaults to one large enough to hold the whole plan.
+        """
+        goal = (goal or "").strip()
+        milestones = list(milestones or [])
+        budgets = budgets or MissionBudgets(
+            max_milestones=max(64, len(milestones)),
+            max_steps_per_cycle=self.default_max_steps,
+            max_attempts_per_milestone=self.default_max_attempts)
+        # never let the cap silently truncate a supplied plan
+        if budgets.max_milestones < len(milestones):
+            budgets.max_milestones = len(milestones)
+        mission = Mission(mission_id=uuid.uuid4().hex, goal=goal, deadline=deadline,
+                          budgets=budgets)
+        if not goal or not milestones:
+            mission.status = MissionStatus.ABANDONED
+            return mission
+
+        align = self._owner_alignment(goal, vector)
+        mission.owner_alignment = align
+        if align is not None and vector is not None and not self._owner_aligned(goal, vector):
+            mission.status = MissionStatus.ABANDONED
+            mission.observations.append("refused: mission points against the Master (Rule 1)")
+            self.save(mission)
+            return mission
+
+        mission.milestones = milestones
+        journal = self._journal_for(mission)
+        try:
+            journal.note(f"planned grand mission {mission.mission_id[:8]} "
+                         f"({len(milestones)} milestones): {goal[:120]}")
+            self._journal_save(mission, journal)
+        except Exception:  # noqa: BLE001
+            pass
+        self.save(mission)
+        return mission
+
+    def run_milestones(self, goal: str, milestones: List[Milestone], *,
+                       deadline: Optional[float] = None,
+                       budgets: Optional[MissionBudgets] = None,
+                       vector: Optional[Dict[str, float]] = None,
+                       max_milestones: Optional[int] = None) -> Mission:
+        """Plan a mission from a prebuilt milestone list and advance it (bounded per run)."""
+        mission = self.plan_milestones(goal, milestones, deadline=deadline,
+                                       budgets=budgets, vector=vector)
+        if mission.status is MissionStatus.ABANDONED:
+            return mission
+        return self.advance(mission, max_milestones=max_milestones)
+
     def _owner_alignment(self, goal: str, vector: Optional[Dict[str, float]]) -> Optional[float]:
         goals = getattr(self.core, "goals", None)
         if goals is None or vector is None:
