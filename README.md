@@ -416,6 +416,52 @@ around the control law.
   isolated-subprocess sandbox, no network, wall-clock timeout), `run_shell`, and an
   SSRF-guarded `http_request` — all capability-gated, so they escalate to the Master rather
   than auto-run under mere autonomy.
+* **First-principles reasoning** — `mind/first_principles.py`. NYXARA does not just *recall*
+  answers, she **derives** them from the rules of a domain. The `FirstPrinciplesFaculty` is a
+  verifiable engine (it wins over any neural guess) spanning four domains: **physics**
+  (dimensional analysis over the seven SI base dimensions — recovering the *form* of a quantity
+  it was never taught, e.g. a pendulum's period as √(L/g) — plus exact symbolic derivations from
+  stated law, energy-conservation → escape velocity `√(2GM/r)`, `a = dv/dt` → kinematics);
+  **chemistry** (`balance_reaction` solves the element-count matrix's null space for the smallest
+  integer stoichiometric coefficients — `C₃H₈ + 5O₂ → 3CO₂ + 4H₂O`, computed, not looked up);
+  **maths** (certifies an algebraic identity by `simplify(lhs − rhs) == 0` — a checked proof,
+  never a bluff); and **logic** (forward-chaining deductive closure). Each call returns a
+  step-by-step `Derivation` and it short-circuits the whole mind via `solve_with_faculties`, so
+  every reasoner reaches it for free.
+
+  ```python
+  core.process("balance C3H8 + O2 -> CO2 + H2O")          # → C3H8 + 5 O2 -> 3 CO2 + 4 H2O
+  core.process("derive the escape velocity from energy conservation")   # → v = √(2·G·M/r)
+  ```
+* **Deep long-horizon planning** — `planning/grand_plan.py`. `core.mission(goal)` decomposes a
+  goal into a shallow milestone list; `GrandPlanner` builds a **connected ~1000-step plan tree**
+  — phases (research → design → materials → manufacturing → testing → redesign → optimization →
+  deployment) fanned out into stages, tasks and concrete steps — with a **cross-phase dependency
+  DAG** so the plan is one connected thing (manufacturing waits on materials + design, testing on
+  manufacturing, redesign on testing, …), acyclic by construction with parallelizable `layers()`.
+  `core.grand_mission(goal, target_steps=1000)` feeds that plan straight into the existing
+  `MissionExecutive` as a prebuilt, dependency-wired milestone list — so a thousand-step
+  undertaking executes without the 64-milestone cap truncating it, every step still clearing
+  corrigibility → honesty → permission → guardian → oversight, checkpointed and resumable.
+
+  ```python
+  plan = core.grand_plan("design and deploy a powered exosuit", target_steps=1000)
+  print(plan.leaf_count(), plan.is_acyclic(), len(plan.layers()))   # 1000 True 200
+  mission = core.grand_mission("design and deploy a powered exosuit", target_steps=1000)
+  ```
+* **Tool-use decision** — `agency/tool_router.py`. The registry decides whether a chosen tool
+  *may* run; the `ToolRouter` decides *which* tool fits — the action-side mirror of faculty
+  selection. It scores the **live** tool catalog (built automatically from whatever is
+  registered) by intent, capability, cost and risk and returns a ranked, *explained* choice:
+  numeric/algorithmic work → `run_python`, geometry/parts → the real **`cad_model`** tool
+  (`design a 5cm cube bracket with a 1cm hole` → exact volume, surface area, mass and OpenSCAD
+  source — real parametric geometry, no heavy CAD kernel), live facts → `web_search`, recall →
+  `recall_memory`. It only ranks; the gate pipeline still disposes.
+
+  ```python
+  core.choose_tool("model a 5cm cube bracket with a 1cm hole")   # → cad_model (top-ranked)
+  core.choose_tool("compute the stress on a 2cm steel beam")     # → run_python
+  ```
 * **Ephemeral tool synthesis (zero-shot programming)** — `agency/dynamic_tool_creator.py`.
   When no tool fits, NYXARA writes a brand-new throwaway Python/C/C++ program, compiles it
   (real `g++`/`clang++`), runs it under a wall-clock deadline, returns the output, and then

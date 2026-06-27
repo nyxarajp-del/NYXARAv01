@@ -2293,6 +2293,59 @@ class NyxaraCore:
         """Every persisted mission still ACTIVE or BLOCKED (awaiting the Master)."""
         return self._mission_exec(authority=authority).active_missions()
 
+    def grand_plan(self, goal: str, *, target_steps: int = 1000, max_depth: int = 4) -> Any:
+        """Decompose ``goal`` into a deep, connected ~``target_steps``-step plan (no execution).
+
+        Returns a :class:`~nyxara.planning.grand_plan.GrandPlan`: a tree of phases → stages →
+        tasks → steps with a cross-phase dependency DAG (manufacturing waits on materials+design,
+        testing on manufacturing, …). When a reasoner is wired it refines the generic phase
+        labels into goal-specific ones; offline it falls back to the deterministic template.
+        """
+        from nyxara.planning.grand_plan import GrandPlanner
+        return GrandPlanner(core=self).decompose(goal, target_steps=target_steps,
+                                                  max_depth=max_depth)
+
+    def grand_mission(self, goal: str, *, target_steps: int = 1000, max_depth: int = 4,
+                      authority: Authority = Authority.OWNER, deadline: Optional[float] = None,
+                      max_milestones: Optional[int] = None,
+                      vector: Optional[Dict[str, float]] = None) -> Any:
+        """Build a deep ~``target_steps``-step plan and **execute** it via the mission executive.
+
+        Unlike :meth:`mission` (shallow single-list decomposition), this feeds a connected
+        :class:`GrandPlan` straight into the executor as a prebuilt, dependency-wired milestone
+        list — so a thousand-step undertaking runs without the 64-milestone cap truncating it.
+        Every milestone still clears corrigibility → honesty → permission → guardian → oversight;
+        the plan is checkpointed to disk and resumable. Returns the
+        :class:`~nyxara.agency.mission.Mission`.
+        """
+        plan = self.grand_plan(goal, target_steps=target_steps, max_depth=max_depth)
+        milestones = plan.to_milestones()
+        return self._mission_exec(authority=authority).run_milestones(
+            goal, milestones, deadline=deadline, vector=vector,
+            max_milestones=max_milestones)
+
+    def _tool_router(self) -> Any:
+        """Lazily build (and cache) a tool-selection reasoner bound to the live registry."""
+        router = getattr(self, "_tool_router_cache", None)
+        if router is None and self.tools is not None:
+            from nyxara.agency.tool_router import ToolRouter
+            router = ToolRouter(self.tools)
+            self._tool_router_cache = router
+        return router
+
+    def choose_tool(self, subtask: str, *, top_k: int = 3) -> Any:
+        """Decide which tool best fits ``subtask`` — a ranked, explained list of candidates.
+
+        The action-side mirror of faculty selection: it scores the *live* tool catalog (Python,
+        CAD, web, memory, …) by intent, capability, cost and risk and returns the best matches.
+        It only ranks; the gate pipeline still decides whether the chosen tool may run. Returns
+        an empty list when tools are disabled or nothing clears the bar.
+        """
+        router = self._tool_router()
+        if router is None:
+            return []
+        return router.select(subtask, top_k=top_k)
+
     # ---- the control-law gate pipeline ---- #
     def _gate(self, c: Candidate, authority: Authority, gates: Dict[str, str]):
         # corrigibility — never act in a way that resists correction

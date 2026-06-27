@@ -27,6 +27,7 @@ from nyxara.agency.mission import (
     MissionExecutive,
     MissionStatus,
 )
+from nyxara.agency.tool_router import ToolChoice, ToolProfile, ToolRouter
 from nyxara.agency.proactive import (
     Initiative,
     ProactiveEngine,
@@ -53,4 +54,7 @@ __all__ = [
     "ProposalDecision",
     "TriggerKind",
     "Verdict",
+    "ToolRouter",
+    "ToolProfile",
+    "ToolChoice",
 ]

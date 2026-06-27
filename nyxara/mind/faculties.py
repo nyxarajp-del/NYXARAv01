@@ -67,6 +67,9 @@ class TaskType(str, Enum):
     GENERATION = "generation"        # open-ended text/creative
     REASONING = "reasoning"          # general multi-step reasoning
     OPTIMIZATION = "optimization"
+    DERIVATION = "derivation"        # derive a result from first-principles axioms
+    PHYSICS = "physics"              # symbolic physics / dimensional analysis
+    CHEMISTRY = "chemistry"          # balance reactions / stoichiometry
 
 
 @dataclass
