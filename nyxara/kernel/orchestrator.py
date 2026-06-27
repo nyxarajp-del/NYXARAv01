@@ -3768,24 +3768,68 @@ class NyxaraCore:
             self._lang_grounder = LanguageGrounder(llm=self._grounding_llm())
         return self._lang_grounder
 
+    def _symbol_grounder(self) -> Any:
+        """NYXARA's grounded semantic memory — built once and kept so meanings she reads or
+        perceives accumulate across calls. Maps a word to its multimodal perceptual meaning
+        (apple → taste/colour/texture/weight/affordance all at once), the symbol-grounding
+        counterpart to the language→dynamics :meth:`_grounder`."""
+        if getattr(self, "_sym_grounder", None) is None:
+            from nyxara.cognition.grounded_understanding import GroundedLexicon
+            self._sym_grounder = GroundedLexicon(llm=self._grounding_llm())
+        return self._sym_grounder
+
+    def understand(self, word: str) -> Dict[str, Any]:
+        """*Imagine* ``word`` — return the multimodal perceptual activation it evokes.
+
+        Unlike a token predictor, NYXARA grounds a word in the senses: "apple" fires taste
+        (sweet), vision (red, round), touch (smooth), physics (≈150 g, falls) and affordance
+        (edible) **simultaneously**. Unknown words are grounded on the fly when a real LLM is
+        configured, else reported as ``grounded: false`` (honest, not hallucinated). Returns
+        the activation as a dict; includes a one-line ``meaning`` gloss.
+        """
+        if not word or not word.strip():
+            return {"error": "empty word", "grounded": False}
+        try:
+            lex = self._symbol_grounder()
+            act = lex.activate(word).to_dict()
+            act["meaning"] = lex.explain(word)
+        except Exception as exc:  # noqa: BLE001 — grounding is a capability, never required
+            return {"error": str(exc), "grounded": False}
+        try:
+            if act.get("grounded"):
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"grounded '{word}' across {act.get('modalities', [])}",
+                                 salience=0.4)
+        except Exception:  # noqa: BLE001
+            pass
+        return act
+
+    # backwards-friendly alias
+    def ground_word(self, word: str) -> Dict[str, Any]:
+        return self.understand(word)
+
     def learn_from_text(self, text: str) -> Dict[str, Any]:
-        """Learn world dynamics from a natural-language passage — read a "textbook".
+        """Learn world dynamics *and* grounded meaning from a natural-language passage.
 
         Turns prose describing how a world behaves ("heating raises the temperature from 20
         to 80") into ``(state, action, next_state, reward)`` transitions and feeds them to the
         world model, which forms concepts and learns dynamics exactly as it does from real
-        sensorimotor experience — no hand-fed numeric tuples required. Best-effort; the
-        deterministic extractor is always available, the LLM ceiling is used only when a real
-        provider is configured. Returns the learning report as a dict.
+        sensorimotor experience — no hand-fed numeric tuples required. The same read also
+        **grounds the nouns** ("apples are sweet and red") into NYXARA's perceptual semantic
+        memory, so verbs gain dynamics and nouns gain meaning from one passage. Best-effort;
+        the deterministic extractors are always available, LLM ceilings only when a real
+        provider is configured. Returns the combined learning report as a dict.
         """
         if not text or not text.strip():
             return {"error": "empty text"}
+        report: Dict[str, Any]
         if self.world_model is None:
-            return {"error": "world model unavailable", "transitions": 0}
-        try:
-            report = self._grounder().learn(text, self.world_model)
-        except Exception as exc:  # noqa: BLE001 — reading is a capability, never required
-            return {"error": str(exc), "transitions": 0}
+            report = {"error": "world model unavailable", "transitions": 0}
+        else:
+            try:
+                report = self._grounder().learn(text, self.world_model)
+            except Exception as exc:  # noqa: BLE001 — reading is a capability, never required
+                report = {"error": str(exc), "transitions": 0}
         try:
             if report.get("transitions"):
                 self.mind.record(ThoughtKind.INFERENCE,
@@ -3793,6 +3837,16 @@ class NyxaraCore:
                                  f"over {report.get('actions', [])} via {report.get('via')}",
                                  salience=0.5)
         except Exception:  # noqa: BLE001
+            pass
+        # also ground the nouns in the same passage (perceptual meaning, best-effort)
+        try:
+            grounding = self._symbol_grounder().learn_from_text(text)
+            report["grounding"] = grounding
+            if grounding.get("grounded"):
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"read & grounded meaning of {grounding['grounded']}",
+                                 salience=0.4)
+        except Exception:  # noqa: BLE001 — grounding is a capability, never required
             pass
         return report
 
