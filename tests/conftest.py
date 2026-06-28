@@ -19,6 +19,7 @@ import os
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_TUNING", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_LLM_EDITS", "false")
+os.environ.setdefault("NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # The Genesis Protocol's boot kickoff (run_on_boot, ON for live DEV/PROD) designs and micro-trains
 # a real neural architecture on the first idle tick — minutes of compute that every core-booting

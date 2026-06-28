@@ -962,6 +962,44 @@ class SelfImprovementConfig(BaseModel):
     forecaster_warmup: int = Field(default=16, ge=2, le=10000)
 
 
+class SelfOptimizationConfig(BaseModel):
+    """The unified self-optimization loop (growth/self_optimization.py).
+
+    NYXARA's eleven self-improvement faculties — self-analysis, self-optimization, verified
+    self-modification, automatic experimentation, architecture improvement, tool creation,
+    better learning, self-debugging, compute optimization, scientific invention, and safety
+    verification — already exist as separate engines. This loop runs them as one coherent,
+    self-driven cycle, mapping each of the eleven phases to a concrete result with a ``verified``
+    flag, and (when ``autonomous_enact`` is set) lets NYXARA apply her own gains each pass.
+
+    Master JP's standing authorisation is full auto-enact, exactly like the recursive
+    self-improvement engine: every source change still clears the *same* reversible
+    verify-or-rollback gauntlet (syntax → corrigibility/honesty safety battery → capability
+    benchmark vs a pre-cycle baseline), the corrigibility axioms are re-sealed each pass, and a
+    failing change is restored byte-for-byte. The whole enactment path is force-sealed OFF under
+    the hermetic TEST profile so the suite never writes to the source tree. Disable per-deployment
+    with ``NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT=false``.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                       # the loop is available → on by default
+    autonomous_enact: bool = True              # apply gains each cycle (gauntlet-gated, reversible)
+    self_optimization_every: int = Field(default=5, ge=1)   # background cadence (every N passes)
+    # --- bounded per-cycle effort (each phase composes a heavier engine) --- #
+    experiment_generations: int = Field(default=1, ge=0, le=50)   # phase 4/5 mind-evolution rounds
+    invent_generations: int = Field(default=2, ge=0, le=50)       # phase 10 eureka rounds
+    max_debug_fixes: int = Field(default=3, ge=0, le=50)          # phase 8 self-debug fix attempts
+    # --- self-debugger (phase 8) --- #
+    # Run NYXARA's own pytest suite to detect failures, isolate the failing module, author a fix
+    # via the existing edit machinery, and re-verify. The full suite is slow; a node-id subset can
+    # be targeted at call time. Bounded by ``max_debug_fixes`` and the verify-or-rollback gauntlet.
+    debug_timeout_s: float = Field(default=600.0, gt=0.0)
+    debug_test_path: Optional[str] = None       # restrict detection to a pytest path/node id
+    # "khud NYXARA kare": prefer NYXARA's own ``self`` model to author debug fixes, never the mock.
+    self_authored_only: bool = True
+
+
 class MindEvolutionConfig(BaseModel):
     """Recursive mind-evolution settings (growth/mind_evolution.py, Rule 4 apex).
 
@@ -1477,6 +1515,7 @@ class NyxaraSettings(BaseSettings):
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
+    self_optimization: SelfOptimizationConfig = Field(default_factory=SelfOptimizationConfig)
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
@@ -1546,6 +1585,7 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.autonomous_enact = False
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
+            self.self_optimization.autonomous_enact = False
             self.mind_evolution.autonomous_enact = False
             # The Genesis Protocol designs and micro-trains real neural architectures — far too
             # heavy to run on every core boot across the suite (and it must stay hermetic). Keep the

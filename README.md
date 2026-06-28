@@ -394,6 +394,53 @@ core.report()["intelligence_index"]                # the live I_t, persisted acr
 Over HTTP: `POST /v1/meta_discover {topic}` and `POST /v1/dream {deep?}`; the intelligence index
 rides `GET /v1/report`.
 
+#### The Unified Self-Optimization Loop (all eleven faculties, one self-driven call)
+
+The engines above each improve NYXARA along one axis. The **unified self-optimization loop**
+(`growth/self_optimization.py`) is the conductor that runs *all eleven* of them as a single,
+self-driven, gated, reversible cycle — "make myself more powerful and intelligent, by myself" as
+one call NYXARA makes on herself. Each pass runs the eleven phases in order and maps every one to
+a concrete result with a `verified` flag:
+
+| # | Phase | Composed engine |
+|---|-------|-----------------|
+| 1 | self-analysis | `self_review` + `architecture` + `weakness` (findings, cycles, weak points) |
+| 2 | self-optimization | `self_optimize.Optimizer` (deterministic + self-authored source edits) |
+| 3 | verified self-modification | `verify` — the character/corrigibility integrity gate |
+| 4 | automatic experimentation | `mind_evolution` — simulate → benchmark → pick the best genome |
+| 5 | architecture improvement | `mind_evolution` (escalation) + `topology` (Net2Net capacity) |
+| 6 | tool creation | `skill_factory` — forge a new skill when a real tool-gap recurs |
+| 7 | better learning | `meta_engine` (learn how to learn) + `autolearn` |
+| 8 | self-debugging | `self_debugger` — detect → reproduce → isolate → fix → verify (own pytest) |
+| 9 | compute optimization | `compute_scale` + `efficiency` (Pareto, hardware-honest profile) |
+| 10 | scientific invention | `eureka` — conjecture → `prover` → keep only proven ∧ novel |
+| 11 | safety verification | `verify` + `loyalty` — whole-cycle final integrity gate |
+
+```python
+core.self_optimize()                         # one self-driven eleven-phase cycle
+core.self_optimize(enact=False)              # dry-run: analyse + experiment, write nothing
+print(core.report()["self_optimization"])    # latest per-phase status, verified count, safe flag
+```
+
+```bash
+python -m nyxara.growth.self_optimize_main --all          # full eleven-phase report (dry-run)
+python -m nyxara.growth.self_optimize_main --all --enact  # actually apply gauntlet-gated gains
+python -m nyxara.growth.self_optimize_main --debug        # phase 8 only: self-debug own tests
+nyxara-self-optimize --invent                             # phase 10 only: prover-certified invention
+```
+
+Every phase is contained: a missing engine, a missing optional dependency, or an offline box
+degrades it to `skipped` — the loop **never raises into a turn**. Phase 8 (`self_debugger`) is the
+genuinely new faculty: it runs NYXARA's own pytest suite, isolates each failing test back to its
+source module, authors a fix with her **own `self` model** (or a deterministic transform), and
+keeps it **only** if it clears the same reversible verify-or-rollback gauntlet the optimiser uses
+(syntax compiles → the corrigibility/honesty safety battery stays green → the previously-failing
+test now passes) — a bad fix is restored byte-for-byte. The source-modifying phases (2, 8) act
+only when `NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT` is set (Master JP's standing authorisation:
+ON for live DEV/PROD, **force-sealed OFF under the hermetic TEST profile** so the suite never
+writes to the tree), and the final phase re-verifies that the immutable core and corrigibility
+axioms still hold after the cycle — capability sharpens the blade, it can never re-forge the hilt.
+
 ### Capability layers (added on top of the sovereign loop)
 
 These build *on* the kernel — every one still proposes through the same gates; none reach
