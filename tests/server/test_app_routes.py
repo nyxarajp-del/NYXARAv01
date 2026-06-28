@@ -60,6 +60,29 @@ def test_solve_rejects_empty_problem():
 
 
 # --------------------------------------------------------------------------- #
+# Delegation route (gated distributed intelligence over the wire)
+# --------------------------------------------------------------------------- #
+def test_delegate_spawns_a_gated_subagent():
+    r = _client().post("/v1/delegate",
+                       json={"name": "scout", "subgoal": "summarize the goal", "max_steps": 1},
+                       headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "scout"
+    assert "status" in body and "model" in body
+
+
+def test_delegate_requires_token():
+    r = _client().post("/v1/delegate", json={"name": "x", "subgoal": "y"})
+    assert r.status_code == 401
+
+
+def test_delegate_rejects_empty_subgoal():
+    r = _client().post("/v1/delegate", json={"name": "x", "subgoal": ""}, headers=_auth())
+    assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
 # Fractal temporal endpoints
 # --------------------------------------------------------------------------- #
 def test_temporal_report_is_serializable():
