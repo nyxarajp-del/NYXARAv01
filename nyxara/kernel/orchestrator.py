@@ -122,6 +122,8 @@ class CycleResult:
     # when a tool actually ran, its name and raw return value (for agentic observation)
     tool: Optional[str] = None
     tool_value: Any = None
+    # the turn's social read (empathy/trust/style/repair); empty when social cognition is off
+    social: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def acted(self) -> bool:
@@ -130,7 +132,7 @@ class CycleResult:
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "disposition": self.disposition.value, "response": self.response,
                 "reason": self.reason, "gates": self.gates, "action_id": self.action_id,
-                "tool": self.tool, "thoughts": self.thoughts}
+                "tool": self.tool, "thoughts": self.thoughts, "social": self.social}
 
 
 # a reasoner turns a (stimulus, focus) into a candidate
@@ -301,6 +303,17 @@ class NyxaraCore:
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
         self.tom = tom if tom is not None else (self._build_tom() if enable_social else None)
+        # social cognition — empathy, a persons roster (trust/style), shared common ground,
+        # culture/register adaptation, and conversational repair. They colour perception and
+        # the reply's style; they never govern (Rule 4). One shared Roster keeps trust coherent.
+        _social = self._build_social() if enable_social else {}
+        self.persons = _social.get("roster")
+        self.empathy = _social.get("empathy")
+        self.common_ground = _social.get("common_ground")
+        self.culture = _social.get("culture")
+        self.repair = _social.get("repair")
+        self._last_social: Dict[str, Any] = {}
+        self._last_style_fragment: str = ""
         # growth — online learning + metacognitive reflection from lived outcomes (Rule 4)
         self.learner = learner if learner is not None else (
             self._build_learner() if enable_growth else None)
@@ -608,6 +621,15 @@ class NyxaraCore:
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
             tools = build_default_tools(registry, memory=self.memory,
                                         web=web_cfg, governor=self.governor)
+            # Domain tool packs (researcher/coder/maker): register their pure-stdlib,
+            # read-only tools (extractive summariser, Python syntax checker) onto the SAME
+            # gated registry. Idempotent and non-executing — they widen reach without a
+            # back door (every call still clears capability/risk/authority/sandbox gates).
+            try:
+                from nyxara.agency.toolpacks import register_packs
+                register_packs(registry)
+            except Exception:  # noqa: BLE001 — packs are a convenience, never a hard dep
+                pass
             self._connect_mcp(registry)
             return tools
         except Exception:  # noqa: BLE001
@@ -786,6 +808,27 @@ class NyxaraCore:
             return tom
         except Exception:  # noqa: BLE001
             return None
+
+    def _build_social(self) -> Dict[str, Any]:
+        """Build the social-cognition faculties over one shared Roster (Master pre-registered).
+
+        Empathy, persons, common ground, culture and repair all read the *same* trust model, so
+        a single relationship drives affect, register and threat-assessment consistently. Pure
+        Python; never fatal — a missing faculty just leaves that channel ``None``."""
+        try:
+            from nyxara.social import (CommonGround, CultureSystem, EmpathySystem,
+                                       RepairManager, Roster)
+            roster = Roster()
+            owner = roster.owner.name
+            return {
+                "roster": roster,
+                "empathy": EmpathySystem(roster=roster),
+                "common_ground": CommonGround(participants=[owner, "NYXARA"]),
+                "culture": CultureSystem(roster=roster),
+                "repair": RepairManager(addressee=owner),
+            }
+        except Exception:  # noqa: BLE001 — social cognition is a capability, never a hard dep
+            return {}
 
     def _build_learner(self) -> Any:
         try:
@@ -2183,6 +2226,7 @@ class NyxaraCore:
         self._turn_start = time.time()
         self._turn_stimulus = stimulus
         self._turn_authority = authority
+        self._last_social = {}   # fresh social read per turn (no stale carry-over on early exits)
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
         if not self.oversight.gate():
@@ -3299,6 +3343,88 @@ class NyxaraCore:
                                            tags=[authority.value])
             except Exception:  # noqa: BLE001
                 pass
+        self._note_social(stimulus, authority)
+
+    def _note_social(self, stimulus: str, authority: Authority) -> None:
+        """Run the social faculties over the turn — colour only, never governing (Rule 4).
+
+        Records the interaction in the roster (trust/style accrual), infers the Master's affect
+        and lets it warm the mood through empathy, folds asserted content into common ground,
+        derives culture/register guidance for the reply, and flags any conversational trouble for
+        repair. Everything is best-effort and stored in ``self._last_social`` for the per-turn
+        report; a fault in any channel is swallowed so the cognitive loop never breaks."""
+        if not (self.persons or self.empathy or self.common_ground
+                or self.culture or self.repair):
+            return
+        owner_name = self.persons.owner.name if self.persons is not None else "Master"
+        is_owner = authority is Authority.OWNER
+        person = owner_name if is_owner else "interlocutor"
+        snap: Dict[str, Any] = {}
+
+        # sentiment of the stimulus (pure-Python NLP), shared by several channels
+        polarity = 0.0
+        try:
+            from nyxara.senses import nlp
+            polarity = float(nlp.sentiment(stimulus).polarity)
+        except Exception:  # noqa: BLE001 — sentiment is best-effort
+            polarity = 0.0
+
+        # 1) roster — accrue trust/style/rapport from this interaction
+        if self.persons is not None:
+            try:
+                from nyxara.social.persons import InteractionKind
+                kind = (InteractionKind.HOSTILE if (not is_owner and polarity <= -0.5)
+                        else InteractionKind.MESSAGE)
+                self.persons.record(person, kind, sentiment=polarity, summary=stimulus[:80])
+                snap["trust"] = self.persons.assess(person).value
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 2) empathy — infer the Master's feeling and let it (gently) warm the mood
+        if self.empathy is not None:
+            try:
+                arousal = min(1.0, abs(polarity) + 0.2)
+                resp = self.empathy.empathize(person, valence=polarity, arousal=arousal,
+                                              cause="what they said", affect=self.affect)
+                snap["empathy"] = {"reads": resp.inferred.label,
+                                   "concern": round(resp.concern, 3),
+                                   "guarded": resp.guarded}
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 3) common ground — the Master asserting something makes it shared knowledge
+        if self.common_ground is not None and is_owner and stimulus.strip():
+            try:
+                self.common_ground.propose(owner_name, stimulus[:160])
+                snap["common_ground"] = self.common_ground.status().get("grounded")
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 4) culture — how to mirror the Master's language/register in the reply
+        if self.culture is not None:
+            try:
+                guidance = self.culture.adapt(person=person, text=stimulus)
+                self._last_style_fragment = guidance.fragment
+                snap["style"] = {"register": guidance.register.value,
+                                 "language": guidance.language}
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 5) repair — flag misunderstanding/non-understanding for graceful recovery
+        if self.repair is not None:
+            try:
+                action = self.repair.handle(stimulus, from_other=True)
+                if action.type.value != "none":
+                    snap["repair"] = {"type": action.type.value,
+                                      "utterance": action.utterance[:120]}
+            except Exception:  # noqa: BLE001
+                pass
+
+        self._last_social = snap
+
+    def social_snapshot(self) -> Dict[str, Any]:
+        """The most recent social read (empathy, trust, style, repair) — for introspection."""
+        return dict(self._last_social)
 
     def _spawn_emergent_goals(self, *, max_new: int = 2) -> List[str]:
         """Turn genuine curiosity into self-set goals — owner-aligned, deduped, bounded.
@@ -4599,7 +4725,8 @@ class NyxaraCore:
         self._apply_affect(disp)
         result = CycleResult(id=cid, disposition=disp, response=response, reason=reason,
                              candidate=candidate, gates=gates, thoughts=thoughts,
-                             action_id=action_id, tool=tool, tool_value=tool_value)
+                             action_id=action_id, tool=tool, tool_value=tool_value,
+                             social=dict(self._last_social))
         # Fractal Layer 2: record this turn (prompt read, code written) on the seconds-scale
         # observer. Best-effort — the multi-dimensional mind never delays or breaks a turn.
         ft = getattr(self, "fractal_temporal", None)

@@ -42,11 +42,12 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from nyxara.senses.binding import Binder, Percept
 from nyxara.senses.predictive import PerceptualPredictor, SensoryPredictor
 from nyxara.identity.motivation import MotivationSystem, Option
+from nyxara.sim.envmodel import EnvironmentModel
 from nyxara.sim.real_environment import RealEnvironment
 
 __all__ = ["Perception", "EmbodiedTransition", "EmbodiedAgent", "embodied_stream"]
@@ -135,7 +136,7 @@ class EmbodiedAgent:
                  web_enabled: bool = False, web_urls: Sequence[str] = (),
                  web: Any = None, gate: Optional[Callable[[], bool]] = None,
                  explore_weight: float = 0.6, reward_weight: float = 1.0,
-                 epsilon: float = 0.1) -> None:
+                 epsilon: float = 0.1, env_model: Optional[EnvironmentModel] = None) -> None:
         self.env = env if env is not None else RealEnvironment(seed=seed)
         if world_model is None:                       # the engine — built here if not supplied
             from nyxara.mind.world_model import build_world_model
@@ -166,6 +167,17 @@ class EmbodiedAgent:
         self._note_seq = 0
         self._img_seq = 0
         self.steps_taken = 0
+
+        # structured environment model: a *learned* template per action over the workspace,
+        # fuelled by the SAME real before→after transitions the numeric world model sees. The
+        # numeric model captures dynamics for control; this captures the symbolic effect of each
+        # action (what attributes change, reversibility, confidence) for planning + dry-runs
+        # (#25 World Model, #53 Simulation). Pure-stdlib; never fatal.
+        self.env_model = env_model if env_model is not None else EnvironmentModel(
+            "embodied workspace", "workspace")
+        if self.env_model.get_entity("workspace") is None:
+            self.env_model.add_entity("workspace", "filesystem",
+                                      file_count=0.0, total_kb=0.0, subdir_count=0.0)
 
     # ------------------------------------------------------------------ #
     # Perception — build the rich numeric state
@@ -439,6 +451,36 @@ class EmbodiedAgent:
     # ------------------------------------------------------------------ #
     # The loop: perceive → decide → act → perceive → reward → learn
     # ------------------------------------------------------------------ #
+    # actions whose effect on the filesystem cannot be undone by the agent itself
+    _IRREVERSIBLE_ACTIONS: FrozenSet[str] = frozenset({"delete_file"})
+
+    def _observe_environment(self, action: str, before: "Perception",
+                             after: "Perception") -> None:
+        """Refine the structured workspace model from one real before→after transition.
+
+        The first three state dims are the physical filesystem facts (file_count, total_kb,
+        subdir_count); we present them as workspace attributes so the model learns each action's
+        symbolic effect (the attribute diff, reversibility, and a confidence that grows with
+        observations). Best-effort — a modelling slip never disturbs the lived loop."""
+        try:
+            b = {"file_count": round(before.state[0], 3),
+                 "total_kb": round(before.state[1], 3),
+                 "subdir_count": round(before.state[2], 3)}
+            a = {"file_count": round(after.state[0], 3),
+                 "total_kb": round(after.state[1], 3),
+                 "subdir_count": round(after.state[2], 3)}
+            self.env_model.observe(action, "workspace", b, a,
+                                   reversible=action not in self._IRREVERSIBLE_ACTIONS)
+        except Exception:  # noqa: BLE001 — structured modelling is a bonus, never load-bearing
+            pass
+
+    def env_coverage(self) -> float:
+        """How well-modelled the workspace is now (mean learned-template confidence)."""
+        try:
+            return self.env_model.coverage()
+        except Exception:  # noqa: BLE001
+            return 0.0
+
     def step(self, action: Optional[str] = None) -> EmbodiedTransition:
         """Live one full sensorimotor cycle and learn from the genuine transition. Never raises."""
         before = self.perceive()
@@ -470,6 +512,9 @@ class EmbodiedAgent:
             Option(name=chosen, signature=self._signature(chosen)),
             competence_gain=competence_gain, skill=chosen)
 
+        # learn the structured (symbolic) effect of this action on the workspace, too
+        self._observe_environment(chosen, before, after)
+
         self.steps_taken += 1
         return EmbodiedTransition(state=before.state, action=chosen, next_state=after.state,
                                   reward=reward, surprise=surprise or sr.surprise,
@@ -495,6 +540,8 @@ class EmbodiedAgent:
                 "perceived_artifacts": len(self._perceived),
                 "novelty_rate": round(self._novelty_ewma, 3),
                 "world_transitions": len(self.world_model),
+                "env_model_coverage": round(self.env_coverage(), 3),
+                "env_actions_learned": len(self.env_model.templates),
                 "web_enabled": self.web_enabled}
 
     def cleanup(self) -> None:
