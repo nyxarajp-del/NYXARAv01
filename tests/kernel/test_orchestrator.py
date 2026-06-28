@@ -92,9 +92,11 @@ def test_recall_floor_scaled_for_lexical_embedder():
 def test_recall_surfaces_owner_fact_with_default_embedder():
     # Regression: "what do you know about me?" must recall "my name is JP, I love astronomy"
     # even on the default (lexical) embedder, where the un-scaled floor used to drop it.
-    from nyxara.memory.store import MemoryType
+    from nyxara.memory.store import LearnedEmbedder, MemoryStore, MemoryType
 
-    nyx = _core()
+    # Pin the dependency-free embedder so this exercises the lexical recall floor
+    # regardless of whether sentence-transformers is installed in the environment.
+    nyx = _core(memory=MemoryStore(embedder=LearnedEmbedder()))
     assert nyx._embedder_is_lexical() is True   # the dependency-free default
     nyx.memory.remember("Master said: My name is JP. Remember that I love astronomy.",
                         mem_type=MemoryType.EPISODIC, tags=["conversation", "stimulus"])

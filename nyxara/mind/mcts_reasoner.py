@@ -30,7 +30,6 @@ in-repo imports otherwise. Stateless per call, like the faculties it composes.
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from dataclasses import dataclass, field

@@ -34,7 +34,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from fractions import Fraction
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
 __all__ = ["ProofVerdict", "ProofClaim", "ProofResult", "Prover"]
 

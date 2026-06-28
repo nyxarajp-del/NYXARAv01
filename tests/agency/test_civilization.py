@@ -7,8 +7,7 @@ on the shared blackboard, once-only message consumption, and the gated action fr
 
 from __future__ import annotations
 
-from nyxara.agency.civilization import (AgentMessage, AgentReport, MicroAgent,
-                                        MicroAgentCivilization)
+from nyxara.agency.civilization import (AgentMessage, AgentReport, MicroAgentCivilization)
 
 
 def _force_due(civ: MicroAgentCivilization) -> None:

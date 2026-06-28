@@ -566,7 +566,7 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"personas used       : {result.personas_used}")
     print(f"final agreement     : {result.rounds[-1].agreement:.3f}")
     print(f"confidence / quality: {result.confidence:.3f} / {result.quality:.3f}")
-    print(f"top contributions   : "
+    print("top contributions   : "
           + ", ".join(f"{n}={c:.2f}" for n, c in sorted(
               result.contributions.items(), key=lambda kv: -kv[1])[:3]))
     assert len(result.rounds) == 3

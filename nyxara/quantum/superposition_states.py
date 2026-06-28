@@ -31,7 +31,7 @@ Pure standard library.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 __all__ = ["Hypothesis", "CollapseResult", "Superposition"]

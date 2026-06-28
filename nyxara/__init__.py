@@ -114,7 +114,7 @@ from nyxara.void.dark_data_mining import (
 )
 from nyxara.quantum.superposition_states import (
     CollapseResult,
-    Hypothesis,
+    Hypothesis as SuperpositionHypothesis,
     Superposition,
 )
 from nyxara.cognition.hyper_dimensional_vectors import (
@@ -229,7 +229,7 @@ __all__ = [
     "PeriodicityReport",
     # Quantum · 1 — Superposition (hold contradictory truths; collapse to the best)
     "Superposition",
-    "Hypothesis",
+    "SuperpositionHypothesis",
     "CollapseResult",
     # Cognition · 1 — Hyperdimensional Latent Space Mapping (10,000-D; patterns invisible in 3-D)
     "LatentSpaceMap",

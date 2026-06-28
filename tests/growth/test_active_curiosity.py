@@ -14,7 +14,6 @@ import random
 
 from nyxara.growth.active_curiosity import (
     ActiveCuriosity,
-    CuriosityFinding,
     CuriosityPass,
     Question,
 )

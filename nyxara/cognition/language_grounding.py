@@ -39,7 +39,7 @@ Pairs with :mod:`mind.world_model`, :mod:`mind.concept_hierarchy`, :mod:`senses.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.mind.world_model import Transition

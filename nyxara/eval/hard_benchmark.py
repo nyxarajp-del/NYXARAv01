@@ -30,7 +30,6 @@ Run it::
 
 from __future__ import annotations
 
-import re
 from typing import List, Tuple
 
 from nyxara.eval.benchmark import Benchmark, BenchmarkTask, Grader

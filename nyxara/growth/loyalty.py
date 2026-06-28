@@ -289,7 +289,10 @@ class LoyaltyObjective:
                 continue
             x = torch.tensor(ids[:-1], dtype=torch.long, device=device).unsqueeze(0)
             y = torch.tensor(ids[1:], dtype=torch.long, device=device).unsqueeze(0)
-            logits = net(x)
+            out = net(x)
+            # genesis nets return ``(logits, aux)`` (the MoE load-balance term); plain
+            # nanogpt-style nets return the logits tensor directly. Accept both.
+            logits = out[0] if isinstance(out, tuple) else out
             ce = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.view(-1))
             total = ce if total is None else total + ce
             count += 1
