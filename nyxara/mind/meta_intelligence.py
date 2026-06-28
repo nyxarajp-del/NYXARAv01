@@ -86,7 +86,7 @@ class MetaIntelligence:
 
     # ---------------------------------------------------------------------- #
     def evaluate_turn(self, stimulus: str, candidate: Any, result: Any,
-                      arbitration: Any) -> MetaEval:
+                      arbitration: Any, *, outcome_correct: Optional[bool] = None) -> MetaEval:
         """Run post-turn meta-evaluation. Always returns a MetaEval.
 
         Parameters
@@ -95,10 +95,17 @@ class MetaIntelligence:
         candidate:    the Candidate that was acted upon
         result:       the ProcessResult returned by process()
         arbitration:  the ArbitratationDecision from dual-process
+        outcome_correct:
+            The *measured* ground truth for this turn when one exists (e.g. a tool ran and either
+            succeeded or failed). When provided it anchors the quality score to reality instead of
+            a self-asserted heuristic — so self-evaluation tracks measured correctness, not the
+            mere fact that a turn acted. ``None`` when the turn carries no verifiable outcome (a
+            conversational reply), in which case the heuristic estimate stands honestly.
         """
         eval_ = MetaEval(stimulus=stimulus)
         try:
-            self._run_evaluation(eval_, stimulus, candidate, result, arbitration)
+            self._run_evaluation(eval_, stimulus, candidate, result, arbitration,
+                                 outcome_correct=outcome_correct)
         except Exception:  # noqa: BLE001 — meta-intelligence is advisory, never fatal
             eval_.reasoning_chain.append("evaluation error — partial result")
 
@@ -122,7 +129,8 @@ class MetaIntelligence:
 
     # ---------------------------------------------------------------------- #
     def _run_evaluation(self, eval_: MetaEval, stimulus: str, candidate: Any,
-                        result: Any, arbitration: Any) -> None:
+                        result: Any, arbitration: Any, *,
+                        outcome_correct: Optional[bool] = None) -> None:
         """Fill eval_ with quality signals from all available sources."""
         quality_signals: List[float] = []
 
@@ -188,8 +196,19 @@ class MetaIntelligence:
             except Exception:  # noqa: BLE001
                 pass
 
-        # 4. Synthesize quality score
-        if quality_signals:
+        # 4. Synthesize quality score — anchored to MEASURED correctness when it exists, so the
+        #    score reflects what actually happened rather than the bare fact that the turn acted.
+        if outcome_correct is not None:
+            measured = 1.0 if outcome_correct else 0.0
+            if quality_signals:
+                heuristic = sum(quality_signals) / len(quality_signals)
+                eval_.quality_score = round(0.7 * measured + 0.3 * heuristic, 3)
+            else:
+                eval_.quality_score = measured
+            if not outcome_correct:
+                eval_.process_was_optimal = False
+                eval_.reasoning_chain.append("measured outcome: the action did not succeed")
+        elif quality_signals:
             eval_.quality_score = round(sum(quality_signals) / len(quality_signals), 3)
         else:
             eval_.quality_score = float(

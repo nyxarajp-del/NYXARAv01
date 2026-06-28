@@ -53,6 +53,14 @@ class AgentRequest(BaseModel):
     authority: str = "owner"
 
 
+class DelegateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    subgoal: str = Field(..., min_length=1)
+    max_steps: Optional[int] = Field(default=None, ge=1)
+    # delegates run AUTONOMOUS by default so their risky moves escalate, never auto-act
+    authority: str = "autonomous"
+
+
 class ResearchRequest(BaseModel):
     topic: str = Field(..., min_length=1)
 
@@ -195,6 +203,13 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
         run = core.agent(req.goal, authority=_authority(req.authority), max_steps=steps)
         return run.to_dict()
+
+    @app.post("/v1/delegate", dependencies=auth)
+    def delegate(req: DelegateRequest) -> dict:
+        steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
+        result = core.delegate(req.name, req.subgoal, max_steps=steps,
+                               authority=_authority(req.authority))
+        return result.to_dict()
 
     @app.post("/v1/research", dependencies=auth)
     def research(req: ResearchRequest) -> dict:

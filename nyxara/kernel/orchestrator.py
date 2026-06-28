@@ -2036,6 +2036,61 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — topology growth is a capability, never required
             return None
 
+    # ---- dynamic topology: real capacity pressure (so growth can actually fire) ---- #
+    def _growth_source(self) -> Any:
+        """The brain to grow from — the live Genesis champion's genome, or ``None``."""
+        if getattr(self, "genesis", None) is None:
+            return None
+        try:
+            champ = self.genesis.champion()
+            return getattr(champ, "genome", None)
+        except Exception:  # noqa: BLE001 — no champion yet → nothing to grow
+            return None
+
+    def _capacity_signal(self, *, min_actions: int = 8) -> Any:
+        """Build a :class:`CapacitySignal` from *lived* telemetry, or ``None`` when there isn't
+        enough evidence yet (so an idle tick stays a cheap no-op and never grows on noise).
+
+        The pressure is real, not fabricated: ``problem_difficulty`` is how often her own gated
+        actions have actually been *failing* (the journal's hard ground truth), and ``saturation``
+        is how *miscalibrated* she is — a high expected-calibration-error with low accuracy means
+        she is operating at the edge of her current capacity. Growth only fires when both clear the
+        monitor's thresholds (difficulty ≥ 0.7, saturation ≥ 0.8), i.e. under sustained, measured
+        pressure — and any grown brain still ships only through the Foundry gauntlet.
+        """
+        try:
+            from nyxara.growth.topology import CapacitySignal
+            from nyxara.planning.journal import ActionStatus
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            succeeded = len(self.journal.by_status(ActionStatus.SUCCEEDED))
+            failed = len(self.journal.failures())
+        except Exception:  # noqa: BLE001
+            return None
+        total = succeeded + failed
+        if total < min_actions:
+            return None                       # too little lived evidence to justify growth
+        failure_rate = failed / total
+        calib = {}
+        try:
+            calib = self.honesty.calibration_report()
+        except Exception:  # noqa: BLE001
+            calib = {}
+        samples = float(calib.get("samples", 0) or 0)
+        ece = float(calib.get("ece", 0.0) or 0.0)
+        accuracy = float(calib.get("accuracy", 1.0) or 1.0)
+        # saturation: miscalibrated *and* inaccurate → at the edge of capacity. Until enough
+        # calibration samples exist, fall back to the action failure rate as the honest proxy.
+        if samples >= min_actions:
+            saturation = max(0.0, min(1.0, ece + (1.0 - accuracy) * 0.5))
+        else:
+            saturation = failure_rate
+        difficulty = max(0.0, min(1.0, failure_rate))
+        loss_plateau = 0.0                    # learner-plateau signal folded in by the monitor
+        return CapacitySignal(problem_difficulty=difficulty, saturation=saturation,
+                              loss_plateau=loss_plateau)
+
     def _build_knowledge(self) -> Any:
         """Seed a foundational knowledge base so the mind has ground truth from turn one."""
         try:
@@ -2203,6 +2258,11 @@ class NyxaraCore:
         if disp is not Disposition.ACT:
             self.reporter.log_decision(candidate.text, candidate.rationale,
                                        outcome=disp.value, autonomous=authority is not Authority.OWNER)
+            # escalation/conflict path: an escalated action becomes a *structured*, ledgered
+            # consent request the Master can answer (Rule 6 transparency), instead of vanishing
+            # into a one-line message. Fail-closed default is "cancel" — silence never acts.
+            if disp is Disposition.ESCALATE:
+                self._open_escalation_consent(candidate, reason)
             self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
@@ -2229,6 +2289,7 @@ class NyxaraCore:
             if tool_result is not None and not tool_result.ok:
                 self.journal.record_outcome(aid, status=ActionStatus.FAILED,
                                             note=tool_result.error)
+                self._record_calibration(candidate, correct=False)
                 self.reporter.log_failure(candidate.text, tool_result.error or "tool failed")
                 return self._finish(cid, Disposition.REFUSE, candidate, gates, thoughts,
                                     f"tool failed: {tool_result.error}",
@@ -2238,9 +2299,11 @@ class NyxaraCore:
                 aid, status=ActionStatus.SUCCEEDED,
                 outcome={"timed_out": deadline.expired, "tool": candidate.tool or None,
                          "result": (tool_result.value if tool_result is not None else None)})
+            self._record_calibration(candidate, correct=True)
             self.oversight_record(candidate)
         except Exception as exc:  # noqa: BLE001
             self.journal.record_outcome(aid, status=ActionStatus.FAILED, note=str(exc))
+            self._record_calibration(candidate, correct=False)
             self.reporter.log_failure(candidate.text, str(exc))
             return self._finish(cid, Disposition.REFUSE, candidate, gates, thoughts,
                                 f"action failed: {exc}", "I tried, but it failed — I've logged it.")
@@ -2279,6 +2342,81 @@ class NyxaraCore:
         loop = AgentLoop(self, max_steps=max_steps, authority=authority,
                          skill_memory=self.skills)
         return loop.run(goal)
+
+    def delegate(self, name: str, subgoal: str, *, max_steps: int = 6,
+                 authority: Authority = Authority.AUTONOMOUS) -> Any:
+        """Spawn a gated, Theory-of-Mind-modelled sub-agent to pursue ``subgoal`` (Distributed
+        Intelligence, capability #49; Subgoals, #7).
+
+        The delegate runs on its own :class:`~nyxara.agency.agent_loop.AgentLoop`, so **every one
+        of its steps still clears the full kernel gate pipeline** (corrigibility → honesty →
+        permission → guardian → oversight) and runs under AUTONOMOUS authority by default —
+        anything risky escalates to the Master rather than auto-acting. NYXARA also *models* the
+        delegate as a mind (its desire is the sub-goal, its intention the action it takes, its
+        beliefs the observations it gathered). A sub-agent buys parallel reach and persistence,
+        never extra power. Returns a :class:`~nyxara.agency.multiagent.DelegationResult`.
+        """
+        from nyxara.agency.multiagent import Delegator
+        return Delegator(core=self, max_steps=max_steps,
+                         authority=authority).delegate(name, subgoal)
+
+    def delegate_all(self, tasks: Dict[str, str], *, max_steps: int = 6,
+                     authority: Authority = Authority.AUTONOMOUS) -> Any:
+        """Delegate several named sub-goals to gated sub-agents; each is modelled as its own
+        mind. The action-side of decomposition: split a goal and pursue the parts in parallel,
+        with every sub-agent step still clearing the sovereign gates."""
+        from nyxara.agency.multiagent import Delegator
+        return Delegator(core=self, max_steps=max_steps,
+                         authority=authority).delegate_all(tasks)
+
+    # ---- structured consent & clarification with the Master (negotiate) ---- #
+    def _negotiator(self) -> Any:
+        """Lazily build (and cache) the session's :class:`~nyxara.agency.negotiate.Negotiator`,
+        which holds the tamper-evident, hash-chained consent ledger across the session."""
+        neg = getattr(self, "_negotiator_cache", None)
+        if neg is None:
+            from nyxara.agency.negotiate import Negotiator
+            neg = Negotiator()
+            self._negotiator_cache = neg
+        return neg
+
+    def _open_escalation_consent(self, candidate: Candidate, reason: str) -> None:
+        """Turn an escalated action into a fail-closed CONFIRM the Master can answer. Best-effort —
+        recording an escalation as a structured consent request never alters the disposition and
+        never breaks a turn; the action stays parked until the Master proceeds (Rule 1)."""
+        try:
+            self._negotiator().confirm(
+                f"Proceed with: {candidate.text[:160]}?",
+                context={"reason": reason, "tool": candidate.tool or None,
+                         "risk": candidate.risk.label, "reversible": candidate.reversible})
+        except Exception:  # noqa: BLE001 — negotiation bookkeeping is never allowed to break a turn
+            pass
+
+    def request_consent(self, question: str, *, risk: RiskTier = RiskTier.HIGH,
+                        reversibility: float = 1.0, ttl: Optional[float] = None) -> Any:
+        """Ask the Master for explicit consent to a risky/irreversible act (Economic/Social
+        reasoning, capabilities #59/#38). Fail-closed: if it is never answered, consent is denied
+        and nothing dangerous is taken on silence. Returns the open NegotiationRequest."""
+        return self._negotiator().request_consent(question, risk=risk,
+                                                  reversibility=reversibility, ttl=ttl)
+
+    def resolve_conflict(self, question: str, options: Sequence[Any], *,
+                         ttl: Optional[float] = None) -> Any:
+        """Surface a goal conflict to the Master as a structured CHOOSE with trade-offs shown.
+        ``options`` are :class:`~nyxara.agency.negotiate.Option` s. Returns the open request."""
+        return self._negotiator().resolve_conflict(question, list(options), ttl=ttl)
+
+    def answer_negotiation(self, request_id: str, *, option_id: Optional[str] = None,
+                           consent: Optional[bool] = None, text: str = "",
+                           authority: Authority = Authority.OWNER) -> Any:
+        """Record the Master's decision on an open negotiation (only the Master may answer);
+        the resolution is appended to the hash-chained consent ledger. Returns the Outcome."""
+        return self._negotiator().respond(request_id, option_id=option_id, consent=consent,
+                                          text=text, authority=authority)
+
+    def pending_negotiations(self) -> List[Dict[str, Any]]:
+        """Every negotiation still awaiting the Master's answer (serialisable)."""
+        return [r.to_dict() for r in self._negotiator().pending()]
 
     def _mission_exec(self, *, authority: Authority = Authority.OWNER) -> Any:
         """Lazily build (and cache) the long-horizon executive bound to this kernel."""
@@ -3353,11 +3491,16 @@ class NyxaraCore:
                 # create a minimal result proxy with disposition info
                 class _R:
                     def __init__(self, d): self.disposition = d.value
+                # a turn carries a *measured* outcome only when a tool ran (its success/failure is
+                # ground truth); a conversational reply does not, so self-evaluation stays honest.
+                measured = ((disp is Disposition.ACT and success)
+                            if getattr(candidate, "tool", None) else None)
                 meta_eval = self.meta_intelligence.evaluate_turn(
                     stimulus=getattr(candidate, "text", ""),
                     candidate=candidate,
                     result=_R(disp),
                     arbitration=self._last_arbitration,
+                    outcome_correct=measured,
                 )
                 reasoning_quality = meta_eval.quality_score
                 if meta_eval.improvement_suggestion:
@@ -3710,7 +3853,13 @@ class NyxaraCore:
         #        pressure (a cheap no-op otherwise). A grown brain ships only through the gauntlet.
         if self.topology is not None and self.oversight.gate():
             try:
-                grow_result = self.topology.maybe_grow()
+                # feed a *real* capacity signal + a brain to grow from, else maybe_grow is a
+                # no-op (its prior no-arg call could never fire). Growth still needs the signal
+                # to clear the monitor's thresholds and the grown brain to clear the gauntlet.
+                signal = self._capacity_signal()
+                source = self._growth_source()
+                grow_result = (self.topology.maybe_grow(signal, source=source)
+                               if (signal is not None and source is not None) else None)
                 if grow_result is not None and grow_result.get("grew"):
                     report["topology_growths"] = len(self.topology.all_reports())
                     report["topology"] = grow_result.get("reason", "")
@@ -4423,6 +4572,25 @@ class NyxaraCore:
         if disp is Disposition.ESCALATE:
             return f"This needs your go-ahead before I act: {c.text}"
         return f"I won't do that: {c.text}"
+
+    def _record_calibration(self, candidate: Optional[Candidate], correct: bool) -> None:
+        """Feed a *ground-truthed* action outcome to the HonestyGuard's calibrator (Rule 6).
+
+        Only actions with a verifiable result are scored: she expressed
+        ``candidate.confidence`` in the move, and the tool's real success/failure says whether
+        that confidence was warranted. Conversational replies carry no ground truth, so they are
+        never recorded as "correct" — doing so would teach false confidence (inflate the very
+        over-confidence calibration is meant to cure). Over many lived turns the calibrator
+        (ECE / Brier → recalibrate) pulls her stated confidence toward her real accuracy, so
+        what she tells the Master is truthfully weighted (capabilities #23, #46, #70).
+        Best-effort — calibration learning never delays or breaks a turn.
+        """
+        if candidate is None or not getattr(candidate, "tool", None):
+            return
+        try:
+            self.honesty.record_outcome(float(candidate.confidence), bool(correct))
+        except Exception:  # noqa: BLE001 — calibration learning is best-effort, never fatal
+            pass
 
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:

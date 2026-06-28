@@ -74,6 +74,18 @@ def _jaccard(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    """Cosine similarity of two embedding vectors, clamped to [0, 1]."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return max(0.0, min(1.0, dot / (na * nb)))
+
+
 # --------------------------------------------------------------------------- #
 # Deliberation mode
 # --------------------------------------------------------------------------- #
@@ -143,10 +155,23 @@ class CouncilResult:
 class LLMCouncil:
     """Convene many LLMs as a panel of tools; NYXARA judges. Stateless."""
 
-    def __init__(self, llm: LLM, *, settings: Optional[NyxaraSettings] = None) -> None:
+    def __init__(self, llm: LLM, *, settings: Optional[NyxaraSettings] = None,
+                 embedder: Any = None) -> None:
         self.llm = llm
         self.settings = settings or getattr(llm, "settings", None) or get_settings()
         self.cfg = self.settings.council
+        # agreement is scored *semantically* (embedding cosine) so members who say the same thing
+        # in different words still register as concordant — a lexical token overlap misses that.
+        # Best-effort: a missing embedder cleanly degrades to the lexical Jaccard floor.
+        self._embedder = embedder if embedder is not None else self._default_embedder()
+
+    @staticmethod
+    def _default_embedder() -> Any:
+        try:
+            from nyxara.memory.store import make_embedder
+            return make_embedder()
+        except Exception:  # noqa: BLE001 — no embedder available → lexical agreement floor
+            return None
 
     # ---- membership ---- #
     def _weight(self, provider: str) -> float:
@@ -184,8 +209,25 @@ class LLMCouncil:
         return verdicts
 
     # ---- scoring ---- #
+    def _agreement(self, answered: Sequence[MemberVerdict]) -> float:
+        """Mean pairwise *semantic* agreement of the answering members (embedding cosine),
+        falling back to lexical Jaccard when no embedder is available or embedding fails."""
+        if len(answered) <= 1:
+            return 1.0
+        emb = self._embedder
+        if emb is not None:
+            try:
+                vecs = [emb.embed(v.text) for v in answered]
+                sims = [_cosine(vecs[i], vecs[j])
+                        for i, j in combinations(range(len(vecs)), 2)]
+                if sims:
+                    return sum(sims) / len(sims)
+            except Exception:  # noqa: BLE001 — embedding hiccup → lexical floor below
+                pass
+        return self._jaccard_agreement(answered)
+
     @staticmethod
-    def _agreement(answered: Sequence[MemberVerdict]) -> float:
+    def _jaccard_agreement(answered: Sequence[MemberVerdict]) -> float:
         if len(answered) <= 1:
             return 1.0
         sims = [_jaccard(a.text, b.text) for a, b in combinations(answered, 2)]

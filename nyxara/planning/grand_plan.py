@@ -225,23 +225,31 @@ class GrandPlanner:
         b = max(1, round((target_steps / n_phases) ** (1.0 / max(1, branch_levels))))
 
         root = PlanNode(id="goal", description=goal, level=PlanLevel.GOAL)
+        # Build the phase nodes first, then refine their generic labels into goal-specific ones
+        # *before* fanning out — so the concrete phase name flows into every descendant step,
+        # not just the top row. A leaf then reads "Implement — <goal-specific phase> (step 3)"
+        # rather than the old decorative "Implement materials (step 3) for <goal>".
+        phase_nodes: List[PlanNode] = [
+            PlanNode(id=f"p{pi}", description=f"{label} — {goal}",
+                     level=PlanLevel.PHASE, kind=kind)
+            for pi, (kind, label, _deps) in enumerate(phases)]
+        if self.core is not None:
+            self._refine_phase_labels(phase_nodes, goal)
+
         phase_kind_to_node: Dict[str, PlanNode] = {}
-        for pi, (kind, label, _deps) in enumerate(phases):
-            phase = PlanNode(id=f"p{pi}", description=f"{label} — {goal}",
-                             level=PlanLevel.PHASE, kind=kind)
-            self._expand(phase, level_idx=1, max_depth=max_depth, branch=b, goal=goal, kind=kind)
+        for phase in phase_nodes:
+            self._expand(phase, level_idx=1, max_depth=max_depth, branch=b,
+                         phase_label=phase.description, kind=phase.kind)
             root.children.append(phase)
-            phase_kind_to_node[kind] = phase
+            phase_kind_to_node[phase.kind] = phase
 
         plan = GrandPlan(goal=goal, root=root, steps=root.leaves())
         self._wire_dependencies(plan, phases, phase_kind_to_node)
-        if self.core is not None:
-            self._refine_with_reasoner(plan, goal)
         return plan
 
     # ---- recursive fan-out ---- #
     def _expand(self, node: PlanNode, *, level_idx: int, max_depth: int, branch: int,
-                goal: str, kind: str) -> None:
+                phase_label: str, kind: str) -> None:
         if level_idx >= max_depth:
             return
         level = [PlanLevel.GOAL, PlanLevel.PHASE, PlanLevel.STAGE, PlanLevel.TASK,
@@ -250,13 +258,15 @@ class GrandPlanner:
         verbs = _STAGE_VERBS if level is PlanLevel.STAGE else _TASK_VERBS
         for i in range(branch):
             verb = verbs[i % len(verbs)]
+            # the description references the (possibly reasoner-refined) phase label, which carries
+            # the goal — so every step is goal-specific, while the index keeps leaf ids/text unique.
             child = PlanNode(
                 id=f"{node.id}.{prefix}{i}",
-                description=f"{verb.capitalize()} {kind} ({level.value} {i + 1}) for {goal}"[:200],
+                description=f"{verb.capitalize()} — {phase_label} ({level.value} {i + 1})"[:200],
                 level=level, kind=kind)
             node.children.append(child)
             self._expand(child, level_idx=level_idx + 1, max_depth=max_depth, branch=branch,
-                         goal=goal, kind=kind)
+                         phase_label=phase_label, kind=kind)
 
     # ---- dependency wiring (acyclic by the earlier-emitted invariant) ---- #
     def _wire_dependencies(self, plan: GrandPlan,
@@ -309,10 +319,14 @@ class GrandPlanner:
             phase_exit[kind] = leaves[-1].id
 
     # ---- optional reasoner refinement ---- #
-    def _refine_with_reasoner(self, plan: GrandPlan, goal: str) -> None:
-        """Rewrite the generic phase labels into goal-specific ones when a core is available."""
+    def _refine_phase_labels(self, phase_nodes: List[PlanNode], goal: str) -> None:
+        """Rewrite the generic phase labels into goal-specific ones when a core is available.
+
+        Run *before* fan-out so each refined, goal-specific phase name propagates into every
+        descendant stage/task/step description — making the whole tree concrete, not just its top
+        row. Advisory and best-effort: if the reasoner is unavailable the template labels stand."""
         prompt = (
-            f"For the GOAL: {goal}\nList exactly {len(plan.root.children)} ordered top-level "
+            f"For the GOAL: {goal}\nList exactly {len(phase_nodes)} ordered top-level "
             f"phases (one per line, '1.', '2.', …), each a short concrete phase name. Output only "
             f"the list.")
         try:
@@ -322,7 +336,7 @@ class GrandPlanner:
             return
         names = [m.group(1).strip() for line in text.splitlines()
                  if (m := re.match(r"^(?:\d+[.)]|[-*•])\s+(.*)$", line.strip()))]
-        for phase, name in zip(plan.root.children, names):
+        for phase, name in zip(phase_nodes, names):
             if name:
                 phase.description = f"{name} — {goal}"[:200]
 
