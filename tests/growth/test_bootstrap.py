@@ -29,7 +29,8 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when `self` is the chosen primary provider
-    s = NyxaraSettings.for_profile(Profile.DEV)   # default provider is anthropic, not self
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.llm.provider = LLMProvider.ANTHROPIC   # explicitly NOT self → bootstrap must no-op
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
