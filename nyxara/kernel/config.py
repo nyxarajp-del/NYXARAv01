@@ -180,7 +180,7 @@ class FeatureFlags(BaseModel):
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
-    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
+    multi_llm_council: bool = True      # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
     vision: bool = False                # heavy ML; off by default
@@ -202,7 +202,12 @@ class LLMConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    provider: LLMProvider = LLMProvider.ANTHROPIC
+    # Default to NYXARA's OWN forged brain: on first run the boot bootstrap
+    # (growth/bootstrap.ensure_primary_model) downloads Qwen3-4B and LoRA-tunes her own
+    # adapter, so a bare `python -m nyxara` yields her own model with zero setup. It
+    # degrades honestly to the always-on n-gram brain (and the mock) when the heavy stack
+    # or weights are unavailable, so this is a safe default everywhere.
+    provider: LLMProvider = LLMProvider.SELF
     # Per-provider default models.
     anthropic_model: str = "claude-opus-4-8"
     openai_model: str = "gpt-4o"
@@ -670,9 +675,12 @@ class CouncilConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    enabled: bool = False
-    # Providers seated on the council. Empty -> every currently-available provider.
-    members: List[str] = Field(default_factory=list)
+    enabled: bool = True
+    # Providers seated on the council. The full panel by default — her OWN forged model
+    # (`self`), Groq cloud (`groq`, joins once a key is set), and the local Qwen3 (`qwen`,
+    # joins once the foundry/qwen stack is installed). Unavailable members are simply
+    # skipped; `include_mock_fallback` keeps the council never-silent on a bare machine.
+    members: List[str] = Field(default_factory=lambda: ["self", "groq", "qwen"])
     # Per-provider vote/synthesis weight; unset providers default to 1.0.
     weights: Dict[str, float] = Field(default_factory=dict)
     # NYXARA's own model presides with extra weight as the foundry improves it.

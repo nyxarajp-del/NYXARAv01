@@ -27,6 +27,17 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # the suite. The genesis tests build their own GenesisConfig (and set backend="torch" explicitly).
 os.environ.setdefault("NYXARA_GENESIS__RUN_ON_BOOT", "false")
 
+# The live defaults are NYXARA's full setup: her OWN forged brain (provider=self) presiding
+# over a multi-LLM council (self + groq + qwen). For the *test suite* that would mean every
+# core-booting test convenes a council and waits on the foundry — slow, and a few tests assert
+# the leaner defaults. Same hermetic rationale as the flags above: pin the suite to the
+# deterministic mock provider with the council off, and never auto-install the heavy stack.
+# Tests that exercise the council / self / foundry build their own settings explicitly.
+os.environ.setdefault("NYXARA_LLM__PROVIDER", "mock")
+os.environ.setdefault("NYXARA_FEATURES__MULTI_LLM_COUNCIL", "false")
+os.environ.setdefault("NYXARA_COUNCIL__ENABLED", "false")
+os.environ.setdefault("NYXARA_AUTO_INSTALL", "0")
+
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 
 # Rebuild the cached singleton so the env overrides above take effect for every test that calls

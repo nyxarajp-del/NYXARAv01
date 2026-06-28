@@ -35,9 +35,16 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
-from nyxara.agency.permissions import Authority
-from nyxara.kernel.orchestrator import Disposition, NyxaraCore
+if TYPE_CHECKING:  # type-only: never imported at runtime, so the foundry stays unloaded
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+# NOTE: the heavy core (``nyxara.kernel.orchestrator``, which transitively imports the
+# foundry and probes the LoRA stack at import time) is imported **lazily inside main()**,
+# *after* ``ensure_runtime_deps`` has had a chance to install torch/transformers/peft on the
+# first run. Importing it here would bake ``_HAS_LORA=False`` before the install could happen,
+# forcing the real Qwen3-4B forge to wait for a second boot. Keep top-level imports light.
 
 # the session memory snapshot — identity carried across restarts (Rule 7)
 _SESSION_MEMORY = os.path.expanduser("~/.nyxara/memory.json")
@@ -129,20 +136,20 @@ commands:
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
-# disposition -> short glyph for the status line
-_GLYPH = {
-    Disposition.ACT: "✓ act",
-    Disposition.ESCALATE: "⚠ escalate",
-    Disposition.REFUSE: "✗ refuse",
-    Disposition.HALT: "■ halt",
-}
-
-
 def _print_result(result) -> None:
     """Print NYXARA's reply followed by a compact disposition/gates line."""
+    from nyxara.kernel.orchestrator import Disposition  # lazy: core is imported in main()
+
+    # disposition -> short glyph for the status line
+    glyph = {
+        Disposition.ACT: "✓ act",
+        Disposition.ESCALATE: "⚠ escalate",
+        Disposition.REFUSE: "✗ refuse",
+        Disposition.HALT: "■ halt",
+    }
     reply = result.response or result.reason or "(no response)"
     print(f"\nNYXARA: {reply}")
-    status = _GLYPH.get(result.disposition, result.disposition.value)
+    status = glyph.get(result.disposition, result.disposition.value)
     line = f"        [{status}]"
     if result.reason and result.disposition is not Disposition.ACT:
         line += f" — {result.reason}"
@@ -268,17 +275,34 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     """Boot NYXARA and run the interactive Master console."""
+    print(_BANNER)
+
+    # First run, zero-setup: install the heavy LoRA stack (torch + transformers + peft) if it
+    # is missing, BEFORE the core (and the foundry it imports) is loaded — the foundry probes
+    # the stack at import time, so installing afterwards would defer the real forge to the next
+    # boot. Best-effort; on failure she falls back to the always-on n-gram brain.
+    try:
+        from nyxara.growth.autodeps import ensure_runtime_deps
+        ensure_runtime_deps(log=print)
+    except Exception as exc:  # noqa: BLE001 — a failed auto-install must never block the door
+        print(f"brain stack       : skipped ({exc})")
+
+    # Heavy imports are lazy on purpose (see the module-level note): only now, after the
+    # auto-install, do we pull the core — so the foundry's import-time LoRA probe sees the
+    # freshly-installed stack.
+    from nyxara.agency.permissions import Authority
+    from nyxara.kernel.orchestrator import NyxaraCore
+
     try:
         core = NyxaraCore()
     except Exception as exc:  # noqa: BLE001 - boot integrity failed
         print(f"NYXARA failed to boot: {exc}", file=sys.stderr)
         return 1
 
-    print(_BANNER)
-    # Primary brain — when NYXARA's OWN model is the chosen provider (`self`), forge it on the
-    # very first boot: LoRA-tune Qwen3-4B (auto-downloaded) into her own loyal voice, then serve
-    # it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram brain; any
-    # failure → logged, never fatal (the mock fallback keeps the console usable).
+    # Primary brain — when NYXARA's OWN model is the chosen provider (`self`, the default), forge
+    # it on the very first boot: LoRA-tune Qwen3-4B (auto-downloaded) into her own loyal voice,
+    # then serve it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram
+    # brain; any failure → logged, never fatal (the mock fallback keeps the console usable).
     try:
         from nyxara.growth.bootstrap import ensure_primary_model
         ensure_primary_model(log=print)
