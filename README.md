@@ -46,24 +46,6 @@ python -m nyxara
 nyxara
 ```
 
-**Zero-setup first run.** Out of the box NYXARA's primary brain is her OWN model
-(`provider=self`) presiding over the multi-LLM council (`self` + `groq` + `qwen`). On the
-**first** boot she bootstraps herself automatically:
-
-1. **auto-installs** the heavy LoRA stack (`torch` + `transformers` + `peft` + `accelerate`)
-   if it's missing — a large, one-time download — then restarts to load it;
-2. **downloads Qwen3-4B** and **LoRA-tunes** it into her own adapter (cached afterwards);
-3. serves that as her brain, with the council convening every available member.
-
-It degrades honestly at every step: no network/GPU or a failed install → her always-on,
-dependency-free **n-gram** brain (and the deterministic mock) keep the console fully usable.
-`groq` joins the council automatically once you set `NYXARA_LLM__GROQ_API_KEY` (free key at
-[console.groq.com](https://console.groq.com)). The first forge is slow and multi-GB; a GPU is
-recommended but not required — later boots are instant.
-
-Opt out of the auto-install with `NYXARA_AUTO_INSTALL=0` (she then runs on the n-gram brain),
-or pre-install the stack yourself with `pip install -e ".[foundry,qwen]"`.
-
 You'll get a `Master>` prompt. Type a message to converse, or use meta-commands:
 
 | Command           | Effect                                                |
