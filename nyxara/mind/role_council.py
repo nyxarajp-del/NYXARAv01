@@ -148,6 +148,40 @@ def _question_lens(stimulus: str) -> str:
     return "open"
 
 
+def _agreement_of(text: str, others: List[str]) -> float:
+    """Mean lexical agreement of ``text`` with the other analyses (0..1).
+
+    Uses the council's shared Jaccard similarity (lazy import to avoid any import
+    cycle); falls back to a tiny stdlib token-overlap if that is unavailable."""
+    peers = [o for o in others if o is not text]
+    if not peers:
+        return 1.0
+    try:
+        from nyxara.mind.council import _jaccard as _sim
+    except Exception:  # noqa: BLE001 — degrade to a local token-overlap
+        def _sim(a: str, b: str) -> float:
+            ta = {w for w in a.lower().split() if len(w) > 2}
+            tb = {w for w in b.lower().split() if len(w) > 2}
+            if not ta and not tb:
+                return 1.0
+            if not ta or not tb:
+                return 0.0
+            return len(ta & tb) / len(ta | tb)
+    sims = [_sim(text, o) for o in peers]
+    return sum(sims) / len(sims) if sims else 1.0
+
+
+def _offline_confidence(text: str, others: List[str], weight: float) -> float:
+    """A genuinely-computed offline confidence for one role's analysis.
+
+    Blends the role's standing weight with how much its lens agrees with the rest of the
+    council, then clamps into an honest mid-band (offline reasoning never claims certainty).
+    Convergent, high-weight perspectives earn more; fragmented ones stay low."""
+    agreement = _agreement_of(text, others)
+    raw = 0.5 * float(weight) + 0.5 * agreement
+    return round(max(0.2, min(0.8, raw)), 3)
+
+
 def _offline_role_analyses(stimulus: str) -> List[Tuple[str, str, float, float]]:
     """Six genuine, deterministic role perspectives grounded in the actual question.
 
@@ -177,9 +211,6 @@ def _offline_role_analyses(stimulus: str) -> List[Tuple[str, str, float, float]]
         "open": "frame the question precisely before exploring it",
     }[lens]
 
-    # third value is the role's weight (mirrors _ROLES); offline confidence is a fixed,
-    # honest mid-band value (no LLM behind it).
-    _OFFLINE_CONF = 0.55
     roles: List[Tuple[str, str, float]] = [
         ("Scientist",
          f"Empirically, treat '{topic}' as a hypothesis: {lens_focus}; weigh what the "
@@ -200,7 +231,14 @@ def _offline_role_analyses(stimulus: str) -> List[Tuple[str, str, float, float]]
          f"Philosophically, clarify what '{topic}' truly means; {lens_focus} from first "
          f"principles, consistent with the Master's values.", 0.75),
     ]
-    return [(name, f"[{name}] {text}", _OFFLINE_CONF, weight)
+    # Offline confidence is *computed*, not hardcoded: each role's confidence reflects how
+    # much its lens converges with the others (mean pairwise agreement) scaled by the role's
+    # weight. A coherent, mutually-reinforcing read earns higher confidence; a fragmented one
+    # stays honestly low. This varies with the actual question, so the council is calibrated
+    # even with no LLM behind it (#23 Calibration, #55 Uncertainty Management).
+    texts = [text for _, text, _ in roles]
+    return [(name, f"[{name}] {text}",
+             _offline_confidence(text, texts, weight), weight)
             for name, text, weight in roles]
 
 
@@ -308,8 +346,13 @@ class RoleCouncil:
             lines.extend(f"• {v.answer}" for v in ordered)
             lead = ordered[0]
             lines.append(f"Integrated view: {lead.answer.split(': ', 1)[-1]}")
-            conf = sum(v.weight for v in votes) / (len(votes) * max(1, len(self.members)))
-            return "\n".join(lines), round(min(0.8, 0.4 + conf), 3)
+            # Synthesis confidence = weight-weighted mean of the (computed) per-vote
+            # confidences, tempered by coverage (how many of the six lenses actually voted).
+            wsum = sum(v.weight for v in votes) or 1.0
+            mean_conf = sum(v.confidence * v.weight for v in votes) / wsum
+            coverage = len(votes) / max(1, len(self.members))
+            conf = mean_conf * (0.6 + 0.4 * coverage)
+            return "\n".join(lines), round(max(0.2, min(0.8, conf)), 3)
         try:
             text = self.llm.generate(prompt, system=_SYNTHESIS_SYSTEM,
                                      temperature=0.35, max_tokens=512)
