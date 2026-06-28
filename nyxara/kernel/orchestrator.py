@@ -1176,6 +1176,26 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — evolution is heavy/optional; never fatal
             return None
 
+    def self_optimize(self, *, enact: Optional[bool] = None,
+                      generations: Optional[int] = None,
+                      include_debug: bool = True) -> Optional[Any]:
+        """Run NYXARA's unified eleven-phase self-optimization cycle on herself.
+
+        Composes every self-improvement faculty — self-analysis, self-optimization, verified
+        self-modification, automatic experimentation, architecture improvement, tool creation,
+        better learning, self-debugging, compute optimization, scientific invention, and a final
+        safety verification — into one self-driven, gated, reversible pass, returning a
+        :class:`~nyxara.growth.self_optimization.SelfOptimizationReport`. ``enact`` overrides the
+        ``self_optimization.autonomous_enact`` config (None ⇒ use it); ``include_debug=False``
+        skips the slow pytest-driven self-debug phase. Best-effort — never raises into a turn.
+        """
+        try:
+            from nyxara.growth.self_optimization import SelfOptimizationLoop
+            loop = SelfOptimizationLoop.from_core(self)
+            return loop.run(enact=enact, generations=generations, include_debug=include_debug)
+        except Exception:  # noqa: BLE001 — self-optimization is heavy/optional; never fatal
+            return None
+
     def _build_role_council(self) -> Any:
         """Level 4 — the six-role internal council (Scientist/Engineer/Strategist/
         Critic/Security Officer/Philosopher) that examines significant turns."""
@@ -4661,6 +4681,15 @@ class NyxaraCore:
                 pass
         if self.capability_foundry is not None:
             rep["capabilities_forged"] = len(self.capability_foundry.forged)
+        last_opt = getattr(self, "_last_self_optimization", None)
+        if last_opt is not None:
+            try:
+                rep["self_optimization"] = {
+                    "completed": last_opt.completed, "verified": last_opt.verified_count,
+                    "safe": last_opt.safe, "enacted": last_opt.enacted,
+                    "phases": {p.name: p.status for p in last_opt.phases}}
+            except Exception:  # noqa: BLE001 — self-optimization status is best-effort
+                pass
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
         if self.civilization is not None:

@@ -113,6 +113,17 @@ from nyxara.growth.recursive_improvement import (
     RecursiveSelfImprovement,
     SelfImprovementReport,
 )
+from nyxara.growth.self_optimization import (
+    PhaseResult,
+    SelfOptimizationLoop,
+    SelfOptimizationReport,
+)
+from nyxara.growth.self_debugger import (
+    DebugReport,
+    FixAttempt,
+    SelfDebugger,
+    TestFailure,
+)
 from nyxara.growth.mind_evolution import (
     EvolutionLineageReport,
     Generation,
@@ -273,6 +284,15 @@ __all__ = [
     # continuous evolution
     "RecursiveSelfImprovement",
     "SelfImprovementReport",
+    # unified eleven-phase self-optimization loop (self-driven)
+    "SelfOptimizationLoop",
+    "SelfOptimizationReport",
+    "PhaseResult",
+    # test-failure-driven self-debugging
+    "SelfDebugger",
+    "DebugReport",
+    "FixAttempt",
+    "TestFailure",
     # recursive mind-evolution — evolve the *way of thinking* itself
     "MindEvolutionEngine",
     "ReasoningGenome",

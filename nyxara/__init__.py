@@ -48,6 +48,12 @@ from nyxara.growth.scientist import (
 )
 from nyxara.growth.skill_memory import SkillMemory
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
+from nyxara.growth.self_optimization import (
+    PhaseResult,
+    SelfOptimizationLoop,
+    SelfOptimizationReport,
+)
+from nyxara.growth.self_debugger import DebugReport, SelfDebugger, TestFailure
 from nyxara.memory.elastic_synapses import (
     ConsolidatedTask,
     ElasticSynapses,
@@ -183,6 +189,13 @@ __all__ = [
     # truly novel problem solving (self-generated, prover-certified, novelty-filtered discovery)
     "EurekaEngine",
     "BreakthroughReport",
+    # unified eleven-phase self-optimization loop (self-driven) + self-debugging
+    "SelfOptimizationLoop",
+    "SelfOptimizationReport",
+    "PhaseResult",
+    "SelfDebugger",
+    "DebugReport",
+    "TestFailure",
     # open-world generalization (crack a never-before-seen system from first principles)
     "OpenWorldGeneralizer",
     "UnderstandingReport",
