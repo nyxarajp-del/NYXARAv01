@@ -54,6 +54,10 @@ def test_profile_drives_trained_model_spec(tmp_path):
     # proving a named profile overrides the raw (tiny) dimension fields end-to-end.
     settings.foundry.backend = "ngram"
     settings.foundry.profile = "gpt2"
+    # isolate profile→spec resolution from hardware autoscaling: with the compute
+    # autoscaler on (and torch present to assess the box), a CPU-only host would be
+    # right-sized down to the tiny profile, masking what this test asserts.
+    settings.foundry.autoscale_to_compute = False
     f = Foundry(settings=settings, seed_corpus=["nyxara is loyal to the master"] * 8)
     _model, version = f.train_candidate()
     assert version.spec["n_embd"] == 768

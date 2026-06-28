@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
-from nyxara.planning.grand_plan import DEFAULT_PHASES, GrandPlan, GrandPlanner, PlanLevel
+from nyxara.planning.grand_plan import DEFAULT_PHASES, GrandPlanner, PlanLevel
 
 
 def test_decompose_hits_target_step_budget():

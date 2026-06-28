@@ -215,7 +215,7 @@ def test_rsi_run_populates_intelligence_without_touching_source():
 # --------------------------------------------------------------------------- #
 # growth directive: the index DRIVES the next investment (closed loop)
 # --------------------------------------------------------------------------- #
-from nyxara.growth.intelligence import IntelligenceState, _slope  # noqa: E402
+from nyxara.growth.intelligence import _slope  # noqa: E402
 
 
 def _big_compute():

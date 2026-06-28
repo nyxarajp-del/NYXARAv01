@@ -12,7 +12,6 @@ import os
 from dataclasses import dataclass, field
 from typing import List
 
-import pytest
 
 from nyxara.mind.world_model import WorldModel
 from nyxara.sim.embodied import (

@@ -20,7 +20,7 @@ sovereign loop, it never bypasses it.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["ToolProfile", "ToolChoice", "ToolRouter", "INTENT_CUES"]

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from nyxara.mind.lot import (
-    And, Const, Function, Iff, Implies, Not, Or, Predicate, Term, Var, alpha_equiv, unify,
+    And, Function, Iff, Implies, Not, Or, Predicate, Term, Var, alpha_equiv, unify,
 )
 
 __all__ = [
@@ -189,10 +189,10 @@ if __name__ == "__main__":  # pragma: no cover
     # the schema covers a fresh, never-seen instance (generalization)
     fresh_inst = pred("parent", const("jp"), const("kiddo"))
     assert subsumes(schema, fresh_inst)
-    print(f"subsumes new inst   : parent(jp, kiddo) ✓")
+    print("subsumes new inst   : parent(jp, kiddo) ✓")
     # but not an unrelated relation
     assert not subsumes(schema, pred("sibling", tom, bob))
-    print(f"rejects sibling(..) : ✓")
+    print("rejects sibling(..) : ✓")
 
     # round-trip: re-ground the schema (productivity — abstraction is reversible)
     x, y = schema.variables

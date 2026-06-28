@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.mind.first_principles import (
-    Derivation,
     FirstPrinciplesEngine,
     FirstPrinciplesFaculty,
     balance_reaction,

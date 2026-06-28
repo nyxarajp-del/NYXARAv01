@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.agency.default_tools import build_default_tools
 from nyxara.agency.tool_router import ToolChoice, ToolProfile, ToolRouter

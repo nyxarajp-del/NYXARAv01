@@ -28,7 +28,7 @@ the world-model factory, with a graceful fallback).
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from nyxara.mind.world_model import WorldModel, build_world_model

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from nyxara.eval.benchmark import Benchmark, BenchmarkTask
-from nyxara.growth.rivalry import Arena, HeadToHead, Rival
+from nyxara.growth.rivalry import Arena, Rival
 
 
 def _bench() -> Benchmark:

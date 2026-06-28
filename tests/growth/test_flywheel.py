@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from nyxara.growth.distill import DistillationExample, load_distillation_docs
 from nyxara.growth.flywheel import DataFlywheel
