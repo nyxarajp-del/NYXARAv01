@@ -136,7 +136,9 @@ class EmbodiedAgent:
                  web_enabled: bool = False, web_urls: Sequence[str] = (),
                  web: Any = None, gate: Optional[Callable[[], bool]] = None,
                  explore_weight: float = 0.6, reward_weight: float = 1.0,
-                 epsilon: float = 0.1, env_model: Optional[EnvironmentModel] = None) -> None:
+                 epsilon: float = 0.1, env_model: Optional[EnvironmentModel] = None,
+                 planner: Optional[Callable[[Tuple[float, ...], List[str]],
+                                            Optional[str]]] = None) -> None:
         self.env = env if env is not None else RealEnvironment(seed=seed)
         if world_model is None:                       # the engine — built here if not supplied
             from nyxara.mind.world_model import build_world_model
@@ -152,6 +154,11 @@ class EmbodiedAgent:
         self.explore_weight = explore_weight
         self.reward_weight = reward_weight
         self.epsilon = max(0.0, min(1.0, epsilon))
+        # Long-horizon planner (#6): an optional ``(state, options) -> action`` that looks
+        # *many* steps ahead (e.g. the Abyss timeline simulator) instead of the greedy
+        # one-step world-model lookahead. None keeps the original myopic decide. When set, it
+        # is consulted on exploit steps; ε-exploration and the greedy floor still stand.
+        self.planner = planner
 
         # live-web perception (oversight + flag gated, data-only)
         self.web_enabled = bool(web_enabled)
@@ -242,6 +249,16 @@ class EmbodiedAgent:
         options = self.safe_actions() or ["noop"]
         if self._rng.random() < self.epsilon:        # ε-exploration keeps the world fresh
             return self._rng.choice(options)
+        # long-horizon lookahead first: roll each option many steps through the world model
+        # and pick the one whose *distribution of futures* is best (risk-aware), not the one
+        # that merely looks best for a single step. Falls through to greedy on any miss.
+        if self.planner is not None:
+            try:
+                planned = self.planner(state, list(options))
+                if planned in options:
+                    return planned
+            except Exception:  # noqa: BLE001 — planning is advisory; the greedy floor stands
+                pass
         best, best_score = options[0], float("-inf")
         for a in options:
             pred = self.world_model.predict(state, a)
