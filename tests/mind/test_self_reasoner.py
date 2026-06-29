@@ -99,8 +99,15 @@ _NET_LESSONS = (
 )
 
 
+def _cold_brain():
+    # prefer_promoted=False isolates from any foundry/active pointer a sibling test may have
+    # written to the shared TEST data dir — these tests pin the *learned-from-experience* path.
+    return build_self_brain(settings=NyxaraSettings.for_profile(Profile.TEST),
+                            persist=False, prefer_promoted=False)
+
+
 def test_self_brain_has_learned_is_honest_about_a_cold_brain():
-    brain = _brain()
+    brain = _cold_brain()
     # a cold brain (only the persona seed) has learned nothing — it must defer to the teacher
     assert brain.learned_count == 0
     assert not brain.has_learned(8)
@@ -110,7 +117,7 @@ def test_self_brain_has_learned_is_honest_about_a_cold_brain():
 
 
 def test_self_brain_provider_available_only_after_real_learning():
-    brain = _brain()
+    brain = _cold_brain()
     prov = SelfBrainProvider(brain, min_learned_docs=8)
     assert prov.available() is False          # cold brain -> not available -> teacher answers
     brain.learn(*_NET_LESSONS)
