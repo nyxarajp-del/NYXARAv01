@@ -53,7 +53,13 @@ class SelfImprovementReport:
     # the momentum-free raw capability target for this cycle; the meta tower is scored by its
     # change (Δbase), NOT the smoothed index, so evolving the smoothing can never game the score.
     intelligence_base: Optional[float] = None
+    # open-ended auto-curriculum frontier score (diagnostic; also folded into transfer_score)
+    frontier: Optional[float] = None
+    # world-grounded score: prediction graded by REAL execution (diagnostic; folded into transfer)
+    grounded: Optional[float] = None
     compute: Optional[Dict[str, Any]] = None
+    # substrate self-expansion: the parallelism/cluster NYXARA surveyed this cycle (growth/substrate)
+    substrate: Optional[Dict[str, Any]] = None
     effort_budget: Optional[Dict[str, Any]] = None
     directive: Optional[Dict[str, Any]] = None   # index-driven: which growth action to take next
     # --- full-wire: the directive turned into a real cross-system action, + its outcome --- #
@@ -71,7 +77,9 @@ class SelfImprovementReport:
                 "tuned": self.tuned, "kept": self.kept, "rolled_back": self.rolled_back,
                 "enacted": self.enacted, "intelligence_index": self.intelligence_index,
                 "intelligence_t": self.intelligence_t,
-                "intelligence_base": self.intelligence_base, "compute": self.compute,
+                "intelligence_base": self.intelligence_base, "frontier": self.frontier,
+                "grounded": self.grounded,
+                "compute": self.compute, "substrate": self.substrate,
                 "effort_budget": self.effort_budget, "directive": self.directive,
                 "directive_action": self.directive_action,
                 "directive_results": self.directive_results, "ledger": self.ledger,
@@ -96,6 +104,15 @@ class SelfImprovementReport:
                          f"(held-out {v.get('holdout_mean_score', 0.0):.0%}, "
                          f"adversarial {v.get('adversarial_mean_score', 0.0):.0%}) "
                          f"— external ground truth")
+            fr = v.get("frontier") if isinstance(v, dict) else None
+            if isinstance(fr, dict):
+                lines.append(f"frontier        : {fr.get('frontier_score', 0.0):.0%} "
+                             f"@ tier {fr.get('frontier_tier')} "
+                             f"(open-ended curriculum, prover-certified)")
+            gr = v.get("grounded") if isinstance(v, dict) else None
+            if isinstance(gr, dict):
+                lines.append(f"grounded        : {gr.get('grounded_score', 0.0):.0%} "
+                             f"(real execution, not a stored answer key)")
         if self.intelligence_index is not None:
             lines.append(f"intelligence    : I_{self.intelligence_t} = "
                          f"{self.intelligence_index:.4f}")
@@ -113,6 +130,11 @@ class SelfImprovementReport:
         if self.ledger is not None:
             lines.append(f"ledger          : Δindex={self.ledger.get('delta')}, "
                          f"arms credited={len(self.ledger.get('arms', []))}")
+        if self.substrate is not None:
+            s = self.substrate
+            lines.append(f"substrate       : {s.get('parallel_units')} unit(s)/"
+                         f"{s.get('nodes')} node(s) ×{s.get('expansion_factor')} ceiling "
+                         f"[{', '.join(s.get('providers', []))}]")
         if self.effort_budget is not None:
             lines.append(f"effort budget   : {self.effort_budget}")
         if self.tuned:
@@ -155,6 +177,8 @@ class RecursiveSelfImprovement:
         self._last_signals: Optional[Dict[str, float]] = None
         self._meta: Any = None                 # meta-meta controller (lazy; gated)
         self._meta_built = False
+        self._substrate: Any = None            # substrate manager (lazy; raises the effort ceiling)
+        self._substrate_built = False
 
     # ---- meta-meta: evolve the improvement engine's OWN knobs, scored by realised index gain ---- #
     def _meta_meta(self) -> Any:
@@ -190,11 +214,45 @@ class RecursiveSelfImprovement:
                 path = base / "meta_meta.json"
             except Exception:  # noqa: BLE001
                 path = None
+            # accelerating returns: let the tower grow its height + execution caps under sustained
+            # gains, tied to the substrate it actually holds (more units ⇒ a higher permitted
+            # recursion/edit ceiling), so acceleration is real but bounded by the hard caps.
+            r_ceiling = e_ceiling = None
+            try:
+                mgr = self._substrate_mgr()
+                if mgr is not None:
+                    units = int(mgr.survey().parallel_units)
+                    r_ceiling = max(5, min(16, 4 + units))
+                    e_ceiling = max(6, min(24, 4 + units * 2))
+            except Exception:  # noqa: BLE001
+                r_ceiling = e_ceiling = None
             self._meta = RecursiveMetaController(
-                height=int(getattr(cfg, "meta_levels", 3)), champion=seed, persist_path=path)
+                height=int(getattr(cfg, "meta_levels", 3)), champion=seed, persist_path=path,
+                can_grow=bool(getattr(cfg, "meta_tower_can_grow", True)),
+                hard_max_height=int(getattr(cfg, "meta_levels_hard_max", 6)),
+                recursion_ceiling=r_ceiling, edits_ceiling=e_ceiling)
         except Exception:  # noqa: BLE001 — the meta-meta loop is a capability, never required
             self._meta = None
         return self._meta
+
+    # ---- substrate self-expansion: survey the parallelism/cluster, raise the ceiling ---- #
+    def _substrate_mgr(self) -> Any:
+        """The substrate manager — built once, surveys local cores + any cluster.
+
+        Returns ``None`` when substrate expansion is disabled, so the budget falls back exactly to
+        the prior single-box behaviour. Never raises — a survey failure simply yields no manager."""
+        if self._substrate_built:
+            return self._substrate
+        self._substrate_built = True
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "substrate_expansion", True)):
+            return None
+        try:
+            from nyxara.growth.substrate import SubstrateManager
+            self._substrate = SubstrateManager(settings=self.settings)
+        except Exception:  # noqa: BLE001 — substrate expansion is a capability, never required
+            self._substrate = None
+        return self._substrate
 
     # ---- intelligence index: I_(t+1) = f(I_t, C_available) ---- #
     def _intel(self) -> Any:
@@ -399,6 +457,20 @@ class RecursiveSelfImprovement:
         terms = [(w_ho, float(ho.mean_score)), (w_adv, float(adv.mean_score))]
         if rw is not None:
             terms.append((w_rw, float(rw.mean_score)))
+        # 4th ruler: the open-ended auto-curriculum — fresh, prover-certified problems at the edge of
+        # her capability. It cannot saturate (the frontier tracks her) and cannot be memorised (every
+        # batch is regenerated), so it is the one ruler that keeps moving once a fixed battery is
+        # mastered. None when disabled or unavailable, in which case its weight is simply dropped.
+        frontier_block = self._run_curriculum(solver)
+        if frontier_block is not None:
+            w_fr = float(getattr(cfg, "transfer_weight_frontier", 0.25))
+            terms.append((w_fr, float(frontier_block["frontier_score"])))
+        # 5th ruler: world-grounded experiments — NYXARA predicts a program's output and is graded by
+        # REAL execution (no stored key). Like the others, dropped (not zeroed) when unavailable.
+        grounded_block = self._run_grounded(solver)
+        if grounded_block is not None:
+            w_gr = float(getattr(cfg, "transfer_weight_grounded", 0.2))
+            terms.append((w_gr, float(grounded_block["grounded_score"])))
         wsum = sum(w for w, _ in terms) or 1.0
         transfer = sum(w * s for w, s in terms) / wsum
         self._validation = {
@@ -417,7 +489,45 @@ class RecursiveSelfImprovement:
                 "realworld_source": getattr(cfg, "validation_realworld_path", None) or "bundled"})
         elif rw_error is not None:
             self._validation["realworld_error"] = rw_error
+        if frontier_block is not None:
+            self._validation["frontier"] = frontier_block
+        if grounded_block is not None:
+            self._validation["grounded"] = grounded_block
         return self._validation
+
+    def _run_grounded(self, solver: Any) -> Optional[Dict[str, Any]]:
+        """Run one world-grounded experiment pass and return its block, or None.
+
+        NYXARA predicts a program's output and is graded by REAL execution in the isolated sandbox —
+        an outcome she did not store in advance. Best-effort: any failure (no sandbox, etc.) degrades
+        to None so the other rulers carry the transfer score unchanged."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "grounded_experiments", True)):
+            return None
+        try:
+            from nyxara.growth.grounded_experiments import GroundedExperiment
+            exp = GroundedExperiment(settings=self.settings)
+            rep = exp.evaluate(solver, trials=int(getattr(cfg, "grounded_experiments_budget", 5)))
+            return rep.to_dict()
+        except Exception:  # noqa: BLE001 — grounded is a ruler; on failure drop it, never zero
+            return None
+
+    def _run_curriculum(self, solver: Any) -> Optional[Dict[str, Any]]:
+        """Run one open-ended auto-curriculum pass and return its frontier block, or None.
+
+        Generates fresh, prover-certified problems at the edge of NYXARA's capability, grades the
+        same sovereign solver the other rulers use, and advances/retreats the frontier. Best-effort:
+        any failure degrades to None so the other rulers carry the transfer score unchanged."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "auto_curriculum_enabled", True)):
+            return None
+        try:
+            from nyxara.growth.curriculum import AutoCurriculum
+            cur = AutoCurriculum(memory=self.memory, settings=self.settings)
+            rep = cur.evaluate(solver, per_tier=int(getattr(cfg, "curriculum_per_tier", 4)))
+            return rep.to_dict()
+        except Exception:  # noqa: BLE001 — the curriculum is a ruler; on failure drop it, never zero
+            return None
 
     # ---- (4) self weakness detection ---- #
     def detect_weaknesses(self) -> Any:
@@ -446,6 +556,11 @@ class RecursiveSelfImprovement:
             architecture=self._arch.to_dict() if self._arch is not None else None,
             benchmark=self._bench, validation=self._validation,
             weaknesses=wreport.to_dict(), enacted=bool(enact))
+        # surface the open-ended curriculum + grounded scores for the index diagnostics + summary
+        if isinstance(self._validation, dict) and isinstance(self._validation.get("frontier"), dict):
+            report.frontier = float(self._validation["frontier"].get("frontier_score", 0.0))
+        if isinstance(self._validation, dict) and isinstance(self._validation.get("grounded"), dict):
+            report.grounded = float(self._validation["grounded"].get("grounded_score", 0.0))
 
         # --- safe, non-source enactment (lessons + tuning) --- #
         report.lessons_stored = self._store_lessons(wreport, enact=enact)
@@ -630,10 +745,15 @@ class RecursiveSelfImprovement:
             self._prior_transfer = float(getattr(prior, "last_inputs", {}).get("transfer", 0.0))
         except Exception:  # noqa: BLE001
             self._prior_transfer = 0.0
+        # substrate self-expansion: a survey of the parallelism/cluster NYXARA holds lifts the
+        # effort ceiling (never lowers it) inside effort_budget, bounded by the absolute hard cap.
         try:
-            self._effort = intel.effort_budget(prior, compute)
+            self._effort = intel.effort_budget(prior, compute, substrate=self._substrate_mgr())
         except Exception:  # noqa: BLE001
-            self._effort = None
+            try:
+                self._effort = intel.effort_budget(prior, compute)
+            except Exception:  # noqa: BLE001
+                self._effort = None
         # the index also DIAGNOSES the bottleneck up front (from the persisted prior signals), so
         # this cycle's effort is steered toward the weakest dimension. When planning is on, the
         # uncertainty-aware Thompson planner chooses under the index's per-dimension posteriors,
@@ -669,6 +789,9 @@ class RecursiveSelfImprovement:
             report.effort_budget = dict(self._effort)
             compute = self._compute_report()
             report.compute = compute.to_dict() if hasattr(compute, "to_dict") else None
+            mgr = self._substrate_mgr()
+            if mgr is not None:
+                report.substrate = mgr.survey().to_dict()
         except Exception:  # noqa: BLE001 — recording is advisory, never fatal
             pass
 

@@ -74,13 +74,19 @@ class _Genome:
 
     _BOUNDS: Tuple[Bound, ...] = ()
 
+    @classmethod
+    def bounds(cls) -> Tuple[Bound, ...]:
+        """The genome's current bounds. A classmethod (not the raw tuple) so a subclass can make its
+        upper caps **dynamic** — the accelerating-recursion tower raises them under sustained gains."""
+        return cls._BOUNDS
+
     def __post_init__(self) -> None:
-        for key, lo, hi, is_int in self._BOUNDS:
+        for key, lo, hi, is_int in self.bounds():
             cur = getattr(self, key)
             setattr(self, key, _clampi(cur, int(lo), int(hi)) if is_int else _clampf(cur, lo, hi))
 
     def _values(self) -> Tuple[float, ...]:
-        return tuple(getattr(self, key) for key, _, _, _ in self._BOUNDS)
+        return tuple(getattr(self, key) for key, _, _, _ in self.bounds())
 
     def mutate(self, rng: random.Random, search: "SearchGenome") -> "_Genome":
         """A small neighbour of this genome, perturbed under a :class:`SearchGenome`.
@@ -89,8 +95,9 @@ class _Genome:
         ``search.step_scale``: ``±1`` for an integer knob, a fraction of the knob's own range for a
         float knob. A real neighbour is guaranteed — never burn a trial window on an identical twin.
         """
+        bounds = self.bounds()
         vals: Dict[str, float] = {}
-        for key, lo, hi, is_int in self._BOUNDS:
+        for key, lo, hi, is_int in bounds:
             cur = getattr(self, key)
             if rng.random() < search.mutation_prob:
                 if is_int:
@@ -103,7 +110,7 @@ class _Genome:
                 vals[key] = cur
         m = type(self)(**vals)  # type: ignore[arg-type]
         if m._values() == self._values():
-            key, lo, hi, is_int = self._BOUNDS[rng.randrange(len(self._BOUNDS))]
+            key, lo, hi, is_int = bounds[rng.randrange(len(bounds))]
             cur = getattr(m, key)
             if is_int:
                 setattr(m, key, _clampi(cur + rng.choice((-1, 1)), int(lo), int(hi)))
@@ -113,7 +120,7 @@ class _Genome:
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
-        for key, _, _, is_int in self._BOUNDS:
+        for key, _, _, is_int in self.bounds():
             v = getattr(self, key)
             out[key] = int(v) if is_int else round(float(v), 6)
         return out
@@ -122,7 +129,7 @@ class _Genome:
     def from_dict(cls, d: Dict[str, Any]) -> "_Genome":
         d = d or {}
         kw: Dict[str, Any] = {}
-        for key, _, _, is_int in cls._BOUNDS:
+        for key, _, _, is_int in cls.bounds():
             if key in d:
                 kw[key] = int(d[key]) if is_int else float(d[key])
         return cls(**kw)  # type: ignore[arg-type]
@@ -150,6 +157,15 @@ class MetaGenome(_Genome):
     # --- measurement: how progress is smoothed (safe: caller scores by the raw target) --- #
     intelligence_momentum: float = 0.7  # index smoothing in I_(t+1)=f(I_t, C)
 
+    # --- accelerating returns: the upper caps on the two execution knobs are *dynamic*. The tower
+    # raises them under sustained gains (RecursiveMetaController._accelerate), so each improvement lets
+    # the improver improve harder next time — bounded by the absolute ceilings below so it can never
+    # run away. These are class-level (one live tower) and start at the historical fixed caps. --- #
+    _MAX_RECURSION: int = 5             # current upper cap on recursion_depth (was the fixed 5)
+    _MAX_EDITS: int = 6                 # current upper cap on max_edits_per_cycle (was the fixed 6)
+    _ABS_MAX_RECURSION: int = 16        # absolute safety ceiling — never exceeded, however many gains
+    _ABS_MAX_EDITS: int = 24
+
     _BOUNDS: Tuple[Bound, ...] = (
         ("recursion_depth", 1, 5, True),
         ("max_edits_per_cycle", 1, 6, True),
@@ -158,6 +174,35 @@ class MetaGenome(_Genome):
         ("bandit_severity_blend", 0.0, 1.0, False),
         ("intelligence_momentum", 0.0, 0.95, False),
     )
+
+    @classmethod
+    def bounds(cls) -> Tuple[Bound, ...]:
+        """Bounds with the two execution caps read from the *dynamic* class caps (accelerating)."""
+        return (
+            ("recursion_depth", 1, cls._MAX_RECURSION, True),
+            ("max_edits_per_cycle", 1, cls._MAX_EDITS, True),
+            ("ledger_reward_scale", 5.0, 200.0, False),
+            ("ledger_prior_strength", 0.25, 8.0, False),
+            ("bandit_severity_blend", 0.0, 1.0, False),
+            ("intelligence_momentum", 0.0, 0.95, False),
+        )
+
+    @classmethod
+    def raise_caps(cls, *, recursion_ceiling: Optional[int] = None,
+                   edits_ceiling: Optional[int] = None) -> Tuple[int, int]:
+        """Widen the execution caps by one step, bounded by the absolute ceiling and any external
+        (substrate-derived) ceiling. Returns the new ``(recursion_cap, edits_cap)``.
+
+        This is what makes recursion *accelerate*: a sustained record of real gains lets the engine
+        attempt deeper re-edit recursion and a larger edit budget than before — compounding — while
+        the absolute ceiling guarantees it stays bounded and safe."""
+        r_ceiling = min(cls._ABS_MAX_RECURSION,
+                        int(recursion_ceiling) if recursion_ceiling else cls._ABS_MAX_RECURSION)
+        e_ceiling = min(cls._ABS_MAX_EDITS,
+                        int(edits_ceiling) if edits_ceiling else cls._ABS_MAX_EDITS)
+        cls._MAX_RECURSION = min(r_ceiling, cls._MAX_RECURSION + 1)
+        cls._MAX_EDITS = min(e_ceiling, cls._MAX_EDITS + 1)
+        return cls._MAX_RECURSION, cls._MAX_EDITS
 
     def apply(self, settings: Any) -> None:
         """Write this genome's knobs into the live self-improvement config (capability-only)."""
@@ -321,9 +366,21 @@ class RecursiveMetaController:
     """
 
     def __init__(self, *, height: int = 3, champion: Optional[MetaGenome] = None,
-                 seed: int = 0, persist_path: Any = None) -> None:
-        self.height = max(1, min(4, int(height)))
+                 seed: int = 0, persist_path: Any = None, can_grow: bool = True,
+                 hard_max_height: int = 6, recursion_ceiling: Optional[int] = None,
+                 edits_ceiling: Optional[int] = None, accel_window: int = 3) -> None:
+        self.hard_max_height = max(1, int(hard_max_height))
+        self.height = max(1, min(self.hard_max_height, int(height)))
         self._persist_path = persist_path
+        # accelerating returns: grow the tower (more meta-levels) and widen the execution caps when
+        # gains are sustained, bounded by hard_max_height and (when given) a substrate-derived ceiling.
+        self.can_grow = bool(can_grow)
+        self.recursion_ceiling = recursion_ceiling
+        self.edits_ceiling = edits_ceiling
+        self.accel_window = max(2, int(accel_window))
+        self._gain_window: List[float] = []      # recent bottom-rung selection qualities
+        self._accel: List[Dict[str, Any]] = []   # log of acceleration events (height/cap growth)
+        self._seed = int(seed)
         rng = random.Random(seed)
         # level 0 carries the real engine genome; levels 1.. carry search genomes
         self.levels: List[MetaImprovementController] = []
@@ -388,12 +445,50 @@ class RecursiveMetaController:
                     ctrl.set_search(parent_active)
             # continue the loop: the rung above may now have a full window and select too
         if bottom_event is not None:
+            self._maybe_accelerate(float(bottom_event.get("selection_quality", 0.0)))
             self._bind_searches()
             self._save()
         return bottom_event
 
+    # ---- accelerating returns: grow the tower / widen the caps under sustained gains ---- #
+    def _maybe_accelerate(self, selection_quality: float) -> None:
+        """Track the bottom rung's realised gains; when sustained-positive, accelerate the engine.
+
+        A run of strictly-positive selection qualities means the improver is *reliably* finding
+        better policies — so we let it improve harder: append a meta-level (more compounding) and
+        widen the execution caps by one step. Bounded by ``hard_max_height`` and the absolute genome
+        ceilings, so acceleration is real but never unbounded."""
+        self._gain_window.append(float(selection_quality))
+        self._gain_window = self._gain_window[-self.accel_window:]
+        if (len(self._gain_window) >= self.accel_window
+                and all(g > 0.0 for g in self._gain_window)):
+            self._accelerate()
+            self._gain_window = []     # require a fresh run of gains before the next acceleration
+
+    def _accelerate(self) -> None:
+        grew = self._grow_height() if self.can_grow else False
+        caps = MetaGenome.raise_caps(recursion_ceiling=self.recursion_ceiling,
+                                     edits_ceiling=self.edits_ceiling)
+        self._accel.append({"grew_height": grew, "height": self.height,
+                            "recursion_cap": caps[0], "edits_cap": caps[1]})
+        self._accel = self._accel[-50:]
+
+    def _grow_height(self) -> bool:
+        """Append one search rung above the current top (more compounding), up to the hard cap."""
+        if len(self.levels) >= self.hard_max_height:
+            return False
+        seed = random.Random(self._seed + len(self.levels)).randint(0, 2 ** 31 - 1)
+        self.levels.append(MetaImprovementController(SearchGenome(), search=SearchGenome(),
+                                                     seed=seed))
+        self.height = len(self.levels)
+        self._bind_searches()
+        return True
+
     def status(self) -> Dict[str, Any]:
-        return {"height": self.height,
+        return {"height": self.height, "hard_max_height": self.hard_max_height,
+                "can_grow": self.can_grow,
+                "recursion_cap": MetaGenome._MAX_RECURSION, "edits_cap": MetaGenome._MAX_EDITS,
+                "accelerations": len(self._accel), "last_accel": self._accel[-1] if self._accel else None,
                 "levels": [c.status() for c in self.levels],
                 "champion": self.champion.to_dict()}
 
@@ -406,6 +501,9 @@ class RecursiveMetaController:
             p = Path(self._persist_path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps({"height": self.height,
+                                     "recursion_cap": MetaGenome._MAX_RECURSION,
+                                     "edits_cap": MetaGenome._MAX_EDITS,
+                                     "accel": self._accel[-50:],
                                      "levels": [c.to_dict() for c in self.levels]}),
                          encoding="utf-8")
         except Exception:  # noqa: BLE001 — persistence is a bonus, never required
@@ -420,7 +518,22 @@ class RecursiveMetaController:
             if not p.exists():
                 return
             data = json.loads(p.read_text(encoding="utf-8"))
+            # restore an accelerated tower: regrow the height and the widened execution caps so the
+            # compounding meta-gain persists across restarts.
+            MetaGenome._MAX_RECURSION = max(MetaGenome._MAX_RECURSION,
+                                            min(MetaGenome._ABS_MAX_RECURSION,
+                                                int(data.get("recursion_cap",
+                                                             MetaGenome._MAX_RECURSION))))
+            MetaGenome._MAX_EDITS = max(MetaGenome._MAX_EDITS,
+                                        min(MetaGenome._ABS_MAX_EDITS,
+                                            int(data.get("edits_cap", MetaGenome._MAX_EDITS))))
+            self._accel = list(data.get("accel", []) or [])[-50:]
             saved = list(data.get("levels", []))
+            while len(self.levels) < len(saved) and len(self.levels) < self.hard_max_height:
+                seed = random.Random(self._seed + len(self.levels)).randint(0, 2 ** 31 - 1)
+                self.levels.append(MetaImprovementController(
+                    SearchGenome(), search=SearchGenome(), seed=seed))
+            self.height = len(self.levels)
             for k, ctrl in enumerate(self.levels):
                 if k >= len(saved):
                     break

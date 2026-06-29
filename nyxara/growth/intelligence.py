@@ -368,23 +368,40 @@ class IntelligenceIndex:
     # ---------------------------------------------------------------------- #
     # Acting on the index — scale improvement effort by I_t and compute
     # ---------------------------------------------------------------------- #
-    def effort_budget(self, state: IntelligenceState, compute: Any) -> Dict[str, Any]:
+    def effort_budget(self, state: IntelligenceState, compute: Any, *,
+                      substrate: Any = None) -> Dict[str, Any]:
         """Translate the index + compute into how hard NYXARA should push this cycle.
 
-        Returns a bounded budget (never exceeds config limits). When
-        ``self_improvement.scale_effort_by_compute`` is off, returns the unscaled config max.
+        Returns a bounded budget. When ``self_improvement.scale_effort_by_compute`` is off, returns
+        the unscaled config max. When a :class:`~nyxara.growth.substrate.SubstrateManager` is passed
+        and substrate expansion is on, the per-cycle ceiling is **raised** (never lowered) in
+        proportion to the real parallelism NYXARA holds — so a stronger or distributed substrate
+        lifts the budget instead of only a weak one shrinking it — bounded by the absolute hard cap.
         """
         cfg = self.settings.self_improvement
         cap_max = int(getattr(cfg, "max_edits_per_cycle", 3))
+        depth_ceiling = 20
+        expansion = 1.0
+        # substrate self-expansion: lift the ceilings by the surveyed expansion factor (bounded by
+        # the hard cap in the manager). None / disabled ⇒ exactly the prior single-box behaviour.
+        if substrate is not None and bool(getattr(cfg, "substrate_expansion", True)):
+            try:
+                cap_max = max(cap_max, int(substrate.effective_cap(cap_max)))
+                expansion = float(substrate.survey().expansion_factor())
+                depth_ceiling = max(20, min(64, int(round(20 * expansion))))
+            except Exception:  # noqa: BLE001 — expansion is advisory, never fatal
+                expansion = 1.0
         if not bool(getattr(cfg, "scale_effort_by_compute", True)):
             return {"max_edits_per_cycle": cap_max, "recursion_depth": None,
-                    "benchmark_full": True, "intensity": 1.0}
+                    "benchmark_full": True, "intensity": 1.0,
+                    "expansion_factor": round(expansion, 4)}
         capacity = self.compute_capacity(compute)
         intensity = _clamp01(0.5 * float(state.index) + 0.5 * capacity)
         max_edits = int(round(intensity * cap_max))
-        recursion_depth = max(1, min(20, 1 + int(round(intensity * 19))))
+        recursion_depth = max(1, min(depth_ceiling, 1 + int(round(intensity * (depth_ceiling - 1)))))
         return {"max_edits_per_cycle": max_edits, "recursion_depth": recursion_depth,
-                "benchmark_full": capacity >= 0.6, "intensity": round(intensity, 4)}
+                "benchmark_full": capacity >= 0.6, "intensity": round(intensity, 4),
+                "expansion_factor": round(expansion, 4)}
 
     # ---------------------------------------------------------------------- #
     # Persistence (rides the existing long-term memory, protected from forgetting)

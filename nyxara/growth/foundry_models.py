@@ -411,11 +411,23 @@ class WordKNGramLM(BaseLanguageModel):
         return self._bos          # unseen tokens fold onto BOS (a never-emitted context slot)
 
     # ---- training ---- #
-    def train_on(self, corpus: Sequence[str], *, steps: int = 0, seed: int = 0) -> TrainStats:
+    def train_on(self, corpus: Sequence[str], *, steps: int = 0, seed: int = 0,
+                 accumulate: bool = False) -> TrainStats:
+        """Train from the corpus. With ``accumulate=True`` the new counts are *added on top* of the
+        existing ones (continual learning, growth/foundry continual path): prior knowledge is
+        retained instead of overwritten, so a later skill cannot erase an earlier one. The default
+        (``accumulate=False``) rebuilds from scratch — the historical behaviour, byte-for-byte."""
         import time
         start = time.monotonic()
         raw: Dict[int, Dict[Tuple[int, ...], Dict[int, int]]] = {
             m: defaultdict(lambda: defaultdict(int)) for m in range(1, self.order + 1)}
+        # continual warm-start: seed the counters with the weights already learned, so this round
+        # adds to (never replaces) prior knowledge.
+        if accumulate and self.raw:
+            for m in range(1, self.order + 1):
+                for ctx, row in self.raw.get(m, {}).items():
+                    for w, c in row.items():
+                        raw[m][ctx][w] += int(c)
         tokens = 0
         for doc in corpus:
             ids = self._encode(doc, intern=True)
