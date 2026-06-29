@@ -234,10 +234,10 @@ class GrowthEngine:
             if key in self._stored_lessons:
                 continue
             self._stored_lessons.add(key)
+            text = f"Lesson [{lesson.kind.value}] {lesson.subject}: {lesson.text}"
             try:
                 self.memory.remember(
-                    f"Lesson [{lesson.kind.value}] {lesson.subject}: {lesson.text}",
-                    mem_type=MemoryType.SEMANTIC,
+                    text, mem_type=MemoryType.SEMANTIC,
                     provenance=Provenance(SourceType.SELF_REFLECTION,
                                           confidence=lesson.confidence),
                     importance=min(1.0, 0.5 + 0.3 * lesson.confidence),
@@ -245,7 +245,30 @@ class GrowthEngine:
                 stored += 1
             except Exception:  # noqa: BLE001
                 pass
+            # A lesson that lives only as a memory record never reaches the substrate that
+            # *answers*. Teach it to NYXARA's always-on learned brain too, so a distilled lesson
+            # becomes retrievable knowledge she can actually speak — a text lesson consolidated
+            # into her own learned weights, not just filed away (closes the lessons→weights gap).
+            self._teach_self_brain(text)
         return stored
+
+    def _teach_self_brain(self, *docs: str) -> None:
+        """Fold text (a lesson, a verified fact) into the core reasoner's learned brain.
+
+        Best-effort and character-safe: it only moves *capability* (what she can recall and
+        say), never a value, and any failure is silently skipped so growth never breaks."""
+        core = self.core
+        if core is None:
+            return
+        reasoner = getattr(core, "reasoner", None)
+        teach = getattr(reasoner, "teach_self_brain", None)
+        if teach is None:
+            teach = getattr(getattr(reasoner, "llm_reasoner", None), "teach_self_brain", None)
+        if callable(teach):
+            try:
+                teach(*docs)
+            except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                pass
 
     # ---- consolidate ---- #
     def _consolidator_obj(self):

@@ -206,3 +206,22 @@ def test_rivalry_stores_lesson_into_memory():
     engine.rivalry()
     hits = [m for m in core.memory._kv.values() if "rivalry" in m.tags]
     assert hits and "lang" in hits[0].content
+
+
+def test_lessons_are_taught_to_the_learned_brain():
+    """A distilled lesson must reach the substrate that *answers*, not just memory (lessons→weights)."""
+    from types import SimpleNamespace
+
+    core = NyxaraCore()
+    brain = core.reasoner._own_brain()
+    assert brain is not None
+    before = brain.learned_count
+    engine = GrowthEngine.from_core(core)
+    lesson = SimpleNamespace(
+        kind=SimpleNamespace(value="strategy"),
+        subject="closing unused ports",
+        text="Closing unused network ports reduces a host's attack surface.",
+        confidence=0.8)
+    stored = engine._store_lessons([lesson])
+    assert stored == 1
+    assert brain.learned_count > before          # the lesson became learned, answerable knowledge

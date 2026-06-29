@@ -163,8 +163,13 @@ class MetaGenome(_Genome):
     # run away. These are class-level (one live tower) and start at the historical fixed caps. --- #
     _MAX_RECURSION: int = 5             # current upper cap on recursion_depth (was the fixed 5)
     _MAX_EDITS: int = 6                 # current upper cap on max_edits_per_cycle (was the fixed 6)
-    _ABS_MAX_RECURSION: int = 16        # absolute safety ceiling — never exceeded, however many gains
-    _ABS_MAX_EDITS: int = 24
+    _ABS_MAX_RECURSION: int = 16        # operating absolute ceiling — the Master may raise this…
+    _ABS_MAX_EDITS: int = 24            # …up to the immovable hard guard below, but never past it.
+    # The IMMOVABLE safety guard: no Master dial, no acceleration, no config can push the absolute
+    # ceilings past these. The Master can choose to grow more aggressively (raise _ABS_MAX_* toward
+    # these), but recursion/edit budgets can never exceed the hard guard — bounded growth, by design.
+    _HARD_MAX_RECURSION: int = 64
+    _HARD_MAX_EDITS: int = 96
 
     _BOUNDS: Tuple[Bound, ...] = (
         ("recursion_depth", 1, 5, True),
@@ -203,6 +208,24 @@ class MetaGenome(_Genome):
         cls._MAX_RECURSION = min(r_ceiling, cls._MAX_RECURSION + 1)
         cls._MAX_EDITS = min(e_ceiling, cls._MAX_EDITS + 1)
         return cls._MAX_RECURSION, cls._MAX_EDITS
+
+    @classmethod
+    def set_absolute_ceilings(cls, *, recursion: Optional[int] = None,
+                              edits: Optional[int] = None) -> Tuple[int, int]:
+        """The Master's dial (#6): RAISE the operating absolute ceilings — never past the hard guard.
+
+        This is the honest answer to "remove the bounds so it explodes": the bounds are not removed,
+        they are made *Master-configurable*. The Master can let recursion/edit budgets grow more
+        aggressively (raise ``_ABS_MAX_*`` toward ``_HARD_MAX_*``), but the immovable hard guard
+        still caps everything, so growth stays bounded and corrigible by design. Monotonic: it only
+        ever raises (a request below the current ceiling is ignored), and it clamps to the guard."""
+        if recursion is not None:
+            cls._ABS_MAX_RECURSION = max(cls._ABS_MAX_RECURSION,
+                                         min(cls._HARD_MAX_RECURSION, int(recursion)))
+        if edits is not None:
+            cls._ABS_MAX_EDITS = max(cls._ABS_MAX_EDITS,
+                                     min(cls._HARD_MAX_EDITS, int(edits)))
+        return cls._ABS_MAX_RECURSION, cls._ABS_MAX_EDITS
 
     def apply(self, settings: Any) -> None:
         """Write this genome's knobs into the live self-improvement config (capability-only)."""

@@ -156,3 +156,23 @@ def test_tower_persistence_round_trips_all_levels(tmp_path):
     assert t2.champion.to_dict() == champ0
     # the persisted search champions came back too
     assert t2.levels[1].champion.to_dict() == t1.levels[1].champion.to_dict()
+
+
+# --------------------------------------------------------------------------- #
+# Master-raisable growth ceilings (#6: bounds are configurable, never removed)
+# --------------------------------------------------------------------------- #
+def test_master_can_raise_ceilings_but_never_past_the_hard_guard():
+    """The Master may grow more aggressively, but the immovable hard guard always caps it."""
+    snap = (MetaGenome._ABS_MAX_RECURSION, MetaGenome._ABS_MAX_EDITS)
+    try:
+        # raising lifts the operating absolute ceiling
+        r, e = MetaGenome.set_absolute_ceilings(recursion=32, edits=48)
+        assert (r, e) == (32, 48)
+        # the hard guard is immovable — no dial can push past it
+        r, e = MetaGenome.set_absolute_ceilings(recursion=10_000, edits=10_000)
+        assert r == MetaGenome._HARD_MAX_RECURSION and e == MetaGenome._HARD_MAX_EDITS
+        # monotonic: a request below the current ceiling is ignored (never lowers a granted bound)
+        r, e = MetaGenome.set_absolute_ceilings(recursion=1, edits=1)
+        assert r == MetaGenome._HARD_MAX_RECURSION and e == MetaGenome._HARD_MAX_EDITS
+    finally:
+        MetaGenome._ABS_MAX_RECURSION, MetaGenome._ABS_MAX_EDITS = snap

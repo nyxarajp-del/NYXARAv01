@@ -2402,6 +2402,11 @@ class NyxaraCore:
                 self.journal.record_outcome(aid, status=ActionStatus.FAILED,
                                             note=tool_result.error)
                 self._record_calibration(candidate, correct=False)
+                # learn from the CONSEQUENCE: a real action ran and failed. Folding the failure
+                # into the value/causal models (not just successes) is what makes this genuine
+                # consequence learning — she discounts action-types the world keeps punishing.
+                self._grow(candidate, Disposition.ACT, authority=authority, success=False,
+                           stimulus=safe_text)
                 self.reporter.log_failure(candidate.text, tool_result.error or "tool failed")
                 return self._finish(cid, Disposition.REFUSE, candidate, gates, thoughts,
                                     f"tool failed: {tool_result.error}",
@@ -2416,6 +2421,9 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             self.journal.record_outcome(aid, status=ActionStatus.FAILED, note=str(exc))
             self._record_calibration(candidate, correct=False)
+            # learn from the consequence of a failed action (see the tool-not-ok path above)
+            self._grow(candidate, Disposition.ACT, authority=authority, success=False,
+                       stimulus=safe_text)
             self.reporter.log_failure(candidate.text, str(exc))
             return self._finish(cid, Disposition.REFUSE, candidate, gates, thoughts,
                                 f"action failed: {exc}", "I tried, but it failed — I've logged it.")

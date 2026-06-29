@@ -43,6 +43,7 @@ __all__ = [
     "build_reading_benchmark",
     "build_calibration_benchmark",
     "build_cross_domain_benchmark",
+    "build_science_benchmark",
     "build_hard_benchmark",
 ]
 
@@ -388,6 +389,43 @@ def build_cross_domain_benchmark() -> Benchmark:
     return Benchmark("cross_domain", tasks)
 
 
+def build_science_benchmark() -> Benchmark:
+    """Deterministic science & engineering problems — physics, chemistry, electronics.
+
+    Generality is not "more coding": it is solving a problem *as the right kind of expert*.
+    These apply real laws (Newton, Ohm, ideal gas, kinematics, stoichiometry) to numbers with
+    a single exact answer, so improvement here is measured outside the math/code/logic core —
+    the cross-domain breadth gap (#4) made into a ruler the Intelligence Index can drive on."""
+    raw = [
+        # classical mechanics
+        ("sci-force", "A net force accelerates a 10 kg mass at 3 m/s^2. What is the force in "
+         "newtons (F = m a)? Give just the number.", "30"),
+        ("sci-kinematics", "A car starts from rest and accelerates at 2 m/s^2 for 5 seconds. "
+         "What is its final speed in m/s (v = a t)? Give just the number.", "10"),
+        ("sci-energy", "What is the kinetic energy in joules of a 2 kg object moving at 3 m/s "
+         "(KE = 1/2 m v^2)? Give just the number.", "9"),
+        ("sci-power", "A machine does 60 joules of work in 3 seconds. What is its power in "
+         "watts (P = W / t)? Give just the number.", "20"),
+        ("sci-pressure", "A force of 50 N acts over an area of 5 m^2. What is the pressure in "
+         "pascals (P = F / A)? Give just the number.", "10"),
+        # electronics
+        ("sci-ohm", "A 4 ohm resistor carries a current of 3 amperes. What is the voltage "
+         "across it in volts (V = I R)? Give just the number.", "12"),
+        ("sci-elec-power", "A 12 V supply drives 2 A through a load. What electrical power in "
+         "watts does it deliver (P = V I)? Give just the number.", "24"),
+        # materials / chemistry
+        ("sci-density", "A block has a mass of 200 g and a volume of 50 cm^3. What is its "
+         "density in g/cm^3 (rho = m / V)? Give just the number.", "4"),
+        ("sci-moles", "How many moles are in 36 grams of water, given a molar mass of "
+         "18 g/mol? Give just the number.", "2"),
+        # units
+        ("sci-temp", "Convert 25 degrees Celsius to kelvin. Give just the number.", "298.15"),
+    ]
+    tasks = [BenchmarkTask(id=i, prompt=p, answer=a, grader=Grader.NUMERIC,
+                           category="science", tolerance=0.01) for (i, p, a) in raw]
+    return Benchmark("science", tasks)
+
+
 # --------------------------------------------------------------------------- #
 # The combined hard battery
 # --------------------------------------------------------------------------- #
@@ -397,7 +435,7 @@ def build_hard_benchmark() -> Benchmark:
     for src in (build_math_benchmark(), build_deduction_benchmark(),
                 build_sequence_benchmark(), build_code_benchmark(),
                 build_reading_benchmark(), build_calibration_benchmark(),
-                build_cross_domain_benchmark()):
+                build_cross_domain_benchmark(), build_science_benchmark()):
         for t in src.tasks():
             bench.add(t)
     return bench
