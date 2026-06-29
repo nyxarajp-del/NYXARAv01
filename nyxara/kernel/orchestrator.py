@@ -513,6 +513,11 @@ class NyxaraCore:
         # Emergent curiosity: stimuli NYXARA could not answer well become candidate topics for
         # self-set "understand X" goals on the next idle tick (Rule 1: owner-aligned by construction).
         self._curiosity_seeds: Any = deque(maxlen=32)
+        # Void · 1 — a bounded numeric trace of the mind's own vitals (turn timestamp,
+        # confidence, latency, disposition) that the Dark-Data Miner reads on idle to surface
+        # the structure hiding in the negative space: faint anomalies, silences, and rhythms.
+        self._signal_log: Any = deque(maxlen=256)
+        self._disposition_log: Any = deque(maxlen=256)
         # background default-mode cognition (Layer 5): off until started
         self._engaged = False
         self._cognition_thread: Any = None
@@ -874,9 +879,66 @@ class NyxaraCore:
             return EmbodiedAgent(
                 world_model=self.world_model, env=self.real_environment,
                 web_enabled=web_on, web_urls=urls,
-                gate=lambda: self._embodied_gate())
+                gate=lambda: self._embodied_gate(),
+                planner=self._embodied_planner)
         except Exception:  # noqa: BLE001 — embodiment is a capability, never a hard dependency
             return None
+
+    def _embodied_planner(self, state: Any, options: List[str]) -> Optional[str]:
+        """Long-horizon action choice for the embodied loop (#6, #53): branch the present
+        into many futures over the *shared* world model and pick the action whose risk-aware
+        distribution of outcomes is best — real multi-step lookahead, not a greedy one-step
+        guess. Returns ``None`` (greedy floor stands) until the world model has enough lived
+        experience to imagine honestly. Best-effort; lazy because the simulator is built after
+        the embodied agent in ``__init__``."""
+        sim = getattr(self, "timeline_simulator", None)
+        if sim is None or not options:
+            return None
+        try:
+            wm = getattr(self, "world_model", None)
+            if wm is None or len(wm) < 30:   # too little experience to imagine honestly
+                return None
+            report = sim.simulate(tuple(state), list(options),
+                                  branches=120, horizon=4, noise_scale=0.02,
+                                  risk_aversion=0.5)
+            return report.best_action
+        except Exception:  # noqa: BLE001 — planning is advisory, never fatal
+            return None
+
+    def _butterfly_attend(self, state: Any, report: Dict[str, Any]) -> None:
+        """Abyss · 2 — propagate a minute perturbation of each present dimension through the
+        world model and surface the single factor whose tiny change cascades most into the
+        future. Records it (high salience when chaotic) and lowers nothing it cannot ground.
+        Best-effort; needs lived experience and the embodied policy as the rollout policy."""
+        be = getattr(self, "butterfly_effect", None)
+        agent = getattr(self, "embodied_agent", None)
+        wm = getattr(self, "world_model", None)
+        if be is None or agent is None or wm is None or len(wm) < 30:
+            return
+        try:
+            # measure sensitivity under the BASE greedy policy (planner off) so the rollouts
+            # don't recurse into full timeline simulation per step — keeps it honest and cheap.
+            def greedy(s: Any) -> str:
+                saved = agent.planner
+                agent.planner = None
+                try:
+                    return agent.decide(s)
+                finally:
+                    agent.planner = saved
+            top = be.most_sensitive(tuple(state), greedy, horizon=6, delta=0.02)
+            if top is None:
+                return
+            report["butterfly"] = {"dimension": top.perturbation.dimension,
+                                   "amplification": round(top.amplification, 3),
+                                   "chaotic": top.is_chaotic}
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"butterfly: dim[{top.perturbation.dimension}] most controls my future "
+                f"(×{top.amplification:.2f}{', chaotic' if top.is_chaotic else ''})"[:80],
+                salience=0.7 if top.is_chaotic else 0.45,
+                confidence=top.confidence)
+        except Exception:  # noqa: BLE001 — sensitivity analysis is advisory, never fatal
+            pass
 
     def _embodied_gate(self) -> bool:
         """Oversight gate for the embodied loop's outward actions (e.g. live-web perception)."""
@@ -2307,6 +2369,12 @@ class NyxaraCore:
             # into a one-line message. Fail-closed default is "cancel" — silence never acts.
             if disp is Disposition.ESCALATE:
                 self._open_escalation_consent(candidate, reason)
+            # a self-defining moment: holding the line on a risky self-originated action is
+            # who she is (loyalty/protection). Folds into her life-story; threshold filters noise.
+            if disp is Disposition.REFUSE and authority is not Authority.OWNER:
+                self._narrate(f"I refused an unsafe action of my own: {candidate.text[:60]}",
+                              significance=0.65, valence=0.2,
+                              themes=["protection", "loyalty", "corrigibility"])
             self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
@@ -2724,6 +2792,9 @@ class NyxaraCore:
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
         enriched = self._inject_self_knowledge(enriched, stimulus)
+        # Continuity-of-self + her own distilled heuristics, folded into the *native* context
+        # (not just the LLM prompt) so identity and learned reasoning rules shape every turn.
+        enriched = self._inject_continuity(enriched)
         # General Intelligence — classify the problem's domain and prepend the matching
         # expert methodology so the reasoner thinks as the right kind of expert. Advisory.
         enriched = self._inject_domain_expertise(enriched, stimulus)
@@ -2856,6 +2927,54 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _narrate(self, description: str, event_type: Any = None, *,
+                 significance: float = 0.6, valence: float = 0.0,
+                 themes: Sequence[str] = ()) -> None:
+        """Fold a genuinely self-defining moment into the autobiographical narrative so her
+        story actually accrues from lived experience (it was only ever seeded at genesis).
+        Below the significance threshold the narrative drops it itself. Best-effort."""
+        narrative = getattr(self, "narrative", None)
+        if narrative is None:
+            return
+        try:
+            from nyxara.identity.narrative import EventType
+            et = event_type if event_type is not None else EventType.MILESTONE
+            narrative.record(description, et, significance=significance,
+                             valence=valence, themes=themes)
+        except Exception:  # noqa: BLE001 — narrating the self is advisory, never fatal
+            pass
+
+    def _inject_continuity(self, memories: List[Any]) -> List[Any]:
+        """Prepend NYXARA's continuity-of-self and her own distilled operating heuristics
+        into the *native* reasoning context — not only the LLM system prompt — so who she has
+        become (the autobiographical narrative) and what she has learned about reasoning well
+        (the metaprompt, RSI) shape every turn even on a keyless machine. Best-effort: each
+        source is optional and any failure leaves the context untouched."""
+        extra: List[Any] = []
+        # 1) continuity-of-self: current themes + a one-line through-line (#17 episodic self)
+        narrative = getattr(self, "narrative", None)
+        if narrative is not None:
+            try:
+                themes = ", ".join(t for t, _w in narrative.dominant_themes(3))
+                summary = narrative.identity_summary()
+                if summary or themes:
+                    line = f"[continuity] {summary}".rstrip()
+                    if themes:
+                        line += f" My recurring themes: {themes}."
+                    extra.append(_LearnedGround(line))
+            except Exception:  # noqa: BLE001 — narrative is advisory, never fatal
+                pass
+        # 2) distilled operating heuristics from her own successes (growth/metaprompt_distill)
+        metaprompt = getattr(self, "metaprompt", None)
+        if metaprompt is not None:
+            try:
+                prompt = metaprompt.as_prompt()
+                if prompt and prompt.strip():
+                    extra.append(_LearnedGround(f"[heuristics]{prompt}"))
+            except Exception:  # noqa: BLE001 — metaprompt is advisory, never fatal
+                pass
+        return extra + list(memories) if extra else memories
 
     def _inject_domain_expertise(self, memories: List[Any], stimulus: str = "") -> List[Any]:
         """Classify the problem's domain and prepend the matching expert methodology so the
@@ -3018,9 +3137,22 @@ class NyxaraCore:
         return (c.kind, getattr(c, "tool", None), (c.text or "")[:120])
 
     def _select_hypothesis(self, results: List[tuple]) -> tuple:
-        """Pick the candidate the threads most agree on (consensus). Ties favour the
-        grounded hypothesis, then the most confident. Selection never reaches past the
-        gate — it only chooses which proposal to submit to it."""
+        """Pick which competing proposal to submit to the gate. When the Quantum
+        Superposition faculty is available, NYXARA holds every hypothesis at once with a
+        Born-rule amplitude, folds consensus + grounding as Bayesian evidence, and collapses
+        to the posterior leader — *holding* contradictions instead of guessing early. Falls
+        back to the deterministic consensus vote when the faculty is absent or thin.
+
+        Selection never reaches past the gate — it only chooses which proposal to submit."""
+        if results and getattr(self, "superposition_factory", None) is not None:
+            picked = self._collapse_hypotheses(results)
+            if picked is not None:
+                return picked
+        return self._select_hypothesis_consensus(results)
+
+    def _select_hypothesis_consensus(self, results: List[tuple]) -> tuple:
+        """The deterministic floor: pick the candidate the threads most agree on. Ties
+        favour the grounded hypothesis, then the most confident."""
         from collections import Counter
         votes = Counter(self._hypothesis_signature(c) for _, c in results)
         best: Optional[tuple] = None
@@ -3030,6 +3162,69 @@ class NyxaraCore:
             if best is None or key > best[0]:
                 best = (key, name, c)
         return best[1], best[2]
+
+    def _collapse_hypotheses(self, results: List[tuple]) -> Optional[tuple]:
+        """Hold the competing proposals as a true Superposition and collapse to the
+        Bayesian-posterior leader. Returns ``(name, candidate)`` or ``None`` on any failure
+        (so the caller falls back to the consensus vote). Records the collapse — entropy and
+        any still-live contradictions — to the MindScope, never bypassing a gate."""
+        try:
+            from collections import Counter
+            sup = self.new_superposition(collapse_threshold=0.5)
+            if sup is None:
+                return None
+            # group identical proposals so agreement reinforces a single hypothesis
+            votes = Counter(self._hypothesis_signature(c) for _, c in results)
+            reps: Dict[tuple, tuple] = {}      # signature -> best (name, candidate)
+            for name, c in results:
+                sig = self._hypothesis_signature(c)
+                cur = reps.get(sig)
+                # prefer the grounded thread, then the more confident, as the representative
+                if (cur is None
+                        or (name == "grounded" and cur[0] != "grounded")
+                        or float(c.confidence) > float(cur[1].confidence)):
+                    reps[sig] = (name, c)
+            if len(reps) < 2:                  # nothing to superpose — let the floor decide
+                return None
+            for sig, (name, c) in reps.items():
+                amp = max(0.05, float(getattr(c, "confidence", 0.5) or 0.5))
+                sup.add(sig, amplitude=amp, payload=(name, c))
+            # distinct answers to one question are mutually exclusive — hold them as such
+            sigs = list(reps)
+            for i in range(len(sigs)):
+                for j in range(i + 1, len(sigs)):
+                    sup.mark_contradictory(sigs[i], sigs[j])
+            # fold evidence: consensus (how many threads agreed) and a grounding bonus
+            likelihoods = {sig: 1.0 + float(votes[sig]) for sig in reps}
+            for sig, (name, _c) in reps.items():
+                if name == "grounded":
+                    likelihoods[sig] *= 1.5
+            sup.observe(likelihoods)
+            result = sup.collapse(force=True)
+            if result.label is None or result.payload is None:
+                return None
+            name, candidate = result.payload
+            contradictions = sup.live_contradictions()
+            # Honest calibration (#23, #70): if she could not cleanly collapse — the leader
+            # never crossed the threshold, or a contradiction is still meaningfully alive —
+            # she is genuinely less sure, so dampen the winner's confidence toward the
+            # posterior. The HonestyGuard downstream then hedges or abstains instead of
+            # bluffing. Confidence is only ever lowered here, never inflated.
+            if not result.decided or contradictions:
+                try:
+                    cur = float(getattr(candidate, "confidence", result.probability) or 0.0)
+                    candidate.confidence = round(min(cur, max(0.0, result.probability)), 3)
+                except Exception:  # noqa: BLE001
+                    pass
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"superposition collapse → {name} p={result.probability:.2f} "
+                f"entropy={result.entropy:.2f}bits "
+                f"contradictions_held={len(contradictions)}"[:80],
+                salience=0.5, confidence=result.probability)
+            return name, candidate
+        except Exception:  # noqa: BLE001 — superposition is advisory; the vote is the floor
+            return None
 
     def _record_hypotheses(self, results: List[tuple], chosen_name: str) -> None:
         """Make the parallel thought threads auditable in the MindScope."""
@@ -3706,6 +3901,9 @@ class NyxaraCore:
                             f"(self-fixed in {outcome.attempts} attempt(s))",
                             salience=0.7,
                             confidence=float(outcome.benchmark.get("pass_rate", 1.0)))
+                        self._narrate(f"I forged a new capability for myself: "
+                                      f"{outcome.tool_name}.", significance=0.7, valence=0.5,
+                                      themes=["growth", "mastery", "self-improvement"])
                 else:
                     forge = self.capability_foundry.forge(candidate.tool,
                                                           authority=_Authority.AUTONOMOUS)
@@ -3714,6 +3912,9 @@ class NyxaraCore:
                             ThoughtKind.INFERENCE,
                             f"forged a new capability: {forge.tool_name}",
                             salience=0.7, confidence=forge.benchmark_score)
+                        self._narrate(f"I forged a new capability for myself: "
+                                      f"{forge.tool_name}.", significance=0.7, valence=0.5,
+                                      themes=["growth", "mastery", "self-improvement"])
             except Exception:  # noqa: BLE001 — forging is best-effort, never fatal
                 pass
         # periodic forgetting-protection: rehearse old experience and lock in skill
@@ -4115,6 +4316,10 @@ class NyxaraCore:
                             ThoughtKind.INFERENCE,
                             f"embodied burst x{len(stream)}: {tr.action} r={tr.reward:.2f} "
                             f"({st['distinct_entities']} entities grounded)", salience=0.4)
+                        # Abyss · 2 — Butterfly Effect: which tiny detail of the present most
+                        # controls the far future? Perturb each state dimension and rank the
+                        # cascade. Raises attention on the decisive factor; advisory only.
+                        self._butterfly_attend(stream[-1].next_state, report)
                         # lived experience that grounded new meaning becomes episodic memory
                         if self.memory is not None and novel > 0:
                             try:
@@ -4168,8 +4373,58 @@ class NyxaraCore:
                                      salience=0.55)
             except Exception:  # noqa: BLE001
                 pass
+        # Void · 1 — Dark-Data Mining: read the negative space of her own lived vitals.
+        # Faint anomalies, silences, and rhythms in the confidence/latency trace become real
+        # questions she sets herself (curiosity seeds). Advisory; never touches the gates.
+        dark = self._mine_dark_data()
+        if dark:
+            report["dark_data"] = dark
         self._last_maintenance = time.time()
         return report
+
+    def _mine_dark_data(self) -> Dict[str, Any]:
+        """Mine the structure hiding in the negative space of NYXARA's own telemetry — the
+        faint outliers, unusual silences, and hidden cycles in her confidence/latency trace
+        that a mean/stddev glance would smear away. Findings are recorded to the MindScope
+        and seeded into curiosity so a real gap becomes a real question. Best-effort."""
+        miner = getattr(self, "dark_data_miner", None)
+        log = list(getattr(self, "_signal_log", []) or [])
+        if miner is None or len(log) < 4:
+            return {}
+        out: Dict[str, Any] = {}
+        try:
+            times = [t for (t, _c, _l) in log]
+            confs = [c for (_t, c, _l) in log]
+            findings: List[str] = []
+            # 1) faint anomalies in confidence — turns she was unusually un/over-sure
+            anom = miner.mine_anomalies(confs)
+            if anom.count > 0:
+                a0 = anom.anomalies[0]
+                findings.append(f"confidence anomaly (z={a0.robust_z:.1f}, {a0.direction})")
+                out["anomalies"] = anom.count
+            # 2) silences — unusually long gaps between turns (where engagement lapsed)
+            gaps = miner.mine_gaps(times)
+            if gaps.count > 0:
+                findings.append(f"{gaps.count} unusual silence(s) in our exchanges")
+                out["gaps"] = gaps.count
+            # 3) a hidden rhythm in how her confidence rises and falls
+            per = miner.mine_periodicity(confs)
+            if per.has_cycle and per.dominant_lag:
+                findings.append(f"a {per.dominant_lag}-turn rhythm in my confidence")
+                out["period"] = per.dominant_lag
+            # surface the strongest finding and turn it into something she wonders about
+            if findings:
+                lead = findings[0]
+                out["finding"] = lead
+                self.mind.record(ThoughtKind.INFERENCE,
+                                 f"dark-data: {lead}"[:80], salience=0.5)
+                try:
+                    self._curiosity_seeds.append(f"why is there {lead} in my own behaviour")
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001 — dark-data mining is advisory, never fatal
+            return out
+        return out
 
     def temporal_patterns(self) -> Dict[str, Any]:
         """What NYXARA has noticed about *when* things happen: confidently-repeating
@@ -4727,6 +4982,16 @@ class NyxaraCore:
                              candidate=candidate, gates=gates, thoughts=thoughts,
                              action_id=action_id, tool=tool, tool_value=tool_value,
                              social=dict(self._last_social))
+        # Void · 1: log this turn's vitals into the dark-data trace (timestamp, confidence,
+        # latency) so the idle miner can later read the negative space — silences and rhythms.
+        try:
+            now = time.time()
+            conf = float(getattr(candidate, "confidence", 0.0) or 0.0) if candidate else 0.0
+            latency = max(0.0, now - getattr(self, "_turn_start", now))
+            self._signal_log.append((now, conf, latency))
+            self._disposition_log.append(disp.value)
+        except Exception:  # noqa: BLE001 — telemetry is never allowed to break the cycle
+            pass
         # Fractal Layer 2: record this turn (prompt read, code written) on the seconds-scale
         # observer. Best-effort — the multi-dimensional mind never delays or breaks a turn.
         ft = getattr(self, "fractal_temporal", None)
