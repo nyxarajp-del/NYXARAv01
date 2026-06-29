@@ -139,7 +139,7 @@ _SYNTH_MIN, _SYNTH_MAX = 1, 6        # bounds on a synthesised program's length 
 # only changes the architecture; it invents the training recipe and the update rule: which optimizer,
 # which loss objectives are composed, the schedule shape, and an optional learnable Hebbian/fast-weight
 # plasticity rule layered on top of backprop (a genuinely different learning paradigm). All real.
-_OPTIMIZERS: Tuple[str, ...] = ("adamw", "lion", "sgd_momentum", "rmsprop", "nadam", "adagrad")
+_OPTIMIZERS: Tuple[str, ...] = ("adamw", "lion", "sgd_momentum", "rmsprop")
 _SCHEDULES: Tuple[str, ...] = ("cosine", "linear", "wsd", "constant")  # wsd = warmup-stable-decay
 # auxiliary self-supervised objectives the search may switch on (each composed ON TOP of the main
 # next-token cross-entropy, never replacing it): masked-token denoising, InfoNCE contrastive on the
@@ -1412,12 +1412,6 @@ if _HAS_TORCH:
                                    nesterov=True)
         if rule.optimizer == "rmsprop":
             return torch.optim.RMSprop(plist, lr=lr, weight_decay=weight_decay, momentum=0.9)
-        if rule.optimizer == "nadam":
-            # Adam with Nesterov-style lookahead momentum — a genuinely different update rule
-            return torch.optim.NAdam(plist, lr=lr, weight_decay=weight_decay)
-        if rule.optimizer == "adagrad":
-            # per-parameter adaptive learning rates from accumulated squared gradients
-            return torch.optim.Adagrad(plist, lr=lr, weight_decay=weight_decay)
         return torch.optim.AdamW(plist, lr=lr, weight_decay=weight_decay)
 
 

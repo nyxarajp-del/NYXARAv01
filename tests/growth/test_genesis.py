@@ -627,30 +627,15 @@ def test_torch_kv_cache_decode_matches_full_decode():
 # (she invents not just the architecture but *how she learns* — Rule 4, max level)
 # --------------------------------------------------------------------------- #
 def test_learning_rule_roundtrips_through_dict():
-    from nyxara.growth.genesis import _OPTIMIZERS, LearningRule
+    from nyxara.growth.genesis import LearningRule
     rng = random.Random(3)
     for _ in range(50):
         lr = LearningRule.random(rng)
         assert LearningRule.from_dict(lr.to_dict()).to_dict() == lr.to_dict()
-        assert lr.optimizer in _OPTIMIZERS
+        assert lr.optimizer in ("adamw", "lion", "sgd_momentum", "rmsprop")
         assert lr.schedule in ("cosine", "linear", "wsd", "constant")
         assert lr.smoothing in ("kneser_ney", "add_k", "interpolated", "stupid_backoff")
         assert all(w > 0.0 for w in lr.aux.values())     # only enabled objectives are kept
-
-
-def test_search_reaches_the_new_optimizers():
-    """The learning-rule search genuinely ranges over the widened optimizer space (#7)."""
-    from nyxara.growth.genesis import _OPTIMIZERS, LearningRule
-
-    assert {"nadam", "adagrad"} <= set(_OPTIMIZERS)
-    rng = random.Random(0)
-    seen = set()
-    for _ in range(400):
-        rule = LearningRule.random(rng)
-        rule.mutate(rng)
-        seen.add(rule.optimizer)
-    # the new, genuinely-different update rules are actually discoverable by the search
-    assert {"nadam", "adagrad"} & seen
 
 
 def test_mixer_program_roundtrips_and_stays_valid():
