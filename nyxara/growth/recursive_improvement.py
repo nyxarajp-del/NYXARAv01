@@ -217,15 +217,32 @@ class RecursiveSelfImprovement:
             # accelerating returns: let the tower grow its height + execution caps under sustained
             # gains, tied to the substrate it actually holds (more units ⇒ a higher permitted
             # recursion/edit ceiling), so acceleration is real but bounded by the hard caps.
+            # The Master's dial (#6): when configured, RAISE the absolute ceilings (bounded by the
+            # immovable hard guard in meta_meta.py) so the loop may grow more aggressively. This never
+            # removes the bound — it makes it Master-configurable and still hard-capped.
+            try:
+                from nyxara.growth.meta_meta import MetaGenome
+                MetaGenome.set_absolute_ceilings(
+                    recursion=getattr(cfg, "recursion_ceiling", None),
+                    edits=getattr(cfg, "edits_ceiling", None))
+                abs_r, abs_e = MetaGenome._ABS_MAX_RECURSION, MetaGenome._ABS_MAX_EDITS
+            except Exception:  # noqa: BLE001 — fall back to the built-in 16 / 24 ceilings
+                abs_r, abs_e = 16, 24
             r_ceiling = e_ceiling = None
             try:
                 mgr = self._substrate_mgr()
                 if mgr is not None:
                     units = int(mgr.survey().parallel_units)
-                    r_ceiling = max(5, min(16, 4 + units))
-                    e_ceiling = max(6, min(24, 4 + units * 2))
+                    # acceleration scales with surveyed substrate, up to the (raisable) absolute ceiling
+                    r_ceiling = max(5, min(abs_r, 4 + units))
+                    e_ceiling = max(6, min(abs_e, 4 + units * 2))
             except Exception:  # noqa: BLE001
                 r_ceiling = e_ceiling = None
+            # with no substrate signal but a Master-raised ceiling, still let the loop use it
+            if r_ceiling is None and abs_r > 16:
+                r_ceiling = abs_r
+            if e_ceiling is None and abs_e > 24:
+                e_ceiling = abs_e
             self._meta = RecursiveMetaController(
                 height=int(getattr(cfg, "meta_levels", 3)), champion=seed, persist_path=path,
                 can_grow=bool(getattr(cfg, "meta_tower_can_grow", True)),

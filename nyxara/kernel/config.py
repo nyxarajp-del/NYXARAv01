@@ -931,6 +931,14 @@ class SelfImprovementConfig(BaseModel):
     # substrate (more cores/nodes ⇒ a higher permitted ceiling), so acceleration is real but safe.
     meta_tower_can_grow: bool = True
     meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
+    # --- Master-raisable growth ceilings (#6: bounds are configurable, never removed) --- #
+    # The recursion-depth / edit-budget *absolute* ceilings default to 16 / 24. The Master may raise
+    # them here to let the meta loop grow more aggressively — but only up to an immovable hard guard
+    # in growth/meta_meta.py (_HARD_MAX_RECURSION / _HARD_MAX_EDITS), which no config can exceed. So
+    # growth accelerates under the Master's hand while staying bounded and corrigible by design.
+    # None ⇒ keep the built-in 16 / 24 ceilings (substrate-driven acceleration still applies).
+    recursion_ceiling: Optional[int] = Field(default=None, ge=1, le=64)
+    edits_ceiling: Optional[int] = Field(default=None, ge=1, le=96)
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
     # File-size ceiling for a self-authored rewrite. Generous so the real algorithm/architecture
     # files (foundry, recursive_improvement, autolearn, the orchestrator) are eligible for a true
