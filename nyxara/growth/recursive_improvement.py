@@ -455,6 +455,16 @@ class RecursiveSelfImprovement:
             try:
                 from nyxara.eval.datasets import build_realworld_benchmark
                 realworld = build_realworld_benchmark(self.settings)
+                # anti-memorisation: when configured, score a deterministic ROTATING subset (seeded by
+                # the number of validated cycles so far) so the optimiser can never overfit a fixed
+                # list. sample_n == 0 keeps the whole corpus (prior behaviour) — rotation is opt-in.
+                n = int(getattr(cfg, "validation_sample_n", 0) or 0)
+                if realworld is not None and n > 0 and bool(getattr(cfg, "validation_rotate", True)):
+                    try:
+                        seed = len(self._intel().load().validation_history)
+                    except Exception:  # noqa: BLE001 — no index yet ⇒ a stable default seed
+                        seed = 0
+                    realworld = realworld.sample(n, seed=seed)
             except Exception as exc:  # noqa: BLE001 — a missing corpus must never break the cycle
                 rw_error = str(exc)
         try:
@@ -488,6 +498,11 @@ class RecursiveSelfImprovement:
         if grounded_block is not None:
             w_gr = float(getattr(cfg, "transfer_weight_grounded", 0.2))
             terms.append((w_gr, float(grounded_block["grounded_score"])))
+            # 6th ruler: agentic tool-task authoring — NYXARA writes code graded by REAL execution.
+            # Present only when actually measured; like the others its weight is dropped if absent.
+            if "tool_grounded_score" in grounded_block:
+                w_tg = float(getattr(cfg, "transfer_weight_tool_grounded", 0.2))
+                terms.append((w_tg, float(grounded_block["tool_grounded_score"])))
         wsum = sum(w for w, _ in terms) or 1.0
         transfer = sum(w * s for w, s in terms) / wsum
         self._validation = {
