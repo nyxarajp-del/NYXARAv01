@@ -334,11 +334,28 @@ class NyxaraReasoner:
                       f"{res.confidence:.2f})")
 
     def _confidence_router(self) -> Any:
-        """Lazily build the own-model-first confidence router (mind/router.py)."""
+        """Lazily build the own-model-first confidence router (mind/router.py).
+
+        The router's "own model" is wired to NYXARA's *always-on learned brain* — the very
+        :class:`~nyxara.mind.self_reasoner.SelfBrain` she compounds on every lived turn (and
+        which itself prefers a promoted foundry model when one exists). This is what makes the
+        handoff real: the substrate that learns is the substrate that answers, instead of a
+        foundry model she would first have to forge and promote. When the flag is off (or her
+        brain is unavailable) the router falls back to the foundry-only ``SelfProvider``."""
         if self._router is None:
             try:
                 from nyxara.mind.router import Router
-                self._router = Router(self.llm, settings=self.settings)
+                self_provider = None
+                if bool(getattr(self.settings.router, "use_self_brain", True)):
+                    from nyxara.mind.self_reasoner import SelfBrainProvider
+                    brain = self._own_brain()
+                    if brain is not None:
+                        min_learned = int(getattr(self.settings.router,
+                                                  "self_brain_min_learned", 8))
+                        self_provider = SelfBrainProvider(brain,
+                                                          min_learned_docs=min_learned)
+                self._router = Router(self.llm, settings=self.settings,
+                                      self_provider=self_provider)
             except Exception:  # noqa: BLE001 — routing is a capability, never a hard dependency
                 self._router = False  # sentinel: tried and unavailable
         return self._router or None

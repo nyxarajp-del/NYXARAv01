@@ -464,7 +464,21 @@ def run_router(bench: "Benchmark", *, settings: Any = None,
     NYXARA's own model answered unaided (``source == "self"``) vs deferred to the teacher.
     Rising handoff at steady accuracy is the wrapper→own-AI transition made visible."""
     from nyxara.mind.router import Router
-    router = Router(None, settings=settings)
+    # Measure the SAME own-model the live loop hands off to: NYXARA's always-on learned brain
+    # (which itself prefers a promoted foundry model). Without this the benchmark would score a
+    # fresh foundry-only SelfProvider and under-report the real handoff. Honest + consistent: the
+    # brain loads her persisted learned corpus, so the rate reflects what she has actually learned.
+    self_provider = None
+    rcfg = getattr(settings, "router", None) if settings is not None else None
+    if rcfg is None or bool(getattr(rcfg, "use_self_brain", True)):
+        try:
+            from nyxara.mind.self_reasoner import SelfBrainProvider, build_self_brain
+            min_learned = int(getattr(rcfg, "self_brain_min_learned", 8)) if rcfg else 8
+            self_provider = SelfBrainProvider(build_self_brain(settings=settings),
+                                              min_learned_docs=min_learned)
+        except Exception:  # noqa: BLE001 — fall back to the foundry-only provider on any error
+            self_provider = None
+    router = Router(None, settings=settings, self_provider=self_provider)
     sys_prompt = system or _BENCH_SYSTEM
     results: List[BenchmarkResult] = []
     sources: Dict[str, int] = {"self": 0, "teacher": 0, "none": 0}

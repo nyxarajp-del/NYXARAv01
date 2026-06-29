@@ -737,6 +737,16 @@ class RouterConfig(BaseModel):
     # default; fail-open (degrades to the single-draft path on any error). 1 sample = disabled.
     verify_rerank: bool = True
     rerank_samples: int = Field(default=5, ge=1, le=16)
+    # SOVEREIGN HANDOFF (mind/self_reasoner.SelfBrainProvider): let NYXARA's *own* model be the
+    # always-on learned brain she compounds on every lived turn — not just a foundry model she
+    # has to forge+promote first. This is what lifts the handoff rate off 0% on an ordinary boot:
+    # the substrate that learns becomes the substrate that answers, gated by an honest
+    # availability floor (she must have learned beyond her seed) and the same intrinsic verifier.
+    # On by default; set False to restrict the handoff to a promoted foundry model only.
+    use_self_brain: bool = True
+    # She must have learned at least this many docs beyond her persona seed before her own brain
+    # may answer a turn unaided — keeps a cold brain honestly deferring to the teacher.
+    self_brain_min_learned: int = Field(default=8, ge=1)
 
 
 class SelfModelRouterConfig(BaseModel):

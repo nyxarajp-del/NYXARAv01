@@ -9,7 +9,7 @@ No external LLM, no torch — pure-stdlib, always available.
 from __future__ import annotations
 
 from nyxara.kernel.config import NyxaraSettings, Profile
-from nyxara.mind.self_reasoner import SelfBrain, build_self_brain
+from nyxara.mind.self_reasoner import SelfBrain, SelfBrainProvider, build_self_brain
 
 
 def _brain(**kw):
@@ -82,3 +82,61 @@ def test_retrieval_can_be_disabled_and_still_replies():
     brain = SelfBrain(settings=settings)
     out = brain.reply("Who are you?")
     assert isinstance(out, str)               # falls back to generation, never crashes
+
+
+# --------------------------------------------------------------------------- #
+# The handoff: the learned brain becomes the router's "own model" (Phase 1)
+# --------------------------------------------------------------------------- #
+_NET_LESSONS = (
+    "A firewall blocks unwanted network ports to protect a host.",
+    "To harden a server, close unused ports and patch the operating system.",
+    "TLS encrypts traffic between a client and a server using certificates.",
+    "A load balancer distributes incoming requests across several backends.",
+    "Rate limiting caps how many requests a client may make in a time window.",
+    "Caching stores frequent responses so repeat requests are served faster.",
+    "DNS resolves human-readable domain names into IP addresses.",
+    "A reverse proxy forwards client requests to one or more backend servers.",
+)
+
+
+def test_self_brain_has_learned_is_honest_about_a_cold_brain():
+    brain = _brain()
+    # a cold brain (only the persona seed) has learned nothing — it must defer to the teacher
+    assert brain.learned_count == 0
+    assert not brain.has_learned(8)
+    brain.learn(*_NET_LESSONS)
+    assert brain.learned_count >= len(_NET_LESSONS)
+    assert brain.has_learned(8)
+
+
+def test_self_brain_provider_available_only_after_real_learning():
+    brain = _brain()
+    prov = SelfBrainProvider(brain, min_learned_docs=8)
+    assert prov.available() is False          # cold brain -> not available -> teacher answers
+    brain.learn(*_NET_LESSONS)
+    assert prov.available() is True           # learned beyond seed -> own model may answer
+
+
+def test_handoff_fires_once_she_has_learned():
+    """The substrate that learns is the substrate that answers — handoff rises off 0%."""
+    from nyxara.mind.llm import LLM
+    from nyxara.mind.router import Router
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    brain = build_self_brain(settings=settings, persist=False)
+    brain.learn(*_NET_LESSONS)
+    router = Router(LLM(settings=settings), settings=settings,
+                    self_provider=SelfBrainProvider(brain, min_learned_docs=8))
+    res = router.draft_self("How does a firewall protect a host?")
+    assert res is not None and res.handed_off and res.source == "self"
+    assert res.confidence >= settings.router.threshold
+
+
+def test_provider_complete_wraps_reply_in_response_shape():
+    from nyxara.mind.llm import LLMRequest
+
+    brain = _brain()
+    brain.learn(*_NET_LESSONS)
+    prov = SelfBrainProvider(brain, min_learned_docs=8)
+    resp = prov.complete(LLMRequest.from_prompt("What does a load balancer do?"))
+    assert resp.provider == "self" and isinstance(resp.text, str) and resp.text.strip()

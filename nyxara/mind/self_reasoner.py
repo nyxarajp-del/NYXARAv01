@@ -40,7 +40,7 @@ import re
 import threading
 from typing import Any, List, Optional, Sequence, Tuple
 
-__all__ = ["SelfBrain", "build_self_brain"]
+__all__ = ["SelfBrain", "build_self_brain", "SelfBrainProvider"]
 
 
 # --------------------------------------------------------------------------- #
@@ -170,6 +170,10 @@ class SelfBrain:
         # (non-TEST) machine with settings; off for the hermetic suite (no cross-test disk state).
         self._persist = self._auto_persist() if persist is None else bool(persist)
         self._save_every = 24          # persist after this many newly-learned docs (amortised I/O)
+        # how many docs she has genuinely learned beyond the persona seed — counts this session's
+        # lessons AND any that survived from prior sessions. The handoff is gated on this so a cold
+        # brain (only the seed) defers to the teacher rather than bluffing from nothing.
+        self._learned_count = len(self._load_persisted())
 
     # ---- construction ---- #
     def _try_promoted(self) -> Optional[Any]:
@@ -487,6 +491,7 @@ class SelfBrain:
             return
         with self._lock:
             self._corpus.extend(fresh)
+            self._learned_count += len(fresh)
             # index the new text right away (retrieval compounds turn-to-turn, no re-fit needed)
             if self._seeded:
                 for doc in fresh:
@@ -525,10 +530,97 @@ class SelfBrain:
     def index_size(self) -> int:
         return len(self._sent)
 
+    @property
+    def learned_count(self) -> int:
+        """Docs learned beyond the persona seed (this session + survived prior sessions)."""
+        return int(self._learned_count)
+
+    def _has_promoted_pointer(self) -> bool:
+        """Cheap check (no weight load) for a forged+promoted foundry model on disk."""
+        if not self.prefer_promoted or self.settings is None:
+            return False
+        try:
+            from pathlib import Path
+            root = getattr(getattr(self.settings, "llm", None), "self_model_dir", None)
+            base = Path(root) if root else (self.settings.paths.data_dir / "foundry")
+            return (base / "active").exists()
+        except Exception:  # noqa: BLE001 — a promoted pointer is a bonus, never required
+            return False
+
+    def has_learned(self, min_docs: int = 1) -> bool:
+        """True once she has a forged model OR genuinely learned beyond her seed corpus.
+
+        This is what keeps the handoff honest: a cold brain reports False, so the confidence
+        router consults the teacher instead of letting her speak from nothing. As she learns
+        from lived turns the count rises and she begins answering more turns herself — real,
+        measurable compounding, no external service."""
+        if self._has_promoted_pointer():
+            return True
+        return self._learned_count >= max(1, int(min_docs))
+
 
 def build_self_brain(settings: Any = None, **kw: Any) -> SelfBrain:
     """Factory: an always-on retrieval-augmented brain bound to the given settings."""
     return SelfBrain(settings=settings, **kw)
+
+
+# --------------------------------------------------------------------------- #
+# Provider adapter — lets the confidence router treat the learned brain as "self"
+# --------------------------------------------------------------------------- #
+class SelfBrainProvider:
+    """Adapt an always-on :class:`SelfBrain` to the LLM-provider surface the confidence
+    router consults as NYXARA's *own* model.
+
+    This is the lever that makes the handoff **real**. Historically the router's "self"
+    was :class:`~nyxara.mind.llm.SelfProvider`, which is available only after the foundry
+    *forges and promotes* a model — so on an ordinary boot it was never available and the
+    teacher answered every turn (handoff rate stuck at 0%). This adapter instead serves the
+    very brain NYXARA teaches on every lived turn (and which itself prefers a promoted
+    foundry model when one exists, via :meth:`SelfBrain._try_promoted`). So the substrate
+    that *learns* is now the substrate that *answers*.
+
+    It stays honest and safe:
+
+    * :meth:`available` is True only once she has genuinely learned beyond her seed (or
+      forged a model), so a cold brain still defers to the teacher and never bluffs;
+    * the router's intrinsic verifier still scores every answer — this only widens *which*
+      own substrate may draft, never which gate the reply must clear. The kernel still
+      disposes the proposal through corrigibility / honesty / permission / guardian / oversight.
+    """
+
+    name = "self"
+
+    def __init__(self, brain: SelfBrain, *, min_learned_docs: int = 8) -> None:
+        self._brain = brain
+        self._min = max(1, int(min_learned_docs))
+
+    def available(self) -> bool:
+        try:
+            return self._brain is not None and self._brain.has_learned(self._min)
+        except Exception:  # noqa: BLE001 — availability probing is advisory, never fatal
+            return False
+
+    def default_model(self) -> str:
+        return "nyxara-self-brain"
+
+    def complete(self, req: Any) -> Any:
+        """Draft a reply from the learned brain, wrapped in the provider response shape."""
+        from nyxara.mind.llm import LLMResponse, Usage, estimate_tokens
+        try:
+            prompt = req.last_user()
+        except Exception:  # noqa: BLE001 — tolerate a bare prompt object
+            prompt = str(getattr(req, "prompt", "") or "")
+        max_tokens = int(getattr(req, "max_tokens", 64) or 64)
+        text = ""
+        try:
+            text = self._brain.reply(prompt, max_tokens=max_tokens) or ""
+        except Exception:  # noqa: BLE001 — a failed own attempt simply defers to the teacher
+            text = ""
+        usage = Usage(prompt_tokens=estimate_tokens(prompt),
+                      completion_tokens=estimate_tokens(text))
+        return LLMResponse(text=text, provider="self", model="nyxara-self-brain",
+                           finish_reason="stop", usage=usage,
+                           raw={"self_brain": True, "kind": getattr(self._brain, "kind", "?")})
 
 
 # --------------------------------------------------------------------------- #
