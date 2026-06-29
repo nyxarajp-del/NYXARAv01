@@ -25,6 +25,15 @@ from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryRep
 from nyxara.growth.eureka import BreakthroughReport, EurekaEngine
 from nyxara.growth.open_world import OpenWorldGeneralizer, UnderstandingReport
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
+# RSI gap-closers: substrate self-expansion, open-ended curriculum, weight surgery,
+# proof-carrying self-modification, scalable oversight, world-grounded experiments.
+from nyxara.growth.substrate import SubstrateManager, SubstrateState, RayComputeProvider
+from nyxara.growth.curriculum import AutoCurriculum, CurriculumProblem, CurriculumReport
+from nyxara.growth.weight_surgery import WeightSurgeon, SurgeryOutcome, Attribution
+from nyxara.growth.proof_carrying import ProofCarrier, ProofCarryResult
+from nyxara.growth.oversight_verify import ScalableVerifier, OversightResult, SubClaim
+from nyxara.growth.grounded_experiments import (GroundedExperiment, GroundedReport,
+                                                GroundedOutcome)
 from nyxara.growth.meta_research import MetaResearcher, MetaResearchReport
 from nyxara.growth.genesis import (
     ArchitectureGenome,
@@ -203,6 +212,13 @@ __all__ = [
     "MetaResearchReport",
     "IntelligenceIndex",
     "IntelligenceState",
+    # RSI gap-closers (real, NYXARA-driven, wired into the recursive-self-improvement loop)
+    "SubstrateManager", "SubstrateState", "RayComputeProvider",   # substrate self-expansion
+    "AutoCurriculum", "CurriculumProblem", "CurriculumReport",    # open-ended auto-curriculum
+    "WeightSurgeon", "SurgeryOutcome", "Attribution",            # self-interpretability + surgery
+    "ProofCarrier", "ProofCarryResult",                          # proof-carrying self-modification
+    "ScalableVerifier", "OversightResult", "SubClaim",           # scalable oversight
+    "GroundedExperiment", "GroundedReport", "GroundedOutcome",   # world-grounded experiments
     # the Genesis Protocol — she designs her OWN neural architectures (Neural Architecture Search)
     "NeuralArchitectureSearch",
     "ArchitectureGenome",

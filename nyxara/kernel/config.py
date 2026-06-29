@@ -312,6 +312,22 @@ class FoundryConfig(BaseModel):
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
+    # ---- weight surgery (growth/weight_surgery.py) — interpret + edit her own weights ---- #
+    # NYXARA looks inside her own forged model and edits a *specific circuit* (an n-gram count row, a
+    # neural parameter) instead of retraining from scratch. Every edit is reversible and gauntlet-
+    # gated (intent achieved AND perplexity non-regressing on a probe); it touches only capability
+    # weights, never the immutable character core. On by default; real on the always-available n-gram
+    # brain and on the neural brain when torch is present.
+    weight_surgery_enabled: bool = True
+    weight_surgery_tol: float = Field(default=0.25, ge=0.0, le=2.0)   # max perplexity regression kept
+    weight_surgery_max_edits: int = Field(default=4, ge=0, le=64)
+    # ---- continual learning (growth/foundry.py + memory/elastic_synapses.py) ---- #
+    # Instead of forging every model from scratch off the replay buffer (which forgets), NYXARA can
+    # warm-start from her active model and consolidate important weights with EWC (Fisher importance),
+    # so new skills do not erase old ones. The loyalty core stays infinitely important (never
+    # consolidated over). On by default; the EWC penalty strength is ``ewc_lambda``.
+    continual_learning: bool = True
+    ewc_lambda: float = Field(default=1.0, ge=0.0, le=1000.0)
     # ---- Always-on offline brain (mind/self_reasoner.SelfBrain) ---- #
     # NYXARA's keyless general-intelligence: a retrieval-augmented brain over everything she has
     # learned (pure-stdlib LearnedEmbedder), with a hardened generative backend as the fallback.
@@ -857,6 +873,20 @@ class SelfImprovementConfig(BaseModel):
     allow_tuning: bool = True                  # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
+    # --- proof-carrying self-modification (growth/proof_carrying.py, Gödel-machine) --- #
+    # Before the empirical gauntlet, NYXARA tries to PROVE what is decidable about an edit: a
+    # behaviour-preserving boolean rewrite must stay logically equivalent (truth-table), and any
+    # decidable claim attached to the edit must hold. A provable regression is rejected up front; an
+    # undecidable edit falls back honestly to verify-or-rollback. Sound — it never blocks a valid
+    # edit. On by default; the proof certificate is journalled on the outcome.
+    proof_carrying_edits: bool = True
+    # --- scalable oversight (growth/oversight_verify.py) --- #
+    # An independent, redundant verifier that does not trust a single self-written test: it decomposes
+    # the change into sub-claims, checks each with a SEPARATE mechanism (the prover for decidable parts,
+    # redundant independent graders otherwise), trusts proof certificates cheaply, and vetoes on any
+    # disagreement. Runs as an extra gate in the gauntlet (and foundry promotion). On by default.
+    scalable_oversight: bool = True
+    oversight_redundancy: int = Field(default=3, ge=1, le=9)
     # --- self-authored edits (real RSI) — triple-gated --- #
     # When ON *and* ``autonomous_enact`` is set *and* a real author is available, NYXARA authors a
     # whole-file fix for a weakness the deterministic transforms cannot express (high complexity,
@@ -883,6 +913,14 @@ class SelfImprovementConfig(BaseModel):
     # level evolves how the level below searches. 1 ⇒ the classic single meta loop. Bounded so the
     # tower can never grow unboundedly deep.
     meta_levels: int = Field(default=3, ge=1, le=4)
+    # --- accelerating returns (growth/meta_meta.py) --- #
+    # The tower is no longer a fixed height with fixed execution caps. Under a sustained run of real
+    # capability gains it GROWS — appends a meta-level (more compounding) and widens the recursion /
+    # edit-budget caps by one step — so each improvement lets the improver improve harder next time.
+    # Bounded by ``meta_levels_hard_max`` and the absolute genome ceilings, and tied to the surveyed
+    # substrate (more cores/nodes ⇒ a higher permitted ceiling), so acceleration is real but safe.
+    meta_tower_can_grow: bool = True
+    meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
     llm_edit_max_tokens: int = Field(default=8192, ge=256, le=32768)  # room for a full file
     # File-size ceiling for a self-authored rewrite. Generous so the real algorithm/architecture
     # files (foundry, recursive_improvement, autolearn, the orchestrator) are eligible for a true
@@ -905,6 +943,15 @@ class SelfImprovementConfig(BaseModel):
     # ``autonomous_enact``-gated) edit budget and benchmark depth by capacity.
     intelligence_index_enabled: bool = True
     scale_effort_by_compute: bool = True
+    # --- substrate self-expansion (growth/substrate.py) --- #
+    # NYXARA does not only *fit* the box she is on — she fans her work across every core she has and
+    # onto a cluster when one exists (Ray / RAY_ADDRESS), and her effort ceiling is RAISED (not just
+    # lowered) in proportion to the real parallelism she holds. The gauntlet still gates every edit;
+    # ``substrate_hard_edit_cap`` is the absolute ceiling so a large cluster can never run the budget
+    # away. On by default; degrades to a clean serial path when no pool/cluster is available.
+    substrate_expansion: bool = True
+    substrate_max_workers: int = Field(default=0, ge=0)        # 0 ⇒ use all available CPU cores
+    substrate_hard_edit_cap: int = Field(default=24, ge=1, le=512)
     intelligence_momentum: float = Field(default=0.7, ge=0.0, le=1.0)
     intelligence_weights: Dict[str, float] = Field(
         default_factory=lambda: {"accuracy": 0.3, "knowledge": 0.15,
@@ -935,6 +982,24 @@ class SelfImprovementConfig(BaseModel):
     transfer_weight_realworld: float = Field(default=0.5, ge=0.0, le=1.0)
     transfer_weight_holdout: float = Field(default=0.2, ge=0.0, le=1.0)
     transfer_weight_adversarial: float = Field(default=0.3, ge=0.0, le=1.0)
+    # --- open-ended auto-curriculum (growth/curriculum.py) --- #
+    # A self-generating, prover-certified curriculum that always stays one step ahead of NYXARA's
+    # capability (POET / open-endedness): it manufactures fresh problems at the edge of what she can
+    # do, grades her against ground truth it can MACHINE-CHECK (the Prover, never an LLM), and moves
+    # the edge up as she masters it. Folded into transfer_score as a 4th ruler that cannot saturate
+    # (the frontier tracks her) and cannot be memorised (every batch is regenerated). Measurement-only.
+    auto_curriculum_enabled: bool = True
+    transfer_weight_frontier: float = Field(default=0.25, ge=0.0, le=1.0)
+    curriculum_per_tier: int = Field(default=4, ge=1, le=64)
+    # --- world-grounded experiments (growth/grounded_experiments.py) --- #
+    # NYXARA also improves against outcomes she does NOT know in advance: she predicts what a program
+    # will do, then RUNS it in the real interpreter (the isolated sandbox) and is graded by the actual
+    # output — no stored answer key, so it cannot be Goodharted. Folded into transfer_score as a 5th,
+    # reality-graded ruler; a falsifiable prediction can also be checked against screened live web
+    # data. Measurement-only; degrades cleanly when the sandbox/network is unavailable.
+    grounded_experiments: bool = True
+    transfer_weight_grounded: float = Field(default=0.2, ge=0.0, le=1.0)
+    grounded_experiments_budget: int = Field(default=5, ge=1, le=64)
     # --- full wire: the index's directive drives a real cross-system action --- #
     # When ON, the planned growth directive (train_self_model / acquire_knowledge / …) is actually
     # dispatched — foundry forge, research-queue enqueue — instead of merely logged. Each dispatch

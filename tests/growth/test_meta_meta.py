@@ -92,8 +92,9 @@ def test_single_rung_evolves_the_algorithm():
 def test_tower_has_configured_height():
     assert len(RecursiveMetaController(height=1).levels) == 1
     assert len(RecursiveMetaController(height=3).levels) == 3
-    # bounded — never grows past the safe ceiling
-    assert len(RecursiveMetaController(height=99).levels) == 4
+    # bounded — never starts past the safe ceiling (now the configurable hard_max_height, default 6)
+    assert len(RecursiveMetaController(height=99).levels) == 6
+    assert len(RecursiveMetaController(height=99, hard_max_height=3).levels) == 3
 
 
 def _drive(tower: RecursiveMetaController, n: int) -> None:

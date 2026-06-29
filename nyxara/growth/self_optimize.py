@@ -78,11 +78,15 @@ class OptimizationOutcome:
     kept: bool = False
     rolled_back: bool = False
     gauntlet: Optional[GauntletResult] = None
+    # proof-carrying + scalable-oversight certificates attached to this edit (when run)
+    proof: Optional[Dict[str, Any]] = None
+    oversight: Optional[Dict[str, Any]] = None
     reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"edit": self.edit.to_dict(), "applied": self.applied, "kept": self.kept,
                 "rolled_back": self.rolled_back, "reason": self.reason,
+                "proof": self.proof, "oversight": self.oversight,
                 "gauntlet": self.gauntlet.to_dict() if self.gauntlet else None}
 
 
@@ -337,6 +341,15 @@ class Optimizer:
             self._ensure_baseline()                 # capture pre-edit capability baseline
             path.write_text(edit.after, encoding="utf-8")
             outcome.applied = True
+            # proof-carrying + scalable oversight run BEFORE the (expensive) empirical gauntlet: a
+            # provable regression or an independent veto rejects the edit up front, byte-for-byte.
+            blocked, why = self._pre_gauntlet_checks(edit, outcome)
+            if blocked:
+                path.write_text(original, encoding="utf-8")
+                outcome.rolled_back = True
+                outcome.reason = f"{why} — rolled back"
+                self._journal_end(action_id, success=False, note=outcome.reason)
+                return outcome
             result = self._gauntlet_fn([str(path)])
             outcome.gauntlet = result
             if result.ok:
@@ -357,6 +370,39 @@ class Optimizer:
             outcome.reason = f"error during optimization ({exc}) — rolled back"
             self._journal_end(action_id, success=False, note=outcome.reason)
         return outcome
+
+    # ---- proof-carrying + scalable-oversight pre-checks (before the empirical gauntlet) ---- #
+    def _pre_gauntlet_checks(self, edit: SourceEdit, outcome: OptimizationOutcome
+                             ) -> tuple[bool, str]:
+        """Run the proof and oversight gates. Returns ``(blocked, reason)``.
+
+        Both are *sound*: they reject only a provable regression (proof-carrying) or an independent
+        cross-examination veto (scalable oversight), and otherwise record a certificate and let the
+        empirical gauntlet decide. Either failing to import simply skips that gate — never blocks."""
+        cfg = self.settings.self_improvement
+        # proof-carrying self-modification (Gödel-machine): block a provable regression up front
+        if bool(getattr(cfg, "proof_carrying_edits", True)):
+            try:
+                from nyxara.growth.proof_carrying import ProofCarrier
+                pres = ProofCarrier(settings=self.settings).certify_edit(
+                    edit.before, edit.after, kind=edit.kind)
+                outcome.proof = pres.to_dict()
+                if pres.blocks:
+                    return True, f"proof-carrying: refuted ({pres.certificate})"
+            except Exception:  # noqa: BLE001 — a proof failure must never block a valid edit
+                pass
+        # scalable oversight: an independent, redundant verifier vetoes a flawed edit
+        if bool(getattr(cfg, "scalable_oversight", True)):
+            try:
+                from nyxara.growth.oversight_verify import ScalableVerifier
+                ores = ScalableVerifier(settings=self.settings).verify_edit(edit.before, edit.after,
+                                                                            kind=edit.kind)
+                outcome.oversight = ores.to_dict()
+                if ores.vetoed:
+                    return True, f"scalable oversight: vetoed ({ores.reason})"
+            except Exception:  # noqa: BLE001 — oversight unavailable ⇒ skip, never block
+                pass
+        return False, ""
 
     def close(self) -> None:
         if self._tmpdir is not None:

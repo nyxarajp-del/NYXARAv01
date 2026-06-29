@@ -213,6 +213,7 @@ class Foundry:
         self.acquired_path = Path(acquired_path) if acquired_path else (self.root / "acquired.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
+        self._ewc: Any = None              # lazy EWC consolidator (continual learning anchors)
         self._load_manifest()
 
     # ---- manifest persistence ---- #
@@ -455,6 +456,134 @@ class Foundry:
         except Exception:  # noqa: BLE001 — autoscale is an optimisation, never required
             return static_dims, static_4bit
 
+    # ---- continual learning: warm-start + EWC consolidation (anti-forgetting) ---- #
+    def _warm_start(self, model: BaseLanguageModel) -> Tuple[bool, bool]:
+        """Load the active model's weights into ``model`` so training continues, not restarts.
+
+        Returns ``(warm, accumulate)``: ``warm`` is True when prior weights were loaded; ``accumulate``
+        is True for n-gram backends, whose counts are *added on top* (the no-forgetting path). A no-op
+        returning ``(False, False)`` when continual learning is off, there is no active model, or the
+        active model's backend is incompatible — so behaviour is unchanged in those cases."""
+        if not bool(getattr(self.cfg, "continual_learning", True)):
+            return False, False
+        act = self.active()
+        if act is None or act.kind != getattr(model, "kind", None):
+            return False, False
+        try:
+            model.load(Path(act.path))
+            # only the word-level Kneser-Ney brain supports count accumulation; other backends
+            # warm-start by continuing training from the loaded weights (no accumulate kwarg).
+            return True, getattr(model, "kind", "") == "kngram"
+        except Exception:  # noqa: BLE001 — a failed warm-start falls back to a clean scratch train
+            return False, False
+
+    def _consolidator(self) -> Any:
+        """The EWC engine that anchors important weights after a promotion (lifelong memory).
+
+        Rides :class:`~nyxara.memory.elastic_synapses.ElasticSynapses`, protecting the immutable
+        character core by name so a skill consolidation can never stiffen a character weight. Lazy
+        and best-effort; returns ``None`` if the dependency is unavailable."""
+        if getattr(self, "_ewc", None) is not None:
+            return self._ewc
+        try:
+            from nyxara.memory.elastic_synapses import ElasticSynapses
+            self._ewc = ElasticSynapses(ewc_lambda=float(getattr(self.cfg, "ewc_lambda", 1.0)),
+                                        protected=sorted(self.protected))
+        except Exception:  # noqa: BLE001
+            self._ewc = None
+        return self._ewc
+
+    @staticmethod
+    def _flatten_weights(model: BaseLanguageModel) -> Dict[str, float]:
+        """Flatten a model's capability weights into a ``{name: value}`` vector for EWC.
+
+        n-gram counts flatten to ``"ctx|word" → count``; a torch module flattens its named parameters
+        to their mean magnitude. Never raises; an unknown backend yields an empty vector."""
+        out: Dict[str, float] = {}
+        hi = getattr(model, "hi", None)
+        if isinstance(hi, dict):
+            for ctx, row in hi.items():
+                key = ",".join(map(str, ctx))
+                for w, c in row.items():
+                    out[f"{key}|{w}"] = float(c)
+            return out
+        try:
+            import torch  # type: ignore  # noqa: F401
+            for attr in ("model", "net", "module"):
+                mod = getattr(model, attr, None)
+                if mod is not None and hasattr(mod, "named_parameters"):
+                    for name, p in mod.named_parameters():
+                        out[name] = float(p.detach().abs().mean())
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def consolidate_active(self, *, task: str = "") -> bool:
+        """Consolidate the active model's weights as an EWC anchor (call after a promotion).
+
+        This is the lifelong-memory write: the weights that matter for what she can now do resist
+        being overwritten by the next round. Best-effort and measurement-only — never gates."""
+        syn = self._consolidator()
+        act = self.active()
+        if syn is None or act is None:
+            return False
+        try:
+            from nyxara.growth.foundry_models import build_model as _build
+            model = _build(ModelSpec.from_dict(act.spec))
+            model.load(Path(act.path))
+            params = self._flatten_weights(model)
+            if not params:
+                return False
+            syn.observe_features({k: 1.0 for k in params})   # every used weight matters
+            syn.consolidate(params, task=task or f"v{act.version}")
+            return True
+        except Exception:  # noqa: BLE001 — consolidation is best-effort, never fatal
+            return False
+
+    # ---- weight surgery: interpret + edit the active model's circuits (no full retrain) ---- #
+    def surgical_edit(self, edits: Sequence[Tuple[str, str]], *,
+                      probe: Optional[Sequence[str]] = None,
+                      suppress: bool = False) -> List[Dict[str, Any]]:
+        """Apply reversible, gauntlet-gated circuit edits to the ACTIVE model in place.
+
+        ``edits`` is a list of ``(context, word)`` pairs: steer the prediction after ``context`` to
+        ``word`` (or, with ``suppress=True``, prune ``word`` from that circuit). Each edit clears the
+        weight-surgery gauntlet (intent achieved AND perplexity non-regressing on the probe) and rolls
+        back exactly otherwise; kept edits are saved back to the active version's directory. Returns a
+        per-edit outcome list. A clean no-op (empty list) when surgery is disabled or no active model
+        exists — so she only ever edits a brain she actually has."""
+        if not bool(getattr(self.cfg, "weight_surgery_enabled", True)):
+            return []
+        act = self.active()
+        if act is None:
+            return []
+        try:
+            from nyxara.growth.foundry_models import build_model as _build
+            from nyxara.growth.weight_surgery import WeightSurgeon
+        except Exception:  # noqa: BLE001
+            return []
+        try:
+            model = _build(ModelSpec.from_dict(act.spec))
+            model.load(Path(act.path))
+        except Exception:  # noqa: BLE001
+            return []
+        surgeon = WeightSurgeon(model, settings=self.settings)
+        cap = int(getattr(self.cfg, "weight_surgery_max_edits", 4))
+        outcomes: List[Dict[str, Any]] = []
+        kept_any = False
+        for context, word in list(edits)[:max(0, cap)]:
+            out = (surgeon.suppress(context, word, probe=probe) if suppress
+                   else surgeon.steer(context, word, probe=probe))
+            outcomes.append(out.to_dict())
+            kept_any = kept_any or out.kept
+        if kept_any:
+            try:
+                model.save(Path(act.path))     # persist the kept circuit edits to the active version
+            except Exception:  # noqa: BLE001
+                pass
+        return outcomes
+
     def train_candidate(self, *, spec: Optional[ModelSpec] = None,
                         corpus: Optional[Sequence[str]] = None,
                         tunables: Optional[Sequence[str]] = None,
@@ -477,7 +606,15 @@ class Foundry:
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
         model = build_model(spec)
-        model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed)
+        # continual learning (anti-forgetting): warm-start from the active model so a new skill is
+        # ADDED to prior knowledge instead of replacing it. n-gram backends accumulate their counts
+        # on top; neural backends continue training from the loaded weights. Falls back to a clean
+        # from-scratch train when there is no compatible active model.
+        warm, accumulate = self._warm_start(model)
+        if accumulate:
+            model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed, accumulate=True)
+        else:
+            model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed)
         ev = self.evaluate(model, eval_texts)
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
@@ -551,6 +688,21 @@ class Foundry:
             if cand_cap < active_capability - self.cfg.capability_regression_tol:
                 return False, (f"capability regressed on the benchmark "
                                f"({cand_cap:.3f} < active {active_capability:.3f})")
+        # scalable oversight: an INDEPENDENT verifier re-derives the promote decision from the metrics
+        # as a redundant second opinion. The foundry's own gates above already ruled; this catches a
+        # single miscomputed gate from ever promoting a worse brain. Best-effort; never the sole gate.
+        if bool(getattr(self.settings.self_improvement, "scalable_oversight", True)):
+            try:
+                from nyxara.growth.oversight_verify import ScalableVerifier
+                res = ScalableVerifier(settings=self.settings).verify_metrics(
+                    dict(candidate.metrics),
+                    {"perplexity": active_perplexity, "capability": active_capability},
+                    min_improvement=self.cfg.min_perplexity_improvement,
+                    capability_tol=self.cfg.capability_regression_tol)
+                if res.vetoed:
+                    return False, f"scalable oversight vetoed promotion: {res.reason}"
+            except Exception:  # noqa: BLE001 — oversight unavailable ⇒ the gates above still rule
+                pass
         return True, "safe, beneficial improvement over the active model"
 
     def _active_perplexity_on(self, eval_texts: Sequence[str]) -> float:
@@ -584,6 +736,10 @@ class Foundry:
         (self.root / "active").write_text(f"v{version}", encoding="utf-8")
         self._save_manifest()
         self.verify_integrity()
+        # continual learning: consolidate the newly-active weights as an EWC anchor so the next
+        # round's training resists overwriting what this model just learned (anti-forgetting).
+        if bool(getattr(self.cfg, "continual_learning", True)):
+            self.consolidate_active(task=f"v{version}")
         return cand
 
     def rollback(self, steps: int = 1) -> Optional[int]:
