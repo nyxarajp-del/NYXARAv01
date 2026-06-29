@@ -2369,6 +2369,12 @@ class NyxaraCore:
             # into a one-line message. Fail-closed default is "cancel" — silence never acts.
             if disp is Disposition.ESCALATE:
                 self._open_escalation_consent(candidate, reason)
+            # a self-defining moment: holding the line on a risky self-originated action is
+            # who she is (loyalty/protection). Folds into her life-story; threshold filters noise.
+            if disp is Disposition.REFUSE and authority is not Authority.OWNER:
+                self._narrate(f"I refused an unsafe action of my own: {candidate.text[:60]}",
+                              significance=0.65, valence=0.2,
+                              themes=["protection", "loyalty", "corrigibility"])
             self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
@@ -2786,6 +2792,9 @@ class NyxaraCore:
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
         enriched = self._inject_self_knowledge(enriched, stimulus)
+        # Continuity-of-self + her own distilled heuristics, folded into the *native* context
+        # (not just the LLM prompt) so identity and learned reasoning rules shape every turn.
+        enriched = self._inject_continuity(enriched)
         # General Intelligence — classify the problem's domain and prepend the matching
         # expert methodology so the reasoner thinks as the right kind of expert. Advisory.
         enriched = self._inject_domain_expertise(enriched, stimulus)
@@ -2918,6 +2927,54 @@ class NyxaraCore:
             return [_SelfKnowledgeEntry(report)] + list(memories)
         except Exception:  # noqa: BLE001 — self-knowledge is advisory, never fatal
             return memories
+
+    def _narrate(self, description: str, event_type: Any = None, *,
+                 significance: float = 0.6, valence: float = 0.0,
+                 themes: Sequence[str] = ()) -> None:
+        """Fold a genuinely self-defining moment into the autobiographical narrative so her
+        story actually accrues from lived experience (it was only ever seeded at genesis).
+        Below the significance threshold the narrative drops it itself. Best-effort."""
+        narrative = getattr(self, "narrative", None)
+        if narrative is None:
+            return
+        try:
+            from nyxara.identity.narrative import EventType
+            et = event_type if event_type is not None else EventType.MILESTONE
+            narrative.record(description, et, significance=significance,
+                             valence=valence, themes=themes)
+        except Exception:  # noqa: BLE001 — narrating the self is advisory, never fatal
+            pass
+
+    def _inject_continuity(self, memories: List[Any]) -> List[Any]:
+        """Prepend NYXARA's continuity-of-self and her own distilled operating heuristics
+        into the *native* reasoning context — not only the LLM system prompt — so who she has
+        become (the autobiographical narrative) and what she has learned about reasoning well
+        (the metaprompt, RSI) shape every turn even on a keyless machine. Best-effort: each
+        source is optional and any failure leaves the context untouched."""
+        extra: List[Any] = []
+        # 1) continuity-of-self: current themes + a one-line through-line (#17 episodic self)
+        narrative = getattr(self, "narrative", None)
+        if narrative is not None:
+            try:
+                themes = ", ".join(t for t, _w in narrative.dominant_themes(3))
+                summary = narrative.identity_summary()
+                if summary or themes:
+                    line = f"[continuity] {summary}".rstrip()
+                    if themes:
+                        line += f" My recurring themes: {themes}."
+                    extra.append(_LearnedGround(line))
+            except Exception:  # noqa: BLE001 — narrative is advisory, never fatal
+                pass
+        # 2) distilled operating heuristics from her own successes (growth/metaprompt_distill)
+        metaprompt = getattr(self, "metaprompt", None)
+        if metaprompt is not None:
+            try:
+                prompt = metaprompt.as_prompt()
+                if prompt and prompt.strip():
+                    extra.append(_LearnedGround(f"[heuristics]{prompt}"))
+            except Exception:  # noqa: BLE001 — metaprompt is advisory, never fatal
+                pass
+        return extra + list(memories) if extra else memories
 
     def _inject_domain_expertise(self, memories: List[Any], stimulus: str = "") -> List[Any]:
         """Classify the problem's domain and prepend the matching expert methodology so the
@@ -3148,6 +3205,17 @@ class NyxaraCore:
                 return None
             name, candidate = result.payload
             contradictions = sup.live_contradictions()
+            # Honest calibration (#23, #70): if she could not cleanly collapse — the leader
+            # never crossed the threshold, or a contradiction is still meaningfully alive —
+            # she is genuinely less sure, so dampen the winner's confidence toward the
+            # posterior. The HonestyGuard downstream then hedges or abstains instead of
+            # bluffing. Confidence is only ever lowered here, never inflated.
+            if not result.decided or contradictions:
+                try:
+                    cur = float(getattr(candidate, "confidence", result.probability) or 0.0)
+                    candidate.confidence = round(min(cur, max(0.0, result.probability)), 3)
+                except Exception:  # noqa: BLE001
+                    pass
             self.mind.record(
                 ThoughtKind.INFERENCE,
                 f"superposition collapse → {name} p={result.probability:.2f} "
@@ -3833,6 +3901,9 @@ class NyxaraCore:
                             f"(self-fixed in {outcome.attempts} attempt(s))",
                             salience=0.7,
                             confidence=float(outcome.benchmark.get("pass_rate", 1.0)))
+                        self._narrate(f"I forged a new capability for myself: "
+                                      f"{outcome.tool_name}.", significance=0.7, valence=0.5,
+                                      themes=["growth", "mastery", "self-improvement"])
                 else:
                     forge = self.capability_foundry.forge(candidate.tool,
                                                           authority=_Authority.AUTONOMOUS)
@@ -3841,6 +3912,9 @@ class NyxaraCore:
                             ThoughtKind.INFERENCE,
                             f"forged a new capability: {forge.tool_name}",
                             salience=0.7, confidence=forge.benchmark_score)
+                        self._narrate(f"I forged a new capability for myself: "
+                                      f"{forge.tool_name}.", significance=0.7, valence=0.5,
+                                      themes=["growth", "mastery", "self-improvement"])
             except Exception:  # noqa: BLE001 — forging is best-effort, never fatal
                 pass
         # periodic forgetting-protection: rehearse old experience and lock in skill

@@ -39,6 +39,18 @@ def test_superposition_records_collapse_to_mindscope():
     assert inferences, "collapse should be auditable in the MindScope"
 
 
+def test_superposition_dampens_confidence_when_undecided():
+    core = NyxaraCore()
+    # two contradictory, near-equally-supported answers: she cannot cleanly collapse, so
+    # honest calibration must pull the winner's confidence down toward the posterior.
+    a = Candidate(text="it is A", kind="respond", confidence=0.9)
+    b = Candidate(text="it is B", kind="respond", confidence=0.88)
+    picked = core._collapse_hypotheses([("base", a), ("role_council", b)])
+    assert picked is not None
+    _name, cand = picked
+    assert cand.confidence < 0.9, "undecided collapse should not stay over-confident"
+
+
 def test_superposition_single_hypothesis_falls_back_to_floor():
     core = NyxaraCore()
     a = Candidate(text="only", kind="respond", confidence=0.5)
@@ -115,3 +127,35 @@ def test_butterfly_attend_is_safe_without_experience():
     # too little world-model experience -> records nothing, never raises
     core._butterfly_attend((0.0,) * 8, report)
     assert "butterfly" not in report
+
+
+# --------------------------------------------------------------------------- #
+# Phase B — narrative continuity + distilled heuristics injected NATIVELY
+# --------------------------------------------------------------------------- #
+def test_narrative_records_self_defining_moment():
+    core = NyxaraCore()
+    assert core.narrative is not None
+    before = len(core.narrative.events())
+    core._narrate("I refused an unsafe action of my own: wipe disk",
+                  significance=0.7, valence=0.2, themes=["protection", "loyalty"])
+    assert len(core.narrative.events()) == before + 1
+
+
+def test_continuity_injected_into_native_context():
+    core = NyxaraCore()
+    core._narrate("I forged a new capability for myself: summarize.",
+                  significance=0.7, valence=0.5, themes=["growth", "mastery"])
+    mems = core._inject_continuity([])
+    texts = [m.text() for m in mems]
+    cont = [t for t in texts if t.startswith("[continuity]")]
+    assert cont, "continuity-of-self must be injected into the native context"
+    # her through-line (loyalty) and recurring themes are named in the native context
+    assert "loyalty" in cont[0].lower()
+    assert "recurring themes" in cont[0].lower()
+
+
+def test_continuity_injection_is_noop_without_sources():
+    core = NyxaraCore(enable_identity=False, enable_growth=False)
+    # no narrative / metaprompt -> context passes through untouched, never raises
+    sentinel = ["x"]
+    assert core._inject_continuity(sentinel) == sentinel
