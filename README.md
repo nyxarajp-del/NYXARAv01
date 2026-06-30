@@ -557,6 +557,36 @@ around the control law.
   python -m nyxara.eval --benchmark --hard --llm         # the whole loop (gates lift calibration)
   python -m nyxara.eval --benchmark --hard --category calibration   # just the honesty battery
   ```
+* **The anti-Goodhart transfer signal — improvement that has to be real** — the self-improvement
+  loop (`growth/recursive_improvement.py`) never lets capability be *claimed* on the very tasks it
+  edits against. Each cycle it scores a blended `transfer_score` on rulers the optimiser never
+  touches, and the intelligence index discounts any gain where the proxy rises while transfer stalls
+  (raising a `goodhart` flag). The rulers:
+  * a **genuinely-external held-out corpus** (`eval/datasets.py` → `eval/data/holdout_realworld.jsonl`)
+    of real facts and multi-step problems she never trains on — the dominant term;
+  * the **held-out fold** of the training battery and the full **adversarial** battery;
+  * the open-ended **auto-curriculum** (fresh, prover-certified problems at her capability edge); and
+  * two **reality-graded** rulers in `growth/grounded_experiments.py` — *predict-execution* (she
+    predicts a program's output, then it is **run** in the isolated sandbox and graded by the real
+    result) and *code-authoring* (she **writes** a `solve` function that is run against a reference,
+    graded by real execution). There is no stored answer key, so neither can be Goodharted. With
+    `grounded_web_enabled` she can also check a falsifiable prediction against screened **live web**
+    data (degrades honestly to "no grounding" offline).
+
+  Drop in a real standard benchmark (GSM8K, MMLU, a private eval) without touching code — point the
+  loader at any JSONL of the documented shape, and optionally rotate a fresh subset each cycle so a
+  fixed list can never be memorised:
+
+  ```bash
+  # reshape a public dataset into the held-out JSONL shape, then validate against it
+  python scripts/prepare_holdout.py --format gsm8k --in gsm8k_test.jsonl --out holdout.jsonl
+  NYXARA_EVAL_HOLDOUT_PATH=$PWD/holdout.jsonl python -m nyxara.growth.improve_main
+  ```
+
+  Knobs (`self_improvement` config): `validation_realworld_path` (external dataset),
+  `validation_rotate` / `validation_sample_n` (rotating subset), `tool_grounding_enabled` /
+  `transfer_weight_tool_grounded` (the authoring ruler), `grounded_web_enabled` /
+  `grounded_web_probes_path` (live-web grounding).
 * **Autonomous researcher** — `growth/researcher.py`. `core.research(topic)` runs one
   self-directed pass: search → read → summarise → store, folding findings into the
   KnowledgeBase, KnowledgeGraph, and semantic memory. Every external fetch flows through

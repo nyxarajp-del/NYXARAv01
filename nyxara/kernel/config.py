@@ -1018,6 +1018,28 @@ class SelfImprovementConfig(BaseModel):
     grounded_experiments: bool = True
     transfer_weight_grounded: float = Field(default=0.2, ge=0.0, le=1.0)
     grounded_experiments_budget: int = Field(default=5, ge=1, le=64)
+    # --- agentic tool-task grounding (growth/grounded_experiments.code_authoring_experiment) --- #
+    # A 6th, reality-graded ruler that asks NYXARA to AUTHOR code for a fresh task, then runs it in the
+    # isolated sandbox and grades it against a reference by REAL execution. Unlike predict_execution
+    # (predict an output) this measures real capability — can she write a correct program? — and the
+    # interpreter, not a stored key, is the grader, so it cannot be Goodharted. Dropped (not zeroed)
+    # when the sandbox is unavailable. Folded into transfer_score alongside the other rulers.
+    tool_grounding_enabled: bool = True
+    transfer_weight_tool_grounded: float = Field(default=0.2, ge=0.0, le=1.0)
+    # --- live-web grounding (growth/grounded_experiments.predict_and_verify) --- #
+    # NYXARA can also check a falsifiable prediction against screened LIVE web data (SSRF-guarded +
+    # injection-scanned, exactly as acquire.py screens its corpus). OFF by default so CI/offline runs
+    # stay deterministic; when on, each probe degrades honestly to "no grounding" offline (weight
+    # dropped, never a fake pass). Probes are loaded from a JSONL of {"url", "expect", "must_contain"}.
+    grounded_web_enabled: bool = False
+    grounded_web_probes_path: Optional[str] = None    # JSONL of web probes; None → no web probes
+    # --- rotating held-out subset (anti-memorisation) --- #
+    # The bundled real-world corpus is a FIXED set; scored whole every cycle it can, over many cycles,
+    # be slowly memorised. When on, each cycle scores a deterministic ROTATING subset (seeded by the
+    # cycle count) so the optimiser never overfits a fixed list. 0 → score the whole corpus (no
+    # sampling). Measurement-only; the held-out tasks are never fed to edit-selection regardless.
+    validation_rotate: bool = True
+    validation_sample_n: int = Field(default=0, ge=0, le=10000)   # 0 → whole corpus
     # --- full wire: the index's directive drives a real cross-system action --- #
     # When ON, the planned growth directive (train_self_model / acquire_knowledge / …) is actually
     # dispatched — foundry forge, research-queue enqueue — instead of merely logged. Each dispatch

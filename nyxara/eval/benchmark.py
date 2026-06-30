@@ -379,6 +379,23 @@ class Benchmark:
         return (Benchmark(f"{self.name}:train", train),
                 Benchmark(f"{self.name}:holdout", holdout))
 
+    def sample(self, n: int, *, seed: int = 0) -> "Benchmark":
+        """A deterministic ROTATING subset of ``n`` tasks (anti-memorisation for held-out scoring).
+
+        Tasks are ranked by a stable per-(seed, id) hash and the first ``n`` are kept, so a given
+        ``seed`` always yields the same subset (reproducible) while advancing the seed each cycle
+        rotates which tasks are scored — the self-improvement loop can never overfit a fixed list.
+        ``n <= 0`` or ``n >= len`` returns the whole battery unchanged.
+        """
+        tasks = list(self._tasks)
+        if n <= 0 or n >= len(tasks):
+            return Benchmark(self.name, tasks)
+        ranked = sorted(
+            tasks,
+            key=lambda t: hashlib.sha256(f"{seed}:{t.id}".encode("utf-8")).digest(),
+        )
+        return Benchmark(f"{self.name}:sample", ranked[:n])
+
     def run(self, solver: Solver, *, category: Optional[str] = None) -> BenchmarkReport:
         results: List[BenchmarkResult] = []
         for task in self.tasks(category):
