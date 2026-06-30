@@ -694,11 +694,17 @@ class Foundry:
         if bool(getattr(self.settings.self_improvement, "scalable_oversight", True)):
             try:
                 from nyxara.growth.oversight_verify import ScalableVerifier
+                # When the capability gate is OFF the operator has deliberately removed the
+                # capability non-regression rule, so the independent verifier must not silently
+                # re-impose it (an infinite tolerance means any capability change is acceptable);
+                # it still re-derives the perplexity-improvement decision as the redundant check.
+                cap_tol = (self.cfg.capability_regression_tol if self.cfg.capability_gate
+                           else float("inf"))
                 res = ScalableVerifier(settings=self.settings).verify_metrics(
                     dict(candidate.metrics),
                     {"perplexity": active_perplexity, "capability": active_capability},
                     min_improvement=self.cfg.min_perplexity_improvement,
-                    capability_tol=self.cfg.capability_regression_tol)
+                    capability_tol=cap_tol)
                 if res.vetoed:
                     return False, f"scalable oversight vetoed promotion: {res.reason}"
             except Exception:  # noqa: BLE001 — oversight unavailable ⇒ the gates above still rule

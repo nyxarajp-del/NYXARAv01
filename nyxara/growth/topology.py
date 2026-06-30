@@ -388,7 +388,12 @@ class DynamicTopology:
     @staticmethod
     def _spec_of(genome: ArchitectureGenome) -> Any:
         # GenesisModel._spec_from_genome is a staticmethod — usable without torch / instantiation.
-        return GenesisModel._spec_from_genome(genome)
+        spec = GenesisModel._spec_from_genome(genome)
+        # Build the grown brain for real: torch → GenesisModel; torch-free → the NumPy substrate
+        # (so the rebuilt/widened brain is actually instantiated and its capacity is real, not an
+        # inert n-gram). Genome growth only builds + counts (no training), so this stays cheap.
+        spec.substrate = "auto"
+        return spec
 
     def _param_count(self, genome: ArchitectureGenome) -> int:
         try:

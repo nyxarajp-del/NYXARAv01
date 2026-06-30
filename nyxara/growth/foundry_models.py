@@ -103,7 +103,7 @@ class ModelSpec:
     value. The foundry's gauntlet refuses any spec that tries to smuggle an immutable-core
     name in here (see :meth:`growth.foundry.Foundry._gauntlet`)."""
 
-    kind: str = "auto"          # "auto" | "ngram" | "nanogpt" | "lora" | "genesis"
+    kind: str = "auto"          # "auto" | "ngram" | "nanogpt" | "lora" | "genesis" | "genesis_np"
     ngram_order: int = 3
     ngram_k: float = 1.0        # add-k smoothing (n-gram / genesis-stdlib substrate)
     block_size: int = 64
@@ -112,10 +112,18 @@ class ModelSpec:
     n_embd: int = 64
     seed: int = 0
     # ---- Genesis architecture (kind="genesis"; the searched topology, growth/genesis.py) ---- #
-    # The serialized ArchitectureGenome the Genesis Protocol crowned. When present (and torch is
-    # installed) build_model assembles a brand-new neural net from it; otherwise it degrades to
-    # the always-on n-gram substrate (using ngram_order / ngram_k), never raising.
+    # The serialized ArchitectureGenome the Genesis Protocol crowned. When present, build_model
+    # assembles a brand-new neural net from it: a torch GenesisModel when torch is installed, else
+    # a REAL pure-NumPy GenesisNumpyModel (genesis_numpy.py) that actually builds and trains the
+    # designed topology on the always-on substrate. Only with neither torch nor NumPy, or a
+    # layer-less genome, does it degrade to the n-gram substrate. Never raises.
     genome: Optional[Dict[str, Any]] = None
+    # Which substrate scores/serves a genome when there is no torch: "numpy"/"auto" build the REAL
+    # pure-NumPy GenesisNumpyModel from the genome; "ngram" (the safe default) keeps the fast
+    # always-on word-Kneser-Ney substrate. The search, promotion and topology paths set this from
+    # the GenesisConfig; an incidental genesis spec left at the default stays fast. ``kind`` of
+    # "genesis_np" forces the NumPy brain regardless of this field.
+    substrate: str = "ngram"
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
     lora_r: int = 8
@@ -140,7 +148,7 @@ class ModelSpec:
         return {"kind": self.kind, "ngram_order": self.ngram_order,
                 "ngram_k": self.ngram_k, "block_size": self.block_size,
                 "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
-                "seed": self.seed, "genome": self.genome,
+                "seed": self.seed, "genome": self.genome, "substrate": self.substrate,
                 "base_model": self.base_model, "lora_r": self.lora_r,
                 "lora_r_auto": self.lora_r_auto,
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
@@ -1079,14 +1087,28 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
             return GenesisModel(spec)
         except Exception:  # noqa: BLE001 — torch present but the searched net failed; fall back
             pass
+    # The genome's neural architecture is NOT inert without torch: build NYXARA's self-designed brain
+    # for real on the always-on NumPy substrate (genesis_numpy.GenesisNumpyModel) — what makes "she
+    # designs and trains her own brain, herself" real on a bare machine. Gated so it is built only
+    # when explicitly requested (kind="genesis_np") or when a genesis/auto spec opted in via
+    # ``substrate`` — an incidental genesis spec at the default ("ngram") stays on the fast path.
+    _sub = str(getattr(spec, "substrate", "ngram")).lower()
+    if (want == "genesis_np"
+            or (want in ("genesis", "auto") and spec.genome and _sub in ("numpy", "auto"))):
+        try:
+            from nyxara.growth.genesis_numpy import GenesisNumpyModel, _HAS_NUMPY  # lazy: no cycle
+            if _HAS_NUMPY and (spec.genome.get("layers") if isinstance(spec.genome, dict) else None):
+                return GenesisNumpyModel(spec.genome, seed=spec.seed)
+        except Exception:  # noqa: BLE001 — numpy build failed; fall to the n-gram substrate
+            pass
     # Real neural fallback: any non-ngram request gets a from-zero NanoGPT when torch is present
     # (covers auto/nanogpt directly, and lora/genesis whose heavier deps/genome are unavailable).
-    if _HAS_TORCH:
+    if _HAS_TORCH and want != "genesis_np":
         try:
             return NanoGPTModel(spec)
         except Exception:  # noqa: BLE001 — torch present but model build failed; fall back
             pass
-    # No torch at all -> the coherent always-on backend: word-level Kneser-Ney (not byte gibberish)
+    # Final always-on backend: coherent word-level Kneser-Ney (never byte gibberish, never raises)
     return WordKNGramLM(order=max(2, spec.ngram_order), seed=spec.seed)
 
 

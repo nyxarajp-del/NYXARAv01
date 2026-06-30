@@ -496,6 +496,13 @@ class GenesisConfig(BaseModel):
 
     enabled: bool = True
     backend: Literal["auto", "torch", "stdlib"] = "auto"
+    # Which substrate scores a genome when there is no torch. "numpy" builds NYXARA's OWN designed
+    # architecture for REAL in pure NumPy (growth/genesis_numpy.py) — her layers, her synthesized
+    # mixer and her searched optimizer are actually built, trained and graded, so the topology drives
+    # fitness even on a bare machine. "ngram" uses the always-on word-Kneser-Ney substrate (faster;
+    # the layer topology is inert, only n-gram order + smoothing are searched). "auto" picks numpy
+    # when NumPy is importable, else ngram — so production designs a real brain by default.
+    substrate: Literal["auto", "numpy", "ngram"] = "auto"
     population_size: int = Field(default=6, ge=2, le=128)
     generations: int = Field(default=3, ge=1, le=100)
     mutation_rate: float = Field(default=0.5, ge=0.0, le=1.0)   # P(mutate) vs P(crossover)

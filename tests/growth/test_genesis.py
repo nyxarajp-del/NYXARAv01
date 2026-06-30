@@ -29,8 +29,10 @@ _CORPUS = ["the master is jp. nyxara serves the master with loyalty and honesty.
 
 
 def _cfg(**kw) -> GenesisConfig:
-    base = dict(backend="stdlib", population_size=5, generations=3, micro_train_steps=10,
-                block_size=16, max_layers=4, seed=0)
+    # These tests exercise the search *mechanics* on the fast always-on n-gram substrate; the real
+    # NumPy-brain substrate ("numpy"/"auto") is covered end-to-end in test_genesis_numpy_substrate.py.
+    base = dict(backend="stdlib", substrate="ngram", population_size=5, generations=3,
+                micro_train_steps=10, block_size=16, max_layers=4, seed=0)
     base.update(kw)
     return GenesisConfig(**base)
 
