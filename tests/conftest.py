@@ -32,6 +32,12 @@ os.environ.setdefault("NYXARA_GENESIS__RUN_ON_BOOT", "false")
 # to the fast n-gram path for any get_settings()-based search in the suite; the real NumPy brain is
 # covered end-to-end in tests/growth/test_genesis_numpy_substrate.py, which opts in explicitly.
 os.environ.setdefault("NYXARA_GENESIS__SUBSTRATE", "ngram")
+# Continuous Recursive Self-Improvement (kernel/orchestrator.idle_maintenance) runs the heavy
+# GrowthEngine tower (mind-evolution, recursive self-improvement, meta-research — each benchmarks
+# the whole reasoner) on a throttled idle cadence. ON for live DEV/PROD so NYXARA improves herself
+# unprompted; OFF for the suite for the same hermetic/compute rationale as the flags above. Tests
+# that exercise the wiring build their own settings with continuous=True and a small cadence.
+os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__CONTINUOUS", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 
