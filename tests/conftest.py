@@ -26,6 +26,12 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # test would otherwise pay. Same hermetic rationale as the enactment flags above: keep it OFF for
 # the suite. The genesis tests build their own GenesisConfig (and set backend="torch" explicitly).
 os.environ.setdefault("NYXARA_GENESIS__RUN_ON_BOOT", "false")
+# In production the Genesis substrate is "auto" → it builds and trains NYXARA's OWN designed
+# architecture for real in NumPy (growth/genesis_numpy.py) whenever a search runs. That is genuine
+# per-candidate neural training — too slow to pay on every search-mechanics test. Pin the substrate
+# to the fast n-gram path for any get_settings()-based search in the suite; the real NumPy brain is
+# covered end-to-end in tests/growth/test_genesis_numpy_substrate.py, which opts in explicitly.
+os.environ.setdefault("NYXARA_GENESIS__SUBSTRATE", "ngram")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

@@ -2045,20 +2045,22 @@ class Candidate:
 
     @property
     def topology_active(self) -> bool:
-        """True only when the neural topology was actually built and trained (torch path).
+        """True when the neural topology was actually built and trained — on the torch path
+        (``genesis``) OR the real pure-NumPy substrate (``genesis_np``).
 
-        On the stdlib substrate the layer genome is *inert*: the candidate is scored by an
-        n-gram model that reads only ``ngram_order``/``ngram_k`` — the attention/conv/recurrent
-        layers are never instantiated. This flag keeps the report from implying otherwise."""
-        return self.kind == "genesis"
+        Only the bare ``kngram`` fallback (neither torch nor NumPy, or a layer-less genome) leaves
+        the layer genome *inert*; this flag keeps the report honest about which actually happened."""
+        return self.kind in ("genesis", "genesis_np")
 
     def describe(self) -> str:
         """An honest, substrate-aware description of what was actually scored."""
-        if self.topology_active:
+        if self.kind == "genesis":
             return self.genome.describe()
+        if self.kind == "genesis_np":
+            return f"{self.genome.describe()} — built + trained on the NumPy substrate (no torch)"
         return (f"word n-gram substrate (order={self.genome.ngram_order}, "
                 f"smoothing={self.genome.learning_rule.smoothing}) — neural topology inert "
-                f"without torch [latent: {self.genome.describe()}]")
+                f"without torch/NumPy [latent: {self.genome.describe()}]")
 
     def to_dict(self) -> Dict[str, Any]:
         return {"genome": self.genome.to_dict(), "perplexity": round(self.perplexity, 4),
@@ -2096,26 +2098,34 @@ class GenesisReport:
 
     @property
     def topology_active(self) -> bool:
-        """Whether real neural architectures were built (torch) or the search ran over the
-        always-runnable n-gram substrate (stdlib), where the layer topology has no effect."""
-        return self.backend == "torch" and self.champion_kind == "genesis"
+        """Whether real neural architectures were built and trained — on the torch path
+        (``genesis``) OR the real pure-NumPy substrate (``genesis_np``). Only the bare ``kngram``
+        fallback leaves the layer topology with no effect on the score."""
+        return self.champion_kind in ("genesis", "genesis_np")
 
     @property
     def note(self) -> str:
-        """A one-line honest caveat so 'she designed her own brain' is never over-read."""
-        if self.topology_active:
+        """A one-line honest caveat so 'she designed her own brain' is never over- or under-read."""
+        if self.champion_kind == "genesis":
             return ("neural architecture search: real PyTorch topologies were built, "
                     "micro-trained and scored — the layer design drives fitness")
-        return ("word n-gram substrate search (no torch): the neural layer topology was NOT built "
-                "or trained and does not affect the score; only the n-gram order AND the searched "
-                "smoothing method (the learning rule on a bare machine) do. Each candidate is scored "
-                "over multiple resampled folds (denoised). Install .[foundry] (torch, ideally a GPU) "
-                "for genuine neural architecture + learning-paradigm search")
+        if self.champion_kind == "genesis_np":
+            return ("neural architecture search (NumPy substrate, no torch): NYXARA's OWN designed "
+                    "topology — her layers, her synthesized mixer and her searched optimizer — was "
+                    "really built, trained and scored on real held-out perplexity; the layer design "
+                    "drives fitness. Small-scale but genuine; install .[foundry] (torch/GPU) to "
+                    "search at larger scale")
+        return ("word n-gram substrate search (no torch or NumPy): the neural layer topology was NOT "
+                "built or trained and does not affect the score; only the n-gram order AND the "
+                "searched smoothing method do. Each candidate is scored over multiple resampled "
+                "folds (denoised)")
 
     def champion_describe(self) -> str:
-        """Substrate-aware champion description (honest on the stdlib path)."""
-        if self.topology_active:
+        """Substrate-aware champion description (honest on every path)."""
+        if self.champion_kind == "genesis":
             return self.champion.describe()
+        if self.champion_kind == "genesis_np":
+            return f"{self.champion.describe()} — built + trained on the NumPy substrate (no torch)"
         return (f"word n-gram substrate (order={self.champion.ngram_order}, "
                 f"smoothing={self.champion.learning_rule.smoothing}) — neural topology inert "
                 f"[latent: {self.champion.describe()}]")
@@ -2393,9 +2403,21 @@ class NeuralArchitectureSearch:
                          seed: int) -> BaseLanguageModel:
         if backend == "torch" and _HAS_TORCH:
             return GenesisModel(genome)
-        # stdlib substrate is the COHERENT word-level n-gram model (not byte gibberish), and its
-        # *smoothing method* is the searched learning rule on a bare machine — so perplexity is a
-        # meaningful, word-level fitness signal that also rewards a better-generalizing paradigm.
+        # Torch-free, but the designed topology is NOT inert: when the substrate is "numpy"/"auto"
+        # build NYXARA's own architecture for REAL in pure NumPy — her layers, her synthesized mixer,
+        # her searched optimizer, all actually built, trained and graded (GenesisNumpyModel). This is
+        # what makes "she designs and trains her own brain, herself" real on a bare machine. "ngram"
+        # selects the faster always-on word-Kneser-Ney substrate (layer topology inert).
+        substrate = str(getattr(self.cfg, "substrate", "auto")).lower()
+        if substrate in ("numpy", "auto"):
+            try:
+                from nyxara.growth.genesis_numpy import GenesisNumpyModel, _HAS_NUMPY
+                if _HAS_NUMPY and genome.layers:
+                    return GenesisNumpyModel(genome, seed=seed)
+            except Exception:  # noqa: BLE001 — numpy build failed; fall to the n-gram substrate
+                pass
+        # Final fallback: the COHERENT word-level n-gram (not byte gibberish), whose *smoothing
+        # method* is itself the searched learning rule, so a search still runs on the barest machine.
         return WordKNGramLM(order=max(2, genome.ngram_order), seed=seed,
                             smoothing=genome.learning_rule.smoothing)
 
@@ -2404,6 +2426,8 @@ class NeuralArchitectureSearch:
                   folds: Sequence[Tuple[Sequence[str], Sequence[str]]], backend: str,
                   *, steps: Optional[int] = None) -> Candidate:
         t0 = time.monotonic()
+        # honest kind: derive it from the model actually built (torch GenesisModel → "genesis";
+        # the real NumPy brain → "genesis_np"; the n-gram fallback → "kngram"), not from a guess.
         kind = "genesis" if (backend == "torch" and _HAS_TORCH) else "kngram"
         train_steps = int(self.cfg.micro_train_steps if steps is None else steps)
         fold_pps: List[float] = []
@@ -2411,6 +2435,7 @@ class NeuralArchitectureSearch:
         for i, (train_texts, eval_texts) in enumerate(folds):
             try:
                 model = self._build_substrate(genome, backend, seed=genome.seed + 7919 * i)
+                kind = getattr(model, "kind", kind)
                 model.train_on(train_texts, steps=train_steps, seed=genome.seed + 7919 * i)
                 pps = [model.perplexity(t) for t in eval_texts]
                 finite = [p for p in pps if p != float("inf")]
@@ -2428,7 +2453,8 @@ class NeuralArchitectureSearch:
         else:
             pp, std, quality, params, align, factor = float("inf"), 0.0, 0.0, 0, 0.0, 0.0
         seconds = time.monotonic() - t0
-        flops = genome.estimated_flops() if kind == "genesis" else 0.0
+        # the topology is real on both the torch and the NumPy substrate, so the FLOPs proxy applies
+        flops = genome.estimated_flops() if kind in ("genesis", "genesis_np") else 0.0
         base = fitness(quality, params, seconds,
                        quality_weight=self.cfg.quality_weight, speed_weight=self.cfg.speed_weight,
                        hardware_weight=float(getattr(self.cfg, "hardware_weight", 0.0)),
@@ -2673,7 +2699,7 @@ class NeuralArchitectureSearch:
             g = c.genome
             spec = ModelSpec(kind="genesis", genome=g.to_dict(), n_embd=g.n_embd,
                              block_size=g.block_size, seed=g.seed, ngram_order=g.ngram_order,
-                             ngram_k=g.ngram_k)
+                             ngram_k=g.ngram_k, substrate=str(getattr(self.cfg, "substrate", "auto")))
             model = build_model(spec)
             model.train_on(texts, steps=train_steps, seed=g.seed)
             members.append(model)
@@ -2689,7 +2715,7 @@ class NeuralArchitectureSearch:
         g = self._champion.genome
         return ModelSpec(kind="genesis", genome=g.to_dict(), n_embd=g.n_embd,
                          block_size=g.block_size, seed=g.seed, ngram_order=g.ngram_order,
-                         ngram_k=g.ngram_k)
+                         ngram_k=g.ngram_k, substrate=str(getattr(self.cfg, "substrate", "auto")))
 
     def all_reports(self) -> List[GenesisReport]:
         return list(self._reports)
