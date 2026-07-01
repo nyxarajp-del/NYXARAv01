@@ -30,7 +30,6 @@ Touches no source, no weights, no gate — it only *measures* against truth it c
 
 from __future__ import annotations
 
-import math
 import re
 import time
 from dataclasses import dataclass, field

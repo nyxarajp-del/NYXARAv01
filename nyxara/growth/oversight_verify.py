@@ -30,7 +30,6 @@ toward vetoing a risky edit, because the cost of a missed regression is higher t
 from __future__ import annotations
 
 import ast
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
