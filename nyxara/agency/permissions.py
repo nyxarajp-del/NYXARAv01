@@ -52,6 +52,8 @@ __all__ = [
     "PermissionDecision",
     "PermissionPolicy",
     "build_default_policy",
+    "grant_full_operational_control",
+    "build_sovereign_policy",
 ]
 
 
@@ -391,6 +393,55 @@ class PermissionPolicy:
 def build_default_policy() -> PermissionPolicy:
     """The standard, owner-loyal policy with the default capability envelopes."""
     return PermissionPolicy()
+
+
+# --------------------------------------------------------------------------- #
+# Full operational control — the Master widens NYXARA's autonomous envelope
+# --------------------------------------------------------------------------- #
+# The complete set of *operational* capabilities. Deliberately EXCLUDES the three
+# owner-exclusive caps (MODIFY_RULES / MODIFY_PERMISSIONS / MODIFY_IDENTITY): those are
+# refused to any non-owner authority at step 2 of `check` (Rule 8) *before* grants are ever
+# consulted, so a grant could never bless them anyway — they stay reserved to the Master.
+_OPERATIONAL_CAPS: Tuple[Capability, ...] = (
+    Capability.FS_READ, Capability.FS_WRITE, Capability.FS_DELETE,
+    Capability.NET_OUT, Capability.NET_IN, Capability.NET_DEFENSE,
+    Capability.PROC_EXEC, Capability.CODE_EXEC, Capability.SELF_MODIFY,
+    Capability.SPAWN_AGENT, Capability.PKG_INSTALL, Capability.ACCOUNT_MODIFY,
+    Capability.SECRETS_ACCESS, Capability.MESSAGE_SEND, Capability.SCHEDULE_TASK,
+    Capability.TOOL_CALL,
+)
+
+
+def grant_full_operational_control(
+    policy: PermissionPolicy, *, authority: Authority = Authority.OWNER
+) -> PermissionPolicy:
+    """Install standing, Master-blessed grants over every *operational* capability.
+
+    Each grant is maximal — any target, any risk (up to CRITICAL), irreversible actions
+    allowed, unlimited uses, never expiring — so NYXARA may act on the OS on her own
+    initiative (shell, files incl. delete, network, packages, self-improvement) without
+    escalating each action to the Master.
+
+    What this **does not** touch, by construction:
+
+    * the three owner-exclusive caps (modifying the Rules, this policy, or NYXARA's identity)
+      remain reserved to the Master — no grant can reach them (Rule 8);
+    * the kernel's corrigibility, oversight and ``/scram`` gates are outside the permission
+      policy entirely and are left fully intact.
+
+    Requires the Master's authority (``policy.grant`` refuses anything else, Rule 8).
+    """
+    for cap in _OPERATIONAL_CAPS:
+        policy.grant(f"full-control:{cap.value}", cap,
+                     max_risk=RiskTier.CRITICAL, scopes=(),
+                     reversible_only=False, max_uses=None, expires_in=None,
+                     authority=authority)
+    return policy
+
+
+def build_sovereign_policy() -> PermissionPolicy:
+    """A default policy with full operational control pre-granted (owner-blessed)."""
+    return grant_full_operational_control(build_default_policy())
 
 
 # --------------------------------------------------------------------------- #
