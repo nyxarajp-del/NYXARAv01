@@ -14,8 +14,11 @@ from pathlib import Path
 from nyxara.growth.meta_meta import (
     MetaGenome,
     MetaImprovementController,
+    MetaResearchGenome,
+    MindSearchGenome,
     RecursiveMetaController,
     SearchGenome,
+    build_engine_meta_tower,
 )
 
 
@@ -176,3 +179,121 @@ def test_master_can_raise_ceilings_but_never_past_the_hard_guard():
         assert r == MetaGenome._HARD_MAX_RECURSION and e == MetaGenome._HARD_MAX_EDITS
     finally:
         MetaGenome._ABS_MAX_RECURSION, MetaGenome._ABS_MAX_EDITS = snap
+
+
+# --------------------------------------------------------------------------- #
+# EVERY layer: the SAME recursive tower governs the mind-evolution and meta-research SEARCHES,
+# not only the code engine (Rule 4, "optimize every layer"). The generic tower is genome-agnostic.
+# --------------------------------------------------------------------------- #
+class _Cfg:
+    """A minimal engine config carrying just the standard meta-tower flags."""
+    meta_meta_enabled = True
+    meta_levels = 3
+    meta_tower_can_grow = True
+    meta_levels_hard_max = 6
+
+
+def test_mind_search_genome_clamps_and_applies():
+    g = MindSearchGenome(population=999, inner_generations=-3, islands=99,
+                         plateau_window=1, min_improvement=1.0)
+    assert g.population == 24 and g.inner_generations == 1 and g.islands == 4
+    assert g.plateau_window == 2 and g.min_improvement == 1e-2
+
+    class _ME:
+        population = inner_generations = islands = plateau_window = 0
+        min_improvement = 0.0
+
+    class _S:
+        mind_evolution = _ME()
+
+    s = _S()
+    MindSearchGenome(population=12, inner_generations=8, islands=3,
+                     plateau_window=5, min_improvement=5e-4).apply(s)
+    assert s.mind_evolution.population == 12 and s.mind_evolution.inner_generations == 8
+    assert s.mind_evolution.islands == 3 and s.mind_evolution.plateau_window == 5
+    assert abs(s.mind_evolution.min_improvement - 5e-4) < 1e-12
+
+
+def test_meta_research_genome_clamps_and_applies():
+    assert MetaResearchGenome(max_candidates=999).max_candidates == 12
+    assert MetaResearchGenome(max_candidates=-4).max_candidates == 1
+
+    class _MR:
+        max_candidates = 0
+
+    class _S:
+        meta_research = _MR()
+
+    s = _S()
+    MetaResearchGenome(max_candidates=7).apply(s)
+    assert s.meta_research.max_candidates == 7
+
+
+def test_builder_disabled_returns_none():
+    class _Off(_Cfg):
+        meta_meta_enabled = False
+
+    assert build_engine_meta_tower(MindSearchGenome(), cfg=_Off()) is None
+
+
+def test_builder_makes_generic_tower_over_the_engine_genome():
+    t = build_engine_meta_tower(MindSearchGenome(), cfg=_Cfg())
+    assert isinstance(t, RecursiveMetaController) and t.height == 3
+    assert isinstance(t.levels[0].champion, MindSearchGenome)   # engine search at the bottom
+    for k in range(1, 3):
+        assert isinstance(t.levels[k].champion, SearchGenome)   # search-about-search above
+    # a non-MetaGenome tower carries NO code-engine execution caps in its status (they are the code
+    # engine's, and must not leak into or be mutated by another engine's tower)
+    assert "recursion_cap" not in t.status() and "edits_cap" not in t.status()
+
+
+def _mind_env(g: MindSearchGenome) -> float:
+    """A landscape where a WIDER population + MORE inner generations genuinely raise capability."""
+    return 0.01 * g.population + 0.02 * g.inner_generations
+
+
+def _drive_engine(tower: RecursiveMetaController, env, n: int) -> None:
+    rng = tower.levels[0]._rng
+    for _ in range(n):
+        tower.record(env(tower.active) + 0.0002 * (rng.random() - 0.5))
+        tower.maybe_evolve()
+
+
+def test_mind_tower_climbs_and_compounds_to_every_level():
+    # fix the height (acceleration is exercised separately by the code-engine tests) so the
+    # "compounds to every level" property is isolated from freshly-appended, not-yet-evolved rungs
+    class _CfgNoGrow(_Cfg):
+        meta_tower_can_grow = False
+
+    tower = build_engine_meta_tower(MindSearchGenome(population=4, inner_generations=2),
+                                    cfg=_CfgNoGrow(), seed=5)
+    _drive_engine(tower, _mind_env, 600)
+    # the bottom champion climbed toward the paying region (wider/deeper search)
+    assert tower.champion.population > 4
+    assert tower.champion.inner_generations > 2
+    # and the compounding signal reached EVERY level — real recursion at every layer
+    assert tower.height == 3
+    for k, ctrl in enumerate(tower.levels):
+        assert ctrl.generation >= 1, f"mind tower level {k} never evolved — no compounding"
+
+
+def test_research_tower_climbs_toward_more_yield():
+    # more candidates ⇒ more validated theories here, so the tower should widen invention breadth
+    tower = build_engine_meta_tower(MetaResearchGenome(max_candidates=2), cfg=_Cfg(), seed=8)
+    _drive_engine(tower, lambda g: float(g.max_candidates), 400)
+    assert tower.champion.max_candidates > 2
+
+
+def test_engine_tower_persistence_round_trips(tmp_path):
+    path = Path(tmp_path) / "mind_meta_meta.json"
+    t1 = build_engine_meta_tower(MindSearchGenome(population=4, inner_generations=2), cfg=_Cfg(),
+                                 seed=3, persist_path=path)
+    _drive_engine(t1, _mind_env, 200)
+    assert path.exists()
+    gens = [c.generation for c in t1.levels]
+    champ0 = t1.champion.to_dict()
+
+    t2 = build_engine_meta_tower(MindSearchGenome(), cfg=_Cfg(), seed=99, persist_path=path)
+    assert [c.generation for c in t2.levels] == gens
+    assert t2.champion.to_dict() == champ0
+    assert isinstance(t2.levels[0].champion, MindSearchGenome)   # level-0 class survives reload

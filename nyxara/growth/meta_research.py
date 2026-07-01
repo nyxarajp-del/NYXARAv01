@@ -68,13 +68,14 @@ class MetaResearchReport:
     validated: int = 0
     integrated: int = 0
     elapsed_ms: float = 0.0
+    meta_meta: Optional[Dict[str, Any]] = None    # the recursive tower over this engine's SEARCH
 
     def to_dict(self) -> Dict[str, Any]:
         return {"topic": self.topic, "timestamp": self.timestamp,
                 "open_questions": self.open_questions,
                 "candidates": [c.to_dict() for c in self.candidates],
                 "validated": self.validated, "integrated": self.integrated,
-                "elapsed_ms": round(self.elapsed_ms, 1)}
+                "elapsed_ms": round(self.elapsed_ms, 1), "meta_meta": self.meta_meta}
 
 
 # --------------------------------------------------------------------------- #
@@ -108,6 +109,42 @@ class MetaResearcher:
         self.journal = journal
         self.permissions = permissions
         self._reports: List[MetaResearchReport] = []
+        # the recursive meta tower over THIS engine's own search (built once, lazily)
+        self._meta: Any = None
+        self._meta_built = False
+
+    # ---------------------------------------------------------------------- #
+    # The recursive meta tower over the meta-research SEARCH (invention breadth)
+    # ---------------------------------------------------------------------- #
+    def _meta_meta(self) -> Any:
+        """The recursive tower that evolves HOW WIDE this engine invents (built once, best-effort).
+
+        Level 0 evolves a :class:`~nyxara.growth.meta_meta.MetaResearchGenome` (``max_candidates``);
+        each higher level evolves how the level below searches — recursion at every level, scored by
+        the real validated-theory yield per pass. Off under the hermetic test profile or when
+        ``meta_research.meta_meta_enabled`` is unset.
+        """
+        if self._meta_built:
+            return self._meta
+        self._meta_built = True
+        cfg = getattr(self.settings, "meta_research", None)
+        try:
+            if str(getattr(getattr(self.settings, "profile", None), "value", "")) == "test":
+                return None
+            if cfg is None or not bool(getattr(cfg, "meta_meta_enabled", True)):
+                return None
+            from nyxara.growth.meta_meta import MetaResearchGenome, build_engine_meta_tower
+            seed = MetaResearchGenome(max_candidates=int(getattr(cfg, "max_candidates", 4)))
+            path = None
+            try:
+                from pathlib import Path
+                path = Path(self.settings.paths.data_dir) / "foundry" / "research_meta_meta.json"
+            except Exception:  # noqa: BLE001 — persistence is a bonus, never required
+                path = None
+            self._meta = build_engine_meta_tower(seed, cfg=cfg, persist_path=path, seed=202)
+        except Exception:  # noqa: BLE001 — the tower is a capability, never required
+            self._meta = None
+        return self._meta
 
     # ---------------------------------------------------------------------- #
     # Public API
@@ -117,6 +154,13 @@ class MetaResearcher:
         t0 = time.monotonic()
         cfg = self.settings.meta_research
         report = MetaResearchReport(topic=topic)
+        # META-META: bind the recursive tower's champion (or on-trial) invention breadth BEFORE this
+        # pass, so it invents under the config currently being measured; scored below by real yield.
+        meta = self._meta_meta()
+        if meta is not None:
+            from nyxara.growth.meta_meta import MetaResearchGenome
+            if isinstance(meta.active, MetaResearchGenome):
+                meta.active.apply(self.settings)   # writes max_candidates into cfg (same object)
         try:
             report.open_questions = self._gather(topic)
             candidates = self._invent(topic, report.open_questions)[:int(cfg.max_candidates)]
@@ -131,6 +175,15 @@ class MetaResearcher:
         except Exception as exc:  # noqa: BLE001 — a failed run is data, not a crash
             report.open_questions.append(f"meta-research error: {exc}")
         report.elapsed_ms = (time.monotonic() - t0) * 1000
+        # META-META: score the active invention breadth by the real validated-theory yield this pass
+        # (new verified knowledge created), then evolve the whole recursive tower.
+        if meta is not None:
+            try:
+                meta.record(float(report.validated))
+                meta.maybe_evolve()
+                report.meta_meta = meta.status()
+            except Exception:  # noqa: BLE001 — the tower is advisory, never fatal to a pass
+                report.meta_meta = None
         self._reports.append(report)
         return report
 

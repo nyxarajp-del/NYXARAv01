@@ -290,12 +290,13 @@ class EvolutionLineageReport:
     plateaued: bool = False
     lessons: Dict[str, Any] = field(default_factory=dict)
     architecture: Optional[Dict[str, Any]] = None     # a Genesis NAS step, when escalated
+    meta_meta: Optional[Dict[str, Any]] = None         # the recursive tower over this engine's SEARCH
 
     def to_dict(self) -> Dict[str, Any]:
         return {"generations": [g.to_dict() for g in self.generations],
                 "champion": dict(self.champion), "promoted": self.promoted,
                 "plateaued": self.plateaued, "lessons": dict(self.lessons),
-                "architecture": self.architecture}
+                "architecture": self.architecture, "meta_meta": self.meta_meta}
 
     def summary(self) -> str:
         lines = ["=" * 70, "NYXARA mind-evolution lineage", "=" * 70]
@@ -460,6 +461,48 @@ class MindEvolutionEngine:
         # the persisted Intelligence Index (the smarter-or-not measuring stick), shared format
         from nyxara.growth.intelligence import IntelligenceIndex
         self._intel = IntelligenceIndex(memory=self.memory, settings=self.settings)
+        # the recursive meta tower over THIS engine's own search (built once, lazily)
+        self._meta: Any = None
+        self._meta_built = False
+
+    # ---------------------------------------------------------------------- #
+    # The recursive meta tower over the mind-evolution SEARCH itself
+    # ---------------------------------------------------------------------- #
+    def _meta_meta(self) -> Any:
+        """The recursive tower that evolves HOW this engine searches (built once, best-effort).
+
+        Level 0 evolves a :class:`~nyxara.growth.meta_meta.MindSearchGenome` (population, inner
+        generations, islands, plateau patience, strictness); each higher level evolves how the level
+        below searches — recursion at every level, scored by the real per-pass capability gain. Off
+        under the hermetic test profile or when ``mind_evolution.meta_meta_enabled`` is unset.
+        """
+        if self._meta_built:
+            return self._meta
+        self._meta_built = True
+        cfg = getattr(self.settings, "mind_evolution", None)
+        try:
+            if str(getattr(getattr(self.settings, "profile", None), "value", "")) == "test":
+                return None
+            if cfg is None or not bool(getattr(cfg, "meta_meta_enabled", True)):
+                return None
+            from nyxara.growth.meta_meta import MindSearchGenome, build_engine_meta_tower
+            seed = MindSearchGenome(
+                population=int(getattr(cfg, "population", 8)),
+                inner_generations=int(getattr(cfg, "inner_generations", 6)),
+                islands=int(getattr(cfg, "islands", 1)),
+                plateau_window=int(getattr(cfg, "plateau_window", 3)),
+                min_improvement=float(getattr(cfg, "min_improvement", 1e-4)))
+            path = None
+            try:
+                from pathlib import Path
+                path = Path(self.settings.paths.data_dir) / "foundry" / "mind_meta_meta.json"
+            except Exception:  # noqa: BLE001 — persistence is a bonus, never required
+                path = None
+            self._meta = build_engine_meta_tower(seed, cfg=cfg, persist_path=path,
+                                                 seed=self.seed + 101)
+        except Exception:  # noqa: BLE001 — the tower is a capability, never required
+            self._meta = None
+        return self._meta
 
     # ---------------------------------------------------------------------- #
     # Measuring one genome — the real benchmark score, minus compute cost
@@ -526,6 +569,21 @@ class MindEvolutionEngine:
                     else ReasoningGenome())
         champ_metrics = self.measure(champion)
         prior_state = self._intel.load() or self._intel_blank()
+
+        # META-META: bind the recursive tower's champion (or on-trial) SEARCH knobs BEFORE this pass
+        # runs, so the pass searches under the configuration currently being measured. The tower is
+        # scored below by the momentum-free RAW capability gain this pass actually produced.
+        from nyxara.growth.meta_meta import MindSearchGenome
+        meta = self._meta_meta()
+        base_score = float(champ_metrics["mean_score"])
+        if meta is not None and isinstance(meta.active, MindSearchGenome):
+            active = meta.active
+            active.apply(self.settings)
+            population = int(active.population)
+            inner_generations = int(active.inner_generations)
+            islands = int(active.islands)
+            plateau_window = int(active.plateau_window)
+            min_improvement = float(active.min_improvement)
 
         run: List[Generation] = []
         promoted = 0
@@ -612,9 +670,22 @@ class MindEvolutionEngine:
         if plateaued and escalate_architecture:
             architecture = self.evolve_architecture()
 
+        # META-META: score the active SEARCH config by the realised RAW capability gain this pass
+        # (final champion mean_score − the pass's starting champion mean_score — momentum-free, so a
+        # search config cannot game its own fitness), then evolve the whole recursive tower.
+        meta_status: Optional[Dict[str, Any]] = None
+        if meta is not None:
+            try:
+                meta.record(float(champ_metrics["mean_score"]) - base_score)
+                meta.maybe_evolve()
+                meta_status = meta.status()
+            except Exception:  # noqa: BLE001 — the tower is advisory, never fatal to a pass
+                meta_status = None
+
         return EvolutionLineageReport(generations=run, champion=champion.to_dict(),
                                       promoted=promoted, plateaued=plateaued,
-                                      lessons=lessons.to_dict(), architecture=architecture)
+                                      lessons=lessons.to_dict(), architecture=architecture,
+                                      meta_meta=meta_status)
 
     # ---------------------------------------------------------------------- #
     # The gauntlet — never relax these

@@ -317,3 +317,34 @@ def test_no_escalation_when_not_plateaued(isolated):
                                  escalate_architecture=True)
     if not rep.plateaued:
         assert rep.architecture is None
+
+
+# --------------------------------------------------------------------------- #
+# recursive meta tower over the mind-evolution SEARCH itself — wired end to end
+# --------------------------------------------------------------------------- #
+def test_meta_meta_tower_sealed_under_default_settings():
+    # default (test-profile, env-sealed) settings → the tower never builds; behaviour is unchanged
+    assert _engine()._meta_meta() is None
+
+
+def test_meta_meta_tower_wires_and_surfaces_on_report(tmp_path):
+    from nyxara.kernel.config import NyxaraSettings, Profile
+
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.mind_evolution.meta_meta_enabled = True      # flag on (env seal only affects get_settings())
+    s.mind_evolution.meta_levels = 2
+    s.paths.data_dir = str(tmp_path)               # isolate tower persistence to tmp
+
+    eng = MindEvolutionEngine(benchmark=_toy_bench(), base_sampler=_noisy_sampler(),
+                              seed=7, settings=s, data_dir=tmp_path)
+    assert eng._meta_meta() is not None            # builds under a non-test profile with the flag on
+
+    from nyxara.growth.meta_meta import MindSearchGenome
+    assert isinstance(eng._meta.active, MindSearchGenome)   # level 0 evolves THIS engine's search
+
+    rep = eng.evolve_generations(1, enact=False, population=6, inner_generations=2)
+    # the recursive tower's status is surfaced on the report — wired end to end
+    assert rep.meta_meta is not None
+    assert "champion" in rep.meta_meta and "levels" in rep.meta_meta
+    # and this pass bound a bounded search population from the tower's active genome into the config
+    assert 2 <= s.mind_evolution.population <= 24
