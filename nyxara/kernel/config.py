@@ -1626,6 +1626,12 @@ class NyxaraSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NYXARA_",
         env_nested_delimiter="__",
+        # Honour the documented `cp .env.example .env` workflow: load a local
+        # `.env` if present. Real process environment variables still win over
+        # the file (pydantic-settings default precedence), so container/CI
+        # overrides are never masked by a stray checked-out `.env`.
+        env_file=".env",
+        env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
         validate_assignment=True,
