@@ -284,23 +284,116 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.NET_OUT, risk=RiskTier.LOW))
 
     # ---- generic HTTP: always available so any web API is reachable ---- #
-    def _http_request(url: str, method: str = "GET", body: str = "") -> Dict[str, Any]:
+    def _http_request(url: str, method: str = "GET", body: str = "",
+                      headers: str = "") -> Dict[str, Any]:
         from nyxara.agency.net_request import http_request
         kw: Dict[str, Any] = {}
         if web is not None:
             kw = {"timeout_s": float(web.timeout_s), "max_bytes": int(web.max_bytes),
                   "allow_private": bool(web.allow_private),
                   "max_redirects": int(web.max_redirects)}
-        return http_request(url, method=method, body=body or None, **kw)
+        # headers is a JSON object string, e.g. '{"Authorization": "Bearer …"}'. Parse it
+        # safely — a malformed value fails as data rather than raising, and only a JSON object
+        # of string→string is accepted (anything else is ignored).
+        parsed_headers: Optional[Dict[str, str]] = None
+        if headers and headers.strip():
+            try:
+                obj = json.loads(headers)
+                if isinstance(obj, dict):
+                    parsed_headers = {str(k): str(v) for k, v in obj.items()}
+                else:
+                    return {"ok": False, "status": 0, "headers": {}, "body": "",
+                            "error": "headers must be a JSON object"}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "status": 0, "headers": {}, "body": "",
+                        "error": f"invalid headers JSON: {exc}"}
+        return http_request(url, method=method, body=body or None,
+                            headers=parsed_headers, **kw)
 
     _add(ToolSpec("http_request", handler=_http_request,
-                  description="make an HTTP(S) request (GET/POST/…); returns "
+                  description="make an HTTP(S) request (GET/POST/…) with optional custom "
+                              "headers (JSON object, e.g. auth/bearer tokens); returns "
                               "status/headers/body, failing as data",
                   params=[ToolParam("url", "str"),
                           ToolParam("method", "str", required=False, default="GET"),
-                          ToolParam("body", "str", required=False, default="")],
+                          ToolParam("body", "str", required=False, default=""),
+                          ToolParam("headers", "str", required=False, default="",
+                                    description="JSON object of header name->value")],
                   capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
                   target_param="url"))
+
+    # ---- agency config: named remote credentials + SSH posture (fall back to settings) ---- #
+    agency_cfg = None
+    try:
+        from nyxara.kernel.config import get_settings
+        agency_cfg = get_settings().agency
+    except Exception:  # noqa: BLE001 — config is a convenience here, never a hard dep
+        agency_cfg = None
+
+    def _resolve_remote(host: str, username: str, port: int,
+                        credential_name: str) -> Dict[str, Any]:
+        """Resolve SSH connection params, preferring a stored `remote_hosts` credential.
+
+        If ``credential_name`` matches a configured host, its host/port/user/secret/key are
+        used as the base and any explicitly passed host/username/port override it. Otherwise
+        the passed values are used directly. Returns a kwargs dict for remote_exec.
+        """
+        base: Dict[str, Any] = {"host": host, "port": port, "username": username,
+                                "password": None, "key_path": None}
+        if credential_name and agency_cfg is not None:
+            for spec in getattr(agency_cfg, "remote_hosts", []) or []:
+                if spec.name == credential_name:
+                    base["host"] = host or spec.host
+                    base["port"] = port if port != 22 else int(spec.port)
+                    base["username"] = username or spec.username
+                    base["password"] = _secret(spec.password)
+                    base["key_path"] = spec.key_path
+                    break
+        allow_private = True if agency_cfg is None else bool(
+            getattr(agency_cfg, "remote_allow_private", True))
+        base["allow_private"] = allow_private
+        return base
+
+    # ---- remote login: verify an SSH credential/host (reversible probe) ---- #
+    def _ssh_login(host: str = "", username: str = "", port: int = 22,
+                   credential_name: str = "") -> Dict[str, Any]:
+        from nyxara.agency.remote_exec import ssh_login
+        p = _resolve_remote(host, username, port, credential_name)
+        return ssh_login(p["host"], port=p["port"], username=p["username"],
+                         password=p["password"], key_path=p["key_path"],
+                         allow_private=p["allow_private"])
+
+    _add(ToolSpec("ssh_login", handler=_ssh_login,
+                  description="log in to an external host over SSH to verify the credential "
+                              "works (verify-only, reversible); failing as data",
+                  params=[ToolParam("host", "str", required=False, default=""),
+                          ToolParam("username", "str", required=False, default=""),
+                          ToolParam("port", "int", required=False, default=22),
+                          ToolParam("credential_name", "str", required=False, default="",
+                                    description="name of a stored remote_hosts credential")],
+                  capability=Capability.REMOTE_EXEC, risk=RiskTier.MODERATE,
+                  reversible=True, target_param="host"))
+
+    # ---- remote command: run a command on an external host over SSH ---- #
+    def _ssh_exec(host: str = "", command: str = "", username: str = "", port: int = 22,
+                  credential_name: str = "") -> Dict[str, Any]:
+        from nyxara.agency.remote_exec import ssh_exec
+        p = _resolve_remote(host, username, port, credential_name)
+        return ssh_exec(p["host"], command, port=p["port"], username=p["username"],
+                        password=p["password"], key_path=p["key_path"],
+                        allow_private=p["allow_private"])
+
+    _add(ToolSpec("ssh_exec", handler=_ssh_exec,
+                  description="run a command on an external host over SSH; returns "
+                              "exit_status/stdout/stderr, failing as data",
+                  params=[ToolParam("host", "str", required=False, default=""),
+                          ToolParam("command", "str"),
+                          ToolParam("username", "str", required=False, default=""),
+                          ToolParam("port", "int", required=False, default=22),
+                          ToolParam("credential_name", "str", required=False, default="",
+                                    description="name of a stored remote_hosts credential")],
+                  capability=Capability.REMOTE_EXEC, risk=RiskTier.HIGH,
+                  reversible=False, target_param="host"))
 
     # ---- multimodal perception: image / audio / documents (heavy ML import-guarded) ---- #
     def _inspect_image(path: str) -> Dict[str, Any]:

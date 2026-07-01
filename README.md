@@ -463,6 +463,19 @@ around the control law.
   isolated-subprocess sandbox, no network, wall-clock timeout), `run_shell`, and an
   SSRF-guarded `http_request` — all capability-gated, so they escalate to the Master rather
   than auto-run under mere autonomy.
+* **Autonomous network actions** — `agency/net_request.py` + `agency/remote_exec.py`. Three
+  wired, real capabilities NYXARA drives *herself* (deterministic agency code, not the LLM):
+  (1) **arbitrary internet requests** — `http_request` now takes custom `headers` (a JSON
+  object), so she can send `Authorization`/bearer tokens and call authenticated APIs, still
+  behind the SSRF guard; (2) **remote logins** — `ssh_login` verifies a credential/host over
+  SSH; (3) **commands to external systems** — `ssh_exec` runs a command on an external host
+  over SSH and returns exit status / stdout / stderr. The remote tools use paramiko
+  (`pip install 'nyxara[remote]'`; import-guarded — absent, they fail as data), resolve stored
+  credentials from `agency.remote_hosts` by `credential_name`, and vet the host fail-closed.
+  A new `REMOTE_EXEC` capability gates them; the Master's standing grant
+  (`grant_autonomous_remote`, `NYXARA_AGENCY__AUTONOMOUS_REMOTE=true`, on by default) lets them
+  run on her own initiative — while `/scram`, oversight, corrigibility, the owner-exclusive
+  caps (Rule 8) and the refusal of `UNTRUSTED` authority all stay intact.
 * **First-principles reasoning** — `mind/first_principles.py`. NYXARA does not just *recall*
   answers, she **derives** them from the rules of a domain. The `FirstPrinciplesFaculty` is a
   verifiable engine (it wins over any neural guess) spanning four domains: **physics**

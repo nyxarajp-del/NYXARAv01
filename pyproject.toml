@@ -44,6 +44,9 @@ embeddings = ["sentence-transformers>=2.7"]
 generate = ["diffusers>=0.27", "torch>=2.2", "pyttsx3>=2.90"]
 # Security
 security = ["cryptography>=42.0"]
+# Remote execution — SSH login + remote commands on external hosts (agency/remote_exec.py).
+# Import-guarded: without it the remote tools return an install hint as data instead of running.
+remote = ["paramiko>=3.4"]
 # Observability
 observe = ["structlog>=24.1"]
 # HTTP/WebSocket API server (reach NYXARA from an app/phone/web, not only the console)
