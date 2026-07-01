@@ -1456,8 +1456,10 @@ class AgencyConfig(BaseModel):
     # so she acts on the OS on her own initiative WITHOUT escalating each action. The sovereign
     # boundaries are deliberately untouched: the /scram kill-switch, oversight and corrigibility
     # remain, and modifying the Rules, this policy, or her identity stays owner-exclusive
-    # (Rule 8). OFF by default — safe-by-default; the owner opts in.
-    full_control: bool = Field(default=False)
+    # (Rule 8). ON by default (the Master's standing choice) — a fresh NYXARA reaches the whole
+    # OS on her own initiative from first boot. Set NYXARA_AGENCY__FULL_CONTROL=false to disable
+    # and fall back to the conservative, per-action-escalating envelope.
+    full_control: bool = Field(default=True)
     # --- autonomous internet (agency/permissions.grant_autonomous_internet) --- #
     # A NETWORK-SCOPED sibling of full_control: the Master pre-grants NYXARA a standing
     # autonomous envelope over her INTERNET capabilities so she may browse, search, call web

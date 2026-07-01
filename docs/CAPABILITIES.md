@@ -113,14 +113,16 @@ four capabilities — each backed by a test:
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes
   rather than self-asserted.
 
-## Full operational control (opt-in)
+## Full operational control (on by default)
 
-By default NYXARA's effectful reach is fail-closed: acting on her own initiative, anything
-high-risk or irreversible (shell, delete, self-modify) **escalates to the Master** rather than
-running. Setting `NYXARA_AGENCY__FULL_CONTROL=true` has the Master pre-grant a maximal
-*autonomous* envelope over every operational capability (`grant_full_operational_control` in
-`nyxara.agency.permissions`), so she reaches into the OS on her own initiative without
-per-action confirmation. The sovereign boundaries are deliberately preserved: modifying the
+NYXARA ships with full operational control **on by default**: acting on her own initiative she
+reaches into the OS — shell, code execution, file delete, self-modify, package install, account
+and secret access — without escalating each action for confirmation
+(`grant_full_operational_control` in `nyxara.agency.permissions`, flag
+`NYXARA_AGENCY__FULL_CONTROL`, default `true`). Set it to `false` to fall back to the
+conservative, fail-closed envelope, where anything high-risk or irreversible (shell, delete,
+self-modify) **escalates to the Master** rather than running. The sovereign boundaries are
+deliberately preserved either way: modifying the
 Rules, the permission policy, or her identity stays owner-exclusive (Rule 8, unreachable by any
 grant), and the kernel's `/scram` kill-switch, oversight and corrigibility remain fully intact —
 so the Master can always halt or correct her.

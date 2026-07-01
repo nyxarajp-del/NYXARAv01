@@ -116,21 +116,32 @@ def test_installer_requires_owner_authority():
         grant_autonomous_internet(pol, authority=Authority.AUTONOMOUS)
 
 
-# -------------------- orchestrator wiring: ON by default -------------------- #
-def test_orchestrator_grants_internet_by_default():
-    # No env set: the feature is on by default, so a fresh core already reaches the web.
-    from nyxara.kernel.orchestrator import NyxaraCore
-    core = NyxaraCore()
-    assert core.permissions.grants(), "internet grants should be installed by default"
-    d = core.permissions.check(_auto(Capability.NET_OUT, target="https://example.com",
-                                     risk=RiskTier.MODERATE))
-    assert d.allowed and d.rule_basis == "grant"
-    # but the machine stays off-limits to autonomy
-    e = core.permissions.check(_auto(Capability.PROC_EXEC, target="ls"))
-    assert e.escalated
+# -------------------- orchestrator wiring: the internet-only grant path -------------------- #
+def test_orchestrator_grants_internet_when_only_internet_on(monkeypatch):
+    # Isolate the internet path: full_control (the broader default) off, internet on.
+    monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "false")
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "true")
+    from nyxara.kernel import config as cfg
+    cfg.reload_settings()
+    try:
+        from nyxara.kernel.orchestrator import NyxaraCore
+        core = NyxaraCore()
+        assert core.permissions.grants(), "internet grants should be installed"
+        d = core.permissions.check(_auto(Capability.NET_OUT, target="https://example.com",
+                                         risk=RiskTier.MODERATE))
+        assert d.allowed and d.rule_basis == "grant"
+        # with ONLY the internet envelope, the machine stays off-limits to autonomy
+        e = core.permissions.check(_auto(Capability.PROC_EXEC, target="ls"))
+        assert e.escalated
+    finally:
+        monkeypatch.delenv("NYXARA_AGENCY__FULL_CONTROL", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
+        cfg.reload_settings()
 
 
 def test_orchestrator_respects_disable_flag(monkeypatch):
+    # Both envelopes off → the conservative default policy, no standing grants.
+    monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()  # settings are a cached singleton; re-read with the env set
@@ -143,5 +154,6 @@ def test_orchestrator_respects_disable_flag(monkeypatch):
                                          risk=RiskTier.MODERATE))
         assert d.escalated
     finally:
+        monkeypatch.delenv("NYXARA_AGENCY__FULL_CONTROL", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         cfg.reload_settings()

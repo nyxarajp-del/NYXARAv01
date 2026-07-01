@@ -85,6 +85,21 @@ def test_installer_requires_owner_authority():
         grant_full_operational_control(pol, authority=Authority.AUTONOMOUS)
 
 
+# -------------------- ON by default -------------------- #
+def test_full_control_is_on_by_default():
+    # No env set: a fresh core reaches the whole OS on her own initiative.
+    from nyxara.kernel.orchestrator import NyxaraCore
+    core = NyxaraCore()
+    assert core.permissions.grants(), "full-control grants should be installed by default"
+    # autonomous shell now runs (via grant) instead of escalating
+    d = core.permissions.check(_auto(Capability.PROC_EXEC, target="ls"))
+    assert d.allowed and d.rule_basis == "grant"
+    # but the sovereign core stays reserved to the Master (Rule 8)
+    for cap in (Capability.MODIFY_RULES, Capability.MODIFY_PERMISSIONS, Capability.MODIFY_IDENTITY):
+        e = core.permissions.check(_auto(cap))
+        assert e.denied and e.rule_basis == "Rule 8"
+
+
 # -------------------- orchestrator wiring honours the flag -------------------- #
 def test_orchestrator_installs_grants_when_flag_on(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "true")
