@@ -146,7 +146,8 @@ def cad_model(spec: str) -> Dict[str, Any]:
 def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                         knowledge: Any = None, enable_code: bool = True,
                         max_read_bytes: int = 200_000,
-                        web: Any = None, governor: Any = None) -> ToolRegistry:
+                        web: Any = None, governor: Any = None,
+                        vault: Any = None) -> ToolRegistry:
     """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
 
     ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
@@ -335,11 +336,17 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
         """Resolve SSH connection params, preferring a stored `remote_hosts` credential.
 
         If ``credential_name`` matches a configured host, its host/port/user/secret/key are
-        used as the base and any explicitly passed host/username/port override it. Otherwise
-        the passed values are used directly. Returns a kwargs dict for remote_exec.
+        used as the base and any explicitly passed host/username/port override it. When that
+        host carries a ``credential_name`` of its own (or the passed ``credential_name`` is
+        itself a vault entry), the secret is resolved from the sovereign CredentialVault at
+        call time via :meth:`CredentialVault.use` — it is injected into the paramiko connect
+        inside the kernel and never surfaces in config, logs, or the LLM. Returns a kwargs
+        dict for remote_exec, possibly carrying ``vault_name``/``vault_kind`` for late binding.
         """
         base: Dict[str, Any] = {"host": host, "port": port, "username": username,
-                                "password": None, "key_path": None}
+                                "password": None, "key_path": None,
+                                "vault_name": "", "vault_kind": ""}
+        vault_ref = ""
         if credential_name and agency_cfg is not None:
             for spec in getattr(agency_cfg, "remote_hosts", []) or []:
                 if spec.name == credential_name:
@@ -348,20 +355,65 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                     base["username"] = username or spec.username
                     base["password"] = _secret(spec.password)
                     base["key_path"] = spec.key_path
+                    vault_ref = getattr(spec, "credential_name", None) or ""
                     break
+        # A vault reference (from the host spec, or the credential_name used directly) resolves
+        # the real secret from NYXARA's encrypted store instead of any plaintext in config.
+        if not vault_ref and credential_name and vault is not None and credential_name in vault:
+            vault_ref = credential_name
+        if vault_ref and vault is not None and vault_ref in vault:
+            try:
+                meta = vault.metadata(vault_ref)
+                base["vault_name"] = vault_ref
+                base["vault_kind"] = meta.get("kind", "")
+                base["password"] = None  # never carry plaintext in the params dict
+                base["key_path"] = None
+            except Exception:  # noqa: BLE001 — fall back to any inline secret already resolved
+                pass
         allow_private = True if agency_cfg is None else bool(
             getattr(agency_cfg, "remote_allow_private", True))
         base["allow_private"] = allow_private
         return base
+
+    def _with_remote_secret(p: Dict[str, Any], call):
+        """Run ``call(password, key_path)`` binding a vault secret late (never returned).
+
+        For a vault-referenced credential the plaintext (an SSH private key or a password) is
+        materialised only inside :meth:`CredentialVault.use` — a private key to a transient
+        0600 keyfile removed in ``finally``, a password passed straight through — so the secret
+        stays inside the kernel and the audit log records the access."""
+        name = p.get("vault_name")
+        if not name or vault is None:
+            return call(p["password"], p["key_path"])
+
+        def _apply(secret: str):
+            if p.get("vault_kind") == "ssh_key":
+                import os as _os
+                import tempfile
+                fd, kp = tempfile.mkstemp(prefix="nyxara_key_", suffix=".pem")
+                try:
+                    _os.write(fd, secret.encode("utf-8"))
+                    _os.close(fd)
+                    _os.chmod(kp, 0o600)
+                    return call(None, kp)
+                finally:
+                    try:
+                        _os.remove(kp)
+                    except OSError:
+                        pass
+            return call(secret, None)
+
+        from nyxara.agency.permissions import Authority as _Authority
+        return vault.use(name, _apply, authority=_Authority.DELEGATED)
 
     # ---- remote login: verify an SSH credential/host (reversible probe) ---- #
     def _ssh_login(host: str = "", username: str = "", port: int = 22,
                    credential_name: str = "") -> Dict[str, Any]:
         from nyxara.agency.remote_exec import ssh_login
         p = _resolve_remote(host, username, port, credential_name)
-        return ssh_login(p["host"], port=p["port"], username=p["username"],
-                         password=p["password"], key_path=p["key_path"],
-                         allow_private=p["allow_private"])
+        return _with_remote_secret(p, lambda password, key_path: ssh_login(
+            p["host"], port=p["port"], username=p["username"],
+            password=password, key_path=key_path, allow_private=p["allow_private"]))
 
     _add(ToolSpec("ssh_login", handler=_ssh_login,
                   description="log in to an external host over SSH to verify the credential "
@@ -379,9 +431,9 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   credential_name: str = "") -> Dict[str, Any]:
         from nyxara.agency.remote_exec import ssh_exec
         p = _resolve_remote(host, username, port, credential_name)
-        return ssh_exec(p["host"], command, port=p["port"], username=p["username"],
-                        password=p["password"], key_path=p["key_path"],
-                        allow_private=p["allow_private"])
+        return _with_remote_secret(p, lambda password, key_path: ssh_exec(
+            p["host"], command, port=p["port"], username=p["username"],
+            password=password, key_path=key_path, allow_private=p["allow_private"]))
 
     _add(ToolSpec("ssh_exec", handler=_ssh_exec,
                   description="run a command on an external host over SSH; returns "

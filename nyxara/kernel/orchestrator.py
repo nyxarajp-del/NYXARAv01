@@ -311,6 +311,8 @@ class NyxaraCore:
         # associative recall — context-cued retrieval over memory (queried before reasoning)
         self.retriever = retriever if retriever is not None else (
             self._build_retriever(self.memory) if enable_memory else None)
+        # the sovereign credential vault (built before tools so the credential tools can bind it)
+        self.vault = self._build_vault() if enable_tools else None
         # the governed, executable toolset shares the kernel's policy + governor
         self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
         # learned procedural skills (experiential learning) — persisted via memory
@@ -667,6 +669,25 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — recall is a capability, never a hard dependency
             return None
 
+    def _build_vault(self) -> Any:
+        """The sovereign Credential Vault (guard/vault.py) — passwords, API keys, SSH keys,
+        OAuth tokens under NYXARA's own encrypted, owner-gated control (Rules 1·6·7·8).
+
+        Lazy and best-effort like every other faculty: keyed off a durable Master key
+        (passphrase or a 0600 machine key), wired to the live guardian so denied access
+        raises a real threat. Never blocks boot — the vault is a capability, not a hard dep."""
+        try:
+            from nyxara.kernel.config import get_settings
+            if not get_settings().vault.enabled:
+                return None
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            pass
+        try:
+            from nyxara.guard.vault import CredentialVault
+            return CredentialVault.bootstrap(guardian=self.guardian)
+        except Exception:  # noqa: BLE001 — the vault is a capability, never a hard dependency
+            return None
+
     def _build_tools(self) -> Any:
         try:
             from nyxara.agency.default_tools import build_default_tools
@@ -679,7 +700,8 @@ class NyxaraCore:
                 web_cfg = None
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
             tools = build_default_tools(registry, memory=self.memory,
-                                        web=web_cfg, governor=self.governor)
+                                        web=web_cfg, governor=self.governor,
+                                        vault=self.vault)
             # Domain tool packs (researcher/coder/maker): register their pure-stdlib,
             # read-only tools (extractive summariser, Python syntax checker) onto the SAME
             # gated registry. Idempotent and non-executing — they widen reach without a
@@ -689,6 +711,15 @@ class NyxaraCore:
                 register_packs(registry)
             except Exception:  # noqa: BLE001 — packs are a convenience, never a hard dep
                 pass
+            # Credential tools: store/list/rotate/revoke/ssh-keygen/authenticated-request over
+            # the sovereign vault. Every call still clears capability/risk/authority/sandbox;
+            # mutations escalate to the Master, and no tool ever returns a plaintext secret.
+            if self.vault is not None:
+                try:
+                    from nyxara.agency.credential_tools import build_credential_tools
+                    build_credential_tools(registry, self.vault)
+                except Exception:  # noqa: BLE001 — credential tools are a capability, not a dep
+                    pass
             self._connect_mcp(registry)
             return tools
         except Exception:  # noqa: BLE001

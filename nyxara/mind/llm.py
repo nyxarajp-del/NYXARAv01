@@ -64,6 +64,18 @@ __all__ = [
 ]
 
 
+def _vault_key(provider: str) -> Optional[str]:
+    """Last-resort provider-key lookup from NYXARA's sovereign vault (config/env win first).
+
+    Lets provider API keys live under NYXARA's own encrypted control instead of the
+    environment. Import-guarded and best-effort — never raises, never blocks a call."""
+    try:
+        from nyxara.guard.vault import resolve_api_key
+        return resolve_api_key(provider)
+    except Exception:  # noqa: BLE001 — the vault is a capability, never a hard dep
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # Messages & request/response
 # --------------------------------------------------------------------------- #
@@ -265,7 +277,8 @@ class AnthropicProvider(LLMProviderBase):
     def _key(self) -> Optional[str]:
         import os
         k = self.settings.llm.anthropic_api_key
-        return (k.get_secret_value() if k else None) or os.getenv("ANTHROPIC_API_KEY")
+        return ((k.get_secret_value() if k else None) or os.getenv("ANTHROPIC_API_KEY")
+                or _vault_key("anthropic"))
 
     def available(self) -> bool:
         try:
@@ -314,7 +327,8 @@ class OpenAIProvider(LLMProviderBase):
     def _key(self) -> Optional[str]:
         import os
         k = self.settings.llm.openai_api_key
-        return (k.get_secret_value() if k else None) or os.getenv("OPENAI_API_KEY")
+        return ((k.get_secret_value() if k else None) or os.getenv("OPENAI_API_KEY")
+                or _vault_key("openai"))
 
     def available(self) -> bool:
         try:
@@ -378,7 +392,8 @@ class GroqProvider(LLMProviderBase):
     def _key(self) -> Optional[str]:
         import os
         k = self.settings.llm.groq_api_key
-        return (k.get_secret_value() if k else None) or os.getenv("GROQ_API_KEY")
+        return ((k.get_secret_value() if k else None) or os.getenv("GROQ_API_KEY")
+                or _vault_key("groq"))
 
     def available(self) -> bool:
         try:
