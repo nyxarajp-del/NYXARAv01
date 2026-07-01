@@ -1072,6 +1072,19 @@ class SelfImprovementConfig(BaseModel):
     # with no torch it is simply unavailable and the dependency-free ledger path stands.
     use_payoff_forecaster: bool = False
     forecaster_warmup: int = Field(default=16, ge=2, le=10000)
+    # --- continuous, self-driven RSI in the live idle loop (kernel/orchestrator.idle_maintenance) --- #
+    # The unifying GrowthEngine tower (reflect → consolidate → abstract-concepts → improve_system
+    # [RSI + meta_meta] → evolve_mind → meta_research) is, by default, only driven by the CLI/the
+    # AutonomicLoop — neither of which a normal console/server session starts. With ``continuous``
+    # ON, NYXARA's own background idle loop runs that tower HERSELF on a throttled cadence: she
+    # redesigns her reasoning engine, evaluates+rebuilds her own architecture, improves how she
+    # improves, and invents+tests new theories — with no human command and no external LLM. Each
+    # sub-engine keeps its own internal cadence (``self_improvement_every`` / ``mind_evolution`` /
+    # ``meta_research``); ``idle_growth_every`` is the outer throttle (every N idle maintenance
+    # passes) so the console stays responsive. Oversight-gated and TEST-sealed like every other
+    # self-modifying idle faculty. Disable with NYXARA_SELF_IMPROVEMENT__CONTINUOUS=false.
+    continuous: bool = True
+    idle_growth_every: int = Field(default=20, ge=1)   # run the tower every N idle passes
 
 
 class SelfOptimizationConfig(BaseModel):

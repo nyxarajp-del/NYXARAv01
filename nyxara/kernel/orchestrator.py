@@ -591,12 +591,33 @@ class NyxaraCore:
         self.explorer = self._build_explorer() if enable_growth else None
         # tasks she could not answer this turn, queued to self-bootstrap on the next idle tick
         self._explore_queue: List[str] = []
+        # Continuous Recursive Self-Improvement (the unifier): the GrowthEngine tower bound to the
+        # LIVE core — reflect → consolidate → abstract-concepts → improve_system (RSI + meta_meta)
+        # → evolve_mind → meta_research, each on its own internal cadence. Built last so it composes
+        # every faculty above. Driven by NYXARA HERSELF from idle_maintenance on a throttled cadence
+        # (config self_improvement.continuous / idle_growth_every), so she runs all six self-
+        # improvements with no human command and no external LLM. Off when growth is disabled.
+        self.growth_engine = self._build_growth_engine() if enable_growth else None
+        self._growth_idle_count = 0          # outer throttle for the continuous idle growth tower
+        self._last_growth_report: Any = None  # the most recent GrowthReport (surfaced in report())
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
             self.soul.check_integrity()   # character must be intact at boot (Rule 4)
 
     # ---- default faculty construction (kept lazy to avoid import cycles) ---- #
+    def _build_growth_engine(self) -> Any:
+        """The unifying GrowthEngine bound to this live core (drives continuous RSI on idle).
+
+        Lazy and best-effort: its heavy sub-engines (recursive self-improvement, mind-evolution,
+        meta-research, foundry) are only constructed on first use, and any failure leaves the
+        engine absent — continuous growth is a capability, never a hard dependency."""
+        try:
+            from nyxara.growth.autolearn import GrowthEngine
+            return GrowthEngine.from_core(self)
+        except Exception:  # noqa: BLE001 — the growth tower is optional; never block boot
+            return None
+
     def _build_memory(self) -> Any:
         try:
             from nyxara.memory.store import MemoryStore
@@ -4203,6 +4224,45 @@ class NyxaraCore:
                                      salience=0.7)
             except Exception:  # noqa: BLE001
                 pass
+        # 4e++++) Continuous Recursive Self-Improvement — NYXARA improves HERSELF while idle, with
+        #         no human command and no external LLM: she redesigns her reasoning engine
+        #         (mind_evolution), evaluates + rebuilds her own cognitive architecture
+        #         (recursive_improvement / self_optimize — gated, reversible source edits), improves
+        #         HOW she improves (meta_meta), and invents + sandbox-tests new theories
+        #         (meta_research). The unifying GrowthEngine.run() already routes to each on its own
+        #         internal cadence, so one call lights up all six self-improvements. Heavy → its own
+        #         slow OUTER idle cadence so the console stays responsive; AutoForge already ran above,
+        #         so do_foundry=False here (no double-forge). Oversight-gated and config-flagged
+        #         (self_improvement.continuous, sealed OFF in the hermetic test suite) exactly like
+        #         every other self-modifying idle faculty; enactment safety lives in each engine's
+        #         own verify-or-rollback gauntlet, never bypassed here.
+        if self.growth_engine is not None and self.oversight.gate():
+            try:
+                from nyxara.kernel.config import get_settings
+                si_cfg = get_settings().self_improvement
+                if bool(getattr(si_cfg, "continuous", False)):
+                    self._growth_idle_count += 1
+                    every = max(1, int(getattr(si_cfg, "idle_growth_every", 20)))
+                else:
+                    every = 0
+                if every and self._growth_idle_count % every == 0:
+                    greport = self.growth_engine.run(do_foundry=False)
+                    self._last_growth_report = greport
+                    report["growth"] = greport.to_dict()
+                    moves = [k for k in ("mind_evolution", "self_improvement", "meta_research")
+                             if getattr(greport, k, None)]
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        ("self-improvement cycle: " + (", ".join(moves) or "reflect+consolidate"))[:80],
+                        salience=0.72)
+                    if self._insight_q is not None and moves:
+                        try:
+                            self._insight_q.put(
+                                "I improved myself just now (" + ", ".join(moves) + ").")
+                        except Exception:  # noqa: BLE001
+                            pass
+            except Exception:  # noqa: BLE001 — continuous growth is a capability, never fatal to idle
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -5341,6 +5401,30 @@ class NyxaraCore:
             try:
                 rep["meta_learning"] = self.meta_learning_engine.summary()
             except Exception:  # noqa: BLE001 — meta-learning report is best-effort, never fatal
+                pass
+        # Continuous Recursive Self-Improvement — proof she runs the whole tower HERSELF on idle:
+        # whether it is wired+armed, how many idle growth passes have fired, and what the last one
+        # did (reasoning redesign / architecture rebuild / theory invention). Best-effort.
+        if getattr(self, "growth_engine", None) is not None:
+            try:
+                from nyxara.kernel.config import get_settings
+                si_cfg = get_settings().self_improvement
+                csi: Dict[str, Any] = {
+                    "armed": bool(getattr(si_cfg, "continuous", False)),
+                    "idle_every": int(getattr(si_cfg, "idle_growth_every", 20)),
+                    "idle_passes": int(getattr(self, "_growth_idle_count", 0)),
+                }
+                last = getattr(self, "_last_growth_report", None)
+                if last is not None:
+                    csi["last"] = {
+                        "redesigned_reasoning": bool(getattr(last, "mind_evolution", None)),
+                        "rebuilt_architecture": bool(getattr(last, "self_improvement", None)),
+                        "invented_theories": bool(getattr(last, "meta_research", None)),
+                        "abstractions": int(getattr(last, "abstractions", 0) or 0),
+                        "lessons_stored": int(getattr(last, "lessons_stored", 0) or 0),
+                    }
+                rep["continuous_self_improvement"] = csi
+            except Exception:  # noqa: BLE001 — continuous-RSI status is best-effort, never fatal
                 pass
         if getattr(self, "fractal_temporal", None) is not None:
             try:
