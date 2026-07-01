@@ -58,6 +58,7 @@ __all__ = [
     "SelfImprovementConfig",
     "MetaResearchConfig",
     "GuardConfig",
+    "VaultConfig",
     "AgencyConfig",
     "MCPServerSpec",
     "MCPConfig",
@@ -1451,6 +1452,30 @@ class RemoteHostSpec(BaseModel):
     username: str = ""
     password: Optional[SecretStr] = None        # masked in logs; None -> key/agent auth
     key_path: Optional[str] = None              # path to a private key file, if used
+    # Preferred: reference a secret held in the CredentialVault (guard/vault.py) instead of
+    # inlining a plaintext password/key. When set, remote_exec resolves the secret from the
+    # vault at call time and it never appears in config, logs, or the LLM's context.
+    credential_name: Optional[str] = None
+
+
+class VaultConfig(BaseModel):
+    """Credential Vault posture (guard/vault.py) — passwords, API keys, SSH keys, OAuth tokens
+    held under NYXARA's own encrypted, owner-gated, tamper-evident store (Rules 1·6·7·8)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    cipher: Literal["aes-256-gcm"] = "aes-256-gcm"
+    # Auto-lock the in-memory key after this many idle seconds (0 -> never auto-lock).
+    autolock_idle_s: float = Field(default=0.0, ge=0.0)
+    # Re-encrypt the whole store under a fresh key version on this cadence (drives
+    # guard-side key rotation; 0 -> manual only). Mirrors GuardConfig.key_rotation_hours.
+    rotation_hours: float = Field(default=0.0, ge=0.0)
+    # Explicit vault/audit file overrides; None -> paths.keys_dir / paths.audit_dir defaults.
+    path: Optional[str] = None
+    audit_path: Optional[str] = None
+    # Let LLM/web faculties fall back to the vault for API keys when env/config supply none.
+    provider_key_fallback: bool = True
 
 
 class AgencyConfig(BaseModel):
@@ -1749,6 +1774,7 @@ class NyxaraSettings(BaseSettings):
     metaprompt: MetaPromptConfig = Field(default_factory=MetaPromptConfig)
     explorer: ExplorerConfig = Field(default_factory=ExplorerConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
+    vault: VaultConfig = Field(default_factory=VaultConfig)
     agency: AgencyConfig = Field(default_factory=AgencyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
