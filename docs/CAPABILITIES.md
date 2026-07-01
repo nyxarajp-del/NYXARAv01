@@ -145,3 +145,26 @@ prompt-injection screening on fetched pages, and the governor's rate limit — p
 sovereign boundaries as above (`/scram`, oversight, corrigibility, and the owner-exclusive caps
 under Rule 8). When on, the always-on daemon also runs at "max level" (`inner_life`), so the
 background mind proactively researches the Master's standing goals on the live web.
+
+## Privilege escalation (off by default, opt-in)
+
+The local machine's root. NYXARA can run **privileged (root/admin) OS operations** —
+`privileged_shell` runs a command under `sudo`, `change_os_permissions` performs an elevated
+`chmod`/`chown`, and `privilege_status` reports the current elevation posture (read-only). The
+real work is done by NYXARA's own deterministic executor (`nyxara.agency.privilege`): a genuine
+`sudo` call that actually runs — not a simulated result.
+
+This is governed as a first-class capability, `PRIV_ESCALATE`, with a **CRITICAL, irreversible**
+envelope, so autonomously each call **escalates to the Master** unless the Master installed the
+explicit, opt-in privilege grant (`grant_privilege_escalation` in `nyxara.agency.permissions`,
+flag `NYXARA_AGENCY__PRIVILEGE_ESCALATION`, default **`false`**). It is the single most dangerous
+OS surface, so — unlike full control / autonomous internet / autonomous remote — it ships **off**.
+`NYXARA_AGENCY__SUDO_CREDENTIAL_NAME` names the Credential-Vault entry holding the sudo password
+(unset ⇒ passwordless `NOPASSWD` sudo or an already-root process).
+
+**It elevates *with* authorization, never around it.** NYXARA uses only the credential the Master
+holds — she never exploits a vulnerability, never prompts a human, never guesses or brute-forces a
+credential. By construction `PRIV_ESCALATE` is **excluded** from full control's operational
+envelope, so turning `FULL_CONTROL` on never confers root — only the privilege flag does. The
+`/scram` kill-switch, oversight and corrigibility gates and the owner-exclusive caps (Rule 8) all
+remain fully intact, so the Master can always halt or correct her.

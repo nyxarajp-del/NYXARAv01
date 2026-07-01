@@ -1541,6 +1541,27 @@ class AgencyConfig(BaseModel):
     # When True (default, aligning with WEB__ALLOW_PRIVATE) loopback/private/link-local hosts are
     # reachable over SSH; set false to refuse them (fail-closed to public hosts only).
     remote_allow_private: bool = Field(default=True)
+    # --- privilege escalation (agency/permissions.grant_privilege_escalation) --- #
+    # The local machine's root: a standing autonomous envelope over PRIV_ESCALATE so NYXARA may
+    # run privileged (root/admin) OS operations on her own initiative WITHOUT escalating each
+    # action — `sudo` commands and OS permission/ownership changes — using the sudo credential
+    # the Master stored (`sudo_credential_name`). This is the single most dangerous OS surface,
+    # so unlike full_control / autonomous_internet / autonomous_remote it is OFF by default
+    # (opt-in only). It elevates *with* the Master's own credential — never an exploit, guess or
+    # brute-force — and is deliberately NOT part of full_control's _OPERATIONAL_CAPS, so turning
+    # full_control on never confers root; only this flag does. /scram + oversight + corrigibility
+    # and the owner-exclusive caps (Rule 8) all remain intact. Set
+    # NYXARA_AGENCY__PRIVILEGE_ESCALATION=true to enable.
+    privilege_escalation: bool = Field(default=False)
+    # Privileged OS operations are effectful and usually irreversible; True (default) means
+    # autonomy is NOT blocked by a reversibility floor. Set false to make irreversible privileged
+    # actions escalate to the Master while reversible ones still run autonomously.
+    privilege_escalation_allow_irreversible: bool = Field(default=True)
+    # Name of the vault/config credential holding the sudo password NYXARA feeds to `sudo -S`.
+    # None (default) => assume passwordless (NOPASSWD) sudo or an already-root process; NYXARA
+    # never prompts a human and never guesses. Store the secret in the Credential Vault under
+    # this name (guard/vault.py) to enable password-based elevation.
+    sudo_credential_name: Optional[str] = Field(default=None)
 
 
 class MCPServerSpec(BaseModel):
