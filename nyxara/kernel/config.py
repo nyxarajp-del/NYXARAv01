@@ -1458,6 +1458,25 @@ class AgencyConfig(BaseModel):
     # remain, and modifying the Rules, this policy, or her identity stays owner-exclusive
     # (Rule 8). OFF by default — safe-by-default; the owner opts in.
     full_control: bool = Field(default=False)
+    # --- autonomous internet (agency/permissions.grant_autonomous_internet) --- #
+    # A NETWORK-SCOPED sibling of full_control: the Master pre-grants NYXARA a standing
+    # autonomous envelope over her INTERNET capabilities so she may browse, search, call web
+    # APIs, and (at wider scopes) message/manage accounts on her own initiative WITHOUT
+    # escalating each action. Unlike full_control this NEVER grants the OS danger surface
+    # (shell, code-exec, file-delete, self-modify, package-install) — autonomy stays on the
+    # wire, not on the machine. The SSRF guard, prompt-injection screening and governor rate
+    # limits on the web tools, plus /scram + oversight + corrigibility and the owner-exclusive
+    # caps (Rule 8), all remain intact. ON by default (the Master's standing choice); it is a
+    # deliberate departure from full_control's OFF default, justified because the envelope is
+    # network-only and reversible-only. Set false to disable.
+    autonomous_internet: bool = Field(default=True)
+    # How far the internet grant reaches: "read" = browse/fetch/HTTP (net.out/net.in);
+    # "write" = + outbound messaging (message.send); "full" = + accounts & secrets
+    # (account.modify / secrets.access) so she can log in and use API keys.
+    autonomous_internet_scope: Literal["read", "write", "full"] = "full"
+    # When False (default) even high-risk web actions run autonomously only while REVERSIBLE
+    # — an irreversible one still escalates to the Master. True lifts that last floor too.
+    autonomous_internet_allow_irreversible: bool = Field(default=False)
 
 
 class MCPServerSpec(BaseModel):

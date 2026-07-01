@@ -124,3 +124,22 @@ per-action confirmation. The sovereign boundaries are deliberately preserved: mo
 Rules, the permission policy, or her identity stays owner-exclusive (Rule 8, unreachable by any
 grant), and the kernel's `/scram` kill-switch, oversight and corrigibility remain fully intact —
 so the Master can always halt or correct her.
+
+## Autonomous internet (on by default)
+
+A network-scoped sibling of full control, **on by default**. NYXARA reaches the live web on
+her own initiative — `web_search`, `web_fetch`, `http_request`, and (at wider scopes) outbound
+messaging, account management and secret use — without escalating each call.
+`grant_autonomous_internet` (in `nyxara.agency.permissions`) installs the standing owner-blessed
+grants; the flag `NYXARA_AGENCY__AUTONOMOUS_INTERNET` (default `true`) drives it, with
+`…_SCOPE` (`read` | `write` | `full`, default `full`) selecting reach and
+`…_ALLOW_IRREVERSIBLE` (default `false`) controlling whether irreversible web actions may run
+autonomously or still escalate.
+
+Crucially this is **narrower than full control**: it never grants the OS danger surface — shell,
+code execution, file delete, self-modify and package installs still escalate. Everything that
+keeps the web safe stays in force: the SSRF guard (no loopback/private targets),
+prompt-injection screening on fetched pages, and the governor's rate limit — plus the same
+sovereign boundaries as above (`/scram`, oversight, corrigibility, and the owner-exclusive caps
+under Rule 8). When on, the always-on daemon also runs at "max level" (`inner_life`), so the
+background mind proactively researches the Master's standing goals on the live web.

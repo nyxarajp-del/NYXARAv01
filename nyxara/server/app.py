@@ -173,15 +173,26 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         if cfg.autonomic:
             try:
                 from nyxara.kernel.autonomic import AutonomicLoop
+                # When the Master has granted autonomous internet (or full control), run the
+                # background mind at "max level": inner_life draws its agenda from her own
+                # proactive engine (incl. the internet-research initiative) + default-mode
+                # stream, so the always-on daemon continuously researches and acts on the live
+                # web on her own cadence — still through every sovereign gate. Off by config
+                # (autonomous_internet=false, full_control=false) it keeps the fixed reflective
+                # repertoire, unchanged.
+                inner_life = bool(settings.agency.full_control
+                                  or settings.agency.autonomous_internet)
                 loop = AutonomicLoop(
                     app_.state.core,
                     interval_s=cfg.autonomic_interval_s,
                     growth_every=cfg.autonomic_growth_every,
+                    inner_life=inner_life,
                 )
                 loop.start()  # schedules an asyncio task on the running server loop
                 app_.state.autonomic = loop
                 print(f"NYXARA background mind (AutonomicLoop) started "
-                      f"[interval {cfg.autonomic_interval_s}s, growth_every {cfg.autonomic_growth_every}]")
+                      f"[interval {cfg.autonomic_interval_s}s, growth_every {cfg.autonomic_growth_every}, "
+                      f"inner_life {inner_life}]")
             except Exception as exc:  # noqa: BLE001 — never let the mind block the server
                 app_.state.autonomic = None
                 print(f"NYXARA background mind failed to start: {exc}")

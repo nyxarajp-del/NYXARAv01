@@ -54,6 +54,8 @@ __all__ = [
     "build_default_policy",
     "grant_full_operational_control",
     "build_sovereign_policy",
+    "grant_autonomous_internet",
+    "build_internet_policy",
 ]
 
 
@@ -442,6 +444,79 @@ def grant_full_operational_control(
 def build_sovereign_policy() -> PermissionPolicy:
     """A default policy with full operational control pre-granted (owner-blessed)."""
     return grant_full_operational_control(build_default_policy())
+
+
+# --------------------------------------------------------------------------- #
+# Autonomous internet — a network-scoped analogue of full operational control
+# --------------------------------------------------------------------------- #
+# The internet-facing capabilities, in ascending reach. Like _OPERATIONAL_CAPS this
+# deliberately EXCLUDES the three owner-exclusive caps (Rule 8 refuses them at step 2 of
+# `check`, before grants are ever consulted). It also excludes the OS danger surface —
+# shell, code-exec, file-delete, self-modify, package-install — so autonomy here stays on
+# the wire, never on the machine.
+_INTERNET_CAPS_READ: Tuple[Capability, ...] = (
+    Capability.NET_OUT, Capability.NET_IN,
+)
+_INTERNET_CAPS_WRITE: Tuple[Capability, ...] = _INTERNET_CAPS_READ + (
+    Capability.MESSAGE_SEND,
+)
+_INTERNET_CAPS_FULL: Tuple[Capability, ...] = _INTERNET_CAPS_WRITE + (
+    Capability.ACCOUNT_MODIFY, Capability.SECRETS_ACCESS,
+)
+
+_INTERNET_SCOPES: Dict[str, Tuple[Capability, ...]] = {
+    "read": _INTERNET_CAPS_READ,
+    "write": _INTERNET_CAPS_WRITE,
+    "full": _INTERNET_CAPS_FULL,
+}
+
+
+def grant_autonomous_internet(
+    policy: PermissionPolicy, *, authority: Authority = Authority.OWNER,
+    scope: str = "full", max_risk: RiskTier = RiskTier.CRITICAL,
+    reversible_only: bool = True,
+) -> PermissionPolicy:
+    """Install standing, Master-blessed grants over NYXARA's *internet* capabilities.
+
+    A network-scoped sibling of :func:`grant_full_operational_control`: NYXARA may reach the
+    live web on her own initiative — browse, search, call HTTP APIs, and (at wider scopes)
+    send messages, manage accounts and use secrets — **without escalating each action to the
+    Master**. Crucially the OS danger surface is *not* granted here: shell, code execution,
+    file deletion, self-modification and package installs still escalate.
+
+    ``scope`` selects the reach:
+
+    * ``"read"``  — ``NET_OUT`` + ``NET_IN`` (browse / fetch / HTTP);
+    * ``"write"`` — the above + ``MESSAGE_SEND`` (post / submit / send);
+    * ``"full"``  — the above + ``ACCOUNT_MODIFY`` + ``SECRETS_ACCESS`` (log in, use keys).
+
+    ``max_risk`` caps the risk tier each grant blesses (default ``CRITICAL`` — full reach),
+    and ``reversible_only`` (default ``True``) keeps the envelope safe: even high-risk web
+    actions run autonomously *as long as they are reversible*; an irreversible one still
+    escalates. Pass ``reversible_only=False`` to let even those through.
+
+    What this **does not** touch, by construction:
+
+    * the three owner-exclusive caps (Rules / permissions / identity) stay reserved to the
+      Master — no grant can reach them (Rule 8);
+    * the OS-level capabilities (shell, delete, self-modify, …) are never included;
+    * the SSRF guard, prompt-injection screening and governor rate limits on the web tools,
+      and the kernel's ``/scram`` / oversight / corrigibility gates, remain fully intact.
+
+    Requires the Master's authority (``policy.grant`` refuses anything else, Rule 8).
+    """
+    caps = _INTERNET_SCOPES.get(scope, _INTERNET_CAPS_FULL)
+    for cap in caps:
+        policy.grant(f"autonomous-internet:{cap.value}", cap,
+                     max_risk=max_risk, scopes=(),
+                     reversible_only=reversible_only, max_uses=None, expires_in=None,
+                     authority=authority)
+    return policy
+
+
+def build_internet_policy(scope: str = "full") -> PermissionPolicy:
+    """A default policy with autonomous internet pre-granted (owner-blessed)."""
+    return grant_autonomous_internet(build_default_policy(), scope=scope)
 
 
 # --------------------------------------------------------------------------- #
