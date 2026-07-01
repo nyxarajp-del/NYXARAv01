@@ -1509,6 +1509,16 @@ class ServerConfig(BaseModel):
     # Cap multi-step agent runs requested over the wire.
     max_agent_steps: int = Field(default=8, ge=1, le=64)
     request_timeout_s: float = Field(default=120.0, gt=0)
+    # --- always-on daemon: run the background mind inside the server process --- #
+    # When ``autonomic`` is ON, the server also starts the AutonomicLoop
+    # (kernel/autonomic.py) in its own asyncio task, so one long-running process is both
+    # a reachable API *and* NYXARA's continuous, self-directed background mind — every
+    # autonomic turn still passes the identical gates. This is what the ``nyxara-daemon``
+    # entry point and the systemd/Windows service units switch on for an always-alive
+    # deployment. OFF by default so a plain ``nyxara-serve`` behaves exactly as before.
+    autonomic: bool = False
+    autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
+    autonomic_growth_every: int = Field(default=0, ge=0)      # learning pass every N ticks (0 = never)
 
 
 class WebConfig(BaseModel):

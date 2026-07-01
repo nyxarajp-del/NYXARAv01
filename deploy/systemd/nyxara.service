@@ -1,0 +1,50 @@
+# NYXARA — always-on sovereign daemon (systemd system service).
+#
+# This is a TEMPLATE. The placeholders (@...@) are filled in by
+# scripts/install_service.sh with the real paths on this machine. You can also copy it
+# to /etc/systemd/system/nyxara.service and edit the paths by hand.
+#
+# It keeps NYXARA (HTTP server + background mind) alive:
+#   * starts automatically on every boot (WantedBy=multi-user.target),
+#   * restarts within a few seconds if it ever crashes or is killed (Restart=always),
+#   * runs before/without any login, as a dedicated unprivileged user.
+#
+# Manage it:   systemctl status|stop|start|restart nyxara
+# Logs:        journalctl -u nyxara -f
+# Disable:     systemctl disable --now nyxara
+
+[Unit]
+Description=NYXARA — sovereign cognitive daemon (API + background mind)
+Documentation=https://github.com/nyxarajp-del/NYXARAv01
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@WORKDIR@
+# Optional: environment (API keys, NYXARA_SERVER__API_TOKEN, HOST/PORT). The leading '-'
+# means "do not fail if the file is absent".
+EnvironmentFile=-@WORKDIR@/.env
+# The daemon entry point turns the background mind on and serves the API.
+ExecStart=@EXECSTART@
+
+# Resilience: always come back, fast, forever.
+Restart=always
+RestartSec=3
+# Don't let a genuinely-broken start hammer the machine: after 5 failures in 60s, back off.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Long-term memory / state lives under a managed state dir (-> ~/.nyxara for the user).
+StateDirectory=nyxara
+Environment=NYXARA_HOME=%S/nyxara
+
+# Modest hardening — a visible, well-behaved service, nothing exotic.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
