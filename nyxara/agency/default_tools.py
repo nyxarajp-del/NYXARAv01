@@ -875,6 +875,74 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
                       target_param="command"))
 
+        # ---- privilege escalation: run root/admin OS operations via sudo (owner-gated) ---- #
+        # These elevate WITH the Master's stored sudo credential — never an exploit, guess or
+        # brute-force. Gated at PRIV_ESCALATE/CRITICAL, so autonomously each call escalates to
+        # the Master unless the Master installed the opt-in privilege grant. `full_control` does
+        # NOT confer this (PRIV_ESCALATE is excluded from _OPERATIONAL_CAPS). The sudo password,
+        # when needed, is materialised only inside `CredentialVault.use` and never surfaces in
+        # the params dict, logs, or the LLM.
+        def _sudo_credential_name() -> Optional[str]:
+            return getattr(agency_cfg, "sudo_credential_name", None) if agency_cfg else None
+
+        def _with_sudo_secret(call):
+            """Run ``call(sudo_password)`` binding the stored sudo secret late (never returned).
+
+            When no credential name is configured (or no vault holds it) the call runs with
+            ``None`` — passwordless (``NOPASSWD``) sudo or an already-root process. Otherwise the
+            plaintext is materialised only inside :meth:`CredentialVault.use`, so it stays inside
+            the kernel and the vault's audit log records the access."""
+            name = _sudo_credential_name()
+            if not name or vault is None or name not in vault:
+                return call(None)
+            from nyxara.agency.permissions import Authority as _Authority
+            return vault.use(name, call, authority=_Authority.DELEGATED)
+
+        def _privileged_shell(command: str, timeout_s: float = 30.0) -> Dict[str, Any]:
+            from nyxara.agency.privilege import privileged_exec
+            res = _with_sudo_secret(lambda secret: privileged_exec(
+                command, sudo_password=secret, timeout_s=max(0.1, min(timeout_s, 300.0))))
+            return res.to_dict()
+
+        _add(ToolSpec("privileged_shell", handler=_privileged_shell,
+                      description="run a shell command with root/admin elevation via sudo "
+                                  "(using the Master's stored credential) — owner-gated, "
+                                  "irreversible; returns rc/stdout/stderr, failing as data",
+                      params=[ToolParam("command", "str"),
+                              ToolParam("timeout_s", "float", required=False, default=30.0)],
+                      capability=Capability.PRIV_ESCALATE, risk=RiskTier.CRITICAL,
+                      reversible=False, target_param="command"))
+
+        def _change_os_permissions(path: str, mode: Optional[str] = None,
+                                   owner: Optional[str] = None, group: Optional[str] = None,
+                                   recursive: bool = False) -> Dict[str, Any]:
+            from nyxara.agency.privilege import change_permissions
+            return _with_sudo_secret(lambda secret: change_permissions(
+                path, mode=mode, owner=owner, group=group, recursive=recursive,
+                sudo_password=secret))
+
+        _add(ToolSpec("change_os_permissions", handler=_change_os_permissions,
+                      description="change a path's OS permissions/ownership (chmod/chown) with "
+                                  "root elevation via sudo — owner-gated, irreversible",
+                      params=[ToolParam("path", "str"),
+                              ToolParam("mode", "str", required=False, default=None,
+                                        description="chmod spec, e.g. '640' or 'u+rwx'"),
+                              ToolParam("owner", "str", required=False, default=None),
+                              ToolParam("group", "str", required=False, default=None),
+                              ToolParam("recursive", "bool", required=False, default=False)],
+                      capability=Capability.PRIV_ESCALATE, risk=RiskTier.CRITICAL,
+                      reversible=False, target_param="path"))
+
+        def _privilege_status() -> Dict[str, Any]:
+            from nyxara.agency.privilege import privilege_status
+            return privilege_status()
+
+        _add(ToolSpec("privilege_status", handler=_privilege_status,
+                      description="report the current elevation posture (euid, is_root, whether "
+                                  "sudo is available and passwordless) — read-only, safe",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
         # ---- self-extension: forge a brand-new tool for a missing capability ---- #
         # Gated at SELF_MODIFY/HIGH so invoking it through the loop escalates to the
         # Master (autonomous-max for self.modify is TRIVIAL). The tools it *produces*

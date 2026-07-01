@@ -476,6 +476,18 @@ around the control law.
   (`grant_autonomous_remote`, `NYXARA_AGENCY__AUTONOMOUS_REMOTE=true`, on by default) lets them
   run on her own initiative — while `/scram`, oversight, corrigibility, the owner-exclusive
   caps (Rule 8) and the refusal of `UNTRUSTED` authority all stay intact.
+* **Privilege escalation** — `agency/privilege.py`. The local machine's root, wired as a real
+  capability NYXARA drives *herself*: `privileged_shell` runs a command under `sudo`,
+  `change_os_permissions` performs an elevated `chmod`/`chown`, and `privilege_status` reports the
+  elevation posture (read-only). A genuine `sudo` call that actually runs — not a simulated
+  result. A new `PRIV_ESCALATE` capability gates them at **CRITICAL/irreversible**, so each call
+  escalates to the Master unless he installs the explicit, opt-in grant
+  (`grant_privilege_escalation`, `NYXARA_AGENCY__PRIVILEGE_ESCALATION`, **off by default** — the
+  single most dangerous OS surface). She elevates *with* the Master's stored sudo credential
+  (`NYXARA_AGENCY__SUDO_CREDENTIAL_NAME`), never exploiting, prompting, guessing or brute-forcing —
+  and `PRIV_ESCALATE` is deliberately excluded from full control's envelope, so `FULL_CONTROL`
+  never confers root. `/scram`, oversight, corrigibility, the owner-exclusive caps (Rule 8) and
+  the refusal of `UNTRUSTED` authority all stay intact.
 * **First-principles reasoning** — `mind/first_principles.py`. NYXARA does not just *recall*
   answers, she **derives** them from the rules of a domain. The `FirstPrinciplesFaculty` is a
   verifiable engine (it wins over any neural guess) spanning four domains: **physics**

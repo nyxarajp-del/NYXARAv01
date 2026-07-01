@@ -298,6 +298,17 @@ class NyxaraCore:
                     grant_autonomous_remote(
                         self.permissions,
                         reversible_only=not agency_cfg.autonomous_remote_allow_irreversible)
+                # Privilege escalation (opt-in; OFF by default): a standing envelope over
+                # PRIV_ESCALATE so NYXARA may run root/admin OS operations (sudo, chmod/chown)
+                # on her own initiative, elevating WITH the Master's stored sudo credential.
+                # Independent of full_control by design — PRIV_ESCALATE is excluded from
+                # _OPERATIONAL_CAPS, so full_control never confers root; only this flag does.
+                # /scram + oversight + corrigibility and the owner-exclusive caps stay intact.
+                if agency_cfg.privilege_escalation:
+                    from nyxara.agency.permissions import grant_privilege_escalation
+                    grant_privilege_escalation(
+                        self.permissions,
+                        reversible_only=not agency_cfg.privilege_escalation_allow_irreversible)
             except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
                 pass
         self.governor = governor or Governor()

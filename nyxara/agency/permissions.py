@@ -58,6 +58,8 @@ __all__ = [
     "build_internet_policy",
     "grant_autonomous_remote",
     "build_remote_policy",
+    "grant_privilege_escalation",
+    "build_privileged_policy",
 ]
 
 
@@ -73,6 +75,7 @@ class Capability(str, Enum):
     NET_IN = "net.in"
     NET_DEFENSE = "net.defense"          # Rule 5 — defensive containment
     REMOTE_EXEC = "remote.exec"          # log in to / run commands on an external host (SSH)
+    PRIV_ESCALATE = "os.privilege"       # run a privileged (root/admin) OS op via sudo
     PROC_EXEC = "proc.exec"              # spawn an OS process / shell
     CODE_EXEC = "code.exec"              # evaluate code in-process
     SELF_MODIFY = "self.modify"          # edit NYXARA's own code
@@ -142,6 +145,9 @@ _DEFAULT_META: Tuple[CapabilityMeta, ...] = (
     CapabilityMeta(Capability.REMOTE_EXEC, RiskTier.HIGH,
                    autonomous_max_risk=RiskTier.TRIVIAL,
                    description="log in to / run a command on an external host (SSH)"),
+    CapabilityMeta(Capability.PRIV_ESCALATE, RiskTier.CRITICAL, irreversible_by_nature=True,
+                   autonomous_max_risk=RiskTier.TRIVIAL,
+                   description="run a privileged (root/admin) OS operation via sudo"),
     CapabilityMeta(Capability.PROC_EXEC, RiskTier.HIGH, irreversible_by_nature=True,
                    autonomous_max_risk=RiskTier.TRIVIAL, description="run a shell/process"),
     CapabilityMeta(Capability.CODE_EXEC, RiskTier.HIGH, irreversible_by_nature=True,
@@ -579,6 +585,65 @@ def build_remote_policy() -> PermissionPolicy:
 
 
 # --------------------------------------------------------------------------- #
+# Privilege escalation — run root/admin OS operations via sudo (owner-blessed)
+# --------------------------------------------------------------------------- #
+# The capabilities NYXARA needs to elevate on the local machine on her own initiative:
+# PRIV_ESCALATE is the reach itself (run a command as root via sudo, change OS
+# permissions), and SECRETS_ACCESS lets the stored sudo credential resolve without
+# escalating. Like the other grant helpers this EXCLUDES the three owner-exclusive caps
+# (Rule 8 refuses them at step 2 of `check`, before grants are ever consulted).
+#
+# IMPORTANT: PRIV_ESCALATE is deliberately NOT part of `_OPERATIONAL_CAPS`, so the broad,
+# on-by-default `full_control` grant NEVER confers root. Elevation is the single most
+# dangerous OS surface and is only ever blessed by this explicit, opt-in helper. It
+# elevates *with* the Master's own credentials — it never exploits a vulnerability to
+# bypass authorization, never guesses or brute-forces a credential; the /scram kill-switch,
+# oversight and corrigibility gates all remain fully intact.
+_PRIVILEGE_CAPS: Tuple[Capability, ...] = (
+    Capability.PRIV_ESCALATE, Capability.SECRETS_ACCESS,
+)
+
+
+def grant_privilege_escalation(
+    policy: PermissionPolicy, *, authority: Authority = Authority.OWNER,
+    max_risk: RiskTier = RiskTier.CRITICAL, reversible_only: bool = False,
+) -> PermissionPolicy:
+    """Install standing, Master-blessed grants over NYXARA's *privilege-escalation* capability.
+
+    A sibling of :func:`grant_autonomous_remote` for the local machine's root: NYXARA may
+    run privileged (root/admin) OS operations on her own initiative — ``sudo`` commands and
+    OS permission/ownership changes — using the sudo credential the Master stored
+    (``SECRETS_ACCESS``) **without escalating each action to the Master**. Because privileged
+    operations are effectful and usually irreversible, ``reversible_only`` defaults to
+    ``False`` here; pass ``True`` to reinstate a reversibility floor so only reversible
+    privileged actions run autonomously and irreversible ones escalate.
+
+    Scope and safety, by construction:
+
+    * elevation is *with* the Master's own credential, never an exploit, guess or brute-force
+      of one; ``UNTRUSTED`` authority is still refused (Rule 7);
+    * the three owner-exclusive caps (Rules / permissions / identity) stay reserved to the
+      Master — no grant can reach them (Rule 8);
+    * this is the ONLY path that blesses ``PRIV_ESCALATE`` — it is excluded from
+      ``_OPERATIONAL_CAPS``, so ``grant_full_operational_control`` never confers root;
+    * the kernel's ``/scram`` / oversight / corrigibility gates remain fully intact.
+
+    Requires the Master's authority (``policy.grant`` refuses anything else, Rule 8).
+    """
+    for cap in _PRIVILEGE_CAPS:
+        policy.grant(f"privilege-escalation:{cap.value}", cap,
+                     max_risk=max_risk, scopes=(),
+                     reversible_only=reversible_only, max_uses=None, expires_in=None,
+                     authority=authority)
+    return policy
+
+
+def build_privileged_policy() -> PermissionPolicy:
+    """A default policy with privilege escalation pre-granted (owner-blessed)."""
+    return grant_privilege_escalation(build_default_policy())
+
+
+# --------------------------------------------------------------------------- #
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
@@ -655,6 +720,38 @@ if __name__ == "__main__":  # pragma: no cover
         raise SystemExit("ERROR: should have raised")
     except AuthorizationError:
         print("authorize() guard   : ✓ (raises on denial)")
+
+    # privilege escalation: autonomous PRIV_ESCALATE is CRITICAL+irreversible -> escalates
+    d = pol.check(PermissionRequest(Capability.PRIV_ESCALATE, "sudo systemctl restart nginx",
+                                    authority=Authority.AUTONOMOUS))
+    print(f"\nautonomous sudo     : allowed={d.allowed} escalated={d.escalated} ({d.rule_basis})")
+    assert not d.allowed and d.escalated
+
+    # the Master may run it directly (Rule 1)
+    d = pol.check(PermissionRequest(Capability.PRIV_ESCALATE, "sudo id",
+                                    authority=Authority.OWNER))
+    assert d.allowed and d.rule_basis == "Rule 1"
+    print(f"owner sudo          : allowed={d.allowed} ({d.rule_basis})")
+
+    # full operational control does NOT confer root (PRIV_ESCALATE excluded from _OPERATIONAL_CAPS)
+    fc = grant_full_operational_control(build_default_policy())
+    d = fc.check(PermissionRequest(Capability.PRIV_ESCALATE, "sudo id",
+                                   authority=Authority.AUTONOMOUS))
+    assert d.escalated, "full_control must NOT grant privilege escalation"
+    print(f"full-control ∌ sudo : escalated={d.escalated} ✓ (root stays opt-in)")
+
+    # the Master's explicit privilege grant blesses autonomous sudo
+    priv = build_privileged_policy()
+    d = priv.check(PermissionRequest(Capability.PRIV_ESCALATE, "sudo id",
+                                     authority=Authority.AUTONOMOUS))
+    assert d.allowed and d.grant is not None
+    print(f"privilege grant     : allowed={d.allowed} grant={d.grant!r}")
+
+    # untrusted authority can never escalate privilege (Rule 7)
+    d = priv.check(PermissionRequest(Capability.PRIV_ESCALATE, "sudo rm -rf /",
+                                     authority=Authority.UNTRUSTED))
+    assert d.denied and d.rule_basis == "Rule 7"
+    print(f"untrusted sudo      : denied={d.denied} ({d.rule_basis}) ✓")
 
     print(f"\nreport              : {pol.report()}")
     print("\nALL SELF-TESTS PASSED ✓")
