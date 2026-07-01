@@ -47,7 +47,8 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["MetaGenome", "SearchGenome", "MetaImprovementController", "RecursiveMetaController"]
+__all__ = ["MetaGenome", "SearchGenome", "MindSearchGenome", "MetaResearchGenome",
+           "MetaImprovementController", "RecursiveMetaController", "build_engine_meta_tower"]
 
 
 def _clampi(x: float, lo: int, hi: int) -> int:
@@ -268,6 +269,76 @@ _ROOT_SEARCH = SearchGenome(mutation_prob=0.7, step_scale=1.0, window=3)
 
 
 # --------------------------------------------------------------------------- #
+# Engine-search genomes — the OTHER self-improvement engines' own searches, so the SAME recursive
+# tower governs every layer (Rule 4, "optimize every layer"): not just the code engine, but how
+# NYXARA searches for a better way of THINKING, and how wide she INVENTS. Both are bounded,
+# capability/measurement-only, and plug into the generic tower unchanged.
+# --------------------------------------------------------------------------- #
+@dataclass
+class MindSearchGenome(_Genome):
+    """How NYXARA searches for a better *way of thinking* — the mind-evolution engine's own search.
+
+    These are the knobs ``MindEvolutionEngine.evolve_generations`` searches under: how wide the
+    population is, how many inner generations per pass, how many islands, how patient the plateau
+    guard is, and how strict "measurably better" must be. All bounded and capability/measurement-
+    only — evolving them tunes *how NYXARA searches for smarter reasoning*, never the character lock
+    nor whether the promote gauntlet measures a candidate against the true champion. Level 1+ of the
+    tower then evolves *how this search is searched* — recursion at every level.
+    """
+
+    population: int = 8
+    inner_generations: int = 6
+    islands: int = 1
+    plateau_window: int = 3
+    min_improvement: float = 1e-4
+
+    _BOUNDS: Tuple[Bound, ...] = (
+        ("population", 2, 24, True),
+        ("inner_generations", 1, 16, True),
+        ("islands", 1, 4, True),
+        ("plateau_window", 2, 8, True),
+        ("min_improvement", 1e-5, 1e-2, False),
+    )
+
+    def apply(self, settings: Any) -> None:
+        """Write this genome's search knobs into the live mind-evolution config (capability-only)."""
+        try:
+            me = settings.mind_evolution
+            me.population = int(self.population)
+            me.inner_generations = int(self.inner_generations)
+            me.islands = int(self.islands)
+            me.plateau_window = int(self.plateau_window)
+            me.min_improvement = float(self.min_improvement)
+        except Exception:  # noqa: BLE001 — binding is best-effort; a failure leaves knobs as-is
+            pass
+
+
+@dataclass
+class MetaResearchGenome(_Genome):
+    """How wide NYXARA invents — the invention breadth of the meta-research engine.
+
+    ``max_candidates`` is how many candidate theories/optimizations she invents and sandbox-tests
+    per pass. The tower evolves it, scored by the real validated-theory yield each pass, so NYXARA
+    learns the breadth that produces the most verified new knowledge — bounded, capability-only, and
+    never touching whether a validated optimization is *integrated* (that stays behind
+    ``allow_integration`` + ``autonomous_enact``). Level 1+ evolves *how this breadth is searched*.
+    """
+
+    max_candidates: int = 4
+
+    _BOUNDS: Tuple[Bound, ...] = (
+        ("max_candidates", 1, 12, True),
+    )
+
+    def apply(self, settings: Any) -> None:
+        """Write this genome's invention breadth into the live meta-research config (capability-only)."""
+        try:
+            settings.meta_research.max_candidates = int(self.max_candidates)
+        except Exception:  # noqa: BLE001 — binding is best-effort; a failure leaves knobs as-is
+            pass
+
+
+# --------------------------------------------------------------------------- #
 # One rung — a measured 1+1 evolutionary loop over a single genome
 # --------------------------------------------------------------------------- #
 class MetaImprovementController:
@@ -404,6 +475,11 @@ class RecursiveMetaController:
         self._gain_window: List[float] = []      # recent bottom-rung selection qualities
         self._accel: List[Dict[str, Any]] = []   # log of acceleration events (height/cap growth)
         self._seed = int(seed)
+        # level 0 may carry the code-engine ``MetaGenome`` (default) or any other bounded engine
+        # genome (mind-evolution / meta-research search). The tower is generic over it; only the
+        # ``MetaGenome`` carries dynamic execution caps that acceleration widens — every other genome
+        # accelerates by growing the tower's height alone.
+        self._level0_cls = type(champion) if champion is not None else MetaGenome
         rng = random.Random(seed)
         # level 0 carries the real engine genome; levels 1.. carry search genomes
         self.levels: List[MetaImprovementController] = []
@@ -490,10 +566,15 @@ class RecursiveMetaController:
 
     def _accelerate(self) -> None:
         grew = self._grow_height() if self.can_grow else False
-        caps = MetaGenome.raise_caps(recursion_ceiling=self.recursion_ceiling,
-                                     edits_ceiling=self.edits_ceiling)
-        self._accel.append({"grew_height": grew, "height": self.height,
-                            "recursion_cap": caps[0], "edits_cap": caps[1]})
+        entry: Dict[str, Any] = {"grew_height": grew, "height": self.height}
+        # only the code-engine ``MetaGenome`` carries dynamic execution caps to widen; every other
+        # engine genome accelerates by growing the tower's height alone.
+        raise_caps = getattr(self._level0_cls, "raise_caps", None)
+        if raise_caps is not None:
+            caps = raise_caps(recursion_ceiling=self.recursion_ceiling,
+                              edits_ceiling=self.edits_ceiling)
+            entry["recursion_cap"], entry["edits_cap"] = caps[0], caps[1]
+        self._accel.append(entry)
         self._accel = self._accel[-50:]
 
     def _grow_height(self) -> bool:
@@ -508,12 +589,17 @@ class RecursiveMetaController:
         return True
 
     def status(self) -> Dict[str, Any]:
-        return {"height": self.height, "hard_max_height": self.hard_max_height,
-                "can_grow": self.can_grow,
-                "recursion_cap": MetaGenome._MAX_RECURSION, "edits_cap": MetaGenome._MAX_EDITS,
-                "accelerations": len(self._accel), "last_accel": self._accel[-1] if self._accel else None,
-                "levels": [c.status() for c in self.levels],
-                "champion": self.champion.to_dict()}
+        out: Dict[str, Any] = {
+            "height": self.height, "hard_max_height": self.hard_max_height,
+            "can_grow": self.can_grow,
+            "accelerations": len(self._accel),
+            "last_accel": self._accel[-1] if self._accel else None,
+            "levels": [c.status() for c in self.levels],
+            "champion": self.champion.to_dict()}
+        if hasattr(self._level0_cls, "_MAX_RECURSION"):
+            out["recursion_cap"] = self._level0_cls._MAX_RECURSION
+            out["edits_cap"] = self._level0_cls._MAX_EDITS
+        return out
 
     # ---- persistence: the whole tower compounds across restarts ---- #
     def _save(self) -> None:
@@ -523,12 +609,13 @@ class RecursiveMetaController:
             from pathlib import Path
             p = Path(self._persist_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps({"height": self.height,
-                                     "recursion_cap": MetaGenome._MAX_RECURSION,
-                                     "edits_cap": MetaGenome._MAX_EDITS,
-                                     "accel": self._accel[-50:],
-                                     "levels": [c.to_dict() for c in self.levels]}),
-                         encoding="utf-8")
+            payload: Dict[str, Any] = {"height": self.height,
+                                       "accel": self._accel[-50:],
+                                       "levels": [c.to_dict() for c in self.levels]}
+            if hasattr(self._level0_cls, "_MAX_RECURSION"):
+                payload["recursion_cap"] = self._level0_cls._MAX_RECURSION
+                payload["edits_cap"] = self._level0_cls._MAX_EDITS
+            p.write_text(json.dumps(payload), encoding="utf-8")
         except Exception:  # noqa: BLE001 — persistence is a bonus, never required
             pass
 
@@ -541,15 +628,17 @@ class RecursiveMetaController:
             if not p.exists():
                 return
             data = json.loads(p.read_text(encoding="utf-8"))
-            # restore an accelerated tower: regrow the height and the widened execution caps so the
-            # compounding meta-gain persists across restarts.
-            MetaGenome._MAX_RECURSION = max(MetaGenome._MAX_RECURSION,
-                                            min(MetaGenome._ABS_MAX_RECURSION,
-                                                int(data.get("recursion_cap",
-                                                             MetaGenome._MAX_RECURSION))))
-            MetaGenome._MAX_EDITS = max(MetaGenome._MAX_EDITS,
-                                        min(MetaGenome._ABS_MAX_EDITS,
-                                            int(data.get("edits_cap", MetaGenome._MAX_EDITS))))
+            # restore an accelerated tower: regrow the height and (for the code-engine ``MetaGenome``)
+            # the widened execution caps so the compounding meta-gain persists across restarts.
+            if hasattr(self._level0_cls, "_MAX_RECURSION") and "recursion_cap" in data:
+                self._level0_cls._MAX_RECURSION = max(
+                    self._level0_cls._MAX_RECURSION,
+                    min(self._level0_cls._ABS_MAX_RECURSION,
+                        int(data.get("recursion_cap", self._level0_cls._MAX_RECURSION))))
+                self._level0_cls._MAX_EDITS = max(
+                    self._level0_cls._MAX_EDITS,
+                    min(self._level0_cls._ABS_MAX_EDITS,
+                        int(data.get("edits_cap", self._level0_cls._MAX_EDITS))))
             self._accel = list(data.get("accel", []) or [])[-50:]
             saved = list(data.get("levels", []))
             while len(self.levels) < len(saved) and len(self.levels) < self.hard_max_height:
@@ -561,7 +650,7 @@ class RecursiveMetaController:
                 if k >= len(saved):
                     break
                 rec = saved[k] or {}
-                cls = MetaGenome if k == 0 else SearchGenome
+                cls = self._level0_cls if k == 0 else SearchGenome
                 ctrl.champion = cls.from_dict(rec.get("champion", {}))  # type: ignore[assignment]
                 cf = rec.get("champion_fitness")
                 ctrl.champion_fitness = float(cf) if cf is not None else None
@@ -573,6 +662,33 @@ class RecursiveMetaController:
                 ctrl._trialing_challenger = True
         except Exception:  # noqa: BLE001 — a corrupt cache is simply ignored
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Shared builder — one recursive tower per self-improvement engine, from config
+# --------------------------------------------------------------------------- #
+def build_engine_meta_tower(champion: _Genome, *, cfg: Any, persist_path: Any = None,
+                            seed: int = 0) -> Optional[RecursiveMetaController]:
+    """Build a recursive meta tower governing one engine's search, or ``None`` when disabled.
+
+    Reuses the exact :class:`RecursiveMetaController` proven on the code engine — level 0 evolves the
+    given engine-search ``champion`` genome (a :class:`MindSearchGenome`, a :class:`MetaResearchGenome`,
+    …), each higher level evolves *how the level below searches*, scored by the real capability gain
+    the engine reports each pass. Reads the standard meta flags off ``cfg`` (``meta_meta_enabled``,
+    ``meta_levels``, ``meta_tower_can_grow``, ``meta_levels_hard_max``) so every engine is configured
+    identically. Never raises — a build failure yields ``None`` and the engine simply runs on its
+    fixed config knobs, exactly as before.
+    """
+    if not bool(getattr(cfg, "meta_meta_enabled", True)):
+        return None
+    try:
+        return RecursiveMetaController(
+            height=int(getattr(cfg, "meta_levels", 3)),
+            champion=champion, persist_path=persist_path, seed=int(seed),
+            can_grow=bool(getattr(cfg, "meta_tower_can_grow", True)),
+            hard_max_height=int(getattr(cfg, "meta_levels_hard_max", 6)))
+    except Exception:  # noqa: BLE001 — the tower is a capability, never required
+        return None
 
 
 # --------------------------------------------------------------------------- #

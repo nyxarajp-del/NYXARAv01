@@ -53,6 +53,34 @@ def test_open_questions_are_gathered():
 
 
 # --------------------------------------------------------------------------- #
+# recursive meta tower over the meta-research SEARCH (invention breadth) — wired end to end
+# --------------------------------------------------------------------------- #
+def test_meta_meta_tower_sealed_by_default():
+    # default (test-profile, env-sealed) settings → the tower never builds; behaviour is unchanged
+    assert _mr()._meta_meta() is None
+    assert _mr().run("caching strategies").meta_meta is None
+
+
+def test_meta_meta_tower_wires_and_surfaces_on_report(tmp_path):
+    from nyxara.kernel.config import NyxaraSettings, Profile
+
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.meta_research.meta_meta_enabled = True     # flag on (env seal only affects get_settings())
+    s.meta_research.use_llm = False              # deterministic offline heuristic inventor
+    s.meta_research.meta_levels = 2
+    s.paths.data_dir = str(tmp_path)             # isolate tower persistence to tmp
+
+    mr = MetaResearcher(sandbox=Sandbox(), settings=s)
+    assert mr._meta_meta() is not None           # builds under a non-test profile with the flag on
+    report = mr.run("caching strategies")
+    # the recursive tower's status is surfaced on the report — wired end to end
+    assert report.meta_meta is not None
+    assert "champion" in report.meta_meta and "levels" in report.meta_meta
+    # and this pass bound a bounded invention breadth from the tower's active genome into the config
+    assert 1 <= s.meta_research.max_candidates <= 12
+
+
+# --------------------------------------------------------------------------- #
 # safety: restricted execution, no integration by default
 # --------------------------------------------------------------------------- #
 def test_candidate_code_cannot_import():

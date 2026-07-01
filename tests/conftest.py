@@ -38,6 +38,13 @@ os.environ.setdefault("NYXARA_GENESIS__SUBSTRATE", "ngram")
 # unprompted; OFF for the suite for the same hermetic/compute rationale as the flags above. Tests
 # that exercise the wiring build their own settings with continuous=True and a small cadence.
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__CONTINUOUS", "false")
+# The recursive meta towers over the mind-evolution and meta-research SEARCHES (growth/meta_meta.py)
+# evolve bounded capability knobs across passes and persist state to disk. ON for live DEV/PROD so
+# NYXARA recursively optimizes HOW she searches for smarter reasoning and wider invention; OFF for
+# the suite for the same hermetic/determinism rationale. Tests that exercise them build their own
+# settings (or drive the generic RecursiveMetaController directly — see test_meta_meta.py).
+os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
+os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

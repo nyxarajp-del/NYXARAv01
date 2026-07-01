@@ -1155,6 +1155,16 @@ class MindEvolutionConfig(BaseModel):
     # index-steered Genesis architecture search. Heavy (and torch-hungry for real models), so OFF
     # by default; with no torch it still runs the stdlib n-gram search. Honours genesis.enabled.
     escalate_to_architecture: bool = False
+    min_improvement: float = Field(default=1e-4, ge=1e-6, le=1e-1)  # strictness of "measurably better"
+    # --- recursive meta tower over the mind-evolution SEARCH (growth/meta_meta.py) --- #
+    # NYXARA does not only evolve HOW she thinks; she recursively evolves HOW she SEARCHES for a
+    # better way of thinking (population / inner-generations / islands / plateau / strictness), and
+    # how that search is itself searched — recursion at every level. Capability/measurement-only and
+    # bounded, scored by the real per-pass capability gain. Sealed OFF in the hermetic test profile.
+    meta_meta_enabled: bool = True
+    meta_levels: int = Field(default=3, ge=1, le=4)
+    meta_tower_can_grow: bool = True
+    meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
 
 
 class ExplorerConfig(BaseModel):
@@ -1201,6 +1211,14 @@ class MetaResearchConfig(BaseModel):
     default_topics: List[str] = Field(
         default_factory=lambda: ["algorithm optimization", "memory consolidation",
                                  "caching strategies"])
+    # --- recursive meta tower over the meta-research SEARCH (growth/meta_meta.py) --- #
+    # NYXARA recursively evolves HOW WIDE she invents (``max_candidates``), and how that breadth is
+    # searched, scored by the real validated-theory yield per pass. Capability/measurement-only and
+    # bounded; it never affects whether a validated optimization is integrated. Sealed OFF in tests.
+    meta_meta_enabled: bool = True
+    meta_levels: int = Field(default=3, ge=1, le=4)
+    meta_tower_can_grow: bool = True
+    meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
 
 
 class MCTSConfig(BaseModel):
@@ -1712,6 +1730,12 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.allow_llm_edits = False
             self.self_optimization.autonomous_enact = False
             self.mind_evolution.autonomous_enact = False
+            # The recursive meta towers over the mind-evolution and meta-research SEARCHES tune only
+            # bounded capability knobs, but they persist state to disk and evolve across passes — keep
+            # them OFF under TEST so the suite stays hermetic and deterministic (a test that wants a
+            # tower builds its own settings object; see tests/growth/test_meta_meta.py).
+            self.mind_evolution.meta_meta_enabled = False
+            self.meta_research.meta_meta_enabled = False
             # The Genesis Protocol designs and micro-trains real neural architectures — far too
             # heavy to run on every core boot across the suite (and it must stay hermetic). Keep the
             # boot kickoff OFF and pin the always-fast pure-stdlib n-gram substrate under TEST; a
