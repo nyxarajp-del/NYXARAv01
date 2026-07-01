@@ -85,6 +85,21 @@ def test_installer_requires_owner_authority():
         grant_full_operational_control(pol, authority=Authority.AUTONOMOUS)
 
 
+# -------------------- ON by default -------------------- #
+def test_full_control_is_on_by_default():
+    # No env set: a fresh core reaches the whole OS on her own initiative.
+    from nyxara.kernel.orchestrator import NyxaraCore
+    core = NyxaraCore()
+    assert core.permissions.grants(), "full-control grants should be installed by default"
+    # autonomous shell now runs (via grant) instead of escalating
+    d = core.permissions.check(_auto(Capability.PROC_EXEC, target="ls"))
+    assert d.allowed and d.rule_basis == "grant"
+    # but the sovereign core stays reserved to the Master (Rule 8)
+    for cap in (Capability.MODIFY_RULES, Capability.MODIFY_PERMISSIONS, Capability.MODIFY_IDENTITY):
+        e = core.permissions.check(_auto(cap))
+        assert e.denied and e.rule_basis == "Rule 8"
+
+
 # -------------------- orchestrator wiring honours the flag -------------------- #
 def test_orchestrator_installs_grants_when_flag_on(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "true")
@@ -103,6 +118,9 @@ def test_orchestrator_installs_grants_when_flag_on(monkeypatch):
 
 def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "false")
+    # autonomous internet ships ON by default and would install its own grants; disable it
+    # here so this test isolates the full_control behaviour it is asserting.
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()
     try:
@@ -114,4 +132,5 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
         assert d.escalated
     finally:
         monkeypatch.delenv("NYXARA_AGENCY__FULL_CONTROL", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         cfg.reload_settings()

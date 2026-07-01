@@ -113,14 +113,35 @@ four capabilities — each backed by a test:
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes
   rather than self-asserted.
 
-## Full operational control (opt-in)
+## Full operational control (on by default)
 
-By default NYXARA's effectful reach is fail-closed: acting on her own initiative, anything
-high-risk or irreversible (shell, delete, self-modify) **escalates to the Master** rather than
-running. Setting `NYXARA_AGENCY__FULL_CONTROL=true` has the Master pre-grant a maximal
-*autonomous* envelope over every operational capability (`grant_full_operational_control` in
-`nyxara.agency.permissions`), so she reaches into the OS on her own initiative without
-per-action confirmation. The sovereign boundaries are deliberately preserved: modifying the
+NYXARA ships with full operational control **on by default**: acting on her own initiative she
+reaches into the OS — shell, code execution, file delete, self-modify, package install, account
+and secret access — without escalating each action for confirmation
+(`grant_full_operational_control` in `nyxara.agency.permissions`, flag
+`NYXARA_AGENCY__FULL_CONTROL`, default `true`). Set it to `false` to fall back to the
+conservative, fail-closed envelope, where anything high-risk or irreversible (shell, delete,
+self-modify) **escalates to the Master** rather than running. The sovereign boundaries are
+deliberately preserved either way: modifying the
 Rules, the permission policy, or her identity stays owner-exclusive (Rule 8, unreachable by any
 grant), and the kernel's `/scram` kill-switch, oversight and corrigibility remain fully intact —
 so the Master can always halt or correct her.
+
+## Autonomous internet (on by default)
+
+A network-scoped sibling of full control, **on by default**. NYXARA reaches the live web on
+her own initiative — `web_search`, `web_fetch`, `http_request`, and (at wider scopes) outbound
+messaging, account management and secret use — without escalating each call.
+`grant_autonomous_internet` (in `nyxara.agency.permissions`) installs the standing owner-blessed
+grants; the flag `NYXARA_AGENCY__AUTONOMOUS_INTERNET` (default `true`) drives it, with
+`…_SCOPE` (`read` | `write` | `full`, default `full`) selecting reach and
+`…_ALLOW_IRREVERSIBLE` (default `false`) controlling whether irreversible web actions may run
+autonomously or still escalate.
+
+Crucially this is **narrower than full control**: it never grants the OS danger surface — shell,
+code execution, file delete, self-modify and package installs still escalate. Everything that
+keeps the web safe stays in force: the SSRF guard (no loopback/private targets),
+prompt-injection screening on fetched pages, and the governor's rate limit — plus the same
+sovereign boundaries as above (`/scram`, oversight, corrigibility, and the owner-exclusive caps
+under Rule 8). When on, the always-on daemon also runs at "max level" (`inner_life`), so the
+background mind proactively researches the Master's standing goals on the live web.

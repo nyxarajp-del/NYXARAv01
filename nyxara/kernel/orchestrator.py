@@ -275,9 +275,19 @@ class NyxaraCore:
         if permissions is None:
             try:
                 from nyxara.kernel.config import get_settings
-                if get_settings().agency.full_control:
+                agency_cfg = get_settings().agency
+                if agency_cfg.full_control:
                     from nyxara.agency.permissions import grant_full_operational_control
                     grant_full_operational_control(self.permissions)
+                # Autonomous internet (opt-out; ON by default): a network-scoped envelope so
+                # she reaches the live web on her own initiative without escalating each call.
+                # Skipped when full_control is on, which is strictly broader. Never grants the
+                # OS danger surface — shell/delete/self-modify still escalate.
+                elif agency_cfg.autonomous_internet:
+                    from nyxara.agency.permissions import grant_autonomous_internet
+                    grant_autonomous_internet(
+                        self.permissions, scope=agency_cfg.autonomous_internet_scope,
+                        reversible_only=not agency_cfg.autonomous_internet_allow_irreversible)
             except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
                 pass
         self.governor = governor or Governor()
@@ -1536,6 +1546,15 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — a locked/invalid skill simply isn't practised
             pass
 
+    def _autonomous_internet_on(self) -> bool:
+        """Whether the Master has granted autonomous internet (config-driven, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            agency_cfg = get_settings().agency
+            return bool(agency_cfg.full_control or agency_cfg.autonomous_internet)
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return False
+
     def _build_proactive(self) -> Any:
         """Independent Action — a governed ProactiveEngine wired to NYXARA's live state.
 
@@ -1587,10 +1606,31 @@ class NyxaraCore:
                     risk=RiskTier.LOW, reversibility=1.0, confidence=0.75,
                     benefit={"competence": 1.0, "owner_benefit": 0.3})]
 
+            # 3) internet-research detector — when autonomous internet is granted, keep
+            # researching the top standing goal on the live web (curiosity). NET_OUT/LOW and
+            # fully reversible, so it clears the same gauntlet; the autonomic loop turns the
+            # surfaced initiative into a gated turn she then runs with the (now-autonomous)
+            # web_search / web_fetch tools. Only registered when the flag is on.
+            def internet_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                if not ctx.get("autonomous_internet"):
+                    return []
+                goals = ctx.get("goals")
+                top = goals.top_goal() if goals is not None else None
+                topic = top.name if top is not None else "the Master's standing interests"
+                return [Initiative(
+                    name=f"research:{topic[:40]}",
+                    rationale=f"research {topic!r} on the live web for the Master",
+                    kind=TriggerKind.CURIOSITY, capability=Capability.NET_OUT,
+                    risk=RiskTier.LOW, reversibility=1.0, confidence=0.72,
+                    benefit={"owner_benefit": 1.0, "competence": 0.4})]
+
             engine.register_detector(goal_detector)
             engine.register_detector(skill_detector)
+            engine.register_detector(internet_detector)
             # remember what live state to feed the detectors when the loop consults the engine
-            self._proactive_context = lambda: {"goals": self.goals, "skilltree": skilltree}
+            self._proactive_context = lambda: {
+                "goals": self.goals, "skilltree": skilltree,
+                "autonomous_internet": self._autonomous_internet_on()}
             return engine
         except Exception:  # noqa: BLE001 — proactive agency is a capability, never required
             return None
