@@ -288,6 +288,16 @@ class NyxaraCore:
                     grant_autonomous_internet(
                         self.permissions, scope=agency_cfg.autonomous_internet_scope,
                         reversible_only=not agency_cfg.autonomous_internet_allow_irreversible)
+                # Autonomous remote execution (opt-out; ON by default): a standing envelope over
+                # REMOTE_EXEC so she may log in to / run commands on external hosts on her own
+                # initiative. Independent of the internet grant; already covered when
+                # full_control is on (REMOTE_EXEC is in _OPERATIONAL_CAPS). Host vetting,
+                # /scram + oversight + corrigibility and the owner-exclusive caps stay intact.
+                if not agency_cfg.full_control and agency_cfg.autonomous_remote:
+                    from nyxara.agency.permissions import grant_autonomous_remote
+                    grant_autonomous_remote(
+                        self.permissions,
+                        reversible_only=not agency_cfg.autonomous_remote_allow_irreversible)
             except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
                 pass
         self.governor = governor or Governor()
@@ -1552,6 +1562,15 @@ class NyxaraCore:
             from nyxara.kernel.config import get_settings
             agency_cfg = get_settings().agency
             return bool(agency_cfg.full_control or agency_cfg.autonomous_internet)
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return False
+
+    def _autonomous_remote_on(self) -> bool:
+        """Whether the Master has granted autonomous remote execution (config-driven, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            agency_cfg = get_settings().agency
+            return bool(agency_cfg.full_control or agency_cfg.autonomous_remote)
         except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
             return False
 

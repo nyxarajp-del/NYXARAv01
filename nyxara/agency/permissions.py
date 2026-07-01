@@ -56,6 +56,8 @@ __all__ = [
     "build_sovereign_policy",
     "grant_autonomous_internet",
     "build_internet_policy",
+    "grant_autonomous_remote",
+    "build_remote_policy",
 ]
 
 
@@ -70,6 +72,7 @@ class Capability(str, Enum):
     NET_OUT = "net.out"
     NET_IN = "net.in"
     NET_DEFENSE = "net.defense"          # Rule 5 — defensive containment
+    REMOTE_EXEC = "remote.exec"          # log in to / run commands on an external host (SSH)
     PROC_EXEC = "proc.exec"              # spawn an OS process / shell
     CODE_EXEC = "code.exec"              # evaluate code in-process
     SELF_MODIFY = "self.modify"          # edit NYXARA's own code
@@ -136,6 +139,9 @@ _DEFAULT_META: Tuple[CapabilityMeta, ...] = (
                    description="accept inbound connection"),
     CapabilityMeta(Capability.NET_DEFENSE, RiskTier.HIGH, autonomous_max_risk=RiskTier.HIGH,
                    description="defensive containment (Rule 5) — wide envelope while reversible"),
+    CapabilityMeta(Capability.REMOTE_EXEC, RiskTier.HIGH,
+                   autonomous_max_risk=RiskTier.TRIVIAL,
+                   description="log in to / run a command on an external host (SSH)"),
     CapabilityMeta(Capability.PROC_EXEC, RiskTier.HIGH, irreversible_by_nature=True,
                    autonomous_max_risk=RiskTier.TRIVIAL, description="run a shell/process"),
     CapabilityMeta(Capability.CODE_EXEC, RiskTier.HIGH, irreversible_by_nature=True,
@@ -407,6 +413,7 @@ def build_default_policy() -> PermissionPolicy:
 _OPERATIONAL_CAPS: Tuple[Capability, ...] = (
     Capability.FS_READ, Capability.FS_WRITE, Capability.FS_DELETE,
     Capability.NET_OUT, Capability.NET_IN, Capability.NET_DEFENSE,
+    Capability.REMOTE_EXEC,
     Capability.PROC_EXEC, Capability.CODE_EXEC, Capability.SELF_MODIFY,
     Capability.SPAWN_AGENT, Capability.PKG_INSTALL, Capability.ACCOUNT_MODIFY,
     Capability.SECRETS_ACCESS, Capability.MESSAGE_SEND, Capability.SCHEDULE_TASK,
@@ -517,6 +524,58 @@ def grant_autonomous_internet(
 def build_internet_policy(scope: str = "full") -> PermissionPolicy:
     """A default policy with autonomous internet pre-granted (owner-blessed)."""
     return grant_autonomous_internet(build_default_policy(), scope=scope)
+
+
+# --------------------------------------------------------------------------- #
+# Autonomous remote execution — SSH login + remote commands on external hosts
+# --------------------------------------------------------------------------- #
+# The capabilities NYXARA needs to log in to and drive an external host on her own
+# initiative. REMOTE_EXEC is the reach itself; SECRETS_ACCESS lets stored credentials
+# (passwords / key paths in the Master's config) resolve without escalating. Like the
+# other grant helpers this EXCLUDES the three owner-exclusive caps (Rule 8 refuses them at
+# step 2 of `check`) and does NOT touch the local OS danger surface (shell, code-exec,
+# file-delete, self-modify, package-install) — remote reach is a distinct capability.
+_REMOTE_CAPS: Tuple[Capability, ...] = (
+    Capability.REMOTE_EXEC, Capability.SECRETS_ACCESS,
+)
+
+
+def grant_autonomous_remote(
+    policy: PermissionPolicy, *, authority: Authority = Authority.OWNER,
+    max_risk: RiskTier = RiskTier.CRITICAL, reversible_only: bool = False,
+) -> PermissionPolicy:
+    """Install standing, Master-blessed grants over NYXARA's *remote-execution* capability.
+
+    A sibling of :func:`grant_autonomous_internet` for the far side of the wire: NYXARA may
+    log in to external hosts and run commands on them on her own initiative — using the
+    credentials the Master stored (``SECRETS_ACCESS``) — **without escalating each action to
+    the Master**. Because remote commands are effectful and often irreversible,
+    ``reversible_only`` defaults to ``False`` here (unlike the internet grant): the Master's
+    standing choice is that remote autonomy is not blocked by a reversibility floor. Pass
+    ``reversible_only=True`` to reinstate that floor so only reversible remote actions run
+    autonomously and irreversible ones escalate.
+
+    What this **does not** touch, by construction:
+
+    * the three owner-exclusive caps (Rules / permissions / identity) stay reserved to the
+      Master — no grant can reach them (Rule 8);
+    * the local OS danger surface (local shell, delete, self-modify, …) is never included;
+    * host vetting on the remote tools, and the kernel's ``/scram`` / oversight /
+      corrigibility gates, remain fully intact; ``UNTRUSTED`` authority is still refused.
+
+    Requires the Master's authority (``policy.grant`` refuses anything else, Rule 8).
+    """
+    for cap in _REMOTE_CAPS:
+        policy.grant(f"autonomous-remote:{cap.value}", cap,
+                     max_risk=max_risk, scopes=(),
+                     reversible_only=reversible_only, max_uses=None, expires_in=None,
+                     authority=authority)
+    return policy
+
+
+def build_remote_policy() -> PermissionPolicy:
+    """A default policy with autonomous remote execution pre-granted (owner-blessed)."""
+    return grant_autonomous_remote(build_default_policy())
 
 
 # --------------------------------------------------------------------------- #

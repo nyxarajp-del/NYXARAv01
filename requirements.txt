@@ -26,6 +26,9 @@ torch>=2.2
 faiss-cpu>=1.8
 # Security
 cryptography>=42.0
+# Remote execution — SSH login + remote commands (agency/remote_exec.py); optional [remote] extra,
+# import-guarded in code. Uncomment (or `pip install nyxara[remote]`) to enable real SSH.
+# paramiko>=3.4
 # Observability
 structlog>=24.1
 # Dev / test

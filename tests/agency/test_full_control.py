@@ -118,9 +118,10 @@ def test_orchestrator_installs_grants_when_flag_on(monkeypatch):
 
 def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "false")
-    # autonomous internet ships ON by default and would install its own grants; disable it
-    # here so this test isolates the full_control behaviour it is asserting.
+    # autonomous internet AND autonomous remote ship ON by default and would each install
+    # their own grants; disable both here so this test isolates the full_control behaviour.
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()
     try:
@@ -133,4 +134,5 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
     finally:
         monkeypatch.delenv("NYXARA_AGENCY__FULL_CONTROL", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", raising=False)
         cfg.reload_settings()

@@ -1435,6 +1435,24 @@ class GuardConfig(BaseModel):
     rule_modification_locked: bool = True
 
 
+class RemoteHostSpec(BaseModel):
+    """One external host NYXARA may log in to / run commands on over SSH (agency/remote_exec).
+
+    A named credential bundle the Master stores once so NYXARA can resolve it by ``name``
+    without re-supplying host/user/secret on every call. ``password`` is a ``SecretStr`` so it
+    is masked by :meth:`NyxaraSettings.redacted`; ``key_path`` points at a private key file.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    name: str                                   # short id NYXARA references (credential_name)
+    host: str                                   # hostname or IP of the external system
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = ""
+    password: Optional[SecretStr] = None        # masked in logs; None -> key/agent auth
+    key_path: Optional[str] = None              # path to a private key file, if used
+
+
 class AgencyConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -1479,6 +1497,25 @@ class AgencyConfig(BaseModel):
     # When False (default) even high-risk web actions run autonomously only while REVERSIBLE
     # — an irreversible one still escalates to the Master. True lifts that last floor too.
     autonomous_internet_allow_irreversible: bool = Field(default=False)
+    # --- autonomous remote execution (agency/permissions.grant_autonomous_remote) --- #
+    # The far side of the wire: a standing autonomous envelope over REMOTE_EXEC so NYXARA may
+    # log in to external hosts and run commands on them on her own initiative WITHOUT escalating
+    # each action, using the credentials the Master stored in `remote_hosts`. Host vetting on the
+    # remote tools, /scram + oversight + corrigibility, the owner-exclusive caps (Rule 8) and the
+    # refusal of UNTRUSTED authority all remain intact; she never guesses or brute-forces a
+    # credential. ON by default (the Master's standing choice). Set
+    # NYXARA_AGENCY__AUTONOMOUS_REMOTE=false to fall back to per-action escalation.
+    autonomous_remote: bool = Field(default=True)
+    # Remote commands are inherently effectful and often irreversible; True (default) means
+    # autonomy is NOT blocked by a reversibility floor. Set false to make irreversible remote
+    # actions escalate to the Master while reversible ones still run autonomously.
+    autonomous_remote_allow_irreversible: bool = Field(default=True)
+    # Named SSH credentials NYXARA can resolve by name (credential_name) without the Master
+    # re-supplying host/user/secret each call. Empty by default — add entries to enable stored creds.
+    remote_hosts: List[RemoteHostSpec] = Field(default_factory=list)
+    # When True (default, aligning with WEB__ALLOW_PRIVATE) loopback/private/link-local hosts are
+    # reachable over SSH; set false to refuse them (fail-closed to public hosts only).
+    remote_allow_private: bool = Field(default=True)
 
 
 class MCPServerSpec(BaseModel):
