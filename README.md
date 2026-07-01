@@ -805,6 +805,40 @@ docker run -p 8000:8000 -e NYXARA_SERVER__API_TOKEN=change-me \
   -e NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-... -v nyxara-data:/data nyxara
 ```
 
+### Run it always-on (auto-start on boot + auto-restart)
+
+To keep NYXARA alive at all times — **the API *and* her continuous background mind** —
+install her as a system service. A process can't run while the machine is powered *off*,
+so "always alive" means: **auto-start on every boot, auto-restart within seconds if she
+crashes or is killed, and run 24/7 while the machine is on** — before/without any login.
+
+The `nyxara-daemon` command runs the server with the `AutonomicLoop` switched on
+(equivalent to `NYXARA_SERVER__AUTONOMIC=true nyxara-serve`), so one process is both a
+reachable API and her self-directed background mind — every autonomic turn still gated.
+
+**Kali / any systemd Linux:**
+
+```bash
+sudo bash scripts/install_service.sh      # install, enable at boot, start now
+systemctl status nyxara                    # check she's alive
+journalctl -u nyxara -f                     # live logs
+sudo bash scripts/install_service.sh --uninstall   # stop auto-starting
+```
+
+**Windows laptop** (elevated / "Run as administrator" PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_nyxara_service_windows.ps1
+# uninstall:
+powershell -ExecutionPolicy Bypass -File scripts\install_nyxara_service_windows.ps1 -Uninstall
+```
+
+For an always-on server, set `NYXARA_SERVER__API_TOKEN` (and any LLM keys) first — in
+`.env` on Linux or as Machine environment variables on Windows. Keep the bind host at
+`127.0.0.1` unless you intend to expose the API to your network. Full details, restart
+semantics, and the cadence knobs (`NYXARA_SERVER__AUTONOMIC_INTERVAL_S`,
+`NYXARA_SERVER__AUTONOMIC_GROWTH_EVERY`) are in [`docs/persistence.md`](docs/persistence.md).
+
 ## Connect external tools via MCP
 
 NYXARA is an **MCP (Model Context Protocol) client** (`agency/mcp_client.py`), so the whole

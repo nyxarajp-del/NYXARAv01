@@ -161,8 +161,45 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         from nyxara.kernel.orchestrator import NyxaraCore
         core = NyxaraCore()
 
+    # ---- always-on background mind ---- #
+    # When ``server.autonomic`` is set (the ``nyxara-daemon`` / service path), start the
+    # AutonomicLoop over this same core once uvicorn's event loop is running, and stop it
+    # cleanly on shutdown. Wrapped so a background-mind hiccup never takes the API down.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(app_: Any):
+        loop = None
+        if cfg.autonomic:
+            try:
+                from nyxara.kernel.autonomic import AutonomicLoop
+                loop = AutonomicLoop(
+                    app_.state.core,
+                    interval_s=cfg.autonomic_interval_s,
+                    growth_every=cfg.autonomic_growth_every,
+                )
+                loop.start()  # schedules an asyncio task on the running server loop
+                app_.state.autonomic = loop
+                print(f"NYXARA background mind (AutonomicLoop) started "
+                      f"[interval {cfg.autonomic_interval_s}s, growth_every {cfg.autonomic_growth_every}]")
+            except Exception as exc:  # noqa: BLE001 — never let the mind block the server
+                app_.state.autonomic = None
+                print(f"NYXARA background mind failed to start: {exc}")
+        else:
+            app_.state.autonomic = None
+        try:
+            yield
+        finally:
+            if loop is not None:
+                try:
+                    await loop.stop()
+                except Exception:  # noqa: BLE001 — best-effort clean shutdown
+                    pass
+                app_.state.autonomic = None
+
     app = FastAPI(title="NYXARA", version=settings.schema_version,
-                  description="Sovereign cognitive architecture — authenticated API.")
+                  description="Sovereign cognitive architecture — authenticated API.",
+                  lifespan=_lifespan)
 
     if cfg.cors_origins:
         app.add_middleware(
