@@ -267,6 +267,19 @@ class NyxaraCore:
         self.oversight = oversight or Oversight(mode=review_mode)
         self.corrigibility = corrigibility or Corrigibility()
         self.permissions = permissions or build_default_policy()
+        # Full operational control (opt-in): when the owner sets agency.full_control, and no
+        # custom policy was injected, pre-grant NYXARA a maximal autonomous envelope over every
+        # operational capability so she acts on the OS on her own initiative without escalating
+        # each action. Owner-exclusive caps (rules/permissions/identity) and the /scram +
+        # oversight + corrigibility gates are untouched — the Master stays sovereign.
+        if permissions is None:
+            try:
+                from nyxara.kernel.config import get_settings
+                if get_settings().agency.full_control:
+                    from nyxara.agency.permissions import grant_full_operational_control
+                    grant_full_operational_control(self.permissions)
+            except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+                pass
         self.governor = governor or Governor()
         self.binder = binder or Binder()
         self.mind = mindscope or MindScope()

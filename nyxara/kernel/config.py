@@ -1450,6 +1450,14 @@ class AgencyConfig(BaseModel):
     # blackboard) — real autonomy, still fail-closed behind permissions + the journal.
     civilization_autonomous: bool = False
     civilization_max_actions_per_cycle: int = Field(default=2, ge=0, le=20)
+    # --- full operational control (agency/permissions.grant_full_operational_control) --- #
+    # When ON, the Master pre-grants NYXARA a maximal *autonomous* envelope over every
+    # operational capability (shell, files incl. delete, network, packages, self-improvement)
+    # so she acts on the OS on her own initiative WITHOUT escalating each action. The sovereign
+    # boundaries are deliberately untouched: the /scram kill-switch, oversight and corrigibility
+    # remain, and modifying the Rules, this policy, or her identity stays owner-exclusive
+    # (Rule 8). OFF by default — safe-by-default; the owner opts in.
+    full_control: bool = Field(default=False)
 
 
 class MCPServerSpec(BaseModel):
