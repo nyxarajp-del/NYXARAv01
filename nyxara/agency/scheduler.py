@@ -243,6 +243,21 @@ class Scheduler:
             ticks += 1
         return ticks
 
+    def purge_terminal(self) -> int:
+        """Drop finished (DONE/FAILED/CANCELLED) tasks that nothing still depends on.
+
+        Keeps the task table bounded for a long-running daemon that submits a fresh
+        one-shot task on every tick. Returns how many were removed."""
+        terminal = {TaskState.DONE, TaskState.FAILED, TaskState.CANCELLED}
+        depended: set = set()
+        for t in self._tasks.values():
+            depended |= set(t.deps)
+        drop = [tid for tid, t in self._tasks.items()
+                if t.state in terminal and tid not in depended]
+        for tid in drop:
+            del self._tasks[tid]
+        return len(drop)
+
     # ---- reporting ---- #
     def pending(self) -> List[Task]:
         return [t for t in self._tasks.values() if t.state is TaskState.PENDING]

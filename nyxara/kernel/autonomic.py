@@ -51,20 +51,36 @@ class AutonomicLoop:
     interval_s: float = 30.0
     prompts: Sequence[str] = field(default_factory=lambda: tuple(DEFAULT_PROMPTS))
     authority: Authority = Authority.AUTONOMOUS
+    # "reasoner" — each tick runs a self-composed prompt through the sovereign cycle (the
+    # LLM-backed reasoner may decide the reply). "code" — NYXARA DECIDES and ACTS entirely in
+    # her own deterministic engines (drive → intent → proactive gauntlet → scheduler), the LLM
+    # never the decider. The always-on daemon runs "code" (see server config); the class
+    # default stays "reasoner" for back-compat with the reactive/console path.
+    decision_mode: str = "reasoner"
     growth_every: int = 0                 # run a learning pass every N ticks (0 = never)
     growth_engine: Any = None
     inner_life: bool = False              # draw prompts from her own mind, not a fixed list
     stream: Any = None                    # DefaultModeStream (auto-wired from core if inner_life)
     prospective: Any = None               # ProspectiveMemory — standing intentions that come due
-    proactive: Any = None                 # ProactiveEngine (auto-wired from core if inner_life)
+    proactive: Any = None                 # ProactiveEngine (auto-wired from core)
     proactive_allowed: bool = True        # gate self-initiated proposals (presence/oversight)
     advance_missions: bool = True         # advance a standing long-horizon mission each tick
     mission_executive: Any = None         # MissionExecutive (auto-wired from core)
+    # code-driven decision+action machinery (auto-wired from the core in __post_init__)
+    intent: Any = None                    # IntentSystem — autonomous goal genesis (active inference)
+    scheduler: Any = None                 # agency Scheduler — where cleared ACTs execute, in code
+    journal: Any = None                   # Journal — hash-chained provenance of autonomous action
+    presence: Any = None                  # Presence — arousal state drives cadence + proactive gate
+    health: Any = None                    # HealthMonitor — heartbeat + bounded self-healing
+    persist_every: int = 20               # checkpoint goals/drives every N ticks (0 = never)
     history: List[CycleResult] = field(default_factory=list)
-    escalations: List[CycleResult] = field(default_factory=list)
+    escalations: List[Any] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
     prompt_sources: List[str] = field(default_factory=list)
     missions_advanced: int = 0
+    intents_adopted: int = 0
+    code_acts: int = 0
+    scheduler_runs: int = 0
     ticks: int = 0
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
@@ -82,8 +98,16 @@ class AutonomicLoop:
         if self.inner_life and self.stream is None:
             self.stream = getattr(self.core, "stream", None)
         # and acts on her own initiative through the core's governed proactive engine
-        if self.inner_life and self.proactive is None:
+        if (self.inner_life or self.decision_mode == "code") and self.proactive is None:
             self.proactive = getattr(self.core, "proactive", None)
+        # code-driven autonomy: wire her own deterministic decision+action faculties from the
+        # core so a background tick can DECIDE and ACT without ever calling the LLM to choose.
+        if self.intent is None:
+            self.intent = getattr(self.core, "intent", None)
+        if self.scheduler is None:
+            self.scheduler = getattr(self.core, "scheduler", None)
+        if self.journal is None:
+            self.journal = getattr(self.core, "journal", None)
         # the background mind also nudges her standing long-horizon missions forward, one
         # gated milestone at a time, on her own cadence (months-long goals advance unattended)
         if self.advance_missions and self.mission_executive is None:
@@ -206,21 +230,139 @@ class AutonomicLoop:
                 return spontaneous, "stream"
         return self._repertoire_prompt(), "repertoire"
 
+    # ---- code-driven decision + action (NYXARA decides herself; the LLM is not the decider) ---- #
+    def _decide_and_act_once(self) -> dict:
+        """One fully deterministic autonomic turn: NYXARA's own engines both DECIDE and ACT.
+
+        drive pressure (``affect.tick``) → adopt a goal by active inference
+        (``intent.autonomous_intent``) → run the loyalty-first gauntlet
+        (``proactive.consider`` — alignment/confidence/permission/reversibility/sandbox) which
+        *submits* every cleared ACT to the scheduler → **drain the scheduler**, executing each
+        initiative's own action callable in code (skill practice, research, consolidation).
+        No English prompt is composed and ``core.process`` is never called — the LLM plays no
+        part in the decision. Risky/irreversible proposals still ESCALATE (queued, not run)."""
+        core = self.core
+        summary = {"mode": "code", "intent": None, "acted": 0,
+                   "escalated": 0, "ran": 0}
+        # 1) let unmet drives build pressure as real time would (homeostasis)
+        affect = getattr(core, "affect", None)
+        if affect is not None:
+            try:
+                affect.tick(self.interval_s if self.interval_s > 0 else 1.0)
+            except Exception:  # noqa: BLE001 — affect is advisory, never fatal
+                pass
+        # 2) adopt her own lowest-free-energy goal (owner-aligned by construction; no LLM/human)
+        if self.intent is not None:
+            try:
+                dg = self.intent.autonomous_intent()
+                if dg is not None:
+                    self.intents_adopted += 1
+                    summary["intent"] = getattr(dg.goal, "name", None)
+                # keep the objective space bounded — re-adopting the same drive-goal each tick
+                # must not grow goals without limit over a long-running daemon
+                goals = getattr(core, "goals", None)
+                if goals is not None and hasattr(goals, "dedupe"):
+                    goals.dedupe()
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) the deterministic gauntlet — cleared ACTs are auto-submitted to the scheduler
+        if self.proactive is not None and self.proactive_allowed:
+            try:
+                from nyxara.agency.proactive import Verdict
+                ctx = (core.proactive_context()
+                       if hasattr(core, "proactive_context") else {})
+                for d in self.proactive.consider(ctx):
+                    if d.verdict is Verdict.ACT:
+                        summary["acted"] += 1
+                    elif d.verdict is Verdict.ESCALATE:
+                        summary["escalated"] += 1
+                        self.escalations.append(d)
+            except Exception:  # noqa: BLE001 — initiative is best-effort, never crashes the loop
+                pass
+        # 4) ACT — execute the cleared initiatives *in code* by draining the scheduler queue
+        if self.scheduler is not None:
+            try:
+                ran = 0
+                while ran <= 256:
+                    got = self.scheduler.tick()
+                    if not got:
+                        break
+                    ran += len(got)
+                summary["ran"] = ran
+                self.scheduler_runs += ran
+                self.scheduler.purge_terminal()
+            except Exception:  # noqa: BLE001
+                pass
+        self.code_acts += summary["acted"]
+        return summary
+
+    def _apply_presence(self) -> None:
+        """Advance the arousal state machine (energy, state, and thus cadence).
+
+        Presence modulates *how fast* the background mind cycles — calm and slow when resting,
+        quick when engaged/alert — via :meth:`_current_interval`. It deliberately does NOT gate
+        proactivity on/off: an un-attended NYXARA decays to ASLEEP within a couple of minutes
+        and only the Master (or a threat) can wake her, so silencing self-initiated action by
+        arousal state would make her dormant exactly when she must stay autonomous. Persistent
+        autonomy means she keeps deciding and acting on her own cadence, Master present or not."""
+        if self.presence is None:
+            return
+        try:
+            self.presence.tick(time.time())
+        except Exception:  # noqa: BLE001 — presence is advisory, never fatal
+            pass
+
+    def _current_interval(self) -> float:
+        """Cadence for the next sleep — presence-aware when a Presence is wired, else fixed."""
+        if self.presence is not None:
+            try:
+                iv = float(self.presence.tick_interval())
+                if iv > 0:
+                    return iv
+            except Exception:  # noqa: BLE001
+                pass
+        return self.interval_s
+
+    def _maybe_persist(self, *, force: bool = False) -> None:
+        """Checkpoint adopted goals + learned drives so autonomy is durable across restarts."""
+        if self.decision_mode != "code":
+            return
+        if not force and (self.persist_every <= 0 or self.ticks % self.persist_every != 0):
+            return
+        fn = getattr(self.core, "persist_autonomy_state", None)
+        if fn is None:
+            return
+        try:
+            fn()
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
     # ---- one step ---- #
-    def tick_once(self) -> Optional[CycleResult]:
+    def tick_once(self) -> Optional[Any]:
         """Run exactly one autonomic turn (synchronously). Returns the result, or None
         if the loop is currently halted by oversight (paused/scrammed)."""
         if not self.core.oversight.gate():
             return None
-        prompt, source = self._compose_prompt()
-        result = self.core.process(prompt, authority=self.authority)
-        self.ticks += 1
-        self.prompt_sources.append(source)
-        self.history.append(result)
-        if result.disposition is Disposition.ESCALATE:
-            self.escalations.append(result)
+        if self.decision_mode == "code":
+            result: Any = self._decide_and_act_once()
+            self.ticks += 1
+            self.prompt_sources.append("code")
+        else:
+            prompt, source = self._compose_prompt()
+            result = self.core.process(prompt, authority=self.authority)
+            self.ticks += 1
+            self.prompt_sources.append(source)
+            self.history.append(result)
+            if result.disposition is Disposition.ESCALATE:
+                self.escalations.append(result)
+        if self.health is not None:
+            try:
+                self.health.beat("autonomic")
+            except Exception:  # noqa: BLE001
+                pass
         self._advance_mission()
         self._maybe_grow()
+        self._maybe_persist()
         return result
 
     def run_for(self, n: int, *, sleep: bool = False) -> List[CycleResult]:
@@ -243,21 +385,39 @@ class AutonomicLoop:
         try:
             while self._running:
                 if self.core.oversight.gate():
-                    prompt, source = self._compose_prompt()
-                    result = await self.core.aprocess(prompt, authority=self.authority)
-                    self.ticks += 1
-                    self.prompt_sources.append(source)
-                    self.history.append(result)
-                    if result.disposition is Disposition.ESCALATE:
-                        self.escalations.append(result)
+                    # presence (when wired) advances arousal and gates proactivity per state
+                    self._apply_presence()
+                    if self.decision_mode == "code":
+                        # the decision + action are pure code, but the action callables may do
+                        # real I/O (research), so run them off the event loop to stay responsive
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, self._decide_and_act_once)
+                        self.ticks += 1
+                        self.prompt_sources.append("code")
+                    else:
+                        prompt, source = self._compose_prompt()
+                        result = await self.core.aprocess(prompt, authority=self.authority)
+                        self.ticks += 1
+                        self.prompt_sources.append(source)
+                        self.history.append(result)
+                        if result.disposition is Disposition.ESCALATE:
+                            self.escalations.append(result)
+                    if self.health is not None:
+                        try:
+                            self.health.beat("autonomic")
+                        except Exception:  # noqa: BLE001
+                            pass
                     self._advance_mission()
                     self._maybe_grow()
+                    self._maybe_persist()
                 done += 1
                 if max_ticks is not None and done >= max_ticks:
                     break
-                await asyncio.sleep(self.interval_s)
+                await asyncio.sleep(self._current_interval())
         finally:
             self._running = False
+            # a final checkpoint so the last-adopted goals/drives are never lost on shutdown
+            self._maybe_persist(force=True)
 
     def start(self, *, max_ticks: Optional[int] = None) -> Any:
         """Schedule the loop as a background asyncio task (requires a running loop)."""
@@ -282,14 +442,30 @@ class AutonomicLoop:
         return self._running
 
     def report(self) -> dict:
-        return {"ticks": self.ticks, "running": self.running,
-                "interval_s": self.interval_s, "inner_life": self.inner_life,
-                "acted": sum(1 for r in self.history if r.disposition is Disposition.ACT),
-                "escalations": len(self.escalations),
-                "missions_advanced": self.missions_advanced,
-                "growth_passes": len(self.growth_reports),
-                "sources": {s: self.prompt_sources.count(s)
-                            for s in sorted(set(self.prompt_sources))}}
+        rep = {"ticks": self.ticks, "running": self.running,
+               "interval_s": self.interval_s, "inner_life": self.inner_life,
+               "decision_mode": self.decision_mode,
+               "acted": sum(1 for r in self.history if r.disposition is Disposition.ACT),
+               "escalations": len(self.escalations),
+               "missions_advanced": self.missions_advanced,
+               "growth_passes": len(self.growth_reports),
+               # code-driven metrics: what NYXARA decided and did on her own, without the LLM
+               "intents_adopted": self.intents_adopted,
+               "code_acts": self.code_acts,
+               "scheduler_runs": self.scheduler_runs,
+               "sources": {s: self.prompt_sources.count(s)
+                           for s in sorted(set(self.prompt_sources))}}
+        if self.presence is not None:
+            try:
+                rep["presence"] = self.presence.state.name
+            except Exception:  # noqa: BLE001
+                pass
+        if self.health is not None:
+            try:
+                rep["health"] = self.health.evaluate().overall.label
+            except Exception:  # noqa: BLE001
+                pass
+        return rep
 
 
 # --------------------------------------------------------------------------- #

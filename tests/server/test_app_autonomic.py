@@ -38,8 +38,10 @@ def test_autonomic_on_starts_loop_on_boot_and_stops_on_shutdown() -> None:
     app = _app(autonomic=True)
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
-        # started with the running server event loop
+        # started with the running server event loop, supervised for in-process auto-restart
         assert app.state.autonomic is not None
-        assert app.state.autonomic._task is not None
+        assert app.state.autonomic.running is True
+        assert app.state.autonomic_runtime is not None
     # lifespan shutdown must tear the background mind down cleanly
     assert app.state.autonomic is None
+    assert app.state.autonomic_runtime is None

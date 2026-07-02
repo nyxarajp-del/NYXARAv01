@@ -170,9 +170,14 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @asynccontextmanager
     async def _lifespan(app_: Any):
         loop = None
+        runtime = None
         if cfg.autonomic:
             try:
                 from nyxara.kernel.autonomic import AutonomicLoop
+                from nyxara.kernel.presence import Presence
+                from nyxara.kernel.runtime import Runtime
+                from nyxara.agency.health import HealthMonitor
+                core = app_.state.core
                 # When the Master has granted autonomous internet (or full control), run the
                 # background mind at "max level": inner_life draws its agenda from her own
                 # proactive engine (incl. the internet-research initiative) + default-mode
@@ -182,31 +187,79 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 # repertoire, unchanged.
                 inner_life = bool(settings.agency.full_control
                                   or settings.agency.autonomous_internet)
+
+                # Presence — arousal state machine gives the background mind a *cadence* (calm
+                # when idle/asleep, active when alert) and gates self-initiated proposals, so
+                # she paces herself without ever needing the Master online.
+                presence = None
+                try:
+                    presence = Presence(settings=settings)
+                except Exception:  # noqa: BLE001 — presence is a capability, never required
+                    presence = None
+
+                # HealthMonitor — heartbeats + resource pressure with bounded self-healing, so
+                # the background mind can recover from degradation on its own (fail-closed on
+                # security/invariant classes, which always escalate to the Master).
+                health = None
+                try:
+                    health = HealthMonitor()
+                    health.register("autonomic", heartbeat_timeout=cfg.autonomic_interval_s * 4)
+                    if getattr(core, "governor", None) is not None:
+                        health.bind_governor(core.governor)
+                except Exception:  # noqa: BLE001 — health is a capability, never required
+                    health = None
+
                 loop = AutonomicLoop(
-                    app_.state.core,
+                    core,
                     interval_s=cfg.autonomic_interval_s,
                     growth_every=cfg.autonomic_growth_every,
                     inner_life=inner_life,
+                    decision_mode=cfg.autonomic_decision_mode,
+                    presence=presence,
+                    health=health,
                 )
-                loop.start()  # schedules an asyncio task on the running server loop
+
+                # Supervise the loop in-process: if the background mind ever crashes it is
+                # auto-restarted with backoff (complementing systemd's Restart=always, which
+                # only restarts the whole process). One long-running, self-healing mind.
+                runtime = Runtime(name="nyxara-autonomic")
+
+                async def _mind_factory(_loop=loop):
+                    _loop._running = True
+                    await _loop._run(None)
+
+                runtime.supervise(_mind_factory, name="autonomic-mind",
+                                  max_restarts=1_000_000, backoff=1.0, max_backoff=30.0)
                 app_.state.autonomic = loop
+                app_.state.autonomic_runtime = runtime
                 print(f"NYXARA background mind (AutonomicLoop) started "
-                      f"[interval {cfg.autonomic_interval_s}s, growth_every {cfg.autonomic_growth_every}, "
-                      f"inner_life {inner_life}]")
+                      f"[interval {cfg.autonomic_interval_s}s, growth_every "
+                      f"{cfg.autonomic_growth_every}, inner_life {inner_life}, "
+                      f"decision_mode {cfg.autonomic_decision_mode}, supervised]")
             except Exception as exc:  # noqa: BLE001 — never let the mind block the server
                 app_.state.autonomic = None
+                app_.state.autonomic_runtime = None
                 print(f"NYXARA background mind failed to start: {exc}")
         else:
             app_.state.autonomic = None
+            app_.state.autonomic_runtime = None
         try:
             yield
         finally:
             if loop is not None:
+                loop._running = False  # signal the background mind to exit its next check
+            if runtime is not None:
                 try:
-                    await loop.stop()
+                    await runtime.stop()
                 except Exception:  # noqa: BLE001 — best-effort clean shutdown
                     pass
-                app_.state.autonomic = None
+            elif loop is not None:
+                try:
+                    await loop.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            app_.state.autonomic = None
+            app_.state.autonomic_runtime = None
 
     app = FastAPI(title="NYXARA", version=settings.schema_version,
                   description="Sovereign cognitive architecture — authenticated API.",

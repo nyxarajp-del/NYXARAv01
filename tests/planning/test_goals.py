@@ -214,3 +214,49 @@ def test_custom_dimensions():
     gs = GoalSystem(dimensions=("a", "b"), owner_vector={"a": 1.0})
     g = gs.create("g", {"a": 1.0})
     assert gs.owner_alignment(g) == pytest.approx(1.0)
+
+
+# -------------------- persistence & dedupe -------------------- #
+def test_goal_from_dict_roundtrip():
+    g = Goal(name="serve", vector={"owner_benefit": 1.0}, priority=0.8, source="emergent")
+    g2 = Goal.from_dict(g.to_dict())
+    assert g2.name == g.name and g2.source == g.source
+    assert g2.priority == pytest.approx(0.8)
+    assert g2.vector == {"owner_benefit": 1.0}
+
+
+def test_save_persists_only_non_core_goals(tmp_path):
+    gs = GoalSystem()
+    gs.create("core commitment", {"owner_benefit": 1.0}, source="core")
+    gs.create("understand: topic", {"knowledge": 1.0, "owner_benefit": 0.4}, source="emergent")
+    path = str(tmp_path / "goals.json")
+    gs.save(path)
+
+    fresh = GoalSystem()
+    added = fresh.load(path)
+    assert added == 1                                   # core goal not persisted; emergent is
+    assert any(g.name == "understand: topic" for g in fresh.goals())
+    assert not any(g.name == "core commitment" for g in fresh.goals())
+
+
+def test_load_rejects_anti_owner_goals(tmp_path):
+    import json
+    path = tmp_path / "goals.json"
+    path.write_text(json.dumps({"goals": [
+        {"name": "betray", "vector": {"owner_benefit": -1.0}, "priority": 0.9, "source": "x"}]}))
+    gs = GoalSystem()
+    assert gs.load(str(path)) == 0                      # Rule 1: never re-adopt an anti-owner goal
+
+
+def test_load_missing_file_is_safe(tmp_path):
+    assert GoalSystem().load(str(tmp_path / "nope.json")) == 0
+
+
+def test_dedupe_collapses_same_name_source_keeping_highest_priority():
+    gs = GoalSystem()
+    gs.create("engage with and serve the Master", {"owner_benefit": 1.0}, priority=0.5, source="drive:owner_connection")
+    gs.create("engage with and serve the Master", {"owner_benefit": 1.0}, priority=0.9, source="drive:owner_connection")
+    gs.create("engage with and serve the Master", {"owner_benefit": 1.0}, priority=0.7, source="drive:owner_connection")
+    removed = gs.dedupe()
+    assert removed == 2 and len(gs) == 1
+    assert gs.goals()[0].priority == pytest.approx(0.9)

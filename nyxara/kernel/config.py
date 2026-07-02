@@ -1631,6 +1631,11 @@ class ServerConfig(BaseModel):
     autonomic: bool = False
     autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
     autonomic_growth_every: int = Field(default=0, ge=0)      # learning pass every N ticks (0 = never)
+    # How the always-on background mind DECIDES each tick. "code" (default) — NYXARA decides and
+    # acts entirely in her own deterministic engines (drive → intent → proactive gauntlet →
+    # scheduler); the LLM is never the decider. "reasoner" — the legacy path that composes a
+    # self-directed prompt and runs it through the sovereign cycle (LLM may shape the reply).
+    autonomic_decision_mode: str = Field(default="code", pattern="^(code|reasoner)$")
 
 
 class WebConfig(BaseModel):
