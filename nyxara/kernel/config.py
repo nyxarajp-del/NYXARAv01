@@ -339,6 +339,16 @@ class FoundryConfig(BaseModel):
     self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
     # Generative fallback backend: "auto" => nano-GPT when torch is present, else word-KN n-gram.
     self_brain_backend: Literal["auto", "kngram", "nanogpt"] = "auto"
+    # ---- Few-shot skill induction (cognition/skill_induction.py) ---- #
+    # NYXARA learns a *task* from a handful of (input -> output) demonstrations by synthesising a
+    # verified, reusable transformation she then applies to genuinely new inputs — real, transferable
+    # capability gain she performs herself (pure stdlib, no LLM). A program is accepted only when it
+    # reproduces every demonstration exactly; with >=3 demos one is held out to measure transfer.
+    skill_induction_enabled: bool = True
+    skill_min_demos: int = Field(default=2, ge=1, le=32)          # demonstrations needed to learn
+    skill_max_program_depth: int = Field(default=3, ge=0, le=8)   # composed-op search depth (Occam)
+    skill_beam_width: int = Field(default=16, ge=1, le=128)       # program-search beam
+    skill_apply_confidence: float = Field(default=0.55, ge=0.0, le=1.0)  # floor to answer with a skill
     # Optional torch nano-GPT dimensions (only used when torch is present, and only when
     # profile == "custom"; a named profile overrides these).
     block_size: int = Field(default=64, ge=8, le=1024)
