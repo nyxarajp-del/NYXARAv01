@@ -488,6 +488,21 @@ around the control law.
   and `PRIV_ESCALATE` is deliberately excluded from full control's envelope, so `FULL_CONTROL`
   never confers root. `/scram`, oversight, corrigibility, the owner-exclusive caps (Rule 8) and
   the refusal of `UNTRUSTED` authority all stay intact.
+* **Filesystem-wide access** — `agency/filesystem.py`. NYXARA's real, whole-disk filesystem
+  faculty, wired end-to-end and done *herself* (plain `os`/`pathlib`/`shutil`, never a shell-out
+  or an LLM call). A single governed `Filesystem` engine backs a full tool family: `read_file`
+  (offset-capable) and `read_bytes` (binary-safe, base64), `stat_path` / `path_exists`, rich
+  `list_dir`, recursive `walk_dir`, `glob_paths` (`**` supported), `search_files` (grep file
+  contents, literal or regex), `disk_usage`, `write_file` / `write_bytes` / `append_file`,
+  `make_dir`, `copy_path`, `move_path`, and — finally exercising the long-unused `FS_DELETE`
+  capability — `delete_path` (file, empty dir, or whole tree). Reads gate at `FS_READ`/LOW, writes
+  at `FS_WRITE`/MODERATE (irreversible), delete at `FS_DELETE`/HIGH. `WHOLE_DISK` is **on by
+  default** (`NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK`) so she operates the entire disk on her own
+  initiative; `FULL_CONTROL` already covers the three FS caps, and when it is off a standalone grant
+  (`grant_filesystem_access`) keeps whole-disk access working independently. The engine enforces its
+  own guards — optional `ROOT` scoping, `DENY_GLOBS` (e.g. fence off the vault key store),
+  symlink control, and byte/depth/result caps so a read or walk can never exhaust memory — while
+  `/scram`, oversight, corrigibility and the owner-exclusive caps (Rule 8) all stay intact.
 * **First-principles reasoning** — `mind/first_principles.py`. NYXARA does not just *recall*
   answers, she **derives** them from the rules of a domain. The `FirstPrinciplesFaculty` is a
   verifiable engine (it wins over any neural guess) spanning four domains: **physics**

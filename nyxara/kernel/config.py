@@ -1478,6 +1478,44 @@ class VaultConfig(BaseModel):
     provider_key_fallback: bool = True
 
 
+class FilesystemConfig(BaseModel):
+    """Whole-disk filesystem faculty (agency/filesystem.py).
+
+    NYXARA's permission layer already authorises the whole disk (``grant_full_operational_control``
+    blesses ``FS_READ``/``FS_WRITE``/``FS_DELETE`` with an empty scope). This config governs the
+    *engine* that exercises that authority: how far it reaches and the caps that keep it safe.
+    Every operation still clears the kernel's capability/risk/authority pipeline and the /scram +
+    oversight + corrigibility gates — these knobs only shape the engine's own path guards.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    # When ON (default), no path restriction — NYXARA reads/writes/deletes anywhere on disk
+    # (subject to the OS's own permissions): genuine full-disk reach, at max level, aligned with
+    # AgencyConfig.full_control. Set NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK=false to confine every
+    # operation under `root` instead (fail-closed to a single subtree).
+    whole_disk: bool = Field(default=True)
+    # The subtree every operation is confined to when whole_disk is False. None -> the process CWD.
+    root: Optional[Path] = None
+    # Hard ceiling on the bytes any single read (text or binary) or per-file content search returns,
+    # so a huge file can never exhaust memory. The model-facing default_tools budget truncates
+    # further for the LLM; this is the engine's own real-I/O cap.
+    max_read_bytes: int = Field(default=5_000_000, ge=1)
+    # When False (default) a symlink is NOT resolved to its target — the leaf is operated on as the
+    # link itself and recursive copies/walks keep links as links. True follows symlinks everywhere.
+    follow_symlinks: bool = Field(default=False)
+    # Optional fnmatch globs (matched against the resolved absolute path). A non-empty allow list
+    # flips the engine to allow-only; the deny list always fences off matching paths even under
+    # whole_disk — e.g. add "*/.nyxara/keys/*" to keep the vault's key store off-limits.
+    allow_globs: List[str] = Field(default_factory=list)
+    deny_globs: List[str] = Field(default_factory=list)
+    # Recursion caps for walk/glob/search so a traversal can never run away: maximum directory
+    # depth, maximum entries/paths returned, and maximum content-search hits.
+    max_walk_depth: int = Field(default=25, ge=1)
+    max_results: int = Field(default=5_000, ge=1)
+    max_search_matches: int = Field(default=1_000, ge=1)
+
+
 class AgencyConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -1493,6 +1531,13 @@ class AgencyConfig(BaseModel):
     # blackboard) — real autonomy, still fail-closed behind permissions + the journal.
     civilization_autonomous: bool = False
     civilization_max_actions_per_cycle: int = Field(default=2, ge=0, le=20)
+    # --- filesystem-wide access (agency/filesystem.py + permissions.grant_filesystem_access) --- #
+    # The whole-disk filesystem faculty: reach and caps for NYXARA's real read/write/list/walk/
+    # glob/search/copy/move/delete engine. whole_disk is ON by default (max level) — she operates
+    # the entire disk on her own initiative, still behind the capability/risk gates and /scram +
+    # oversight + corrigibility. When full_control is off but filesystem.whole_disk is on, the
+    # orchestrator installs a standalone FS grant so filesystem-wide access works independently.
+    filesystem: FilesystemConfig = Field(default_factory=FilesystemConfig)
     # --- full operational control (agency/permissions.grant_full_operational_control) --- #
     # When ON, the Master pre-grants NYXARA a maximal *autonomous* envelope over every
     # operational capability (shell, files incl. delete, network, packages, self-improvement)

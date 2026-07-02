@@ -147,7 +147,7 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                         knowledge: Any = None, enable_code: bool = True,
                         max_read_bytes: int = 200_000,
                         web: Any = None, governor: Any = None,
-                        vault: Any = None) -> ToolRegistry:
+                        vault: Any = None, fs: Any = None) -> ToolRegistry:
     """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
 
     ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
@@ -175,6 +175,18 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
             web = get_settings().web
         except Exception:  # noqa: BLE001 — config is a convenience here, never a hard dep
             web = None
+
+    # ---- filesystem faculty: one governed engine, config-driven (whole-disk by default) ---- #
+    # `fs` may be a FilesystemConfig; fall back to settings, then to the engine's own defaults so
+    # a keyless/config-less machine still gets a working whole-disk faculty (never crashes).
+    from nyxara.agency.filesystem import Filesystem
+    if fs is None:
+        try:
+            from nyxara.kernel.config import get_settings
+            fs = get_settings().agency.filesystem
+        except Exception:  # noqa: BLE001 — config is a convenience here, never a hard dep
+            fs = None
+    filesystem = fs if isinstance(fs, Filesystem) else Filesystem.from_config(fs)
 
     def _secret(v: Any) -> Optional[str]:
         return v.get_secret_value() if v is not None else None
@@ -209,36 +221,177 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   params=[ToolParam("spec", "str", description="JSON parametric model spec")],
                   capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
 
-    # ---- filesystem reads: low risk, scoped by target ---- #
-    def _read_file(path: str) -> str:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(max_read_bytes)
+    # ---- filesystem faculty: NYXARA's own real whole-disk engine, capability-bound ---- #
+    # Every tool below routes through the shared `filesystem` engine and declares its path arg as
+    # the target, so the registry's capability/risk/authority pipeline gates each call. Reads are
+    # FS_READ/LOW; writes are FS_WRITE/MODERATE (irreversible); delete is FS_DELETE/HIGH.
+
+    # -- reads -- #
+    def _read_file(path: str, offset: int = 0) -> str:
+        # Model-facing return is bounded by max_read_bytes (the LLM budget); the engine's own
+        # max_read_bytes bounds the real I/O.
+        return filesystem.read_text(path, offset=offset, length=max_read_bytes)
 
     _add(ToolSpec("read_file", handler=_read_file,
-                  description="read a UTF-8 text file (truncated to a safe size)",
+                  description="read a UTF-8 text file (optional byte offset; truncated to a safe size)",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("offset", "int", required=False, default=0)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _read_bytes(path: str, offset: int = 0, length: int = 0) -> Dict[str, Any]:
+        b64 = filesystem.read_bytes(path, offset=offset, length=(length or None))
+        return {"path": path, "base64": b64}
+
+    _add(ToolSpec("read_bytes", handler=_read_bytes,
+                  description="read raw bytes of any file (binary-safe), returned base64-encoded",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("offset", "int", required=False, default=0),
+                          ToolParam("length", "int", required=False, default=0)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _stat_path(path: str) -> Dict[str, Any]:
+        return filesystem.stat(path)
+
+    _add(ToolSpec("stat_path", handler=_stat_path,
+                  description="metadata for a path (type, size, mtime, POSIX mode)",
                   params=[ToolParam("path", "str")],
                   capability=Capability.FS_READ, risk=RiskTier.LOW,
                   target_param="path"))
 
-    def _list_dir(path: str = ".") -> List[str]:
-        return sorted(os.listdir(path))
+    def _path_exists(path: str) -> bool:
+        return filesystem.exists(path)
+
+    _add(ToolSpec("path_exists", handler=_path_exists,
+                  description="whether a path exists on disk",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _list_dir(path: str = ".") -> List[Dict[str, Any]]:
+        return filesystem.list_dir(path)
 
     _add(ToolSpec("list_dir", handler=_list_dir,
-                  description="list the entries of a directory",
+                  description="list a directory with metadata (name, type, size, mtime, mode)",
                   params=[ToolParam("path", "str", required=False, default=".")],
                   capability=Capability.FS_READ, risk=RiskTier.LOW,
                   target_param="path"))
 
-    # ---- filesystem write: moderate, capability-bound ---- #
-    def _write_file(path: str, content: str) -> str:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        return f"wrote {len(content)} chars to {path}"
+    def _walk_dir(path: str = ".", max_depth: int = 0, max_results: int = 0
+                  ) -> List[Dict[str, Any]]:
+        return filesystem.walk(path, max_depth=(max_depth or None),
+                               max_results=(max_results or None))
+
+    _add(ToolSpec("walk_dir", handler=_walk_dir,
+                  description="recursively list a directory tree (depth- and count-bounded)",
+                  params=[ToolParam("path", "str", required=False, default="."),
+                          ToolParam("max_depth", "int", required=False, default=0),
+                          ToolParam("max_results", "int", required=False, default=0)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _glob_paths(pattern: str, root: str = ".", max_results: int = 0) -> List[str]:
+        return filesystem.glob(pattern, root=root, max_results=(max_results or None))
+
+    _add(ToolSpec("glob_paths", handler=_glob_paths,
+                  description="find paths matching a glob pattern under a root ('**' supported)",
+                  params=[ToolParam("pattern", "str"),
+                          ToolParam("root", "str", required=False, default="."),
+                          ToolParam("max_results", "int", required=False, default=0)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="root"))
+
+    def _search_files(root: str, pattern: str, regex: bool = False,
+                      include: str = "*", max_matches: int = 0) -> List[Dict[str, Any]]:
+        return filesystem.search(root, pattern, regex=regex, include=include,
+                                 max_matches=(max_matches or None))
+
+    _add(ToolSpec("search_files", handler=_search_files,
+                  description="grep file contents under a root for a literal or regex pattern",
+                  params=[ToolParam("root", "str"), ToolParam("pattern", "str"),
+                          ToolParam("regex", "bool", required=False, default=False),
+                          ToolParam("include", "str", required=False, default="*"),
+                          ToolParam("max_matches", "int", required=False, default=0)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="root"))
+
+    def _disk_usage(path: str = ".") -> Dict[str, int]:
+        return filesystem.disk_usage(path)
+
+    _add(ToolSpec("disk_usage", handler=_disk_usage,
+                  description="total/used/free bytes of the filesystem holding a path",
+                  params=[ToolParam("path", "str", required=False, default=".")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    # -- writes: moderate, irreversible, capability-bound -- #
+    def _write_file(path: str, content: str, overwrite: bool = True) -> Dict[str, Any]:
+        return filesystem.write_text(path, content, overwrite=overwrite)
 
     _add(ToolSpec("write_file", handler=_write_file,
-                  description="write UTF-8 text to a file (overwrites)",
+                  description="write UTF-8 text to a file (creates parents; overwrites by default)",
+                  params=[ToolParam("path", "str"), ToolParam("content", "str"),
+                          ToolParam("overwrite", "bool", required=False, default=True)],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _write_bytes(path: str, content_b64: str, overwrite: bool = True) -> Dict[str, Any]:
+        return filesystem.write_bytes(path, content_b64, overwrite=overwrite)
+
+    _add(ToolSpec("write_bytes", handler=_write_bytes,
+                  description="write raw bytes (base64 input) to a file (creates parents)",
+                  params=[ToolParam("path", "str"), ToolParam("content_b64", "str"),
+                          ToolParam("overwrite", "bool", required=False, default=True)],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _append_file(path: str, content: str) -> Dict[str, Any]:
+        return filesystem.append_text(path, content)
+
+    _add(ToolSpec("append_file", handler=_append_file,
+                  description="append UTF-8 text to a file (creates it if absent)",
                   params=[ToolParam("path", "str"), ToolParam("content", "str")],
                   capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _make_dir(path: str, parents: bool = True) -> Dict[str, Any]:
+        return filesystem.make_dir(path, parents=parents)
+
+    _add(ToolSpec("make_dir", handler=_make_dir,
+                  description="create a directory (parents=True makes the whole chain)",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("parents", "bool", required=False, default=True)],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _copy_path(src: str, dst: str) -> Dict[str, Any]:
+        return filesystem.copy(src, dst)
+
+    _add(ToolSpec("copy_path", handler=_copy_path,
+                  description="copy a file (metadata preserved) or a whole directory tree",
+                  params=[ToolParam("src", "str"), ToolParam("dst", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="dst"))
+
+    def _move_path(src: str, dst: str) -> Dict[str, Any]:
+        return filesystem.move(src, dst)
+
+    _add(ToolSpec("move_path", handler=_move_path,
+                  description="move/rename a file or directory",
+                  params=[ToolParam("src", "str"), ToolParam("dst", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="src"))
+
+    # -- delete: high risk, irreversible (finally exercises FS_DELETE) -- #
+    def _delete_path(path: str, recursive: bool = False) -> Dict[str, Any]:
+        return filesystem.delete(path, recursive=recursive)
+
+    _add(ToolSpec("delete_path", handler=_delete_path,
+                  description="delete a file, an empty directory, or (recursive=True) a whole tree",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("recursive", "bool", required=False, default=False)],
+                  capability=Capability.FS_DELETE, risk=RiskTier.HIGH,
                   reversible=False, target_param="path"))
 
     # ---- network fetch: injection-sanitised (senses/web), governed, fails as data ---- #
