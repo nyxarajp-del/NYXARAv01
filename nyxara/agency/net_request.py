@@ -32,6 +32,19 @@ from nyxara.senses.web import WebFetcher
 __all__ = ["http_request"]
 
 
+def _redirect_reason(newurl: str, *, allow_private: bool) -> Optional[str]:
+    """Return a rejection reason if a redirect target must not be followed, else None.
+
+    A redirect hop is vetted by the very same SSRF guard as the initial request
+    (:meth:`~nyxara.senses.web.WebFetcher._vet_url`), so a public URL cannot bounce the call
+    onto a loopback/private/link-local host (e.g. the cloud-metadata service). Never raises —
+    a vetting failure is itself treated as a reason to refuse (fail-closed)."""
+    try:
+        return WebFetcher(allow_private=allow_private)._vet_url(newurl)  # noqa: SLF001
+    except Exception as exc:  # noqa: BLE001 — fail-closed on any vetting error
+        return f"redirect vetting failed: {exc}"
+
+
 # A bounded redirect handler: urllib follows redirects by default, but we cap the count
 # and — critically — re-vetting happens implicitly because we set a low max via the
 # opener below. We disallow protocol downgrades to non-http(s) by relying on urllib's
@@ -78,10 +91,21 @@ def http_request(url: str, *, method: str = "GET", headers: Optional[Dict[str, s
             req.add_header(k, v)
 
     # Cap redirects per call (defence against redirect loops). Defaults to the conservative
-    # _BoundedRedirect (2); callers may raise it via max_redirects.
+    # _BoundedRedirect (2); callers may raise it via max_redirects. Critically, each redirect
+    # target is RE-VETTED by the same SSRF guard before it is followed — otherwise a public URL
+    # that 302-redirects to a private/loopback/link-local host (e.g. the cloud-metadata service
+    # at 169.254.169.254) would be dialled fail-open. A blocked hop raises an HTTPError which the
+    # call's own handler below turns into uniform error data.
     class _PerCallRedirect(urllib.request.HTTPRedirectHandler):
         max_repeats = max(0, int(max_redirects))
         max_redirections = max(0, int(max_redirects))
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            bad = _redirect_reason(newurl, allow_private=allow_private)
+            if bad:
+                raise urllib.error.HTTPError(newurl, code, f"blocked redirect: {bad}",
+                                             headers, fp)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     opener = urllib.request.build_opener(_PerCallRedirect)
 

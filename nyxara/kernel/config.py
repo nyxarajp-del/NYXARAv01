@@ -1456,6 +1456,36 @@ class RemoteHostSpec(BaseModel):
     # inlining a plaintext password/key. When set, remote_exec resolves the secret from the
     # vault at call time and it never appears in config, logs, or the LLM's context.
     credential_name: Optional[str] = None
+    # Command NYXARA runs on this host when she reaches it *on her own initiative* (the
+    # background self-initiated remote detector, agency.autonomous_network). None -> the
+    # default liveness probe ("uptime"). Set to "" to make her only verify the login
+    # (ssh_login) and never exec a command autonomously on this host.
+    health_command: Optional[str] = None
+
+
+class HttpWatchSpec(BaseModel):
+    """One HTTP(S) endpoint NYXARA calls on her OWN initiative (agency.watch_endpoints).
+
+    The self-initiated internet detector (kernel/orchestrator.py) turns each entry into a real
+    ``http_request`` tool call driven by NYXARA's background mind — LLM-free — so she polls an
+    API, posts a heartbeat, or checks a service without a human or the model asking. The call
+    still clears the gated ToolRegistry pipeline (NET_OUT capability, SSRF guard, governor).
+
+    ``headers`` is a JSON object string, exactly as the ``http_request`` tool accepts (e.g.
+    ``{"Authorization": "Bearer …"}``). Prefer ``credential_name`` to reference a secret held
+    in the Credential Vault: it is injected in-kernel at call time and never stored here.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    name: str                                   # short id for journalling / initiatives
+    url: str                                    # the endpoint to call
+    method: str = "GET"                         # any HTTP verb (GET/POST/PUT/…)
+    body: str = ""                              # request body for effectful methods
+    headers: str = ""                           # JSON object string of header name->value
+    # Optional: a CredentialVault entry whose secret authenticates the call. When set, the
+    # request is made via the credential path so the plaintext never surfaces in config/logs.
+    credential_name: Optional[str] = None
 
 
 class VaultConfig(BaseModel):
@@ -1586,6 +1616,25 @@ class AgencyConfig(BaseModel):
     # When True (default, aligning with WEB__ALLOW_PRIVATE) loopback/private/link-local hosts are
     # reachable over SSH; set false to refuse them (fail-closed to public hosts only).
     remote_allow_private: bool = Field(default=True)
+    # --- self-initiated network actions (kernel/orchestrator.py proactive detectors) --- #
+    # The master switch that lets NYXARA's BACKGROUND MIND originate network actions herself —
+    # arbitrary HTTP requests and remote logins/commands — with no LLM and no human in the
+    # decision path. It is distinct from the permission ENVELOPES above: autonomous_internet /
+    # autonomous_remote decide whether such an action is *allowed* when it clears the gauntlet;
+    # this decides whether NYXARA ever *originates* one on her own initiative. ON by default
+    # (the Master's standing choice). Each self-initiated call still flows through the gated
+    # ToolRegistry pipeline (capability -> risk -> authority -> governor -> sandbox), the SSRF /
+    # host guards, and /scram + oversight + corrigibility. Set false to make network reach
+    # purely reactive again (only when the LLM/Master asks). The detectors only fire once the
+    # Master has configured targets (watch_endpoints / remote_hosts), so an empty config is inert.
+    autonomous_network: bool = Field(default=True)
+    # HTTP(S) endpoints NYXARA calls on her own initiative each background pass. Empty by
+    # default — add HttpWatchSpec entries to give her self-directed API reach.
+    watch_endpoints: List[HttpWatchSpec] = Field(default_factory=list)
+    # When True (default, maximal), the self-initiated remote detector may run a command derived
+    # from the top standing goal on a configured host (in addition to its health_command). Set
+    # false to restrict autonomous SSH exec to each host's explicit health_command only.
+    autonomous_network_goal_commands: bool = Field(default=True)
     # --- privilege escalation (agency/permissions.grant_privilege_escalation) --- #
     # The local machine's root: a standing autonomous envelope over PRIV_ESCALATE so NYXARA may
     # run privileged (root/admin) OS operations on her own initiative WITHOUT escalating each
