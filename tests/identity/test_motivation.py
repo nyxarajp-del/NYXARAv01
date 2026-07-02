@@ -181,3 +181,24 @@ def test_status(mot):
     mot.visit("x")
     s = mot.status()
     assert "visited_signatures" in s and "weights" in s
+
+
+# -------------------- persistence (drives survive restarts) -------------------- #
+def test_snapshot_restore_roundtrip():
+    m = MotivationSystem()
+    m.visit("theme-a")
+    m.visit("theme-a")
+    m.record_outcome(Option(name="learn x", signature="x"), competence_gain=0.4, skill="x")
+    snap = m.snapshot()
+
+    m2 = MotivationSystem()
+    m2.restore(snap)
+    assert m2.novelty("theme-a") == pytest.approx(m.novelty("theme-a"))
+    assert m2.competence("x") == pytest.approx(0.4)
+
+
+def test_restore_ignores_garbage():
+    m = MotivationSystem()
+    m.restore(None)              # not a dict -> no-op
+    m.restore({"visits": {"a": "notint"}, "competence": {"s": "nan"}})  # bad values skipped
+    assert m.novelty("a") == pytest.approx(1.0)

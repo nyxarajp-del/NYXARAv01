@@ -206,6 +206,29 @@ class MotivationSystem:
     def competence(self, skill: str) -> float:
         return self._competence.get(skill, 0.0)
 
+    # ---- persistence (novelty/competence survive restarts) ---- #
+    def snapshot(self) -> Dict[str, Any]:
+        """Serialise the learned novelty/competence state (drives survive a restart)."""
+        return {"visits": dict(self._visits),
+                "competence": dict(self._competence)}
+
+    def restore(self, state: Dict[str, Any]) -> None:
+        """Reload a previously-taken :meth:`snapshot` (best-effort, additive)."""
+        if not isinstance(state, dict):
+            return
+        visits = state.get("visits") or {}
+        comp = state.get("competence") or {}
+        for k, v in visits.items():
+            try:
+                self._visits[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        for k, v in comp.items():
+            try:
+                self._competence[str(k)] = _clamp(float(v))
+            except (TypeError, ValueError):
+                continue
+
     # ---- optional estimators ---- #
     @staticmethod
     def estimate_empowerment(world_model: Any, state: Sequence[Any],

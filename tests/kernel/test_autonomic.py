@@ -130,6 +130,88 @@ def test_inner_life_falls_back_to_stream_then_repertoire():
     assert loop.prompt_sources == ["stream", "repertoire"]   # stream first, then the steady list
 
 
+def _code_core():
+    # enable_memory=False keeps the research action offline (researcher is None), so the
+    # code-driven decision+action path is exercised fully but hermetically (no network).
+    return NyxaraCore(enable_memory=False)
+
+
+def test_code_mode_decides_and_acts_without_the_llm():
+    core = _code_core()
+    calls = {"n": 0}
+    orig = core.process
+    def _spy(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+    core.process = _spy
+
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    loop.run_for(5)
+
+    assert loop.ticks == 5
+    # the whole point: NYXARA decides in her own code; the LLM reasoner is never the decider
+    assert calls["n"] == 0
+    rep = loop.report()
+    assert rep["decision_mode"] == "code"
+    assert rep["intents_adopted"] >= 1      # adopted her own goals by active inference
+    assert rep["code_acts"] >= 1            # cleared ACTs executed in code (via the scheduler)
+    assert core.journal.verify()            # every autonomous act journaled + chain intact
+    assert len(core.journal.actions()) >= 1
+
+
+def test_code_mode_keeps_goals_and_scheduler_bounded():
+    core = _code_core()
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    base = len(core.goals)
+    loop.run_for(40)
+    # re-adopting the same drive-goal every tick must not grow the objective space unbounded
+    assert len(core.goals) <= base + 6
+    # finished one-shot scheduler tasks are purged, so the task table stays bounded
+    assert core.scheduler.report()["tasks"] <= 8
+
+
+def test_code_mode_respects_scram():
+    core = _code_core()
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    core.scram(reason="stand down")
+    assert loop.tick_once() is None and loop.ticks == 0
+    core.resume()
+    assert loop.tick_once() is not None and loop.ticks == 1
+
+
+def test_code_mode_persists_state_to_disk(tmp_path, monkeypatch):
+    core = _code_core()
+    # pin the persistence dir to a temp location (independent of the global settings/home)
+    monkeypatch.setattr(core, "_autonomy_state_dir", lambda: str(tmp_path))
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    loop.run_for(4)
+    saved = core.persist_autonomy_state()
+    assert saved["goals"] and saved["motivation"]
+    assert (tmp_path / "autonomy_goals.json").exists()
+    assert (tmp_path / "autonomy_motivation.json").exists()
+    # the emergent goals reload into a fresh GoalSystem seeded with the same core commitments
+    from nyxara.planning.goals import GoalSystem
+    gs = GoalSystem()
+    reloaded = gs.load(str(tmp_path / "autonomy_goals.json"))
+    assert reloaded >= 1
+
+
+def test_presence_paces_but_never_silences_autonomy():
+    # regression: an un-attended NYXARA decays to ASLEEP and only the Master/threat can wake
+    # her, so presence must only modulate CADENCE — never disable self-initiated action, or
+    # the background mind would go dormant exactly when it must stay autonomous.
+    from nyxara.kernel.presence import Presence, PresenceState
+    core = _code_core()
+    pres = Presence(initial=PresenceState.ASLEEP)
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code", presence=pres)
+    loop._apply_presence()                       # advance the (asleep) arousal state machine
+    assert loop.proactive_allowed is True        # low arousal must NOT gate proactivity off
+    r = loop.tick_once()
+    assert r["acted"] >= 1                        # still decides + acts while "asleep"
+    # cadence still reflects the rested state (slower than an engaged tick)
+    assert loop._current_interval() == pres.tick_interval()
+
+
 def test_aprocess_matches_process():
     core = NyxaraCore()
 

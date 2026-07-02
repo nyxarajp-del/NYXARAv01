@@ -345,6 +345,9 @@ class NyxaraCore:
         # drive pressures modulate which motive dominates right now, so the loop is closed: it
         # selects WHICH queued autonomous task she does first, rather than blind arrival order.
         self.motivation = self._build_motivation(self.affect) if enable_identity else None
+        # reload learned novelty/competence so intrinsic drives survive a restart (best-effort)
+        if self.motivation is not None:
+            self._restore_motivation_state()
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -471,7 +474,13 @@ class NyxaraCore:
         # and her own weaknesses and disciplines each through the loyalty-first gauntlet
         # (alignment → confidence → permission → reversibility → sandbox). It proposes; the
         # AutonomicLoop's background mind drives it; every proposal still passes every gate.
+        # The deterministic action scheduler the engine submits cleared ACTs to (set inside
+        # _build_proactive; stays None when proactive agency is disabled).
+        self.scheduler = None
         self.proactive = self._build_proactive() if enable_goals else None
+        # Autonomous goal genesis — active-inference intent from unmet drives (LLM-free): the
+        # background mind adopts its own lowest-free-energy goal each tick, always owner-aligned.
+        self.intent = self._build_intent() if enable_goals and enable_identity else None
         # Level 8 — Cycle Reflector: daily/weekly/monthly structured reflection cycles.
         self.cycle_reflector = self._build_cycle_reflector() if enable_growth else None
         # Level 9 — Micro-Agent Civilization: 7 specialized background agents.
@@ -896,6 +905,12 @@ class NyxaraCore:
                       {"owner_safety": 1.0, "owner_benefit": 0.6}, priority=0.9, source="core")
             gs.create("grow capability in service",
                       {"capability": 1.0, "owner_benefit": 0.4}, priority=0.6, source="core")
+            # reload any emergent/adopted goals persisted from prior runs, so the background
+            # mind's own commitments survive a restart (persistent autonomy). Best-effort.
+            try:
+                gs.load(self._goals_state_path())
+            except Exception:  # noqa: BLE001
+                pass
             return gs
         except Exception:  # noqa: BLE001
             return None
@@ -1631,8 +1646,15 @@ class NyxaraCore:
             from nyxara.agency.proactive import (Initiative, ProactiveEngine,
                                                  TriggerKind)
             from nyxara.agency.permissions import Capability, RiskTier
+            from nyxara.agency.scheduler import Scheduler
 
-            engine = ProactiveEngine(goals=self.goals)
+            # A real, deterministic priority scheduler shared with the engine: when a
+            # proactive proposal clears the loyalty-first gauntlet the engine *submits* its
+            # own action here, so the background mind ACTS in code (draining this queue),
+            # rather than laundering the decision back through the LLM reasoner. Owner-first,
+            # governor-throttled, fully offline.
+            self.scheduler = Scheduler(governor=self.governor)
+            engine = ProactiveEngine(goals=self.goals, scheduler=self.scheduler)
             skilltree = self.skilltree
 
             # 1) standing-goal detector — keep making progress on the top owner-aligned goal
@@ -1647,7 +1669,9 @@ class NyxaraCore:
                     kind=TriggerKind.MAINTENANCE, capability=Capability.TOOL_CALL,
                     risk=RiskTier.LOW, reversibility=1.0,
                     confidence=max(0.7, float(getattr(top, "priority", 0.7))),
-                    benefit=dict(getattr(top, "vector", {})) or {"owner_benefit": 1.0})]
+                    benefit=dict(getattr(top, "vector", {})) or {"owner_benefit": 1.0},
+                    action=(lambda gname=top.name: self._run_initiative_action(
+                        "progress standing goal", gname, self._progress_standing_goal)))]
 
             # 2) skill-gap detector — practise the highest-leverage learnable skill (curiosity)
             def skill_detector(ctx: Dict[str, Any]) -> List[Initiative]:
@@ -1665,7 +1689,10 @@ class NyxaraCore:
                     name=f"practise:{name}", rationale=f"strengthen the skill {name!r}",
                     kind=TriggerKind.CURIOSITY, capability=Capability.TOOL_CALL,
                     risk=RiskTier.LOW, reversibility=1.0, confidence=0.75,
-                    benefit={"competence": 1.0, "owner_benefit": 0.3})]
+                    benefit={"competence": 1.0, "owner_benefit": 0.3},
+                    action=(lambda sname=name: self._run_initiative_action(
+                        f"practise skill {sname}", sname,
+                        lambda: self.skilltree.practice(sname))))]
 
             # 3) internet-research detector — when autonomous internet is granted, keep
             # researching the top standing goal on the live web (curiosity). NET_OUT/LOW and
@@ -1683,7 +1710,9 @@ class NyxaraCore:
                     rationale=f"research {topic!r} on the live web for the Master",
                     kind=TriggerKind.CURIOSITY, capability=Capability.NET_OUT,
                     risk=RiskTier.LOW, reversibility=1.0, confidence=0.72,
-                    benefit={"owner_benefit": 1.0, "competence": 0.4})]
+                    benefit={"owner_benefit": 1.0, "competence": 0.4},
+                    action=(lambda t=topic: self._run_initiative_action(
+                        f"research {t}", t, lambda: self._research_topic(t))))]
 
             engine.register_detector(goal_detector)
             engine.register_detector(skill_detector)
@@ -1712,6 +1741,142 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001
                 pass
         return ctx
+
+    def _build_intent(self) -> Any:
+        """Autonomous goal genesis (active inference) over her drives — LLM-free, owner-first.
+
+        Shares the live affect, motivation and goal systems so the goal she spontaneously
+        adopts each background tick is grounded in real, unmet drive pressure and always
+        bends back to serving the Master (Rule 1)."""
+        if self.affect is None or self.goals is None:
+            return None
+        try:
+            from nyxara.planning.intent import IntentSystem
+            return IntentSystem(self.affect, motivation=self.motivation,
+                                goal_system=self.goals)
+        except Exception:  # noqa: BLE001 — intent genesis is a capability, never required
+            return None
+
+    # ---- executing self-initiated action in code (not via the LLM) ---- #
+    def _run_initiative_action(self, label: str, goal: str, fn: Any) -> Dict[str, Any]:
+        """Execute a cleared proactive initiative's real work *in code*, journaled end-to-end.
+
+        This is the concrete "NYXARA does it herself" step: the decision to act was already
+        made deterministically by the ProactiveEngine's gauntlet; here the chosen action
+        actually runs (skill practice, research, consolidation), and both the action and its
+        outcome are written to the hash-chained :class:`~nyxara.planning.journal.Journal`
+        so every autonomous act stays auditable (Rule 6)."""
+        from nyxara.planning.journal import ActionStatus
+        aid = None
+        if self.journal is not None:
+            try:
+                aid = self.journal.record_action(
+                    label, goal=goal, rationale="self-initiated (proactive, code-driven)",
+                    autonomous=True, confidence=0.75, reversibility=1.0,
+                    decision="act", provenance="autonomic")
+            except Exception:  # noqa: BLE001 — journalling is best-effort, never fatal
+                aid = None
+        try:
+            result = fn()
+            if self.journal is not None and aid is not None:
+                try:
+                    self.journal.record_outcome(
+                        aid, status=ActionStatus.SUCCEEDED,
+                        outcome={"summary": str(result)[:240]})
+                except Exception:  # noqa: BLE001
+                    pass
+            return {"ok": True, "label": label, "goal": goal, "result": result}
+        except Exception as exc:  # noqa: BLE001 — a failed action is data, never a crash
+            if self.journal is not None and aid is not None:
+                try:
+                    self.journal.record_outcome(
+                        aid, status=ActionStatus.FAILED, note=str(exc)[:240])
+                except Exception:  # noqa: BLE001
+                    pass
+            return {"ok": False, "label": label, "goal": goal, "error": str(exc)}
+
+    def _progress_standing_goal(self) -> Dict[str, Any]:
+        """Real, offline progress on a standing goal: one memory-consolidation cycle (rehearse
+        the salient, abstract the recurring). Falls back to a reaffirming note when there is
+        no memory to consolidate — always genuine work, never a no-op stub."""
+        if self.consolidator is not None:
+            try:
+                result = self.consolidator.run_cycle()
+                summary = getattr(result, "to_dict", lambda: result)()
+                return {"consolidated": summary}
+            except Exception as exc:  # noqa: BLE001
+                return {"consolidated": None, "error": str(exc)}
+        top = self.goals.top_goal() if self.goals is not None else None
+        return {"reaffirmed": top.name if top is not None else "standing commitments"}
+
+    def _research_topic(self, topic: str) -> Dict[str, Any]:
+        """Run one autonomous research pass on ``topic`` through her own researcher (offline
+        heuristic when no web/LLM is granted; live web when it is). LLM-free decision path."""
+        if getattr(self, "researcher", None) is None:
+            return {"researched": topic, "note": "researcher unavailable"}
+        report = self.researcher.research(topic)
+        summary = getattr(report, "summary", "")
+        return {"researched": topic, "summary": str(summary)[:240],
+                "sources": len(getattr(report, "sources", []) or [])}
+
+    # ---- persistent autonomy: goals & drives survive restarts ---- #
+    def _autonomy_state_dir(self) -> str:
+        import os
+        try:
+            from nyxara.kernel.config import get_settings
+            paths = get_settings().paths
+            d = str(paths.data_dir or paths.root)
+        except Exception:  # noqa: BLE001
+            d = os.path.join(os.path.expanduser("~"), ".nyxara", "data")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return d
+
+    def _goals_state_path(self) -> str:
+        import os
+        return os.path.join(self._autonomy_state_dir(), "autonomy_goals.json")
+
+    def _motivation_state_path(self) -> str:
+        import os
+        return os.path.join(self._autonomy_state_dir(), "autonomy_motivation.json")
+
+    def persist_autonomy_state(self) -> Dict[str, Any]:
+        """Checkpoint the state that makes background autonomy *durable*: emergent/adopted
+        goals and learned novelty/competence drives. Best-effort; never raises so a save can
+        run on every tick or at shutdown from the background loop without risk."""
+        import json
+        import os
+        saved: Dict[str, Any] = {"goals": False, "motivation": False}
+        if self.goals is not None:
+            try:
+                self.goals.save(self._goals_state_path())
+                saved["goals"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        if self.motivation is not None and hasattr(self.motivation, "snapshot"):
+            try:
+                path = self._motivation_state_path()
+                tmp = f"{path}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(self.motivation.snapshot(), default=str))
+                os.replace(tmp, path)
+                saved["motivation"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        return saved
+
+    def _restore_motivation_state(self) -> None:
+        """Reload persisted novelty/competence into the live motivation system (best-effort)."""
+        import json
+        if self.motivation is None or not hasattr(self.motivation, "restore"):
+            return
+        try:
+            with open(self._motivation_state_path(), "r", encoding="utf-8") as f:
+                self.motivation.restore(json.loads(f.read()))
+        except (OSError, ValueError):
+            pass
 
     def _build_capability_foundry(self) -> Any:
         """Level 15 — CapabilityFoundry: forge brand-new runnable tools from capability gaps."""

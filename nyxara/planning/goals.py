@@ -21,7 +21,9 @@ Pure standard library; feeds the rest of ``planning/``.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -68,6 +70,13 @@ class Goal:
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "vector": self.vector, "priority": round(self.priority, 3),
                 "source": self.source}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Goal":
+        return cls(name=str(d.get("name", "")),
+                   vector={str(k): float(v) for k, v in (d.get("vector") or {}).items()},
+                   priority=float(d.get("priority", 0.5)),
+                   source=str(d.get("source", "")))
 
 
 # --------------------------------------------------------------------------- #
@@ -164,6 +173,67 @@ class GoalSystem:
 
     def __len__(self) -> int:
         return len(self._goals)
+
+    def dedupe(self) -> int:
+        """Collapse goals that share the same ``(name, source)`` into one (highest priority),
+        keeping the objective space bounded when the background mind re-adopts the same
+        drive-goal every tick. Returns how many duplicates were removed."""
+        best: Dict[Tuple[str, str], Goal] = {}
+        for g in self._goals.values():
+            key = (g.name, g.source)
+            cur = best.get(key)
+            if cur is None or g.priority > cur.priority:
+                best[key] = g
+        if len(best) == len(self._goals):
+            return 0
+        removed = len(self._goals) - len(best)
+        self._goals = {g.goal_id: g for g in best.values()}
+        return removed
+
+    # ---- persistence (emergent/adopted goals survive restarts) ---- #
+    def save(self, path: str, *, include_sources: Sequence[str] = ()) -> str:
+        """Persist goals to JSON so autonomy is durable across restarts.
+
+        Only goals *not* seeded from code are saved by default (``source != "core"``),
+        since core commitments are re-seeded on boot; pass ``include_sources`` to widen.
+        Atomic (write-then-rename), best-effort — never raises to the caller's loop."""
+        keep = [g.to_dict() for g in self._goals.values()
+                if g.source != "core" or (include_sources and g.source in include_sources)]
+        payload = json.dumps({"goals": keep}, default=str)
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+        return path
+
+    def load(self, path: str) -> int:
+        """Reload previously-persisted goals (owner-aligned only; de-duplicated by name).
+
+        Returns the number of goals adopted. Missing/corrupt files load nothing."""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+        except (OSError, ValueError):
+            return 0
+        existing = {g.name for g in self._goals.values()}
+        added = 0
+        for d in (data.get("goals") or []):
+            try:
+                goal = Goal.from_dict(d)
+            except (TypeError, ValueError):
+                continue
+            if not goal.name or goal.name in existing:
+                continue
+            if not self.is_owner_aligned(goal):   # never re-adopt an anti-owner goal (Rule 1)
+                continue
+            self.add(goal)
+            existing.add(goal.name)
+            added += 1
+        return added
 
     # ---- alignment / conflict ---- #
     def alignment(self, a: Goal, b: Goal) -> float:
