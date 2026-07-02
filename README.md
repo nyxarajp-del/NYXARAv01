@@ -475,7 +475,19 @@ around the control law.
   A new `REMOTE_EXEC` capability gates them; the Master's standing grant
   (`grant_autonomous_remote`, `NYXARA_AGENCY__AUTONOMOUS_REMOTE=true`, on by default) lets them
   run on her own initiative — while `/scram`, oversight, corrigibility, the owner-exclusive
-  caps (Rule 8) and the refusal of `UNTRUSTED` authority all stay intact.
+  caps (Rule 8) and the refusal of `UNTRUSTED` authority all stay intact. **Self-initiated, not
+  just reactive:** her background/proactive mind now *originates* these network actions herself
+  — two detectors in `kernel/orchestrator.py` turn each configured target into a real,
+  journalled tool call driven in code (no LLM in the decision path). Set
+  `agency.watch_endpoints` (a list of `HttpWatchSpec`: `url`/`method`/`body`/`headers`, or a
+  vault `credential_name`) and she GETs/POSTs them on her own; add `health_command` to a
+  `remote_hosts` entry (default `uptime`, `""` = verify-login only) and she logs in and runs it
+  over SSH on her own. The master switch is `agency.autonomous_network`
+  (`NYXARA_AGENCY__AUTONOMOUS_NETWORK`, on by default); it is inert until targets are
+  configured. Every self-initiated call still clears the full gated `ToolRegistry` pipeline.
+  The `http_request` guard is also hardened against **SSRF-via-redirect**: every redirect hop
+  is re-vetted, so a public URL can no longer bounce the call onto a private/loopback/
+  link-local host (e.g. the cloud-metadata service).
 * **Privilege escalation** — `agency/privilege.py`. The local machine's root, wired as a real
   capability NYXARA drives *herself*: `privileged_shell` runs a command under `sudo`,
   `change_os_permissions` performs an elevated `chmod`/`chown`, and `privilege_status` reports the

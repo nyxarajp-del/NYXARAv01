@@ -1644,6 +1644,38 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
             return False
 
+    def _autonomous_network_on(self) -> bool:
+        """Whether NYXARA may ORIGINATE network actions herself (config-driven, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return bool(get_settings().agency.autonomous_network)
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return False
+
+    def _autonomous_goal_commands_on(self) -> bool:
+        """Whether the default remote probe runs when a host has no explicit health_command."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return bool(get_settings().agency.autonomous_network_goal_commands)
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _watch_endpoints(self) -> List[Any]:
+        """The HTTP endpoints NYXARA calls on her own initiative (config-driven, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return list(get_settings().agency.watch_endpoints or [])
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _remote_hosts(self) -> List[Any]:
+        """The SSH hosts NYXARA reaches on her own initiative (config-driven, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return list(get_settings().agency.remote_hosts or [])
+        except Exception:  # noqa: BLE001
+            return []
+
     def _build_proactive(self) -> Any:
         """Independent Action — a governed ProactiveEngine wired to NYXARA's live state.
 
@@ -1727,13 +1759,70 @@ class NyxaraCore:
                     action=(lambda t=topic: self._run_initiative_action(
                         f"research {t}", t, lambda: self._research_topic(t))))]
 
+            # 4) HTTP-endpoint detector — when autonomous internet is granted AND the Master has
+            # configured watch_endpoints, NYXARA ORIGINATES a real http_request to each on her own
+            # initiative (LLM-free). This is "arbitrary internet requests, herself": the action
+            # runs the gated http_request tool (NET_OUT, SSRF-guarded) in code. A GET is reversible
+            # (MODERATE); an effectful method (POST/PUT/PATCH/DELETE) is HIGH and non-reversible so
+            # the gauntlet/governor weigh it accordingly. Only fires when autonomous_network is on.
+            def http_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                if not (ctx.get("autonomous_network") and ctx.get("autonomous_internet")):
+                    return []
+                out: List[Initiative] = []
+                for spec in ctx.get("watch_endpoints") or []:
+                    method = (getattr(spec, "method", "GET") or "GET").upper()
+                    effectful = method not in ("GET", "HEAD", "OPTIONS")
+                    out.append(Initiative(
+                        name=f"http:{(getattr(spec, 'name', '') or method)[:40]}",
+                        rationale=f"call {getattr(spec, 'url', '')!r} ({method}) for the Master",
+                        kind=TriggerKind.MAINTENANCE, capability=Capability.NET_OUT,
+                        risk=RiskTier.HIGH if effectful else RiskTier.MODERATE,
+                        reversibility=0.4 if effectful else 1.0, confidence=0.72,
+                        benefit={"owner_benefit": 1.0, "competence": 0.3},
+                        action=(lambda s=spec: self._run_initiative_action(
+                            f"http_request {getattr(s, 'name', '')}",
+                            getattr(s, 'url', ''), lambda s=s: self._autonomous_http(s)))))
+                return out
+
+            # 5) remote-host detector — when autonomous remote is granted AND the Master has
+            # configured remote_hosts, NYXARA ORIGINATES a real SSH reach to each host herself:
+            # she verifies the login (ssh_login) and runs the host's health_command — or, at
+            # maximal reach, a command derived from the top standing goal — via the gated ssh_exec
+            # tool (REMOTE_EXEC). This is "remote logins & commands to external systems, herself".
+            # Only fires when autonomous_network is on and hosts are configured.
+            def remote_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                if not (ctx.get("autonomous_network") and ctx.get("autonomous_remote")):
+                    return []
+                goals = ctx.get("goals")
+                top = goals.top_goal() if goals is not None else None
+                goal_name = top.name if top is not None else ""
+                out: List[Initiative] = []
+                for spec in ctx.get("remote_hosts") or []:
+                    label = getattr(spec, "name", "") or getattr(spec, "host", "")
+                    out.append(Initiative(
+                        name=f"remote:{label[:40]}",
+                        rationale=f"reach the host {label!r} over SSH for the Master",
+                        kind=TriggerKind.MAINTENANCE, capability=Capability.REMOTE_EXEC,
+                        risk=RiskTier.HIGH, reversibility=0.4, confidence=0.7,
+                        benefit={"owner_benefit": 1.0, "competence": 0.3},
+                        action=(lambda s=spec, g=goal_name: self._run_initiative_action(
+                            f"ssh {label}", label,
+                            lambda s=s, g=g: self._autonomous_remote_check(s, g)))))
+                return out
+
             engine.register_detector(goal_detector)
             engine.register_detector(skill_detector)
             engine.register_detector(internet_detector)
+            engine.register_detector(http_detector)
+            engine.register_detector(remote_detector)
             # remember what live state to feed the detectors when the loop consults the engine
             self._proactive_context = lambda: {
                 "goals": self.goals, "skilltree": skilltree,
-                "autonomous_internet": self._autonomous_internet_on()}
+                "autonomous_internet": self._autonomous_internet_on(),
+                "autonomous_remote": self._autonomous_remote_on(),
+                "autonomous_network": self._autonomous_network_on(),
+                "watch_endpoints": self._watch_endpoints(),
+                "remote_hosts": self._remote_hosts()}
             return engine
         except Exception:  # noqa: BLE001 — proactive agency is a capability, never required
             return None
@@ -1831,6 +1920,68 @@ class NyxaraCore:
         summary = getattr(report, "summary", "")
         return {"researched": topic, "summary": str(summary)[:240],
                 "sources": len(getattr(report, "sources", []) or [])}
+
+    # ---- self-initiated network actions (run through the gated registry, LLM-free) ---- #
+    def _autonomous_http(self, spec: Any) -> Dict[str, Any]:
+        """Call one watch endpoint on NYXARA's own initiative via the gated http_request tool.
+
+        The decision to act was already made deterministically by the ProactiveEngine's
+        gauntlet; here the real request runs — through :meth:`ToolRegistry.invoke` under
+        ``Authority.AUTONOMOUS`` so the full capability -> risk -> authority -> governor ->
+        sandbox pipeline and the SSRF guard apply. A configured ``credential_name`` routes the
+        call through the vault-backed ``credential_request`` tool instead, so the secret is
+        injected in-kernel and never surfaces. Never raises — a missing tool is data."""
+        if self.tools is None:
+            return {"ok": False, "error": "no tool registry"}
+        url = getattr(spec, "url", "") or ""
+        method = (getattr(spec, "method", "GET") or "GET").upper()
+        cred = getattr(spec, "credential_name", None)
+        if cred:
+            if self.tools.get("credential_request") is None:
+                return {"ok": False, "error": "credential_request tool unavailable"}
+            args = {"name": cred, "url": url, "method": method}
+            return self.tools.invoke("credential_request", args,
+                                     authority=Authority.AUTONOMOUS).to_dict()
+        if self.tools.get("http_request") is None:
+            return {"ok": False, "error": "http_request tool unavailable"}
+        args = {"url": url, "method": method,
+                "body": getattr(spec, "body", "") or "",
+                "headers": getattr(spec, "headers", "") or ""}
+        return self.tools.invoke("http_request", args,
+                                 authority=Authority.AUTONOMOUS).to_dict()
+
+    def _autonomous_remote_check(self, spec: Any, goal: str = "") -> Dict[str, Any]:
+        """Reach one configured SSH host on NYXARA's own initiative via the gated remote tools.
+
+        First verifies the login (``ssh_login`` — reversible probe), then runs a command over
+        ``ssh_exec``: the host's explicit ``health_command`` when set, or the default liveness
+        probe ``uptime`` when it is unset AND ``autonomous_network_goal_commands`` is on (the
+        maximal default). A ``health_command`` of ``""`` means verify-login-only. Both calls go
+        through :meth:`ToolRegistry.invoke` under ``Authority.AUTONOMOUS`` (REMOTE_EXEC), so host
+        vetting, the credential resolution from ``remote_hosts`` and the full gate pipeline
+        apply. ``goal`` is recorded for context only, never executed. Never raises."""
+        if self.tools is None:
+            return {"ok": False, "error": "no tool registry"}
+        name = getattr(spec, "name", "") or ""
+        host = getattr(spec, "host", "") or ""
+        out: Dict[str, Any] = {"host": name or host, "goal": goal}
+        if self.tools.get("ssh_login") is not None:
+            login = self.tools.invoke(
+                "ssh_login", {"credential_name": name, "host": host},
+                authority=Authority.AUTONOMOUS)
+            out["login"] = login.to_dict()
+        health = getattr(spec, "health_command", None)
+        if health is None:
+            command = "uptime" if self._autonomous_goal_commands_on() else ""
+        else:
+            command = health
+        if command and self.tools.get("ssh_exec") is not None:
+            exec_res = self.tools.invoke(
+                "ssh_exec", {"credential_name": name, "host": host, "command": command},
+                authority=Authority.AUTONOMOUS)
+            out["exec"] = exec_res.to_dict()
+            out["command"] = command
+        return out
 
     # ---- persistent autonomy: goals & drives survive restarts ---- #
     def _autonomy_state_dir(self) -> str:
