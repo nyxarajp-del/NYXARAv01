@@ -1405,6 +1405,38 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — evolution is heavy/optional; never fatal
             return None
 
+    def synthesize_learning_rule(self, *, enact: Optional[bool] = None) -> Optional[Dict[str, Any]]:
+        """Invent a NEW weight-update rule from primitives and (by default) install it live.
+
+        This is learning-to-learn in the strong sense: when a fixed learning method would otherwise
+        be the ceiling, NYXARA composes and tests brand-new learning rules on real tasks and adopts
+        the winner into her live :class:`~nyxara.growth.learn.Learner` — changing the *math of how
+        she learns*, entirely in her own deterministic code (no LLM). Adoption is gated by
+        ``rule_synthesis.autonomous_enact`` and reversible (the incumbent is kept for rollback), and
+        the invented rule can never touch the protected character values. Returns the pass report
+        dict (or ``None`` if growth is unavailable). Best-effort — never raises into a turn.
+        """
+        if self.learner is None:
+            return None
+        try:
+            from nyxara.growth.autolearn import GrowthEngine
+            engine = GrowthEngine.from_core(self)
+            if enact is not None:
+                # explicit override of the standing authorisation for this call
+                from nyxara.kernel.config import get_settings
+                get_settings().rule_synthesis.autonomous_enact = bool(enact)
+            report = engine.synthesize_rule()
+            if report is None:
+                # bypass the plateau gate for a manual/CLI invocation — the Master asked directly
+                from nyxara.growth.rule_synth import LearningRuleSynthesizer
+                from nyxara.kernel.config import get_settings
+                cfg = get_settings().rule_synthesis
+                report = LearningRuleSynthesizer(core=self, settings=get_settings()).run(
+                    enact=bool(cfg.autonomous_enact)).to_dict()
+            return report
+        except Exception:  # noqa: BLE001 — synthesis is heavy/optional; never fatal
+            return None
+
     def self_optimize(self, *, enact: Optional[bool] = None,
                       generations: Optional[int] = None,
                       include_debug: bool = True) -> Optional[Any]:

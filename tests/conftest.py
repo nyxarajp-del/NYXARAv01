@@ -21,6 +21,11 @@ os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_TUNING", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_LLM_EDITS", "false")
 os.environ.setdefault("NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
+# Learning-rule synthesis (growth/rule_synth.py) INVENTS a new weight-update rule when the fixed
+# learner stalls and, with autonomous_enact, installs it into the live learner. Searching/measuring
+# is hermetic and fast, but installing mutates a live faculty — seal it OFF for the suite (same
+# rationale as the flags above). Tests that exercise adoption build their own synthesizer/settings.
+os.environ.setdefault("NYXARA_RULE_SYNTHESIS__AUTONOMOUS_ENACT", "false")
 # The Genesis Protocol's boot kickoff (run_on_boot, ON for live DEV/PROD) designs and micro-trains
 # a real neural architecture on the first idle tick — minutes of compute that every core-booting
 # test would otherwise pay. Same hermetic rationale as the enactment flags above: keep it OFF for

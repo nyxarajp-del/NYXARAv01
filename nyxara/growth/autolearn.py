@@ -50,6 +50,9 @@ class GrowthReport:
     foundry: List[Dict[str, Any]] = field(default_factory=list)
     self_improvement: Optional[Dict[str, Any]] = None
     mind_evolution: Optional[Dict[str, Any]] = None
+    # Learning-to-learn: an INVENTED weight-update rule she composed and adopted when the fixed
+    # learning method stalled (growth/rule_synth.py). None unless a pass ran + a rule was tried.
+    rule_synthesis: Optional[Dict[str, Any]] = None
     meta_research: Optional[Dict[str, Any]] = None
     rivalry: Optional[Dict[str, Any]] = None
     adversarial: Optional[Dict[str, Any]] = None
@@ -67,6 +70,7 @@ class GrowthReport:
                 "foundry": self.foundry,
                 "self_improvement": self.self_improvement,
                 "mind_evolution": self.mind_evolution,
+                "rule_synthesis": self.rule_synthesis,
                 "meta_research": self.meta_research, "rivalry": self.rivalry,
                 "adversarial": self.adversarial,
                 "metaprompt_insights": self.metaprompt_insights,
@@ -144,6 +148,12 @@ class GrowthEngine:
         self.enable_mind_evolution = bool(self.settings.mind_evolution.enabled)
         self.mind_evolution_every = max(1, int(self.settings.mind_evolution.every))
         self._mind_evolver = None
+        # Learning-to-learn: INVENT a new weight-update rule when the fixed learning method stalls,
+        # on its own (slow) cadence — a synthesis pass evaluates many candidate learners, so it is a
+        # heavy loop kept dormant until `should_invent()` detects a plateau/regression.
+        self.enable_rule_synthesis = bool(self.settings.rule_synthesis.enabled)
+        self.rule_synthesis_every = max(1, int(self.settings.rule_synthesis.every))
+        self._rule_synth = None
         # Meta-research: invent → test → (gated) integrate, on its own (slow) cadence.
         self.enable_meta_research = (self.settings.meta_research.enabled
                                      if enable_meta_research is None else enable_meta_research)
@@ -555,6 +565,61 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — mind-evolution is heavy/optional; never fatal
             return None
 
+    # ---- learning-to-learn: invent a NEW learning rule when the old one fails ---- #
+    def _rule_synth_obj(self):
+        if self._rule_synth is None:
+            from nyxara.growth.rule_synth import LearningRuleSynthesizer
+            self._rule_synth = LearningRuleSynthesizer(core=self.core, settings=self.settings)
+        return self._rule_synth
+
+    def should_invent(self) -> bool:
+        """Only invent a new learning rule when the EXISTING learner has genuinely stalled/regressed.
+
+        Reads live plateau/regression signals already produced by the system; absent any evidence it
+        returns ``False`` — the subsystem stays dormant so a working learner is never churned. This
+        is the "jab purana tarika fail ho" (when the old way fails) trigger.
+        """
+        core = self.core
+        if core is None or getattr(core, "learner", None) is None:
+            return False
+        cfg = self.settings.rule_synthesis
+        # (a) learning-dimension plateau/decline from the live MetaLearningEngine (least-squares slope)
+        mle = getattr(core, "meta_learning_engine", None)
+        if mle is not None:
+            try:
+                from nyxara.growth.meta_engine import MetaDimension
+                slope = mle.trend(MetaDimension.LEARNING)
+                n = len(mle._samples.get(MetaDimension.LEARNING.value, ()))
+                if n >= int(cfg.min_signal) and slope <= float(cfg.plateau_slope):
+                    return True
+            except Exception:  # noqa: BLE001 — signal is best-effort
+                pass
+        # (b) the reflector says recent actions are net-hurting (more "hurts" than "helps")
+        try:
+            pats = self._reflector_obj().action_patterns()
+            if pats and (sum(1 for p in pats if p.verdict == "hurts")
+                         > sum(1 for p in pats if p.verdict == "helps")):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        # (c) an explicit eval regression handed in via the core
+        return bool(getattr(core, "_last_eval_regressions", None))
+
+    def synthesize_rule(self) -> Optional[Dict[str, Any]]:
+        """Run one learning-rule synthesis pass (best-effort).
+
+        Installs an invented rule into the live learner only when ``rule_synthesis.autonomous_enact``
+        is set (the standing authorisation for autonomous self-modification) and only after it
+        measurably beats the incumbent AND recovers the optimum. Reversible via ``rollback_rule``."""
+        if not self.enable_rule_synthesis or not self.should_invent():
+            return None
+        try:
+            cfg = self.settings.rule_synthesis
+            report = self._rule_synth_obj().run(enact=bool(cfg.autonomous_enact))
+            return report.to_dict()
+        except Exception:  # noqa: BLE001 — synthesis is heavy/optional; never fatal
+            return None
+
     # ---- meta-research (invent → test → (gated) integrate) ---- #
     def _meta_obj(self):
         if self._meta_researcher is None:
@@ -629,6 +694,13 @@ class GrowthEngine:
         if self.enable_mind_evolution and \
                 self._growth_passes % self.mind_evolution_every == 0:
             report.mind_evolution = self.evolve_mind()
+
+        # Learning-to-learn: when the fixed learning method has stalled, INVENT a new weight-update
+        # rule from primitives and (gated + reversible) install it into the live learner. Dormant
+        # until `should_invent()` fires, on its own slow cadence.
+        if self.enable_rule_synthesis and \
+                self._growth_passes % self.rule_synthesis_every == 0:
+            report.rule_synthesis = self.synthesize_rule()
 
         # Meta-research runs on its own (slow) cadence — invent + sandbox-test new theories.
         if self.enable_meta_research and \
