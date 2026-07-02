@@ -241,6 +241,39 @@ class WorldModel:
         """How well the model knows this (state, action) — its prediction confidence."""
         return self.predict(state, action).confidence
 
+    def learning_progress(self, state: Sequence[Any], action: Action) -> float:
+        """Expected information gain of taking ``action`` here — an honest curiosity signal in
+        ``[0, 1]``, shared by every embodied loop (filesystem + physics) so exploration is
+        driven by one calibrated measure instead of each caller re-deriving ``1 - confidence``.
+
+        A high value means "I do not yet know what this action does here, so doing it would
+        teach me a lot" — exactly the drive that makes a child drop things to see what happens.
+        Two honest signals feed it, and the *more curious* of the two wins:
+
+        * ``1 - confidence`` — plain novelty: an unseen or out-of-distribution (state, action)
+          scores ~1, a well-modelled one scores ~0.
+        * ensemble **epistemic disagreement** (when the backend reports it) — the models
+          contradicting each other means the region is genuinely under-determined even if any
+          single net is locally confident. Squashed into ``[0, 1)`` so its raw magnitude never
+          dominates the metric.
+
+        Works on every backend unchanged: ``predict`` always returns ``confidence`` (and
+        ``epistemic`` defaults to 0 where a model has no ensemble), so this needs no per-backend
+        override. Never raises — a modelling slip yields maximal curiosity (there is clearly
+        something here left to learn), never a crash.
+        """
+        try:
+            pred = self.predict(state, action)
+        except Exception:  # noqa: BLE001 — an un-predictable state is maximally worth learning
+            return 1.0
+        conf = max(0.0, min(1.0, pred.confidence))
+        info_gain = 1.0 - conf
+        if pred.epistemic > 0.0:
+            scale = max(1e-6, getattr(self, "distance_scale", 1.0))
+            disagreement = 1.0 - math.exp(-pred.epistemic / scale)
+            info_gain = max(info_gain, disagreement)
+        return max(0.0, min(1.0, info_gain))
+
     # ---- imagination: rollouts ---- #
     @staticmethod
     def _action_at(policy: Policy, state: State, t: int) -> Optional[Action]:

@@ -393,6 +393,16 @@ class NyxaraCore:
         self.embodied_agent = (self._build_embodied_agent()
                                if (enable_growth and self.world_model is not None
                                    and self.real_environment is not None) else None)
+        # physics agent — a second, deeper embodied loop that grounds a world model in real
+        # intuitive physics: a rigid-body micro-world (gravity/friction/collision/momentum) the
+        # agent shoves with its body (push/lift/drop/poke) and learns from the consequences, the
+        # way a child learns physics by dropping things and touching them. It owns a *dedicated*
+        # learned-dynamics model because physics is a distinct 11-D state space from the 8-D
+        # filesystem embodiment (the per-action learners lock to one dimensionality) — the same
+        # reason real_environment is not fed into the shared model. Curiosity-driven, no LLM —
+        # entirely NYXARA's own numeric code. Fully in-memory; strictly sandboxed.
+        self.physics_agent = (self._build_physics_agent()
+                              if enable_growth else None)
         # continuous cognition — a default-mode stream that wanders/incubates when idle
         self.stream = stream if stream is not None else (
             self._build_stream() if enable_growth else None)
@@ -1008,6 +1018,19 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — embodiment is a capability, never a hard dependency
             return None
 
+    def _build_physics_agent(self) -> Any:
+        try:
+            from nyxara.sim.physics_world import PhysicsAgent
+            # A dedicated learned-dynamics model over the 11-D physics state (positions,
+            # velocities, contacts). It grounds the intuitive physics NYXARA lacks — a dropped
+            # body falls, a pushed one slides and stops, a poke passes motion across a collision —
+            # from its own lived interaction. Curiosity-driven, fully in-memory, no LLM, never
+            # fatal. Kept separate from the filesystem world model because the per-action learners
+            # lock to a single state dimensionality (world_model.py); one model cannot hold both.
+            return PhysicsAgent()
+        except Exception:  # noqa: BLE001 — physics grounding is a capability, never required
+            return None
+
     def _embodied_planner(self, state: Any, options: List[str]) -> Optional[str]:
         """Long-horizon action choice for the embodied loop (#6, #53): branch the present
         into many futures over the *shared* world model and pick the action whose risk-aware
@@ -1133,6 +1156,10 @@ class NyxaraCore:
             sm.set_capability("tool_use", 0.7 if has("tools") else 0.15, confidence=0.6)
             sm.set_capability("world_modeling", 0.6 if has("world_model") else 0.25,
                               confidence=0.5)
+            # intuitive physics learned from lived interaction (dropping/pushing/colliding),
+            # not from text — a distinct, honestly-rated grounding faculty
+            sm.set_capability("physics_grounding",
+                              0.55 if has("physics_agent") else 0.15, confidence=0.5)
             sm.set_capability("math_and_logic", 0.75 if has("reasoner") else 0.5,
                               confidence=0.6)
             # honest LOW capabilities — these *are* the weaknesses she should admit
@@ -4875,6 +4902,51 @@ class NyxaraCore:
                             except Exception:  # noqa: BLE001 — memory write is best-effort
                                 pass
             except Exception:  # noqa: BLE001 — an embodied burst is a capability, never required
+                pass
+        # 4f++) Intuitive-physics burst — the deepest grounding: a real perceive→act→consequence→
+        #       learn loop inside a rigid-body micro-world (gravity, friction, momentum,
+        #       collisions). The agent shoves its body (push/lift/drop/poke) and learns physics
+        #       from what actually happens — the way a child learns by dropping things and touching
+        #       them — into a dedicated learned-dynamics model. Curiosity-driven (it seeks the
+        #       interactions it cannot yet predict), no LLM, fully in-memory. Oversight-gated: a
+        #       paused/scrammed mind takes no autonomous action, even on a simulated body.
+        if self.physics_agent is not None:
+            try:
+                if self.oversight.gate():
+                    from nyxara.sim.physics_world import physics_stream
+                    pstream = physics_stream(self.physics_agent, steps=6)
+                    if pstream:
+                        ptr = pstream[-1]
+                        pst = self.physics_agent.status()
+                        pnovel = sum(1 for t in pstream if t.novelty)
+                        report["physics"] = {
+                            "action": ptr.action, "reward": round(ptr.reward, 3),
+                            "stream": len(pstream), "novel": pnovel,
+                            "competence_gain": round(ptr.competence_gain, 4),
+                            "transitions": pst["world_transitions"],
+                            "actions_learned": pst["actions_learned"]}
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"physics burst x{len(pstream)}: {ptr.action} r={ptr.reward:.2f} "
+                            f"({pst['actions_learned']} motor effects grounded)", salience=0.4)
+                        # CROSS-MODULE BUS — the physics model reports its own blind spots so the
+                        # self-improvement channels target the dynamics it cannot yet predict.
+                        try:
+                            pm = self.physics_agent.world_model
+                            for attr in ("mean_epistemic", "epistemic", "uncertainty"):
+                                fn = getattr(pm, attr, None)
+                                if callable(fn):
+                                    gap = float(fn())
+                                    if gap > 0.4:
+                                        from nyxara.growth.signal_bus import get_signal_bus
+                                        get_signal_bus().post(
+                                            "world_model_gap",
+                                            "intuitive-physics prediction uncertainty is high",
+                                            source="physics_world", weight=min(1.0, gap))
+                                    break
+                        except Exception:  # noqa: BLE001 — the physics signal is advisory
+                            pass
+            except Exception:  # noqa: BLE001 — a physics burst is a capability, never required
                 pass
         # 4g) Read & model — learn dynamics from LANGUAGE, not just from doing. Pull one
         #      ingested passage and let the language-grounding bridge turn it into transitions
