@@ -84,6 +84,7 @@ class NyxaraReasoner:
         self._offline: Any = None  # lazily built sovereign offline mind (keyless machine)
         self._router: Any = None  # lazily built own-model-first confidence router (handoff)
         self._self_brain: Any = None  # lazily built own LEARNED brain (compounds with experience)
+        self._sample_mind: Any = None  # lazily built few-shot / skill-induction mind
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -261,6 +262,18 @@ class NyxaraReasoner:
                              risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                              rationale=f"{process} via a verifiable faculty (exact computation, "
                                        f"no guessing); {len(mems)} memories recalled")
+        # learned-skill short-circuit: a task NYXARA induced from a few demonstrations (and
+        # verified against every one of them) is applied here to a novel input — real, transferable
+        # capability she gained herself, not a neural guess. Fires only when the input matches what
+        # the skill was taught to transform, so it never hijacks an unrelated turn.
+        skl = self._skill_answer(stimulus)
+        if skl is not None:
+            text, conf = skl
+            return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
+                             risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
+                             rationale=f"{process} via a learned skill (few-shot induced + "
+                                       f"verified, applied to a new input); "
+                                       f"{len(mems)} memories recalled")
         if not self._real_llm():
             # keyless machine: the sovereign offline mind answers from her own faculties
             # (NLP + knowledge base + recalled memory) instead of echoing "I understand: X".
@@ -455,6 +468,31 @@ class NyxaraReasoner:
             except Exception:  # noqa: BLE001 — the learned brain is a capability, never required
                 self._self_brain = None
         return self._self_brain
+
+    def _sample_efficient_mind(self) -> Any:
+        """Lazily build the few-shot / skill-induction mind, bound to NYXARA's memory store.
+
+        Skills persist through the store, so this shares learned tasks with the orchestrator's
+        own :class:`~nyxara.cognition.sample_efficient.SampleEfficientMind` instance."""
+        if self._sample_mind is None:
+            try:
+                from nyxara.cognition.sample_efficient import SampleEfficientMind
+                embedder = getattr(self.memory, "embedder", None)
+                self._sample_mind = SampleEfficientMind(
+                    embedder, store=self.memory, settings=self.settings)
+            except Exception:  # noqa: BLE001 — the skill mind is a capability, never required
+                self._sample_mind = False
+        return self._sample_mind or None
+
+    def _skill_answer(self, stimulus: str) -> Optional[Tuple[str, float]]:
+        """Apply a matching few-shot-learned skill to ``stimulus``, or None to defer."""
+        mind = self._sample_efficient_mind()
+        if mind is None:
+            return None
+        try:
+            return mind.solve(stimulus)
+        except Exception:  # noqa: BLE001 — a learned-skill attempt is advisory, never fatal
+            return None
 
     def teach_self_brain(self, *docs: str) -> None:
         """Compound the own learned brain from lived exchanges (called by the kernel's _grow)."""

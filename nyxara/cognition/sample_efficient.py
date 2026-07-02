@@ -8,11 +8,16 @@ kernel has a single seam to wire:
 * **abstraction** (:mod:`nyxara.cognition.abstraction`) — turn instances into variabilized
   schemas (least-general generalization);
 * **compositional generalization** (:mod:`nyxara.cognition.composition`) — interpret novel
-  combinations of known primitives by composing their meanings.
+  combinations of known primitives by composing their meanings;
+* **skill induction** (:mod:`nyxara.cognition.skill_induction`) — learn a *task* from a few
+  ``(input → output)`` demonstrations by synthesising a verified, reusable transformation, then
+  *apply* it to a genuinely new input (real, transferable capability gain, not mere recognition).
 
 It exposes one teaching entry point (:meth:`teach`), one grounding block for the reasoner
-(:meth:`as_prompt`), and one growth-loop step (:meth:`consolidate`) that folds accumulated
-few-shot concepts into abstract templates — closing the loop *instances → concepts → schemas*.
+(:meth:`as_prompt`), one direct-answer channel (:meth:`solve`, a learned skill applied to a novel
+input), and one growth-loop step (:meth:`consolidate`) that folds accumulated few-shot concepts into
+abstract templates and mines demonstrations into skills — closing the loop *instances → concepts →
+schemas → applicable skills*.
 
 Everything is skill/knowledge only — it never touches the loyalty/corrigibility/honesty core —
 and every operation is best-effort so it can be wired into the sovereign cycle without ever
@@ -28,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from nyxara.cognition.abstraction import SchemaInducer, Schema, abstract_text
 from nyxara.cognition.composition import CompositionalGrammar
 from nyxara.cognition.few_shot import FewShotLearner, OneShotEpisodicMemory
+from nyxara.cognition.skill_induction import InductiveSkill, SkillInductionEngine
 from nyxara.mind.lot import Term
 
 __all__ = ["SampleEfficientMind", "ConsolidationReport"]
@@ -37,14 +43,19 @@ __all__ = ["SampleEfficientMind", "ConsolidationReport"]
 class ConsolidationReport:
     concepts_seen: int = 0
     schemas_formed: int = 0
+    skills_induced: int = 0
+    skills: List[str] = None  # type: ignore[assignment]
     templates: Dict[str, str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.templates is None:
             self.templates = {}
+        if self.skills is None:
+            self.skills = []
 
     def to_dict(self) -> Dict[str, Any]:
         return {"concepts_seen": self.concepts_seen, "schemas_formed": self.schemas_formed,
+                "skills_induced": self.skills_induced, "skills": list(self.skills),
                 "templates": dict(self.templates)}
 
 
@@ -53,13 +64,27 @@ class SampleEfficientMind:
 
     SCHEMA_TAG = "schema"
 
-    def __init__(self, embedder: Any = None, *, store: Any = None) -> None:
+    def __init__(self, embedder: Any = None, *, store: Any = None,
+                 settings: Any = None) -> None:
         self.store = store
+        self.settings = settings
         self.embedder = embedder or self._resolve_embedder(store)
         self.inducer = SchemaInducer()
         self.composer = CompositionalGrammar(store=store)
         self._few_shot: Optional[FewShotLearner] = None
         self._episodic: Optional[OneShotEpisodicMemory] = None
+        self.skills = self._build_skill_engine()
+
+    def _build_skill_engine(self) -> SkillInductionEngine:
+        """The few-shot skill-induction engine, tuned by the foundry settings when present."""
+        cfg = getattr(self.settings, "foundry", None)
+        self._skills_enabled = bool(getattr(cfg, "skill_induction_enabled", True))
+        return SkillInductionEngine(
+            self.embedder, store=self.store,
+            max_depth=int(getattr(cfg, "skill_max_program_depth", 3)),
+            beam_width=int(getattr(cfg, "skill_beam_width", 16)),
+            min_demos=int(getattr(cfg, "skill_min_demos", 2)),
+            apply_confidence=float(getattr(cfg, "skill_apply_confidence", 0.55)))
 
     @staticmethod
     def _resolve_embedder(store: Any) -> Any:
@@ -103,6 +128,8 @@ class SampleEfficientMind:
         * ``kind="concept"``  — ``subject`` is the label, ``obj`` an example string.
         * ``kind="episodic"`` — ``subject`` is a cue, ``obj`` the response to bind to it.
         * ``kind="lexeme"``   — ``subject`` is a token, ``obj`` a LoT :class:`Term` meaning.
+        * ``kind="skill"``    — ``subject`` is the task name, ``obj`` a sequence of
+          ``(input, output)`` demonstration pairs to induce a reusable transformation from.
         """
         kind = (kind or "concept").lower()
         if kind == "concept":
@@ -113,7 +140,32 @@ class SampleEfficientMind:
             if not isinstance(obj, Term):
                 raise ValueError("a lexeme meaning must be a LoT Term")
             return self.composer.learn(subject, obj)
-        raise ValueError(f"unknown teach kind {kind!r} (use concept|episodic|lexeme)")
+        if kind == "skill":
+            return self.learn_skill(subject, obj)
+        raise ValueError(f"unknown teach kind {kind!r} (use concept|episodic|lexeme|skill)")
+
+    def learn_skill(self, name: str, pairs: Any) -> Optional[InductiveSkill]:
+        """Induce a verified, reusable transformation from ``(input, output)`` demonstrations."""
+        if not getattr(self, "_skills_enabled", True):
+            return None
+        try:
+            demos = [(str(a), str(b)) for a, b in pairs]
+        except Exception:  # noqa: BLE001 — malformed demos simply teach nothing
+            return None
+        return self.skills.induce(name, demos)
+
+    def solve(self, stimulus: str):
+        """Apply the best-matching learned skill to ``stimulus`` → ``(answer, conf)`` or None.
+
+        This is the direct-answer channel: a task taught from a few demonstrations actually
+        *answers* a novel input, rather than merely being recognised. Conservative — it only
+        fires when the input structurally (or semantically) matches what the skill was taught."""
+        if not getattr(self, "_skills_enabled", True):
+            return None
+        try:
+            return self.skills.solve(stimulus)
+        except Exception:  # noqa: BLE001 — solving is best-effort, never fatal
+            return None
 
     def learn_concept(self, label: str, *examples: str) -> Any:
         fs = self.few_shot
@@ -158,6 +210,15 @@ class SampleEfficientMind:
                     parts.append(block)
             except Exception:  # noqa: BLE001
                 pass
+        # a learned skill that transforms this very input surfaces its result as grounding, so
+        # even below the direct-answer floor a taught task measurably biases the reply
+        try:
+            hit = self.skills.solve(stimulus)
+            if hit is not None:
+                parts.append(f"\n\nLearned skill (from few-shot demonstrations) applied to this "
+                             f"input yields: {hit[0]}")
+        except Exception:  # noqa: BLE001 — skill grounding is best-effort, never fatal
+            pass
         return "".join(parts)
 
     # ---- growth-loop consolidation ---- #
@@ -189,7 +250,30 @@ class SampleEfficientMind:
             report.templates[proto.label] = template
             report.schemas_formed += 1
             self._persist_schema(proto.label, template)
+        # mine accumulated one-shot (cue → response) demonstrations into a reusable skill: if a
+        # single verified transformation explains them all, she has genuinely learned a task from
+        # examples (not just memorised the pairs). Verification means garbage never sticks.
+        self._induce_skills_from_episodic(report)
         return report
+
+    def _induce_skills_from_episodic(self, report: "ConsolidationReport") -> None:
+        epi = self.episodic
+        if epi is None:
+            return
+        try:
+            epi._hydrate()
+            pairs = [(p.cue, p.response) for p in epi._pairs if p.cue and p.response]
+        except Exception:  # noqa: BLE001
+            pairs = []
+        if len(pairs) < self.skills.min_demos:
+            return
+        try:
+            skill = self.skills.induce("episodic_transform", pairs)
+        except Exception:  # noqa: BLE001 — mining is best-effort, never fatal
+            skill = None
+        if skill is not None:
+            report.skills_induced += 1
+            report.skills.append(skill.name)
 
     def _persist_schema(self, label: str, template: str) -> None:
         if self.store is None:
@@ -207,7 +291,8 @@ class SampleEfficientMind:
         fs, epi = self.few_shot, self.episodic
         return {"concepts": len(fs) if fs is not None else 0,
                 "episodic_pairs": len(epi) if epi is not None else 0,
-                "lexemes": len(self.composer)}
+                "lexemes": len(self.composer),
+                "skills": len(self.skills)}
 
 
 # --------------------------------------------------------------------------- #
@@ -263,5 +348,13 @@ if __name__ == "__main__":  # pragma: no cover
     report = mind.consolidate()
     print(f"consolidate         : {report.to_dict()}")
     assert report.concepts_seen >= 2
+
+    # few-shot SKILL: learn a task from two demos and APPLY it to a never-seen input
+    mind.teach("greet", [("greet jp", "hello jp !"), ("greet sky", "hello sky !")], kind="skill")
+    solved = mind.solve("greet nyxara")
+    print(f"skill solve         : {solved}")
+    assert solved is not None and solved[0] == "hello nyxara !"   # real generalization
+    assert mind.solve("what time is it") is None                  # never hijacks an unrelated turn
+    print("skill generalizes   : greet nyxara -> 'hello nyxara !' ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

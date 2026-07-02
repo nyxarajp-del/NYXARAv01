@@ -792,7 +792,8 @@ class NyxaraCore:
         try:
             from nyxara.cognition.sample_efficient import SampleEfficientMind
             embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
-            return SampleEfficientMind(embedder, store=self.memory)
+            return SampleEfficientMind(embedder, store=self.memory,
+                                       settings=getattr(self, "settings", None))
         except Exception:  # noqa: BLE001 — a capability, never a hard dependency
             return None
 

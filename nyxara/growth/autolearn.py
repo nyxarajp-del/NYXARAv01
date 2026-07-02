@@ -58,6 +58,9 @@ class GrowthReport:
     adversarial: Optional[Dict[str, Any]] = None
     metaprompt_insights: List[str] = field(default_factory=list)
     concept_abstraction: Optional[Dict[str, Any]] = None
+    # Few-shot skill acquisition (growth/skill_induction via the sample-efficient mind): tasks she
+    # induced from a few demonstrations, verified, and can now apply to novel inputs herself.
+    skills: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"episodes_seen": self.episodes_seen, "lessons": self.lessons,
@@ -74,7 +77,8 @@ class GrowthReport:
                 "meta_research": self.meta_research, "rivalry": self.rivalry,
                 "adversarial": self.adversarial,
                 "metaprompt_insights": self.metaprompt_insights,
-                "concept_abstraction": self.concept_abstraction}
+                "concept_abstraction": self.concept_abstraction,
+                "skills": self.skills}
 
 
 class GrowthEngine:
@@ -314,6 +318,34 @@ class GrowthEngine:
             return mind.consolidate().to_dict()
         except Exception:  # noqa: BLE001 — concept abstraction is best-effort, never fatal
             return None
+
+    # ---- few-shot skill acquisition (learn a task from demos, apply to novel inputs) ---- #
+    def induce_skills(self, consolidation: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Report the skills mined this pass and teach each one's summary into the learned brain.
+
+        The mining itself happens inside the sample-efficient mind's :meth:`consolidate` (already
+        run by :meth:`abstract_concepts`), which turns accumulated ``(cue → response)`` demonstrations
+        into a *verified* reusable transformation. Here we surface what was learned and fold a
+        one-line capability summary of every learned skill into NYXARA's always-on brain, so a task
+        she taught herself becomes something she can also *speak about* — real, compounding capability
+        gain she performed herself (no external LLM). Best-effort; never fatal."""
+        mind = getattr(self.core, "sample_efficient", None) if self.core is not None else None
+        if mind is None:
+            return None
+        try:
+            engine = getattr(mind, "skills", None)
+            learned = engine.skills() if engine is not None else []
+        except Exception:  # noqa: BLE001 — introspection is best-effort
+            learned = []
+        for skill in learned:
+            try:
+                self._teach_self_brain(getattr(skill, "render", lambda: "")())
+            except Exception:  # noqa: BLE001 — teaching the summary is best-effort
+                pass
+        cons = consolidation or {}
+        return {"skills_induced": int(cons.get("skills_induced", 0)),
+                "skills": list(cons.get("skills", [])),
+                "total_skills": len(learned)}
 
     # ---- forge (opt-in, gated) ---- #
     def _memory_corpus(self, *, max_items: int = 2000) -> List[str]:
@@ -656,6 +688,12 @@ class GrowthEngine:
         # Concept abstraction (Rule 4): fold the few-shot concepts learned this period into
         # abstract templates — closing the loop instances → concepts → schemas. Best-effort.
         report.concept_abstraction = self.abstract_concepts()
+
+        # Few-shot skill acquisition (Rule 4): mine accumulated demonstrations into verified,
+        # reusable transformations she can apply to novel inputs, and teach their summaries into her
+        # always-on brain. This is the capability the Master asked for — learning a new task from a
+        # few examples, done by NYXARA herself. Best-effort.
+        report.skills = self.induce_skills(report.concept_abstraction)
 
         # Rivalry (Edge 4): measure against a peer AGI first, so its lead becomes the curiosity
         # focus for this pass's self-play. Default off; never acts on anything external.
