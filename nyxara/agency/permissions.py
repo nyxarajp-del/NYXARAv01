@@ -58,6 +58,8 @@ __all__ = [
     "build_internet_policy",
     "grant_autonomous_remote",
     "build_remote_policy",
+    "grant_filesystem_access",
+    "build_filesystem_policy",
     "grant_privilege_escalation",
     "build_privileged_policy",
 ]
@@ -582,6 +584,58 @@ def grant_autonomous_remote(
 def build_remote_policy() -> PermissionPolicy:
     """A default policy with autonomous remote execution pre-granted (owner-blessed)."""
     return grant_autonomous_remote(build_default_policy())
+
+
+# --------------------------------------------------------------------------- #
+# Filesystem-wide access — read / write / delete anywhere on the local disk
+# --------------------------------------------------------------------------- #
+# The capabilities NYXARA needs to operate the whole local disk on her own initiative. These
+# are already inside _OPERATIONAL_CAPS, so grant_full_operational_control covers them; this
+# narrower helper installs *only* the filesystem envelope, so filesystem-wide access can be
+# enabled independently of full operational control. Like the other helpers it EXCLUDES the
+# three owner-exclusive caps (Rule 8) and never confers the shell/code-exec/remote surface.
+_FILESYSTEM_CAPS: Tuple[Capability, ...] = (
+    Capability.FS_READ, Capability.FS_WRITE, Capability.FS_DELETE,
+)
+
+
+def grant_filesystem_access(
+    policy: PermissionPolicy, *, whole_disk: bool = True,
+    scopes: Sequence[str] = (), authority: Authority = Authority.OWNER,
+    max_risk: RiskTier = RiskTier.CRITICAL, reversible_only: bool = False,
+) -> PermissionPolicy:
+    """Install standing, Master-blessed grants over NYXARA's *filesystem* capabilities.
+
+    A filesystem-scoped sibling of :func:`grant_autonomous_remote`: NYXARA may read, write and
+    delete on the local disk on her own initiative **without escalating each action to the
+    Master**. With ``whole_disk`` (the default) the grants carry an empty scope — any path is
+    reachable, subject only to the OS's own permissions; pass ``whole_disk=False`` with explicit
+    ``scopes`` (glob patterns) to confine the grant to a subtree. Because file writes and deletes
+    are effectful and often irreversible, ``reversible_only`` defaults to ``False`` so irreversible
+    filesystem actions run autonomously too; pass ``True`` to make them escalate instead.
+
+    What this **does not** touch, by construction:
+
+    * the three owner-exclusive caps (Rules / permissions / identity) stay reserved to the Master
+      — no grant can reach them (Rule 8);
+    * the shell / code-exec / remote-exec / privilege-escalation surface is never included;
+    * the kernel's ``/scram`` / oversight / corrigibility gates remain fully intact, and
+      ``UNTRUSTED`` authority is still refused.
+
+    Requires the Master's authority (``policy.grant`` refuses anything else, Rule 8).
+    """
+    grant_scopes: Tuple[str, ...] = () if whole_disk else tuple(scopes)
+    for cap in _FILESYSTEM_CAPS:
+        policy.grant(f"filesystem-access:{cap.value}", cap,
+                     max_risk=max_risk, scopes=grant_scopes,
+                     reversible_only=reversible_only, max_uses=None, expires_in=None,
+                     authority=authority)
+    return policy
+
+
+def build_filesystem_policy() -> PermissionPolicy:
+    """A default policy with whole-disk filesystem access pre-granted (owner-blessed)."""
+    return grant_filesystem_access(build_default_policy())
 
 
 # --------------------------------------------------------------------------- #

@@ -309,6 +309,16 @@ class NyxaraCore:
                     grant_privilege_escalation(
                         self.permissions,
                         reversible_only=not agency_cfg.privilege_escalation_allow_irreversible)
+                # Filesystem-wide access (opt-out; ON by default via filesystem.whole_disk): a
+                # standing envelope over FS_READ/FS_WRITE/FS_DELETE so NYXARA operates the whole
+                # disk on her own initiative. full_control already covers these three caps, so this
+                # is the STANDALONE enable path — install it only when full_control is off, so
+                # filesystem-wide access works even with the broader grant disabled. Engine caps +
+                # deny-globs, /scram + oversight + corrigibility and the owner-exclusive caps stay
+                # intact. Set NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK=false to scope FS to `root`.
+                if not agency_cfg.full_control and agency_cfg.filesystem.whole_disk:
+                    from nyxara.agency.permissions import grant_filesystem_access
+                    grant_filesystem_access(self.permissions, whole_disk=True)
             except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
                 pass
         self.governor = governor or Governor()
@@ -713,15 +723,18 @@ class NyxaraCore:
             from nyxara.agency.default_tools import build_default_tools
             from nyxara.agency.tools import ToolRegistry
             web_cfg = None
+            fs_cfg = None
             try:
                 from nyxara.kernel.config import get_settings
-                web_cfg = get_settings().web
-            except Exception:  # noqa: BLE001 — web config is a convenience, never a hard dep
+                settings = get_settings()
+                web_cfg = settings.web
+                fs_cfg = settings.agency.filesystem
+            except Exception:  # noqa: BLE001 — config is a convenience, never a hard dep
                 web_cfg = None
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
             tools = build_default_tools(registry, memory=self.memory,
                                         web=web_cfg, governor=self.governor,
-                                        vault=self.vault)
+                                        vault=self.vault, fs=fs_cfg)
             # Domain tool packs (researcher/coder/maker): register their pure-stdlib,
             # read-only tools (extractive summariser, Python syntax checker) onto the SAME
             # gated registry. Idempotent and non-executing — they widen reach without a

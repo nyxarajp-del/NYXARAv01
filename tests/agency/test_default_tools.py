@@ -127,7 +127,8 @@ def test_read_and_write_file(tmp_path):
 def test_list_dir(tmp_path):
     (tmp_path / "a.txt").write_text("x")
     r = _reg().invoke("list_dir", {"path": str(tmp_path)}, authority=Authority.OWNER)
-    assert r.ok and "a.txt" in r.value
+    # list_dir now returns rich metadata entries (name/type/size/mtime/mode), not bare names.
+    assert r.ok and any(e["name"] == "a.txt" and e["type"] == "file" for e in r.value)
 
 
 def test_multimodal_tools_registered():
