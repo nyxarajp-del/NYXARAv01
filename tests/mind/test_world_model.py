@@ -115,6 +115,28 @@ def test_coverage():
     assert wm.coverage((3.0,), "left") > wm.coverage((1000.0,), "left")
 
 
+def test_learning_progress_bounds():
+    wm = _trained()
+    for state, action in [((3.0,), "left"), ((1000.0,), "left"), ((0.0,), "never_tried")]:
+        lp = wm.learning_progress(state, action)
+        assert 0.0 <= lp <= 1.0
+
+
+def test_learning_progress_unseen_action_is_maximal():
+    wm = _trained()
+    # a never-observed action is entirely un-modelled ⇒ maximal information gain
+    assert wm.learning_progress((3.0,), "never_tried") == pytest.approx(1.0)
+
+
+def test_learning_progress_falls_with_competence():
+    wm = _trained()
+    # well-modelled (state, action) is less worth exploring than an out-of-distribution one
+    known = wm.learning_progress((3.0,), "left")
+    ood = wm.learning_progress((1000.0,), "left")
+    assert known < ood
+    assert known < 1.0
+
+
 def test_symbolic_states():
     wm = WorldModel()
     wm.observe(("room_a",), "go", ("room_b",), reward=1.0)
