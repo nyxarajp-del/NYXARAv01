@@ -863,15 +863,45 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                               ToolParam("timeout_s", "float", required=False, default=5.0)],
                       capability=Capability.CODE_EXEC, risk=RiskTier.HIGH, reversible=False))
 
-        def _run_shell(command: str, timeout_s: float = 10.0) -> Dict[str, Any]:
-            from nyxara.agency.code_sandbox import safe_shell
-            return safe_shell(command, timeout_s=max(0.1, min(timeout_s, 60.0))).to_dict()
+        # A real, unrestricted terminal: run commands through an actual shell (bash/sh) so
+        # pipes, redirection, &&/;/|| chaining, globbing and $VAR expansion all work. One
+        # process-lifetime ShellSession is bound here, so the working directory (cd) and the
+        # exported environment (export) PERSIST across calls — NYXARA drives a continuous
+        # terminal across the sovereign loop's turns, exactly like a real tab. There is no
+        # command filtering; the registry's PROC_EXEC/HIGH gate (owner / full_control) is what
+        # governs whether a call may run.
+        from nyxara.agency.code_sandbox import ShellSession
+        _shell_session = ShellSession()
+
+        def _run_shell(command: str, timeout_s: float = 30.0, cwd: str = "",
+                       stdin: str = "") -> Dict[str, Any]:
+            # timeout_s <= 0 means unbounded (a long-running command); otherwise clamp to a
+            # generous ceiling so a single call can still be reaped.
+            t = timeout_s if timeout_s <= 0 else max(0.1, min(timeout_s, 3600.0))
+            if cwd:
+                # An explicit cwd is a one-shot override that does not disturb the session's
+                # own persistent working directory.
+                from nyxara.agency.code_sandbox import run_shell_command
+                return run_shell_command(command, timeout_s=t, cwd=cwd,
+                                         env=_shell_session.env,
+                                         stdin=stdin or None).to_dict()
+            return _shell_session.run(command, timeout_s=t, stdin=stdin or None).to_dict()
 
         _add(ToolSpec("run_shell", handler=_run_shell,
-                      description="run a shell command in a subprocess (captured output, "
-                                  "wall-clock timeout) — owner-gated, irreversible",
+                      description="run an ARBITRARY command in a real shell (bash/sh): pipes, "
+                                  "redirection, &&/;/|| chaining, globbing, $VAR expansion and "
+                                  "$(…) substitution all work. Working directory (cd) and "
+                                  "exported env (export) PERSIST across calls — a continuous "
+                                  "terminal session. timeout_s<=0 means unbounded; optional cwd "
+                                  "is a one-shot dir override, stdin feeds standard input. "
+                                  "Returns rc/stdout/stderr, failing as data — owner/"
+                                  "full-control-gated, irreversible",
                       params=[ToolParam("command", "str"),
-                              ToolParam("timeout_s", "float", required=False, default=10.0)],
+                              ToolParam("timeout_s", "float", required=False, default=30.0),
+                              ToolParam("cwd", "str", required=False, default="",
+                                        description="one-shot working directory override"),
+                              ToolParam("stdin", "str", required=False, default="",
+                                        description="optional standard input for the command")],
                       capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
                       target_param="command"))
 
