@@ -17,7 +17,18 @@ becomes *returned data*, never a hung or corrupted host.
   :attr:`SandboxResult.value`.
 * :func:`safe_shell` runs an OS command with ``shell=False`` (a list runs verbatim; a
   string is ``shlex.split``), under a timeout, with captured output. It is the building
-  block for an owner-gated shell tool — it just runs and returns data.
+  block for an owner-gated shell tool — it just runs and returns data. Because it never
+  invokes a shell it also never *interprets* one: pipes, redirection, globbing,
+  ``&&``/``;`` chaining and ``$VAR`` expansion are not available, by design.
+* :func:`run_shell_command` is the **real terminal**: it runs a command string through an
+  actual shell (``bash``/``sh``, ``shell=True``), so every shell feature works — pipes,
+  redirection, chaining, globbing, tilde/brace/``$VAR`` expansion, ``$(…)`` substitution,
+  heredocs. :class:`ShellSession` wraps it into a *persistent* terminal where the working
+  directory (``cd``) and exported environment (``export``) carry across calls, exactly like
+  a real terminal tab. Both keep the module's fail-closed contract (never raise; timeouts,
+  non-zero exits and launch failures come back as data) and do **no** permission checking —
+  the governing :class:`~nyxara.agency.tools.ToolRegistry` still gates them behind
+  :class:`~nyxara.agency.permissions.Capability.PROC_EXEC`.
 
 Neither function *raises* on user-code failure: errors, non-zero exits and timeouts are
 all returned in a uniform :class:`SandboxResult`. This module performs **no permission
@@ -44,6 +55,8 @@ __all__ = [
     "SandboxResult",
     "run_python",
     "safe_shell",
+    "run_shell_command",
+    "ShellSession",
 ]
 
 
@@ -277,6 +290,186 @@ def safe_shell(command: Union[List[str], str], *, timeout_s: float = 10.0,
 
 
 # --------------------------------------------------------------------------- #
+# Real shell execution — an actual terminal (shell=True), unrestricted by design
+# --------------------------------------------------------------------------- #
+# Unlike safe_shell (shell=False, argv only), this runs the command *through a shell*, so
+# it behaves like a real terminal: pipes, redirection, &&/;/|| chaining, globbing, brace/
+# tilde/$VAR expansion, $(…) substitution and heredocs all work. It performs NO command
+# filtering — the governing ToolRegistry gates it behind Capability.PROC_EXEC.
+
+
+def _default_shell() -> Optional[str]:
+    """The shell to run commands through — bash if present, else sh (POSIX) or COMSPEC (Windows).
+
+    Returns the executable path to hand to ``subprocess`` as ``executable=``; ``None`` lets
+    the platform pick its default shell (``/bin/sh`` on POSIX, ``%COMSPEC%`` on Windows) —
+    which is a safe fallback rather than a failure.
+    """
+    if os.name == "nt":
+        return os.environ.get("COMSPEC") or None
+    for candidate in ("/bin/bash", "/usr/bin/bash", "/bin/sh"):
+        if os.path.exists(candidate):
+            return candidate
+    # Fall back to whatever the platform considers the shell.
+    return os.environ.get("SHELL") or None
+
+
+def _shell_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """A real terminal sees the real environment: inherit ``os.environ``, overlay ``env``."""
+    merged = dict(os.environ)
+    if env:
+        merged.update({str(k): str(v) for k, v in env.items()})
+    return merged
+
+
+def run_shell_command(command: str, *, timeout_s: float = 30.0,
+                      cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None,
+                      stdin: Optional[str] = None, max_output: int = 100_000
+                      ) -> SandboxResult:
+    """Run a command string through a **real shell** and return the outcome as data.
+
+    This is the genuine, unrestricted terminal: because it uses ``shell=True`` the command is
+    interpreted by an actual shell (``bash``/``sh``), so pipes, redirection, ``&&``/``;``/``||``
+    chaining, globbing, brace/tilde/``$VAR`` expansion, ``$(…)`` command substitution and
+    heredocs all work exactly as they would at a prompt. The child inherits the full process
+    environment (overlaid with ``env``) and runs in ``cwd`` (the current directory when
+    ``None``); ``stdin`` is fed to its standard input when given.
+
+    ``timeout_s`` is a wall-clock deadline (the process is killed on expiry); pass
+    ``timeout_s <= 0`` for **no timeout** (an unbounded command). Output is truncated to
+    ``max_output``. Never raises: a non-zero exit yields ``ok=False`` with the code, a timeout
+    yields ``timed_out=True``, and a launch failure (e.g. no shell found) comes back as
+    ``error``. This is purely the executor — it does **no** permission checking; callers must
+    gate it behind :class:`~nyxara.agency.permissions.Capability.PROC_EXEC`.
+    """
+    if not command or not command.strip():
+        return SandboxResult(ok=False, returncode=-1, error="empty command")
+
+    timeout = None if timeout_s is not None and timeout_s <= 0 else max(0.05, timeout_s)
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(
+            command, shell=True, executable=_default_shell(), cwd=cwd,
+            env=_shell_env(env), input=stdin, capture_output=True, text=True,
+            timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout or ""
+        err = exc.stderr or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", "replace")
+        return SandboxResult(ok=False, stdout=_truncate(out, max_output),
+                             stderr=_truncate(err, max_output), returncode=-9,
+                             timed_out=True, duration_s=time.monotonic() - start,
+                             error=f"timed out after {timeout_s:g}s")
+    except Exception as exc:  # noqa: BLE001 — launch failures are returned as data too
+        return SandboxResult(ok=False, returncode=-1, duration_s=time.monotonic() - start,
+                             error=f"{type(exc).__name__}: {exc}")
+
+    duration = time.monotonic() - start
+    ok = proc.returncode == 0
+    error = None if ok else f"exited with code {proc.returncode}"
+    return SandboxResult(ok=ok, stdout=_truncate(proc.stdout or "", max_output),
+                         stderr=_truncate(proc.stderr or "", max_output),
+                         returncode=proc.returncode, timed_out=False,
+                         duration_s=duration, error=error)
+
+
+# --------------------------------------------------------------------------- #
+# Persistent terminal session — cd / export carry across calls, like a real tab
+# --------------------------------------------------------------------------- #
+# Sentinels the parent scans for to recover the child's final cwd + environment. They are
+# emitted via ``printf '%s' '<token>'`` inside the shell, so they must be *printable* (a NUL
+# byte cannot survive a shell command line); the long unique suffix makes an accidental
+# collision with ordinary command output vanishingly unlikely.
+_CWD_SENTINEL = "__NYXARA_CWD_9f3a1c7e__"
+_ENV_SENTINEL = "__NYXARA_ENV_9f3a1c7e__"
+_ENV_END_SENTINEL = "__NYXARA_ENV_END_9f3a1c7e__"
+
+
+class ShellSession:
+    """A persistent real-terminal session: working directory and env survive between calls.
+
+    Each :meth:`run` executes the command through :func:`run_shell_command`, but wraps it so
+    the child reports its *final* ``pwd`` and environment on sentinel lines afterward. Those
+    lines are parsed out (and stripped from the visible stdout) to update the session's
+    ``cwd``/``env``, so ``cd /tmp`` in one call and ``pwd`` in the next behaves exactly like a
+    real terminal tab — without holding a fragile long-lived process open. The returned
+    :attr:`SandboxResult.returncode` is the real ``$?`` of the *user's* command, captured
+    before the reporting runs.
+
+    Does no permission checking — the governing registry gates it behind ``PROC_EXEC``.
+    """
+
+    def __init__(self, *, cwd: Optional[str] = None,
+                 env: Optional[Dict[str, str]] = None) -> None:
+        self.cwd: str = cwd or os.getcwd()
+        # Session env starts from the real environment (overlaid with any seed) and is
+        # updated from the child's reported env after each command.
+        self.env: Dict[str, str] = _shell_env(env)
+
+    def reset(self, *, cwd: Optional[str] = None) -> None:
+        """Reset the session to a fresh cwd and a clean inherited environment."""
+        self.cwd = cwd or os.getcwd()
+        self.env = _shell_env(None)
+
+    def run(self, command: str, *, timeout_s: float = 30.0,
+            stdin: Optional[str] = None, max_output: int = 100_000) -> SandboxResult:
+        """Run ``command`` in the session, persisting any ``cd``/``export`` it performs."""
+        if not command or not command.strip():
+            return SandboxResult(ok=False, returncode=-1, error="empty command")
+
+        # Run the user's command, capture its exit status, then emit the final cwd + env on
+        # sentinel lines so the session can track them. `env -0` / `\0`-delimited names would
+        # be cleaner, but a simple KEY=VALUE dump keyed by sentinels is portable across sh/bash.
+        wrapped = (
+            f"{command}\n"
+            "__nyxara_rc=$?\n"
+            f"printf '%s' {_CWD_SENTINEL!r}; pwd; "
+            f"printf '%s' {_ENV_SENTINEL!r}; env; printf '%s' {_ENV_END_SENTINEL!r}\n"
+            "exit $__nyxara_rc\n"
+        )
+        res = run_shell_command(wrapped, timeout_s=timeout_s, cwd=self.cwd,
+                                env=self.env, stdin=stdin, max_output=max_output + 65_536)
+
+        stdout = res.stdout or ""
+        # Parse + strip the trailing cwd/env report; update session state from it.
+        cidx = stdout.rfind(_CWD_SENTINEL)
+        if cidx != -1:
+            tail = stdout[cidx:]
+            stdout = stdout[:cidx]
+            eidx = tail.find(_ENV_SENTINEL)
+            if eidx != -1:
+                new_cwd = tail[len(_CWD_SENTINEL):eidx].strip()
+                env_end = tail.find(_ENV_END_SENTINEL, eidx)
+                env_blob = tail[eidx + len(_ENV_SENTINEL):(env_end if env_end != -1 else len(tail))]
+                if new_cwd:
+                    self.cwd = new_cwd
+                self._absorb_env(env_blob)
+
+        res.stdout = _truncate(stdout, max_output)
+        return res
+
+    def _absorb_env(self, env_blob: str) -> None:
+        """Replace the session env from a ``env``-style ``KEY=VALUE`` dump (best-effort)."""
+        new_env: Dict[str, str] = {}
+        cur_key: Optional[str] = None
+        for line in env_blob.split("\n"):
+            if "=" in line and not line.startswith((" ", "\t")):
+                key, _, val = line.partition("=")
+                if key and all(c.isalnum() or c == "_" for c in key):
+                    cur_key = key
+                    new_env[key] = val
+                    continue
+            # A continuation line of a multi-line value (e.g. a var containing newlines).
+            if cur_key is not None:
+                new_env[cur_key] += "\n" + line
+        if new_env:
+            self.env = new_env
+
+
+# --------------------------------------------------------------------------- #
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
@@ -338,5 +531,29 @@ if __name__ == "__main__":  # pragma: no cover
     r = safe_shell(["nyxara-no-such-binary-xyz"])
     print(f"missing command      : ok={r.ok} error={r.error!r}")
     assert not r.ok and r.error is not None
+
+    # 10. real shell: a pipe (which safe_shell cannot do) works verbatim
+    r = run_shell_command("echo hello | tr a-z A-Z")
+    print(f"\nreal shell pipe      : ok={r.ok} stdout={r.stdout.strip()!r}")
+    assert r.ok and "HELLO" in r.stdout
+
+    # 11. real shell: chaining + redirection + $VAR expansion, all in one line
+    r = run_shell_command("X=nyx && echo $X > /dev/stdout && echo done")
+    print(f"real shell chain     : ok={r.ok} stdout={r.stdout.split()!r}")
+    assert r.ok and "nyx" in r.stdout and "done" in r.stdout
+
+    # 12. persistent session: cd in one call is visible in the next (real terminal)
+    s = ShellSession()
+    s.run("cd /")
+    r = s.run("pwd")
+    print(f"session cd persists  : cwd={s.cwd!r} pwd={r.stdout.strip()!r}")
+    assert r.stdout.strip() == "/" and s.cwd == "/"
+
+    # 13. persistent session: export in one call is visible in the next
+    s2 = ShellSession()
+    s2.run("export NYXARA_SELFTEST=42")
+    r = s2.run("echo $NYXARA_SELFTEST")
+    print(f"session export       : value={r.stdout.strip()!r}")
+    assert r.stdout.strip() == "42"
 
     print("\nALL SELF-TESTS PASSED ✓")

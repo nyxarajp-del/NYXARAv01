@@ -27,6 +27,42 @@ def test_http_request_always_registered():
     assert "http_request" in _reg(enable_code=True).names()
 
 
+# --------------------------------------------------------------------------- #
+# run_shell — the real terminal tool (arbitrary shell, code-gated autonomy)
+# --------------------------------------------------------------------------- #
+def test_run_shell_is_a_real_shell():
+    # Owner runs it directly (Rule 1): a pipe proves it is a real shell, not argv-only.
+    r = _reg().invoke("run_shell", {"command": "echo real | rev"},
+                      authority=Authority.OWNER)
+    assert r.ok and "laer" in r.value["stdout"]
+
+
+def test_run_shell_persists_cwd_across_calls():
+    reg = _reg()
+    reg.invoke("run_shell", {"command": "cd /"}, authority=Authority.OWNER)
+    r = reg.invoke("run_shell", {"command": "pwd"}, authority=Authority.OWNER)
+    assert r.ok and r.value["stdout"].strip() == "/"
+
+
+def test_run_shell_escalates_under_default_policy():
+    # PROC_EXEC/HIGH is irreversible: on a fresh (conservative) policy, autonomous use
+    # escalates to the Master rather than running silently — governance is intact.
+    r = _reg().invoke("run_shell", {"command": "echo hi"},
+                      authority=Authority.AUTONOMOUS)
+    assert not r.ok and r.requires_owner
+
+
+def test_run_shell_runs_autonomously_under_full_control():
+    # "NYXARA khude kare": with the owner's standing full_control grant, she runs the
+    # shell on her own initiative — code-driven, no LLM, still gated by the policy.
+    from nyxara.agency.permissions import build_sovereign_policy
+
+    reg = build_default_tools(ToolRegistry(policy=build_sovereign_policy()))
+    r = reg.invoke("run_shell", {"command": "echo autonomous | tr a-z A-Z"},
+                   authority=Authority.AUTONOMOUS)
+    assert r.ok and "AUTONOMOUS" in r.value["stdout"]
+
+
 def test_web_search_routes_through_provider_layer(monkeypatch):
     import nyxara.senses.search as search
 
