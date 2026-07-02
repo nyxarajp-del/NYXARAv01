@@ -83,7 +83,12 @@ The sovereign cycle is fully wired end to end:
   self-critique pass) and `NYXARA_LLM__REASONING_SAMPLES` (>1 votes by self-consistency).
 * **Act** — cleared action candidates dispatch to a **governed, executable toolset**
   (`agency/default_tools.py`) through the registry's full safety pipeline — real effects,
-  not recorded intents. Defaults include time, arithmetic, file read/write/list, a
+  not recorded intents. Defaults include time, arithmetic, a **complete filesystem-wide
+  toolset** (read/write/append/delete, text *and* binary, `list_dir`/`find_files`/
+  `search_in_files`/`path_stat`/`disk_usage`, plus `make_dir`/`copy_path`/`move_path`/
+  `delete_dir`) that reaches any path on disk — governed by the `FS_READ`/`FS_WRITE`/
+  `FS_DELETE` capabilities and, under `FULL_CONTROL` (on by default), authorized
+  filesystem-wide on her own initiative — a
   SSRF-guarded + injection-sanitised **web fetch**, a live **web search**, **multimodal
   perception** (image inspect/OCR, audio transcribe, document ingest), **generative output**
   (`generate_image`, `synthesize_speech` — diffusion/TTS when installed, a real

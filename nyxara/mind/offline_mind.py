@@ -264,20 +264,29 @@ class OfflineMind:
             return None
 
         q_tokens = self._content_tokens(stimulus.lower())
-        if not q_tokens:
+        # The leading command verb (read/write/delete/list/find/search/…) is a decisive
+        # routing signal — _content_tokens strips verbs, so match it against raw tool-name
+        # tokens directly. This keeps sibling tools (read_file vs delete_file vs write_file)
+        # from collapsing into a tie once the whole filesystem family is registered.
+        verb = next((w for w in re.findall(r"[a-z]+", stimulus.lower())
+                     if w in _COMMAND_VERBS), None)
+        if not q_tokens and verb is None:
             return None
 
-        # Score each tool: a hit on a *tool-name* token is decisive (weight 2); a hit on a
-        # description token is corroborating (weight 1). Filename/argument tokens that match
-        # nothing simply don't count — they never penalise a genuine fit.
+        # Score each tool: a matching command verb in the tool name is decisive (weight 3);
+        # a hit on a *tool-name* token is strong (weight 2); a description-token hit is
+        # corroborating (weight 1). Tokens that match nothing simply don't count.
         best_name, best_score = "", 0.0
         for name in names:
             spec = self.tools.get(name)
             if spec is None:
                 continue
+            raw_name_tokens = set(name.lower().split("_"))
             name_tokens = self._content_tokens(name.replace("_", " "))
             desc_tokens = self._content_tokens((spec.description or "").lower())
             score = 2 * len(q_tokens & name_tokens) + len(q_tokens & desc_tokens)
+            if verb is not None and verb in raw_name_tokens:
+                score += 3
             if score > best_score:
                 best_name, best_score = name, score
 

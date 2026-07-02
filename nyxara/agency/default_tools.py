@@ -19,18 +19,28 @@ override freely. The registry, not this module, enforces permission/governance.
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import math
 import operator
 import os
 import re
+import shutil
+import stat as _stat
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
 
 __all__ = ["build_default_tools", "safe_calculate", "cad_model"]
+
+# Hard ceiling for a single explicit filesystem read/write (50 MB). Far beyond the
+# model-facing `max_read_bytes` budget, but bounds an explicit large-file operation so a
+# runaway read can never exhaust memory. Filesystem-wide *reach* is unrestricted (any path);
+# only the per-call byte size is capped.
+_FS_MAX_BYTES = 50_000_000
 
 # --------------------------------------------------------------------------- #
 # A safe arithmetic evaluator (no builtins, no names, no attribute access)
@@ -209,36 +219,325 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   params=[ToolParam("spec", "str", description="JSON parametric model spec")],
                   capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
 
-    # ---- filesystem reads: low risk, scoped by target ---- #
-    def _read_file(path: str) -> str:
+    # ======================================================================= #
+    # Filesystem — a complete, real, governed toolset spanning the whole disk. #
+    # Every tool is capability-bound (FS_READ / FS_WRITE / FS_DELETE) with a    #
+    # `target_param` so the permission gate scopes it; with FULL_CONTROL on    #
+    # (the default) these reach any path, filesystem-wide, on NYXARA's own      #
+    # initiative. There is NO path sandbox here — confinement is the capability #
+    # policy, not a chroot. Handlers do real os/shutil/pathlib work.            #
+    # ======================================================================= #
+    def _clamp_bytes(n: Optional[int], default: int) -> int:
+        try:
+            v = int(n) if n is not None else int(default)
+        except (TypeError, ValueError):
+            v = int(default)
+        if v <= 0:
+            v = int(default)
+        return min(v, _FS_MAX_BYTES)
+
+    # ---- reads: low risk (FS_READ) ---- #
+    def _read_file(path: str, offset: int = 0, max_bytes: Optional[int] = None) -> str:
+        """Read UTF-8 text from any path, optionally from a byte offset, bounded in size."""
+        cap = _clamp_bytes(max_bytes, max_read_bytes)
         with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(max_read_bytes)
+            if offset and int(offset) > 0:
+                f.seek(int(offset))
+            return f.read(cap)
 
     _add(ToolSpec("read_file", handler=_read_file,
-                  description="read a UTF-8 text file (truncated to a safe size)",
+                  description="read a UTF-8 text file from any path; optional byte offset and "
+                              "max_bytes for large/partial reads (bounded to a safe ceiling)",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("offset", "int", required=False, default=0,
+                                    description="byte offset to start reading from"),
+                          ToolParam("max_bytes", "int", required=False, default=None,
+                                    description="max bytes to read (defaults to the safe budget)")],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _read_file_bytes(path: str, offset: int = 0,
+                         max_bytes: Optional[int] = None) -> Dict[str, Any]:
+        """Read a binary file from any path and return base64 (bounded in size)."""
+        cap = _clamp_bytes(max_bytes, _FS_MAX_BYTES)
+        with open(path, "rb") as f:
+            if offset and int(offset) > 0:
+                f.seek(int(offset))
+            raw = f.read(cap)
+        return {"path": path, "bytes": len(raw), "offset": int(offset or 0),
+                "base64": base64.b64encode(raw).decode("ascii")}
+
+    _add(ToolSpec("read_file_bytes", handler=_read_file_bytes,
+                  description="read a binary file from any path and return it base64-encoded "
+                              "(bounded to a safe ceiling)",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("offset", "int", required=False, default=0),
+                          ToolParam("max_bytes", "int", required=False, default=None)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _entry_info(p: Path) -> Dict[str, Any]:
+        try:
+            st = p.lstat()
+        except OSError:
+            return {"name": p.name, "path": str(p), "type": "unknown"}
+        if p.is_symlink():
+            kind = "symlink"
+        elif _stat.S_ISDIR(st.st_mode):
+            kind = "dir"
+        elif _stat.S_ISREG(st.st_mode):
+            kind = "file"
+        else:
+            kind = "other"
+        return {"name": p.name, "path": str(p), "type": kind,
+                "size": int(st.st_size), "mtime": float(st.st_mtime)}
+
+    def _list_dir(path: str = ".", recursive: bool = False,
+                 show_hidden: bool = False) -> List[Dict[str, Any]]:
+        """List a directory's entries with metadata; optionally recurse the whole tree."""
+        root = Path(path)
+        out: List[Dict[str, Any]] = []
+        if recursive:
+            for dirpath, dirnames, filenames in os.walk(root):
+                if not show_hidden:
+                    dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for name in list(dirnames) + filenames:
+                    if not show_hidden and name.startswith("."):
+                        continue
+                    out.append(_entry_info(Path(dirpath) / name))
+        else:
+            for entry in sorted(root.iterdir(), key=lambda e: e.name):
+                if not show_hidden and entry.name.startswith("."):
+                    continue
+                out.append(_entry_info(entry))
+        return out
+
+    _add(ToolSpec("list_dir", handler=_list_dir,
+                  description="list a directory's entries with metadata (name, type, size, "
+                              "mtime); recursive=True walks the whole tree",
+                  params=[ToolParam("path", "str", required=False, default="."),
+                          ToolParam("recursive", "bool", required=False, default=False),
+                          ToolParam("show_hidden", "bool", required=False, default=False)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _path_stat(path: str) -> Dict[str, Any]:
+        """Full stat of any path: existence, type, size, mode, timestamps, owner."""
+        p = Path(path)
+        if not p.exists() and not p.is_symlink():
+            return {"path": path, "exists": False}
+        st = p.lstat()
+        return {"path": path, "exists": True,
+                "is_dir": p.is_dir(), "is_file": p.is_file(),
+                "is_symlink": p.is_symlink(),
+                "size": int(st.st_size), "mode": oct(_stat.S_IMODE(st.st_mode)),
+                "mtime": float(st.st_mtime), "ctime": float(st.st_ctime),
+                "atime": float(st.st_atime), "uid": int(st.st_uid), "gid": int(st.st_gid)}
+
+    _add(ToolSpec("path_stat", handler=_path_stat,
+                  description="stat any path — existence, type, size, mode, timestamps, owner",
                   params=[ToolParam("path", "str")],
                   capability=Capability.FS_READ, risk=RiskTier.LOW,
                   target_param="path"))
 
-    def _list_dir(path: str = ".") -> List[str]:
-        return sorted(os.listdir(path))
+    def _path_exists(path: str) -> bool:
+        p = Path(path)
+        return p.exists() or p.is_symlink()
 
-    _add(ToolSpec("list_dir", handler=_list_dir,
-                  description="list the entries of a directory",
-                  params=[ToolParam("path", "str", required=False, default=".")],
-                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+    _add(ToolSpec("path_exists", handler=_path_exists,
+                  description="return True if a path exists (file, dir, or symlink)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_READ, risk=RiskTier.TRIVIAL,
                   target_param="path"))
 
-    # ---- filesystem write: moderate, capability-bound ---- #
-    def _write_file(path: str, content: str) -> str:
-        with open(path, "w", encoding="utf-8") as f:
+    def _find_files(root: str = ".", pattern: str = "*",
+                   max_results: int = 500) -> List[str]:
+        """Find paths under a root matching a glob (e.g. '**/*.py'); recursive by default."""
+        base = Path(root)
+        limit = max(1, min(int(max_results), 10_000))
+        results: List[str] = []
+        matcher = base.rglob(pattern) if "**" in pattern else base.glob(pattern)
+        for hit in matcher:
+            results.append(str(hit))
+            if len(results) >= limit:
+                break
+        return results
+
+    _add(ToolSpec("find_files", handler=_find_files,
+                  description="find paths under a root matching a glob pattern "
+                              "(e.g. '**/*.py'); bounded by max_results",
+                  params=[ToolParam("root", "str", required=False, default="."),
+                          ToolParam("pattern", "str", required=False, default="*"),
+                          ToolParam("max_results", "int", required=False, default=500)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="root"))
+
+    def _search_in_files(root: str, query: str, glob: str = "**/*",
+                        regex: bool = False, max_results: int = 200) -> List[Dict[str, Any]]:
+        """Grep-like content search under a root; returns [{path, line_no, line}]."""
+        base = Path(root)
+        limit = max(1, min(int(max_results), 5_000))
+        pat = re.compile(query) if regex else None
+        hits: List[Dict[str, Any]] = []
+        candidates = base.rglob(glob) if "**" in glob else base.glob(glob)
+        for fp in candidates:
+            if not fp.is_file():
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="ignore") as fh:
+                    for i, line in enumerate(fh, 1):
+                        found = pat.search(line) if pat is not None else (query in line)
+                        if found:
+                            hits.append({"path": str(fp), "line_no": i,
+                                         "line": line.rstrip("\n")[:500]})
+                            if len(hits) >= limit:
+                                return hits
+            except OSError:
+                continue
+        return hits
+
+    _add(ToolSpec("search_in_files", handler=_search_in_files,
+                  description="grep-like content search under a root; substring by default, "
+                              "regex=True for a pattern; returns path/line_no/line matches",
+                  params=[ToolParam("root", "str"),
+                          ToolParam("query", "str"),
+                          ToolParam("glob", "str", required=False, default="**/*"),
+                          ToolParam("regex", "bool", required=False, default=False),
+                          ToolParam("max_results", "int", required=False, default=200)],
+                  capability=Capability.FS_READ, risk=RiskTier.LOW,
+                  target_param="root"))
+
+    def _disk_usage(path: str = "/") -> Dict[str, Any]:
+        usage = shutil.disk_usage(path)
+        return {"path": path, "total": int(usage.total), "used": int(usage.used),
+                "free": int(usage.free)}
+
+    _add(ToolSpec("disk_usage", handler=_disk_usage,
+                  description="report total/used/free bytes of the filesystem holding a path",
+                  params=[ToolParam("path", "str", required=False, default="/")],
+                  capability=Capability.FS_READ, risk=RiskTier.TRIVIAL,
+                  target_param="path"))
+
+    # ---- writes: moderate, capability-bound (FS_WRITE) ---- #
+    def _write_file(path: str, content: str, append: bool = False,
+                   make_parents: bool = True) -> str:
+        """Write UTF-8 text to any path — overwrite (default) or append."""
+        p = Path(path)
+        if make_parents and p.parent and not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if append else "w"
+        with open(path, mode, encoding="utf-8") as f:
             f.write(content)
-        return f"wrote {len(content)} chars to {path}"
+        verb = "appended" if append else "wrote"
+        return f"{verb} {len(content)} chars to {path}"
 
     _add(ToolSpec("write_file", handler=_write_file,
-                  description="write UTF-8 text to a file (overwrites)",
-                  params=[ToolParam("path", "str"), ToolParam("content", "str")],
+                  description="write UTF-8 text to any path; append=True appends, "
+                              "make_parents=True creates missing parent dirs",
+                  params=[ToolParam("path", "str"), ToolParam("content", "str"),
+                          ToolParam("append", "bool", required=False, default=False),
+                          ToolParam("make_parents", "bool", required=False, default=True)],
                   capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _write_file_bytes(path: str, base64_data: str, append: bool = False,
+                         make_parents: bool = True) -> str:
+        """Write binary content (base64-encoded) to any path — overwrite or append."""
+        raw = base64.b64decode(base64_data)
+        p = Path(path)
+        if make_parents and p.parent and not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        mode = "ab" if append else "wb"
+        with open(path, mode) as f:
+            f.write(raw)
+        verb = "appended" if append else "wrote"
+        return f"{verb} {len(raw)} bytes to {path}"
+
+    _add(ToolSpec("write_file_bytes", handler=_write_file_bytes,
+                  description="write binary content (base64-encoded) to any path; "
+                              "append and make_parents supported",
+                  params=[ToolParam("path", "str"), ToolParam("base64_data", "str"),
+                          ToolParam("append", "bool", required=False, default=False),
+                          ToolParam("make_parents", "bool", required=False, default=True)],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="path"))
+
+    def _make_dir(path: str) -> str:
+        """Create a directory (and any missing parents); no error if it exists."""
+        os.makedirs(path, exist_ok=True)
+        return f"ensured directory {path}"
+
+    _add(ToolSpec("make_dir", handler=_make_dir,
+                  description="create a directory and any missing parents (mkdir -p)",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.LOW,
+                  target_param="path"))
+
+    def _copy_path(src: str, dst: str) -> str:
+        """Copy a file (metadata-preserving) or a whole directory tree."""
+        if Path(src).is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            return f"copied directory tree {src} -> {dst}"
+        p = Path(dst)
+        if p.parent and not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return f"copied file {src} -> {dst}"
+
+    _add(ToolSpec("copy_path", handler=_copy_path,
+                  description="copy a file (metadata-preserving) or a directory tree to a "
+                              "destination path",
+                  params=[ToolParam("src", "str"), ToolParam("dst", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="dst"))
+
+    def _move_path(src: str, dst: str) -> str:
+        """Move or rename a file or directory."""
+        p = Path(dst)
+        if p.parent and not p.parent.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(src, dst)
+        return f"moved {src} -> {dst}"
+
+    _add(ToolSpec("move_path", handler=_move_path,
+                  description="move or rename a file or directory",
+                  params=[ToolParam("src", "str"), ToolParam("dst", "str")],
+                  capability=Capability.FS_WRITE, risk=RiskTier.MODERATE,
+                  reversible=False, target_param="dst"))
+
+    # ---- deletes: high risk, irreversible (FS_DELETE) — wires the FS_DELETE cap ---- #
+    def _delete_file(path: str) -> str:
+        """Delete a single file (refuses directories — use delete_dir)."""
+        p = Path(path)
+        if p.is_dir() and not p.is_symlink():
+            raise IsADirectoryError(f"{path} is a directory; use delete_dir")
+        os.remove(path)
+        return f"deleted file {path}"
+
+    _add(ToolSpec("delete_file", handler=_delete_file,
+                  description="delete a single file (irreversible); refuses directories",
+                  params=[ToolParam("path", "str")],
+                  capability=Capability.FS_DELETE, risk=RiskTier.HIGH,
+                  reversible=False, target_param="path"))
+
+    def _delete_dir(path: str, recursive: bool = False) -> str:
+        """Delete a directory. An empty dir removes directly; a non-empty tree
+        requires recursive=True (fail-safe against accidental tree deletion)."""
+        p = Path(path)
+        if not p.is_dir():
+            raise NotADirectoryError(f"{path} is not a directory")
+        if recursive:
+            shutil.rmtree(path)
+            return f"deleted directory tree {path}"
+        os.rmdir(path)  # raises OSError if not empty — safe default
+        return f"deleted empty directory {path}"
+
+    _add(ToolSpec("delete_dir", handler=_delete_dir,
+                  description="delete a directory; empty dir removes directly, a non-empty "
+                              "tree requires recursive=True (irreversible)",
+                  params=[ToolParam("path", "str"),
+                          ToolParam("recursive", "bool", required=False, default=False)],
+                  capability=Capability.FS_DELETE, risk=RiskTier.HIGH,
                   reversible=False, target_param="path"))
 
     # ---- network fetch: injection-sanitised (senses/web), governed, fails as data ---- #
