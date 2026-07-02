@@ -23,6 +23,7 @@ standard library.
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from collections import defaultdict, deque
@@ -106,13 +107,21 @@ class ReplayBuffer:
 class LinearValueModel:
     """Per-action linear value over sparse features, with EWC-style elastic anchoring."""
 
-    def __init__(self, *, ewc_lambda: float = 0.0) -> None:
+    def __init__(self, *, ewc_lambda: float = 0.0, update_rule: Optional[Any] = None) -> None:
         self.ewc_lambda = ewc_lambda
+        # An *invented* weight-update rule (any object with ``.delta(**inputs) -> float``).
+        # ``None`` means the incumbent SGD+EWC delta — behaviour is byte-identical to before this
+        # seam existed. A non-None rule is installed by growth.rule_synth only after it *measurably*
+        # beats the incumbent on real tasks; it changes only *how* a weight moves, never *what* is
+        # learned (feature names never reach it, so Learner._guard / IMMUTABLE_VALUES are untouched).
+        self.update_rule = update_rule
         self._w: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self._w_star: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self._F: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))     # sum x^2
         self._n: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))     # uses
         self._anchor: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))  # frozen importance
+        self._m: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))     # momentum EMA
+        self._v: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))     # 2nd-moment EMA
 
     def predict(self, action: str, features: Features) -> float:
         w = self._w[action]
@@ -126,10 +135,25 @@ class LinearValueModel:
         F = self._F[action]
         n = self._n[action]
         anchor_imp = self._anchor[action]
+        rule = self.update_rule
+        m = self._m[action] if rule is not None else None
+        v = self._v[action] if rule is not None else None
         for f, x in features.items():
             # EWC penalty uses the *frozen, normalized* importance (0 before consolidation)
             penalty = self.ewc_lambda * anchor_imp[f] * (w[f] - w_star[f])
-            w[f] += lr * (err * x - penalty)
+            if rule is None:
+                delta = lr * (err * x - penalty)      # incumbent SGD+EWC — byte-identical default
+            else:
+                grad = err * x
+                # per-(action, feature) moment EMAs let invented rules express momentum/Adam forms
+                m[f] = 0.9 * m[f] + 0.1 * grad
+                v[f] = 0.999 * v[f] + 0.001 * grad * grad
+                delta = rule.delta(err=err, x=x, w=w[f], w_star=w_star[f],
+                                   importance=anchor_imp[f], grad=grad, m=m[f], v=v[f],
+                                   step=n[f], lr=lr, penalty=penalty)
+                if not math.isfinite(delta):
+                    delta = lr * (err * x - penalty)  # live-seam guard: never NaN the live model
+            w[f] += delta
             F[f] += x * x
             n[f] += 1.0
         return err
@@ -156,15 +180,17 @@ class Learner:
     def __init__(self, *, base_lr: float = 0.1, lr_decay: float = 0.0,
                  ewc_lambda: float = 0.0, replay_lr: Optional[float] = None,
                  buffer_capacity: int = 2000,
-                 protected: Optional[Sequence[str]] = None, seed: int = 0) -> None:
+                 protected: Optional[Sequence[str]] = None, seed: int = 0,
+                 update_rule: Optional[Any] = None) -> None:
         self.base_lr = base_lr
         self.lr_decay = lr_decay
         self.replay_lr = replay_lr if replay_lr is not None else base_lr * 0.5
-        self.model = LinearValueModel(ewc_lambda=ewc_lambda)
+        self.model = LinearValueModel(ewc_lambda=ewc_lambda, update_rule=update_rule)
         self.buffer = ReplayBuffer(buffer_capacity)
         self.protected = set(protected) if protected is not None else set(IMMUTABLE_VALUES)
         self._rng = random.Random(seed)
         self._steps = 0
+        self._incumbent_rule: Optional[Any] = None
 
     # ---- learning-rate schedule ---- #
     def lr(self) -> float:
@@ -210,10 +236,34 @@ class Learner:
     def consolidate(self) -> None:
         self.model.consolidate()
 
+    # ---- learning-to-learn: swap the update rule itself (reversibly) ---- #
+    @property
+    def update_rule(self) -> Optional[Any]:
+        """The active weight-update rule (``None`` = the incumbent SGD+EWC delta)."""
+        return self.model.update_rule
+
+    def install_rule(self, rule: Optional[Any]) -> None:
+        """Install an invented update rule into the live model, keeping the incumbent for rollback.
+
+        Character safety is unaffected: the rule is a pure scalar function of numeric inputs with no
+        access to feature names, so :meth:`_guard` / ``IMMUTABLE_VALUES`` remain the sole gate on
+        *what* may be learned. This changes only *how* a weight moves — sharpen the blade, never
+        re-forge it. Reversible via :meth:`rollback_rule`.
+        """
+        self._incumbent_rule = self.model.update_rule
+        self.model.update_rule = rule
+
+    def rollback_rule(self) -> None:
+        """Restore the update rule that was active before the last :meth:`install_rule`."""
+        self.model.update_rule = self._incumbent_rule
+        self._incumbent_rule = None
+
     def report(self) -> Dict[str, Any]:
+        rule = self.model.update_rule
         return {"steps": self._steps, "lr": round(self.lr(), 5),
                 "buffer": len(self.buffer), "ewc_lambda": self.model.ewc_lambda,
-                "protected": sorted(self.protected)}
+                "protected": sorted(self.protected),
+                "update_rule": ("sgd_ewc" if rule is None else str(getattr(rule, "expr", rule)))}
 
 
 # --------------------------------------------------------------------------- #

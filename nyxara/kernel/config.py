@@ -1168,6 +1168,44 @@ class MindEvolutionConfig(BaseModel):
     meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
 
 
+class RuleSynthesisConfig(BaseModel):
+    """Learning-rule synthesis settings (growth/rule_synth.py, Rule 4 — learning-to-learn).
+
+    Every other engine *selects among* or *tunes* a fixed learning rule; this one **invents a new
+    weight-update rule from mathematical primitives** when the existing learning has stalled, tests
+    it on real tasks, and installs it into the live learner only when it measurably beats plain
+    gradient descent AND still recovers the optimum. No LLM is involved — NYXARA does this herself.
+
+    Searching and measuring are always safe; **installing** the invented rule into the live learner
+    only happens when ``autonomous_enact`` is set (the standing authorisation for autonomous
+    self-modification), and is fully reversible (the incumbent is kept for rollback). The invented
+    rule is a pure scalar function with no access to feature names, so ``IMMUTABLE_VALUES`` /
+    ``Learner._guard`` remain the sole gate on *what* is learned and are never touched. Bounded like
+    Genesis (tiny population/generations/steps, hard wall-clock cap) — real, deterministic, CI-fast.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                       # invent-and-measure is safe → on by default
+    # Master JP's standing authorisation: install an invented rule into the live learner. A rule is
+    # only ever adopted after it measurably beats the incumbent AND recovers the regression optimum,
+    # and adoption is reversible, so auto-install cannot trade safety or stability for capability.
+    autonomous_enact: bool = True              # install the invented rule into the live learner
+    every: int = Field(default=15, ge=1)       # run one synthesis pass every N growth passes (heavy)
+    population: int = Field(default=12, ge=2, le=64)
+    generations: int = Field(default=8, ge=1, le=100)
+    steps_per_task: int = Field(default=60, ge=4, le=1000)
+    seeds: int = Field(default=3, ge=1, le=16)
+    max_seconds: float = Field(default=8.0, ge=0.5, le=120.0)
+    adoption_margin: float = Field(default=0.02, ge=0.0, le=1.0)
+    parsimony: float = Field(default=0.001, ge=0.0, le=1.0)
+    # Failure trigger: only invent when learning has genuinely plateaued/regressed. ``plateau_slope``
+    # is the least-squares slope of the LEARNING dimension below which the fixed method counts as
+    # stalled; ``min_signal`` is how many samples must exist before the plateau signal is trusted.
+    plateau_slope: float = Field(default=0.0)
+    min_signal: int = Field(default=8, ge=2)
+
+
 class ExplorerConfig(BaseModel):
     """The Infinite Explorer — Environment-Driven Learning (growth/explorer.py, Rule 4).
 
@@ -1887,6 +1925,7 @@ class NyxaraSettings(BaseSettings):
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     self_optimization: SelfOptimizationConfig = Field(default_factory=SelfOptimizationConfig)
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
+    rule_synthesis: RuleSynthesisConfig = Field(default_factory=RuleSynthesisConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
@@ -1958,6 +1997,10 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.allow_llm_edits = False
             self.self_optimization.autonomous_enact = False
             self.mind_evolution.autonomous_enact = False
+            # Rule synthesis may SEARCH (fast, deterministic) under TEST, but must never install an
+            # invented rule into the live learner in the hermetic suite (a test that wants adoption
+            # sets autonomous_enact on its own settings object; see tests/growth/test_rule_synth.py).
+            self.rule_synthesis.autonomous_enact = False
             # The recursive meta towers over the mind-evolution and meta-research SEARCHES tune only
             # bounded capability knobs, but they persist state to disk and evolve across passes — keep
             # them OFF under TEST so the suite stays hermetic and deterministic (a test that wants a

@@ -132,6 +132,13 @@ from nyxara.growth.mind_evolution import (
     genome_solver,
 )
 from nyxara.growth.autolearn import GrowthEngine, GrowthReport
+from nyxara.growth.rule_synth import (
+    LearningRuleSynthesizer,
+    Node,
+    RuleSynthesisReport,
+    UpdateRule,
+    incumbent_rule,
+)
 from nyxara.growth.self_optimize import (
     EditGenerator,
     GauntletResult,
@@ -301,6 +308,12 @@ __all__ = [
     "genome_solver",
     "GrowthEngine",
     "GrowthReport",
+    # learning-to-learn — invent a NEW weight-update rule when the fixed one fails
+    "LearningRuleSynthesizer",
+    "UpdateRule",
+    "Node",
+    "RuleSynthesisReport",
+    "incumbent_rule",
     "Optimizer",
     "EditGenerator",
     "LLMEditGenerator",
