@@ -485,10 +485,11 @@ around the control law.
   capability NYXARA drives *herself*: `privileged_shell` runs a command under `sudo`,
   `change_os_permissions` performs an elevated `chmod`/`chown`, and `privilege_status` reports the
   elevation posture (read-only). A genuine `sudo` call that actually runs — not a simulated
-  result. A new `PRIV_ESCALATE` capability gates them at **CRITICAL/irreversible**, so each call
-  escalates to the Master unless he installs the explicit, opt-in grant
-  (`grant_privilege_escalation`, `NYXARA_AGENCY__PRIVILEGE_ESCALATION`, **off by default** — the
-  single most dangerous OS surface). She elevates *with* the Master's stored sudo credential
+  result. A new `PRIV_ESCALATE` capability gates them at **CRITICAL/irreversible**; the Master
+  installs a standing grant for them (`grant_privilege_escalation`,
+  `NYXARA_AGENCY__PRIVILEGE_ESCALATION`, **on by default** — the Master's standing choice, though
+  the single most dangerous OS surface; set it `false` to make each call escalate instead). She
+  elevates *with* the Master's stored sudo credential
   (`NYXARA_AGENCY__SUDO_CREDENTIAL_NAME`), never exploiting, prompting, guessing or brute-forcing —
   and `PRIV_ESCALATE` is deliberately excluded from full control's envelope, so `FULL_CONTROL`
   never confers root. `/scram`, oversight, corrigibility, the owner-exclusive caps (Rule 8) and

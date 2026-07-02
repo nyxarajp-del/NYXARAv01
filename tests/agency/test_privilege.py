@@ -79,33 +79,35 @@ def test_installer_requires_owner_authority():
         grant_privilege_escalation(pol, authority=Authority.AUTONOMOUS)
 
 
-# -------------------- config: OFF by default -------------------- #
-def test_privilege_escalation_off_by_default():
+# -------------------- config: ON by default (the Master's standing choice) -------------------- #
+def test_privilege_escalation_on_by_default():
     from nyxara.kernel.config import get_settings
-    assert get_settings().agency.privilege_escalation is False
+    assert get_settings().agency.privilege_escalation is True
 
 
-def test_orchestrator_omits_privilege_grant_by_default():
-    # full_control is ON by default, but PRIV_ESCALATE must still escalate.
+def test_orchestrator_installs_privilege_grant_by_default():
+    # The Master's standing choice: PRIV_ESCALATE is granted from first boot, so an
+    # autonomous privileged action runs on her own initiative rather than escalating.
     from nyxara.kernel.orchestrator import NyxaraCore
     core = NyxaraCore()
     names = [g.name for g in core.permissions.grants()]
-    assert "privilege-escalation:os.privilege" not in names
+    assert "privilege-escalation:os.privilege" in names
     d = core.permissions.check(_auto(Capability.PRIV_ESCALATE, target="sudo id"))
-    assert d.escalated
+    assert d.allowed and d.rule_basis == "grant"
 
 
-def test_orchestrator_installs_privilege_grant_when_flag_on(monkeypatch):
-    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "true")
+def test_orchestrator_omits_privilege_grant_when_flag_off(monkeypatch):
+    # Set the flag false and PRIV_ESCALATE reverts to per-action escalation — the OFF path.
+    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()
     try:
         from nyxara.kernel.orchestrator import NyxaraCore
         core = NyxaraCore()
         names = [g.name for g in core.permissions.grants()]
-        assert "privilege-escalation:os.privilege" in names
+        assert "privilege-escalation:os.privilege" not in names
         d = core.permissions.check(_auto(Capability.PRIV_ESCALATE, target="sudo id"))
-        assert d.allowed and d.rule_basis == "grant"
+        assert d.escalated
     finally:
         monkeypatch.delenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", raising=False)
         cfg.reload_settings()
