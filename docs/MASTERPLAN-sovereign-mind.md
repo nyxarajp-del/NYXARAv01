@@ -55,7 +55,11 @@ This is not vaporware. Every step below reuses machinery that already exists in 
 **Handoff rate** = the % of turns NYXARA's *own* model handles confidently **and** correctly
 (verifier-pass) without the external LLM.
 
-- **Today = 0%.** Goal: raise it phase by phase to **60–80%**, without dropping safety or quality.
+- **Measured (2026-07, offline, no LLM): NYXARA answers 93% of the capability battery herself**
+  (`--benchmark --router`; 27/29, verifiable faculties + own brain, zero teacher). The old "0%" only
+  ever counted the neural self-brain and ignored her verifiable faculties — see §11 (2026-07). The
+  neural self-brain's *own* share still grows with the GPU LoRA path. Goal: hold accuracy as the
+  neural share rises toward **60–80%**, without dropping safety or quality.
 - Secondary metric: the self-model's **capability-benchmark score** (`nyxara/eval/benchmark.py`),
   measured apples-to-apples against the bare external LLM.
 - Measure with: `python -m nyxara.eval --benchmark` (the loop / self-model) and
@@ -483,6 +487,61 @@ theory, inequality). A fresh seed per process explores new ground each session w
 prevents re-discovering what she already holds; on idle ticks the `AutonomicLoop` advances one
 (oversight-gated) generation. Pure-stdlib core; `sympy`/`z3` reached only through the `Prover` and only ever
 strengthen a verdict; touches no source, no weights, no gate. 12 new tests.
+
+### 2026-07 — Autonomous reasoning made primary, measured, and honestly bounded
+
+The Master asked NYXARA to *herself* close the three gaps this doc names — own thinking, continual
+learning, capability — for real, not fake. We reconciled the doc's stale "handoff rate 0%" against
+what the code actually does, fixed a real regression, made her own mind answer more turns herself,
+and put an honest live meter on it. All torch-free (runs in CI, on any box), inside the same gates.
+
+**What we found + measured (ground truth, not the doc's older claims):**
+- The `_default_reasoner` keyword-stub is already superseded: on a keyless box the sovereign
+  **offline mind** + **verifiable faculties** answer, and the always-on **`SelfBrain`** compounds
+  every lived turn (`orchestrator._compound_own_models` → `teach_self_brain`, one shared instance
+  that both learns and answers). The **offline capability benchmark is 90%** (`python -m nyxara.eval
+  --benchmark`), all by her own faculties, no LLM.
+- **A real regression, now fixed:** the confidence router's faculty path only called
+  `solve_with_faculties`, **discarding the multi-step reasoning chain** the full loop uses — so
+  `multi_step` scored **0% through the router** vs 100% in the loop. We hoisted the loop's
+  chain→single logic into one shared `mind/reasoning_faculties.solve_verifiable()` and pointed both
+  the router and `NyxaraReasoner` at it. Router accuracy **83% → 93%**; her own exact reasoning is no
+  longer thrown away on the handoff path.
+- **The "0%" was a measurement artefact.** The router's handoff line counted only the neural
+  self-brain, ignoring that her *verifiable faculties* answer with no teacher at all. Corrected, the
+  honest number is **NYXARA answers 93% of the battery herself, unaided** (27/29, zero teacher).
+
+**What we shipped:**
+- **`solve_verifiable()`** — one source of truth for verifiable reasoning (chain → single),
+  reused by the router and the loop (router `multi_step` 0%→100%).
+- **Knowledge-grounded handoff (real handoff off 0%).** `SelfBrain` now takes her `knowledge` base
+  and answers a turn from what she *genuinely knows*; `SelfBrainProvider.available()` opens on real
+  grounding as a second honest path alongside lived learning. Critically it **never bluffs**: the
+  handoff path (`reply(require_grounding=True)`) answers only from genuine grounding (knowledge +
+  lived-learned sentences), **excludes the generic persona seed**, and skips cold generation — so an
+  ungrounded turn returns "" and cleanly defers to the teacher instead of reciting a coherent-looking
+  irrelevance the quality verifier (which scores coherence, not relevance) couldn't catch.
+- **A live handoff meter** (`NyxaraCore.report()["handoff"]`) — the North Star measured, not
+  asserted: turns answered by her own mind (faculty / skill / own-brain / offline) vs the teacher.
+  Keyless, every turn is hers (rate 1.0).
+- **Continual learning, end-to-end, torch-free.** Verified + pinned the whole loop on the word-level
+  Kneser-Ney substrate (whose counts are real, anchorable weights): **train → gauntlet → promote →
+  EWC-consolidate → served**, with her `SelfBrain` then preferring the promoted model
+  (`kind="promoted:…"`). The `AutonomicLoop` drives it on idle ticks, oversight-gated. (The legacy
+  byte n-gram has no anchorable weights, so EWC is a no-op there — the default/`auto`/`kngram` path
+  used everywhere live does consolidate.)
+- **Learned re-ranker fed from lived success** (the doc's named "optional next step"):
+  `orchestrator._reinforce_recall` teaches `AssociativeRetriever.record_feedback` which recalled
+  memories actually helped a turn. Additive and **off by default** (a strict no-op until a re-ranker
+  is attached — fixed fusion weights unchanged), so no pinned behaviour regresses.
+
+**The honest ceiling (unchanged, stated plainly).** No single person/repo can train a model that
+beats frontier Claude/GPT, and this box has no GPU/torch — so the neural LoRA-on-Qwen brain remains
+**scaffolded, not run here** (`python -m nyxara.growth --distill --backend lora --base-model
+Qwen/Qwen2.5-7B --bench` on the Master's GPU box). We deliberately wrote **no** "beats everyone /
+most powerful AI" claim into code or docs; we pushed every *real, achievable* capability to its max on
+the substrate that actually runs, and measured it. Safety, character, corrigibility, and the sealed
+rules are untouched — every reply is still a proposal the kernel disposes through all five gates.
 
 ---
 

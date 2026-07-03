@@ -43,6 +43,43 @@ def test_report_exposes_identity():
     assert "mood" in rep and "voice" in rep and rep["character_stable"] is True
 
 
+def test_handoff_meter_counts_her_own_mind():
+    """The North Star, measured live: with no LLM key every turn is answered by her own mind."""
+    nyx = NyxaraCore()   # keyless -> offline / faculty / own-brain path, never a teacher
+    for msg in ("What is 3 times 4 plus 1?", "Tell me about your day."):
+        nyx.process(msg, authority=Authority.OWNER)
+    handoff = nyx.report()["handoff"]
+    assert handoff["turns"] >= 2
+    assert handoff["counts"].get("teacher", 0) == 0     # no external teacher answered
+    assert handoff["handoff_rate"] == 1.0               # she answered every turn herself
+
+
+def test_successful_turn_teaches_the_recall_reranker():
+    """D4: a lived, successful turn reinforces the memory that helped — recall learns usefulness.
+
+    Off by default (no re-ranker attached ⇒ a strict no-op); once one is attached the wire feeds it
+    from real turns so recall learns its own signal mix, not merely textual similarity."""
+    from nyxara.kernel.orchestrator import Candidate, Capability, RiskTier
+    from nyxara.memory.retrieval import FusionWeights, LearnedReranker, RetrievalContext
+
+    nyx = NyxaraCore()
+    assert getattr(nyx.retriever, "reranker", None) is None      # honest default: off
+    nyx.retriever.reranker = LearnedReranker.from_fusion(FusionWeights())
+    before = dict(nyx.retriever.reranker.weights)
+
+    fact = "Andromeda is a spiral galaxy about two million light years from the Milky Way"
+    nyx.memory.remember(fact)
+    nyx._last_recall_results = nyx.retriever.retrieve(RetrievalContext(query="andromeda galaxy"), k=3)
+    assert nyx._last_recall_results                               # the fact was surfaced
+
+    # a successful respond turn whose answer shares content with the recalled memory
+    cand = Candidate(text=fact + ".", kind="respond", capability=Capability.MESSAGE_SEND,
+                     risk=RiskTier.LOW, reversible=True, confidence=0.8, belief=0.8, rationale="x")
+    nyx._reinforce_recall(cand, success=True)
+    assert nyx.retriever.reranker.weights != before              # she learned which memory helped
+    assert nyx._last_recall_results == []                        # consumed (not double-counted)
+
+
 def test_voice_reaches_the_reasoner():
     nyx = NyxaraCore()
     # the LLM reasoner was handed the soul, so its effective system carries the voice

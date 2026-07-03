@@ -190,6 +190,39 @@ def test_first_model_trained_and_promoted(tmp_path):
     assert (tmp_path / "foundry" / "active").read_text().strip() == f"v{res.version}"
 
 
+def test_continual_learning_loop_closes_end_to_end(tmp_path):
+    """The whole torch-free loop: train → gauntlet → promote → EWC-consolidate → served.
+
+    The substrate that LEARNS (the word-level Kneser-Ney n-gram, whose counts are real anchorable
+    weights) is the substrate that ANSWERS: after a promotion her SelfBrain prefers the forged
+    model. This is continual learning that runs herself, no torch, no external service."""
+    from nyxara.mind.self_reasoner import build_self_brain
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "kngram"          # EWC-capable word-KN (the real self-brain substrate)
+    f = Foundry(settings=settings, replay=_replay())
+
+    [res] = f.self_improve(generations=1)
+    # 1) promotion happened, gauntlet-gated, and the active pointer is set on disk
+    assert res.promoted and res.gauntlet_passed
+    assert (tmp_path / "foundry" / "active").read_text().strip() == f"v{res.version}"
+    active = f.active()
+    assert active is not None and active.kind == "kngram"
+
+    # 2) EWC actually consolidated the newly-promoted weights (anti-forgetting anchor written),
+    #    protecting the immutable loyalty core as infinitely important all the while
+    stats = f._consolidator().stats()
+    assert stats["consolidations"] >= 1 and stats["tasks"] >= 1
+    assert "loyalty_to_master" in stats["protected"]
+
+    # 3) the served answer comes from the promoted model — her SelfBrain prefers it
+    brain = build_self_brain(settings=settings, persist=False)
+    brain.reply("warm up")
+    assert brain.kind.startswith("promoted:")
+    assert brain.has_learned(8)                  # a promoted pointer is honest availability
+
+
 def test_versioning_on_disk(tmp_path):
     f = _foundry(tmp_path)
     f.self_improve(generations=1)

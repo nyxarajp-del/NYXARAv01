@@ -147,3 +147,60 @@ def test_provider_complete_wraps_reply_in_response_shape():
     prov = SelfBrainProvider(brain, min_learned_docs=8)
     resp = prov.complete(LLMRequest.from_prompt("What does a load balancer do?"))
     assert resp.provider == "self" and isinstance(resp.text, str) and resp.text.strip()
+
+
+# --------------------------------------------------------------------------- #
+# Knowledge grounding: she answers a turn she genuinely KNOWS, defers the rest
+# (raises real handoff off 0% without ever bluffing) — Pillar A / D2.
+# --------------------------------------------------------------------------- #
+def _kb_with(*facts: str):
+    from nyxara.knowledge.base import KnowledgeBase
+    from nyxara.memory.store import MemoryStore
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    kb = KnowledgeBase(store=MemoryStore(settings=settings), name="kb")
+    for i, fact in enumerate(facts):
+        kb.ingest_text(fact, source=f"src-{i}")
+    return settings, kb
+
+
+def test_knowledge_grounding_makes_a_cold_brain_available():
+    settings, kb = _kb_with(
+        "The Andromeda galaxy is about 2.5 million light-years from the Milky Way.")
+    brain = build_self_brain(settings=settings, persist=False, prefer_promoted=False,
+                             knowledge=kb)
+    # she has learned nothing from experience, yet she KNOWS things -> available (grounded path)
+    assert brain.learned_count == 0
+    assert brain.has_grounding() is True
+    assert SelfBrainProvider(brain, min_learned_docs=8).available() is True
+    # a brain with no knowledge base stays honestly cold
+    assert _cold_brain().has_grounding() is False
+
+
+def test_grounded_turn_is_answered_from_knowledge_ungrounded_defers():
+    from nyxara.mind.llm import LLM
+    from nyxara.mind.router import Router
+
+    settings, kb = _kb_with(
+        "The Andromeda galaxy is about 2.5 million light-years from the Milky Way.")
+    brain = build_self_brain(settings=settings, persist=False, prefer_promoted=False,
+                             knowledge=kb)
+    router = Router(LLM(settings=settings), settings=settings,
+                    self_provider=SelfBrainProvider(brain, min_learned_docs=8))
+    # grounded: she answers herself, from her real knowledge
+    hit = router.draft_self("How far away is the Andromeda galaxy?")
+    assert hit is not None and hit.handed_off and hit.source == "self"
+    assert "andromeda" in hit.text.lower() or "light-year" in hit.text.lower()
+    # ungrounded: she defers (None) rather than bluffing from the persona seed or a cold n-gram
+    assert router.draft_self("What did I eat for breakfast last Tuesday?") is None
+
+
+def test_handoff_path_never_bluffs_from_the_persona_seed():
+    """require_grounding excludes the generic seed, so an unrelated turn returns "" (defers)."""
+    settings, kb = _kb_with("Photosynthesis converts light into chemical energy in plants.")
+    brain = build_self_brain(settings=settings, persist=False, prefer_promoted=False,
+                             knowledge=kb)
+    # the offline voice may still speak from the seed (no teacher exists there)...
+    # ...but the handoff path answers only from genuine grounding:
+    assert brain.reply("Give me an unrelated random anecdote.",
+                       require_grounding=True) == ""
