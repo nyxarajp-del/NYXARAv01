@@ -52,28 +52,91 @@ class Experience:
     features: Features
     reward: float
     context: str = ""
+    task: str = ""                       # which skill/task this experience belongs to
+    logit: Optional[float] = None        # the model's own prediction at record time (DER)
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"action": self.action, "reward": round(self.reward, 4),
-                "context": self.context, "features": dict(self.features)}
+                "context": self.context, "features": dict(self.features),
+                "task": self.task,
+                "logit": (round(self.logit, 4) if self.logit is not None else None)}
 
 
 class ReplayBuffer:
-    """A bounded buffer of experiences, sampled with priority by reward magnitude."""
+    """A bounded buffer of experiences, sampled with priority by reward magnitude.
 
-    def __init__(self, capacity: int = 2000) -> None:
+    With ``task_reserve > 0`` the buffer also keeps a per-task **reservoir** (Algorithm R,
+    seeded) of up to ``task_reserve`` experiences per distinct task tag, alongside the
+    recency deque — so a flood of new-task experiences can age old ones out of the deque but
+    can never erase a task's reservoir. :meth:`sample_balanced` draws evenly across tasks
+    from both stores, which is what makes rehearsal cover *old* skills, not just recent ones.
+    """
+
+    def __init__(self, capacity: int = 2000, *, task_reserve: int = 0,
+                 seed: int = 0) -> None:
         self.capacity = capacity
+        self.task_reserve = max(0, int(task_reserve))
         self._buf: Deque[Experience] = deque(maxlen=capacity)
+        self._reserve: Dict[str, List[Experience]] = {}
+        self._reserve_seen: Dict[str, int] = {}
+        self._reserve_rng = random.Random(seed)
 
     def __len__(self) -> int:
         return len(self._buf)
 
     def add(self, exp: Experience) -> None:
         self._buf.append(exp)
+        if self.task_reserve > 0 and exp.task:
+            # reservoir sampling per task: every experience of a task has an equal chance
+            # of being retained, however many arrive after it.
+            pool = self._reserve.setdefault(exp.task, [])
+            seen = self._reserve_seen.get(exp.task, 0)
+            if len(pool) < self.task_reserve:
+                pool.append(exp)
+            else:
+                j = self._reserve_rng.randint(0, seen)
+                if j < self.task_reserve:
+                    pool[j] = exp
+            self._reserve_seen[exp.task] = seen + 1
 
     def recent(self, n: int = 10) -> List[Experience]:
         return list(self._buf)[-n:]
+
+    def tasks(self) -> List[str]:
+        """Every distinct task tag currently represented (deque or reservoir)."""
+        tags = {e.task for e in self._buf if e.task}
+        tags.update(t for t, pool in self._reserve.items() if pool)
+        return sorted(tags)
+
+    def counts_by_task(self) -> Dict[str, int]:
+        """How many distinct experiences each task tag has across deque + reservoir."""
+        out: Dict[str, int] = {}
+        seen: set = set()
+        for exp in list(self._buf):
+            out[exp.task or ""] = out.get(exp.task or "", 0) + 1
+            seen.add(id(exp))
+        for task, pool in self._reserve.items():
+            for exp in pool:
+                if id(exp) not in seen:
+                    out[task] = out.get(task, 0) + 1
+                    seen.add(id(exp))
+        return out
+
+    @staticmethod
+    def _draw_one(items: List[Experience], rng: random.Random,
+                  prioritized: bool) -> Experience:
+        """Pop one experience from ``items`` (reward-weighted when prioritized)."""
+        if not prioritized or len(items) == 1:
+            return items.pop(rng.randrange(len(items)))
+        total = sum(abs(e.reward) + 0.1 for e in items)
+        r = rng.uniform(0, total)
+        upto = 0.0
+        for i, e in enumerate(items):
+            upto += abs(e.reward) + 0.1
+            if upto >= r:
+                return items.pop(i)
+        return items.pop()
 
     def sample(self, n: int, *, rng: Optional[random.Random] = None,
                prioritized: bool = True) -> List[Experience]:
@@ -99,6 +162,41 @@ class ReplayBuffer:
                     pool.pop(i)
                     break
         return chosen
+
+    def sample_balanced(self, n: int, *, rng: Optional[random.Random] = None,
+                        prioritized: bool = True) -> List[Experience]:
+        """Sample with an equal share per distinct task, drawing from deque + reservoirs.
+
+        This is the anti-forgetting sampler: however lopsided recent experience is, every
+        task NYXARA has ever tagged gets rehearsed. Untagged experiences form one pool.
+        Falls back to plain :meth:`sample` when nothing is tagged.
+        """
+        rng = rng or random.Random()
+        pools: Dict[str, List[Experience]] = {}
+        seen: set = set()
+        for exp in list(self._buf):
+            pools.setdefault(exp.task or "", []).append(exp)
+            seen.add(id(exp))
+        for task, items in self._reserve.items():
+            pool = pools.setdefault(task, [])
+            for exp in items:
+                if id(exp) not in seen:
+                    pool.append(exp)
+                    seen.add(id(exp))
+        pools = {t: items for t, items in pools.items() if items}
+        if not pools:
+            return []
+        if set(pools) == {""}:
+            return self.sample(n, rng=rng, prioritized=prioritized)
+        out: List[Experience] = []
+        order = sorted(pools)
+        i = 0
+        while len(out) < n and any(pools.values()):
+            items = pools[order[i % len(order)]]
+            if items:
+                out.append(self._draw_one(items, rng, prioritized))
+            i += 1
+        return out
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +225,8 @@ class LinearValueModel:
         w = self._w[action]
         return sum(w[f] * x for f, x in features.items())
 
-    def update(self, action: str, features: Features, reward: float, lr: float) -> float:
+    def update(self, action: str, features: Features, reward: float, lr: float,
+               *, lr_scale: Optional[Dict[str, float]] = None) -> float:
         pred = self.predict(action, features)
         err = reward - pred
         w = self._w[action]
@@ -153,6 +252,9 @@ class LinearValueModel:
                                    step=n[f], lr=lr, penalty=penalty)
                 if not math.isfinite(delta):
                     delta = lr * (err * x - penalty)  # live-seam guard: never NaN the live model
+            if lr_scale is not None:
+                # plasticity gating: consolidated (frozen) weights learn slower, by design
+                delta *= lr_scale.get(f, 1.0)
             w[f] += delta
             F[f] += x * x
             n[f] += 1.0
@@ -179,18 +281,31 @@ class Learner:
 
     def __init__(self, *, base_lr: float = 0.1, lr_decay: float = 0.0,
                  ewc_lambda: float = 0.0, replay_lr: Optional[float] = None,
-                 buffer_capacity: int = 2000,
+                 buffer_capacity: int = 2000, task_reserve: int = 0,
+                 der_alpha: float = 0.0, frozen_lr_scale: float = 1.0,
                  protected: Optional[Sequence[str]] = None, seed: int = 0,
                  update_rule: Optional[Any] = None) -> None:
         self.base_lr = base_lr
         self.lr_decay = lr_decay
         self.replay_lr = replay_lr if replay_lr is not None else base_lr * 0.5
+        self.der_alpha = max(0.0, float(der_alpha))
+        self.frozen_lr_scale = float(frozen_lr_scale)
         self.model = LinearValueModel(ewc_lambda=ewc_lambda, update_rule=update_rule)
-        self.buffer = ReplayBuffer(buffer_capacity)
+        self.buffer = ReplayBuffer(buffer_capacity, task_reserve=task_reserve, seed=seed)
         self.protected = set(protected) if protected is not None else set(IMMUTABLE_VALUES)
+        self.synapses: Optional[Any] = None   # an attached ElasticSynapses engine (or None)
         self._rng = random.Random(seed)
         self._steps = 0
         self._incumbent_rule: Optional[Any] = None
+
+    # ---- lifelong-memory engine attachment ---- #
+    def attach_synapses(self, syn: Any) -> None:
+        """Wire an :class:`~nyxara.memory.elastic_synapses.ElasticSynapses` engine into every
+        update step: frozen weights learn slower (plasticity gating), every step is pulled
+        back toward the consolidated anchors (per-step EWC), and every step feeds the
+        engine's importance estimators (Fisher/MAS + Synaptic Intelligence). ``None``
+        detaches and restores the exact pre-attachment behavior."""
+        self.synapses = syn
 
     # ---- learning-rate schedule ---- #
     def lr(self) -> float:
@@ -208,15 +323,53 @@ class Learner:
     def update(self, action: str, features: Features, reward: float, *,
                context: str = "") -> float:
         self._guard(action, features)
-        err = self.model.update(action, features, reward, self.lr())
+        syn = self.synapses
+        if syn is None:
+            err = self.model.update(action, features, reward, self.lr())
+            self._steps += 1
+            return err
+        lr = self.lr()
+        # names in the engine's ``action::feature`` scheme, so anchors line up with the
+        # orchestrator's _learner_weight_vector flattening
+        touched = {f"{action}::{f}": f for f in features}
+        w = self.model._w[action]
+        old = {name: w[feat] for name, feat in touched.items()}
+        lr_scale: Optional[Dict[str, float]] = None
+        if self.frozen_lr_scale != 1.0:
+            # plasticity gating: consolidated-important weights move slower
+            lr_scale = {feat: (self.frozen_lr_scale if syn.is_frozen(name) else 1.0)
+                        for name, feat in touched.items()}
+        err = self.model.update(action, features, reward, lr, lr_scale=lr_scale)
+        # per-step elastic pull-back toward every consolidated anchor (O(touched) via names=,
+        # and stable however many anchors stack: the pull can never overshoot)
+        try:
+            current = {name: w[feat] for name, feat in touched.items()}
+            pull = syn.penalty_pull(current, lr, names=list(touched))
+            protected = getattr(syn, "protected", set())
+            for name, d in pull.items():
+                feat = touched.get(name)
+                if feat is not None and name not in protected:
+                    w[feat] += d
+            # feed both importance estimators with this very step (grad of ½err² is −err·x)
+            new = {name: w[feat] for name, feat in touched.items()}
+            grads = {name: -err * features[feat] for name, feat in touched.items()}
+            syn.accumulate_step(grads, old, new)
+        except Exception:  # noqa: BLE001 — protection is best-effort, learning never breaks
+            pass
         self._steps += 1
         return err
 
     def record(self, action: str, features: Features, reward: float, *,
-               context: str = "") -> float:
-        """Update online *and* remember the experience for replay."""
+               context: str = "", task: str = "") -> float:
+        """Update online *and* remember the experience for replay.
+
+        The model's own pre-update prediction is stored as the experience's ``logit`` — the
+        dark knowledge that Dark-Experience-Replay distils from during rehearsal.
+        """
+        logit = self.model.predict(action, features)
         err = self.update(action, features, reward, context=context)
-        self.buffer.add(Experience(action, dict(features), reward, context))
+        self.buffer.add(Experience(action, dict(features), reward, context,
+                                   task=task, logit=logit))
         return err
 
     # ---- value / decision ---- #
@@ -227,10 +380,21 @@ class Learner:
         return max(actions, key=lambda a: self.model.predict(a, features))
 
     # ---- replay / consolidation (forgetting protection) ---- #
-    def replay(self, n: int = 32, *, prioritized: bool = True) -> int:
-        batch = self.buffer.sample(n, rng=self._rng, prioritized=prioritized)
+    def replay(self, n: int = 32, *, prioritized: bool = True,
+               balanced: bool = False) -> int:
+        """Rehearse past experiences. ``balanced=True`` samples evenly across every task tag
+        (old skills included); with ``der_alpha > 0`` each rehearsal also regresses toward
+        the experience's stored ``logit`` (DER++ distillation) so the model is pulled back
+        toward what it *used to know*, not just toward the raw rewards."""
+        if balanced:
+            batch = self.buffer.sample_balanced(n, rng=self._rng, prioritized=prioritized)
+        else:
+            batch = self.buffer.sample(n, rng=self._rng, prioritized=prioritized)
         for exp in batch:
             self.model.update(exp.action, exp.features, exp.reward, self.replay_lr)
+            if self.der_alpha > 0.0 and exp.logit is not None:
+                self.model.update(exp.action, exp.features, exp.logit,
+                                  self.replay_lr * self.der_alpha)
         return len(batch)
 
     def consolidate(self) -> None:
@@ -263,6 +427,9 @@ class Learner:
         return {"steps": self._steps, "lr": round(self.lr(), 5),
                 "buffer": len(self.buffer), "ewc_lambda": self.model.ewc_lambda,
                 "protected": sorted(self.protected),
+                "tasks": self.buffer.tasks(),
+                "der_alpha": self.der_alpha,
+                "synapses": self.synapses is not None,
                 "update_rule": ("sgd_ewc" if rule is None else str(getattr(rule, "expr", rule)))}
 
 

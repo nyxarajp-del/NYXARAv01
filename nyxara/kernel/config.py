@@ -1405,11 +1405,30 @@ class MemoryConfig(BaseModel):
     # protection). ``ewc_lambda`` is the elastic stiffness; ``ewc_freeze_threshold`` is the
     # normalized-importance level above which a weight counts as frozen; ``ewc_online`` keeps a
     # single decaying anchor (bounded memory) vs. ``ewc_max_tasks`` distinct skill anchors.
+    # With ``ewc_per_skill_anchors`` each distinct skill keeps its OWN running anchor, and
+    # anchor overflow is merged losslessly into a long-term memory (never dropped);
+    # ``ewc_si_enabled`` adds the Synaptic-Intelligence path-integral importance signal on top
+    # of the Fisher one. The learner is wired into the engine on every update step:
+    # ``ewc_frozen_lr_scale`` slows learning on consolidated-important weights (plasticity
+    # gating), ``ewc_der_alpha`` weighs Dark-Experience-Replay distillation toward the model's
+    # own past predictions, and ``ewc_task_reserve`` keeps a per-task reservoir of experiences
+    # so a flood of new tasks can never evict an old task from the replay buffer entirely.
     ewc_enabled: bool = True
     ewc_lambda: float = Field(default=3.0, ge=0.0)
     ewc_freeze_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
-    ewc_max_tasks: int = Field(default=8, ge=1)
+    ewc_max_tasks: int = Field(default=32, ge=1)      # overflow now merges (lossless), so roomy
     ewc_online: bool = True
+    ewc_gamma: float = Field(default=0.9, ge=0.0, le=1.0)
+    ewc_per_skill_anchors: bool = True
+    ewc_si_enabled: bool = True
+    ewc_frozen_lr_scale: float = Field(default=0.2, ge=0.0, le=1.0)
+    ewc_der_alpha: float = Field(default=0.5, ge=0.0)
+    ewc_task_reserve: int = Field(default=64, ge=0)
+    # --- Skill rehearsal (growth/skill_rehearsal.py): never forget a learned skill --- #
+    # On the same cadence, re-run the stored demos of induced skills through the live engine;
+    # a skill that regressed is restored from its known-good snapshot immediately.
+    skill_rehearsal_enabled: bool = True
+    skill_rehearsal_batch: int = Field(default=5, ge=1)
 
 
 class TemporalHierarchyConfig(BaseModel):

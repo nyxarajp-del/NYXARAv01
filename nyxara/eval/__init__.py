@@ -19,6 +19,9 @@ from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
                                   BenchmarkTask, Grader, build_arithmetic_benchmark,
                                   build_default_benchmark, build_logic_benchmark,
                                   core_solver, grade_final_numeric, llm_solver, self_solver)
+from nyxara.eval.continual import (ContinualMetrics, ContinualReport, ContinualTask,
+                                   evaluate_continual, make_task_suite, matrix_metrics,
+                                   run_sequential)
 from nyxara.eval.datasets import (DatasetError, build_realworld_benchmark,
                                   load_jsonl_benchmark)
 from nyxara.eval.hard_benchmark import (build_calibration_benchmark, build_code_benchmark,
@@ -38,6 +41,14 @@ __all__ = [
     "EvalSuite",
     "default_core_factory",
     "build_default_suite",
+    # continual learning: the forgetting benchmark (eval/continual.py)
+    "ContinualTask",
+    "ContinualMetrics",
+    "ContinualReport",
+    "make_task_suite",
+    "run_sequential",
+    "matrix_metrics",
+    "evaluate_continual",
     # capability benchmarks
     "Benchmark",
     "BenchmarkTask",

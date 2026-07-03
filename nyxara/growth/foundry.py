@@ -487,7 +487,10 @@ class Foundry:
             return self._ewc
         try:
             from nyxara.memory.elastic_synapses import ElasticSynapses
+            # per-skill anchors: every promoted model version (task="vN") keeps its own
+            # anchor, and anchor overflow merges losslessly into a long-term memory
             self._ewc = ElasticSynapses(ewc_lambda=float(getattr(self.cfg, "ewc_lambda", 1.0)),
+                                        per_skill_anchors=True, max_tasks=32,
                                         protected=sorted(self.protected))
         except Exception:  # noqa: BLE001
             self._ewc = None
