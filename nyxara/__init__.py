@@ -67,6 +67,7 @@ from nyxara.memory.elastic_synapses import (
     ConsolidatedTask,
     ElasticSynapses,
     FisherEstimator,
+    PathIntegralEstimator,
     TorchElasticSynapses,
 )
 from nyxara.kernel.autonomic import AutonomicLoop
@@ -179,6 +180,7 @@ __all__ = [
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",
+    "PathIntegralEstimator",
     "ConsolidatedTask",
     "TorchElasticSynapses",
     # autonomous research + the scientist loop

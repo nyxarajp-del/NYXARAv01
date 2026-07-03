@@ -430,6 +430,18 @@ class NyxaraCore:
         # matter most and freezes them, so she keeps learning forever without forgetting old
         # skills or her loyalty core (catastrophic-forgetting protection / lifelong memory)
         self.elastic_synapses = self._build_elastic_synapses() if enable_memory else None
+        # wire the lifelong-memory engine into the learner's every update step: plasticity
+        # gating on frozen weights, a stable per-step pull toward every consolidated anchor,
+        # and continuous Fisher + Synaptic-Intelligence importance feed (true continual
+        # learning, not cadence-only). Best-effort — either faculty may be absent.
+        if self.learner is not None and self.elastic_synapses is not None:
+            try:
+                self.learner.attach_synapses(self.elastic_synapses)
+            except Exception:  # noqa: BLE001 — attachment is a capability, never required
+                pass
+        # skill rehearsal — re-verifies induced skills against their stored demos on the
+        # consolidation cadence and restores any regressed skill from its known-good snapshot
+        self._skill_rehearsal: Any = None
         # temporal reasoning — a sense of *when*: order, precedence/lag, and rhythm over
         # the timestamps her memory already keeps (Allen's interval algebra)
         self.temporal = self._build_temporal() if enable_growth else None
@@ -973,7 +985,13 @@ class NyxaraCore:
     def _build_learner(self) -> Any:
         try:
             from nyxara.growth.learn import Learner
-            return Learner()
+            from nyxara.kernel.config import get_settings
+            mcfg = get_settings().memory
+            return Learner(
+                der_alpha=getattr(mcfg, "ewc_der_alpha", 0.0),
+                frozen_lr_scale=getattr(mcfg, "ewc_frozen_lr_scale", 1.0),
+                task_reserve=getattr(mcfg, "ewc_task_reserve", 0),
+            )
         except Exception:  # noqa: BLE001 — growth is a capability, never a hard dependency
             return None
 
@@ -1294,6 +1312,9 @@ class NyxaraCore:
                 freeze_threshold=getattr(mcfg, "ewc_freeze_threshold", 0.85),
                 max_tasks=getattr(mcfg, "ewc_max_tasks", 8),
                 online=getattr(mcfg, "ewc_online", True),
+                gamma=getattr(mcfg, "ewc_gamma", 0.9),
+                per_skill_anchors=getattr(mcfg, "ewc_per_skill_anchors", False),
+                si_enabled=getattr(mcfg, "ewc_si_enabled", True),
             )
         except Exception:  # noqa: BLE001 — elastic synapses are a capability, never required
             return None
@@ -1315,6 +1336,50 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001 — never let introspection break the loop
                 continue
         return out
+
+    def _dominant_task_tag(self) -> str:
+        """The most common task tag among recent experiences — a *skill-boundary* label for
+        the consolidation anchor (so each skill keeps its own anchor), falling back to a
+        turn-numbered label when nothing recent is tagged."""
+        try:
+            recent = self.learner.buffer.recent(max(10, self.consolidate_every))
+            counts: Dict[str, int] = {}
+            for exp in recent:
+                tag = getattr(exp, "task", "") or ""
+                if tag:
+                    counts[tag] = counts.get(tag, 0) + 1
+            if counts:
+                return max(counts, key=lambda t: (counts[t], t))
+        except Exception:  # noqa: BLE001 — labelling is best-effort
+            pass
+        return f"turn-{self._turns}"
+
+    def _rehearse_skills(self) -> None:
+        """Run one skill-rehearsal pass (sync snapshots + re-verify a batch), lazily building
+        the library over the live skill-induction engine. Best-effort, never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            mcfg = get_settings().memory
+            if not getattr(mcfg, "skill_rehearsal_enabled", True):
+                return
+            engine = getattr(getattr(self, "sample_efficient", None), "skills", None)
+            if engine is None:
+                return
+            if self._skill_rehearsal is None:
+                from nyxara.growth.skill_rehearsal import SkillRehearsalLibrary
+                self._skill_rehearsal = SkillRehearsalLibrary(
+                    engine, store=self.memory,
+                    batch=getattr(mcfg, "skill_rehearsal_batch", 5))
+            self._skill_rehearsal.sync()
+            report = self._skill_rehearsal.rehearse()
+            if report.restored > 0 and self.mind is not None:
+                self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"skill rehearsal restored {report.restored} regressed skill(s): "
+                    f"{', '.join(report.skills)}",
+                    salience=0.7, confidence=0.9)
+        except Exception:  # noqa: BLE001 — rehearsal is a capability, never required
+            pass
 
     def _build_temporal(self) -> Any:
         """A sense of time: order, precedence/lag, and rhythm over remembered events."""
@@ -4300,7 +4365,8 @@ class NyxaraCore:
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
         if self.learner is not None:
             try:
-                self.learner.record(action, features, reward, context=candidate.rationale)
+                self.learner.record(action, features, reward, context=candidate.rationale,
+                                    task=action)
             except Exception:  # noqa: BLE001 — protected-core clashes are simply skipped
                 pass
         if self.reflector is not None:
@@ -4453,12 +4519,15 @@ class NyxaraCore:
         self._turns += 1
         if self.learner is not None and self._turns % self.consolidate_every == 0:
             try:
-                self.learner.replay()
+                # balanced replay rehearses EVERY task tag she has ever lived — old skills
+                # included — not just whatever the recent flood happens to contain
+                self.learner.replay(balanced=True)
                 self.learner.consolidate()
             except Exception:  # noqa: BLE001
                 pass
             # Elastic Weight Consolidation: snapshot the learner's value weights as a frozen
             # "memory" so the skills she has learned so far resist being overwritten later.
+            # The anchor is keyed by the dominant recent skill, so each skill keeps its own.
             if self.elastic_synapses is not None:
                 try:
                     weights = self._learner_weight_vector()
@@ -4466,9 +4535,13 @@ class NyxaraCore:
                         self.elastic_synapses.observe_features(
                             {k: abs(v) for k, v in weights.items()})
                         self.elastic_synapses.consolidate(
-                            weights, task=f"turn-{self._turns}")
+                            weights, task=self._dominant_task_tag())
                 except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
                     pass
+            # Skill rehearsal: re-verify induced skills against their stored demos and
+            # restore any that regressed — a learned skill can be broken for at most one
+            # consolidation interval before it is repaired.
+            self._rehearse_skills()
         # periodic meta-learning: on the same cadence, decide how to learn/reason/remember/
         # predict *better* and softly apply those bounded tunings to the live subsystems.
         if (self.meta_learning_engine is not None
@@ -5829,6 +5902,11 @@ class NyxaraCore:
             try:
                 rep["elastic_synapses"] = self.elastic_synapses.stats()
             except Exception:  # noqa: BLE001 — synapse stats are best-effort
+                pass
+        if self._skill_rehearsal is not None:
+            try:
+                rep["skill_rehearsal"] = self._skill_rehearsal.stats()
+            except Exception:  # noqa: BLE001 — rehearsal stats are best-effort
                 pass
         if self.reflector is not None:
             rep["episodes"] = len(self.reflector)

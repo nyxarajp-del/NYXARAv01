@@ -12,12 +12,14 @@ from nyxara.memory.elastic_synapses import (
     ConsolidatedTask,
     ElasticSynapses,
     FisherEstimator,
+    PathIntegralEstimator,
     TorchElasticSynapses,
 )
 
 __all__ = [
     "ElasticSynapses",
     "FisherEstimator",
+    "PathIntegralEstimator",
     "ConsolidatedTask",
     "TorchElasticSynapses",
 ]

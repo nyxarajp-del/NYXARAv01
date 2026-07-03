@@ -201,3 +201,27 @@ def test_faculties_can_be_disabled():
     assert nyx.tom is None and nyx.learner is None and nyx.stream is None
     # still fully functional without the optional faculties
     assert nyx.process("hello", authority=Authority.OWNER).acted
+
+
+# -------------------- continual learning: elastic synapses wired per-step -------------------- #
+def test_elastic_synapses_attached_to_learner():
+    nyx = NyxaraCore()
+    if nyx.learner is None or nyx.elastic_synapses is None:
+        return  # faculties disabled in this environment — nothing to pin
+    # the lifelong-memory engine rides every learner update step, not just the cadence
+    assert nyx.learner.synapses is nyx.elastic_synapses
+
+
+def test_consolidation_uses_skill_boundary_labels_and_reports_drift():
+    nyx = NyxaraCore(consolidate_every=1)
+    for _ in range(2):
+        nyx.process("hello", authority=Authority.OWNER)
+    if nyx.elastic_synapses is None:
+        return
+    stats = nyx.elastic_synapses.stats()
+    assert stats["consolidations"] >= 1
+    # the upgraded engine reports its continual-learning telemetry
+    for key in ("per_skill_anchors", "si_enabled", "longterm_weights", "mean_anchor_drift"):
+        assert key in stats
+    rep = nyx.report()
+    assert "elastic_synapses" in rep

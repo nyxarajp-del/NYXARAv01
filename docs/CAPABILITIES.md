@@ -37,7 +37,7 @@ applied to the documentation itself).
 | 15 | Architecture Evolution | `nyxara.growth.topology` | UPGRADED |
 | 16 | Tool Creation | `nyxara.growth.capability_foundry` | REAL+WIRED |
 | 17 | Memory (working/episodic/semantic/procedural) | `nyxara.memory.store` | REAL+WIRED |
-| 18 | Continual Learning (no catastrophic forgetting) | `nyxara.memory.elastic_synapses` | REAL+WIRED |
+| 18 | Continual Learning (no catastrophic forgetting) | `nyxara.memory.elastic_synapses` + `nyxara.growth.skill_rehearsal` + `nyxara.eval.continual` | UPGRADED |
 | 19 | Transfer Learning | `nyxara.mind.concept_hierarchy` | REAL+WIRED |
 | 20 | Meta Learning (learn how to learn) | `nyxara.growth.meta_engine` | REAL+WIRED |
 | 21 | Self Reflection | `nyxara.growth.reflect` | REAL+WIRED |

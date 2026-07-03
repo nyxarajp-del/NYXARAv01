@@ -266,6 +266,9 @@ class OfflineMind:
         q_tokens = self._content_tokens(stimulus.lower())
         if not q_tokens:
             return None
+        # for NAME matching keep the command verbs: "read" is exactly what tells
+        # ``read_file`` apart from ``write_file`` / ``append_file``
+        q_verbal = self._verbal_tokens(stimulus.lower())
 
         # Score each tool: a hit on a *tool-name* token is decisive (weight 2); a hit on a
         # description token is corroborating (weight 1). Filename/argument tokens that match
@@ -275,9 +278,9 @@ class OfflineMind:
             spec = self.tools.get(name)
             if spec is None:
                 continue
-            name_tokens = self._content_tokens(name.replace("_", " "))
+            name_tokens = self._verbal_tokens(name.replace("_", " "))
             desc_tokens = self._content_tokens((spec.description or "").lower())
-            score = 2 * len(q_tokens & name_tokens) + len(q_tokens & desc_tokens)
+            score = 2 * len(q_verbal & name_tokens) + len(q_tokens & desc_tokens)
             if score > best_score:
                 best_name, best_score = name, score
 
@@ -360,6 +363,13 @@ class OfflineMind:
     def _content_tokens(text: str) -> set:
         toks = re.findall(r"[a-z0-9_]+", text.lower())
         return {t for t in toks if t not in _STOP and t not in _COMMAND_VERBS and len(t) > 1}
+
+    @staticmethod
+    def _verbal_tokens(text: str) -> set:
+        """Like :meth:`_content_tokens` but KEEPS command verbs — for tool-*name* matching,
+        where the verb is the discriminator (``read_file`` vs ``write_file``)."""
+        toks = re.findall(r"[a-z0-9_]+", text.lower())
+        return {t for t in toks if t not in _STOP and len(t) > 1}
 
     @staticmethod
     def _object_phrase(stimulus: str) -> str:
