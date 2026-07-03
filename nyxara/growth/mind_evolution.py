@@ -43,6 +43,7 @@ import json
 import random
 import re
 import time
+import zlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -161,7 +162,9 @@ class ReasoningGenome:
     def seed(self) -> int:
         """A stable seed derived from the genome so its measurement is a pure function of it."""
         body = "|".join(f"{k}={round(float(getattr(self, k)), 4)}" for k, _, _ in self._BOUNDS)
-        return hash(body) & 0x7FFFFFFF
+        # crc32, not hash(): str hashing is randomized per process (PYTHONHASHSEED), and this
+        # seed must be a *pure function of the genome* across runs, as promised above.
+        return zlib.crc32(body.encode("utf-8")) & 0x7FFFFFFF
 
 
 # --------------------------------------------------------------------------- #
@@ -364,7 +367,10 @@ def genome_solver(genome: ReasoningGenome, base_sampler: Sampler, *, seed: int =
     k = genome.vote_samples()
 
     def _solve(prompt: str) -> str:
-        rng = random.Random((int(seed) * 1000003) ^ (hash(prompt) & 0x7FFFFFFF))
+        # crc32, not hash(): per-process hash randomization would make the same genome
+        # measure differently on every run — fitness must be reproducible to be meaningful.
+        rng = random.Random((int(seed) * 1000003)
+                            ^ (zlib.crc32(prompt.encode("utf-8")) & 0x7FFFFFFF))
         votes: Dict[str, int] = {}
         reps: Dict[str, str] = {}
         for _ in range(k):
