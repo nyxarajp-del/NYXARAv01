@@ -16,7 +16,7 @@ title NYXARA installer
 
 set "DEST=%USERPROFILE%\NYXARA"
 set "REPO=https://github.com/nyxarajp-del/NYXARAv01.git"
-set "BRANCH=claude/code-review-gaps-oc3z3n"
+set "BRANCH=main"
 
 REM --- 1. Ensure Git --------------------------------------------------------
 where git >nul 2>&1
