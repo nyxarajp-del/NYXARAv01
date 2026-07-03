@@ -450,6 +450,16 @@ class NyxaraCore:
         # actions as do-experiments. "A hua, isliye B hua" — not "A aur B saath dikhte hain".
         self.causal_world_model = self._build_causal_world_model() if enable_growth else None
         self._causal_turns = 0
+        # HANDOFF METER (North Star, docs/MASTERPLAN-sovereign-mind.md §3): a live tally of who
+        # actually answered each conversational turn — NYXARA's own mind (a verifiable faculty, a
+        # learned skill, her own learned brain, or her offline voice) vs the external teacher. The
+        # honest measure of "her own mind answers her turns", surfaced in report(), replacing the
+        # stale doc claim of a fixed 0% with what she is measurably doing right now.
+        self._handoff_counts: Dict[str, int] = {}
+        # the recall results surfaced for the current turn, kept so a successful turn can teach the
+        # learned memory re-ranker which memories actually helped (memory/retrieval.record_feedback).
+        # A strict no-op unless a re-ranker is attached to the retriever, so defaults are unchanged.
+        self._last_recall_results: List[Any] = []
         # Fractal Temporal Hierarchies — the multi-dimensional mind: loops within loops at
         # three time scales at once. A millisecond hardware/network monitor (Layer 1) nested
         # inside a second-scale turn observer (Layer 2) nested inside a day/month "Master AI"
@@ -3323,6 +3333,9 @@ class NyxaraCore:
                 floor = self._recall_semantic_floor()
                 results = [r for r in hits
                            if float(getattr(r, "signals", {}).get("semantic", 1.0)) >= floor]
+                # keep the scored retriever hits (they carry .signals + .record) so a successful
+                # turn can teach the learned re-ranker which of them actually helped (D4).
+                self._last_recall_results = list(results)
             except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
                 pass
         # Level 6 — graph traversal: extract entity mentions and find related triples
@@ -4309,6 +4322,84 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001 — compounding recall is best-effort
                 pass
 
+    @staticmethod
+    def _classify_answer_source(candidate: Candidate) -> Optional[str]:
+        """Which mind answered a conversational turn, read from its rationale (Rule 6 transparency).
+
+        Returns one of: ``faculty`` / ``skill`` / ``self`` (own learned brain / promoted model) /
+        ``offline`` (keyless sovereign voice) — all NYXARA answering herself — or ``teacher`` when
+        the external LLM/council produced the words. ``None`` for non-respond turns (acts)."""
+        if getattr(candidate, "kind", "respond") != "respond":
+            return None
+        r = str(getattr(candidate, "rationale", "") or "").lower()
+        if "verifiable faculty" in r:
+            return "faculty"
+        if "learned skill" in r:
+            return "skill"
+        if "own model (handoff" in r or "own model" in r:
+            return "self"
+        if "offline mind" in r:
+            return "offline"
+        return "teacher"
+
+    def _tally_handoff(self, candidate: Optional[Candidate]) -> None:
+        """Increment the live handoff meter for this finished conversational turn (best-effort)."""
+        if candidate is None:
+            return
+        try:
+            src = self._classify_answer_source(candidate)
+            if src is not None:
+                self._handoff_counts[src] = self._handoff_counts.get(src, 0) + 1
+        except Exception:  # noqa: BLE001 — the meter is introspection, never fatal to a turn
+            pass
+
+    def _reinforce_recall(self, candidate: Optional[Candidate], success: bool) -> None:
+        """Teach the learned memory re-ranker which surfaced memories helped this turn (D4).
+
+        The honest usefulness signal: a recalled memory *helped* when its content measurably shows
+        up in the answer she gave (shared content words) on a successful respond turn — those are
+        reinforced, the rest of the surfaced set pushed down, so recall learns to predict what
+        actually helps this mind rather than what is merely textually similar. A strict no-op unless
+        a re-ranker is attached to the retriever (``memory/retrieval.record_feedback``), so default
+        behaviour — fixed fusion weights — is unchanged. Best-effort; never fatal to a turn."""
+        results = self._last_recall_results
+        self._last_recall_results = []
+        if not results or candidate is None or getattr(self.retriever, "reranker", None) is None:
+            return
+        if not success or getattr(candidate, "kind", "respond") != "respond":
+            return
+        def _content_words(text: str) -> set:
+            # dependency-free content-word set: alnum-normalised tokens longer than three chars
+            words = "".join(c if c.isalnum() else " " for c in text.lower()).split()
+            return {w for w in words if len(w) > 3}
+
+        try:
+            answer_tokens = _content_words(str(getattr(candidate, "text", "")))
+            if not answer_tokens:
+                return
+            useful_ids = []
+            for res in results:
+                try:
+                    mem_text = res.record.text()
+                except Exception:  # noqa: BLE001 — a malformed record simply can't be credited
+                    continue
+                mem_tokens = _content_words(mem_text)
+                # a memory helped if a real share of its content words made it into the answer
+                if mem_tokens and len(mem_tokens & answer_tokens) >= max(2, int(0.3 * len(mem_tokens))):
+                    useful_ids.append(res.record.mem_id)
+            self.retriever.record_feedback(results, useful_ids, reward=1.0)
+        except Exception:  # noqa: BLE001 — reinforcement is best-effort, never fatal to a turn
+            pass
+
+    def _handoff_report(self) -> Dict[str, Any]:
+        """Summarise the live handoff meter: turns NYXARA answered herself vs deferred (Rule 6)."""
+        counts = dict(self._handoff_counts)
+        total = sum(counts.values())
+        own = total - counts.get("teacher", 0)          # everything but the teacher is her own mind
+        return {"counts": counts, "turns": total,
+                "own_turns": own,
+                "handoff_rate": round(own / total, 4) if total else 0.0}
+
     def _grow(self, candidate: Optional[Candidate], disp: Disposition, *,
               authority: Authority, success: bool, stimulus: str = "") -> None:
         """Learn from a finished turn: record the outcome into the learner/reflector and
@@ -4318,6 +4409,11 @@ class NyxaraCore:
         # compound NYXARA's OWN learned models from this lived exchange (Rule 4): the self-built
         # brain and the distributional embedder both get measurably better the more she converses.
         self._compound_own_models(stimulus, candidate, success)
+        # tally the handoff meter: who answered this turn — her own mind or the teacher (Rule 6)
+        self._tally_handoff(candidate)
+        # teach the learned memory re-ranker which recalled memories actually helped this turn, so
+        # recall learns its OWN signal mix from lived success (no-op unless a re-ranker is attached).
+        self._reinforce_recall(candidate, success)
         action = candidate.tool or candidate.kind
         owner = authority is Authority.OWNER
         # temporal: stamp this turn's action so order, lag, and rhythm can be reasoned over
@@ -5914,6 +6010,8 @@ class NyxaraCore:
             rep["world_transitions"] = len(self.world_model)
         if self.knowledge is not None:
             rep["knowledge_chunks"] = len(self.knowledge)
+        # the North Star: how many turns NYXARA answered herself vs deferred to the teacher
+        rep["handoff"] = self._handoff_report()
         if self.thought_gen is not None:
             rep["workspace_broadcasts"] = self.thought_gen.workspace_metrics().get(
                 "broadcasts", 0)

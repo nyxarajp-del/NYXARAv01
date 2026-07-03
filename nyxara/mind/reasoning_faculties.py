@@ -33,7 +33,7 @@ __all__ = [
     "tautology", "extract_formula", "LogicFaculty",
     "solve_syllogism", "SyllogismFaculty",
     "solve_comparative", "ComparativeFaculty",
-    "build_default_faculties", "solve_with_faculties",
+    "build_default_faculties", "solve_with_faculties", "solve_verifiable",
 ]
 
 
@@ -1040,3 +1040,25 @@ def solve_with_faculties(text: str) -> Optional[Tuple[str, float]]:
                 continue
             return str(prop.content), float(prop.confidence)
     return None
+
+
+def solve_verifiable(text: str) -> Optional[Tuple[str, float]]:
+    """Exact, verifiable answer to ``text`` — a multi-step chain first, a single faculty second.
+
+    This is the *whole* of NYXARA's verifiable reasoning in one place, so every caller (the
+    integrated reasoner AND the confidence router) reaches the same capability. A multi-step
+    reasoning chain (:func:`~nyxara.mind.reasoning_chain.solve_chain`) is tried first — it fires
+    only on a binding/'then' and defers otherwise, so it never steals a single-shot question and a
+    follow-up step is never lost to its head — then a single faculty (:func:`solve_with_faculties`).
+    Returns ``(answer, confidence)`` or ``None`` to defer to the neural mind. Never raises."""
+    try:
+        from nyxara.mind.reasoning_chain import solve_chain
+        chain = solve_chain(text)
+        if chain is not None:
+            return chain.render(), float(chain.confidence)
+    except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+        pass
+    try:
+        return solve_with_faculties(text)
+    except Exception:  # noqa: BLE001
+        return None

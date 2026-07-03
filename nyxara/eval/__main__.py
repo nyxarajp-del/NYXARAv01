@@ -90,11 +90,18 @@ def _run_router(args: argparse.Namespace) -> int:
     report, sources = run_router(bench, category=args.category)
     print(report.summary())
     n = len(report) or 1
-    handoff = sources.get("self", 0) / n
-    print(f"\nhandoff: own model answered {sources.get('self', 0)}/{n} unaided "
-          f"({handoff:.0%}); teacher {sources.get('teacher', 0)}, unanswered "
-          f"{sources.get('none', 0)}. Accuracy on handed-off turns is the number that "
-          f"must hold as handoff rises.")
+    # Both her learned self-brain AND her verifiable faculties answer with NO teacher — both are
+    # NYXARA reasoning for herself, so the honest "answered herself" rate counts both. We still
+    # break them out so the neural-substrate share (self) is visible as it grows.
+    own_self = sources.get("self", 0)
+    own_faculty = sources.get("faculty", 0)
+    own = own_self + own_faculty
+    handoff = own / n
+    print(f"\nhandoff: NYXARA answered {own}/{n} herself, unaided ({handoff:.0%}) — "
+          f"{own_faculty} by verifiable faculty, {own_self} by her learned brain; "
+          f"teacher {sources.get('teacher', 0)}, abstained {sources.get('abstain', 0)}, "
+          f"unanswered {sources.get('none', 0)}. Accuracy on handed-off turns is the number "
+          f"that must hold as handoff rises.")
     if args.save:
         report.save(args.save)
         print(f"\nbaseline (router) saved -> {args.save}")

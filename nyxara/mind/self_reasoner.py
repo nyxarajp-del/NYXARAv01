@@ -138,12 +138,17 @@ class SelfBrain:
 
     def __init__(self, *, order: int = 3, seed: int = 0,
                  max_corpus: int = 4000, settings: Any = None,
-                 prefer_promoted: bool = True, persist: Optional[bool] = None) -> None:
+                 prefer_promoted: bool = True, persist: Optional[bool] = None,
+                 knowledge: Any = None) -> None:
         self.order = max(2, int(order))
         self.seed = int(seed)
         self.max_corpus = max(64, int(max_corpus))
         self.settings = settings
         self.prefer_promoted = bool(prefer_promoted)
+        # her own knowledge base (knowledge/base.KnowledgeBase, retrieval-only). When present she
+        # can answer a turn from what she genuinely *knows* — real grounding, not n-gram guessing —
+        # so her own mind handles grounded turns herself instead of always deferring to the teacher.
+        self._knowledge = knowledge
         self._lm: Any = None
         self._kind: str = "uninitialised"
         self._corpus: List[str] = []
@@ -158,6 +163,12 @@ class SelfBrain:
         self._top_k = int(getattr(cfg, "self_brain_top_k", 4))
         self._sim_threshold = float(getattr(cfg, "self_brain_sim_threshold", 0.35))
         self._backend = str(getattr(cfg, "self_brain_backend", "auto"))
+        # the generic persona/architecture seed sentences — identifiable so the *handoff* path can
+        # exclude them: they colour her offline voice (identity questions) but must never be handed
+        # off in place of a capable teacher for an unrelated turn (a coherent-looking bluff the
+        # router's quality verifier, which scores coherence not relevance, could not catch).
+        self._seed_sentences: frozenset = frozenset(
+            _clean(s) for d in _SEED_CORPUS for s in _sentences(d) if _clean(s))
         self._embedder: Any = None
         self._sent: List[str] = []                 # indexed sentences (parallel to _sent_vec)
         self._sent_vec: List[List[float]] = []     # their embeddings
@@ -337,8 +348,13 @@ class SelfBrain:
 
     # ---- retrieval ---- #
     def _retrieve(self, stimulus: str,
-                  grounding: Optional[Sequence[str]]) -> List[Tuple[str, float]]:
-        """Rank known (and grounding) sentences by semantic similarity to the stimulus."""
+                  grounding: Optional[Sequence[str]],
+                  *, exclude_seed: bool = False) -> List[Tuple[str, float]]:
+        """Rank known (and grounding) sentences by semantic similarity to the stimulus.
+
+        ``exclude_seed`` drops the generic persona/architecture seed from the candidate pool, so
+        the handoff path answers only from genuine grounding (knowledge + lived-learned sentences).
+        """
         emb = self._ensure_embedder()
         if emb is None:
             return []
@@ -363,6 +379,9 @@ class SelfBrain:
         for sent, vec in cands:
             # never answer a question by echoing it back: skip near-identical sentences
             if self._is_echo(sent, q_tokens):
+                continue
+            # handoff discipline: a generic persona line is never handed off for an unrelated turn
+            if exclude_seed and sent in self._seed_sentences:
                 continue
             try:
                 sim = float(_cosine(qv, vec))
@@ -397,25 +416,78 @@ class SelfBrain:
                 break
         return " ".join(parts)
 
+    # ---- knowledge grounding (answer from what she genuinely knows) ---- #
+    def _knowledge_grounding(self, stimulus: str, k: int = 4) -> List[str]:
+        """Retrieve grounding chunks for ``stimulus`` from her knowledge base, if any."""
+        kb = self._knowledge
+        if kb is None:
+            return []
+        try:
+            hits = kb.retrieve(_clean(stimulus), k=max(1, int(k)))
+        except Exception:  # noqa: BLE001 — knowledge grounding is a bonus, never required
+            return []
+        out: List[str] = []
+        for h in hits or []:
+            text = getattr(h, "text", None) or (h if isinstance(h, str) else "")
+            s = _clean(text)
+            if s:
+                out.append(s)
+        return out
+
+    def _merge_knowledge_grounding(self, stimulus: str,
+                                   grounding: Optional[Sequence[str]]) -> List[str]:
+        """Combine any caller-supplied grounding with this turn's knowledge-base grounding."""
+        merged: List[str] = [g for g in (grounding or []) if _clean(g)]
+        merged.extend(self._knowledge_grounding(stimulus))
+        return merged
+
+    def has_grounding(self) -> bool:
+        """True iff she has a non-empty knowledge base to answer grounded turns from.
+
+        This is a second, honest path to availability alongside lived learning: she may answer a
+        turn herself when she genuinely *knows* the material, even before she has compounded eight
+        lived exchanges. A brain with no knowledge base (the hermetic tests) reports False and stays
+        cold — she never becomes 'available' from nothing."""
+        kb = self._knowledge
+        if kb is None:
+            return False
+        try:
+            return len(kb) > 0
+        except Exception:  # noqa: BLE001 — a knowledge base that can't be sized grounds nothing
+            return False
+
     # ---- the conversational act ---- #
     def reply(self, stimulus: str, *, grounding: Optional[Sequence[str]] = None,
-              max_tokens: int = 64) -> str:
+              max_tokens: int = 64, require_grounding: bool = False) -> str:
         """Generate a learned conversational reply, or "" if the cold brain cannot yet.
 
         Retrieval first (answer from the closest real sentence she has learned), generation second
         (a hardened sample from the backend), and "" last so the caller keeps its honest floor.
+
+        ``require_grounding`` is the *handoff* discipline. When True (the confidence router asks
+        her to answer a turn a capable teacher could otherwise take), she answers ONLY from genuine
+        grounding — her knowledge base and lived-learned sentences — never from the generic persona
+        seed and never from cold generation, so an ungrounded turn returns "" and cleanly defers to
+        the teacher instead of bluffing. When False (her offline/keyless voice, where no teacher
+        exists) the persona seed and a hardened n-gram sample remain, so she is never mute.
         """
+        # fold in what she genuinely KNOWS (her knowledge base) as extra grounding for this turn,
+        # so a grounded question is answered from real knowledge rather than deferred or guessed.
+        grounding = self._merge_knowledge_grounding(stimulus, grounding)
         self._ensure(grounding)
-        # 1. retrieval-augmented answer — coherent because it is real learned text, not salad
+        # 1. retrieval-augmented answer — coherent because it is real learned text, not salad. On
+        #    the handoff path the generic persona seed is excluded (real grounding only).
         if self._retrieval:
-            ranked = self._retrieve(stimulus, grounding)
+            ranked = self._retrieve(stimulus, grounding, exclude_seed=require_grounding)
             composed = self._compose(ranked)
             if composed and _looks_usable(composed):
                 best_sim = ranked[0][1] if ranked else 0.0
                 self._remember_reply(composed, self._sim_to_conf(best_sim))
                 return composed
-        # 2. generative fallback (hardened sampling so the n-gram reads better)
-        if self._lm is None:
+        # 2. generative fallback (hardened sampling so the n-gram reads better). Skipped on the
+        #    handoff path: cold generation could bluff a coherent-looking answer the teacher should
+        #    have given, so she defers ("") instead. Her offline voice keeps it (no teacher exists).
+        if require_grounding or self._lm is None:
             return ""
         prompt = _clean(stimulus)
         out = self._generate(prompt, max_tokens)
@@ -596,7 +668,13 @@ class SelfBrainProvider:
 
     def available(self) -> bool:
         try:
-            return self._brain is not None and self._brain.has_learned(self._min)
+            if self._brain is None:
+                return False
+            # available once she has EITHER compounded enough lived experience OR has genuine
+            # knowledge to ground a turn in. Grounded/ungrounded is decided per-turn inside
+            # reply() (an ungrounded turn returns "" and defers), so opening on knowledge never
+            # bluffs — it only lets her own mind answer the turns she can actually stand behind.
+            return self._brain.has_learned(self._min) or self._brain.has_grounding()
         except Exception:  # noqa: BLE001 — availability probing is advisory, never fatal
             return False
 
@@ -613,7 +691,10 @@ class SelfBrainProvider:
         max_tokens = int(getattr(req, "max_tokens", 64) or 64)
         text = ""
         try:
-            text = self._brain.reply(prompt, max_tokens=max_tokens) or ""
+            # the router path: answer only from genuine grounding, else "" so she defers to the
+            # teacher rather than bluffing from the persona seed or a cold n-gram (honest handoff).
+            text = self._brain.reply(prompt, max_tokens=max_tokens,
+                                     require_grounding=True) or ""
         except Exception:  # noqa: BLE001 — a failed own attempt simply defers to the teacher
             text = ""
         usage = Usage(prompt_tokens=estimate_tokens(prompt),

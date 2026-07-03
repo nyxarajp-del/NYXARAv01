@@ -302,9 +302,12 @@ class Router:
         return None
 
     def _faculty_answer(self, prompt: str) -> Optional[Tuple[str, float]]:
+        # Reuse the SAME verifiable-reasoning entry point the integrated loop uses
+        # (chain → single), so the router never discards NYXARA's multi-step reasoning on the
+        # handoff path — her exact answer is as strong here as in the full cognitive cycle.
         try:
-            from nyxara.mind.reasoning_faculties import solve_with_faculties
-            return solve_with_faculties(prompt)
+            from nyxara.mind.reasoning_faculties import solve_verifiable
+            return solve_verifiable(prompt)
         except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
             return None
 

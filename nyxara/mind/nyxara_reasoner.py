@@ -377,24 +377,16 @@ class NyxaraReasoner:
     def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:
         """Exact answer from a verifiable faculty, or None to defer to the neural mind.
 
-        Tries a multi-step reasoning chain first (it fires only on a binding/'then' and defers
-        otherwise, so it never steals a single-shot question) and a single faculty second — so
-        exact computation beats any neural guess, and a follow-up step is not lost to its head."""
+        Delegates to the single shared verifiable-reasoning entry point
+        (:func:`~nyxara.mind.reasoning_faculties.solve_verifiable`): a multi-step reasoning chain
+        first (it fires only on a binding/'then' and defers otherwise, so it never steals a
+        single-shot question), a single faculty second — so exact computation beats any neural
+        guess, a follow-up step is not lost to its head, and the router shares the same capability."""
         try:
-            from nyxara.mind.reasoning_chain import solve_chain
-            chain = solve_chain(stimulus)
-            if chain is not None:
-                return chain.render(), chain.confidence
+            from nyxara.mind.reasoning_faculties import solve_verifiable
+            return solve_verifiable(stimulus)
         except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
-            pass
-        try:
-            from nyxara.mind.reasoning_faculties import solve_with_faculties
-            single = solve_with_faculties(stimulus)
-            if single is not None:
-                return single
-        except Exception:  # noqa: BLE001
-            pass
-        return None
+            return None
 
     def _deliberate_council(self, stimulus: str, system: str,
                             mems: List[str]) -> Tuple[str, float, str]:
@@ -464,7 +456,10 @@ class NyxaraReasoner:
             try:
                 from nyxara.mind.self_reasoner import build_self_brain
                 order = int(getattr(getattr(self.settings, "foundry", None), "ngram_order", 3))
-                self._self_brain = build_self_brain(settings=self.settings, order=max(2, order))
+                # wire her knowledge base in so the same brain that learns and answers can also
+                # ground its replies in what she genuinely knows (raises real handoff off 0%).
+                self._self_brain = build_self_brain(settings=self.settings, order=max(2, order),
+                                                    knowledge=self.knowledge)
             except Exception:  # noqa: BLE001 — the learned brain is a capability, never required
                 self._self_brain = None
         return self._self_brain
