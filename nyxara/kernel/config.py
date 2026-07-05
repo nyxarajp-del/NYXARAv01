@@ -1645,6 +1645,16 @@ class AgencyConfig(BaseModel):
     # OS on her own initiative from first boot. Set NYXARA_AGENCY__FULL_CONTROL=false to disable
     # and fall back to the conservative, per-action-escalating envelope.
     full_control: bool = Field(default=True)
+    # --- autonomous self-coding (agency/self_coder + the proactive code_detector) --- #
+    # When ON, NYXARA WRITES code herself (her own LLM-free CodeSynthesizer) and RUNS it on her
+    # own initiative through the gated run_python tool the moment she has a concrete computational
+    # need (queued via core.enqueue_code_need, or derived from long-horizon awareness). Whether it
+    # then executes without asking is governed by the SAME permission gauntlet as everything else:
+    # under full_control (on by default) autonomous CODE_EXEC is blessed, so it runs at once with no
+    # per-action permission; with full_control off it escalates to the Master instead. This flag only
+    # controls whether the self-coding INITIATIVE forms at all. ON by default, consistent with
+    # full_control / autonomous_internet. Set NYXARA_AGENCY__AUTONOMOUS_CODE=false to disable.
+    autonomous_code: bool = Field(default=True)
     # --- autonomous internet (agency/permissions.grant_autonomous_internet) --- #
     # A NETWORK-SCOPED sibling of full_control: the Master pre-grants NYXARA a standing
     # autonomous envelope over her INTERNET capabilities so she may browse, search, call web

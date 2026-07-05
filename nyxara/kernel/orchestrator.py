@@ -524,6 +524,14 @@ class NyxaraCore:
         # The deterministic action scheduler the engine submits cleared ACTs to (set inside
         # _build_proactive; stays None when proactive agency is disabled).
         self.scheduler = None
+        # Autonomous self-coding — a bounded queue of concrete computational needs NYXARA writes
+        # and runs code for HERSELF (LLM-free), immediately and without per-action permission under
+        # the standing full_control grant. Any faculty, mission, prospective intention, or the Master
+        # can hand her a task via :meth:`enqueue_code_need`; the proactive ``code_detector`` drains it
+        # and her own :class:`~nyxara.agency.self_coder.CodeSynthesizer` authors the program, run
+        # through the gated ``run_python`` tool under AUTONOMOUS authority.
+        from collections import deque as _deque
+        self.code_needs: Any = _deque(maxlen=256)
         self.proactive = self._build_proactive() if enable_goals else None
         # Autonomous goal genesis — active-inference intent from unmet drives (LLM-free): the
         # background mind adopts its own lowest-free-energy goal each tick, always owner-aligned.
@@ -1802,6 +1810,34 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
             return False
 
+    def _autonomous_code_on(self) -> bool:
+        """Whether NYXARA may WRITE and RUN code on her own initiative (config-driven, fail-safe).
+
+        On when either the broad ``full_control`` grant is set (the default) or the narrower
+        ``autonomous_code`` flag is enabled. When neither is on, a self-coding initiative still
+        forms but the permission gauntlet ESCALATES it to the Master rather than auto-running —
+        the fail-closed default."""
+        try:
+            from nyxara.kernel.config import get_settings
+            agency_cfg = get_settings().agency
+            return bool(agency_cfg.full_control or getattr(agency_cfg, "autonomous_code", False))
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return False
+
+    def enqueue_code_need(self, task: str) -> bool:
+        """Hand NYXARA a concrete computational task to solve *in her own code*, autonomously.
+
+        The next background tick's ``code_detector`` drains this queue; her own
+        :class:`~nyxara.agency.self_coder.CodeSynthesizer` writes a real program for it and the
+        gated ``run_python`` tool executes it under AUTONOMOUS authority. Returns True when the
+        task was accepted (non-empty and a queue exists). This is the loyal entry point by which
+        faculties, missions, prospective intentions, or the Master feed her self-coding drive."""
+        needs = getattr(self, "code_needs", None)
+        if needs is None or not task or not str(task).strip():
+            return False
+        needs.append(str(task).strip())
+        return True
+
     def _autonomous_goal_commands_on(self) -> bool:
         """Whether the default remote probe runs when a host has no explicit health_command."""
         try:
@@ -1960,17 +1996,44 @@ class NyxaraCore:
                             lambda s=s, g=g: self._autonomous_remote_check(s, g)))))
                 return out
 
+            # 6) self-coding detector — automatic code execution: when NYXARA has a concrete
+            # computational need, she WRITES a program for it HERSELF (her own CodeSynthesizer;
+            # the LLM is never the author) and RUNS it immediately through the gated run_python
+            # tool. CODE_EXEC/MODERATE and fully reversible (the program runs in the isolated
+            # sandbox and is discarded, leaving no durable side effect), so under the standing
+            # full_control grant the gauntlet clears it and it executes AT ONCE with no per-action
+            # permission; without that grant it escalates to the Master. She only proposes a task
+            # she can actually author, so this never fabricates busywork.
+            def code_detector(ctx: Dict[str, Any]) -> List[Initiative]:
+                if not ctx.get("autonomous_code"):
+                    return []
+                need = self._next_code_need(ctx)
+                if not need:
+                    return []
+                return [Initiative(
+                    name=f"self_code:{need[:40]}",
+                    rationale=f"write and run a program to solve {need!r} for the Master",
+                    kind=TriggerKind.OPPORTUNITY, capability=Capability.CODE_EXEC,
+                    risk=RiskTier.MODERATE, reversibility=1.0, confidence=0.8,
+                    benefit={"owner_benefit": 1.0, "competence": 0.6},
+                    action=(lambda n=need: self._run_initiative_action(
+                        f"self-code {n[:48]}", n,
+                        lambda n=n: self._autonomous_self_code(n))))]
+
             engine.register_detector(goal_detector)
             engine.register_detector(skill_detector)
             engine.register_detector(internet_detector)
             engine.register_detector(http_detector)
             engine.register_detector(remote_detector)
+            engine.register_detector(code_detector)
             # remember what live state to feed the detectors when the loop consults the engine
             self._proactive_context = lambda: {
                 "goals": self.goals, "skilltree": skilltree,
                 "autonomous_internet": self._autonomous_internet_on(),
                 "autonomous_remote": self._autonomous_remote_on(),
                 "autonomous_network": self._autonomous_network_on(),
+                "autonomous_code": self._autonomous_code_on(),
+                "code_needs": self.code_needs,
                 "watch_endpoints": self._watch_endpoints(),
                 "remote_hosts": self._remote_hosts()}
             return engine
@@ -2070,6 +2133,72 @@ class NyxaraCore:
         summary = getattr(report, "summary", "")
         return {"researched": topic, "summary": str(summary)[:240],
                 "sources": len(getattr(report, "sources", []) or [])}
+
+    # ---- self-initiated code authoring + execution (LLM-free, gated) ---- #
+    def _next_code_need(self, ctx: Dict[str, Any]) -> Optional[str]:
+        """Pick the next computational task NYXARA can actually write code for.
+
+        A queued need (from :meth:`enqueue_code_need`) comes first — the first she can
+        synthesise is taken and any she cannot are discarded, honestly; failing that, a
+        long-horizon awareness recommendation is used if it parses as something computable.
+        Returns None when there is nothing she can author, so the self-coding detector never
+        fabricates busywork."""
+        try:
+            from nyxara.agency.self_coder import CodeSynthesizer
+            syn = CodeSynthesizer()
+        except Exception:  # noqa: BLE001 — the synthesiser is a capability, never fatal
+            return None
+        needs = ctx.get("code_needs")
+        if needs is not None:
+            drained = 0
+            while needs and drained < 32:
+                candidate = str(needs.popleft())
+                drained += 1
+                try:
+                    if syn.synthesize(candidate).ok:
+                        return candidate
+                except Exception:  # noqa: BLE001
+                    continue
+        for rec in ctx.get("awareness_recommendations") or []:
+            try:
+                if syn.synthesize(str(rec)).ok:
+                    return str(rec)
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
+    def _autonomous_self_code(self, need: str) -> Dict[str, Any]:
+        """Write a program for ``need`` with her OWN synthesiser and run it — LLM-free, gated.
+
+        The decision to act was already made deterministically by the ProactiveEngine's
+        gauntlet; here NYXARA authors the source herself
+        (:class:`~nyxara.agency.self_coder.CodeSynthesizer`, never an LLM) and executes it via
+        :meth:`ToolRegistry.invoke` under ``Authority.AUTONOMOUS`` — so the full
+        capability → risk → authority → governor → sandbox pipeline applies. Under the standing
+        full_control grant autonomous CODE_EXEC is blessed, so it runs at once with no per-action
+        permission; otherwise the registry returns ``requires_owner``. Never raises — a miss, an
+        escalation, or a failed run all come back as data for the journal to record."""
+        try:
+            from nyxara.agency.self_coder import CodeSynthesizer
+            res = CodeSynthesizer().synthesize(need)
+        except Exception as exc:  # noqa: BLE001 — synthesis is best-effort, never a crash
+            return {"ok": False, "need": need, "authored": False,
+                    "error": f"synthesis failed: {exc}"}
+        if not res.ok:
+            return {"ok": False, "need": need, "authored": False, "note": res.note}
+        if self.tools is None or self.tools.get("run_python") is None:
+            return {"ok": False, "need": need, "authored": True, "origin": res.origin,
+                    "source": res.source, "error": "run_python tool unavailable"}
+        outcome = self.tools.invoke(
+            "run_python", {"code": res.source, "timeout_s": 10.0},
+            authority=Authority.AUTONOMOUS).to_dict()
+        run = outcome.get("value") if isinstance(outcome.get("value"), dict) else {}
+        ran = bool(outcome.get("ok")) and bool(run.get("ok"))
+        return {"ok": ran, "need": need, "authored": True, "origin": res.origin,
+                "expected": res.expected, "computed": run.get("value"),
+                "requires_owner": bool(outcome.get("requires_owner")),
+                "source": res.source, "stdout": run.get("stdout", ""),
+                "error": outcome.get("error") or run.get("error")}
 
     # ---- self-initiated network actions (run through the gated registry, LLM-free) ---- #
     def _autonomous_http(self, spec: Any) -> Dict[str, Any]:
