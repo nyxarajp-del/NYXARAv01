@@ -224,11 +224,27 @@ class DynamicToolCreator:
     # Synthesis (zero-shot): words -> source
     # ------------------------------------------------------------------ #
     def synthesize(self, task: str, language: Language = Language.PYTHON) -> Tuple[str, str]:
-        """Write the source for *task*. LLM-backed when wired, honest template otherwise.
+        """Write the source for *task*. NYXARA's own engine first, LLM only if wired.
 
-        Returns ``(source, origin)`` where origin is ``"llm"`` or ``"template"``. An LLM
-        draft that fails the static scan is discarded in favour of the safe template."""
+        Returns ``(source, origin)`` where origin is ``"local:<family>"`` (her own
+        deterministic :class:`~nyxara.agency.self_coder.CodeSynthesizer`), ``"llm"`` (an
+        optional wired model), or ``"template"`` (the last-resort honest scaffold). Order is
+        deliberate and loyal to the Master's intent — *NYXARA writes it herself* whenever she
+        can, so a keyless machine is genuinely capable, not faking. A synthesised/LLM draft
+        that fails the static scan is discarded before it is ever trusted."""
         language = Language.coerce(language)
+        # 1) her own local, LLM-free synthesiser — real code for the families she handles.
+        if language is Language.PYTHON:
+            try:
+                from nyxara.agency.self_coder import CodeSynthesizer
+                res = CodeSynthesizer().synthesize(task)
+                if res.ok:
+                    ok, _ = _scan_source(res.source, language)
+                    if ok:
+                        return res.source, res.origin
+            except Exception:  # noqa: BLE001 — the synthesiser is a capability, never fatal
+                pass
+        # 2) an optional wired LLM (off by default) — only consulted when she couldn't do it herself.
         if self.llm is not None:
             try:
                 draft = self.llm(self._synthesis_prompt(task, language))
@@ -239,6 +255,7 @@ class DynamicToolCreator:
                 ok, _ = _scan_source(src, language)
                 if ok:
                     return src, "llm"
+        # 3) honest last-resort scaffold — never a fake claim of success.
         return self._template(task, language), "template"
 
     @staticmethod
