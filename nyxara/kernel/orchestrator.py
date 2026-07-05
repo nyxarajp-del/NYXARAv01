@@ -426,6 +426,11 @@ class NyxaraCore:
         # consolidation — the dream engine: rehearses salient memories and abstracts
         # episodes into semantics during idle time (Ebbinghaus forgetting curve)
         self.consolidator = self._build_consolidator() if enable_memory else None
+        # prospective memory — standing intentions (time/recurring/context triggers) that come
+        # due and fire their own action on her cadence, so a commitment she makes ("check X in an
+        # hour") is honoured unattended by the always-on background mind (kernel/autonomic.py
+        # auto-wires and ticks this in the code-mode loop).
+        self.prospective = self._build_prospective() if enable_memory else None
         # elastic synapses — Elastic Weight Consolidation: estimates which learned weights
         # matter most and freezes them, so she keeps learning forever without forgetting old
         # skills or her loyalty core (catastrophic-forgetting protection / lifelong memory)
@@ -1305,6 +1310,16 @@ class NyxaraCore:
             from nyxara.memory.consolidation import Consolidator
             return Consolidator(self.memory)
         except Exception:  # noqa: BLE001 — consolidation is a capability, never required
+            return None
+
+    def _build_prospective(self) -> Any:
+        """Prospective memory — future intentions that fire their own action when their trigger
+        (time / recurring / event / context) is satisfied. Wired so the always-on background mind
+        honours standing commitments unattended. A capability, never required."""
+        try:
+            from nyxara.memory.prospective import ProspectiveMemory
+            return ProspectiveMemory(store=self.memory)
+        except Exception:  # noqa: BLE001 — prospective memory is a capability, never required
             return None
 
     def _build_elastic_synapses(self) -> Any:

@@ -236,6 +236,26 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                       f"[interval {cfg.autonomic_interval_s}s, growth_every "
                       f"{cfg.autonomic_growth_every}, inner_life {inner_life}, "
                       f"decision_mode {cfg.autonomic_decision_mode}, supervised]")
+
+                # Deep self-directed cognition: the AutonomicLoop above decides + acts, but the
+                # richer "think on her own and create her own work" engines (the default-mode
+                # stream, and idle_maintenance — dream replay, the autonomous scientist, the
+                # eureka engine, active curiosity, continuous RSI growth — plus the micro-agent
+                # civilization) live behind NyxaraCore.start_cognition(). The console starts it;
+                # the always-on daemon must too, or a deployed NYXARA never runs them. Started
+                # here, LLM-free and oversight-gated; stopped cleanly in the finally below.
+                deep = bool(getattr(cfg, "autonomic_deep_cognition", True)
+                            and getattr(settings.features, "continuous_cognition", True))
+                app_.state.deep_cognition = False
+                if deep:
+                    try:
+                        if core.start_cognition():
+                            app_.state.deep_cognition = True
+                            print("NYXARA deep cognition started "
+                                  "[default-mode stream + idle_maintenance "
+                                  "(dream/scientist/eureka/curiosity/growth) + civilization]")
+                    except Exception as cexc:  # noqa: BLE001 — never let cognition block the API
+                        print(f"NYXARA deep cognition failed to start: {cexc}")
             except Exception as exc:  # noqa: BLE001 — never let the mind block the server
                 app_.state.autonomic = None
                 app_.state.autonomic_runtime = None
@@ -246,6 +266,13 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         try:
             yield
         finally:
+            # stop the deep-cognition thread first (it is what start_cognition launched)
+            if getattr(app_.state, "deep_cognition", False):
+                try:
+                    app_.state.core.stop_cognition()
+                except Exception:  # noqa: BLE001 — best-effort clean shutdown
+                    pass
+                app_.state.deep_cognition = False
             if loop is not None:
                 loop._running = False  # signal the background mind to exit its next check
             if runtime is not None:

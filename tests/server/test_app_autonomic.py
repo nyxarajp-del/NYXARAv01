@@ -45,3 +45,26 @@ def test_autonomic_on_starts_loop_on_boot_and_stops_on_shutdown() -> None:
     # lifespan shutdown must tear the background mind down cleanly
     assert app.state.autonomic is None
     assert app.state.autonomic_runtime is None
+
+
+def test_autonomic_on_starts_deep_cognition_and_stops_on_shutdown() -> None:
+    # the always-on daemon must also run the deep self-directed engines (default-mode stream +
+    # idle_maintenance — dream/scientist/eureka/curiosity/growth — + civilization), not only the
+    # narrow decide→act loop. These live behind core.start_cognition(), which the console starts
+    # and the server previously did not.
+    app = _app(autonomic=True)
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert app.state.deep_cognition is True
+        assert app.state.core._cognition_thread is not None
+        assert app.state.core._cognition_thread.is_alive()
+    # clean teardown stops the cognition thread
+    assert app.state.deep_cognition is False
+    assert app.state.core._cognition_thread is None
+
+
+def test_autonomic_off_leaves_no_deep_cognition() -> None:
+    app = _app(autonomic=False)
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert getattr(app.state, "deep_cognition", False) is False

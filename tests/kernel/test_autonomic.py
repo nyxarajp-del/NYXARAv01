@@ -220,3 +220,88 @@ def test_aprocess_matches_process():
 
     r = asyncio.run(_go())
     assert r.acted and r.candidate.kind == "respond"
+
+
+# --------------------------------------------------------------------------- #
+# Always-on autonomy: never idle-and-silent, and never silently broken
+# --------------------------------------------------------------------------- #
+def test_code_mode_idle_tick_is_never_a_silent_noop():
+    # On an idle system the code-mode loop must always do real self-directed work — adopt a goal
+    # and drain the scheduler — so unproductive ticks stay at zero and the telemetry proves it.
+    core = _code_core()
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    loop.run_for(6)
+    rep = loop.report()
+    assert rep["intents_adopted"] >= 1
+    assert rep["scheduler_runs"] >= 1
+    assert rep["unproductive_ticks"] == 0        # she is never idle-and-silent
+    assert rep["consecutive_unproductive"] == 0
+    assert rep["errors"] == 0                    # and nothing failed silently
+
+
+def test_code_mode_creates_own_work_when_nothing_else_fires():
+    # When the primary decide→act path yields nothing (no intent, no initiative, no scheduler),
+    # NYXARA still makes her own work via a real engine (curiosity/consolidation): the guaranteed
+    # fallback fires and the tick is counted productive, not idle.
+    core = NyxaraCore()                          # full core: has active_curiosity/consolidator
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    loop.intent = None
+    loop.proactive = None
+    loop.scheduler = None
+    r = loop.tick_once()
+    assert r["mode"] == "code"
+    assert r["intent"] is None and r["acted"] == 0 and r["ran"] == 0
+    assert r["fallback"] in ("curiosity", "consolidation")   # she created her own work
+    assert r["productive"] is True
+    rep = loop.report()
+    assert rep["fallback_acts"] >= 1 and rep["unproductive_ticks"] == 0
+
+
+def test_silent_failure_is_visible_and_degrades_health():
+    # A faculty that throws every tick used to be indistinguishable from a calm, idle mind. Now
+    # the error is counted per-stage, and when the loop is genuinely stalled its health degrades
+    # so it escalates instead of looking healthy.
+    from nyxara.agency.health import HealthMonitor
+    # no fallback engines (memory + growth off) so a broken decide path cannot be masked
+    core = NyxaraCore(enable_memory=False, enable_growth=False)
+    health = HealthMonitor()
+    health.register("autonomic", heartbeat_timeout=120.0)
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code",
+                         health=health, stall_threshold=3)
+
+    class _Boom:
+        def autonomous_intent(self):
+            raise RuntimeError("intent faculty down")
+
+    loop.intent = _Boom()
+    loop.proactive = None
+    loop.scheduler = None
+    loop.run_for(5)
+    rep = loop.report()
+    assert rep["errors"] >= 5                     # counted, not silently swallowed
+    assert rep["stage_errors"].get("intent", 0) >= 5
+    assert rep["unproductive_ticks"] >= 5
+    assert rep["consecutive_unproductive"] >= 5
+    sub = health.get("autonomic")                 # health saw the stall
+    assert sub is not None and sub.metrics()["errors"] >= 1
+
+
+def test_prospective_intentions_fire_in_code_mode():
+    # a standing intention set on the core's own prospective memory fires unattended on the
+    # code-mode background cadence — a commitment honoured without the Master or the LLM.
+    core = NyxaraCore()                            # full core: prospective memory is built
+    fired = {"n": 0}
+    core.prospective.remind_at(
+        when=1.0, description="follow up on the deployment",
+        action=lambda intention, now: fired.__setitem__("n", fired["n"] + 1))
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    loop.run_for(2)
+    assert fired["n"] == 1                          # the intention's own action ran, in code
+    assert loop.report()["intentions_fired"] >= 1
+
+
+def test_code_mode_auto_wires_prospective_from_core():
+    core = NyxaraCore()
+    assert core.prospective is not None            # built on the core
+    loop = AutonomicLoop(core, interval_s=0.0, decision_mode="code")
+    assert loop.prospective is core.prospective    # auto-wired in __post_init__
