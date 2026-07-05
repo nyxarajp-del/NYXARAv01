@@ -2324,17 +2324,29 @@ class NyxaraCore:
             return None
 
     def _build_researcher(self) -> Any:
-        """Level 10 — AutonomousResearcher for self-directed web research."""
+        """Level 10 — AutonomousResearcher for self-directed web research.
+
+        Reach is config-driven (``web.research_max_sources``, a "max" profile) and the LLM is
+        **late-bound**: the researcher is constructed before the reasoner, so we hand it a
+        zero-arg hook that resolves ``self.reasoner.llm`` at research time. That keeps the
+        LLM-free heuristic default while using a real model for summarization once one exists.
+        """
         try:
             from nyxara.growth.researcher import AutonomousResearcher
-            reasoner = getattr(self, "reasoner", None)
+            max_sources = 6
+            try:
+                from nyxara.kernel.config import get_settings
+                max_sources = int(get_settings().web.research_max_sources)
+            except Exception:  # noqa: BLE001 — config is a convenience, never a hard dep
+                pass
             return AutonomousResearcher(
                 tools=getattr(self, "tools", None),
                 knowledge=getattr(self, "knowledge", None),
                 knowledge_graph=getattr(self, "knowledge_graph", None),
-                llm=getattr(reasoner, "llm", None) if reasoner else None,
+                llm=(lambda: getattr(getattr(self, "reasoner", None), "llm", None)),
                 memory=getattr(self, "memory", None),
                 sandbox=getattr(self, "sandbox_runner", None),
+                max_sources=max_sources,
             )
         except Exception:  # noqa: BLE001 — researcher is a capability, never required
             return None

@@ -140,11 +140,31 @@ autonomously or still escalate.
 
 Crucially this is **narrower than full control**: it never grants the OS danger surface — shell,
 code execution, file delete, self-modify and package installs still escalate. Everything that
-keeps the web safe stays in force: the SSRF guard (no loopback/private targets),
+keeps the web safe stays in force: the SSRF guard (no loopback/private targets, **re-vetted on
+every redirect hop** in both the generic HTTP path and the page-fetch transport),
 prompt-injection screening on fetched pages, and the governor's rate limit — plus the same
 sovereign boundaries as above (`/scram`, oversight, corrigibility, and the owner-exclusive caps
 under Rule 8). When on, the always-on daemon also runs at "max level" (`inner_life`), so the
 background mind proactively researches the Master's standing goals on the live web.
+
+**Real research, not empty stubs.** Her autonomous researcher (`growth/researcher.py`) fetches
+real pages and now synthesises genuine substance from them: sentences are relevance-ranked
+against the topic's terms (so "large language models" still draws claims from pages that say
+"large language model"), and the summary is an extractive digest of the actual content —
+never a "nothing found" stub — upgraded to an LLM summary when a real model is wired. Reach is
+config-driven (`NYXARA_WEB__RESEARCH_MAX_SOURCES`, default 6).
+
+**Headless browser — she reads JS pages and acts on the web.** Beyond static `web_fetch`, a
+real Playwright-driven headless Chromium (`senses/browser.py`) gives two gated tools:
+`browse_render` returns a JavaScript-rendered page's screened text (reaching dynamic sites
+`web_fetch` cannot), and `browse_actions` drives a typed action script —
+`goto`/`click`/`fill`/`press`/`submit`/`wait`/`screenshot` — to **take actions on the web**
+(form fills, clicks, submissions). Her researcher reaches for `browse_render` herself when a
+page returns little static text. Both tools are `NET_OUT` and SSRF-guarded like every other
+reach; `browse_actions` is high-risk/irreversible (it submits forms) so the gate weighs it
+accordingly. The engine is import-guarded: with no `playwright` installed the tools return an
+honest "engine unavailable" note rather than failing (`NYXARA_WEB__BROWSER_ENABLED`, default
+`true`; `pip install playwright && python -m playwright install chromium` makes it real).
 
 ## Privilege escalation (off by default, opt-in)
 

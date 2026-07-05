@@ -197,7 +197,7 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
             return {"governor": governor}
         return {"governor": governor, "allow_private": bool(web.allow_private),
                 "max_bytes": int(web.max_bytes), "timeout": float(web.timeout_s),
-                "user_agent": web.user_agent}
+                "user_agent": web.user_agent, "max_redirects": int(web.max_redirects)}
 
     # ---- time: trivial, read-only ---- #
     def _now() -> str:
@@ -475,6 +475,57 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                                     description="JSON object of header name->value")],
                   capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
                   target_param="url"))
+
+    # ---- headless browser: render JS pages & take real web actions (senses/browser.py) ---- #
+    # Import-guarded: with no `playwright` package installed the tools return an honest
+    # "engine unavailable" note (never a crash), exactly like the vision/audio faculties.
+    # Both are NET_OUT and SSRF-guarded; browse_actions is HIGH + irreversible (it submits
+    # forms / clicks) so the gate weighs it as an effectful web action.
+    def _make_browser() -> Any:
+        from nyxara.senses.browser import Browser
+        if web is None:
+            return Browser(governor=governor)
+        return Browser(allow_private=bool(web.allow_private),
+                       timeout_s=float(getattr(web, "browser_timeout_s", 45.0)),
+                       max_bytes=int(web.max_bytes), user_agent=web.user_agent,
+                       governor=governor)
+
+    if web is None or bool(getattr(web, "browser_enabled", True)):
+        def _browse_render(url: str) -> Dict[str, Any]:
+            return _make_browser().render(url).to_dict()
+
+        _add(ToolSpec("browse_render", handler=_browse_render,
+                      description="open a URL in a REAL headless browser and return its "
+                                  "JS-rendered, injection-screened text (reaches dynamic pages "
+                                  "web_fetch cannot); fails as data, honest note if no engine",
+                      params=[ToolParam("url", "str")],
+                      capability=Capability.NET_OUT, risk=RiskTier.MODERATE,
+                      target_param="url"))
+
+        def _browse_actions(url: str, actions: str) -> Dict[str, Any]:
+            # `actions` is a JSON array of steps, e.g.
+            # '[{"op":"fill","selector":"#q","value":"hi"},{"op":"click","selector":"#go"}]'
+            try:
+                parsed = json.loads(actions) if actions and actions.strip() else []
+            except Exception as exc:  # noqa: BLE001 — a malformed script fails as data
+                return {"ok": False, "url": url, "error": f"invalid actions JSON: {exc}"}
+            if not isinstance(parsed, list):
+                return {"ok": False, "url": url, "error": "actions must be a JSON array"}
+            steps = [s for s in parsed if isinstance(s, dict)]
+            return _make_browser().act(url, steps).to_dict()
+
+        _add(ToolSpec("browse_actions", handler=_browse_actions,
+                      description="drive a REAL headless browser through a typed action script "
+                                  "(goto/click/fill/press/submit/wait/screenshot) to TAKE "
+                                  "ACTIONS on the web — form fills, clicks, submits. `actions` "
+                                  "is a JSON array of {op,...} steps; returns the resulting "
+                                  "page text + per-step outcomes, failing as data",
+                      params=[ToolParam("url", "str"),
+                              ToolParam("actions", "str",
+                                        description="JSON array of {op, selector?, value?, …} "
+                                                    "browser action steps")],
+                      capability=Capability.NET_OUT, risk=RiskTier.HIGH,
+                      reversible=False, target_param="url"))
 
     # ---- agency config: named remote credentials + SSH posture (fall back to settings) ---- #
     agency_cfg = None

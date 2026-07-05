@@ -24,6 +24,11 @@ httpx>=0.27
 torch>=2.2
 # Vector / retrieval
 faiss-cpu>=1.8
+# Headless browser — render JS pages & TAKE ACTIONS on the web (senses/browser.py); import-guarded
+# in code, so without it the browse_render/browse_actions tools return an honest "engine
+# unavailable" note. Install the package AND a browser once (`python -m playwright install
+# chromium`) to make it real; the Chromium binary is then located via PLAYWRIGHT_BROWSERS_PATH.
+playwright>=1.40
 # Security
 cryptography>=42.0
 # Remote execution — SSH login + remote commands (agency/remote_exec.py); optional [remote] extra,
