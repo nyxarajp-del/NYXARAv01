@@ -1852,6 +1852,19 @@ class WebConfig(BaseModel):
     allow_private: bool = True
     injection_scan: bool = True
 
+    # autonomous research reach: how many web sources NYXARA's background researcher gathers
+    # per topic pass (bounded by max_results). A "max" profile default — more sources, richer
+    # synthesis — while still finite so a self-directed pass terminates.
+    research_max_sources: int = Field(default=6, ge=1, le=50)
+
+    # headless browser (nyxara/senses/browser.py): a real JS-rendering engine so NYXARA can
+    # read dynamic pages and TAKE ACTIONS on the web (click/fill/submit). Enabled by default;
+    # it is import-guarded, so with no `playwright` package installed the browser tools return
+    # an honest "engine unavailable" note instead of failing (same idiom as vision/audio). The
+    # Chromium binary is located via Playwright's own resolution (PLAYWRIGHT_BROWSERS_PATH).
+    browser_enabled: bool = True
+    browser_timeout_s: float = Field(default=45.0, gt=0, le=600.0)
+
 
 class ObservabilityConfig(BaseModel):
     model_config = {"validate_assignment": True}

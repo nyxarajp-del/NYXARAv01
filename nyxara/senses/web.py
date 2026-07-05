@@ -261,27 +261,80 @@ class WebPage:
 DEFAULT_USER_AGENT = "NYXARA/1.0 (+https://nyxara.ai)"
 
 
+def _revet_redirect(newurl: str, *, allow_private: bool) -> Optional[str]:
+    """Return a rejection reason if a redirect target must not be followed, else None.
+
+    Every redirect hop is vetted by the very same SSRF guard as the initial request, so a
+    public URL cannot bounce the fetch onto a loopback/private/link-local host (e.g. the
+    cloud-metadata service at 169.254.169.254). Fail-closed: a vetting error is itself a reason
+    to refuse. Reuses the shared helper in :mod:`agency.net_request` so the logic lives once.
+    """
+    try:
+        from nyxara.agency.net_request import _redirect_reason  # noqa: PLC0415
+        return _redirect_reason(newurl, allow_private=allow_private)
+    except Exception as exc:  # noqa: BLE001 — fail-closed on any vetting error
+        return f"redirect vetting failed: {exc}"
+
+
 def _default_transport(url: str, timeout: float, max_bytes: int,
-                       user_agent: str = DEFAULT_USER_AGENT) -> FetchResult:  # pragma: no cover
+                       user_agent: str = DEFAULT_USER_AGENT, *,
+                       allow_private: bool = False,
+                       max_redirects: int = 20) -> FetchResult:  # pragma: no cover
     """Real network transport: prefer httpx, fall back to stdlib urllib.
 
     A descriptive ``user_agent`` is always sent — some hosts reject generic library
-    agents, which would otherwise silently break "full" web reach.
+    agents, which would otherwise silently break "full" web reach. **Every redirect hop is
+    re-vetted by the SSRF guard** (``allow_private`` off ⇒ loopback/private/link-local targets
+    are refused), so a public URL cannot 30x-redirect the fetch onto an internal host — the
+    same discipline :mod:`agency.net_request` already applies to generic HTTP calls.
     """
     start = time.monotonic()
     headers = {"User-Agent": user_agent}
+    cap = max(0, int(max_redirects))
     try:
         try:
             import httpx  # type: ignore
-            r = httpx.get(url, timeout=timeout, follow_redirects=True, headers=headers)
-            body = r.text[:max_bytes]
-            return FetchResult(url=url, ok=r.status_code < 400, status=r.status_code,
-                               content_type=r.headers.get("content-type", ""),
-                               body=body, elapsed=time.monotonic() - start)
+            # Follow redirects MANUALLY so each hop can be re-vetted before it is dialled.
+            with httpx.Client(timeout=timeout, follow_redirects=False,
+                              headers=headers) as client:
+                cur = url
+                for _ in range(cap + 1):
+                    r = client.get(cur)
+                    if r.is_redirect and r.has_redirect_location:
+                        nxt = str(r.next_request.url) if r.next_request else \
+                            str(r.headers.get("location", ""))
+                        bad = _revet_redirect(nxt, allow_private=allow_private)
+                        if bad:
+                            return FetchResult(url=cur, ok=False, blocked_reason=bad,
+                                               error=f"blocked redirect: {bad}",
+                                               elapsed=time.monotonic() - start)
+                        cur = nxt
+                        continue
+                    body = r.text[:max_bytes]
+                    return FetchResult(url=str(r.url), ok=r.status_code < 400,
+                                       status=r.status_code,
+                                       content_type=r.headers.get("content-type", ""),
+                                       body=body, elapsed=time.monotonic() - start)
+                return FetchResult(url=cur, ok=False, error="too many redirects",
+                                   elapsed=time.monotonic() - start)
         except ImportError:
+            import urllib.error
             import urllib.request
+
+            class _RevetRedirect(urllib.request.HTTPRedirectHandler):
+                max_repeats = cap
+                max_redirections = cap
+
+                def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                    bad = _revet_redirect(newurl, allow_private=allow_private)
+                    if bad:
+                        raise urllib.error.HTTPError(newurl, code, f"blocked redirect: {bad}",
+                                                     hdrs, fp)
+                    return super().redirect_request(req, fp, code, msg, hdrs, newurl)
+
+            opener = urllib.request.build_opener(_RevetRedirect)
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            with opener.open(req, timeout=timeout) as resp:  # noqa: S310
                 raw = resp.read(max_bytes)
                 ctype = resp.headers.get("Content-Type", "")
                 return FetchResult(url=url, ok=True, status=getattr(resp, "status", 200),
@@ -298,14 +351,18 @@ class WebFetcher:
     def __init__(self, *, transport: Optional[Transport] = None, governor: Any = None,
                  allow_private: bool = False, max_bytes: int = 5_000_000,
                  timeout: float = 15.0, cache: bool = True,
-                 user_agent: str = DEFAULT_USER_AGENT) -> None:
+                 user_agent: str = DEFAULT_USER_AGENT, max_redirects: int = 20) -> None:
         self.user_agent = user_agent
-        # the default transport carries our descriptive UA; injected transports keep the
-        # plain (url, timeout, max_bytes) contract used by tests.
-        self._transport = transport or (
-            lambda u, t, m: _default_transport(u, t, m, user_agent=self.user_agent))
-        self.governor = governor
         self.allow_private = allow_private
+        self.max_redirects = max(0, int(max_redirects))
+        # the default transport carries our descriptive UA and re-vets each redirect hop with
+        # the fetcher's own SSRF posture; injected transports keep the plain
+        # (url, timeout, max_bytes) contract used by tests.
+        self._transport = transport or (
+            lambda u, t, m: _default_transport(
+                u, t, m, user_agent=self.user_agent,
+                allow_private=self.allow_private, max_redirects=self.max_redirects))
+        self.governor = governor
         self.max_bytes = max_bytes
         self.timeout = timeout
         self._cache: Dict[str, FetchResult] = {} if cache else None  # type: ignore

@@ -293,3 +293,25 @@ def test_fetch_result_is_html():
 def test_fetch_result_to_dict():
     d = FetchResult("u", True, 200, "text/html", "body").to_dict()
     assert d["bytes"] == 4 and d["ok"] is True
+
+
+# -------------------- redirect re-vetting parity (SSRF-via-redirect in the transport) ------- #
+def test_transport_revet_refuses_private_redirect():
+    # the page-fetch transport re-vets each redirect hop with the same guard as net_request,
+    # so a public URL cannot 30x-redirect the fetch onto an internal host.
+    from nyxara.senses.web import _revet_redirect
+    assert _revet_redirect("http://169.254.169.254/latest/meta-data/", allow_private=False)
+    assert _revet_redirect("http://127.0.0.1/admin", allow_private=False)
+    assert _revet_redirect("http://10.0.0.5/", allow_private=False)
+    assert _revet_redirect("file:///etc/passwd", allow_private=False)
+
+
+def test_transport_revet_allows_public_redirect():
+    from nyxara.senses.web import _revet_redirect
+    assert _revet_redirect("https://example.com/next", allow_private=False) is None
+
+
+def test_webfetcher_carries_redirect_cap():
+    # the fetcher threads its SSRF posture + redirect cap into the default transport
+    f = WebFetcher(allow_private=True, max_redirects=7)
+    assert f.allow_private is True and f.max_redirects == 7
