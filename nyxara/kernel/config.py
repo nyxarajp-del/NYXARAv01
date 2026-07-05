@@ -1791,12 +1791,23 @@ class ServerConfig(BaseModel):
     # deployment. OFF by default so a plain ``nyxara-serve`` behaves exactly as before.
     autonomic: bool = False
     autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
-    autonomic_growth_every: int = Field(default=0, ge=0)      # learning pass every N ticks (0 = never)
+    # A learning pass every N ticks. Non-zero by default so the always-on daemon actually
+    # compounds: her GrowthEngine (reflect → consolidate → abstract → induce skills) runs on
+    # this cadence inside the supervised loop, not only in the console.
+    autonomic_growth_every: int = Field(default=20, ge=0)     # learning pass every N ticks (0 = never)
     # How the always-on background mind DECIDES each tick. "code" (default) — NYXARA decides and
     # acts entirely in her own deterministic engines (drive → intent → proactive gauntlet →
     # scheduler); the LLM is never the decider. "reasoner" — the legacy path that composes a
     # self-directed prompt and runs it through the sovereign cycle (LLM may shape the reply).
     autonomic_decision_mode: str = Field(default="code", pattern="^(code|reasoner)$")
+    # Deep self-directed cognition inside the always-on daemon. When ON (and features.
+    # continuous_cognition is set) the server also starts NyxaraCore.start_cognition(): the
+    # default-mode stream (the wandering mind) plus idle_maintenance — dream replay, the
+    # autonomous scientist, the eureka engine, active curiosity, and continuous RSI growth —
+    # and the micro-agent civilization. All LLM-free and oversight-gated: this is what makes the
+    # daemon genuinely "think on her own and create her own work" when no one is speaking, rather
+    # than only cycling the narrow goal→consolidate→practise loop.
+    autonomic_deep_cognition: bool = True
 
 
 class WebConfig(BaseModel):

@@ -73,6 +73,7 @@ class AutonomicLoop:
     presence: Any = None                  # Presence — arousal state drives cadence + proactive gate
     health: Any = None                    # HealthMonitor — heartbeat + bounded self-healing
     persist_every: int = 20               # checkpoint goals/drives every N ticks (0 = never)
+    stall_threshold: int = 5              # consecutive unproductive ticks before health degrades
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[Any] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
@@ -81,7 +82,16 @@ class AutonomicLoop:
     intents_adopted: int = 0
     code_acts: int = 0
     scheduler_runs: int = 0
+    fallback_acts: int = 0                 # guaranteed self-work steps taken on an otherwise-idle tick
+    intentions_fired: int = 0             # standing prospective intentions that came due and acted
     ticks: int = 0
+    # observability + self-healing: a mind that silently swallows every failure and does nothing is
+    # indistinguishable from an idle one. These make a stalled/broken loop VISIBLE (report + health)
+    # instead of looking like calm. Counted here, never used to grant power.
+    errors: int = 0                       # total swallowed exceptions across all stages
+    stage_errors: dict = field(default_factory=dict)   # per-stage error tally
+    unproductive_ticks: int = 0           # ticks that adopted/acted/ran/fell-back on NOTHING
+    consecutive_unproductive: int = 0     # current streak of unproductive ticks (self-heal trigger)
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
     _intention_queue: List[str] = field(default_factory=list, init=False)
@@ -108,6 +118,10 @@ class AutonomicLoop:
             self.scheduler = getattr(self.core, "scheduler", None)
         if self.journal is None:
             self.journal = getattr(self.core, "journal", None)
+        # standing intentions (time/recurring/context triggers) fire on her own cadence too, so a
+        # commitment she made ("check X in an hour") comes due unattended in the always-on daemon.
+        if self.prospective is None:
+            self.prospective = getattr(self.core, "prospective", None)
         # the background mind also nudges her standing long-horizon missions forward, one
         # gated milestone at a time, on her own cadence (months-long goals advance unattended)
         if self.advance_missions and self.mission_executive is None:
@@ -231,26 +245,84 @@ class AutonomicLoop:
         return self._repertoire_prompt(), "repertoire"
 
     # ---- code-driven decision + action (NYXARA decides herself; the LLM is not the decider) ---- #
+    def _note_error(self, stage: str) -> None:
+        """Record a swallowed exception so a silently-failing faculty becomes visible.
+
+        Each autonomic stage stays best-effort (a bad faculty never crashes the loop), but the
+        failure is now *counted* per stage and surfaced in :meth:`report` and to health — a broken
+        mind that does nothing is no longer indistinguishable from a calm, idle one."""
+        self.errors += 1
+        self.stage_errors[stage] = self.stage_errors.get(stage, 0) + 1
+
+    def _fire_due_intentions(self) -> int:
+        """Fire any standing prospective intentions that have come due, in code.
+
+        ``ProspectiveMemory.tick`` runs each due intention's own ``action`` callback as it fires
+        (a commitment she made — "check X in an hour" — now honoured unattended). Returns how many
+        fired this tick, which counts as real self-directed work."""
+        if self.prospective is None:
+            return 0
+        try:
+            fired = self.prospective.tick()
+        except Exception:  # noqa: BLE001 — prospective memory is advisory, never fatal
+            self._note_error("prospective")
+            return 0
+        n = len(fired or [])
+        self.intentions_fired += n
+        return n
+
+    def _guaranteed_self_work(self) -> Optional[str]:
+        """When a tick would otherwise do nothing, make her own work — in code, LLM-free.
+
+        "When there is no work, think and create your own work." Reuses real engines already on
+        the core: prefer active curiosity (she poses and answers her *own* question), else a
+        memory-consolidation cycle. Both are cheap, best-effort and idempotent, so running them
+        on an otherwise-idle tick only adds genuine self-directed work. The whole tick is already
+        oversight-gated upstream (a scrammed mind never reaches here). Returns a short label of
+        what she did, or None when no fallback engine is available."""
+        core = self.core
+        # active curiosity — her own WHY/WHAT-IF question, self-designed experiment, folded back
+        curiosity = getattr(core, "active_curiosity", None)
+        if curiosity is not None:
+            try:
+                cp = curiosity.tick()
+                if cp is not None:
+                    self.fallback_acts += 1
+                    return "curiosity"
+            except Exception:  # noqa: BLE001
+                self._note_error("fallback:curiosity")
+        # consolidation — rehearse and strengthen what is worth keeping (real work, not a no-op)
+        consolidator = getattr(core, "consolidator", None)
+        if consolidator is not None:
+            try:
+                consolidator.run_cycle()
+                self.fallback_acts += 1
+                return "consolidation"
+            except Exception:  # noqa: BLE001
+                self._note_error("fallback:consolidation")
+        return None
+
     def _decide_and_act_once(self) -> dict:
         """One fully deterministic autonomic turn: NYXARA's own engines both DECIDE and ACT.
 
         drive pressure (``affect.tick``) → adopt a goal by active inference
-        (``intent.autonomous_intent``) → run the loyalty-first gauntlet
-        (``proactive.consider`` — alignment/confidence/permission/reversibility/sandbox) which
-        *submits* every cleared ACT to the scheduler → **drain the scheduler**, executing each
-        initiative's own action callable in code (skill practice, research, consolidation).
-        No English prompt is composed and ``core.process`` is never called — the LLM plays no
-        part in the decision. Risky/irreversible proposals still ESCALATE (queued, not run)."""
+        (``intent.autonomous_intent``) → fire any due standing intentions → run the loyalty-first
+        gauntlet (``proactive.consider`` — alignment/confidence/permission/reversibility/sandbox)
+        which *submits* every cleared ACT to the scheduler → **drain the scheduler**, executing
+        each initiative's own action callable in code (skill practice, research, consolidation).
+        If the tick would otherwise do nothing, a guaranteed self-work step runs so she is never
+        idle-and-silent. No English prompt is composed and ``core.process`` is never called — the
+        LLM plays no part in the decision. Risky/irreversible proposals still ESCALATE (queued)."""
         core = self.core
-        summary = {"mode": "code", "intent": None, "acted": 0,
-                   "escalated": 0, "ran": 0}
+        summary = {"mode": "code", "intent": None, "acted": 0, "escalated": 0,
+                   "ran": 0, "fired": 0, "fallback": None, "productive": False}
         # 1) let unmet drives build pressure as real time would (homeostasis)
         affect = getattr(core, "affect", None)
         if affect is not None:
             try:
                 affect.tick(self.interval_s if self.interval_s > 0 else 1.0)
             except Exception:  # noqa: BLE001 — affect is advisory, never fatal
-                pass
+                self._note_error("affect")
         # 2) adopt her own lowest-free-energy goal (owner-aligned by construction; no LLM/human)
         if self.intent is not None:
             try:
@@ -264,7 +336,9 @@ class AutonomicLoop:
                 if goals is not None and hasattr(goals, "dedupe"):
                     goals.dedupe()
             except Exception:  # noqa: BLE001
-                pass
+                self._note_error("intent")
+        # 2.5) fire standing intentions that have come due (their actions join the scheduler queue)
+        summary["fired"] = self._fire_due_intentions()
         # 3) the deterministic gauntlet — cleared ACTs are auto-submitted to the scheduler
         if self.proactive is not None and self.proactive_allowed:
             try:
@@ -278,7 +352,7 @@ class AutonomicLoop:
                         summary["escalated"] += 1
                         self.escalations.append(d)
             except Exception:  # noqa: BLE001 — initiative is best-effort, never crashes the loop
-                pass
+                self._note_error("proactive")
         # 4) ACT — execute the cleared initiatives *in code* by draining the scheduler queue
         if self.scheduler is not None:
             try:
@@ -292,8 +366,21 @@ class AutonomicLoop:
                 self.scheduler_runs += ran
                 self.scheduler.purge_terminal()
             except Exception:  # noqa: BLE001
-                pass
+                self._note_error("scheduler")
         self.code_acts += summary["acted"]
+        # 5) did this tick actually do anything? if not, make her own work (never idle-and-silent)
+        productive = bool(summary["intent"] or summary["acted"] or summary["ran"]
+                          or summary["fired"])
+        if not productive:
+            summary["fallback"] = self._guaranteed_self_work()
+            productive = summary["fallback"] is not None
+        summary["productive"] = productive
+        # 6) self-heal telemetry: track unproductive streaks so a stalled loop is visible, not calm
+        if productive:
+            self.consecutive_unproductive = 0
+        else:
+            self.unproductive_ticks += 1
+            self.consecutive_unproductive += 1
         return summary
 
     def _apply_presence(self) -> None:
@@ -337,6 +424,25 @@ class AutonomicLoop:
         except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
             pass
 
+    def _beat_health(self, result: Any) -> None:
+        """Heartbeat + productivity signal to the wired HealthMonitor.
+
+        The heartbeat proves the loop is alive; the productivity signal proves it is doing real
+        work. In code mode (where productivity is measurable) a long streak of unproductive ticks
+        degrades health, so a silently-stalled mind SURFACES and escalates instead of looking calm.
+        A productive tick clears the error state. Best-effort — health is a capability, not required."""
+        if self.health is None:
+            return
+        try:
+            self.health.beat("autonomic")
+            if self.decision_mode == "code" and isinstance(result, dict):
+                if result.get("productive"):
+                    self.health.record_success("autonomic")
+                elif self.consecutive_unproductive >= self.stall_threshold:
+                    self.health.record_error("autonomic")
+        except Exception:  # noqa: BLE001
+            pass
+
     # ---- one step ---- #
     def tick_once(self) -> Optional[Any]:
         """Run exactly one autonomic turn (synchronously). Returns the result, or None
@@ -355,11 +461,7 @@ class AutonomicLoop:
             self.history.append(result)
             if result.disposition is Disposition.ESCALATE:
                 self.escalations.append(result)
-        if self.health is not None:
-            try:
-                self.health.beat("autonomic")
-            except Exception:  # noqa: BLE001
-                pass
+        self._beat_health(result)
         self._advance_mission()
         self._maybe_grow()
         self._maybe_persist()
@@ -384,32 +486,45 @@ class AutonomicLoop:
         done = 0
         try:
             while self._running:
-                if self.core.oversight.gate():
-                    # presence (when wired) advances arousal and gates proactivity per state
-                    self._apply_presence()
-                    if self.decision_mode == "code":
-                        # the decision + action are pure code, but the action callables may do
-                        # real I/O (research), so run them off the event loop to stay responsive
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, self._decide_and_act_once)
-                        self.ticks += 1
-                        self.prompt_sources.append("code")
-                    else:
-                        prompt, source = self._compose_prompt()
-                        result = await self.core.aprocess(prompt, authority=self.authority)
-                        self.ticks += 1
-                        self.prompt_sources.append(source)
-                        self.history.append(result)
-                        if result.disposition is Disposition.ESCALATE:
-                            self.escalations.append(result)
+                # Per-tick containment: one bad tick (a raised gate check, a throwing reasoner
+                # aprocess, a bookkeeping slip) must never terminate the always-on loop. It is
+                # counted and health is signalled; the loop keeps ticking. This makes the loop
+                # self-heal in place rather than relying only on the outer Runtime supervisor.
+                try:
+                    if self.core.oversight.gate():
+                        # presence (when wired) advances arousal and gates proactivity per state
+                        self._apply_presence()
+                        result: Any = None
+                        if self.decision_mode == "code":
+                            # the decision + action are pure code, but the action callables may do
+                            # real I/O (research), so run them off the loop to stay responsive
+                            loop = asyncio.get_running_loop()
+                            result = await loop.run_in_executor(
+                                None, self._decide_and_act_once)
+                            self.ticks += 1
+                            self.prompt_sources.append("code")
+                        else:
+                            prompt, source = self._compose_prompt()
+                            result = await self.core.aprocess(
+                                prompt, authority=self.authority)
+                            self.ticks += 1
+                            self.prompt_sources.append(source)
+                            self.history.append(result)
+                            if result.disposition is Disposition.ESCALATE:
+                                self.escalations.append(result)
+                        self._beat_health(result)
+                        self._advance_mission()
+                        self._maybe_grow()
+                        self._maybe_persist()
+                except asyncio.CancelledError:
+                    raise   # a real cancellation (shutdown) must propagate, not be swallowed
+                except Exception:  # noqa: BLE001 — contain one bad tick, keep the mind alive
+                    self._note_error("run")
                     if self.health is not None:
                         try:
-                            self.health.beat("autonomic")
+                            self.health.record_error("autonomic")
                         except Exception:  # noqa: BLE001
                             pass
-                    self._advance_mission()
-                    self._maybe_grow()
-                    self._maybe_persist()
                 done += 1
                 if max_ticks is not None and done >= max_ticks:
                     break
@@ -453,6 +568,13 @@ class AutonomicLoop:
                "intents_adopted": self.intents_adopted,
                "code_acts": self.code_acts,
                "scheduler_runs": self.scheduler_runs,
+               "fallback_acts": self.fallback_acts,
+               "intentions_fired": self.intentions_fired,
+               # observability: a stalled or silently-failing loop is now visible, not "calm"
+               "errors": self.errors,
+               "stage_errors": dict(self.stage_errors),
+               "unproductive_ticks": self.unproductive_ticks,
+               "consecutive_unproductive": self.consecutive_unproductive,
                "sources": {s: self.prompt_sources.count(s)
                            for s in sorted(set(self.prompt_sources))}}
         if self.presence is not None:
