@@ -147,7 +147,8 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                         knowledge: Any = None, enable_code: bool = True,
                         max_read_bytes: int = 200_000,
                         web: Any = None, governor: Any = None,
-                        vault: Any = None, fs: Any = None) -> ToolRegistry:
+                        vault: Any = None, fs: Any = None,
+                        system: Any = None) -> ToolRegistry:
     """Register NYXARA's default real toolset onto ``registry`` (idempotent-skipping).
 
     ``memory`` (an optional :class:`~nyxara.memory.store.MemoryStore`) wires the
@@ -1176,6 +1177,213 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                                   "sudo is available and passwordless) — read-only, safe",
                       params=[],
                       capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        # ---- whole-machine OS control: NYXARA's own structured system-control faculty ---- #
+        # The OS-control sibling of the filesystem faculty. One governed, pure-Python engine
+        # (psutil when present, /proc + stdlib otherwise) that NYXARA drives HERSELF — she never
+        # hands the LLM a raw shell string for these. Read-only introspection is TOOL_CALL/LOW;
+        # process signalling is PROC_EXEC/HIGH; packages finally exercise the PKG_INSTALL cap and
+        # user management the ACCOUNT_MODIFY cap; the root surface (service/power/user/sysctl-write)
+        # sits at PRIV_ESCALATE/CRITICAL and routes through the SAME vault-backed sudo secret as
+        # privileged_shell. Power is off by default and a protected-PID guard is built in.
+        from nyxara.agency.system_control import SystemControl
+        _sys_cfg = system if system is not None else getattr(agency_cfg, "system", None)
+        system_ctl = (_sys_cfg if isinstance(_sys_cfg, SystemControl)
+                      else SystemControl.from_config(_sys_cfg))
+
+        def _sys_priv_runner(command: Any, timeout_s: float):
+            # Elevate WITH the Master's stored sudo credential (materialised only inside the vault),
+            # exactly like privileged_shell — never an exploit, guess or brute-force.
+            from nyxara.agency.privilege import privileged_exec
+            return _with_sudo_secret(lambda secret: privileged_exec(
+                command, sudo_password=secret, timeout_s=timeout_s))
+
+        system_ctl.privileged_runner = _sys_priv_runner
+
+        # -- read-only introspection: safe, low blast radius -- #
+        _add(ToolSpec("system_info", handler=system_ctl.system_info,
+                      description="OS/kernel/arch/hostname, boot time, uptime, load and logged-in "
+                                  "users — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        _add(ToolSpec("cpu_info", handler=lambda interval=0.2: system_ctl.cpu_info(interval=interval),
+                      description="CPU core counts, frequency and per-core utilisation (%)",
+                      params=[ToolParam("interval", "float", required=False, default=0.2)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("memory_info", handler=system_ctl.memory_info,
+                      description="virtual and swap memory (bytes + percent used) — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
+        _add(ToolSpec("disk_partitions", handler=system_ctl.disk_partitions,
+                      description="mounted partitions with per-mount usage (device, fstype, "
+                                  "total/used/free) — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("hardware_sensors", handler=system_ctl.sensors,
+                      description="hardware temperatures, fans and battery when the platform "
+                                  "exposes them — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("network_interfaces", handler=system_ctl.network_interfaces,
+                      description="network interfaces: addresses (IPv4/IPv6/MAC) and up/speed/MTU "
+                                  "— read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("net_connections",
+                      handler=lambda kind="inet", limit=200: system_ctl.net_connections(
+                          kind=kind, limit=limit),
+                      description="active network connections (family, local/remote, status, pid) "
+                                  "— read-only",
+                      params=[ToolParam("kind", "str", required=False, default="inet"),
+                              ToolParam("limit", "int", required=False, default=200)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("list_processes",
+                      handler=lambda sort_by="cpu", limit=50: system_ctl.list_processes(
+                          sort_by=sort_by, limit=limit),
+                      description="running processes (pid, name, user, cpu%, mem%, status, "
+                                  "cmdline), sorted (cpu|mem|pid|name) and capped — read-only",
+                      params=[ToolParam("sort_by", "str", required=False, default="cpu"),
+                              ToolParam("limit", "int", required=False, default=50)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("process_info", handler=lambda pid: system_ctl.process_info(pid),
+                      description="detailed info for one process by PID (name, user, status, "
+                                  "cpu/mem, threads, nice, cwd, exe) — read-only",
+                      params=[ToolParam("pid", "int")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("service_status", handler=lambda name: system_ctl.service_status(name),
+                      description="a systemd unit's active/enabled state — read-only, unprivileged",
+                      params=[ToolParam("name", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, target_param="name"))
+
+        _add(ToolSpec("package_query", handler=lambda name: system_ctl.package_query(name),
+                      description="whether a package is installed (auto-detects the manager) "
+                                  "— read-only",
+                      params=[ToolParam("name", "str")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, target_param="name"))
+
+        _add(ToolSpec("list_users", handler=system_ctl.list_users,
+                      description="local user accounts from /etc/passwd — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("who", handler=system_ctl.who,
+                      description="currently logged-in sessions (user, terminal, host, login "
+                                  "time) — read-only",
+                      params=[], capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("get_env", handler=lambda name="": system_ctl.get_env(name),
+                      description="read one environment variable, or the whole process "
+                                  "environment when name is empty — read-only",
+                      params=[ToolParam("name", "str", required=False, default="")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW))
+
+        _add(ToolSpec("sysctl_get", handler=lambda key: system_ctl.sysctl_get(key),
+                      description="read a kernel tunable via /proc/sys or sysctl — read-only",
+                      params=[ToolParam("key", "str", description="e.g. 'net.ipv4.ip_forward'")],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, target_param="key"))
+
+        # -- process control: PROC_EXEC/HIGH, irreversible (protected-PID guard built in) -- #
+        _add(ToolSpec("signal_process",
+                      handler=lambda pid, sig="SIGTERM": system_ctl.signal_process(pid, sig),
+                      description="send a signal to a process by PID (name/number/SIGxxx accepted) "
+                                  "— refuses init and NYXARA's own process; owner/full-control-gated",
+                      params=[ToolParam("pid", "int"),
+                              ToolParam("sig", "str", required=False, default="SIGTERM")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="pid"))
+
+        _add(ToolSpec("terminate_process", handler=lambda pid: system_ctl.terminate_process(pid),
+                      description="politely terminate a process (SIGTERM) — protected-PID guarded, "
+                                  "owner/full-control-gated, irreversible",
+                      params=[ToolParam("pid", "int")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="pid"))
+
+        _add(ToolSpec("kill_process", handler=lambda pid: system_ctl.kill_process(pid),
+                      description="forcefully kill a process (SIGKILL) — protected-PID guarded, "
+                                  "owner/full-control-gated, irreversible",
+                      params=[ToolParam("pid", "int")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="pid"))
+
+        _add(ToolSpec("set_process_priority",
+                      handler=lambda pid, nice: system_ctl.set_nice(pid, nice),
+                      description="set a process's scheduling niceness (-20 highest .. 19 lowest) "
+                                  "— protected-PID guarded, owner/full-control-gated",
+                      params=[ToolParam("pid", "int"), ToolParam("nice", "int")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.MODERATE, reversible=True,
+                      target_param="pid"))
+
+        _add(ToolSpec("set_env", handler=lambda name, value: system_ctl.set_env(name, value),
+                      description="set an environment variable for NYXARA's own process (and "
+                                  "children she spawns) — process-scoped, reversible",
+                      params=[ToolParam("name", "str"), ToolParam("value", "str")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.LOW, reversible=True,
+                      target_param="name"))
+
+        # -- package management: finally wires the PKG_INSTALL capability -- #
+        _add(ToolSpec("package_install", handler=lambda name: system_ctl.package_install(name),
+                      description="install a system/pip package via the detected manager "
+                                  "(apt/dnf/pacman/zypper/apk/brew/pip); elevates for system "
+                                  "managers — owner/full-control-gated, irreversible",
+                      params=[ToolParam("name", "str")],
+                      capability=Capability.PKG_INSTALL, risk=RiskTier.HIGH, reversible=False,
+                      target_param="name"))
+
+        _add(ToolSpec("package_remove", handler=lambda name: system_ctl.package_remove(name),
+                      description="remove a package via the detected manager; elevates for system "
+                                  "managers — owner/full-control-gated, irreversible",
+                      params=[ToolParam("name", "str")],
+                      capability=Capability.PKG_INSTALL, risk=RiskTier.HIGH, reversible=False,
+                      target_param="name"))
+
+        # -- user/account management: finally wires the ACCOUNT_MODIFY capability -- #
+        _add(ToolSpec("manage_user",
+                      handler=lambda action, username, password="": system_ctl.user_action(
+                          action, username, password=(password or None)),
+                      description="manage a local user: add/remove/modify/lock/unlock/passwd "
+                                  "(elevated via sudo) — owner/full-control-gated, irreversible",
+                      params=[ToolParam("action", "str",
+                                        description="add|remove|modify|lock|unlock|passwd"),
+                              ToolParam("username", "str"),
+                              ToolParam("password", "str", required=False, default="")],
+                      capability=Capability.ACCOUNT_MODIFY, risk=RiskTier.HIGH, reversible=False,
+                      target_param="username"))
+
+        # -- root surface: PRIV_ESCALATE/CRITICAL (opt-in privilege gate, like privileged_shell) -- #
+        _add(ToolSpec("service_control",
+                      handler=lambda name, action: system_ctl.service_action(name, action),
+                      description="control a systemd unit: start/stop/restart/reload/enable/"
+                                  "disable (elevated via sudo) — owner-gated, irreversible",
+                      params=[ToolParam("name", "str"),
+                              ToolParam("action", "str",
+                                        description="start|stop|restart|reload|enable|disable")],
+                      capability=Capability.PRIV_ESCALATE, risk=RiskTier.CRITICAL, reversible=False,
+                      target_param="name"))
+
+        _add(ToolSpec("power_control",
+                      handler=lambda action, delay_min=0: system_ctl.power_action(
+                          action, delay_min=delay_min),
+                      description="drive machine power: shutdown/poweroff/reboot/halt/suspend/"
+                                  "hibernate/logout (elevated) — OFF by default (config), "
+                                  "owner-gated, irreversible",
+                      params=[ToolParam("action", "str",
+                                        description="shutdown|poweroff|reboot|halt|suspend|"
+                                                    "hibernate|logout"),
+                              ToolParam("delay_min", "int", required=False, default=0)],
+                      capability=Capability.PRIV_ESCALATE, risk=RiskTier.CRITICAL, reversible=False,
+                      target_param="action"))
+
+        _add(ToolSpec("sysctl_set",
+                      handler=lambda key, value: system_ctl.sysctl_set(key, value),
+                      description="write a kernel tunable (sysctl -w) — elevated via sudo, "
+                                  "owner-gated, irreversible",
+                      params=[ToolParam("key", "str"), ToolParam("value", "str")],
+                      capability=Capability.PRIV_ESCALATE, risk=RiskTier.CRITICAL, reversible=False,
+                      target_param="key"))
 
         # ---- self-extension: forge a brand-new tool for a missing capability ---- #
         # Gated at SELF_MODIFY/HIGH so invoking it through the loop escalates to the

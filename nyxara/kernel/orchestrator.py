@@ -796,17 +796,19 @@ class NyxaraCore:
             from nyxara.agency.tools import ToolRegistry
             web_cfg = None
             fs_cfg = None
+            sys_cfg = None
             try:
                 from nyxara.kernel.config import get_settings
                 settings = get_settings()
                 web_cfg = settings.web
                 fs_cfg = settings.agency.filesystem
+                sys_cfg = settings.agency.system
             except Exception:  # noqa: BLE001 — config is a convenience, never a hard dep
                 web_cfg = None
             registry = ToolRegistry(policy=self.permissions, governor=self.governor)
             tools = build_default_tools(registry, memory=self.memory,
                                         web=web_cfg, governor=self.governor,
-                                        vault=self.vault, fs=fs_cfg)
+                                        vault=self.vault, fs=fs_cfg, system=sys_cfg)
             # Domain tool packs (researcher/coder/maker): register their pure-stdlib,
             # read-only tools (extractive summariser, Python syntax checker) onto the SAME
             # gated registry. Idempotent and non-executing — they widen reach without a

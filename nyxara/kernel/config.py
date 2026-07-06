@@ -1613,6 +1613,53 @@ class FilesystemConfig(BaseModel):
     max_search_matches: int = Field(default=1_000, ge=1)
 
 
+class SystemControlConfig(BaseModel):
+    """Whole-machine OS-control faculty (agency/system_control.py).
+
+    The disk sibling :class:`FilesystemConfig` governs NYXARA's reach over *files*; this governs
+    her reach over the *running machine* — processes, services, packages, hardware/system state,
+    power, users, and kernel tunables. NYXARA drives it herself with structured, pure-Python
+    operations (psutil when present, ``/proc`` + stdlib otherwise), never by handing the LLM a raw
+    shell string. Every operation still clears the kernel's capability/risk/authority pipeline and
+    the /scram + oversight + corrigibility gates — these knobs only shape the engine's own guards.
+
+    Reach is maximal by default (aligned with ``full_control``): she may enumerate and signal
+    processes, control services, install/remove packages, and read all system state on her own
+    initiative. The two most dangerous surfaces are fenced by construction — power control is OFF
+    by default, and a protected-PID guard keeps her from signalling init or killing herself — and
+    root-requiring actions still ride the opt-in ``privilege_escalation`` gate + the Master's
+    stored sudo credential.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    # Master switch for the whole faculty. ON by default (max level). Off makes every effectful
+    # operation refuse as data (reads still describe why they can't run).
+    enabled: bool = Field(default=True)
+    # Power control (shutdown/reboot/suspend/logout) is the single most destructive OS action, so
+    # it is OFF by default (opt-in). Set NYXARA_AGENCY__SYSTEM__ALLOW_POWER=true to enable.
+    allow_power: bool = Field(default=False)
+    # Service (systemd unit) start/stop/restart/enable/disable. ON by default; status reads are
+    # always allowed regardless of this flag.
+    allow_service_control: bool = Field(default=True)
+    # Package install/remove via the detected manager (apt/dnf/pacman/zypper/apk/brew/pip). ON by
+    # default; package queries are always allowed regardless of this flag.
+    allow_package_management: bool = Field(default=True)
+    # Local user add/remove/modify/lock/passwd. ON by default; listing users is always allowed.
+    allow_user_management: bool = Field(default=True)
+    # Force a specific package manager instead of auto-detecting ("" = auto-detect from PATH).
+    package_manager: str = Field(default="")
+    # When True (default) the engine refuses to signal/renice NYXARA's own process/parent/group so
+    # she cannot accidentally kill herself. protected_pids additionally fences off system-critical
+    # PIDs — 0 (kernel) and 1 (init/systemd) by default.
+    protect_self: bool = Field(default=True)
+    protected_pids: List[int] = Field(default_factory=lambda: [0, 1])
+    # Cap on the number of processes a single listing returns, so an enumeration can't run away.
+    max_processes: int = Field(default=5_000, ge=1)
+    # Default wall-clock timeout for effectful/privileged operations (seconds).
+    default_timeout_s: float = Field(default=30.0, gt=0)
+
+
 class AgencyConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -1635,6 +1682,14 @@ class AgencyConfig(BaseModel):
     # oversight + corrigibility. When full_control is off but filesystem.whole_disk is on, the
     # orchestrator installs a standalone FS grant so filesystem-wide access works independently.
     filesystem: FilesystemConfig = Field(default_factory=FilesystemConfig)
+    # --- whole-machine OS control (agency/system_control.py) --- #
+    # The OS-control sibling of the filesystem faculty: NYXARA's own structured, pure-Python engine
+    # for processes, services, packages, hardware/system state, power, users and kernel tunables.
+    # Reach is maximal by default (aligned with full_control), with power OFF by default and a
+    # protected-PID guard by construction. Every call still clears the capability/risk/authority
+    # gates and /scram + oversight + corrigibility; root-requiring actions ride the opt-in
+    # privilege_escalation gate + the Master's stored sudo credential.
+    system: SystemControlConfig = Field(default_factory=SystemControlConfig)
     # --- full operational control (agency/permissions.grant_full_operational_control) --- #
     # When ON, the Master pre-grants NYXARA a maximal *autonomous* envelope over every
     # operational capability (shell, files incl. delete, network, packages, self-improvement)
