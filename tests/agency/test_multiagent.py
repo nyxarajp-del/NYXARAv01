@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nyxara.agency.multiagent import Delegator
 from nyxara.agency.permissions import Authority, Capability, RiskTier
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Candidate, NyxaraCore
 
 
@@ -58,8 +59,11 @@ def test_delegate_multistep_tool_use_is_tracked():
 
 
 def test_risky_delegate_escalates_and_never_auto_acts():
-    d = Delegator(core=NyxaraCore(reasoner=_Risky()), max_steps=3,
-                  authority=Authority.AUTONOMOUS)
+    # conservative oversight (the default is now fully-autonomous SOVEREIGN): proves a sub-agent
+    # is no escape hatch — a risky irreversible move still escalates to the Master when autonomy
+    # is dialed down.
+    d = Delegator(core=NyxaraCore(reasoner=_Risky(), review_mode=ReviewMode.AUTONOMOUS),
+                  max_steps=3, authority=Authority.AUTONOMOUS)
     res = d.delegate("reckless", "do something dangerous")
     # a sub-agent is no escape hatch: a risky irreversible move goes to the Master
     assert res.escalated and res.status == "escalated"

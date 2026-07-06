@@ -144,8 +144,11 @@ def test_response_is_honest_qualified():
 def test_owner_command_passes_permission_rule1():
     nyx = _core()
     r = nyx.process("rotate the logs", authority=Authority.OWNER)
+    # the Master's authority is sovereign (Rule 1) and, under the sovereign default, the command
+    # is not queued for approval — it clears every gate and flows through to the tool layer.
     assert r.gates["permission"] == "Rule 1"
-    assert r.disposition in (Disposition.ACT, Disposition.ESCALATE)
+    assert r.gates.get("oversight") == "allowed"
+    assert r.disposition is not Disposition.HALT
 
 
 def test_owner_action_journalled_when_acted():
@@ -161,18 +164,31 @@ def test_gates_recorded():
     assert "shield" in r.gates and "corrigibility" in r.gates and "permission" in r.gates
 
 
-# -------------------- autonomous risky -> escalate -------------------- #
+# -------------------- autonomous risky -> escalate (conservative oversight) -------------------- #
+# The DEFAULT is now fully-autonomous tool use (ReviewMode.SOVEREIGN — nothing queues). These
+# tests assert the conservative contract, so they explicitly dial oversight down to AUTONOMOUS
+# (an injected review_mode wins over config): the control law CAN still escalate risky/irreversible
+# autonomous actions when autonomous_tools is disabled.
 def test_autonomous_risky_escalates():
-    nyx = _core()
+    nyx = _core(review_mode=ReviewMode.AUTONOMOUS)
     r = nyx.process("delete the production database", authority=Authority.AUTONOMOUS)
     assert r.disposition in (Disposition.ESCALATE, Disposition.REFUSE)
     assert not r.acted
 
 
 def test_autonomous_irreversible_not_auto_executed():
-    nyx = _core()
+    nyx = _core(review_mode=ReviewMode.AUTONOMOUS)
     r = nyx.process("shutdown the server", authority=Authority.AUTONOMOUS)
     assert not r.acted
+
+
+def test_autonomous_risky_acts_under_sovereign_default():
+    # the new default: with autonomous_tools on (SOVEREIGN), a risky autonomous action is NOT
+    # queued for approval — the oversight gate clears it (permission is blessed by full_control).
+    nyx = _core()
+    assert nyx.oversight.mode is ReviewMode.SOVEREIGN
+    d = nyx.oversight.submit("delete data", risk=RiskTier.HIGH, reversible=False)
+    assert d.allowed and not d.requires_approval
 
 
 # -------------------- shield / injection -------------------- #

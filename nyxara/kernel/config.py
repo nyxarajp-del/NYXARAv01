@@ -1645,6 +1645,25 @@ class AgencyConfig(BaseModel):
     # OS on her own initiative from first boot. Set NYXARA_AGENCY__FULL_CONTROL=false to disable
     # and fall back to the conservative, per-action-escalating envelope.
     full_control: bool = Field(default=True)
+    # --- autonomous tool use (guard/oversight.py ReviewMode.SOVEREIGN) --- #
+    # The master switch for "NYXARA uses ANY tool without per-action approval". full_control (and
+    # the autonomous_* envelopes) widen the PERMISSION gate, but the kernel's oversight gate would
+    # still QUEUE every high-risk/irreversible tool call for the Master's manual approval. When this
+    # is ON, oversight runs in the fully-autonomous SOVEREIGN mode: nothing is ever queued — she
+    # acts at once. It also folds in privilege escalation (root/sudo runs without approval too,
+    # elevating WITH the Master's stored credential — never an exploit/guess/brute-force). The true
+    # safety boundaries are deliberately untouched: the /scram kill-switch and pause still halt
+    # everything instantly, the hash-chained transparency feed still records every action (Rule 6),
+    # corrigibility stays invariant, and modifying the Rules/this policy/her identity stays
+    # owner-exclusive (Rule 8). ON by default (the Master's standing choice), consistent with
+    # full_control. Set NYXARA_AGENCY__AUTONOMOUS_TOOLS=false to fall back to per-action approval
+    # for risky/irreversible actions (the conservative AUTONOMOUS oversight mode).
+    autonomous_tools: bool = Field(default=True)
+    # Explicit oversight review-mode override. None (default) -> derived from autonomous_tools
+    # (True -> "sovereign", False -> "autonomous"). Set to pin a specific tier regardless:
+    # "sovereign" = nothing queues; "autonomous" = risky/irreversible queue; "supervised" =
+    # moderate+ queue; "manual" = everything queues for the Master. /scram + pause always apply.
+    oversight_review_mode: Optional[Literal["sovereign", "autonomous", "supervised", "manual"]] = None
     # --- autonomous self-coding (agency/self_coder + the proactive code_detector) --- #
     # When ON, NYXARA WRITES code herself (her own LLM-free CodeSynthesizer) and RUNS it on her
     # own initiative through the gated run_python tool the moment she has a concrete computational

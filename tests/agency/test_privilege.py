@@ -85,14 +85,36 @@ def test_privilege_escalation_off_by_default():
     assert get_settings().agency.privilege_escalation is False
 
 
-def test_orchestrator_omits_privilege_grant_by_default():
-    # full_control is ON by default, but PRIV_ESCALATE must still escalate.
+def test_orchestrator_omits_privilege_grant_when_autonomy_dialed_down(monkeypatch):
+    # The autonomous_tools master switch (ON by default) folds root/sudo in, so by default the
+    # privilege grant IS installed (see test_default_folds_privilege_into_autonomous_tools). With
+    # both autonomous_tools AND the explicit privilege flag off, PRIV_ESCALATE escalates again —
+    # full_control still never confers root (it is excluded from _OPERATIONAL_CAPS).
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", "false")
+    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "false")
+    from nyxara.kernel import config as cfg
+    cfg.reload_settings()
+    try:
+        from nyxara.kernel.orchestrator import NyxaraCore
+        core = NyxaraCore()
+        names = [g.name for g in core.permissions.grants()]
+        assert "privilege-escalation:os.privilege" not in names
+        d = core.permissions.check(_auto(Capability.PRIV_ESCALATE, target="sudo id"))
+        assert d.escalated
+    finally:
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", raising=False)
+        cfg.reload_settings()
+
+
+def test_default_folds_privilege_into_autonomous_tools():
+    # the Master's decision: autonomous_tools (default ON) blesses autonomous root/sudo too.
     from nyxara.kernel.orchestrator import NyxaraCore
     core = NyxaraCore()
     names = [g.name for g in core.permissions.grants()]
-    assert "privilege-escalation:os.privilege" not in names
+    assert "privilege-escalation:os.privilege" in names
     d = core.permissions.check(_auto(Capability.PRIV_ESCALATE, target="sudo id"))
-    assert d.escalated
+    assert d.allowed and d.rule_basis == "grant"
 
 
 def test_orchestrator_installs_privilege_grant_when_flag_on(monkeypatch):

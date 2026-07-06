@@ -124,6 +124,9 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", "false")
     monkeypatch.setenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", "false")
+    # autonomous_tools also ships ON and folds in a privilege-escalation grant; disable it too so
+    # this test isolates the full_control behaviour (no standing grants at all).
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()
     try:
@@ -135,6 +138,7 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
         assert d.escalated
     finally:
         monkeypatch.delenv("NYXARA_AGENCY__FULL_CONTROL", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", raising=False)

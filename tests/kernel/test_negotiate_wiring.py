@@ -10,6 +10,7 @@ instead of vanishing into a one-line message (Economic/Social reasoning, capabil
 from __future__ import annotations
 
 from nyxara.agency.permissions import Authority, Capability, RiskTier
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Candidate, Disposition, NyxaraCore
 
 
@@ -35,8 +36,10 @@ def test_non_owner_cannot_answer():
 
 
 def test_escalated_action_opens_a_consent_request():
-    # a risky autonomous action that the gates escalate becomes a structured, answerable CONFIRM
-    nyx = NyxaraCore()
+    # a risky autonomous action that the gates escalate becomes a structured, answerable CONFIRM.
+    # Pin conservative oversight (default is now the fully-autonomous SOVEREIGN mode) so the action
+    # actually escalates and opens the negotiation.
+    nyx = NyxaraCore(review_mode=ReviewMode.AUTONOMOUS)
     risky = Candidate(text="delete production database", kind="act", confidence=0.8,
                       capability=Capability.TOOL_CALL, risk=RiskTier.HIGH, reversible=False)
     nyx._invoke_reasoner = lambda *a, **k: risky          # type: ignore[assignment]

@@ -147,6 +147,9 @@ def test_orchestrator_respects_disable_flag(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", "false")
     monkeypatch.setenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", "false")
+    # autonomous_tools ships ON too and folds in a privilege-escalation grant; disable it so the
+    # policy really has no standing grants at all.
+    monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()  # settings are a cached singleton; re-read with the env set
     try:
@@ -162,4 +165,5 @@ def test_orchestrator_respects_disable_flag(monkeypatch):
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_TOOLS", raising=False)
         cfg.reload_settings()

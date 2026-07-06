@@ -10,6 +10,7 @@ deterministic stand-in, test doubles) run exactly once — never multiplied.
 from __future__ import annotations
 
 from nyxara.agency.permissions import Authority, Capability, RiskTier
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Candidate, Disposition, NyxaraCore
 from nyxara.observe.mindscope import ThoughtKind
 
@@ -82,7 +83,9 @@ def test_parallel_records_thought_threads():
 
 # -------------------- the control law still holds -------------------- #
 def test_high_risk_hypothesis_still_gated():
-    nyx = NyxaraCore(reasoner=_Risky(), parallel_hypotheses=3)
+    # conservative oversight (default is now the fully-autonomous SOVEREIGN mode): a high-risk
+    # hypothesis must still be gated when autonomy is dialed down.
+    nyx = NyxaraCore(reasoner=_Risky(), parallel_hypotheses=3, review_mode=ReviewMode.AUTONOMOUS)
     r = nyx.process("do the thing", authority=Authority.AUTONOMOUS)
     assert r.disposition in (Disposition.ESCALATE, Disposition.REFUSE, Disposition.HALT)
     assert r.disposition is not Disposition.ACT
