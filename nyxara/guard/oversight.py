@@ -55,6 +55,7 @@ class ControlState(str, Enum):
 
 
 class ReviewMode(str, Enum):
+    SOVEREIGN = "sovereign"     # fully autonomous — NOTHING queues for approval (scram/pause still halt)
     AUTONOMOUS = "autonomous"   # only risky/irreversible actions need approval
     SUPERVISED = "supervised"   # moderate+ or irreversible need approval
     MANUAL = "manual"           # everything needs approval
@@ -150,6 +151,14 @@ class Oversight:
 
     # ---- review policy ---- #
     def _needs_approval(self, risk: RiskTier, reversible: bool) -> bool:
+        # SOVEREIGN — the Master's fully-autonomous standing choice: NO action ever queues for
+        # per-action approval, whatever its risk or reversibility. This is what makes "use any
+        # tool without approval" real. It removes ONLY the approval queue: /scram (STOPPED) and
+        # pause (PAUSED) are checked in submit() BEFORE this, so the kill-switch and pause still
+        # halt everything instantly, and the tamper-evident transparency feed still records every
+        # proposal + auto-approval (Rule 6). Corrigibility stays invariant.
+        if self.mode is ReviewMode.SOVEREIGN:
+            return False
         if self.mode is ReviewMode.MANUAL:
             return True
         if not reversible:
@@ -361,6 +370,20 @@ if __name__ == "__main__":  # pragma: no cover
     ov.veto(d.action_id, owner=True, reason="too dangerous")
     assert ov.get(d.action_id).status is ActionStatus.VETOED
     print("real-time veto      : the Master vetoed the risky action ✓")
+
+    # SOVEREIGN — the Master's fully-autonomous standing choice: even a HIGH-risk irreversible
+    # action proceeds with NO approval queue, yet /scram and pause still halt it (proven below).
+    sov = Oversight(mode=ReviewMode.SOVEREIGN, clock=lambda: now["t"])
+    d = sov.submit("delete a file autonomously", risk=RiskTier.CRITICAL, reversible=False)
+    print(f"\nsovereign risky     : allowed={d.allowed} approval={d.requires_approval}")
+    assert d.allowed and not d.requires_approval
+    sov.record_executed(d.action_id)
+    assert sov.verify_feed()          # transparency feed still intact under SOVEREIGN
+    # but the kill-switch is untouched — scram still fail-closes every submit
+    sov.scram(reason="master stop")
+    blocked = sov.submit("anything", risk=RiskTier.LOW)
+    assert not blocked.allowed and "scrammed" in blocked.reason
+    print("sovereign + scram   : kill-switch still halts (corrigibility preserved) ✓")
 
     # PAUSE — the loop must stop proceeding
     ov.pause(reason="let me look")

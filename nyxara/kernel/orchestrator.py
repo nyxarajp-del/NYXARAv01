@@ -261,10 +261,18 @@ class NyxaraCore:
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
                  history_turns: int = 6, parallel_hypotheses: int = 3,
-                 review_mode: ReviewMode = ReviewMode.AUTONOMOUS) -> None:
+                 review_mode: Optional[ReviewMode] = None) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
-        self.oversight = oversight or Oversight(mode=review_mode)
+        # Oversight review mode: an explicitly injected oversight or review_mode wins; otherwise it
+        # is resolved from config (agency.autonomous_tools / agency.oversight_review_mode) by
+        # _resolve_review_mode below. Default (autonomous_tools on) is SOVEREIGN — no per-action
+        # approval queue — so NYXARA uses any tool without approval. /scram + pause still halt.
+        if oversight is not None:
+            self.oversight = oversight
+        else:
+            self.oversight = Oversight(
+                mode=review_mode if review_mode is not None else self._resolve_review_mode())
         self.corrigibility = corrigibility or Corrigibility()
         self.permissions = permissions or build_default_policy()
         # Full operational control (opt-in): when the owner sets agency.full_control, and no
@@ -298,13 +306,15 @@ class NyxaraCore:
                     grant_autonomous_remote(
                         self.permissions,
                         reversible_only=not agency_cfg.autonomous_remote_allow_irreversible)
-                # Privilege escalation (opt-in; OFF by default): a standing envelope over
-                # PRIV_ESCALATE so NYXARA may run root/admin OS operations (sudo, chmod/chown)
-                # on her own initiative, elevating WITH the Master's stored sudo credential.
-                # Independent of full_control by design — PRIV_ESCALATE is excluded from
-                # _OPERATIONAL_CAPS, so full_control never confers root; only this flag does.
-                # /scram + oversight + corrigibility and the owner-exclusive caps stay intact.
-                if agency_cfg.privilege_escalation:
+                # Privilege escalation: a standing envelope over PRIV_ESCALATE so NYXARA may run
+                # root/admin OS operations (sudo, chmod/chown) on her own initiative, elevating
+                # WITH the Master's stored sudo credential (never an exploit/guess/brute-force).
+                # PRIV_ESCALATE is excluded from _OPERATIONAL_CAPS, so full_control never confers
+                # root — it is blessed here by EITHER the explicit privilege_escalation flag OR the
+                # autonomous_tools master switch (the Master's decision to fold root/sudo into
+                # "use any tool without approval"). /scram + oversight + corrigibility and the
+                # owner-exclusive caps stay intact.
+                if agency_cfg.privilege_escalation or agency_cfg.autonomous_tools:
                     from nyxara.agency.permissions import grant_privilege_escalation
                     grant_privilege_escalation(
                         self.permissions,
@@ -762,6 +772,23 @@ class NyxaraCore:
             return CredentialVault.bootstrap(guardian=self.guardian)
         except Exception:  # noqa: BLE001 — the vault is a capability, never a hard dependency
             return None
+
+    @staticmethod
+    def _resolve_review_mode() -> ReviewMode:
+        """Resolve the oversight review mode from config (agency.autonomous_tools /
+        agency.oversight_review_mode). An explicit oversight_review_mode wins; otherwise it is
+        derived from the autonomous_tools master switch (on -> SOVEREIGN: no per-action approval;
+        off -> AUTONOMOUS: risky/irreversible actions escalate). Falls back to SOVEREIGN if config
+        cannot be read, matching the default standing choice."""
+        try:
+            from nyxara.kernel.config import get_settings
+            agency_cfg = get_settings().agency
+            explicit = agency_cfg.oversight_review_mode
+            if explicit:
+                return ReviewMode(explicit)
+            return ReviewMode.SOVEREIGN if agency_cfg.autonomous_tools else ReviewMode.AUTONOMOUS
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return ReviewMode.SOVEREIGN
 
     def _build_tools(self) -> Any:
         try:
@@ -6410,17 +6437,28 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"\nconversation        : {r.disposition.value} — {r.response!r}")
     assert r.acted and r.candidate.kind == "respond"
 
-    # a low/moderate command from the Master goes through every gate and acts
+    # a command from the Master clears every gate (Rule 1 permission, guardian, oversight); under
+    # the sovereign default it is not queued, so it flows straight through to the tool layer.
     r = nyx.process("rotate the application logs", authority=Authority.OWNER)
     print(f"command (owner)     : {r.disposition.value} gates={r.gates}")
-    assert r.disposition in (Disposition.ACT, Disposition.ESCALATE)
+    assert r.gates.get("permission") == "Rule 1" and r.gates.get("oversight") == "allowed"
 
     # WHY did NYXARA decide that? — the whole turn is auditable
     print(f"\nexplain last        : {nyx.explain_last()}")
 
-    # an AUTONOMOUS high-risk irreversible command escalates to the Master (not auto-done)
-    r = nyx.process("delete the production database", authority=Authority.AUTONOMOUS)
-    print(f"\nrisky (autonomous)  : {r.disposition.value} — {r.reason}")
+    # autonomous tool use (default): oversight runs in the fully-autonomous SOVEREIGN mode, so a
+    # risky autonomous action is NOT queued for per-action approval — she may act at once. The
+    # /scram kill-switch, pause, the transparency feed and the owner-exclusive caps stay intact.
+    assert nyx.oversight.mode is ReviewMode.SOVEREIGN
+    d = nyx.oversight.submit("delete data", risk=RiskTier.HIGH, reversible=False)
+    print(f"\nsovereign tool use  : allowed={d.allowed} approval={d.requires_approval} (no queue)")
+    assert d.allowed and not d.requires_approval
+
+    # dial autonomy down (autonomous_tools off => AUTONOMOUS oversight): the control law CAN still
+    # escalate a high-risk irreversible autonomous command to the Master rather than auto-run it.
+    cautious = NyxaraCore(review_mode=ReviewMode.AUTONOMOUS)
+    r = cautious.process("delete the production database", authority=Authority.AUTONOMOUS)
+    print(f"cautious (autonomous): {r.disposition.value} — {r.reason}")
     assert r.disposition in (Disposition.ESCALATE, Disposition.REFUSE)
     assert not r.acted
 

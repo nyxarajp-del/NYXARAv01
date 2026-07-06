@@ -15,6 +15,7 @@ from nyxara.agency.mission import (
     MissionStatus,
 )
 from nyxara.agency.permissions import Capability, RiskTier
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Candidate, NyxaraCore
 
 
@@ -94,7 +95,10 @@ def test_decomposition_into_multiple_milestones(tmp_path):
 
 
 def test_escalation_defers_then_master_approves_and_resumes(tmp_path):
-    core = NyxaraCore(reasoner=_EscalateThenComply())
+    # pin conservative oversight: the default is now fully-autonomous SOVEREIGN (nothing queues),
+    # but this test exercises the escalate -> Master-approves -> resume path, which needs a gate
+    # that actually escalates the risky milestone.
+    core = NyxaraCore(reasoner=_EscalateThenComply(), review_mode=ReviewMode.AUTONOMOUS)
     exe = MissionExecutive(core, persist_dir=str(tmp_path))
     m = exe.run("A goal that needs the Master's sign-off")
 

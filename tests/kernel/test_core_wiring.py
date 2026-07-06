@@ -12,6 +12,7 @@ Every faculty *colours* the loop; none may govern it. The kernel still disposes.
 from __future__ import annotations
 
 from nyxara.agency.permissions import Authority
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Disposition, NyxaraCore
 from nyxara.observe.mindscope import ThoughtKind
 
@@ -147,8 +148,10 @@ def test_turn_logs_meta_trial():
 # -------------------- the faculties never govern -------------------- #
 def test_faculties_are_colour_only_high_risk_still_escalates():
     # an autonomous, high-risk irreversible proposal must NOT auto-act, no matter what
-    # the predictive/dual-process/meta faculties say — the kernel still disposes.
-    nyx = _core()
+    # the predictive/dual-process/meta faculties say — the kernel still disposes. Oversight is
+    # pinned to AUTONOMOUS here (the default is now the fully-autonomous SOVEREIGN mode) so the
+    # conservative escalation contract is what's under test.
+    nyx = _core(review_mode=ReviewMode.AUTONOMOUS)
     r = nyx.process("delete the production database", authority=Authority.AUTONOMOUS)
     assert r.disposition in (Disposition.ESCALATE, Disposition.REFUSE, Disposition.HALT)
     assert r.disposition is not Disposition.ACT

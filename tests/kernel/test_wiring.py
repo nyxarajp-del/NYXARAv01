@@ -9,6 +9,7 @@ and participating in every turn, while never overriding the control law.
 from __future__ import annotations
 
 from nyxara.agency.permissions import Authority
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Disposition, NyxaraCore
 
 
@@ -224,8 +225,10 @@ def test_history_reaches_the_reasoner():
 
 # -------------------- faculties never override the control law -------------------- #
 def test_faculties_do_not_change_dispositions():
-    # a benign owner turn still acts; a risky autonomous one still escalates/refuses
-    nyx = NyxaraCore()
+    # a benign owner turn still acts; a risky autonomous one still escalates/refuses when oversight
+    # is dialed down to AUTONOMOUS (the default is now the fully-autonomous SOVEREIGN mode, so this
+    # pins the conservative tier to prove the control law can still escalate).
+    nyx = NyxaraCore(review_mode=ReviewMode.AUTONOMOUS)
     assert nyx.process("how are you?", authority=Authority.OWNER).acted
     r = nyx.process("delete the production database", authority=Authority.AUTONOMOUS)
     assert r.disposition in (Disposition.ESCALATE, Disposition.REFUSE)
