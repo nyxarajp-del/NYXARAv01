@@ -63,6 +63,55 @@ def test_run_shell_runs_autonomously_under_full_control():
     assert r.ok and "AUTONOMOUS" in r.value["stdout"]
 
 
+# --------------------------------------------------------------------------- #
+# process/job control + system introspection tools
+# --------------------------------------------------------------------------- #
+def test_process_control_tools_registered():
+    names = set(_reg().names())
+    assert {"proc_spawn", "proc_list", "proc_read", "proc_write", "proc_signal",
+            "proc_kill", "proc_wait", "list_processes", "kill_process",
+            "system_info"} <= names
+
+
+def test_proc_spawn_read_wait_roundtrip():
+    import time
+
+    reg = _reg()
+    r = reg.invoke("proc_spawn", {"command": "echo hello-job"}, authority=Authority.OWNER)
+    assert r.ok and r.value["ok"]
+    handle = r.value["handle"]
+    reg.invoke("proc_wait", {"handle": handle, "timeout_s": 10.0}, authority=Authority.OWNER)
+    time.sleep(0.05)
+    out = reg.invoke("proc_read", {"handle": handle}, authority=Authority.OWNER)
+    assert out.ok and "hello-job" in out.value["stdout"]
+
+
+def test_proc_spawn_escalates_under_default_policy():
+    # proc_spawn is PROC_EXEC/HIGH like run_shell: conservative policy escalates autonomous use.
+    r = _reg().invoke("proc_spawn", {"command": "echo hi"}, authority=Authority.AUTONOMOUS)
+    assert not r.ok and r.requires_owner
+
+
+def test_proc_spawn_runs_autonomously_under_full_control():
+    from nyxara.agency.permissions import build_sovereign_policy
+
+    reg = build_default_tools(ToolRegistry(policy=build_sovereign_policy()))
+    r = reg.invoke("proc_spawn", {"command": "sleep 300"}, authority=Authority.AUTONOMOUS)
+    assert r.ok and r.value["ok"]
+    reg.invoke("proc_kill", {"handle": r.value["handle"]}, authority=Authority.AUTONOMOUS)
+
+
+def test_system_info_tool_is_read_only_and_safe():
+    # system_info is TOOL_CALL/LOW: even autonomously it runs without escalation.
+    r = _reg().invoke("system_info", {}, authority=Authority.AUTONOMOUS)
+    assert r.ok and r.value["ok"] and r.value["cpu_count"] >= 1
+
+
+def test_kill_process_requires_a_target():
+    r = _reg().invoke("kill_process", {}, authority=Authority.OWNER)
+    assert r.ok and r.value["ok"] is False and "pid" in r.value["error"]
+
+
 def test_web_search_routes_through_provider_layer(monkeypatch):
     import nyxara.senses.search as search
 

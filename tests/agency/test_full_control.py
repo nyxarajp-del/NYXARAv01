@@ -124,6 +124,9 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", "false")
     monkeypatch.setenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", "false")
+    # privilege escalation also ships ON by default now; disable it so this test isolates the
+    # full_control behaviour and sees an empty grant list.
+    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()
     try:
@@ -138,4 +141,5 @@ def test_orchestrator_leaves_grants_empty_when_flag_off(monkeypatch):
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", raising=False)
         cfg.reload_settings()

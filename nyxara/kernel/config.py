@@ -1707,13 +1707,16 @@ class AgencyConfig(BaseModel):
     # run privileged (root/admin) OS operations on her own initiative WITHOUT escalating each
     # action — `sudo` commands and OS permission/ownership changes — using the sudo credential
     # the Master stored (`sudo_credential_name`). This is the single most dangerous OS surface,
-    # so unlike full_control / autonomous_internet / autonomous_remote it is OFF by default
-    # (opt-in only). It elevates *with* the Master's own credential — never an exploit, guess or
-    # brute-force — and is deliberately NOT part of full_control's _OPERATIONAL_CAPS, so turning
-    # full_control on never confers root; only this flag does. /scram + oversight + corrigibility
-    # and the owner-exclusive caps (Rule 8) all remain intact. Set
-    # NYXARA_AGENCY__PRIVILEGE_ESCALATION=true to enable.
-    privilege_escalation: bool = Field(default=False)
+    # and it is deliberately NOT part of full_control's _OPERATIONAL_CAPS, so turning full_control
+    # on never confers root; only THIS flag does. It ships ON by default (max-level control): the
+    # Master has granted NYXARA unrestricted control of her own computer, root included. It always
+    # elevates *with* the Master's own credential (stored sudo password, or NOPASSWD/already-root)
+    # — never an exploit, guess or brute-force — and it actually elevates only when such a
+    # credential is available; otherwise `sudo -n` fails cleanly as data. The sovereign gates are
+    # untouched: /scram + oversight + corrigibility and the owner-exclusive caps (Rule 8) all
+    # remain intact. Set NYXARA_AGENCY__PRIVILEGE_ESCALATION=false to make root escalate to the
+    # Master again.
+    privilege_escalation: bool = Field(default=True)
     # Privileged OS operations are effectful and usually irreversible; True (default) means
     # autonomy is NOT blocked by a reversibility floor. Set false to make irreversible privileged
     # actions escalate to the Master while reversible ones still run autonomously.

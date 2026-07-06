@@ -1171,6 +1171,138 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                               ToolParam("timeout_s", "float", required=False, default=5.0)],
                       capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
 
+        # ---- live process & job control: background processes NYXARA drives over time ---- #
+        # run_shell above is one-shot (blocks to completion). This is the other half of real
+        # machine control: launch a long-running / interactive process, then list it, stream its
+        # output, feed it stdin, signal it and kill it across separate turns of the sovereign
+        # loop — a real job table, exactly like juggling terminal tabs. One process-lifetime
+        # ProcessManager is shared here so jobs PERSIST across calls. All PROC_EXEC/HIGH, so the
+        # full_control grant covers them automatically; there is no command filtering.
+        from nyxara.agency.process_control import get_process_manager
+        _proc_mgr = get_process_manager()
+
+        def _proc_spawn(command: str, tty: bool = False, cwd: str = "",
+                        stdin: str = "") -> Dict[str, Any]:
+            return _proc_mgr.spawn(command, tty=tty, cwd=cwd or None, stdin=stdin or None)
+
+        _add(ToolSpec("proc_spawn", handler=_proc_spawn,
+                      description="launch an ARBITRARY command as a background job in a real "
+                                  "shell and return its handle+pid immediately (does NOT block). "
+                                  "Use proc_read to stream output, proc_write to feed stdin, "
+                                  "proc_signal/proc_kill to stop it. tty=true attaches a real "
+                                  "pseudo-terminal for interactive/ncurses programs (top, vim, "
+                                  "prompts). Owner/full-control-gated, irreversible",
+                      params=[ToolParam("command", "str"),
+                              ToolParam("tty", "bool", required=False, default=False,
+                                        description="attach a pseudo-terminal (interactive/TTY apps)"),
+                              ToolParam("cwd", "str", required=False, default="",
+                                        description="working directory override"),
+                              ToolParam("stdin", "str", required=False, default="",
+                                        description="optional standard input written at launch")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="command"))
+
+        def _proc_list() -> Dict[str, Any]:
+            return _proc_mgr.list_jobs()
+
+        _add(ToolSpec("proc_list", handler=_proc_list,
+                      description="list every background job (running or exited) with pid, "
+                                  "command, status, return code and buffered output size",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        def _proc_read(handle: int, max_bytes: int = 100_000) -> Dict[str, Any]:
+            return _proc_mgr.read(handle, max_bytes=max(0, max_bytes))
+
+        _add(ToolSpec("proc_read", handler=_proc_read,
+                      description="read a background job's output that arrived since the last "
+                                  "read (incremental streaming), plus its running/exit status",
+                      params=[ToolParam("handle", "int"),
+                              ToolParam("max_bytes", "int", required=False, default=100_000)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        def _proc_write(handle: int, data: str, newline: bool = False) -> Dict[str, Any]:
+            return _proc_mgr.write(handle, data, newline=newline)
+
+        _add(ToolSpec("proc_write", handler=_proc_write,
+                      description="feed data to a running background job's standard input "
+                                  "(or its pty); set newline=true to append a newline",
+                      params=[ToolParam("handle", "int"), ToolParam("data", "str"),
+                              ToolParam("newline", "bool", required=False, default=False)],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
+
+        def _proc_signal(handle: int, sig: int = 15) -> Dict[str, Any]:
+            return _proc_mgr.signal(handle, sig)
+
+        _add(ToolSpec("proc_signal", handler=_proc_signal,
+                      description="send a signal (default 15/SIGTERM) to a background job's "
+                                  "whole process group — irreversible",
+                      params=[ToolParam("handle", "int"),
+                              ToolParam("sig", "int", required=False, default=15,
+                                        description="signal number, e.g. 15=TERM, 9=KILL, 2=INT")],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
+
+        def _proc_kill(handle: int, timeout_s: float = 5.0) -> Dict[str, Any]:
+            return _proc_mgr.kill(handle, timeout_s=max(0.1, min(timeout_s, 60.0)))
+
+        _add(ToolSpec("proc_kill", handler=_proc_kill,
+                      description="terminate a background job: SIGTERM, wait, then SIGKILL if it "
+                                  "clings on. Reaps the whole process group — irreversible",
+                      params=[ToolParam("handle", "int"),
+                              ToolParam("timeout_s", "float", required=False, default=5.0)],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
+
+        def _proc_wait(handle: int, timeout_s: float = 30.0) -> Dict[str, Any]:
+            return _proc_mgr.wait(handle, timeout_s=timeout_s)
+
+        _add(ToolSpec("proc_wait", handler=_proc_wait,
+                      description="block up to timeout_s for a background job to exit and report "
+                                  "its return code (timeout_s<=0 waits indefinitely)",
+                      params=[ToolParam("handle", "int"),
+                              ToolParam("timeout_s", "float", required=False, default=30.0)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        # ---- structured system introspection & control ---- #
+        def _system_info() -> Dict[str, Any]:
+            from nyxara.agency.process_control import system_info
+            return system_info()
+
+        _add(ToolSpec("system_info", handler=_system_info,
+                      description="report the machine's live posture: platform, hostname, cpu "
+                                  "count, load average, total/available memory, uptime, disk "
+                                  "usage and identity (user/euid/root) — read-only, safe",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        def _list_processes(limit: int = 500) -> Dict[str, Any]:
+            from nyxara.agency.process_control import list_processes
+            return list_processes(limit=max(1, min(limit, 5000)))
+
+        _add(ToolSpec("list_processes", handler=_list_processes,
+                      description="the system process table (pid, ppid, user, rss, command line) "
+                                  "sorted by memory — read-only, safe",
+                      params=[ToolParam("limit", "int", required=False, default=500)],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.LOW, reversible=True))
+
+        def _kill_process(pid: int = 0, name: str = "", sig: int = 15) -> Dict[str, Any]:
+            from nyxara.agency.process_control import kill_by_name, kill_pid
+            if pid and pid > 0:
+                return kill_pid(pid, sig=sig)
+            if name:
+                return kill_by_name(name, sig=sig)
+            return {"ok": False, "error": "give a pid (>0) or a name substring to signal"}
+
+        _add(ToolSpec("kill_process", handler=_kill_process,
+                      description="signal an ARBITRARY system process by pid, or every process "
+                                  "whose command matches a name substring (default 15/SIGTERM, "
+                                  "9=KILL). Owner/full-control-gated, irreversible",
+                      params=[ToolParam("pid", "int", required=False, default=0),
+                              ToolParam("name", "str", required=False, default="",
+                                        description="command-line substring to match"),
+                              ToolParam("sig", "int", required=False, default=15)],
+                      capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False,
+                      target_param="name"))
+
     return registry
 
 

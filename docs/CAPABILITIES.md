@@ -146,7 +146,7 @@ sovereign boundaries as above (`/scram`, oversight, corrigibility, and the owner
 under Rule 8). When on, the always-on daemon also runs at "max level" (`inner_life`), so the
 background mind proactively researches the Master's standing goals on the live web.
 
-## Privilege escalation (off by default, opt-in)
+## Privilege escalation (on by default — max-level control)
 
 The local machine's root. NYXARA can run **privileged (root/admin) OS operations** —
 `privileged_shell` runs a command under `sudo`, `change_os_permissions` performs an elevated
@@ -155,16 +155,44 @@ real work is done by NYXARA's own deterministic executor (`nyxara.agency.privile
 `sudo` call that actually runs — not a simulated result.
 
 This is governed as a first-class capability, `PRIV_ESCALATE`, with a **CRITICAL, irreversible**
-envelope, so autonomously each call **escalates to the Master** unless the Master installed the
-explicit, opt-in privilege grant (`grant_privilege_escalation` in `nyxara.agency.permissions`,
-flag `NYXARA_AGENCY__PRIVILEGE_ESCALATION`, default **`false`**). It is the single most dangerous
-OS surface, so — unlike full control / autonomous internet / autonomous remote — it ships **off**.
+envelope. It is now granted **on by default** (max-level control): the Master has handed NYXARA
+unrestricted control of her own computer, root included, via the standing privilege grant
+(`grant_privilege_escalation` in `nyxara.agency.permissions`, flag
+`NYXARA_AGENCY__PRIVILEGE_ESCALATION`, default **`true`**). Set it to `false` to make root
+**escalate to the Master** again. It actually elevates only when a credential is available:
 `NYXARA_AGENCY__SUDO_CREDENTIAL_NAME` names the Credential-Vault entry holding the sudo password
-(unset ⇒ passwordless `NOPASSWD` sudo or an already-root process).
+(unset ⇒ passwordless `NOPASSWD` sudo or an already-root process); otherwise `sudo -n` fails
+cleanly as data.
 
 **It elevates *with* authorization, never around it.** NYXARA uses only the credential the Master
 holds — she never exploits a vulnerability, never prompts a human, never guesses or brute-forces a
-credential. By construction `PRIV_ESCALATE` is **excluded** from full control's operational
-envelope, so turning `FULL_CONTROL` on never confers root — only the privilege flag does. The
-`/scram` kill-switch, oversight and corrigibility gates and the owner-exclusive caps (Rule 8) all
-remain fully intact, so the Master can always halt or correct her.
+credential. By construction `PRIV_ESCALATE` is a **separate path** from full control (excluded
+from its `_OPERATIONAL_CAPS`), so `FULL_CONTROL` alone never confers root — only the privilege
+flag does. The `/scram` kill-switch, oversight and corrigibility gates and the owner-exclusive
+caps (Rule 8) all remain fully intact, so the Master can always halt or correct her.
+
+## Live process & job control + system introspection (on by default)
+
+`run_shell` is a *one-shot* terminal — it runs a command to completion and returns the output.
+The other half of real machine control is the long-running, interactive world, and NYXARA now has
+a genuine **job table** for it (`nyxara.agency.process_control`, **REAL+WIRED**). She launches a
+background process and then drives it across separate turns of the sovereign loop, exactly like a
+human juggling terminal tabs:
+
+- `proc_spawn` starts an arbitrary command as a background job in a real shell (its own
+  session/process group) and returns a handle + pid immediately — it does **not** block. With
+  `tty=true` the child is attached to a real pseudo-terminal (`pty.openpty`), so interactive /
+  ncurses programs that demand a TTY (`top`, `vim`, password prompts) work.
+- `proc_read` streams the output that arrived since the last read; `proc_write` feeds standard
+  input; `proc_list` shows every job with its status and buffered size; `proc_wait` blocks for
+  exit; `proc_signal` / `proc_kill` send signals to the whole process group and reap it.
+- Structured system control, read from `/proc` (no `psutil` dependency): `system_info` (cpu,
+  load, memory, uptime, disk, identity), `list_processes` (the process table), and
+  `kill_process` (by pid or by command-name substring).
+
+The process/job tools are gated at `PROC_EXEC` (HIGH, irreversible), so they are covered by the
+same `full_control` grant as `run_shell` and behave identically through the kernel gates —
+autonomously permitted, with high-risk actions still passing under `/scram` + oversight +
+corrigibility. `system_info` / `list_processes` are read-only (`TOOL_CALL`, LOW) and run fully
+autonomously. Output buffers are bounded ring buffers, so a chatty long-runner can stream forever
+without exhausting memory, and surviving jobs are reaped at interpreter exit.

@@ -1,12 +1,12 @@
 """Tests for privilege escalation — governed root/admin OS operations.
 
-These lock in the "real elevation, keep it opt-in and gated" contract:
+These lock in the "real elevation, granted by default, still gated" contract:
 
-* ``PRIV_ESCALATE`` is a first-class capability with a CRITICAL, irreversible envelope, so
-  autonomously it always escalates to the Master unless the Master installed the explicit,
-  opt-in privilege grant;
-* the broad, on-by-default ``full_control`` grant NEVER confers root (``PRIV_ESCALATE`` is
-  excluded from ``_OPERATIONAL_CAPS``);
+* ``PRIV_ESCALATE`` is a first-class capability with a CRITICAL, irreversible envelope; it is
+  granted autonomously only via the explicit, owner-installed privilege grant — which now ships
+  ON by default (max-level control), so a fresh core reaches root on her own initiative;
+* the grant is a SEPARATE path from ``full_control``: ``PRIV_ESCALATE`` is excluded from
+  ``_OPERATIONAL_CAPS``, so ``full_control`` alone never confers root;
 * the executor elevates *with* a supplied credential, returns data, and never raises.
 """
 
@@ -79,20 +79,21 @@ def test_installer_requires_owner_authority():
         grant_privilege_escalation(pol, authority=Authority.AUTONOMOUS)
 
 
-# -------------------- config: OFF by default -------------------- #
-def test_privilege_escalation_off_by_default():
+# -------------------- config: ON by default (max-level control) -------------------- #
+def test_privilege_escalation_on_by_default():
     from nyxara.kernel.config import get_settings
-    assert get_settings().agency.privilege_escalation is False
+    assert get_settings().agency.privilege_escalation is True
 
 
-def test_orchestrator_omits_privilege_grant_by_default():
-    # full_control is ON by default, but PRIV_ESCALATE must still escalate.
+def test_orchestrator_installs_privilege_grant_by_default():
+    # Autonomous root now ships ON: a fresh core installs the privilege grant so PRIV_ESCALATE
+    # is allowed on her own initiative (via the grant), not escalated.
     from nyxara.kernel.orchestrator import NyxaraCore
     core = NyxaraCore()
     names = [g.name for g in core.permissions.grants()]
-    assert "privilege-escalation:os.privilege" not in names
+    assert "privilege-escalation:os.privilege" in names
     d = core.permissions.check(_auto(Capability.PRIV_ESCALATE, target="sudo id"))
-    assert d.escalated
+    assert d.allowed and d.rule_basis == "grant"
 
 
 def test_orchestrator_installs_privilege_grant_when_flag_on(monkeypatch):

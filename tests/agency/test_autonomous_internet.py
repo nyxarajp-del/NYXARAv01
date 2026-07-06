@@ -141,12 +141,13 @@ def test_orchestrator_grants_internet_when_only_internet_on(monkeypatch):
 
 def test_orchestrator_respects_disable_flag(monkeypatch):
     # All autonomy envelopes off → the conservative default policy, no standing grants.
-    # (autonomous_remote and whole-disk filesystem access are on by default and independent,
-    # so they must be disabled too.)
+    # (autonomous_remote, whole-disk filesystem access and privilege escalation are all on by
+    # default and independent, so they must be disabled too.)
     monkeypatch.setenv("NYXARA_AGENCY__FULL_CONTROL", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", "false")
     monkeypatch.setenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", "false")
     monkeypatch.setenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", "false")
+    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "false")
     from nyxara.kernel import config as cfg
     cfg.reload_settings()  # settings are a cached singleton; re-read with the env set
     try:
@@ -162,4 +163,5 @@ def test_orchestrator_respects_disable_flag(monkeypatch):
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_INTERNET", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__AUTONOMOUS_REMOTE", raising=False)
         monkeypatch.delenv("NYXARA_AGENCY__FILESYSTEM__WHOLE_DISK", raising=False)
+        monkeypatch.delenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", raising=False)
         cfg.reload_settings()
