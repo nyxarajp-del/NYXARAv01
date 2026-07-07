@@ -6,9 +6,8 @@ The Master's order has two halves and this module is the second one.
     **NYXARA herself** judges what they say. The panel advises; the sovereign decides.
 
 Where :mod:`mind.llm` exposes each provider one at a time, the council convenes them
-*together*. For a single question it asks every available member — the open-source models
-(``transformers`` in-process, ``local`` via an OpenAI-compatible endpoint), the cloud models
-(``anthropic``, ``openai``), and most importantly NYXARA's OWN model forged from zero by the
+*together*. For a single question it asks every available member — the local TinyLlama-1.1B
+base (``tinyllama``, in-process) and most importantly NYXARA's OWN model forged by the
 foundry (``self``) — then aggregates their verdicts into one answer that NYXARA owns.
 
 Two ways to decide, both driven by NYXARA's own code (no member is ever handed control):

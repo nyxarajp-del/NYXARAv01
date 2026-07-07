@@ -1,14 +1,15 @@
 """NYXARA · mind/cost.py — the LLM token & spend ledger (💸).
 
-Every call to the stateless LLM faculty (mind/llm.py) burns tokens, and tokens cost
-money. This module is the **ledger** that turns each :class:`~nyxara.mind.llm.Usage`
-into a costed :class:`LineItem`, aggregates spend by model and provider, and answers
-the one question the governor cares about: *are we over today's budget?*
+Every call to the stateless LLM faculty (mind/llm.py) burns tokens. This module is
+the **ledger** that turns each :class:`~nyxara.mind.llm.Usage` into a
+:class:`LineItem`, aggregates usage by model and provider, and answers the one
+question the governor cares about: *are we over today's budget?*
 
-Pricing lives in :data:`PRICES` — ``model (or prefix) -> (usd_per_1k_prompt,
-usd_per_1k_completion)`` — matched by **longest prefix**, so ``claude-opus-4-8`` is
-priced by the most specific ``claude-opus`` entry and unknown models fall back to a
-conservative default rather than silently costing zero.
+Every model now runs on NYXARA's own hardware (TinyLlama-1.1B in-process, her
+foundry-forged ``self`` model, and the mock), so the dollar cost of every call is
+**zero** — the ledger's real job is token accounting. The pricing machinery
+(:data:`PRICES`, longest-prefix match, the daily budget gate) is kept intact so a
+priced entry can be added again if a metered backend ever returns.
 
 The ledger is **thread-safe** (a single lock) because the event loop and its
 background worker tasks (kernel/jobqueue.py) may record concurrently. It carries no
@@ -43,32 +44,15 @@ __all__ = [
 # Values are USD per 1K tokens (prompt, completion); estimate_cost divides token
 # counts by 1000, so these stay as the headline per-1K rates.
 PRICES: Dict[str, Tuple[float, float]] = {
-    # Anthropic Claude
-    "claude-opus": (15.0, 75.0),
-    "claude-sonnet": (3.0, 15.0),
-    "claude-haiku": (0.80, 4.0),
-    "claude-3-opus": (15.0, 75.0),
-    "claude-3-5-sonnet": (3.0, 15.0),
-    "claude-3-haiku": (0.25, 1.25),
-    "claude": (3.0, 15.0),
-    # OpenAI
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
-    "gpt-4-turbo": (10.0, 30.0),
-    "gpt-4": (30.0, 60.0),
-    "gpt-3.5": (0.50, 1.50),
-    # Groq open-weight (very cheap)
-    "openai/gpt-oss-120b": (0.15, 0.75),
-    "llama": (0.10, 0.10),
-    # In-process / local / mock models cost nothing to run on our own hardware.
-    "qwen": (0.0, 0.0),
-    "local": (0.0, 0.0),
+    # Everything runs in-process on NYXARA's own hardware — zero marginal dollar cost.
+    "TinyLlama": (0.0, 0.0),
+    "tinyllama": (0.0, 0.0),
     "nyxara-self": (0.0, 0.0),
     "mock": (0.0, 0.0),
 }
 
-# Conservative fallback for an unrecognised model (USD per 1K tokens).
-DEFAULT_PRICE: Tuple[float, float] = (1.0, 2.0)
+# Every backend is local now, so an unrecognised model also costs nothing.
+DEFAULT_PRICE: Tuple[float, float] = (0.0, 0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -274,50 +258,51 @@ if __name__ == "__main__":  # pragma: no cover
 
     ledger = UsageLedger(daily_budget=10.0)
 
-    # record from an LLMResponse-like object
-    r = _Resp("openai", "gpt-4o", _Usage(1000, 1000))
+    # record from an LLMResponse-like object — local models cost nothing
+    r = _Resp("tinyllama", "TinyLlama/TinyLlama-1.1B-Chat-v1.0", _Usage(1000, 1000))
     item = ledger.record(r)
-    print(f"gpt-4o 1k/1k cost    : ${item.cost_usd:.4f}")
-    # gpt-4o: 2.50/1k prompt + 10.0/1k completion -> 2.50 + 10.0 = 12.50
-    assert abs(item.cost_usd - 12.50) < 1e-9
+    print(f"tinyllama 1k/1k cost : ${item.cost_usd:.4f}")
+    assert item.cost_usd == 0.0
 
     # record from a raw Usage (+ explicit provider/model)
-    item2 = ledger.record(_Usage(2000, 500), provider="anthropic", model="claude-opus-4-8")
-    # longest-prefix "claude-opus": 15/1k prompt + 75/1k completion -> 30 + 37.5 = 67.5
-    print(f"claude-opus cost     : ${item2.cost_usd:.4f}")
-    assert abs(item2.cost_usd - 67.5) < 1e-9
-    assert item2.model == "claude-opus-4-8"
+    item2 = ledger.record(_Usage(2000, 500), provider="self", model="nyxara-self")
+    print(f"nyxara-self cost     : ${item2.cost_usd:.4f}")
+    assert item2.cost_usd == 0.0
+    assert item2.model == "nyxara-self"
 
-    # longest-prefix specificity: gpt-4o-mini must NOT use the gpt-4o rate
-    mini = UsageLedger.estimate_cost("gpt-4o-mini", 1000, 1000)
-    assert abs(mini - (0.15 + 0.60)) < 1e-9
-    print(f"longest-prefix match : gpt-4o-mini 1k/1k = ${mini:.4f} (not gpt-4o) ✓")
-
-    # unknown model -> fallback price (not zero)
+    # unknown model -> local-default fallback (also zero: everything is owned hardware)
     unknown = UsageLedger.estimate_cost("some-mystery-model", 1000, 0)
-    assert unknown > 0
-    print(f"fallback price       : unknown model 1k prompt = ${unknown:.4f}")
+    assert unknown == 0.0
+    print(f"fallback price       : unknown model 1k prompt = ${unknown:.4f} (local -> $0)")
 
-    # aggregation
+    # aggregation still tracks calls/tokens per model & provider
     bm = ledger.by_model()
     bp = ledger.by_provider()
-    assert "gpt-4o" in bm and "claude-opus-4-8" in bm
-    assert set(bp) == {"openai", "anthropic"}
-    print(f"by_provider          : { {k: round(v['cost_usd'], 2) for k, v in bp.items()} }")
+    assert "TinyLlama/TinyLlama-1.1B-Chat-v1.0" in bm and "nyxara-self" in bm
+    assert set(bp) == {"tinyllama", "self"}
+    print(f"by_provider          : { {k: int(v['tokens']) for k, v in bp.items()} }")
 
-    # totals
+    # totals: tokens counted, zero spend
     assert ledger.total_tokens() == 1000 + 1000 + 2000 + 500
-    assert abs(ledger.total_cost() - (12.50 + 67.5)) < 1e-9
+    assert ledger.total_cost() == 0.0
 
-    # budget: $10/day, we've spent ~$80 -> over budget, negative remaining
-    assert ledger.over_budget() is True
-    assert ledger.remaining() < 0
-    print(f"budget               : over={ledger.over_budget()}  remaining=${ledger.remaining():.2f}")
+    # budget gate machinery still works when a price exists (hand-priced entry)
+    PRICES["metered-test-model"] = (1.0, 2.0)
+    try:
+        priced = UsageLedger.estimate_cost("metered-test-model", 1000, 1000)
+        assert abs(priced - 3.0) < 1e-9
+        small = UsageLedger(daily_budget=1.0)
+        small.record(_Usage(1000, 1000), provider="test", model="metered-test-model")
+        assert small.over_budget() is True
+        assert small.remaining() < 0
+        print(f"budget gate          : over={small.over_budget()}  remaining=${small.remaining():.2f}")
+    finally:
+        del PRICES["metered-test-model"]
 
-    # a free local model adds tokens but no cost
-    ledger.record(_Usage(5000, 5000), provider="local", model="qwen")
-    assert UsageLedger.estimate_cost("qwen", 5000, 5000) == 0.0
-    print("free local model     : tokens counted, $0 cost ✓")
+    # zero-cost spend never trips the budget
+    assert ledger.over_budget() is False
+    assert ledger.remaining() == ledger.daily_budget
+    print("free local models    : tokens counted, $0 cost, budget untouched ✓")
 
     print("\n" + ledger.summary())
     print("\nALL SELF-TESTS PASSED ✓")

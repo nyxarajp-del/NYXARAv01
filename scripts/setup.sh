@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# NYXARA setup — Groq cloud + Qwen3 local
+# NYXARA setup — fully local TinyLlama-1.1B (no API keys)
 # -----------------------------------------------------------------------------
-# One-shot installer for the two LLM backends you chose:
-#   * Groq   — GPT-OSS-120B cloud (uses the openai SDK; needs GROQ_API_KEY)
-#   * Qwen3  — Qwen/Qwen3-4B running locally (torch + transformers; no key)
+# One-shot installer for the local LLM stack:
+#   * TinyLlama-1.1B — TinyLlama/TinyLlama-1.1B-Chat-v1.0 running in-process
+#     (torch + transformers + accelerate; weights auto-download on first use)
+#   * Foundry (LoRA) — peft, so NYXARA can LoRA-tune TinyLlama as her OWN brain
 #
 # Usage:
-#   bash scripts/setup.sh          # install everything (Groq + Qwen)
-#   bash scripts/setup.sh --groq   # Groq only (light, no torch download)
-#   bash scripts/setup.sh --qwen   # Qwen only (heavy: torch + transformers)
+#   bash scripts/setup.sh          # install everything (TinyLlama + foundry)
+#   bash scripts/setup.sh --light  # core only (no torch download; mock/n-gram)
 #
 # Requires Python 3.11+.
 # =============================================================================
@@ -17,46 +17,40 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-WANT_GROQ=1
-WANT_QWEN=1
+WANT_TINYLLAMA=1
 case "${1:-}" in
-  --groq) WANT_QWEN=0 ;;
-  --qwen) WANT_GROQ=0 ;;
-  "")     ;;
-  *) echo "unknown option: $1 (use --groq, --qwen, or no arg)"; exit 1 ;;
+  --light) WANT_TINYLLAMA=0 ;;
+  "")      ;;
+  *) echo "unknown option: $1 (use --light or no arg)"; exit 1 ;;
 esac
 
 echo "==> Python: $(python3 --version)"
 
-echo "==> Installing core + reasoning + llm + dev extras"
+echo "==> Installing core + dev extras"
 python3 -m pip install -e ".[dev]"
 
-if [[ "$WANT_GROQ" == "1" ]]; then
-  echo "==> Groq: ready (served via the openai SDK, already installed by .[dev])"
-fi
-
-if [[ "$WANT_QWEN" == "1" ]]; then
-  echo "==> Qwen3 local: installing torch + transformers + accelerate (heavy, ~GBs)"
-  python3 -m pip install -e ".[qwen]"
-  echo "    Qwen3-4B weights download automatically on first use (cached after)."
-  echo "==> Foundry (LoRA): installing peft so NYXARA can LoRA-tune Qwen3-4B as her OWN brain"
+if [[ "$WANT_TINYLLAMA" == "1" ]]; then
+  echo "==> TinyLlama local: installing torch + transformers + accelerate (heavy, ~GBs)"
+  python3 -m pip install -e ".[llm]"
+  echo "    TinyLlama-1.1B weights download automatically on first use (cached after)."
+  echo "==> Foundry (LoRA): installing peft so NYXARA can LoRA-tune TinyLlama as her OWN brain"
   python3 -m pip install -e ".[foundry]"
   echo "    Set NYXARA_LLM__PROVIDER=self — she forges her primary brain on first boot,"
-  echo "    or run it now:  bash scripts/lora_tune_qwen3.sh"
+  echo "    or run it now:  bash scripts/lora_tune_tinyllama.sh"
 fi
 
 # Seed a .env from the template if the user hasn't made one yet.
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  echo "==> Created .env from .env.example — edit it and set NYXARA_LLM__GROQ_API_KEY"
+  echo "==> Created .env from .env.example — tweak the NYXARA_LLM__TINYLLAMA_* knobs as you like"
 else
   echo "==> .env already exists — left untouched"
 fi
 
 echo
 echo "Done. Next steps:"
-echo "  1. Get a free Groq key:  https://console.groq.com  -> paste into .env"
-echo "  2. Load it:              set -a; source .env; set +a"
-echo "  3. Run:                  python -m nyxara"
+echo "  1. (Optional) edit .env — every TinyLlama/LoRA knob lives there"
+echo "  2. Load it:   set -a; source .env; set +a"
+echo "  3. Run:       python -m nyxara"
 echo
-echo "Both Groq + Qwen run together as a council (NYXARA asks both, then decides)."
+echo "TinyLlama + her own forged brain run together as a council (NYXARA asks both, then decides)."

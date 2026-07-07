@@ -52,9 +52,11 @@ header **inside the kernel** — the secret never appears in the tool result or 
 - **SSH.** A `remote_hosts` entry with `credential_name` resolves its secret from the vault at
   call time; `ssh_login` / `ssh_exec` bind an SSH private key to a transient `0600` keyfile (or
   a password directly) inside `CredentialVault.use` and wipe it afterward.
-- **Provider API keys.** When `NYXARA_VAULT__PROVIDER_KEY_FALLBACK=true`, `mind/llm.py` falls
-  back to a vault record named `<provider>_api_key` (e.g. `anthropic_api_key`) when neither
-  config nor env supplies a key. Config/env still win.
+- **Service API keys.** When `NYXARA_VAULT__PROVIDER_KEY_FALLBACK=true`,
+  `guard.vault.resolve_api_key("<service>")` resolves a vault record named
+  `<service>_api_key` (e.g. `brave_api_key`) as a fallback when neither config nor env
+  supplies a key. Config/env still win. (The LLM itself is fully local —
+  TinyLlama-1.1B in-process — and needs no key at all.)
 
 ## Direct (Master, Python) API
 
@@ -63,10 +65,10 @@ from nyxara.guard.vault import CredentialVault, CredentialKind
 from nyxara.agency.permissions import Authority
 
 v = CredentialVault.bootstrap()                                  # process vault
-v.put("anthropic_api_key", CredentialKind.API_KEY, "sk-ant-…",   # Master only
+v.put("brave_api_key", CredentialKind.API_KEY, "brv-…",          # Master only
       authority=Authority.OWNER)
 v.list(authority=Authority.AUTONOMOUS)                           # redacted metadata
-v.reveal("anthropic_api_key", authority=Authority.OWNER)         # plaintext, Master only
+v.reveal("brave_api_key", authority=Authority.OWNER)             # plaintext, Master only
 v.mint_ssh("deploy", authority=Authority.OWNER)                  # NYXARA mints her own key
 v.rotate_key(v._box._master.bumped(), authority=Authority.OWNER) # re-encrypt everything
 assert v.verify_audit()                                          # tamper-evident log

@@ -303,7 +303,7 @@ _STDLIB_MAP: Tuple[Tuple[Tuple[type, ...], ErrorCategory], ...] = (
     ((OSError, IOError), ErrorCategory.EXTERNAL),
 )
 
-# Heuristic substrings for opaque third-party errors (e.g. httpx/openai) when type is unhelpful.
+# Heuristic substrings for opaque third-party errors (e.g. httpx/transformers) when type is unhelpful.
 _TRANSIENT_HINTS = ("timeout", "timed out", "temporar", "rate limit", "429", "503", "502",
                     "overloaded", "connection reset", "try again", "unavailable")
 _SECURITY_HINTS = ("unauthorized", "forbidden", "401", "403", "invalid api key",

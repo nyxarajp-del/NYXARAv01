@@ -3,12 +3,12 @@
 # Build:  docker build -t nyxara .
 # Run:    docker run -p 8000:8000 \
 #             -e NYXARA_SERVER__API_TOKEN=change-me \
-#             -e NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-... \
 #             nyxara
 #
-# Out of the box NYXARA answers through her deterministic reasoner (no key needed); set a
-# provider key for LLM-backed, deliberate replies. Heavy ML extras (senses/foundry/qwen)
-# are intentionally omitted to keep the image lean — add them by extending this file.
+# Out of the box NYXARA answers through her deterministic reasoner. The LLM stack is fully
+# local (TinyLlama-1.1B via HuggingFace — no API keys); the heavy ML extras (llm/foundry/
+# senses) are intentionally omitted to keep the image lean — add them by extending this file
+# (pip install -e ".[llm,foundry]") for in-container TinyLlama inference and LoRA tuning.
 
 FROM python:3.11-slim AS base
 

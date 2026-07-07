@@ -153,8 +153,7 @@ def test_provider_status():
     llm = _mock_llm()
     status = llm.provider_status()
     assert status["mock"] is True
-    assert set(status) == {"anthropic", "openai", "groq", "local",
-                           "transformers", "qwen", "self", "mock"}
+    assert set(status) == {"tinyllama", "self", "mock"}
 
 
 def test_async_complete():
@@ -194,8 +193,8 @@ def test_retry_then_success():
     from nyxara.kernel.errors import RetryPolicy
     flaky = _FlakyProvider(fail_times=2)
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.LOCAL
-    llm = LLM(settings=settings, providers={"local": flaky, "mock": MockProvider()},
+    settings.llm.provider = ProviderName.TINYLLAMA
+    llm = LLM(settings=settings, providers={"tinyllama": flaky, "mock": MockProvider()},
               retry_policy=RetryPolicy(max_attempts=5, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("x"))
     assert resp.text == "recovered"
@@ -219,8 +218,8 @@ def test_falls_back_to_mock_when_provider_dead():
             raise ExternalServiceError("always down")
 
     settings = NyxaraSettings.for_profile(Profile.DEV)  # allows mock fallback
-    settings.llm.provider = ProviderName.LOCAL
-    llm = LLM(settings=settings, providers={"local": _Dead(), "mock": MockProvider()},
+    settings.llm.provider = ProviderName.TINYLLAMA
+    llm = LLM(settings=settings, providers={"tinyllama": _Dead(), "mock": MockProvider()},
               retry_policy=RetryPolicy(max_attempts=2, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("fallback please"))
     assert resp.provider == "mock"
@@ -242,10 +241,10 @@ def test_no_fallback_raises_when_disabled():
             raise ExternalServiceError("down")
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.LOCAL
+    settings.llm.provider = ProviderName.TINYLLAMA
     settings.llm.allow_mock_fallback = False
     from nyxara.kernel.errors import RetryPolicy
-    llm = LLM(settings=settings, providers={"local": _Dead()},
+    llm = LLM(settings=settings, providers={"tinyllama": _Dead()},
               retry_policy=RetryPolicy(max_attempts=1, base_delay=0))
     with pytest.raises(LLMError):
         llm.complete(LLMRequest.from_prompt("x"))
@@ -259,8 +258,8 @@ def test_unavailable_provider_falls_back_to_mock():
             return False
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.LOCAL
-    llm = LLM(settings=settings, providers={"local": _Unavailable(), "mock": MockProvider()})
+    settings.llm.provider = ProviderName.TINYLLAMA
+    llm = LLM(settings=settings, providers={"tinyllama": _Unavailable(), "mock": MockProvider()})
     assert llm.chosen_provider().name == "mock"
 
 

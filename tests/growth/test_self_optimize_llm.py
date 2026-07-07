@@ -131,12 +131,12 @@ def test_self_model_is_an_author_but_mock_is_not(tmp_path: Path):
 
 
 def test_external_provider_only_when_self_authored_only_off():
-    # default (self_authored_only=True): an external LLM is NOT permitted to author — khud NYXARA
+    # default (self_authored_only=True): the base LLM is NOT permitted to author — khud NYXARA
     assert LLMEditGenerator(
-        llm=_StubLLM(provider="groq"), settings=_llm_settings()).available() is False
-    # with the flag off, a real external provider may author when the own-model isn't ready
+        llm=_StubLLM(provider="tinyllama"), settings=_llm_settings()).available() is False
+    # with the flag off, the real base provider may author when the own-model isn't ready
     s = _llm_settings(self_authored_only=False)
-    assert LLMEditGenerator(llm=_StubLLM(provider="groq"), settings=s).available() is True
+    assert LLMEditGenerator(llm=_StubLLM(provider="tinyllama"), settings=s).available() is True
 
 
 def test_llm_generator_none_llm_is_unavailable():

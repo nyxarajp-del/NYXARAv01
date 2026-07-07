@@ -9,14 +9,14 @@ One Master-facing command for the sovereign-brain flywheel, end to end:
    (reversible; a worse candidate is kept on the bench, never shipped).
 4. **Report** (optional) — measure the handoff rate so "wrapper → her own AI" is visible.
 
-The dependency-free **n-gram** backend runs anywhere (so this is CI-testable); point
-``--backend lora --base-model Qwen/Qwen2.5-7B`` at a real base on a GPU box for genuine
-capability — the very same flywheel, only the backend swaps. Nothing here reaches around a
-gate: a promoted model still proposes through the sovereign loop the kernel disposes.
+The dependency-free **n-gram** backend runs anywhere (so this is CI-testable); the ``lora``
+backend fine-tunes the TinyLlama-1.1B base (CPU-runnable, comfortable on any GPU) for
+genuine capability — the very same flywheel, only the backend swaps. Nothing here reaches
+around a gate: a promoted model still proposes through the sovereign loop the kernel disposes.
 
     python -m nyxara.growth --backend ngram --generations 1 --bench
-    python -m nyxara.growth --qwen3 --distill --bench        # LoRA-tune Qwen3-4B (her primary)
-    python -m nyxara.growth --distill --backend lora --base-model Qwen/Qwen2.5-7B --bench
+    python -m nyxara.growth --tinyllama --distill --bench   # LoRA-tune TinyLlama-1.1B (her primary)
+    python -m nyxara.growth --distill --backend lora --bench
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-# The shared identity seed corpus + the Qwen3-4B base live in growth/bootstrap.py, so the
+# The shared identity seed corpus + the TinyLlama-1.1B base live in growth/bootstrap.py, so the
 # Master-facing CLI and the auto-on-boot forge train the *same* loyal self from the *same* base.
 from nyxara.growth.bootstrap import IDENTITY_SEED as _IDENTITY_SEED
-from nyxara.growth.bootstrap import QWEN3_4B
+from nyxara.growth.bootstrap import TINYLLAMA_1_1B
 
 
 def _build_foundry(args: argparse.Namespace) -> Any:
@@ -40,12 +40,12 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     settings = get_settings().model_copy(deep=True)   # honour env config, leak nothing back
     if args.data_dir:
         settings.paths.data_dir = Path(args.data_dir)
-    # --qwen3 is the one-command shortcut for NYXARA's primary brain: LoRA-tune Qwen3-4B with
-    # QLoRA (4-bit, honoured only on a GPU; degrades on CPU). Explicit flags still override it.
-    if args.qwen3:
+    # --tinyllama is the one-command shortcut for NYXARA's primary brain: LoRA-tune
+    # TinyLlama-1.1B. Quantization stays as configured (1.1B rarely needs it); explicit
+    # flags still override the preset.
+    if args.tinyllama:
         settings.foundry.backend = "lora"
-        settings.foundry.base_model = QWEN3_4B
-        settings.foundry.load_in_4bit = True
+        settings.foundry.base_model = TINYLLAMA_1_1B
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
@@ -64,7 +64,7 @@ def _maybe_distill(args: argparse.Namespace, settings: Any) -> int:
 
     distiller = Distiller(settings=settings)
     if not distiller.available():
-        print("· no real teacher configured (set NYXARA_LLM__PROVIDER + an API key) — "
+        print("· no real teacher available (install .[llm] so the tinyllama provider runs) — "
               "skipping distillation; training on seeds / lived memory only.")
         return 0
     n: Optional[int] = None if args.distill < 0 else args.distill
@@ -114,14 +114,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="self-improvement generations to run (default 1)")
     parser.add_argument("--distill", type=int, nargs="?", const=-1, default=0, metavar="N",
                         help="first distil N teacher prompts into the corpus (all if N omitted)")
-    parser.add_argument("--qwen3", action="store_true",
-                        help="one-command preset: LoRA-tune Qwen/Qwen3-4B (QLoRA) as her primary "
-                             "brain; weights download on first use. Needs .[foundry] for the real "
-                             "base (degrades to the n-gram brain otherwise)")
+    parser.add_argument("--tinyllama", action="store_true",
+                        help="one-command preset: LoRA-tune TinyLlama/TinyLlama-1.1B-Chat-v1.0 as "
+                             "her primary brain; weights download on first use. Needs .[foundry] "
+                             "for the real base (degrades to the n-gram brain otherwise)")
     parser.add_argument("--backend", choices=["auto", "ngram", "nanogpt", "lora"], default=None,
                         help="override the foundry backend (lora needs a GPU + .[foundry])")
     parser.add_argument("--base-model", default=None,
-                        help="base checkpoint for the lora backend, e.g. Qwen/Qwen3-4B")
+                        help="base checkpoint for the lora backend, "
+                             "e.g. TinyLlama/TinyLlama-1.1B-Chat-v1.0")
     parser.add_argument("--load-in-4bit", action="store_true",
                         help="QLoRA: load the base in 4-bit (needs bitsandbytes + a GPU); "
                              "lets a 7B+ base fine-tune on one consumer GPU, degrades on CPU")

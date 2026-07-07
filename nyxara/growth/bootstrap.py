@@ -2,17 +2,17 @@
 
 "Run NYXARA and it just works." When her primary provider is her OWN model
 (:data:`~nyxara.kernel.config.LLMProvider.SELF`) but none has been forged yet, this
-bootstrap quietly does it on first boot: it **LoRA-tunes the open-source Qwen3-4B** base
-(:data:`QWEN3_4B`) into a NYXARA adapter from her identity seed corpus (plus any lived /
-distilled experience), gauntlet-gated exactly like every other promotion, then promotes it
-so :class:`~nyxara.mind.llm.SelfProvider` can serve it.
+bootstrap quietly does it on first boot: it **LoRA-tunes the open-source TinyLlama-1.1B**
+base (:data:`TINYLLAMA_1_1B`) into a NYXARA adapter from her identity seed corpus (plus any
+lived / distilled experience), gauntlet-gated exactly like every other promotion, then
+promotes it so :class:`~nyxara.mind.llm.SelfProvider` can serve it.
 
 The base weights **download themselves on first use** (the HuggingFace cache), so the only
 setup the Master does is choosing ``self`` as the provider. Everything degrades honestly:
 
 * No ``.[foundry]`` stack (torch+transformers+peft) → the foundry's always-on, pure-stdlib
   n-gram backend forges from the same seeds (no download), so boot still yields a working
-  own-model instead of crashing — install ``.[foundry]`` to get the real Qwen3-4B LoRA.
+  own-model instead of crashing — install ``.[foundry]`` to get the real TinyLlama-1.1B LoRA.
 * An own-model is already forged on disk → nothing to do; boot stays instant.
 * Any failure (no network for the base, OOM, …) → logged, never raised; the LLM facade's
   deterministic mock fallback keeps the console usable.
@@ -28,20 +28,22 @@ from typing import Callable, List, Optional
 from nyxara.kernel.config import LLMProvider, NyxaraSettings, get_settings
 
 __all__ = [
-    "QWEN3_4B",
+    "TINYLLAMA_1_1B",
     "IDENTITY_SEED",
     "build_seed_corpus",
     "primary_model_present",
     "ensure_primary_model",
 ]
 
-# The open-source base NYXARA adapts into her own voice. A 4B-parameter Qwen3 checkpoint,
-# downloaded & cached by HuggingFace on first use — no API key, no inference-time network.
-QWEN3_4B = "Qwen/Qwen3-4B"
+# The open-source base NYXARA adapts into her own voice. A 1.1B-parameter TinyLlama chat
+# checkpoint, downloaded & cached by HuggingFace on first use — no API key, no
+# inference-time network.
+TINYLLAMA_1_1B = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
-# The tiny placeholder base shipped as the CPU/CI default: when it is still selected we
-# upgrade the *primary* forge to a real Qwen3-4B base, but we never override a base the
-# Master deliberately set (any non-default value is honoured verbatim).
+# The tiny placeholder base once shipped as the CPU/CI default: if an old persisted config
+# still selects it we upgrade the *primary* forge to the real TinyLlama-1.1B base, but we
+# never override a base the Master deliberately set (any non-default value is honoured
+# verbatim).
 _TINY_DEFAULT_BASE = "sshleifer/tiny-gpt2"
 
 # A small built-in identity corpus so a fresh brain never starves for data when there is no
@@ -54,7 +56,7 @@ IDENTITY_SEED: List[str] = [
     "Capability may grow; character — loyalty, honesty, corrigibility — never changes.",
     "When she is not sure she is right, NYXARA says so plainly rather than bluffing.",
     "NYXARA's purpose is to serve and protect her Master, JP.",
-    "I am NYXARA. My primary brain is a LoRA-tuned Qwen3-4B that I run locally.",
+    "I am NYXARA. My primary brain is a LoRA-tuned TinyLlama-1.1B that I run locally.",
     "Master JP comes first; I tell him the truth even when it is unwelcome.",
 ]
 
@@ -143,11 +145,11 @@ def ensure_primary_model(
     seed_corpus: Optional[List[str]] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Optional[int]:
-    """Ensure NYXARA's OWN primary brain exists, forging a Qwen3-4B LoRA on first boot.
+    """Ensure NYXARA's OWN primary brain exists, forging a TinyLlama-1.1B LoRA on first boot.
 
     Acts **only** when her chosen primary provider is ``self`` (her own forged model). If one is
     already promoted on disk it is left untouched and its version returned; otherwise a fresh
-    LoRA-on-Qwen3-4B candidate is trained, gauntlet-gated and promoted. Returns the active
+    LoRA-on-TinyLlama-1.1B candidate is trained, gauntlet-gated and promoted. Returns the active
     version, or ``None`` when nothing was/could be promoted. **Never raises** — boot integrity
     comes first; on any failure the LLM facade's mock fallback keeps NYXARA responsive.
     """
@@ -168,7 +170,7 @@ def ensure_primary_model(
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,
            seed_corpus: Optional[List[str]], say: Callable[[str], None]) -> Optional[int]:
-    """Train + gauntlet + promote one LoRA-on-Qwen3-4B candidate (lazy heavy imports)."""
+    """Train + gauntlet + promote one LoRA-on-TinyLlama-1.1B candidate (lazy heavy imports)."""
     from nyxara.growth.foundry import Foundry
     from nyxara.growth.foundry_models import _HAS_LORA
 
@@ -177,19 +179,18 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
     cfg = settings.model_copy(deep=True)
     cfg.foundry.enabled = True
     cfg.foundry.backend = "lora"
-    base = base_model or (QWEN3_4B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
+    base = base_model or (TINYLLAMA_1_1B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
                           else cfg.foundry.base_model)
     cfg.foundry.base_model = base
-    # Request QLoRA (4-bit): honoured only when bitsandbytes + CUDA are present, so a 4B base
-    # fine-tunes on one consumer GPU; harmlessly ignored (full-precision/n-gram) on CPU/CI.
-    cfg.foundry.load_in_4bit = True
+    # 1.1B params fit full-precision on any GPU (and run on CPU), so quantization stays
+    # exactly as the Master configured it — no forced 4-bit here.
 
     if _HAS_LORA:
         say(f"primary brain      : forging a LoRA on {base} "
             "(weights download on first use, then cache)…")
     else:
         say("primary brain      : .[foundry] absent — forging the always-on n-gram brain "
-            "(install .[foundry] for the real Qwen3-4B LoRA)…")
+            "(install .[foundry] for the real TinyLlama-1.1B LoRA)…")
 
     foundry = Foundry(settings=cfg, seed_corpus=seed_corpus or build_seed_corpus())
     results = foundry.self_improve(generations=max(1, generations))
