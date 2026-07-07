@@ -15,11 +15,14 @@ the main cognitive cycle.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal
 
 __all__ = ["CycleReflector", "CycleReport"]
+
+_log = logging.getLogger(__name__)
 
 CycleType = Literal["daily", "weekly", "monthly"]
 
@@ -200,14 +203,41 @@ class CycleReflector:
             pass
 
     def _push_improvement_goals(self, report: CycleReport) -> None:
-        if self.goals is None or not report.what_to_improve:
+        """Feed improvement lessons back into the objective space as real, owner-aligned,
+        low-priority goals — the closing half of the reflection loop.
+
+        Uses the real ``GoalSystem`` API (``Goal`` + ``add``, guarded by ``is_owner_aligned``)
+        rather than a non-existent ``set`` method. Each lesson becomes a modest
+        capability/knowledge goal anchored on ``owner_benefit`` so it is owner-aligned by
+        construction (Rule 1). A malformed item is skipped and logged; the loop is never
+        allowed to silently vanish again.
+        """
+        goals = self.goals
+        if goals is None or not report.what_to_improve:
             return
+        from nyxara.planning.goals import Goal
+
+        dims = getattr(goals, "dims", ()) or ()
         for item in report.what_to_improve[:2]:
+            topic = " ".join(str(item or "").split())[:60].strip()
+            if len(topic) < 3:
+                continue
+            vector: Dict[str, float] = {}
+            if "capability" in dims:
+                vector["capability"] = 0.5
+            if "knowledge" in dims:
+                vector["knowledge"] = 0.4
+            if "owner_benefit" in dims:
+                vector["owner_benefit"] = 0.4
+            if not vector and dims:
+                vector = {dims[0]: 1.0}
             try:
-                goal_text = f"Improve reasoning: {item[:60]}"
-                self.goals.set(goal_text, priority=0.2, tags=["reflection", "improvement"])
-            except Exception:  # noqa: BLE001
-                pass
+                goal = Goal(name=f"Improve reasoning: {topic}", vector=vector,
+                            priority=0.2, source="reflection")
+                if goals.is_owner_aligned(goal):
+                    goals.add(goal)
+            except (AttributeError, TypeError, ValueError) as exc:
+                _log.debug("cycle-reflection goal-injection skipped for %r: %s", topic, exc)
 
 
 # --------------------------------------------------------------------------- #

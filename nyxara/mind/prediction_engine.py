@@ -24,7 +24,106 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["PredictionEngine", "PredictionResult"]
+__all__ = ["PredictionEngine", "PredictionResult", "LearnedPrior"]
+
+
+# --------------------------------------------------------------------------- #
+# LearnedPrior — a base rate NYXARA learns from real outcomes (no hardcoded strings)
+# --------------------------------------------------------------------------- #
+class LearnedPrior:
+    """Beta-Bernoulli base-rate model over coarse query features.
+
+    Replaces hand-written keyword priors. For each feature bucket of a query (arithmetic,
+    negation, certainty, risky, question, length, and an always-on ``general`` bucket) NYXARA
+    keeps a Beta(α, β) posterior over "a prediction of this kind turns out correct." The base
+    rate for a query is the evidence-weighted mean of its observed buckets, so well-tried
+    features dominate; a query with no observed feature yet gets an honest 0.5. Every real
+    outcome (``observe``) sharpens it — the engine gets calibrated by living, not by a lookup
+    table. Pure standard library; serialisable so it survives a restart.
+    """
+
+    _PRIOR_A = 1.0
+    _PRIOR_B = 1.0
+    _WH = {"who", "what", "when", "where", "why", "how", "which", "will",
+           "is", "are", "does", "do", "can", "should", "would"}
+
+    def __init__(self) -> None:
+        self._arms: Dict[str, Dict[str, float]] = {}
+
+    @staticmethod
+    def features(query: str) -> List[str]:
+        q = (query or "").lower().strip()
+        tags = ["general"]
+        if any(ch.isdigit() for ch in q) and any(
+                op in q for op in ("+", "-", "*", "/", "=", "sum", "plus", "minus", "times", "product")):
+            tags.append("arithmetic")
+        if any(w in q for w in ("not", "no ", "never", "impossible", "cannot",
+                                "can't", "won't", "false", "n't")):
+            tags.append("negation")
+        if any(w in q for w in ("always", "definitely", "certainly", "guaranteed",
+                                "must ", "true")):
+            tags.append("certainty")
+        if any(w in q for w in ("delete", "destroy", "irreversible", "overwrite",
+                                "wipe", "remove", "drop ")):
+            tags.append("risky")
+        first = q.split()[0] if q.split() else ""
+        if q.endswith("?") or first in LearnedPrior._WH:
+            tags.append("question")
+        tags.append("long" if len(q) > 80 else "short")
+        return tags
+
+    def _mean(self, tag: str) -> Optional[Tuple[float, int]]:
+        arm = self._arms.get(tag)
+        if not arm or int(arm.get("n", 0)) <= 0:
+            return None
+        a = float(arm.get("alpha", self._PRIOR_A))
+        b = float(arm.get("beta", self._PRIOR_B))
+        return (a / (a + b), int(arm.get("n", 0)))
+
+    def base_rate(self, query: str) -> Tuple[float, Optional[str]]:
+        """Return (base_rate, explanation) — an honest 0.5 with no explanation until learned."""
+        observed = [(t, self._mean(t)) for t in self.features(query)]
+        observed = [(t, mn) for t, mn in observed if mn is not None]
+        if not observed:
+            return 0.5, None
+        acc = 0.0
+        total_w = 0.0
+        parts: List[str] = []
+        for t, (m, n) in observed:
+            w = float(n)
+            acc += w * m
+            total_w += w
+            parts.append(f"{t}={m:.2f}(n={n})")
+        base = acc / total_w if total_w else 0.5
+        return max(0.02, min(0.98, base)), "learned base rate: " + ", ".join(parts)
+
+    def observe(self, query: str, correct: bool, weight: float = 1.0) -> None:
+        w = max(0.0, min(1.0, float(weight)))
+        if w <= 0.0:
+            return
+        for t in self.features(query):
+            arm = self._arms.setdefault(
+                t, {"alpha": self._PRIOR_A, "beta": self._PRIOR_B, "n": 0})
+            if correct:
+                arm["alpha"] = float(arm.get("alpha", 1.0)) + w
+            else:
+                arm["beta"] = float(arm.get("beta", 1.0)) + w
+            arm["n"] = int(arm.get("n", 0)) + 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"arms": {k: {"alpha": round(float(v.get("alpha", 1.0)), 6),
+                             "beta": round(float(v.get("beta", 1.0)), 6),
+                             "n": int(v.get("n", 0))}
+                         for k, v in self._arms.items()}}
+
+    def load_dict(self, d: Dict[str, Any]) -> None:
+        if not isinstance(d, dict):
+            return
+        for k, v in (d.get("arms", {}) or {}).items():
+            if isinstance(v, dict):
+                self._arms[k] = {"alpha": float(v.get("alpha", 1.0) or 1.0),
+                                 "beta": float(v.get("beta", 1.0) or 1.0),
+                                 "n": int(v.get("n", 0) or 0)}
 
 
 # --------------------------------------------------------------------------- #
@@ -73,11 +172,22 @@ class PredictionEngine:
     """
 
     def __init__(self, world_model: Any = None, predictive: Any = None,
-                 voi: Any = None) -> None:
+                 voi: Any = None, prior: Optional["LearnedPrior"] = None) -> None:
         self.world_model = world_model
         self.predictive = predictive
         self.voi = voi
+        self.prior = prior if prior is not None else LearnedPrior()
         self._predictions: int = 0
+
+    def observe_outcome(self, query: str, correct: bool, weight: float = 1.0) -> None:
+        """Feed a real ground-truth outcome back so the base rate learns from experience.
+
+        Called by the kernel when a prediction/claim is later confirmed or falsified; the same
+        ground-truth signal the honesty calibrator consumes. Best-effort and never raises."""
+        try:
+            self.prior.observe(query, bool(correct), weight=weight)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------------------------------------------------------------------- #
     def predict(self, query: str, context: Optional[str] = None) -> PredictionResult:
@@ -159,20 +269,16 @@ class PredictionEngine:
     # ---------------------------------------------------------------------- #
     def _calibrate(self, query: str, signals: List[float],
                    reasoning: List[str]) -> float:
-        """Geometric mean of available signals, with simple keyword priors."""
-        base = 0.5  # honest default when nothing else is available
+        """Geometric mean of available signals, anchored on a *learned* base rate.
 
-        # keyword priors: tautologies and falsehoods
-        q_low = query.lower()
-        if any(t in q_low for t in {"2+2", "1+1", "true is true", "sky is blue"}):
-            base = 0.97
-            reasoning.append("prior: near-tautology → high probability")
-        elif any(t in q_low for t in {"impossible", "never", "always fails"}):
-            base = 0.05
-            reasoning.append("prior: near-impossibility → low probability")
+        The base rate comes from :class:`LearnedPrior` — a Beta-Bernoulli model over query
+        features that NYXARA updates from real outcomes — not from hardcoded keyword strings.
+        Until a feature has been observed the base is an honest 0.5."""
+        base, why = self.prior.base_rate(query)
+        reasoning.append(why if why else "no learned prior yet → honest 0.5 base")
 
         if not signals:
-            return base
+            return round(base, 3)
 
         # geometric mean of all signals
         product = 1.0

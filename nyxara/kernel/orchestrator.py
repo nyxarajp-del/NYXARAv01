@@ -3364,8 +3364,41 @@ class NyxaraCore:
         labels into goal-specific ones; offline it falls back to the deterministic template.
         """
         from nyxara.planning.grand_plan import GrandPlanner
-        return GrandPlanner(core=self).decompose(goal, target_steps=target_steps,
-                                                  max_depth=max_depth)
+        plan = GrandPlanner(core=self).decompose(goal, target_steps=target_steps,
+                                                 max_depth=max_depth)
+        # play it forward and imagine it already failed — attach the top failure modes +
+        # mitigations to the plan and log them to the hash-chained journal so the foresight
+        # demonstrably informs execution and future cycles (never blocks — advisory).
+        try:
+            analysis = self.pre_mortem(goal)
+            setattr(plan, "risk_analysis", analysis)
+            setattr(plan, "premortem", analysis.get("premortem", []))
+            if self.journal is not None and analysis.get("premortem"):
+                top = analysis["premortem"][0]
+                self.journal.note(
+                    f"pre-mortem[{goal[:48]}]: top risk '{top.get('cause','')}' "
+                    f"(risk={top.get('risk')}) → {top.get('mitigation','')}; "
+                    f"{analysis.get('recommendation','')}")
+        except Exception:  # noqa: BLE001 — foresight is best-effort, never fatal to planning
+            pass
+        return plan
+
+    def _scenario(self) -> Any:
+        """Lazy scenario-planning + pre-mortem faculty (planning/scenario.py)."""
+        if getattr(self, "_scenario_engine", None) is None:
+            from nyxara.planning.scenario import ScenarioAnalysis
+            self._scenario_engine = ScenarioAnalysis()
+        return self._scenario_engine
+
+    def pre_mortem(self, plan: str, *, factors: Optional[List[Dict[str, Any]]] = None,
+                   base_value: float = 0.5, downside: float = 0.6) -> Dict[str, Any]:
+        """Assume ``plan`` has failed and ask why — best/likely/worst/black-swan scenarios plus
+        a Klein pre-mortem of ranked failure modes and the mitigation to install *now*.
+
+        Pure, self-contained (planning/scenario.py); returns the scenario+pre-mortem+recommendation
+        analysis. Read-only and advisory — the caller decides what to do with it."""
+        return self._scenario().analyze(plan, base_value=base_value, downside=downside,
+                                        factors=factors)
 
     def grand_mission(self, goal: str, *, target_steps: int = 1000, max_depth: int = 4,
                       authority: Authority = Authority.OWNER, deadline: Optional[float] = None,
@@ -3447,6 +3480,24 @@ class NyxaraCore:
         gates["oversight"] = ("approval" if od.requires_approval else "allowed")
         if od.requires_approval:
             return Disposition.ESCALATE, "oversight: awaiting your approval"
+
+        # initiative — decision-theoretic self-governance of *autonomous action*.
+        # Only autonomous acts (not conversational responses) are gated here: an
+        # irreversible high-stakes or low-confidence action is deferred to the Master
+        # rather than taken alone. This never bypasses a prior gate — it can only add
+        # caution — so it is safe on the live path.
+        if c.kind == "act":
+            try:
+                gov = self._initiative().gate(self._initiative_option(c))
+                gates["initiative"] = gov.action.value
+                from nyxara.planning.decide import DecisionAction
+                if gov.action is DecisionAction.REJECT:
+                    return Disposition.REFUSE, f"initiative: {gov.reason}"
+                if gov.action is not DecisionAction.ACT:
+                    return Disposition.ESCALATE, f"initiative: {gov.reason}"
+            except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
+                gates["initiative"] = f"skipped ({exc})"
+
         return Disposition.ACT, "cleared"
 
     # ---- recall & reasoning ---- #
@@ -5762,6 +5813,37 @@ class NyxaraCore:
             self._voi_engine = ValueOfInformation()
         return self._voi_engine
 
+    def _initiative(self) -> Any:
+        """Lazy decision-theoretic initiative governor (planning/decide.py).
+
+        Gates autonomous *actions* on confidence × reversibility × stakes, so an irreversible
+        high-stakes or low-confidence action is deferred to the Master rather than taken alone.
+        Shares the core's live settings so agency thresholds are honoured."""
+        if getattr(self, "_initiative_governor", None) is None:
+            from nyxara.planning.decide import InitiativeGovernor
+            settings = self.settings if getattr(self, "settings", None) is not None else None
+            self._initiative_governor = InitiativeGovernor(settings=settings)
+        return self._initiative_governor
+
+    def _initiative_option(self, c: Candidate) -> Any:
+        """Map a live Candidate onto a decide.Option for the initiative governor.
+
+        stakes rise with the risk tier (TRIVIAL..CRITICAL → 0..1); an irreversible candidate
+        drops well below the autonomy reversibility floor. owner_aligned is True here because the
+        corrigibility / honesty / permission / guardian / oversight gates have already cleared —
+        this layer only asks "confident and reversible enough to act *alone*?"."""
+        from nyxara.planning.decide import Option
+        try:
+            stakes = float(int(c.risk)) / float(int(RiskTier.CRITICAL) or 1)
+        except Exception:  # noqa: BLE001
+            stakes = 0.3
+        return Option(name=(c.text or c.tool or "action")[:40],
+                      confidence=float(c.confidence),
+                      reversibility=1.0 if c.reversible else 0.2,
+                      stakes=max(0.0, min(1.0, stakes)),
+                      owner_aligned=True,
+                      payload=c)
+
     def _gap_uncertainty(self, topic: str) -> float:
         """1 - effective confidence in the gap's (subject, predicate); 1.0 if unknown."""
         subject, _, predicate = topic.partition(".")
@@ -5942,6 +6024,15 @@ class NyxaraCore:
             self.honesty.record_outcome(float(candidate.confidence), bool(correct))
         except Exception:  # noqa: BLE001 — calibration learning is best-effort, never fatal
             pass
+        # the same ground truth teaches the prediction engine's learned base rate, so its
+        # future probabilities are anchored on measured accuracy rather than hardcoded strings.
+        pe = getattr(self, "prediction_engine", None)
+        if pe is not None:
+            try:
+                pe.observe_outcome(candidate.text, bool(correct),
+                                   weight=float(candidate.confidence))
+            except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+                pass
 
     def _finish(self, cid, disp, candidate, gates, thoughts, reason, response,
                 action_id=None, tool=None, tool_value=None) -> CycleResult:
@@ -5973,7 +6064,36 @@ class NyxaraCore:
                                 latency_s=latency, authority=auth)
             except Exception:  # noqa: BLE001 — telemetry is never allowed to break the cycle
                 pass
+        # Durability (Rule 7): periodically snapshot long-term memory so a long-running mind
+        # does not lose what it has learned between manual saves. Best-effort and throttled.
+        self._maybe_autosave()
         return result
+
+    def _maybe_autosave(self) -> None:
+        """Snapshot memory after enough turns *or* enough elapsed time (whichever first).
+
+        ON by default in real use so learning survives a crash/exit without a manual ``/save``;
+        automatically OFF under pytest so the test suite never writes to (or pollutes) the
+        Master's real memory file. Set ``core._autosave_enabled`` to override. Never raises."""
+        import os
+        enabled = getattr(self, "_autosave_enabled", None)
+        if enabled is None:
+            enabled = "PYTEST_CURRENT_TEST" not in os.environ
+            self._autosave_enabled = enabled
+        if not enabled or self.memory is None:
+            return
+        try:
+            now = time.time()
+            self._autosave_writes = int(getattr(self, "_autosave_writes", 0)) + 1
+            every = int(getattr(self, "_autosave_every_turns", 10))
+            interval = float(getattr(self, "_autosave_min_interval", 120.0))
+            last = float(getattr(self, "_autosave_last", 0.0))
+            if self._autosave_writes >= every or (now - last) >= interval:
+                if self.save_state() is not None:
+                    self._autosave_writes = 0
+                    self._autosave_last = now
+        except Exception:  # noqa: BLE001 — durability is best-effort, never breaks a turn
+            pass
 
     def _apply_affect(self, disp: Disposition) -> None:
         """Colour the soul's transient mood by the turn's outcome, then relax toward the
@@ -6366,6 +6486,7 @@ class NyxaraCore:
             os.makedirs(os.path.dirname(target), exist_ok=True)
             saved = self.memory.save(target)
             self._save_self_model(target)
+            self._save_prediction_prior(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
@@ -6379,11 +6500,46 @@ class NyxaraCore:
         try:
             import os
             self._load_self_model(target)
+            self._load_prediction_prior(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
         except Exception:  # noqa: BLE001
             return 0
+
+    def _prediction_prior_path(self, memory_target: str) -> str:
+        """The learned-prediction-prior sidecar lives next to the long-term memory file."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "prediction_prior.json")
+
+    def _save_prediction_prior(self, memory_target: str) -> None:
+        pe = getattr(self, "prediction_engine", None)
+        if pe is None or getattr(pe, "prior", None) is None:
+            return
+        try:
+            import json
+            import os
+            path = self._prediction_prior_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(pe.prior.to_dict(), fh, indent=2)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_prediction_prior(self, memory_target: str) -> None:
+        pe = getattr(self, "prediction_engine", None)
+        if pe is None or getattr(pe, "prior", None) is None:
+            return
+        try:
+            import json
+            import os
+            path = self._prediction_prior_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                pe.prior.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
 
     def _self_model_path(self, memory_target: str) -> str:
         """The self-model sidecar lives next to the long-term memory file."""
