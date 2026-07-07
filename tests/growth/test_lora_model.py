@@ -51,7 +51,7 @@ def test_build_model_lora_never_raises_for_missing_deps():
 # QLoRA (4-bit) — pure decision/config logic, no GPU or deps needed
 # --------------------------------------------------------------------------- #
 def test_spec_roundtrips_qlora_fields():
-    spec = ModelSpec(kind="lora", base_model="Qwen/Qwen2.5-7B", load_in_4bit=True,
+    spec = ModelSpec(kind="lora", base_model="TinyLlama/TinyLlama-1.1B-Chat-v1.0", load_in_4bit=True,
                      bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16",
                      bnb_4bit_use_double_quant=False, gradient_checkpointing=False)
     again = ModelSpec.from_dict(spec.to_dict())
@@ -150,3 +150,50 @@ def test_build_model_returns_lora_when_available(lora_model):
     # with the stack present, the factory yields a real LoRA model for kind="lora"
     model = build_model(ModelSpec(kind="lora", base_model=TINY, max_seq_len=32, device="cpu"))
     assert model.kind == "lora"
+
+
+# --------------------------------------------------------------------------- #
+# Full-control knobs (no heavy deps) — target modules, optimiser, schedule, 8-bit
+# --------------------------------------------------------------------------- #
+def test_spec_roundtrips_full_control_fields():
+    spec = ModelSpec(kind="lora",
+                     lora_target_modules=("q_proj", "v_proj"),
+                     lora_bias="lora_only", lora_use_rslora=True,
+                     lora_modules_to_save=("lm_head",),
+                     batch_size=4, grad_accum_steps=8, warmup_ratio=0.1,
+                     lr_scheduler="cosine", weight_decay=0.01,
+                     adam_beta1=0.85, adam_beta2=0.95, adam_eps=1e-6,
+                     max_grad_norm=0.5, train_epochs=2, load_in_8bit=True)
+    d = spec.to_dict()
+    assert d["lora_target_modules"] == ["q_proj", "v_proj"]
+    assert d["lr_scheduler"] == "cosine" and d["grad_accum_steps"] == 8
+    again = ModelSpec.from_dict(d)
+    assert tuple(again.lora_target_modules) == ("q_proj", "v_proj")
+    assert again.lora_bias == "lora_only" and again.lora_use_rslora is True
+    assert again.batch_size == 4 and again.train_epochs == 2
+    assert again.load_in_8bit is True
+
+
+def test_spec_from_dict_tolerates_missing_full_control_fields():
+    # a spec persisted before the full-control knobs must load with safe defaults
+    spec = ModelSpec.from_dict({"kind": "lora", "base_model": "x/y"})
+    assert spec.lora_target_modules == () and spec.lora_bias == "none"
+    assert spec.batch_size == 1 and spec.grad_accum_steps == 1
+    assert spec.lr_scheduler == "constant" and spec.train_epochs == 0
+    assert spec.load_in_8bit is False
+
+
+def test_should_quantize_honours_8bit_request():
+    from nyxara.growth.foundry_models import _should_quantize
+    spec8 = ModelSpec(kind="lora", load_in_8bit=True)
+    assert _should_quantize(spec8, has_bnb=True, has_cuda=True) is True
+    assert _should_quantize(spec8, has_bnb=False, has_cuda=True) is False
+    assert _should_quantize(spec8, has_bnb=True, has_cuda=False) is False
+
+
+def test_quant_kwargs_8bit_and_4bit_priority():
+    from nyxara.growth.foundry_models import _quant_kwargs
+    assert _quant_kwargs(ModelSpec(kind="lora", load_in_8bit=True)) == {"load_in_8bit": True}
+    # 4-bit wins when both are (somehow) set on a raw spec
+    both = ModelSpec(kind="lora", load_in_4bit=True, load_in_8bit=True)
+    assert _quant_kwargs(both)["load_in_4bit"] is True

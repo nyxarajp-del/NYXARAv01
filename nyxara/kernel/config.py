@@ -10,7 +10,7 @@ Design goals
 * **Profile-aware.** ``dev`` and ``prod`` profiles ship safe, opinionated defaults;
   ``prod`` is strict (debug off, sandbox enforced, tighter budgets).
 * **Env-overridable.** Any field is overridable via ``NYXARA_`` environment variables
-  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=openai``.
+  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=tinyllama``.
 * **Secret-safe.** API keys are ``SecretStr``; :meth:`NyxaraSettings.redacted`
   produces a log-safe dict that never leaks secrets.
 * **Owner-bound.** The owner identity (Jaypal Khoja / JP) is encoded as an immutable
@@ -97,12 +97,7 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    GROQ = "groq"                 # Groq cloud API (OpenAI-compatible); e.g. openai/gpt-oss-120b
-    LOCAL = "local"               # OpenAI-compatible HTTP endpoint (e.g. Ollama)
-    TRANSFORMERS = "transformers"  # in-process HuggingFace model (open-source)
-    QWEN = "qwen"                 # in-process Qwen3 open-source model, downloaded via HuggingFace
+    TINYLLAMA = "tinyllama"       # in-process TinyLlama-1.1B-Chat, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     MOCK = "mock"
 
@@ -199,33 +194,51 @@ class FeatureFlags(BaseModel):
 # Subsystem configs
 # --------------------------------------------------------------------------- #
 class LLMConfig(BaseModel):
-    """Multi-provider, stateless LLM faculty settings (mind/llm.py)."""
+    """Stateless, fully local LLM faculty settings (mind/llm.py).
+
+    The only real backend is TinyLlama-1.1B running in-process via HuggingFace
+    transformers — no cloud providers, no API keys. Every load-time and
+    generation-time knob is exposed (``NYXARA_LLM__TINYLLAMA_*``) for maximum
+    control over the model. ``self`` serves the foundry-forged model (a LoRA
+    fine-tune of the same base) and ``mock`` is the deterministic offline fallback.
+    """
 
     model_config = {"validate_assignment": True}
 
-    provider: LLMProvider = LLMProvider.ANTHROPIC
-    # Per-provider default models.
-    anthropic_model: str = "claude-opus-4-8"
-    openai_model: str = "gpt-4o"
-    # Groq cloud (OpenAI-compatible). GPT-OSS-120B is an open-weight model served by Groq.
-    groq_model: str = "openai/gpt-oss-120b"
-    local_model: str = "local-default"
-    # In-process open-source model loaded via HuggingFace transformers (optional dep).
-    transformers_model: str = "sshleifer/tiny-gpt2"
-    transformers_device: str = ""          # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
-    # In-process Qwen3 open-source model, downloaded & run locally via HuggingFace.
-    qwen_model: str = "Qwen/Qwen3-4B"
-    qwen_device: str = ""                   # "" -> auto/CPU; e.g. "cuda", "cpu", "mps"
-    qwen_enable_thinking: bool = False      # Qwen3 thinking mode (slower; emits <think> traces)
+    provider: LLMProvider = LLMProvider.TINYLLAMA
+    # ---- TinyLlama-1.1B: model & load-time control ---- #
+    tinyllama_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    tinyllama_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
+    tinyllama_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
+    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise).
+    tinyllama_load_in_4bit: bool = False
+    tinyllama_load_in_8bit: bool = False
+    tinyllama_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
+    tinyllama_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
+    tinyllama_bnb_4bit_use_double_quant: bool = True
+    tinyllama_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
+    tinyllama_use_cache: bool = True        # KV cache during generation
+    tinyllama_trust_remote_code: bool = False
+    # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
+    # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
+    tinyllama_adapter_path: Optional[Path] = None
+    tinyllama_merge_adapter: bool = False
+    # ---- TinyLlama-1.1B: generation control (per-request LLMRequest fields win) ---- #
+    tinyllama_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
+    tinyllama_repetition_penalty: float = Field(default=1.1, ge=0.5, le=2.0)
+    tinyllama_no_repeat_ngram_size: int = Field(default=0, ge=0, le=20)  # 0 -> disabled
+    tinyllama_min_new_tokens: int = Field(default=0, ge=0)            # 0 -> disabled
+    tinyllama_num_beams: int = Field(default=1, ge=1, le=16)
+    tinyllama_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
+    # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
+    tinyllama_do_sample: Literal["auto", "always", "never"] = "auto"
+    # TinyLlama's context window is 2048 tokens; prompts are left-truncated to fit.
+    tinyllama_max_input_tokens: int = Field(default=2048, ge=64, le=2048)
+    # Zephyr chat template (system/user/assistant). False -> flat prompt, for base checkpoints.
+    tinyllama_use_chat_template: bool = True
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
-
-    anthropic_api_key: Optional[SecretStr] = None
-    openai_api_key: Optional[SecretStr] = None
-    groq_api_key: Optional[SecretStr] = None
-    groq_base_url: str = "https://api.groq.com/openai/v1"
-    local_base_url: str = "http://127.0.0.1:11434/v1"
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -253,25 +266,21 @@ class LLMConfig(BaseModel):
     # 1 = off (single pass); 5–20 = active recursive improvement.
     recursive_improvement_iterations: int = Field(default=5, ge=1, le=20)
 
+    @model_validator(mode="after")
+    def _quant_exclusive(self) -> "LLMConfig":
+        if self.tinyllama_load_in_4bit and self.tinyllama_load_in_8bit:
+            raise ValueError("tinyllama_load_in_4bit and tinyllama_load_in_8bit are mutually exclusive")
+        return self
+
     def active_model(self) -> str:
         return {
-            LLMProvider.ANTHROPIC: self.anthropic_model,
-            LLMProvider.OPENAI: self.openai_model,
-            LLMProvider.GROQ: self.groq_model,
-            LLMProvider.LOCAL: self.local_model,
-            LLMProvider.TRANSFORMERS: self.transformers_model,
-            LLMProvider.QWEN: self.qwen_model,
+            LLMProvider.TINYLLAMA: self.tinyllama_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.MOCK: "mock",
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
-        if self.provider is LLMProvider.ANTHROPIC:
-            return self.anthropic_api_key
-        if self.provider is LLMProvider.OPENAI:
-            return self.openai_api_key
-        if self.provider is LLMProvider.GROQ:
-            return self.groq_api_key
+        """Always ``None`` — every backend runs locally; there are no API keys."""
         return None
 
 
@@ -356,10 +365,10 @@ class FoundryConfig(BaseModel):
     n_head: int = Field(default=2, ge=1, le=32)
     n_embd: int = Field(default=64, ge=8, le=2048)
     # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
-    # Adapts a real pretrained base to NYXARA's lived memory by training a small low-rank
-    # adapter — the path to genuine capability. A GPU is recommended for real bases; the
-    # tiny default keeps it runnable (and testable) on CPU.
-    base_model: str = "sshleifer/tiny-gpt2"
+    # Adapts the TinyLlama-1.1B base to NYXARA's lived memory by training a small low-rank
+    # adapter — the path to genuine capability. 1.1B params train comfortably on a single
+    # consumer GPU and are runnable (slowly) on CPU.
+    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     lora_r: int = Field(default=8, ge=1, le=256)
     # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
     # 7B base converges while a tiny base stays cheap). When True the foundry infers the rank
@@ -368,15 +377,38 @@ class FoundryConfig(BaseModel):
     lora_alpha: int = Field(default=16, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
+    # Which modules receive LoRA adapters. The default is every projection in the llama
+    # architecture (attention + MLP) — full-coverage fine-tuning of TinyLlama. An empty
+    # list lets peft infer the defaults for the base architecture.
+    lora_target_modules: List[str] = Field(default_factory=lambda: [
+        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+    lora_bias: Literal["none", "all", "lora_only"] = "none"
+    lora_use_rslora: bool = False           # rank-stabilised LoRA scaling
+    # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
+    lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
-    # QLoRA: load the frozen base in 4-bit so a 7B+ base fine-tunes on a single consumer GPU.
-    # Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades to full-precision
-    # LoRA (no crash). Set load_in_4bit=true with backend="lora" and a real base for genuine scale.
+    # QLoRA: load the frozen base in 4-bit (or 8-bit) so bigger bases fine-tune on a single
+    # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
+    # to full-precision LoRA (no crash). TinyLlama-1.1B rarely needs it, but the knob stays
+    # for tight-VRAM boxes.
     load_in_4bit: bool = False
+    load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
     bnb_4bit_use_double_quant: bool = True
     gradient_checkpointing: bool = True
+    # ---- Optimiser / schedule (full-control training loop) ---- #
+    batch_size: int = Field(default=1, ge=1, le=256)             # windows per micro-step
+    grad_accum_steps: int = Field(default=1, ge=1, le=1024)      # micro-steps per optimiser step
+    warmup_ratio: float = Field(default=0.03, ge=0.0, le=0.5)    # fraction of steps spent warming up
+    lr_scheduler: Literal["constant", "linear", "cosine"] = "constant"
+    weight_decay: float = Field(default=0.0, ge=0.0, le=1.0)
+    adam_beta1: float = Field(default=0.9, ge=0.0, lt=1.0)
+    adam_beta2: float = Field(default=0.999, ge=0.0, lt=1.0)
+    adam_eps: float = Field(default=1e-8, gt=0.0)
+    max_grad_norm: float = Field(default=1.0, ge=0.0)            # 0 -> no clipping
+    # 0 -> train for ``train_steps``; >0 -> that many passes over the corpus windows instead.
+    train_epochs: int = Field(default=0, ge=0, le=100)
     # Training / data.
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
@@ -427,6 +459,12 @@ class FoundryConfig(BaseModel):
     # backend; a strong CUDA GPU unlocks GPT-2 scale + 4-bit QLoRA. Clamped to reality — never
     # recommends a model the machine cannot train. Overrides ``profile`` when on.
     autoscale_to_compute: bool = True
+
+    @model_validator(mode="after")
+    def _quant_exclusive(self) -> "FoundryConfig":
+        if self.load_in_4bit and self.load_in_8bit:
+            raise ValueError("load_in_4bit and load_in_8bit are mutually exclusive")
+        return self
 
     def resolved_dims(self) -> Dict[str, int]:
         """The (n_layer, n_head, n_embd, block_size) the foundry should build with.
@@ -693,9 +731,9 @@ class TopologyConfig(BaseModel):
 class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
-    NYXARA does not bind herself to a single model. She convenes a *council* of language
-    models — open-source (``transformers``/``local``), cloud (``anthropic``/``openai``), and
-    most importantly her OWN model forged by the foundry (``self``) — asks each as a governed
+    NYXARA does not bind herself to a single voice. She convenes a *council* of her local
+    models — the ``tinyllama`` base she runs in-process and, most importantly, her OWN model
+    forged by the foundry (``self``) — asks each as a governed
     tool, and then **NYXARA herself** judges and synthesises the verdicts. No single model
     ever drives; the panel advises, the sovereign decides. As the foundry sharpens her own
     model and promotes it, ``self`` joins the council and (via ``prefer_self_weight``)
@@ -926,8 +964,8 @@ class SelfImprovementConfig(BaseModel):
     # model is, and the deterministic linter-class transforms always work with no model at all.
     allow_llm_edits: bool = True               # author real source fixes (self-model or LLM)
     # "khud NYXARA kare, koi LLM naa kare": when True, ONLY NYXARA's own model (the ``self``
-    # provider) may author edits — never an external provider (Anthropic/OpenAI/…). Set False to
-    # also permit a configured external provider as the author.
+    # provider) may author edits — never another provider. Set False to
+    # also permit the configured base provider (``tinyllama``) as the author.
     self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
     # META-META loop (growth/meta_meta.py): a recursive tower that evolves the improvement
@@ -2014,9 +2052,10 @@ class NyxaraSettings(BaseSettings):
     Environment overrides use the ``NYXARA_`` prefix and ``__`` for nesting::
 
         NYXARA_PROFILE=prod
-        NYXARA_LLM__PROVIDER=openai
+        NYXARA_LLM__PROVIDER=tinyllama
         NYXARA_RESOURCES__MAX_CONCURRENT_TASKS=128
-        NYXARA_LLM__ANTHROPIC_API_KEY=sk-ant-...
+        NYXARA_LLM__TINYLLAMA_ADAPTER_PATH=/data/foundry/versions/v3/adapter
+        NYXARA_FOUNDRY__LORA_R=16
     """
 
     model_config = SettingsConfigDict(
@@ -2258,9 +2297,9 @@ if __name__ == "__main__":  # pragma: no cover
 
     # Secret redaction
     s = NyxaraSettings(profile="dev")
-    s.llm.anthropic_api_key = SecretStr("sk-ant-SECRET")
+    s.server.api_token = SecretStr("tok-SECRET")
     red = s.redacted()
-    assert red["llm"]["anthropic_api_key"] == "***REDACTED***"
+    assert red["server"]["api_token"] == "***REDACTED***"
     assert "SECRET" not in s.to_json(redact=True)
     print("secret redaction OK")
 

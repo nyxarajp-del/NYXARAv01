@@ -702,10 +702,11 @@ def get_process_vault(**kw: Any) -> Optional[CredentialVault]:
 
 
 def resolve_api_key(provider: str) -> Optional[str]:
-    """Kernel-internal: fetch a provider API key from the vault, or None.
+    """Kernel-internal: fetch a service API key from the vault, or None.
 
-    Trusted in-process faculties (e.g. :mod:`nyxara.mind.llm`) call this *only* as a fallback
-    when neither config nor env supplies a key. It never runs unless
+    Trusted in-process faculties (e.g. web search) may call this *only* as a fallback
+    when neither config nor env supplies a key. (The LLM itself is fully local —
+    TinyLlama-1.1B — and needs no key.) It never runs unless
     ``VaultConfig.provider_key_fallback`` is on, and only reads pre-existing records — it does
     not create a vault where one is not warranted. The plaintext is used to construct the API
     client inside the kernel; it is never returned to the model.

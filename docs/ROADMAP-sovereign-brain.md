@@ -14,7 +14,7 @@ safety gates, memory with a real forgetting-curve, a world-model, a planner, a c
 and a **foundry that can actually train her own model** (n-gram / nano-GPT / LoRA backends,
 with gauntlet-gated promotion). But there is one real gap:
 
-- **The default response always comes from an external LLM** (Anthropic / OpenAI). NYXARA
+- **The default response used to come from an external LLM** (now removed — fully local). NYXARA
   *can* train her own model, but it sits "on the bench" — it is never the primary responder.
   The keyless "offline reasoner" is only a ~10-line keyword-matcher stub
   (`kernel/orchestrator.py:_default_reasoner`).
@@ -66,7 +66,7 @@ This is the crux (GPU + API key available). The frontier LLM becomes the *teache
 voice.
 
 - **Make LoRA-on-real-base the default foundry backend.** `NYXARA_FOUNDRY__BACKEND=lora`,
-  `NYXARA_FOUNDRY__BASE_MODEL` = a strong open base (e.g. `Qwen/Qwen2.5-3B` or `-7B`, on GPU).
+  `NYXARA_FOUNDRY__BASE_MODEL` = the local open base (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`).
   This is the path the README calls "genuine capability." The base already speaks the
   language; we only learn a small low-rank adapter for NYXARA's **voice + lived memory +
   teacher answers**.
@@ -130,7 +130,7 @@ neural model calls / cross-checks against:
 
 ## Phase 5 — Scaling the substrate (genuine capability)
 
-- **Base-model ladder.** Climb as compute allows: Qwen2.5 0.5B → 3B → 7B LoRA
+- **Base-model ladder.** Climb as compute allows: TinyLlama-1.1B LoRA (today's base)
   (`FoundryConfig` already has profiles + `estimated_params()`). Recommendation:
   **LoRA-on-a-strong-open-base** is the realistic "own brain" — from-scratch GPT-2 pretraining
   has poor ROI.

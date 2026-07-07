@@ -139,10 +139,28 @@ class ModelSpec:
     # ``load_in_4bit``; honoured only when bitsandbytes is importable AND CUDA is present —
     # otherwise the LoRA backend silently loads the base full-precision (so CPU/CI is unchanged).
     load_in_4bit: bool = False
+    load_in_8bit: bool = False                  # 8-bit alternative (4-bit wins if both set)
     bnb_4bit_quant_type: str = "nf4"            # "nf4" (QLoRA default) or "fp4"
     bnb_4bit_compute_dtype: str = "bfloat16"    # compute dtype for the de-quantized matmuls
     bnb_4bit_use_double_quant: bool = True      # nested quantization — a little more memory saved
     gradient_checkpointing: bool = True         # trade compute for memory (recommended with 4-bit)
+    # ---- LoRA structure (full control over WHERE the adapter attaches) ---- #
+    # Empty -> let peft infer the architecture defaults (with an all-linear fallback).
+    lora_target_modules: Tuple[str, ...] = ()
+    lora_bias: str = "none"                     # "none" | "all" | "lora_only"
+    lora_use_rslora: bool = False               # rank-stabilised LoRA scaling
+    lora_modules_to_save: Tuple[str, ...] = ()  # extra full-precision modules (e.g. lm_head)
+    # ---- Optimiser / schedule (full control over HOW the adapter trains) ---- #
+    batch_size: int = 1
+    grad_accum_steps: int = 1
+    warmup_ratio: float = 0.03
+    lr_scheduler: str = "constant"              # "constant" | "linear" | "cosine"
+    weight_decay: float = 0.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_eps: float = 1e-8
+    max_grad_norm: float = 1.0                  # 0 -> no clipping
+    train_epochs: int = 0                       # 0 -> use the caller's ``steps``
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "ngram_order": self.ngram_order,
@@ -154,10 +172,30 @@ class ModelSpec:
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
                 "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
                 "device": self.device, "load_in_4bit": self.load_in_4bit,
+                "load_in_8bit": self.load_in_8bit,
                 "bnb_4bit_quant_type": self.bnb_4bit_quant_type,
                 "bnb_4bit_compute_dtype": self.bnb_4bit_compute_dtype,
                 "bnb_4bit_use_double_quant": self.bnb_4bit_use_double_quant,
-                "gradient_checkpointing": self.gradient_checkpointing}
+                "gradient_checkpointing": self.gradient_checkpointing,
+                "lora_target_modules": list(self.lora_target_modules),
+                "lora_bias": self.lora_bias,
+                "lora_use_rslora": self.lora_use_rslora,
+                "lora_modules_to_save": list(self.lora_modules_to_save),
+                "batch_size": self.batch_size,
+                "grad_accum_steps": self.grad_accum_steps,
+                "warmup_ratio": self.warmup_ratio,
+                "lr_scheduler": self.lr_scheduler,
+                "weight_decay": self.weight_decay,
+                "adam_beta1": self.adam_beta1, "adam_beta2": self.adam_beta2,
+                "adam_eps": self.adam_eps, "max_grad_norm": self.max_grad_norm,
+                "train_epochs": self.train_epochs}
+
+    def __post_init__(self) -> None:
+        # JSON round-trips tuples as lists — normalise so from_dict(to_dict()) == spec.
+        if not isinstance(self.lora_target_modules, tuple):
+            self.lora_target_modules = tuple(self.lora_target_modules or ())
+        if not isinstance(self.lora_modules_to_save, tuple):
+            self.lora_modules_to_save = tuple(self.lora_modules_to_save or ())
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ModelSpec":
@@ -847,25 +885,30 @@ def _cuda_available() -> bool:
 
 def _should_quantize(spec: "ModelSpec", *, has_bnb: Optional[bool] = None,
                      has_cuda: Optional[bool] = None) -> bool:
-    """Decide whether to load the base in 4-bit (QLoRA), honestly.
+    """Decide whether to load the base quantized (4-bit QLoRA or 8-bit), honestly.
 
-    Quantize only when it was *requested* (``spec.load_in_4bit``) AND it can actually work —
-    bitsandbytes importable and a CUDA device present. 4-bit has no CPU path, so on a keyless/
-    CPU/CI machine this returns False and the LoRA backend loads the base full-precision
-    instead of crashing. Pure (deps injectable) so the decision is unit-testable without a GPU.
+    Quantize only when it was *requested* (``spec.load_in_4bit`` / ``spec.load_in_8bit``)
+    AND it can actually work — bitsandbytes importable and a CUDA device present. Neither
+    has a CPU path, so on a keyless/CPU/CI machine this returns False and the LoRA backend
+    loads the base full-precision instead of crashing. Pure (deps injectable) so the
+    decision is unit-testable without a GPU.
     """
     has_bnb = _HAS_BNB if has_bnb is None else has_bnb
     has_cuda = _cuda_available() if has_cuda is None else has_cuda
-    return bool(spec.load_in_4bit and has_bnb and has_cuda)
+    wanted = spec.load_in_4bit or getattr(spec, "load_in_8bit", False)
+    return bool(wanted and has_bnb and has_cuda)
 
 
 def _quant_kwargs(spec: "ModelSpec") -> Dict[str, Any]:
     """The BitsAndBytesConfig keyword arguments implied by ``spec`` — a pure dict, so the
-    intended quantization can be asserted in tests without importing transformers/bnb."""
-    return {"load_in_4bit": True,
-            "bnb_4bit_quant_type": spec.bnb_4bit_quant_type,
-            "bnb_4bit_compute_dtype": spec.bnb_4bit_compute_dtype,
-            "bnb_4bit_use_double_quant": spec.bnb_4bit_use_double_quant}
+    intended quantization can be asserted in tests without importing transformers/bnb.
+    4-bit wins when both are requested (it is the stricter QLoRA path)."""
+    if spec.load_in_4bit or not getattr(spec, "load_in_8bit", False):
+        return {"load_in_4bit": True,
+                "bnb_4bit_quant_type": spec.bnb_4bit_quant_type,
+                "bnb_4bit_compute_dtype": spec.bnb_4bit_compute_dtype,
+                "bnb_4bit_use_double_quant": spec.bnb_4bit_use_double_quant}
+    return {"load_in_8bit": True}
 
 
 class LoRAModel(BaseLanguageModel):
@@ -921,16 +964,20 @@ class LoRAModel(BaseLanguageModel):
         self.synapses: Any = None
 
     def _load_quantized_base(self) -> Any:
-        """Load the base in 4-bit (NF4) and prepare it for k-bit LoRA training (QLoRA)."""
+        """Load the base quantized (4-bit NF4 QLoRA, or 8-bit) and prepare it for
+        k-bit LoRA training."""
         import torch as _torch
         from transformers import AutoModelForCausalLM, BitsAndBytesConfig
         from peft import prepare_model_for_kbit_training
         kw = _quant_kwargs(self.spec)
-        compute_dtype = getattr(_torch, kw["bnb_4bit_compute_dtype"], _torch.float16)
-        bnb = BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_quant_type=kw["bnb_4bit_quant_type"],
-            bnb_4bit_compute_dtype=compute_dtype,
-            bnb_4bit_use_double_quant=kw["bnb_4bit_use_double_quant"])
+        if kw.get("load_in_8bit"):
+            bnb = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            compute_dtype = getattr(_torch, kw["bnb_4bit_compute_dtype"], _torch.float16)
+            bnb = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type=kw["bnb_4bit_quant_type"],
+                bnb_4bit_compute_dtype=compute_dtype,
+                bnb_4bit_use_double_quant=kw["bnb_4bit_use_double_quant"])
         base = AutoModelForCausalLM.from_pretrained(
             self.spec.base_model, quantization_config=bnb, device_map="auto")
         return prepare_model_for_kbit_training(
@@ -959,7 +1006,16 @@ class LoRAModel(BaseLanguageModel):
         else:
             r, alpha = self.spec.lora_r, self.spec.lora_alpha
         common = dict(r=r, lora_alpha=alpha,
-                      lora_dropout=self.spec.lora_dropout, task_type=TaskType.CAUSAL_LM)
+                      lora_dropout=self.spec.lora_dropout, task_type=TaskType.CAUSAL_LM,
+                      bias=getattr(self.spec, "lora_bias", "none"),
+                      use_rslora=getattr(self.spec, "lora_use_rslora", False))
+        modules_to_save = list(getattr(self.spec, "lora_modules_to_save", ()) or ())
+        if modules_to_save:
+            common["modules_to_save"] = modules_to_save
+        targets = list(getattr(self.spec, "lora_target_modules", ()) or ())
+        if targets:
+            # Explicit placement: the spec says exactly which projections adapt.
+            return get_peft_model(base, LoraConfig(target_modules=targets, **common))
         try:
             # Let peft infer target modules from the architecture (gpt2->c_attn, llama->q/v…).
             return get_peft_model(base, LoraConfig(**common))
@@ -977,32 +1033,96 @@ class LoRAModel(BaseLanguageModel):
             return []
         return [ids[i:i + n] for i in range(0, len(ids), n) if len(ids[i:i + n]) >= 2]
 
-    def train_on(self, corpus: Sequence[str], *, steps: int = 100, seed: int = 0) -> TrainStats:
+    def _lr_lambda(self, total_steps: int):
+        """Warmup then constant / linear-decay / cosine, per ``spec.lr_scheduler``.
+
+        Hand-rolled (no transformers ``get_scheduler`` dependency) so the schedule is
+        exact, inspectable, and works with any torch version."""
+        warmup = int(total_steps * max(0.0, self.spec.warmup_ratio))
+        kind = str(getattr(self.spec, "lr_scheduler", "constant")).lower()
+
+        def factor(step: int) -> float:
+            if warmup > 0 and step < warmup:
+                return (step + 1) / warmup
+            if kind == "constant" or total_steps <= warmup:
+                return 1.0
+            progress = (step - warmup) / max(1, total_steps - warmup)
+            progress = min(1.0, max(0.0, progress))
+            if kind == "linear":
+                return max(0.0, 1.0 - progress)
+            if kind == "cosine":
+                return 0.5 * (1.0 + math.cos(math.pi * progress))
+            return 1.0
+
+        return factor
+
+    def _batch(self, windows: List[List[int]], picks: List[int]) -> Tuple[Any, Any]:
+        """Pad ``picks`` windows to the longest and mask padding out of the loss."""
+        pad = self.tokenizer.pad_token_id or 0
+        chosen = [windows[i] for i in picks]
+        width = max(len(w) for w in chosen)
+        ids = torch.full((len(chosen), width), pad, dtype=torch.long)
+        labels = torch.full((len(chosen), width), -100, dtype=torch.long)
+        for row, w in enumerate(chosen):
+            t = torch.tensor(w, dtype=torch.long)
+            ids[row, :len(w)] = t
+            labels[row, :len(w)] = t
+        return ids.to(self.device), labels.to(self.device)
+
+    def train_on(self, corpus: Sequence[str], *, steps: int = 100, seed: int = 0,
+                 accumulate: bool = False) -> TrainStats:
+        """Fine-tune the LoRA adapter with the spec's full optimiser/schedule control.
+
+        Honours ``batch_size``, ``grad_accum_steps``, ``warmup_ratio`` + ``lr_scheduler``,
+        AdamW betas/eps/``weight_decay``, ``max_grad_norm`` clipping, and ``train_epochs``
+        (>0 -> passes over the corpus windows override the caller's ``steps``). ``accumulate``
+        is accepted for warm-start parity with the count-based backends: continuing to train
+        the loaded adapter *is* accumulation for a neural model."""
         import time
         start = time.monotonic()
         windows = self._windows(corpus)
         if not windows:
             return TrainStats(steps=0, final_loss=0.0, seconds=0.0, tokens=0)
+        batch = max(1, int(getattr(self.spec, "batch_size", 1)))
+        accum = max(1, int(getattr(self.spec, "grad_accum_steps", 1)))
+        epochs = int(getattr(self.spec, "train_epochs", 0))
+        if epochs > 0:   # optimiser steps needed for `epochs` passes over the windows
+            total = max(1, math.ceil(len(windows) * epochs / (batch * accum)))
+        else:
+            total = max(1, steps)
         params = [p for p in self.net.parameters() if p.requires_grad]
-        opt = torch.optim.AdamW(params, lr=self.spec.lora_lr)
+        opt = torch.optim.AdamW(
+            params, lr=self.spec.lora_lr,
+            betas=(getattr(self.spec, "adam_beta1", 0.9), getattr(self.spec, "adam_beta2", 0.999)),
+            eps=getattr(self.spec, "adam_eps", 1e-8),
+            weight_decay=getattr(self.spec, "weight_decay", 0.0))
+        sched = torch.optim.lr_scheduler.LambdaLR(opt, self._lr_lambda(total))
+        clip = float(getattr(self.spec, "max_grad_norm", 1.0))
         rng = random.Random(seed or self.spec.seed)
         self.net.train()
         last, tokens = 0.0, 0
-        for _ in range(max(1, steps)):
-            window = windows[rng.randrange(len(windows))]
-            ids = torch.tensor([window], dtype=torch.long, device=self.device)
-            out = self.net(input_ids=ids, labels=ids)
-            loss = out.loss
-            if self.synapses is not None:   # Elastic Weight Consolidation: protect old skills
-                loss = loss + self.synapses.penalty()
-            opt.zero_grad(); loss.backward(); opt.step()
-            last = float(out.loss.item()); tokens += len(window)
+        for _ in range(total):
+            opt.zero_grad()
+            for _micro in range(accum):
+                picks = [rng.randrange(len(windows)) for _ in range(batch)]
+                ids, labels = self._batch(windows, picks)
+                out = self.net(input_ids=ids, labels=labels)
+                loss = out.loss
+                if self.synapses is not None:   # Elastic Weight Consolidation: protect old skills
+                    loss = loss + self.synapses.penalty()
+                (loss / accum).backward()
+                last = float(out.loss.item())
+                tokens += sum(len(windows[i]) for i in picks)
+            if clip > 0:
+                torch.nn.utils.clip_grad_norm_(params, clip)
+            opt.step()
+            sched.step()
         if self.synapses is not None:
             try:
                 self.synapses.consolidate(task=f"gen-{self.synapses._consolidations}")
             except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
                 pass
-        return TrainStats(steps=max(1, steps), final_loss=last,
+        return TrainStats(steps=total, final_loss=last,
                           seconds=time.monotonic() - start, tokens=tokens)
 
     def perplexity(self, text: str) -> float:

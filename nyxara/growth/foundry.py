@@ -600,12 +600,27 @@ class Foundry:
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
                                  lora_r_auto=getattr(self.cfg, "lora_r_auto", True),
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,
+                                 lora_target_modules=tuple(self.cfg.lora_target_modules),
+                                 lora_bias=self.cfg.lora_bias,
+                                 lora_use_rslora=self.cfg.lora_use_rslora,
+                                 lora_modules_to_save=tuple(self.cfg.lora_modules_to_save),
                                  max_seq_len=self.cfg.max_seq_len,
                                  load_in_4bit=load_in_4bit,
+                                 load_in_8bit=self.cfg.load_in_8bit,
                                  bnb_4bit_quant_type=self.cfg.bnb_4bit_quant_type,
                                  bnb_4bit_compute_dtype=self.cfg.bnb_4bit_compute_dtype,
                                  bnb_4bit_use_double_quant=self.cfg.bnb_4bit_use_double_quant,
-                                 gradient_checkpointing=self.cfg.gradient_checkpointing)
+                                 gradient_checkpointing=self.cfg.gradient_checkpointing,
+                                 batch_size=self.cfg.batch_size,
+                                 grad_accum_steps=self.cfg.grad_accum_steps,
+                                 warmup_ratio=self.cfg.warmup_ratio,
+                                 lr_scheduler=self.cfg.lr_scheduler,
+                                 weight_decay=self.cfg.weight_decay,
+                                 adam_beta1=self.cfg.adam_beta1,
+                                 adam_beta2=self.cfg.adam_beta2,
+                                 adam_eps=self.cfg.adam_eps,
+                                 max_grad_norm=self.cfg.max_grad_norm,
+                                 train_epochs=self.cfg.train_epochs)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
         model = build_model(spec)

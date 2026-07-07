@@ -1,13 +1,10 @@
-"""Tests for the open-source (transformers) and self-built (SelfProvider) LLM backends."""
+"""Tests for the self-built (SelfProvider) LLM backend."""
 
 from __future__ import annotations
 
 
-import pytest
-
-from nyxara.growth.foundry_models import _HAS_TORCH
 from nyxara.kernel.config import LLMProvider, NyxaraSettings, Profile
-from nyxara.mind.llm import LLM, SelfProvider, TransformersProvider
+from nyxara.mind.llm import LLM, SelfProvider
 
 
 def _settings():
@@ -15,9 +12,9 @@ def _settings():
 
 
 # -------------------- providers are registered & honest -------------------- #
-def test_new_providers_registered():
+def test_self_provider_registered():
     status = LLM(settings=_settings()).provider_status()
-    assert "transformers" in status and "self" in status
+    assert "self" in status
 
 
 def test_self_provider_unavailable_without_promoted_model(tmp_path):
@@ -26,8 +23,7 @@ def test_self_provider_unavailable_without_promoted_model(tmp_path):
     assert SelfProvider(settings).available() is False
 
 
-def test_transformers_enum_value_exists():
-    assert LLMProvider.TRANSFORMERS.value == "transformers"
+def test_self_enum_value_exists():
     assert LLMProvider.SELF.value == "self"
 
 
@@ -51,19 +47,3 @@ def test_self_provider_serves_promoted_model(tmp_path):
     assert prov.available() is True        # a model was trained AND promoted
     resp = prov.complete(LLMRequest.from_prompt("nyxara is", max_tokens=16))
     assert isinstance(resp.text, str) and resp.provider == "self"
-
-
-# -------------------- optional torch backend -------------------- #
-@pytest.mark.skipif(_HAS_TORCH, reason="torch IS installed; bare-machine path not applicable")
-def test_transformers_unavailable_without_torch():
-    assert TransformersProvider(_settings()).available() is False
-
-
-@pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
-def test_transformers_available_with_torch():
-    # transformers must also be importable for availability
-    try:
-        import transformers  # noqa: F401
-    except Exception:
-        pytest.skip("transformers not installed")
-    assert TransformersProvider(_settings()).available() is True

@@ -27,11 +27,11 @@ nyxara-self-optimize = "nyxara.growth.self_optimize_main:main"
 [project.optional-dependencies]
 # Reasoning / math / data
 reasoning = ["z3-solver>=4.12", "sympy>=1.12", "numpy>=1.26", "networkx>=3.2", "scikit-learn>=1.4"]
-# LLM providers (Groq is OpenAI-wire-compatible, driven via the openai SDK)
-llm = ["anthropic>=0.40", "openai>=1.40", "httpx>=0.27"]
-# Qwen3 local open-source model — downloaded & run in-process via HuggingFace.
-# Qwen3 chat templates need transformers>=4.51; accelerate enables device_map="auto".
-qwen = ["transformers>=4.51", "torch>=2.2", "accelerate>=0.30"]
+# LLM — TinyLlama-1.1B, downloaded & run in-process via HuggingFace (no API keys).
+# accelerate enables device_map="auto"; httpx stays for web senses.
+llm = ["transformers>=4.40", "torch>=2.2", "accelerate>=0.30", "httpx>=0.27"]
+# Alias for the same local stack (kept as an obvious install target for the provider).
+tinyllama = ["transformers>=4.40", "torch>=2.2", "accelerate>=0.30"]
 # Vector / retrieval (scale: faiss ANN index, selected via NYXARA_MEMORY__VECTOR_BACKEND=faiss)
 vector = ["faiss-cpu>=1.8", "numpy>=1.26"]
 # Managed/embedded Qdrant vector DB (NYXARA_MEMORY__VECTOR_BACKEND=qdrant). Embedded

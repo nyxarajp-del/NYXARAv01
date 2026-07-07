@@ -28,14 +28,14 @@ class _OwnProvider:
 
 class _Teacher:
     def available_providers(self):
-        return ["anthropic", "self", "mock"]
+        return ["tinyllama", "self", "mock"]
 
     def complete_with(self, name, req):
         return type("_R", (), {"text": f"[teacher:{name}] a careful answer"})()
 
 
 class _FakeProvider:
-    name = "anthropic"  # not "mock" → _real_llm() is True, so the teacher path is live
+    name = "tinyllama"  # not "mock" → _real_llm() is True, so the teacher path is live
 
 
 class _FakeLLM:

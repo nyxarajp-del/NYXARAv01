@@ -11,18 +11,17 @@ makes cognition replayable (kernel/replay.py) and auditable. Memory lives in
 ``memory/``; tool execution lives in ``agency/``; the decision to *act* on any output
 belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
-Multi-provider, selected by config:
+Fully local, selected by config:
 
-* :class:`AnthropicProvider`   — Claude (anthropic SDK + ``ANTHROPIC_API_KEY``)
-* :class:`OpenAIProvider`      — GPT (openai SDK + ``OPENAI_API_KEY``)
-* :class:`GroqProvider`        — Groq cloud, OpenAI-compatible (e.g. ``openai/gpt-oss-120b`` + ``GROQ_API_KEY``)
-* :class:`LocalProvider`       — any OpenAI-compatible endpoint (e.g. Ollama, via httpx)
-* :class:`TransformersProvider`— any in-process HuggingFace model (open-source)
-* :class:`QwenProvider`        — Qwen3 open-source model, downloaded & run locally (HuggingFace)
+* :class:`TinyLlamaProvider`   — TinyLlama-1.1B-Chat, downloaded & run in-process (HuggingFace);
+  every load-time and generation-time knob is exposed via ``NYXARA_LLM__TINYLLAMA_*``,
+  including serving a foundry-forged LoRA adapter directly
+* :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry
 * :class:`MockProvider`        — deterministic, offline; the always-available fallback
 
-Each adapter imports its SDK lazily and reports ``available()`` honestly, so this
-module works with zero heavy deps installed (falling back to the mock).
+No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``) are
+imported lazily and reported honestly via ``available()``, so this module works with zero
+heavy deps installed (falling back to the mock).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -50,30 +49,13 @@ __all__ = [
     "LLMResponse",
     "LLMProviderBase",
     "MockProvider",
-    "AnthropicProvider",
-    "OpenAIProvider",
-    "GroqProvider",
-    "LocalProvider",
-    "TransformersProvider",
-    "QwenProvider",
+    "TinyLlamaProvider",
     "SelfProvider",
     "format_self_prompt",
     "format_self_training_doc",
     "truncate_at_stops",
     "LLM",
 ]
-
-
-def _vault_key(provider: str) -> Optional[str]:
-    """Last-resort provider-key lookup from NYXARA's sovereign vault (config/env win first).
-
-    Lets provider API keys live under NYXARA's own encrypted control instead of the
-    environment. Import-guarded and best-effort — never raises, never blocks a call."""
-    try:
-        from nyxara.guard.vault import resolve_api_key
-        return resolve_api_key(provider)
-    except Exception:  # noqa: BLE001 — the vault is a capability, never a hard dep
-        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -265,290 +247,41 @@ class MockProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# Anthropic provider
+# TinyLlama provider — TinyLlama-1.1B, downloaded & run locally (HuggingFace)
 # --------------------------------------------------------------------------- #
-class AnthropicProvider(LLMProviderBase):
-    name = "anthropic"
+class TinyLlamaProvider(LLMProviderBase):
+    """Run **TinyLlama-1.1B** in-process, downloaded via HuggingFace — the sole real backend.
 
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._client = None
+    The model is fetched on first use (``TinyLlama/TinyLlama-1.1B-Chat-v1.0`` by default)
+    and cached locally by the ``transformers`` hub, then served entirely on this machine —
+    no API key, no network at inference time. The chat checkpoint ships the Zephyr chat
+    template (``system``/``user``/``assistant``), applied via ``apply_chat_template``.
 
-    def _key(self) -> Optional[str]:
-        import os
-        k = self.settings.llm.anthropic_api_key
-        return ((k.get_secret_value() if k else None) or os.getenv("ANTHROPIC_API_KEY")
-                or _vault_key("anthropic"))
+    Maximum control, all from config (``NYXARA_LLM__TINYLLAMA_*``):
 
-    def available(self) -> bool:
-        try:
-            import anthropic  # noqa: F401
-        except Exception:
-            return False
-        return bool(self._key())
+    * load-time — device, dtype, 4-/8-bit quantized load (bitsandbytes+CUDA only, silently
+      full-precision otherwise), attention implementation, KV cache, trust_remote_code;
+    * fine-tune serving — ``tinyllama_adapter_path`` loads a peft LoRA adapter (e.g. a
+      foundry ``versions/vN/adapter``) on top of the base; ``tinyllama_merge_adapter``
+      folds it into the weights for faster inference;
+    * generation — top_k, repetition_penalty, no_repeat_ngram_size, min_new_tokens,
+      beam search + length_penalty, do_sample policy, deterministic seeding, input-length
+      budget; per-request :class:`LLMRequest` fields (temperature/top_p/max_tokens/stop/
+      seed) always win over config defaults.
 
-    def default_model(self) -> str:
-        return self.settings.llm.anthropic_model
-
-    def _ensure_client(self):
-        if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic(api_key=self._key())
-        return self._client
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        client = self._ensure_client()
-        kwargs: Dict[str, Any] = {
-            "model": model, "max_tokens": req.max_tokens,
-            "temperature": req.temperature, "top_p": req.top_p,
-            "messages": req.provider_messages(),
-        }
-        if req.system:
-            kwargs["system"] = req.system
-        if req.stop:
-            kwargs["stop_sequences"] = list(req.stop)
-        resp = client.messages.create(**kwargs)
-        text = "".join(getattr(b, "text", "") for b in resp.content)
-        usage = Usage(prompt_tokens=getattr(resp.usage, "input_tokens", 0),
-                      completion_tokens=getattr(resp.usage, "output_tokens", 0))
-        return (text, getattr(resp, "stop_reason", "stop") or "stop", usage, resp)
-
-
-# --------------------------------------------------------------------------- #
-# OpenAI provider
-# --------------------------------------------------------------------------- #
-class OpenAIProvider(LLMProviderBase):
-    name = "openai"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._client = None
-
-    def _key(self) -> Optional[str]:
-        import os
-        k = self.settings.llm.openai_api_key
-        return ((k.get_secret_value() if k else None) or os.getenv("OPENAI_API_KEY")
-                or _vault_key("openai"))
-
-    def available(self) -> bool:
-        try:
-            import openai  # noqa: F401
-        except Exception:
-            return False
-        return bool(self._key())
-
-    def default_model(self) -> str:
-        return self.settings.llm.openai_model
-
-    def _ensure_client(self):
-        if self._client is None:
-            import openai
-            self._client = openai.OpenAI(api_key=self._key())
-        return self._client
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        client = self._ensure_client()
-        messages = req.provider_messages()
-        if req.system:
-            messages = [{"role": "system", "content": req.system}] + messages
-        kwargs: Dict[str, Any] = {
-            "model": model, "messages": messages, "temperature": req.temperature,
-            "max_tokens": req.max_tokens, "top_p": req.top_p,
-        }
-        if req.stop:
-            kwargs["stop"] = list(req.stop)
-        if req.json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        if req.seed is not None:
-            kwargs["seed"] = req.seed
-        resp = client.chat.completions.create(**kwargs)
-        choice = resp.choices[0]
-        text = choice.message.content or ""
-        u = getattr(resp, "usage", None)
-        usage = Usage(prompt_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
-                      completion_tokens=getattr(u, "completion_tokens", 0) if u else 0)
-        return (text, choice.finish_reason or "stop", usage, resp)
-
-
-# --------------------------------------------------------------------------- #
-# Groq provider — Groq cloud, OpenAI-compatible (e.g. openai/gpt-oss-120b)
-# --------------------------------------------------------------------------- #
-class GroqProvider(LLMProviderBase):
-    """Groq cloud inference via its OpenAI-compatible API.
-
-    Groq serves open-weight models (e.g. ``openai/gpt-oss-120b``) behind an
-    OpenAI-shaped endpoint, so we drive it with the already-present ``openai`` SDK
-    pointed at Groq's ``base_url`` — no extra dependency required. Stateless like every
-    other adapter: request in -> text out. Imports lazily and reports availability
-    honestly (SDK importable AND a key present), degrading to the mock otherwise.
+    Heavy deps are imported lazily and reported honestly, so a bare machine degrades to
+    the mock rather than erroring. Stateless: the loaded weights are a cached instrument,
+    never conversation memory.
     """
 
-    name = "groq"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._client = None
-
-    def _key(self) -> Optional[str]:
-        import os
-        k = self.settings.llm.groq_api_key
-        return ((k.get_secret_value() if k else None) or os.getenv("GROQ_API_KEY")
-                or _vault_key("groq"))
-
-    def available(self) -> bool:
-        try:
-            import openai  # noqa: F401 — Groq speaks the OpenAI wire protocol
-        except Exception:
-            return False
-        return bool(self._key())
-
-    def default_model(self) -> str:
-        return self.settings.llm.groq_model
-
-    def _ensure_client(self):
-        if self._client is None:
-            import openai
-            self._client = openai.OpenAI(
-                api_key=self._key(),
-                base_url=self.settings.llm.groq_base_url,
-            )
-        return self._client
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        client = self._ensure_client()
-        messages = req.provider_messages()
-        if req.system:
-            messages = [{"role": "system", "content": req.system}] + messages
-        kwargs: Dict[str, Any] = {
-            "model": model, "messages": messages, "temperature": req.temperature,
-            "max_tokens": req.max_tokens, "top_p": req.top_p,
-        }
-        if req.stop:
-            kwargs["stop"] = list(req.stop)
-        if req.json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        if req.seed is not None:
-            kwargs["seed"] = req.seed
-        resp = client.chat.completions.create(**kwargs)
-        choice = resp.choices[0]
-        text = choice.message.content or ""
-        u = getattr(resp, "usage", None)
-        usage = Usage(prompt_tokens=getattr(u, "prompt_tokens", 0) if u else 0,
-                      completion_tokens=getattr(u, "completion_tokens", 0) if u else 0)
-        return (text, choice.finish_reason or "stop", usage, resp)
-
-
-# --------------------------------------------------------------------------- #
-# Local provider — any OpenAI-compatible HTTP endpoint
-# --------------------------------------------------------------------------- #
-class LocalProvider(LLMProviderBase):
-    name = "local"
-
-    def available(self) -> bool:
-        try:
-            import httpx  # noqa: F401
-        except Exception:
-            return False
-        return True
-
-    def default_model(self) -> str:
-        return self.settings.llm.local_model
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        import httpx
-        messages = req.provider_messages()
-        if req.system:
-            messages = [{"role": "system", "content": req.system}] + messages
-        payload = {"model": model, "messages": messages, "temperature": req.temperature,
-                   "max_tokens": req.max_tokens, "top_p": req.top_p, "stream": False}
-        url = self.settings.llm.local_base_url.rstrip("/") + "/chat/completions"
-        with httpx.Client(timeout=self.settings.llm.request_timeout_s) as client:
-            r = client.post(url, json=payload)
-            r.raise_for_status()
-            data = r.json()
-        choice = data["choices"][0]
-        text = choice["message"]["content"]
-        u = data.get("usage", {})
-        usage = Usage(prompt_tokens=u.get("prompt_tokens", 0),
-                      completion_tokens=u.get("completion_tokens", 0))
-        return (text, choice.get("finish_reason", "stop"), usage, data)
-
-
-# --------------------------------------------------------------------------- #
-# Transformers provider — in-process open-source model (HuggingFace)
-# --------------------------------------------------------------------------- #
-class TransformersProvider(LLMProviderBase):
-    """Run an open-source model in-process via HuggingFace ``transformers``.
-
-    The LLM stays a tool NYXARA *uses*: request in -> text out, no state, no control.
-    Heavy deps (``transformers`` + ``torch``) are imported lazily and reported honestly,
-    so a bare machine degrades to the mock rather than erroring.
-    """
-
-    name = "transformers"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._pipe = None
-        self._pipe_model: Optional[str] = None
-
-    def available(self) -> bool:
-        try:
-            import torch  # noqa: F401
-            import transformers  # noqa: F401
-        except Exception:
-            return False
-        return True
-
-    def default_model(self) -> str:
-        return self.settings.llm.transformers_model
-
-    def _ensure_pipe(self, model: str):
-        if self._pipe is None or self._pipe_model != model:
-            from transformers import pipeline
-            device = self.settings.llm.transformers_device or None
-            self._pipe = pipeline("text-generation", model=model,
-                                  device_map=device if device else None)
-            self._pipe_model = model
-        return self._pipe
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        pipe = self._ensure_pipe(model)
-        prompt = (req.system + "\n\n" if req.system else "") + req.last_user()
-        out = pipe(prompt, max_new_tokens=req.max_tokens, temperature=max(req.temperature, 1e-3),
-                   top_p=req.top_p, do_sample=req.temperature > 0,
-                   return_full_text=False)
-        text = out[0].get("generated_text", "") if out else ""
-        usage = Usage(prompt_tokens=estimate_tokens(prompt),
-                      completion_tokens=estimate_tokens(text))
-        return (text, "stop", usage, out)
-
-
-# --------------------------------------------------------------------------- #
-# Qwen provider — Qwen3 open-source model, downloaded & run locally (HuggingFace)
-# --------------------------------------------------------------------------- #
-class QwenProvider(LLMProviderBase):
-    """Run an open-source **Qwen3** model in-process, downloaded via HuggingFace.
-
-    The model is fetched on first use (``Qwen/Qwen3-4B`` by default) and cached locally
-    by the ``transformers`` hub, then served entirely on this machine — no API key, no
-    network at inference time. Unlike the generic :class:`TransformersProvider` (which
-    flattens the prompt for tiny demo models), this adapter uses Qwen3's **chat template**
-    so multi-turn ``system``/``user``/``assistant`` messages are formatted correctly, and
-    optionally toggles Qwen3's *thinking* mode.
-
-    Heavy deps (``transformers`` + ``torch``) are imported lazily and reported honestly,
-    so a bare machine degrades to the mock rather than erroring. Stateless: the loaded
-    weights are a cached instrument, never conversation memory.
-    """
-
-    name = "qwen"
+    name = "tinyllama"
 
     def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
         super().__init__(settings)
         self._model = None
         self._tokenizer = None
-        self._loaded_name: Optional[str] = None
+        self._loaded_key: Optional[Tuple[str, str]] = None   # (model_name, adapter_path)
+        self._torch: Any = None
 
     def available(self) -> bool:
         try:
@@ -556,57 +289,151 @@ class QwenProvider(LLMProviderBase):
             import transformers  # noqa: F401
         except Exception:
             return False
+        if self.settings.llm.tinyllama_adapter_path is not None:
+            try:
+                import peft  # noqa: F401
+            except Exception:
+                return False
         return True
 
     def default_model(self) -> str:
-        return self.settings.llm.qwen_model
+        return self.settings.llm.tinyllama_model
+
+    # ---- lazy model loading (cached; reloads when model or adapter changes) ---- #
+    def _quant_config(self, torch: Any) -> Optional[Any]:
+        """A ``BitsAndBytesConfig`` when quantization is requested AND usable, else None.
+
+        Quantized load needs bitsandbytes + CUDA; anywhere else we silently serve full
+        precision instead of crashing (graceful degradation, mirrors the foundry)."""
+        cfg = self.settings.llm
+        if not (cfg.tinyllama_load_in_4bit or cfg.tinyllama_load_in_8bit):
+            return None
+        try:
+            import bitsandbytes  # noqa: F401
+            from transformers import BitsAndBytesConfig
+        except Exception:
+            return None
+        if not torch.cuda.is_available():
+            return None
+        if cfg.tinyllama_load_in_8bit:
+            return BitsAndBytesConfig(load_in_8bit=True)
+        return BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type=cfg.tinyllama_bnb_4bit_quant_type,
+            bnb_4bit_compute_dtype=getattr(torch, cfg.tinyllama_bnb_4bit_compute_dtype),
+            bnb_4bit_use_double_quant=cfg.tinyllama_bnb_4bit_use_double_quant,
+        )
 
     def _ensure_model(self, model: str):
-        if self._model is None or self._loaded_name != model:
+        cfg = self.settings.llm
+        key = (model, str(cfg.tinyllama_adapter_path or ""))
+        if self._model is None or self._loaded_key != key:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
-            device = self.settings.llm.qwen_device or None
-            self._tokenizer = AutoTokenizer.from_pretrained(model)
-            self._model = AutoModelForCausalLM.from_pretrained(
-                model,
-                torch_dtype="auto",
-                device_map=device if device else "auto",
-            )
-            self._loaded_name = model
-            self._torch = torch
+            tok = AutoTokenizer.from_pretrained(
+                model, trust_remote_code=cfg.tinyllama_trust_remote_code)
+            if tok.pad_token is None:
+                tok.pad_token = tok.eos_token
+            kwargs: Dict[str, Any] = {
+                "torch_dtype": ("auto" if cfg.tinyllama_dtype == "auto"
+                                else getattr(torch, cfg.tinyllama_dtype)),
+                "device_map": cfg.tinyllama_device or "auto",
+                "trust_remote_code": cfg.tinyllama_trust_remote_code,
+            }
+            if cfg.tinyllama_attn_implementation:
+                kwargs["attn_implementation"] = cfg.tinyllama_attn_implementation
+            quant = self._quant_config(torch)
+            if quant is not None:
+                kwargs["quantization_config"] = quant
+                kwargs["device_map"] = "auto"   # bitsandbytes places layers itself
+            lm = AutoModelForCausalLM.from_pretrained(model, **kwargs)
+            if cfg.tinyllama_adapter_path is not None:
+                from peft import PeftModel   # a bad adapter raises -> LLMError -> mock fallback
+                lm = PeftModel.from_pretrained(lm, str(cfg.tinyllama_adapter_path))
+                if cfg.tinyllama_merge_adapter:
+                    lm = lm.merge_and_unload()
+            lm.eval()
+            self._model, self._tokenizer = lm, tok
+            self._loaded_key, self._torch = key, torch
         return self._model, self._tokenizer
 
-    def _build_messages(self, req: LLMRequest) -> List[Dict[str, str]]:
+    # ---- request -> prompt / generation kwargs ---- #
+    def _render_prompt(self, req: LLMRequest, tok: Any) -> str:
+        cfg = self.settings.llm
+        system = (req.system or "").strip()
+        if req.json_mode:
+            nudge = "Respond with ONLY valid JSON — no prose, no code fences."
+            system = f"{system}\n\n{nudge}" if system else nudge
         messages = req.provider_messages()
-        if req.system:
-            messages = [{"role": "system", "content": req.system}] + messages
-        return messages
+        if cfg.tinyllama_use_chat_template:
+            if system:
+                messages = [{"role": "system", "content": system}] + messages
+            return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        parts = ([system] if system else []) + [m["content"] for m in messages]
+        return "\n\n".join(parts)
+
+    def _gen_kwargs(self, req: LLMRequest, tok: Any) -> Dict[str, Any]:
+        """Merge per-request fields with config defaults (the request wins where it exists).
+
+        Sampling knobs are dropped entirely when decoding greedily — transformers warns
+        (and ignores them) otherwise, so the kwargs stay honest."""
+        cfg = self.settings.llm
+        do_sample = {"always": True, "never": False}.get(
+            cfg.tinyllama_do_sample, req.temperature > 0)
+        kwargs: Dict[str, Any] = {
+            "max_new_tokens": req.max_tokens,
+            "do_sample": do_sample,
+            "num_beams": cfg.tinyllama_num_beams,
+            "use_cache": cfg.tinyllama_use_cache,
+            "pad_token_id": tok.pad_token_id,
+            "eos_token_id": tok.eos_token_id,
+        }
+        if do_sample:
+            kwargs["temperature"] = max(req.temperature, 1e-3)
+            kwargs["top_p"] = req.top_p
+            if cfg.tinyllama_top_k > 0:
+                kwargs["top_k"] = cfg.tinyllama_top_k
+        if cfg.tinyllama_repetition_penalty != 1.0:
+            kwargs["repetition_penalty"] = cfg.tinyllama_repetition_penalty
+        if cfg.tinyllama_no_repeat_ngram_size > 0:
+            kwargs["no_repeat_ngram_size"] = cfg.tinyllama_no_repeat_ngram_size
+        if cfg.tinyllama_min_new_tokens > 0:
+            kwargs["min_new_tokens"] = cfg.tinyllama_min_new_tokens
+        if cfg.tinyllama_num_beams > 1:
+            kwargs["length_penalty"] = cfg.tinyllama_length_penalty
+        return kwargs
 
     def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
         lm, tok = self._ensure_model(model)
-        messages = self._build_messages(req)
-        text_in = tok.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=self.settings.llm.qwen_enable_thinking,
-        )
-        inputs = tok([text_in], return_tensors="pt").to(lm.device)
-        gen_kwargs: Dict[str, Any] = {
-            "max_new_tokens": req.max_tokens,
-            "top_p": req.top_p,
-            "do_sample": req.temperature > 0,
-        }
-        if req.temperature > 0:
-            gen_kwargs["temperature"] = req.temperature
+        cfg = self.settings.llm
+        prompt = self._render_prompt(req, tok)
+        inputs = dict(tok([prompt], return_tensors="pt"))
+        # prompt + completion must fit TinyLlama's 2048-token context — keep the tail
+        budget = max(8, cfg.tinyllama_max_input_tokens - req.max_tokens)
+        if inputs["input_ids"].shape[1] > budget:
+            inputs = {k: v[:, -budget:] for k, v in inputs.items()}
+        inputs = {k: v.to(lm.device) for k, v in inputs.items()}
+        if req.seed is not None:   # full determinism on demand
+            self._torch.manual_seed(req.seed)
+            try:
+                from transformers import set_seed
+                set_seed(req.seed)
+            except Exception:  # noqa: BLE001 — seeding is best-effort beyond torch
+                pass
+        gen_kwargs = self._gen_kwargs(req, tok)
         with self._torch.no_grad():
             generated = lm.generate(**inputs, **gen_kwargs)
-        # keep only the newly-generated continuation, not the echoed prompt
-        new_tokens = generated[0][inputs["input_ids"].shape[1]:]
-        out = tok.decode(new_tokens, skip_special_tokens=True).strip()
-        usage = Usage(prompt_tokens=int(inputs["input_ids"].shape[1]),
-                      completion_tokens=int(new_tokens.shape[0]))
-        return (out, "stop", usage, {"qwen": True, "model": model})
+        input_len = int(inputs["input_ids"].shape[1])
+        new_tokens = generated[0][input_len:]
+        raw_text = tok.decode(new_tokens, skip_special_tokens=True).strip()
+        text, hit = truncate_at_stops(raw_text, req.stop)
+        n_new = int(new_tokens.shape[0])
+        finish = "stop" if (hit or n_new < req.max_tokens) else "length"
+        usage = Usage(prompt_tokens=input_len, completion_tokens=n_new)
+        adapter = cfg.tinyllama_adapter_path
+        return (text, finish, usage,
+                {"tinyllama": True, "model": model,
+                 "adapter": str(adapter) if adapter else None})
 
 
 # --------------------------------------------------------------------------- #
@@ -712,12 +539,7 @@ class SelfProvider(LLMProviderBase):
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
-    ProviderName.ANTHROPIC: AnthropicProvider,
-    ProviderName.OPENAI: OpenAIProvider,
-    ProviderName.GROQ: GroqProvider,
-    ProviderName.LOCAL: LocalProvider,
-    ProviderName.TRANSFORMERS: TransformersProvider,
-    ProviderName.QWEN: QwenProvider,
+    ProviderName.TINYLLAMA: TinyLlamaProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.MOCK: MockProvider,
 }
@@ -873,14 +695,14 @@ if __name__ == "__main__":  # pragma: no cover
     except LLMError:
         print("bad json raises      : OK")
 
-    # adapters report availability honestly (no keys in TEST -> only mock/local)
+    # adapters report availability honestly (bare machine -> only mock)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    # the open-source + cloud + self-built providers are all registered and degrade honestly
-    for p in ("transformers", "qwen", "groq", "self"):
+    assert set(status) == {"tinyllama", "self", "mock"}
+    for p in ("tinyllama", "self"):
         assert p in status, f"provider '{p}' must be registered"
-    assert status["self"] is False     # no model trained/promoted yet on a bare machine
-    assert status["groq"] is False     # no GROQ_API_KEY in the TEST profile
-    print("qwen/groq/self       : registered; all unavailable on a bare keyless machine ✓")
+    assert status["self"] is False       # no model trained/promoted yet on a bare machine
+    # tinyllama is available iff torch+transformers are installed — honest either way
+    print("tinyllama/self       : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

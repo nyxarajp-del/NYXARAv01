@@ -66,14 +66,14 @@ def test_test_profile_forces_mock_llm():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
-    s.llm.provider = LLMProvider.ANTHROPIC
-    assert s.llm.active_model() == s.llm.anthropic_model
-    s.llm.provider = LLMProvider.OPENAI
-    assert s.llm.active_model() == s.llm.openai_model
-    s.llm.anthropic_api_key = SecretStr("k")
-    s.llm.provider = LLMProvider.ANTHROPIC
-    assert s.llm.active_key().get_secret_value() == "k"
-    s.llm.provider = LLMProvider.LOCAL
+    s.llm.provider = LLMProvider.TINYLLAMA
+    assert s.llm.active_model() == s.llm.tinyllama_model
+    assert s.llm.tinyllama_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    s.llm.provider = LLMProvider.SELF
+    assert s.llm.active_model() == "nyxara-self"
+    # every backend is local now — there are no API keys anywhere
+    assert s.llm.active_key() is None
+    s.llm.provider = LLMProvider.MOCK
     assert s.llm.active_key() is None
 
 
@@ -87,9 +87,9 @@ def test_resource_limits_validation():
 
 def test_secret_redaction_never_leaks():
     s = NyxaraSettings()
-    s.llm.anthropic_api_key = SecretStr("sk-ant-TOPSECRET")
+    s.server.api_token = SecretStr("tok-TOPSECRET")
     red = s.redacted()
-    assert red["llm"]["anthropic_api_key"] == "***REDACTED***"
+    assert red["server"]["api_token"] == "***REDACTED***"
     blob = s.to_json(redact=True)
     assert "TOPSECRET" not in blob
     # redacted output must be valid JSON
@@ -107,11 +107,11 @@ def test_save_and_from_file_roundtrip(tmp_path):
 
 def test_env_override(monkeypatch):
     monkeypatch.setenv("NYXARA_PROFILE", "prod")
-    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "openai")
+    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "tinyllama")
     monkeypatch.setenv("NYXARA_RESOURCES__MAX_CONCURRENT_TASKS", "128")
     s = NyxaraSettings()
     assert s.profile is Profile.PROD
-    assert s.llm.provider is LLMProvider.OPENAI
+    assert s.llm.provider is LLMProvider.TINYLLAMA
     assert s.resources.max_concurrent_tasks == 128
 
 
