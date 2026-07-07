@@ -190,6 +190,13 @@ class ModelSpec:
                 "adam_eps": self.adam_eps, "max_grad_norm": self.max_grad_norm,
                 "train_epochs": self.train_epochs}
 
+    def __post_init__(self) -> None:
+        # JSON round-trips tuples as lists — normalise so from_dict(to_dict()) == spec.
+        if not isinstance(self.lora_target_modules, tuple):
+            self.lora_target_modules = tuple(self.lora_target_modules or ())
+        if not isinstance(self.lora_modules_to_save, tuple):
+            self.lora_modules_to_save = tuple(self.lora_modules_to_save or ())
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ModelSpec":
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
