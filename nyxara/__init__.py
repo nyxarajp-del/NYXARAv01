@@ -70,6 +70,7 @@ from nyxara.memory.elastic_synapses import (
     PathIntegralEstimator,
     TorchElasticSynapses,
 )
+from nyxara.memory.equation_memory import EquationCode, EquationMemory
 from nyxara.kernel.autonomic import AutonomicLoop
 from nyxara.temporal import (
     Awareness,
@@ -183,6 +184,9 @@ __all__ = [
     "PathIntegralEstimator",
     "ConsolidatedTask",
     "TorchElasticSynapses",
+    # Equation memory — data stored as compact mathematical equations, unpacked in real time
+    "EquationMemory",
+    "EquationCode",
     # autonomous research + the scientist loop
     "AutonomousResearcher",
     "ResearchReport",
