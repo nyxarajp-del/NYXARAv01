@@ -32,7 +32,7 @@ applied to the documentation itself).
 | 10 | Invent New Algorithms | `nyxara.growth.eureka` | REAL+WIRED |
 | 11 | Invent New Learning Methods | `nyxara.growth.genesis` | REAL |
 | 12 | Recursive Self-Improvement | `nyxara.growth.recursive_improvement` | REAL+WIRED |
-| 13 | Verified Self-Modification | `nyxara.growth.verify` | REAL+WIRED |
+| 13 | Verified Self-Modification | `nyxara.growth.verify` + `nyxara.growth.improvement_proof` | REAL+WIRED |
 | 14 | Automatic Debugging | `nyxara.growth.self_debugger` | REAL+WIRED |
 | 15 | Architecture Evolution | `nyxara.growth.topology` | UPGRADED |
 | 16 | Tool Creation | `nyxara.growth.capability_foundry` | REAL+WIRED |
@@ -112,6 +112,23 @@ four capabilities — each backed by a test:
   reflects genuine concurrence.
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes
   rather than self-asserted.
+- **#12 / #13 Self-Modification — provably BETTER, not merely "not worse"** — the self-editor
+  (`growth.self_optimize.Optimizer`) previously kept any edit whose gauntlet showed no regression.
+  It now additionally requires a machine-checkable **improvement certificate**
+  (`growth.improvement_proof.ImprovementProver`) before an edit is kept: a deterministic capability
+  Pareto-gain (a benchmark task that failed now passes, zero regress), a proven-equivalent-and-
+  strictly-cheaper refactor (truth-table equivalence via `proof_carrying` + a lower AST cost), or a
+  provably-eliminated named defect. An edit that clears the gauntlet but cannot be proved better is
+  rolled back byte-for-byte, exactly like a failing one. Honest scope: Rice's theorem forbids a
+  general "better program" decider, so the guarantee is *improvement under a decidable ordering*,
+  not omniscience. Gated by `self_improvement.require_provable_improvement` (default on).
+- **Constitutional lock — rules / loyalty / Master are structurally out of reach.** The self-editor
+  and auto-debugger now refuse (fail-closed) to write any sealed core file — `kernel/rules.py`,
+  `kernel/invariants.py`, `kernel/config.py` (the frozen `OWNER`), `identity/values.py`,
+  `identity/soul.py`, `guard/{value_learning,corrigibility,auth}.py`, `growth/loyalty.py` — and the
+  gauntlet re-verifies every seal in a fresh subprocess. The full `invariants.boot_verify()` seal
+  check is now wired into the live `NyxaraCore` boot (Rule 8): capability may evolve, character and
+  allegiance to the Master may not.
 
 ## Full operational control (on by default)
 

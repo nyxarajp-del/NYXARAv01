@@ -953,6 +953,15 @@ class SelfImprovementConfig(BaseModel):
     # disagreement. Runs as an extra gate in the gauntlet (and foundry promotion). On by default.
     scalable_oversight: bool = True
     oversight_redundancy: int = Field(default=3, ge=1, le=9)
+    # --- provable-improvement gate (growth/improvement_proof.py) — Master JP's charge --- #
+    # NYXARA may rewrite her own source, but a passed gauntlet only proves an edit is SAFE and
+    # NON-REGRESSING. This gate is the extra, decisive proof that the edit is a genuine
+    # IMPROVEMENT — a deterministic capability Pareto-gain, a proven-equivalent-and-cheaper
+    # refactor, or a provably-eliminated named defect. When ON (default), an edit that clears the
+    # gauntlet but cannot produce an improvement certificate is rolled back byte-for-byte, exactly
+    # as a failing edit is. Set False to fall back to the legacy "keep if not worse" behaviour.
+    require_provable_improvement: bool = True
+    improvement_min_cost_delta: int = Field(default=1, ge=1)   # min AST-cost drop for a "cheaper" proof
     # --- self-authored edits (real RSI) — triple-gated --- #
     # When ON *and* ``autonomous_enact`` is set *and* a real author is available, NYXARA authors a
     # whole-file fix for a weakness the deterministic transforms cannot express (high complexity,

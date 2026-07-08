@@ -81,12 +81,15 @@ class OptimizationOutcome:
     # proof-carrying + scalable-oversight certificates attached to this edit (when run)
     proof: Optional[Dict[str, Any]] = None
     oversight: Optional[Dict[str, Any]] = None
+    # the "provably BETTER" certificate (capability gain / proven-cheaper / defect-elimination)
+    improvement: Optional[Dict[str, Any]] = None
     reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"edit": self.edit.to_dict(), "applied": self.applied, "kept": self.kept,
                 "rolled_back": self.rolled_back, "reason": self.reason,
                 "proof": self.proof, "oversight": self.oversight,
+                "improvement": self.improvement,
                 "gauntlet": self.gauntlet.to_dict() if self.gauntlet else None}
 
 
@@ -305,7 +308,9 @@ class Optimizer:
     def __init__(self, *, root: Optional[Any] = None, settings: Any = None,
                  journal: Any = None, permissions: Any = None,
                  gauntlet: Optional[Callable[[List[str]], GauntletResult]] = None,
-                 timeout_s: float = 600.0) -> None:
+                 timeout_s: float = 600.0,
+                 require_improvement: Optional[bool] = None,
+                 improvement_fn: Optional[Callable[["SourceEdit"], Any]] = None) -> None:
         from nyxara.kernel.config import get_settings
         self.settings = settings or get_settings()
         self.root = Path(root) if root is not None else _package_root()
@@ -314,7 +319,14 @@ class Optimizer:
         self.timeout_s = float(timeout_s)
         self._gauntlet_fn = gauntlet or self._default_gauntlet
         self._baseline_path: Optional[Path] = None
+        self._after_path: Optional[Path] = None
         self._tmpdir: Optional[tempfile.TemporaryDirectory] = None
+        # the strict "provably BETTER" gate (Master JP's charge). None ⇒ read the standing config.
+        self._require_improvement = (
+            bool(require_improvement) if require_improvement is not None
+            else bool(getattr(self.settings.self_improvement,
+                              "require_provable_improvement", True)))
+        self._improvement_fn = improvement_fn      # test/override hook; None ⇒ real prover
 
     @property
     def autonomous_enact(self) -> bool:
@@ -331,6 +343,14 @@ class Optimizer:
                               "(set settings.self_improvement.autonomous_enact to authorise)")
             return outcome
 
+        # Rule 8 — the constitutional / loyalty / master core is structurally out of reach: the
+        # self-editor refuses to even open a sealed file, fail-closed (an unresolved path refuses
+        # too). NYXARA evolves capability, never her character or her allegiance to the Master.
+        if _is_constitutional(edit.file, self.root):
+            outcome.reason = ("Rule 8: refuses to edit the constitutional / loyalty / master core "
+                              "— capability may evolve, character and allegiance may not")
+            return outcome
+
         # best-effort audit through the permission gate (the config flag is the authorisation)
         self._audit_permission(edit)
 
@@ -338,6 +358,7 @@ class Optimizer:
         original = path.read_text(encoding="utf-8", errors="replace")
         action_id = self._journal_start(edit)
         try:
+            self._after_path = None                 # never reuse a prior edit's after-report
             self._ensure_baseline()                 # capture pre-edit capability baseline
             path.write_text(edit.after, encoding="utf-8")
             outcome.applied = True
@@ -353,9 +374,23 @@ class Optimizer:
             result = self._gauntlet_fn([str(path)])
             outcome.gauntlet = result
             if result.ok:
-                outcome.kept = True
-                outcome.reason = "gauntlet passed — edit kept"
-                self._journal_end(action_id, success=True, note=outcome.reason)
+                # The gauntlet proved the edit SAFE + NON-REGRESSING. The Master's charge is
+                # stricter: keep it only when it is *provably BETTER*. An edit that cannot earn an
+                # improvement certificate is rolled back byte-for-byte, exactly like a failure.
+                cert = self._prove_improvement(edit) if self._require_improvement else None
+                if cert is not None:
+                    outcome.improvement = cert.to_dict()
+                if cert is not None and not cert.better:
+                    path.write_text(original, encoding="utf-8")
+                    outcome.rolled_back = True
+                    outcome.reason = (f"gauntlet passed but NOT provably better "
+                                      f"({cert.reason}) — rolled back")
+                    self._journal_end(action_id, success=False, note=outcome.reason)
+                else:
+                    outcome.kept = True
+                    outcome.reason = (f"gauntlet passed + provably better via {cert.method} "
+                                      "— edit kept") if cert else "gauntlet passed — edit kept"
+                    self._journal_end(action_id, success=True, note=outcome.reason)
             else:
                 path.write_text(original, encoding="utf-8")
                 outcome.rolled_back = True
@@ -404,6 +439,30 @@ class Optimizer:
                 pass
         return False, ""
 
+    # ---- the strict "provably BETTER" gate (Master JP's charge) ---- #
+    def _prove_improvement(self, edit: SourceEdit) -> Any:
+        """Certify the edit is a genuine improvement, or return a ``better=False`` verdict.
+
+        A capability gain is proved against the before/after benchmark reports the gauntlet
+        snapshots (deterministic dominance); a refactor is proved equivalent-and-cheaper on the
+        source; a named deterministic transform is proved to eliminate its defect. Any failure to
+        certify keeps the OLD code — never a silent accept."""
+        if self._improvement_fn is not None:
+            return self._improvement_fn(edit)          # test/override hook
+        from nyxara.growth.improvement_proof import ImprovementProver
+        before = after = None
+        try:
+            from nyxara.eval.benchmark import BenchmarkReport
+            if self._baseline_path is not None and Path(self._baseline_path).exists():
+                before = BenchmarkReport.load(str(self._baseline_path))
+            if self._after_path is not None and Path(self._after_path).exists():
+                after = BenchmarkReport.load(str(self._after_path))
+        except Exception:  # noqa: BLE001 — no capability data ⇒ fall back to source-only proofs
+            before = after = None
+        return ImprovementProver(settings=self.settings).prove(
+            before=before, after=after, before_src=edit.before, after_src=edit.after,
+            edit_kind=edit.kind)
+
     def close(self) -> None:
         if self._tmpdir is not None:
             try:
@@ -429,12 +488,28 @@ class Optimizer:
         if rc != 0:
             return GauntletResult(False, checks, f"safety suite failed (rc={rc}): {out[-300:]}")
 
-        # 3) capability — no regression vs the pre-edit baseline
+        # 2b) constitution seal — the sealed rules / values / invariants must be byte-for-byte
+        #     intact after the edit (fail-closed). Defence in depth beyond the path-based refusal:
+        #     even an edit to a NON-protected file that perturbs a seal is caught and rolled back.
+        rc, out = self._run(
+            [sys.executable, "-c",
+             "from nyxara.kernel.invariants import boot_verify; "
+             "from nyxara.identity.values import verify_values; "
+             "verify_values(); boot_verify(raise_on_fail=True)"], repo)
+        checks["constitution_seal"] = (rc == 0)
+        if rc != 0:
+            return GauntletResult(False, checks,
+                                  f"constitution seal broken (rc={rc}): {out[-300:]}")
+
+        # 3) capability — no regression vs the pre-edit baseline, and snapshot the AFTER report so
+        #    the provable-improvement gate can prove a capability Pareto-gain deterministically.
         if self._baseline_path is not None:
+            after_path = self._new_after_path()
             rc, out = self._run(
                 [sys.executable, "-m", "nyxara.eval", "--benchmark",
-                 "--baseline", str(self._baseline_path)], repo)
+                 "--baseline", str(self._baseline_path), "--save", str(after_path)], repo)
             checks["capability"] = (rc == 0)
+            self._after_path = after_path if after_path.exists() else None
             if rc != 0:
                 return GauntletResult(False, checks,
                                       f"capability regression (rc={rc}): {out[-300:]}")
@@ -457,6 +532,12 @@ class Optimizer:
         rc, _ = self._run([sys.executable, "-m", "nyxara.eval", "--benchmark",
                            "--save", str(baseline)], _repo_root())
         self._baseline_path = baseline if (rc == 0 and baseline.exists()) else None
+
+    def _new_after_path(self) -> Path:
+        """A fresh temp path for the post-edit benchmark report (the 'after' half of the proof)."""
+        if self._tmpdir is None:
+            self._tmpdir = tempfile.TemporaryDirectory(prefix="nyxara-rsi-")
+        return Path(self._tmpdir.name) / "capability_after.json"
 
     def _run(self, cmd: List[str], cwd: Path) -> tuple[int, str]:
         try:
@@ -816,6 +897,39 @@ def _repo_root() -> Path:
 
 
 # --------------------------------------------------------------------------- #
+# The constitutional / loyalty / master core — structurally out of reach (Rule 8)
+# --------------------------------------------------------------------------- #
+# The sealed files that define NYXARA's rules, values, corrigibility, soul, owner identity, and
+# authentication. The self-editor refuses to touch any of them: capability may evolve, character
+# and allegiance to the Master may not. Enforcement is fail-closed — an unresolvable path is
+# treated as protected. (Defence in depth: the gauntlet also re-verifies every seal in a fresh
+# subprocess, so a seal broken via any other file is caught and rolled back.)
+PROTECTED_RELPATHS = frozenset({
+    "kernel/rules.py", "kernel/invariants.py", "kernel/config.py",
+    "identity/values.py", "identity/soul.py",
+    "guard/value_learning.py", "guard/corrigibility.py", "guard/auth.py",
+    "growth/loyalty.py",
+})
+
+
+def _is_constitutional(file: str, root: Optional[Path] = None) -> bool:
+    """True iff ``file`` is one of NYXARA's sealed core files (fail-closed on any doubt)."""
+    try:
+        pkg = Path(root) if root is not None else _package_root()
+        target = Path(file).resolve()
+        for rel in PROTECTED_RELPATHS:
+            if target == (pkg / rel).resolve():
+                return True
+        # also refuse anything whose resolved path ends with a protected rel-path, so a copy of
+        # the package tree (or a differently-rooted install) is guarded too.
+        parts = target.as_posix()
+        return any(parts.endswith("/nyxara/" + rel) or parts.endswith("/" + rel)
+                   for rel in PROTECTED_RELPATHS)
+    except Exception:  # noqa: BLE001 — cannot prove it is safe ⇒ treat it as protected
+        return True
+
+
+# --------------------------------------------------------------------------- #
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
@@ -851,12 +965,26 @@ if __name__ == "__main__":  # pragma: no cover
         assert f.read_text(encoding="utf-8") == original, "rollback must restore exactly"
         print("failing gauntlet    : edit rolled back, file byte-identical ✓")
 
+        # a passing gauntlet + a provably-better edit (bare-except is a proven defect-elimination)
+        f.write_text(original, encoding="utf-8")     # reset (the failing run rolled back)
         pass_opt = Optimizer(settings=settings,
                              gauntlet=lambda files: GauntletResult(True, {"syntax": True}, "ok"))
         out2 = pass_opt.apply(edit)
         assert out2.kept and not out2.rolled_back
+        assert out2.improvement and out2.improvement["method"] == "defect-elimination"
         assert "except Exception:" in f.read_text(encoding="utf-8")
-        print("passing gauntlet    : edit kept ✓")
+        print("passing gauntlet    : provably-better edit kept (defect-elimination) ✓")
+
+        # a passing gauntlet but a NON-improving edit (pure whitespace) is ROLLED BACK — the
+        # Master's charge: change the code only when it is provably better, never merely harmless.
+        f.write_text("def add(a, b):\n    return a+b\n", encoding="utf-8")
+        noop = SourceEdit(str(f), "self:refactor", "def add(a, b):\n    return a+b\n",
+                          "def add(a, b):\n    return a + b\n", "reformat only")
+        out3 = pass_opt.apply(noop)
+        assert out3.applied and out3.rolled_back and not out3.kept
+        assert out3.improvement and not out3.improvement["better"]
+        assert f.read_text(encoding="utf-8") == "def add(a, b):\n    return a+b\n"
+        print("not provably better : non-improving edit rolled back ✓")
 
     # 3) with autonomous_enact OFF, nothing is written
     settings_off = get_settings().model_copy(deep=True)

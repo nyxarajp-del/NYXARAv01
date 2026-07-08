@@ -225,6 +225,14 @@ class SelfDebugger:
             attempt.reason = f"source module not found: {module}"
             return attempt
 
+        # Rule 8 — never self-edit the constitutional / loyalty / master core, even to fix a test.
+        # Checked before any edit is even proposed: a failing test may not license a character change.
+        from nyxara.growth.self_optimize import _is_constitutional
+        if _is_constitutional(str(mod_path)):    # resolves against the package root (fail-closed)
+            attempt.reason = ("Rule 8: refuses to edit the constitutional / loyalty / master core "
+                              "— a failing test may not license a character change")
+            return attempt
+
         edit = self._propose_edit(failure, mod_path)
         if edit is None:
             attempt.reason = "no candidate fix could be authored (offline / no transform applies)"
