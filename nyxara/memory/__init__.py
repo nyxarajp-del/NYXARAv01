@@ -15,6 +15,7 @@ from nyxara.memory.elastic_synapses import (
     PathIntegralEstimator,
     TorchElasticSynapses,
 )
+from nyxara.memory.equation_memory import EquationCode, EquationMemory
 
 __all__ = [
     "ElasticSynapses",
@@ -22,4 +23,6 @@ __all__ = [
     "PathIntegralEstimator",
     "ConsolidatedTask",
     "TorchElasticSynapses",
+    "EquationMemory",
+    "EquationCode",
 ]

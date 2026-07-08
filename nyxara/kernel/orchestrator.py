@@ -339,6 +339,10 @@ class NyxaraCore:
         self.reporter = reporter or SelfReporter(honesty=self.honesty)
         # long-term memory (read for grounding, written each turn) — optional, lazy
         self.memory = memory if memory is not None else (self._build_memory() if enable_memory else None)
+        # equation memory — stores data (embeddings, numeric fields) as compact mathematical
+        # equations and unpacks them in real time on access. NYXARA's own deterministic
+        # algorithm; no LLM in the loop. See nyxara/memory/equation_memory.py.
+        self.equation_memory = self._build_equation_memory()
         # associative recall — context-cued retrieval over memory (queried before reasoning)
         self.retriever = retriever if retriever is not None else (
             self._build_retriever(self.memory) if enable_memory else None)
@@ -783,6 +787,17 @@ class NyxaraCore:
             from nyxara.memory.store import MemoryStore
             return MemoryStore()
         except Exception:  # noqa: BLE001 — memory is a capability, never a hard dependency
+            return None
+
+    def _build_equation_memory(self) -> Any:
+        # Reuse the store's engine when memory exists (shared stats), else a standalone one.
+        engine = getattr(self.memory, "equation_memory", None)
+        if engine is not None:
+            return engine
+        try:
+            from nyxara.memory.equation_memory import EquationMemory
+            return EquationMemory()
+        except Exception:  # noqa: BLE001 — equation compression is a capability, never required
             return None
 
     def _build_retriever(self, memory: Any) -> Any:

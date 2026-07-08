@@ -782,9 +782,20 @@ class MemoryStore:
         settings: Optional[NyxaraSettings] = None,
         weights: Optional[_ScoreWeights] = None,
         on_evict: Optional[Callable[[MemoryRecord], None]] = None,
+        equation_memory: Optional[Any] = None,
+        compress_embeddings: bool = True,
+        embedding_tol: float = 1e-3,
     ) -> None:
         self._settings = settings or get_settings()
         self.embedder = embedder or make_embedder(self._settings)
+        # equation memory: persist embeddings as compact equations (see equation_memory.py).
+        # Storage-only — recall always runs over live vectors — so it degrades cleanly. The
+        # embedding is the retrieval substrate, so it is coded near-losslessly (small tol,
+        # non-aggressive): zero-heavy vectors still collapse via run-length, dense vectors
+        # stay faithful. The engine's aggressive-lossy mode remains available on its own API.
+        self.compress_embeddings = compress_embeddings
+        self.embedding_tol = float(embedding_tol)
+        self.equation_memory = self._resolve_equation_memory(equation_memory)
         # faiss-backed ANN index at scale when configured & available, else exact numpy
         self._index = make_vector_index(self.embedder.dim, self._settings)
         # re-entrant lock: aprocess() and the background autonomic loop touch memory
@@ -798,6 +809,46 @@ class MemoryStore:
 
     def __len__(self) -> int:
         return len(self._kv)
+
+    # ---- equation memory (compact equation-coded embeddings) ---- #
+    @staticmethod
+    def _resolve_equation_memory(explicit: Optional[Any]) -> Optional[Any]:
+        if explicit is not None:
+            return explicit
+        try:
+            from nyxara.memory.equation_memory import EquationMemory
+            return EquationMemory()
+        except Exception:  # noqa: BLE001 — compression is a capability, never required
+            return None
+
+    def _encode_embedding(self, rec: MemoryRecord) -> Dict[str, Any]:
+        """Serialize a record's embedding, as an equation code when that is smaller on disk."""
+        emb = rec.embedding
+        if not emb or not (self.compress_embeddings and self.equation_memory is not None):
+            return {"embedding": emb}
+        try:
+            code = self.equation_memory.compress_vector(
+                emb, tol=self.embedding_tol, aggressive=False)
+        except Exception:  # noqa: BLE001 — fall back to the raw vector on any coder trouble
+            return {"embedding": emb}
+        if len(json.dumps(code, separators=(",", ":"))) < len(json.dumps(emb)):
+            return {"embedding_eqcode": code}
+        return {"embedding": emb}
+
+    def _decode_embedding(self, d: Dict[str, Any]) -> Optional[List[float]]:
+        """Recover an embedding from either the raw list or its equation code — real-time unpack."""
+        if d.get("embedding") is not None:
+            return d["embedding"]
+        code = d.get("embedding_eqcode")
+        if not code:
+            return None
+        engine = self.equation_memory or self._resolve_equation_memory(None)
+        if engine is None:
+            return None
+        try:
+            return engine.decompress_vector(code)
+        except Exception:  # noqa: BLE001 — _index_record re-embeds if the vector is unusable
+            return None
 
     # ---- write ---- #
     def remember(
@@ -1005,7 +1056,7 @@ class MemoryStore:
                     "created_at": r.created_at, "last_access": r.last_access,
                     "access_count": r.access_count, "links": r.links,
                     "metadata": r.metadata, "half_life_days": r.half_life_days,
-                    "embedding": r.embedding,
+                    **self._encode_embedding(r),
                     "provenance": {
                         "source": r.provenance.source.value,
                         "confidence": r.provenance.confidence,
@@ -1017,6 +1068,8 @@ class MemoryStore:
                 for r in self._kv.values()
             ],
         }
+        if self.equation_memory is not None and self.compress_embeddings:
+            data["equation_memory"] = self.equation_memory.stats()
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, default=str)
         return path
@@ -1038,7 +1091,7 @@ class MemoryStore:
                 tags=frozenset(d["tags"]), created_at=d["created_at"],
                 last_access=d["last_access"], access_count=d["access_count"],
                 links=d.get("links", {}), metadata=d.get("metadata", {}),
-                half_life_days=d["half_life_days"], embedding=d.get("embedding"),
+                half_life_days=d["half_life_days"], embedding=self._decode_embedding(d),
             )
             self._kv[rec.mem_id] = rec
             self._index_record(rec)
@@ -1068,8 +1121,11 @@ class MemoryStore:
 
     def stats(self) -> Dict[str, Any]:
         by_type = {t.value: len(self.by_type(t)) for t in MemoryType}
-        return {**self._stats, "total": len(self._kv), "by_type": by_type,
-                "indexed": len(self._index), "numpy": has_numpy()}
+        out = {**self._stats, "total": len(self._kv), "by_type": by_type,
+               "indexed": len(self._index), "numpy": has_numpy()}
+        if self.equation_memory is not None and self.compress_embeddings:
+            out["equation_memory"] = self.equation_memory.stats()
+        return out
 
 
 # --------------------------------------------------------------------------- #
