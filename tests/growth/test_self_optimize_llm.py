@@ -247,7 +247,10 @@ def test_llm_edit_kept_when_gauntlet_passes(tmp_path: Path):
     edit = LLMEditGenerator(llm=_StubLLM(fixed), settings=s).generate(
         _W(id="code-high_complexity-g.py-1", locus=f"{f}:1"))
     assert edit is not None
-    opt = Optimizer(settings=s, gauntlet=lambda files: GauntletResult(True, {}, "ok"))
+    # isolate the LLM-edit → gauntlet → keep MECHANISM (require_improvement=False); the separate
+    # provable-improvement gate is exercised in tests/growth/test_improvement_proof.py.
+    opt = Optimizer(settings=s, gauntlet=lambda files: GauntletResult(True, {}, "ok"),
+                    require_improvement=False)
     out = opt.apply(edit)
     assert out.kept and not out.rolled_back
     assert f.read_text(encoding="utf-8") == fixed

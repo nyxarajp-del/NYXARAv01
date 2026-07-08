@@ -724,6 +724,46 @@ class NyxaraCore:
         self.corrigibility.verify_axioms()
         if self.soul is not None:
             self.soul.check_integrity()   # character must be intact at boot (Rule 4)
+        self._verify_constitution_seals()  # rules / values / invariants seals intact (Rule 8)
+
+    def _verify_constitution_seals(self) -> None:
+        """Fail-closed: the sealed rules / values / invariants must be byte-for-byte intact at boot.
+
+        This closes the gap where the full seal verification lived only in the self-modification
+        gauntlets and tests, not the live boot. A tampered constitution is FATAL and refuses to
+        start.
+
+        Only the pure-hash SEAL checks run here — the character or the Master's identity being
+        altered is the hard, non-negotiable failure, and ``hashlib`` is thread-safe so the check is
+        safe on the per-core construction hot path (eval builds many cores across threads). The Z3
+        formal-consistency proof is deliberately NOT run here: the z3 bindings are not thread-safe
+        (concurrent ``Z3_dec_ref`` segfaults), and it is not the security property. The full
+        ``boot_verify`` — seals + Z3 consistency + runtime invariants — still runs in the
+        self-modification gauntlet's fresh (single-threaded) subprocess."""
+        import hmac
+
+        from nyxara.kernel.errors import InvariantViolation, Severity
+        try:
+            from nyxara.identity.values import verify_values
+            verify_values()                     # raises InvariantViolation on a tampered value seal
+        except InvariantViolation:
+            raise
+        except Exception:  # noqa: BLE001 — values module unavailable (partial install) ⇒ skip
+            pass
+        try:
+            from nyxara.kernel.invariants import INVARIANTS_SEAL, invariants_digest
+            from nyxara.kernel.rules import REGISTRY as RULE_REGISTRY
+            from nyxara.kernel.rules import verify_rules
+        except Exception:  # noqa: BLE001 — kernel seals unavailable ⇒ the value check above stands
+            return
+        verify_rules()                          # raises on a tampered sovereign-rules seal
+        RULE_REGISTRY.verify()                  # the live rule registry seal too
+        live = invariants_digest()
+        if not (hmac.compare_digest(live, INVARIANTS_SEAL) or INVARIANTS_SEAL == "0" * 64):
+            raise InvariantViolation(
+                "CONSTITUTION SEAL FAILED at boot — the invariant spec was tampered; refusing to "
+                "start (fail-closed, Rule 8)",
+                severity=Severity.FATAL, context={"expected": INVARIANTS_SEAL, "actual": live})
 
     # ---- default faculty construction (kept lazy to avoid import cycles) ---- #
     def _build_growth_engine(self) -> Any:
