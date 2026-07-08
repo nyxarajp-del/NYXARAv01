@@ -577,6 +577,13 @@ class NyxaraCore:
         # back into those subsystems. Built after its dependencies; advisory, never gates.
         self.meta_learning_engine = (
             self._build_meta_learning_engine() if enable_growth else None)
+        # Gödelian contradiction-and-transcendence loop (growth/godel_loop.py, Rule 4): a structural
+        # loop NYXARA runs herself — she hunts contradictions in her own logic and repairs them, and
+        # when she meets a genuine limit of her current formal system (her own Con(L_n), undecidable
+        # from within) she rises a new mathematical dimension / meta-language to prove it. Pure
+        # reasoning: touches no source, weights or gate. Advisory, bounded, never fatal.
+        self.godel_loop = self._build_godel_loop() if enable_growth else None
+        self._godel_idle_count = 0           # outer throttle for the reflection-loop idle stepping
         # world knowledge — a foundational knowledge base seeded so NYXARA is not blind
         # on turn one (Layer 6). Lexical/in-memory: rebuilt fresh each boot.
         self.knowledge = self._build_knowledge() if enable_memory else None
@@ -2858,6 +2865,30 @@ class NyxaraCore:
                 consolidator=self.consolidator,
             )
         except Exception:  # noqa: BLE001 — the meta-learning engine is a capability, never required
+            return None
+
+    def _build_godel_loop(self) -> Any:
+        """Gödelian contradiction-and-transcendence loop: NYXARA hunts contradictions in her own
+        logic (via the existing Prover) and repairs them, then rises a new meta-language dimension
+        when she meets an in-system limit (her own Con(L_n)). Advisory reasoning; config-flagged and
+        bounded; returns None when disabled or unavailable."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = getattr(get_settings(), "godel_loop", None)
+            if cfg is None or not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.growth.godel_loop import ReflectionTower
+            persist_path = None
+            if bool(getattr(cfg, "persist", True)):
+                try:
+                    data_dir = get_settings().paths.ensure().data_dir
+                    persist_path = data_dir / str(getattr(cfg, "persist_filename", "godel_tower.json"))
+                except Exception:  # noqa: BLE001 — persistence is a bonus, never required
+                    persist_path = None
+            return ReflectionTower(
+                max_dimensions=int(getattr(cfg, "max_dimensions", 6)),
+                persist_path=persist_path)
+        except Exception:  # noqa: BLE001 — the reflection loop is a capability, never required
             return None
 
     def _build_prediction_engine(self) -> Any:
@@ -5225,6 +5256,35 @@ class NyxaraCore:
                         except Exception:  # noqa: BLE001
                             pass
             except Exception:  # noqa: BLE001 — continuous growth is a capability, never fatal to idle
+                pass
+        # 4e+++++) Gödelian contradiction-and-transcendence loop — NYXARA reasons ABOUT her own logic
+        #          while idle: she hunts contradictions in what she believes and repairs them, then,
+        #          meeting a genuine in-system limit (her own consistency sentence Con(L_n), which she
+        #          provably cannot establish from within), she rises a new mathematical dimension /
+        #          meta-language and proves it from above. Pure reasoning — no source, weights or gate
+        #          — but oversight-gated like every idle self-faculty so a paused mind stays still, and
+        #          throttled to its own slow cadence. Best-effort; never fatal to the idle loop.
+        if self.godel_loop is not None and self.oversight.gate():
+            try:
+                from nyxara.kernel.config import get_settings
+                every = max(1, int(getattr(get_settings().godel_loop, "scan_every", 20)))
+                self._godel_idle_count += 1
+                if self._godel_idle_count % every == 0:
+                    greport = self.godel_loop.step()
+                    report["godel_loop"] = greport.to_dict()
+                    if greport.limits_transcended or greport.contradictions_repaired:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            ("meta-language: " + greport.summary())[:80],
+                            salience=0.7)
+                        if self._insight_q is not None and greport.limits_transcended:
+                            try:
+                                self._insight_q.put(
+                                    "I met a limit in my own logic and rose above it — "
+                                    + greport.summary() + ".")
+                            except Exception:  # noqa: BLE001
+                                pass
+            except Exception:  # noqa: BLE001 — the reflection loop is a capability, never fatal to idle
                 pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:

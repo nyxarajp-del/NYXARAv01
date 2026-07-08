@@ -1317,6 +1317,32 @@ class MetaResearchConfig(BaseModel):
     meta_levels_hard_max: int = Field(default=6, ge=1, le=8)
 
 
+class GodelLoopConfig(BaseModel):
+    """Gödelian contradiction-and-transcendence loop (growth/godel_loop.py) — Rule 4.
+
+    A structural loop NYXARA runs *herself, in code* (never via an LLM): each tick she hunts
+    contradictions in her own logic — beliefs the :class:`~nyxara.growth.prover.Prover` refutes,
+    unsound adjoined axioms, claims whose negation is also provable — and **repairs** them
+    (retract / drop). Then, meeting a genuine limit of her current formal system — the honest
+    ``UNPROVABLE`` verdict, canonically her own consistency sentence ``Con(L_n)``, which Gödel's
+    second theorem forbids her from proving from within — she does **not** stop: she rises a
+    **new mathematical dimension** ``L_{n+1} = L_n + Con(L_n)``, adjoining a reflection principle
+    (a new meta-language operator) from which the former limit is now proven.
+
+    Pure reasoning: it touches no source, no weights, no gate. Every adjoined axiom is sanitised
+    against the immutable character core, and the ascent is hard-capped by ``max_dimensions`` so it
+    is real but never runs away. Persists the climbed tower so the height compounds across restarts.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                              # build + step the loop — safe, on by default
+    max_dimensions: int = Field(default=6, ge=1, le=16)   # hard cap on the reflection-tower height
+    scan_every: int = Field(default=20, ge=1)         # idle ticks between loop steps
+    persist: bool = True                              # persist the tower under paths.data_dir
+    persist_filename: str = "godel_tower.json"
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2112,6 +2138,7 @@ class NyxaraSettings(BaseSettings):
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
     rule_synthesis: RuleSynthesisConfig = Field(default_factory=RuleSynthesisConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
+    godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2192,6 +2219,12 @@ class NyxaraSettings(BaseSettings):
             # tower builds its own settings object; see tests/growth/test_meta_meta.py).
             self.mind_evolution.meta_meta_enabled = False
             self.meta_research.meta_meta_enabled = False
+            # The Gödelian reflection loop persists its climbed tower to disk and compounds across
+            # passes — keep its idle stepping/persistence OFF under TEST so the suite stays hermetic
+            # and deterministic (a test that wants the loop builds its own ReflectionTower/settings;
+            # see tests/growth/test_godel_loop.py).
+            self.godel_loop.enabled = False
+            self.godel_loop.persist = False
             # The Genesis Protocol designs and micro-trains real neural architectures — far too
             # heavy to run on every core boot across the suite (and it must stay hermetic). Keep the
             # boot kickoff OFF and pin the always-fast pure-stdlib n-gram substrate under TEST; a
