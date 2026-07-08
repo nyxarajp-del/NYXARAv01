@@ -45,6 +45,14 @@ from nyxara.growth.frontier import (
     NoveltyArchive,
 )
 from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover
+from nyxara.growth.godel_loop import (
+    Contradiction,
+    DecisionResult,
+    Dimension,
+    ReflectionTower,
+    Statement,
+    TowerReport,
+)
 from nyxara.growth.eureka import (
     Breakthrough,
     BreakthroughReport,
@@ -242,6 +250,13 @@ __all__ = [
     "ProofClaim",
     "ProofResult",
     "ProofVerdict",
+    # Gödelian contradiction-and-transcendence loop — hunt contradictions, rise a new meta-language
+    "ReflectionTower",
+    "Dimension",
+    "Statement",
+    "Contradiction",
+    "DecisionResult",
+    "TowerReport",
     # truly novel problem solving — self-generated, prover-certified, novelty-filtered discovery
     "EurekaEngine",
     "Conjecture",
