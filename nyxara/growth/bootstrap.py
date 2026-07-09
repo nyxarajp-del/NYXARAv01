@@ -29,6 +29,7 @@ from nyxara.kernel.config import LLMProvider, NyxaraSettings, get_settings
 
 __all__ = [
     "TINYLLAMA_1_1B",
+    "QWYTHOS_9B",
     "IDENTITY_SEED",
     "build_seed_corpus",
     "primary_model_present",
@@ -39,6 +40,13 @@ __all__ = [
 # checkpoint, downloaded & cached by HuggingFace on first use — no API key, no
 # inference-time network.
 TINYLLAMA_1_1B = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+# The primary base NYXARA now LoRA-adapts into her own voice: the Qwythos-9B safetensors
+# parent (a Qwen3.5-9B derivative). This is the *training* repo — NOT the ``-GGUF`` one, which
+# is inference-only. At 9B it wants QLoRA (4-bit) + a GPU and a trust_remote_code load; on a
+# bare CPU/CI box the forge degrades to the always-on n-gram brain. The cheap GGUF quant of the
+# same model is served separately by the ``gguf`` provider (mind/llm.LlamaCppProvider).
+QWYTHOS_9B = "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
 
 # The tiny placeholder base once shipped as the CPU/CI default: if an old persisted config
 # still selects it we upgrade the *primary* forge to the real TinyLlama-1.1B base, but we
@@ -182,15 +190,15 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
     base = base_model or (TINYLLAMA_1_1B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
                           else cfg.foundry.base_model)
     cfg.foundry.base_model = base
-    # 1.1B params fit full-precision on any GPU (and run on CPU), so quantization stays
-    # exactly as the Master configured it — no forced 4-bit here.
+    # Quantization (4-bit QLoRA for the 9B base) stays exactly as the Master configured it —
+    # honoured only on a CUDA box with bitsandbytes, else the LoRA loads full-precision.
 
     if _HAS_LORA:
         say(f"primary brain      : forging a LoRA on {base} "
             "(weights download on first use, then cache)…")
     else:
-        say("primary brain      : .[foundry] absent — forging the always-on n-gram brain "
-            "(install .[foundry] for the real TinyLlama-1.1B LoRA)…")
+        say(f"primary brain      : .[foundry] absent — forging the always-on n-gram brain "
+            f"(install .[foundry] for the real {base} LoRA)…")
 
     foundry = Foundry(settings=cfg, seed_corpus=seed_corpus or build_seed_corpus())
     results = foundry.self_improve(generations=max(1, generations))

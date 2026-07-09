@@ -98,6 +98,7 @@ class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
     TINYLLAMA = "tinyllama"       # in-process TinyLlama-1.1B-Chat, downloaded via HuggingFace
+    GGUF = "gguf"                 # in-process GGUF (llama.cpp) — the Qwythos-9B quant, cheap to serve
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     MOCK = "mock"
 
@@ -196,16 +197,19 @@ class FeatureFlags(BaseModel):
 class LLMConfig(BaseModel):
     """Stateless, fully local LLM faculty settings (mind/llm.py).
 
-    The only real backend is TinyLlama-1.1B running in-process via HuggingFace
-    transformers — no cloud providers, no API keys. Every load-time and
-    generation-time knob is exposed (``NYXARA_LLM__TINYLLAMA_*``) for maximum
-    control over the model. ``self`` serves the foundry-forged model (a LoRA
-    fine-tune of the same base) and ``mock`` is the deterministic offline fallback.
+    Two real backends run in-process, no cloud providers and no API keys: the
+    HuggingFace ``transformers`` path (``tinyllama``, any HF causal-LM id via
+    ``NYXARA_LLM__TINYLLAMA_*``) and the llama.cpp path (``gguf``, a quantized GGUF
+    served through ``llama-cpp-python`` via ``NYXARA_LLM__GGUF_*``). The shipped
+    default is Qwythos-9B: served cheaply from its GGUF quant, LoRA-fine-tuned on its
+    safetensors parent by the foundry. ``self`` serves the foundry-forged model (the
+    LoRA adapter over that base) and ``mock`` is the deterministic offline fallback;
+    every backend degrades to ``mock`` when its heavy deps are absent.
     """
 
     model_config = {"validate_assignment": True}
 
-    provider: LLMProvider = LLMProvider.TINYLLAMA
+    provider: LLMProvider = LLMProvider.GGUF
     # ---- TinyLlama-1.1B: model & load-time control ---- #
     tinyllama_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     tinyllama_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
@@ -236,6 +240,21 @@ class LLMConfig(BaseModel):
     tinyllama_max_input_tokens: int = Field(default=2048, ge=64, le=2048)
     # Zephyr chat template (system/user/assistant). False -> flat prompt, for base checkpoints.
     tinyllama_use_chat_template: bool = True
+    # ---- GGUF (llama.cpp): the Qwythos-9B quant, served in-process via llama-cpp-python ---- #
+    # GGUF is an inference-only format, so this backend never trains — it serves the cheap
+    # quantized weights (Q4 ≈ 6 GB) while the foundry LoRA-tunes the safetensors parent. Needs
+    # ``llama-cpp-python`` (``.[gguf]``); absent, the provider degrades honestly to the mock.
+    gguf_model: str = "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic-GGUF"
+    # Which quant file to pull from the repo (a llama.cpp glob; picks the single match).
+    gguf_filename: str = "*Q4_K_M.gguf"
+    gguf_n_ctx: int = Field(default=8192, ge=256)              # context window (0 -> model default)
+    gguf_n_gpu_layers: int = Field(default=-1, ge=-1)          # -1 -> all layers on GPU; 0 -> CPU-only
+    gguf_n_threads: int = Field(default=0, ge=0)               # 0 -> llama.cpp auto (all cores)
+    gguf_chat_format: str = ""                                 # "" -> the GGUF's own chat template
+    gguf_seed: int = Field(default=-1, ge=-1)                  # -1 -> nondeterministic (request seed wins)
+    # Serve a llama.cpp-converted LoRA adapter (a foundry adapter exported to GGUF) on top.
+    gguf_lora_path: Optional[Path] = None
+    gguf_lora_scale: float = Field(default=1.0, ge=0.0, le=4.0)
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
@@ -275,6 +294,7 @@ class LLMConfig(BaseModel):
     def active_model(self) -> str:
         return {
             LLMProvider.TINYLLAMA: self.tinyllama_model,
+            LLMProvider.GGUF: self.gguf_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.MOCK: "mock",
         }[self.provider]
@@ -365,10 +385,15 @@ class FoundryConfig(BaseModel):
     n_head: int = Field(default=2, ge=1, le=32)
     n_embd: int = Field(default=64, ge=8, le=2048)
     # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
-    # Adapts the TinyLlama-1.1B base to NYXARA's lived memory by training a small low-rank
-    # adapter — the path to genuine capability. 1.1B params train comfortably on a single
-    # consumer GPU and are runnable (slowly) on CPU.
-    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # Adapts the base to NYXARA's lived memory by training a small low-rank adapter — the path
+    # to genuine capability. Default base is the Qwythos-9B safetensors parent (NOT the -GGUF
+    # repo: GGUF is inference-only and cannot be LoRA-trained); at 9B it wants QLoRA (4-bit) and
+    # a GPU, and degrades to the always-on n-gram backend on a bare CPU/CI box.
+    base_model: str = "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
+    # The Qwythos base ships custom Qwen3.5 modeling code (hybrid Gated-DeltaNet attention);
+    # transformers needs trust_remote_code to load it. Kept a knob so a stock base can turn it
+    # off. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
+    trust_remote_code: bool = True
     lora_r: int = Field(default=8, ge=1, le=256)
     # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
     # 7B base converges while a tiny base stays cheap). When True the foundry infers the rank
@@ -378,10 +403,11 @@ class FoundryConfig(BaseModel):
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
     # Which modules receive LoRA adapters. The default is every projection in the llama
-    # architecture (attention + MLP) — full-coverage fine-tuning of TinyLlama. An empty
-    # list lets peft infer the defaults for the base architecture.
-    lora_target_modules: List[str] = Field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+    # architecture (attention + MLP). Empty by default so peft infers the targets for the
+    # Qwythos base's hybrid Qwen3.5 arch (its Gated-DeltaNet layers don't use the llama names);
+    # LoRAModel._apply_lora falls back to "all-linear" if inference fails. Set explicitly (e.g.
+    # the llama q/k/v/o/gate/up/down set) to pin placement on a known base.
+    lora_target_modules: List[str] = Field(default_factory=list)
     lora_bias: Literal["none", "all", "lora_only"] = "none"
     lora_use_rslora: bool = False           # rank-stabilised LoRA scaling
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
@@ -389,9 +415,9 @@ class FoundryConfig(BaseModel):
     max_seq_len: int = Field(default=256, ge=8, le=8192)
     # QLoRA: load the frozen base in 4-bit (or 8-bit) so bigger bases fine-tune on a single
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
-    # to full-precision LoRA (no crash). TinyLlama-1.1B rarely needs it, but the knob stays
-    # for tight-VRAM boxes.
-    load_in_4bit: bool = False
+    # to full-precision LoRA (no crash). On by default because the Qwythos-9B base needs it to
+    # fit; a tiny base (e.g. TinyLlama-1.1B) trains fine either way.
+    load_in_4bit: bool = True
     load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"

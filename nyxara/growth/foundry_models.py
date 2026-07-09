@@ -126,6 +126,9 @@ class ModelSpec:
     substrate: str = "ngram"
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
+    # Load custom modeling code shipped with the base (needed for the Qwythos/Qwen3.5 hybrid
+    # arch). Threaded into every AutoTokenizer/AutoModel from_pretrained below.
+    trust_remote_code: bool = False
     lora_r: int = 8
     lora_r_auto: bool = False    # True -> scale the rank to the base width (set by the foundry)
     lora_alpha: int = 16
@@ -167,7 +170,8 @@ class ModelSpec:
                 "ngram_k": self.ngram_k, "block_size": self.block_size,
                 "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
                 "seed": self.seed, "genome": self.genome, "substrate": self.substrate,
-                "base_model": self.base_model, "lora_r": self.lora_r,
+                "base_model": self.base_model,
+                "trust_remote_code": self.trust_remote_code, "lora_r": self.lora_r,
                 "lora_r_auto": self.lora_r_auto,
                 "lora_alpha": self.lora_alpha, "lora_dropout": self.lora_dropout,
                 "lora_lr": self.lora_lr, "max_seq_len": self.max_seq_len,
@@ -937,7 +941,9 @@ class LoRAModel(BaseLanguageModel):
         self.spec = spec or ModelSpec(kind="lora")
         torch.manual_seed(self.spec.seed)
         self.device = self.spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.spec.base_model)
+        trc = bool(getattr(self.spec, "trust_remote_code", False))
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.spec.base_model, trust_remote_code=trc)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token or self.tokenizer.unk_token
         self.quantized = _should_quantize(self.spec)
@@ -958,7 +964,8 @@ class LoRAModel(BaseLanguageModel):
                     pass
             self.net = net
         else:
-            base = AutoModelForCausalLM.from_pretrained(self.spec.base_model)
+            base = AutoModelForCausalLM.from_pretrained(
+                self.spec.base_model, trust_remote_code=trc)
             self.net = self._apply_lora(base).to(self.device)
         # Optional Elastic Weight Consolidation over the adapter weights (see NanoGPTModel).
         self.synapses: Any = None
@@ -979,7 +986,8 @@ class LoRAModel(BaseLanguageModel):
                 bnb_4bit_compute_dtype=compute_dtype,
                 bnb_4bit_use_double_quant=kw["bnb_4bit_use_double_quant"])
         base = AutoModelForCausalLM.from_pretrained(
-            self.spec.base_model, quantization_config=bnb, device_map="auto")
+            self.spec.base_model, quantization_config=bnb, device_map="auto",
+            trust_remote_code=bool(getattr(self.spec, "trust_remote_code", False)))
         return prepare_model_for_kbit_training(
             base, use_gradient_checkpointing=self.spec.gradient_checkpointing)
 

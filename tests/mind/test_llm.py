@@ -153,7 +153,7 @@ def test_provider_status():
     llm = _mock_llm()
     status = llm.provider_status()
     assert status["mock"] is True
-    assert set(status) == {"tinyllama", "self", "mock"}
+    assert set(status) == {"tinyllama", "gguf", "self", "mock"}
 
 
 def test_async_complete():
@@ -315,3 +315,72 @@ def test_format_self_training_doc_appends_answer():
     assert doc.startswith(head)
     assert doc.endswith("It is 4.\n")
     assert f"{_SELF_ASSISTANT_TAG}\nIt is 4." in doc
+
+
+# -------------------- GGUF (llama.cpp) provider -------------------- #
+def test_gguf_provider_registered_and_default_model():
+    from nyxara.mind.llm import LlamaCppProvider, _PROVIDER_CLASSES
+    assert _PROVIDER_CLASSES[ProviderName.GGUF] is LlamaCppProvider
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    p = LlamaCppProvider(settings)
+    assert p.name == "gguf"
+    # default model is whatever config points at (the Qwythos GGUF out of the box)
+    assert p.default_model() == settings.llm.gguf_model
+
+
+def test_gguf_provider_available_honestly():
+    """available() must be True iff llama_cpp imports — never crash on a bare box."""
+    import importlib.util
+    from nyxara.mind.llm import LlamaCppProvider
+    have_llama = importlib.util.find_spec("llama_cpp") is not None
+    assert LlamaCppProvider(NyxaraSettings.for_profile(Profile.TEST)).available() is have_llama
+
+
+def test_gguf_default_provider_falls_back_to_mock_without_llama_cpp():
+    """With provider=gguf but llama-cpp-python absent, the facade serves the mock."""
+    import importlib.util
+    if importlib.util.find_spec("llama_cpp") is not None:
+        pytest.skip("llama_cpp installed — the honest path here is the real backend")
+    settings = NyxaraSettings.for_profile(Profile.DEV)  # allows mock fallback
+    settings.llm.provider = ProviderName.GGUF
+    llm = LLM(settings=settings)
+    assert llm.chosen_provider().name == "mock"
+    resp = llm.complete(LLMRequest.from_prompt("hello gguf"))
+    assert "hello gguf" in resp.text
+
+
+def test_gguf_complete_maps_request_and_stops(monkeypatch):
+    """Drive _complete with a fake llama.cpp so the request→chat mapping is exercised
+    without downloading a 6 GB GGUF."""
+    from nyxara.mind.llm import LlamaCppProvider
+
+    captured = {}
+
+    class _FakeLlama:
+        def create_chat_completion(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "choices": [{"message": {"content": "the answer STOP tail"},
+                             "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+            }
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    p = LlamaCppProvider(settings)
+    monkeypatch.setattr(p, "available", lambda: True)
+    monkeypatch.setattr(p, "_ensure_model", lambda model: _FakeLlama())
+
+    req = LLMRequest.from_prompt("q", system="be brief",
+                                 temperature=0.3, top_p=0.9, max_tokens=32,
+                                 stop=("STOP",), seed=123)
+    resp = p.complete(req)
+    # stop sequence truncates the text and reports a clean stop
+    assert resp.text == "the answer"
+    assert resp.finish_reason == "stop"
+    assert resp.usage.prompt_tokens == 7 and resp.usage.completion_tokens == 3
+    # request fields flow into the chat call, system becomes the first message
+    assert captured["temperature"] == 0.3 and captured["top_p"] == 0.9
+    assert captured["max_tokens"] == 32 and captured["seed"] == 123
+    assert captured["stop"] == ["STOP"]
+    assert captured["messages"][0] == {"role": "system", "content": "be brief"}
+    assert resp.raw["gguf"] is True

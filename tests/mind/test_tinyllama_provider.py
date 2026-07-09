@@ -31,12 +31,12 @@ def _has_torch() -> bool:
 # -------------------- enum / registry / config routing -------------------- #
 def test_provider_enum_is_local_only():
     assert LLMProvider.TINYLLAMA.value == "tinyllama"
-    assert {p.value for p in LLMProvider} == {"tinyllama", "self", "mock"}
+    assert {p.value for p in LLMProvider} == {"tinyllama", "gguf", "self", "mock"}
 
 
 def test_registered_in_facade():
     status = LLM(settings=_settings()).provider_status()
-    assert set(status) == {"tinyllama", "self", "mock"}
+    assert set(status) == {"tinyllama", "gguf", "self", "mock"}
 
 
 def test_config_routes_model_and_no_keys():
@@ -47,9 +47,11 @@ def test_config_routes_model_and_no_keys():
     assert s.llm.active_key() is None
 
 
-def test_default_provider_is_tinyllama():
+def test_default_provider_is_gguf():
+    # the shipped default serves the Qwythos-9B GGUF quant (cheap in-process llama.cpp);
+    # absent llama-cpp-python it degrades to the mock, so this is safe on a bare box.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.llm.provider is LLMProvider.TINYLLAMA
+    assert s.llm.provider is LLMProvider.GGUF
 
 
 def test_quant_flags_mutually_exclusive():
@@ -346,9 +348,10 @@ def test_env_overrides_foundry_knobs(monkeypatch):
 
 def test_foundry_default_base_and_targets():
     s = NyxaraSettings()
-    assert s.foundry.base_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    assert s.foundry.lora_target_modules == [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    # default base is the Qwythos-9B safetensors parent (the -GGUF repo is inference-only)
+    assert s.foundry.base_model == "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
+    # empty targets -> peft infers them for the hybrid Qwen3.5 arch (all-linear fallback)
+    assert s.foundry.lora_target_modules == []
 
 
 def test_foundry_quant_flags_mutually_exclusive():

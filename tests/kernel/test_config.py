@@ -69,12 +69,30 @@ def test_llm_active_model_and_key():
     s.llm.provider = LLMProvider.TINYLLAMA
     assert s.llm.active_model() == s.llm.tinyllama_model
     assert s.llm.tinyllama_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    s.llm.provider = LLMProvider.GGUF
+    assert s.llm.active_model() == s.llm.gguf_model
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
     # every backend is local now — there are no API keys anywhere
     assert s.llm.active_key() is None
     s.llm.provider = LLMProvider.MOCK
     assert s.llm.active_key() is None
+
+
+def test_qwythos_is_the_default_foundry_base_and_gguf_serving():
+    """The shipped defaults wire the Qwythos-9B integration end to end."""
+    s = NyxaraSettings()
+    # serving: gguf provider by default, pointing at the Qwythos GGUF quant
+    assert s.llm.provider is LLMProvider.GGUF
+    assert "Qwythos-9B" in s.llm.gguf_model and s.llm.gguf_model.endswith("-GGUF")
+    assert s.llm.gguf_filename.endswith(".gguf")
+    # training: the foundry adapts the SAFETENSORS parent (not the -GGUF repo) with QLoRA
+    assert s.foundry.base_model == "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
+    assert not s.foundry.base_model.endswith("-GGUF")
+    assert s.foundry.load_in_4bit is True
+    assert s.foundry.trust_remote_code is True
+    # empty target modules -> peft infers them for the hybrid Qwen3.5 arch
+    assert s.foundry.lora_target_modules == []
 
 
 def test_resource_limits_validation():
