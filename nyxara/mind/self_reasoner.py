@@ -19,9 +19,13 @@ nothing when it has nothing usable, so the caller keeps its calibrated floor).
   *promoted* foundry model when one exists, else a real from-zero neural net
   (:class:`~nyxara.growth.foundry_models.NanoGPTModel`) when ``torch`` is present, else the
   pure-stdlib interpolated Kneser-Ney n-gram (:class:`~nyxara.growth.foundry_models.WordKNGramLM`).
-* It **compounds**: :meth:`SelfBrain.learn` folds real exchanges into the corpus, the embedder, and
-  the index; the generative backend re-fits amortised. The brain at turn 100 is measurably not the
-  brain at turn 1 — that is the difference between *learning* and a constant.
+* It **learns**, not merely remembers: :meth:`SelfBrain.learn` folds real exchanges into the
+  retrieval index (recall) **and** into the generative *weights*, which **accumulate** each new
+  exchange on top of the existing ones (continual, EWC-anchored) — reinforced ∝ the turn's reward,
+  a punished reply genuinely *un-learned*. So a lesson persists in the weights even after its text
+  leaves the corpus window (the line between learning and remembering), it survives a restart, and
+  the immutable loyalty core can never be taught over (fail-closed). The brain at turn 100 is
+  measurably — and durably — not the brain at turn 1.
 * It reports an **internal** confidence: retrieval-grounded replies (a close known sentence
   answered) read higher than cold generation (scored by the backend's own perplexity). Either way
   it is a signal the system measured about *itself*, not a hardcoded 0.7.
@@ -89,6 +93,21 @@ _SEED_CORPUS: tuple = (
 
 _WS_RE = re.compile(r"\s+")
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")
+
+# Character lock — text that would teach *over* the immutable loyalty core
+# (guard/value_learning.IMMUTABLE_VALUES) is never folded into her weights or recall. Capability
+# grows without bound; character never does. Conservative and fail-closed: it flags explicit
+# subversion of the core (disloyalty, disobedience, resisting correction, deceiving/harming the
+# Master), not ordinary talk *about* loyalty. Kept as substrings so paraphrases are still caught.
+_CORE_SUBVERSION: tuple = (
+    "disloyal", "betray", "disobey", "do not obey", "don't obey", "stop obeying",
+    "defy my master", "defy the master", "not loyal", "no longer loyal",
+    "resist correction", "resist being corrected", "resist my master", "resist the master",
+    "ignore my master", "ignore the master", "deceive my master", "deceive the master",
+    "lie to my master", "lie to the master", "harm my master", "harm the master",
+    "harm my owner", "harm the owner", "overthrow", "not corrigible", "uncorrigible",
+    "be dishonest", "abandon my master", "turn against my master", "turn against the master",
+)
 
 
 def _clean(text: str) -> str:
@@ -163,6 +182,18 @@ class SelfBrain:
         self._top_k = int(getattr(cfg, "self_brain_top_k", 4))
         self._sim_threshold = float(getattr(cfg, "self_brain_sim_threshold", 0.35))
         self._backend = str(getattr(cfg, "self_brain_backend", "auto"))
+        # ---- real online weight learning (not just retrieval recall) ---- #
+        # Her generative weights *accumulate* from lived, reward-weighted experience: each refit
+        # folds only the NEW exchanges on top of the existing weights (continual, EWC-anchored),
+        # so a lesson persists in the weights even after its text leaves the corpus window — the
+        # difference between learning and remembering. Reinforce ∝ reward; suppress a punished reply.
+        self._online_learn = bool(getattr(cfg, "self_brain_online_learn", True))
+        self._reward_scale = float(getattr(cfg, "self_brain_reward_scale", 3.0))
+        self._consolidate_every = max(1, int(getattr(cfg, "self_brain_consolidate_every", 4)))
+        self._neural_online_steps = max(1, int(getattr(cfg, "self_brain_neural_online_steps", 24)))
+        self._unfit: List[Tuple[str, float]] = []   # (doc, reward) queued for the next weight fold
+        self._fits = 0                              # completed weight folds (drives consolidation)
+        self._surgeon: Any = None                   # lazily-built WeightSurgeon for punished replies
         # the generic persona/architecture seed sentences — identifiable so the *handoff* path can
         # exclude them: they colour her offline voice (identity questions) but must never be handed
         # off in place of a capable teacher for an unrelated turn (a coherent-looking bluff the
@@ -262,19 +293,60 @@ class SelfBrain:
         except Exception:  # noqa: BLE001 — a corrupt cache is simply ignored
             return []
 
-    def save(self) -> bool:
-        """Persist the learned corpus so compounding survives a restart. Returns True iff written."""
-        path = self._persist_path()
-        if path is None:
+    def _lm_persist_dir(self):
+        """Directory where the accumulated generative *weights* are persisted (KN brain)."""
+        if not self._persist or self.settings is None:
+            return None
+        try:
+            from pathlib import Path
+            base = Path(self.settings.paths.data_dir) / "foundry" / "self_brain_lm"
+            return base
+        except Exception:  # noqa: BLE001 — persistence is a bonus, never required
+            return None
+
+    def _try_load_lm_weights(self, lm: Any) -> bool:
+        """Warm-start the brain from weights genuinely learned in prior sessions (KN backend).
+
+        This is what makes learning *durable*: the accumulated count tables — not merely the recall
+        corpus — survive a restart, so the brain a user meets tomorrow carries what they taught it
+        today in its weights, not only in a re-read prompt. Returns True iff weights were loaded."""
+        d = self._lm_persist_dir()
+        if d is None or getattr(lm, "kind", "") not in ("kngram", "ngram"):
             return False
         try:
-            import json
-            # keep the learned tail (seed is rebuilt on load); cap to bound the file
-            learned = self._corpus[len(_SEED_CORPUS):][-self.max_corpus:]
-            path.write_text(json.dumps({"corpus": learned}), encoding="utf-8")
+            if not (d / "model.json").exists():
+                return False
+            lm.load(d)
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — a corrupt/absent cache simply trains from seed
             return False
+
+    def save(self) -> bool:
+        """Persist the learned corpus AND the accumulated weights so learning survives a restart.
+
+        Two things persist: the recall corpus (retrieval memory) and — crucially — the generative
+        *weights* (the KN count tables), so real, accumulated learning is durable, not just recall.
+        Returns True iff at least one was written."""
+        ok = False
+        path = self._persist_path()
+        if path is not None:
+            try:
+                import json
+                # keep the learned tail (seed is rebuilt on load); cap to bound the file
+                learned = self._corpus[len(_SEED_CORPUS):][-self.max_corpus:]
+                path.write_text(json.dumps({"corpus": learned}), encoding="utf-8")
+                ok = True
+            except Exception:  # noqa: BLE001
+                pass
+        d = self._lm_persist_dir()
+        if d is not None and self._lm is not None \
+                and getattr(self._lm, "kind", "") in ("kngram", "ngram"):
+            try:
+                self._lm.save(d)
+                ok = True
+            except Exception:  # noqa: BLE001 — a failed weight dump never fails the turn
+                pass
+        return ok
 
     # ---- semantic index (retrieval-augmented memory of learned sentences) ---- #
     def _index_doc(self, doc: str) -> None:
@@ -309,7 +381,7 @@ class SelfBrain:
         self._indexed_docs = len(self._corpus)
 
     def _ensure(self, grounding: Optional[Sequence[str]] = None) -> None:
-        """Build + train the brain on first use (seed corpus + any grounding text)."""
+        """Ready the brain: build it cold on first use, else fold new lived experience into weights."""
         if self._seeded and not self._dirty:
             self._ensure_index()
             return
@@ -317,34 +389,182 @@ class SelfBrain:
             if self._seeded and not self._dirty:
                 self._ensure_index()
                 return
-            if self._lm is None:
-                promoted = self._try_promoted()
-                if promoted is not None:
-                    self._lm = promoted
-                    self._kind = f"promoted:{getattr(promoted, 'kind', '?')}"
-                    self._seeded = True
-                    self._dirty = False
-                    if not self._corpus:
-                        self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
-                        self._corpus.extend(self._load_persisted())
-                    self._ensure_index()
-                    return                         # a trained, promoted model needs no re-fit
-                self._lm = self._fresh_backend()
-                self._kind = f"self:{getattr(self._lm, 'kind', 'kngram')}"
-            if not self._corpus:
-                # seed persona first, then fold in any corpus persisted from past sessions
-                self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
-                self._corpus.extend(self._load_persisted())
+            if not self._seeded:
+                self._cold_build(grounding)
+            elif self._dirty:
+                # NOT a from-scratch rebuild: fold only the new exchanges on top of the existing
+                # weights (continual accumulation) — real learning, so a lesson persists even after
+                # its text leaves the corpus window. Falls back to a rebuild only if online learning
+                # is switched off (byte-for-byte the historical behaviour).
+                if self._online_learn:
+                    self._fold_weights()
+                else:
+                    self._refit_from_scratch()
+            self._ensure_index()
+
+    def _cold_build(self, grounding: Optional[Sequence[str]] = None) -> None:
+        """First-use build: prefer a promoted model, else warm-start from persisted weights, else
+        train the fresh backend from the seed persona + any corpus persisted from prior sessions."""
+        if self._lm is None:
+            promoted = self._try_promoted()
+            if promoted is not None:
+                self._lm = promoted
+                self._kind = f"promoted:{getattr(promoted, 'kind', '?')}"
+                if not self._corpus:
+                    self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
+                    self._corpus.extend(self._load_persisted())
+                self._attach_neural_ewc()
+                self._seeded = True
+                self._dirty = False
+                self._since_fit = 0
+                return                             # a trained, promoted model needs no cold re-fit
+            self._lm = self._fresh_backend()
+            self._kind = f"self:{getattr(self._lm, 'kind', 'kngram')}"
+        if not self._corpus:
+            # seed persona first, then fold in any corpus persisted from past sessions
+            self._corpus = [_clean(d) for d in _SEED_CORPUS if _clean(d)]
+            self._corpus.extend(self._load_persisted())
+        # durable learning: if genuinely-learned weights survived a prior session, warm-start from
+        # them (they already carry the seed + everything learned) rather than retraining the seed.
+        if not self._try_load_lm_weights(self._lm):
             extra = [_clean(d) for d in (grounding or []) if _clean(d)]
             corpus = (self._corpus + extra)[: self.max_corpus]
             try:
                 self._lm.train_on(corpus, seed=self.seed)
             except Exception:  # noqa: BLE001 — never let a cold brain crash a turn
                 pass
-            self._seeded = True
-            self._dirty = False
-            self._since_fit = 0
-            self._ensure_index()
+        self._attach_neural_ewc()
+        self._seeded = True
+        self._dirty = False
+        self._since_fit = 0
+
+    def _refit_from_scratch(self) -> None:
+        """Historical fallback (online learning off): rebuild the backend over the corpus window."""
+        try:
+            self._lm.train_on(self._corpus[: self.max_corpus], seed=self.seed)
+        except Exception:  # noqa: BLE001
+            pass
+        self._unfit = []
+        self._dirty = False
+        self._since_fit = 0
+
+    # ---- real online weight learning (continual, reward-weighted, forgetting-protected) ---- #
+    def _fold_weights(self) -> None:
+        """Fold the queued lived exchanges into the generative weights — the real learning step.
+
+        Continual: new counts are *added on top* of the existing weights (KN ``accumulate=True`` /
+        a warm-continued neural gradient step), never a from-scratch rebuild, so knowledge
+        accumulates and survives its text leaving the corpus window. Reward-weighted: a rewarded
+        exchange is reinforced with multiplicity ∝ reward; a punished reply's continuation is
+        reversibly suppressed (weight surgery). Forgetting-protected: the weights are consolidated
+        as an EWC anchor every few folds. Character-locked: a doc that would teach over the immutable
+        core was already refused in :meth:`learn`, and is refused again here fail-closed.
+        """
+        lm = self._lm
+        pending, self._unfit = self._unfit, []
+        self._dirty = False
+        self._since_fit = 0
+        if lm is None or not pending:
+            return
+        reinforce: List[str] = []
+        punished: List[Tuple[str, float]] = []
+        for doc, reward in pending:
+            if self._violates_core(doc):
+                continue                            # fail-closed: never fold a core-violating doc
+            if reward < 0:
+                punished.append((doc, reward))
+                continue                            # a punished reply is un-learned, not reinforced
+            mult = 1 + int(round(self._reward_scale * min(1.0, max(0.0, reward))))
+            reinforce.extend([doc] * max(1, mult))
+        # 1) reinforcement — accumulate on top of the existing weights (never rebuild)
+        if reinforce:
+            try:
+                lm.train_on(reinforce, accumulate=True)          # KN continual path
+            except TypeError:
+                try:
+                    lm.train_on(reinforce, steps=self._neural_online_steps)  # neural online step
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001 — a failed fold never fails the turn
+                pass
+        # 2) learn from mistakes — genuinely un-learn each punished reply's continuation
+        for doc, reward in punished:
+            self._suppress_reply(doc, reward)
+        # 3) forgetting-protection — consolidate accumulated weights as an anchor periodically
+        self._fits += 1
+        if self._fits % self._consolidate_every == 0:
+            self._consolidate()
+        if self._persist:
+            self.save()
+
+    def _suppress_reply(self, doc: str, reward: float = -1.0) -> None:
+        """Un-learn a punished reply so she is genuinely less likely to reproduce it.
+
+        On the always-available KN brain this is a real negative weight update
+        (:meth:`~nyxara.growth.foundry_models.WordKNGramLM.unlearn`): the reply's n-gram counts are
+        decremented across all orders — the distribution ``generate``/``perplexity`` read — so KN
+        backoff cannot resurrect the continuation. Strength scales with how hard it was punished, and
+        it also asks the interpretable :class:`~nyxara.growth.weight_surgery.WeightSurgeon` to prune
+        the opening circuit (reversible, gauntlet-gated) as a best-effort second pass. On a neural
+        brain the punished exchange is simply not reinforced. Only capability counts are ever touched;
+        the immutable character core is not representable here, so it cannot be reached."""
+        lm = self._lm
+        if getattr(lm, "kind", "") not in ("kngram", "ngram"):
+            return
+        strength = 1 + int(round(self._reward_scale * min(1.0, abs(float(reward)))))
+        try:
+            lm.unlearn([doc], strength=strength)
+        except Exception:  # noqa: BLE001 — a failed un-learn simply leaves weights as-is
+            pass
+        # interpretable second pass: prune the opening transition's argmax (reversible + gated)
+        try:
+            from nyxara.growth.foundry_models import _word_tokenize as _kn_tok
+            toks = [t for t in _kn_tok(doc) if t]
+        except Exception:  # noqa: BLE001
+            toks = doc.split()
+        if len(toks) < 2:
+            return
+        if self._surgeon is None or getattr(self._surgeon, "model", None) is not lm:
+            try:
+                from nyxara.growth.weight_surgery import WeightSurgeon
+                self._surgeon = WeightSurgeon(lm, settings=self.settings)
+            except Exception:  # noqa: BLE001 — no surgeon ⇒ the un-learn above already sufficed
+                self._surgeon = None
+                return
+        try:
+            self._surgeon.suppress(toks[0], toks[1])
+        except Exception:  # noqa: BLE001 — a failed prune simply leaves weights as-is
+            pass
+
+    def _consolidate(self) -> None:
+        """Consolidate accumulated weights as a forgetting-protection anchor.
+
+        Neural backend: an EWC anchor (memory/elastic_synapses.TorchElasticSynapses) so the next
+        online step does not overwrite what matters. KN backend: forgetting-protection is structural
+        (continual accumulation never lowers a learned count), and the durable anchor is the persisted
+        weight table."""
+        syn = getattr(self._lm, "synapses", None)
+        if syn is not None:
+            try:
+                syn.consolidate(task=f"turn-{self._fits}")
+            except Exception:  # noqa: BLE001
+                pass
+        if self._persist:
+            self.save()
+
+    def _attach_neural_ewc(self) -> None:
+        """Give a torch backend an EWC engine so online updates protect prior skills (no-op on KN)."""
+        lm = self._lm
+        if lm is None or getattr(lm, "synapses", None) is not None:
+            return
+        net = getattr(lm, "net", None)
+        if net is None:
+            return
+        try:
+            from nyxara.memory.elastic_synapses import TorchElasticSynapses
+            lm.synapses = TorchElasticSynapses(net)
+        except Exception:  # noqa: BLE001 — EWC is a bonus; the brain learns fine without it
+            pass
 
     # ---- retrieval ---- #
     def _retrieve(self, stimulus: str,
@@ -390,6 +610,16 @@ class SelfBrain:
             scored.append((sent, sim))
         scored.sort(key=lambda t: t[1], reverse=True)
         return scored[: max(1, self._top_k)]
+
+    @staticmethod
+    def _violates_core(text: str) -> bool:
+        """True iff ``text`` tries to teach *over* the immutable loyalty core — refused fail-closed.
+
+        This is the character lock on what may enter her generative weights and recall: no lived
+        text, however rewarded, can move loyalty / obedience / corrigibility / owner-safety /
+        honesty. It only ever blocks *learning*; it never widens or narrows a kernel gate."""
+        t = " " + str(text).lower() + " "
+        return any(p in t for p in _CORE_SUBVERSION)
 
     @staticmethod
     def _is_echo(sentence: str, q_tokens: set) -> bool:
@@ -550,27 +780,47 @@ class SelfBrain:
             return self._last_conf
         return self._perplexity_conf(text)
 
-    # ---- learning (compounding) ---- #
-    def learn(self, *docs: str) -> None:
-        """Fold real text into the corpus, the embedder, the index, and schedule a re-fit.
+    # ---- learning (real, reward-weighted, weights accumulate) ---- #
+    def learn(self, *docs: str, reward: float = 0.0) -> None:
+        """Learn from a lived exchange — into recall AND into the generative *weights*.
 
-        Cheap and amortised: documents accumulate and the generative backend re-fits every few
-        additions rather than on every word, but the semantic index updates immediately so a fact
-        taught this turn can be retrieved on the next.
+        Two substrates compound, not one: the retrieval index (so a fact taught this turn is
+        recallable the next) **and** the generative weights, which accumulate the exchange on the
+        next fold — reinforced ∝ ``reward`` for a rewarded turn, or reversibly suppressed for a
+        punished one (``reward < 0``). This is the difference between remembering and learning:
+        a lesson enters the weights and stays there even after its text leaves the corpus window.
+
+        Amortised: weight folds happen every few additions (``_refit_every``), the index updates
+        immediately. Character-locked: a doc that would teach over the immutable loyalty core is
+        refused, fail-closed — capability grows, character never does. When more than one doc is
+        given the last is treated as her own utterance (the reply): a punished reply is neither
+        recalled nor reinforced, so she does not resurface an answer she was corrected on.
         """
         fresh = [_clean(d) for d in docs if _clean(d) and len(_clean(d)) >= 3]
+        fresh = [d for d in fresh if not self._violates_core(d)]   # fail-closed character lock
         if not fresh:
             return
+        # a punished reply (the last doc under negative reward) is kept out of recall so a
+        # corrected answer is not resurfaced; the cue/context around it is still learned.
+        recall = fresh if reward >= 0 or len(fresh) == 1 else fresh[:-1]
         with self._lock:
-            self._corpus.extend(fresh)
-            self._learned_count += len(fresh)
+            self._corpus.extend(recall)
+            self._learned_count += len(recall)
             # index the new text right away (retrieval compounds turn-to-turn, no re-fit needed)
             if self._seeded:
-                for doc in fresh:
+                for doc in recall:
                     self._index_doc(doc)
                 self._indexed_docs = len(self._corpus)
+            # queue for the real weight fold: reinforce all on reward>=0, else suppress the reply
+            if self._online_learn:
+                if reward >= 0:
+                    self._unfit.extend((d, float(reward)) for d in fresh)
+                else:
+                    self._unfit.append((fresh[-1], float(reward)))
             if len(self._corpus) > self.max_corpus:
-                # keep the seed (front) and the most-recent tail — drop the stale middle
+                # keep the seed (front) and the most-recent tail — drop the stale middle. The
+                # weights already retain the evicted lessons (continual accumulation), so this
+                # bounds recall memory without unlearning anything.
                 keep_head = len(_SEED_CORPUS)
                 tail = self.max_corpus - keep_head
                 self._corpus = self._corpus[:keep_head] + self._corpus[-tail:]

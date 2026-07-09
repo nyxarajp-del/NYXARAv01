@@ -264,13 +264,15 @@ class LLMReasoner:
             pass
         return base                           # honest floor: never worse than the template
 
-    def teach_self_brain(self, *docs: str) -> None:
+    def teach_self_brain(self, *docs: str, reward: float = 0.0) -> None:
         """Fold real exchanges/observations into the own brain so it compounds (Rule 4).
 
-        Safe no-op when the brain was never built (a real external LLM is in use)."""
+        ``reward`` carries the turn's outcome so the brain *learns* (weights accumulate ∝ reward, a
+        punished reply is suppressed), not merely remembers. Safe no-op when the brain was never
+        built (a real external LLM is in use)."""
         if self._self_brain is not None:
             try:
-                self._self_brain.learn(*docs)
+                self._self_brain.learn(*docs, reward=reward)
             except Exception:  # noqa: BLE001
                 pass
 
