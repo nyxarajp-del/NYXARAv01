@@ -4600,18 +4600,22 @@ class NyxaraCore:
                     self._research_queue.append(topic[:60])
         return spawned
 
-    def _compound_own_models(self, stimulus: str, candidate: Candidate, success: bool) -> None:
+    def _compound_own_models(self, stimulus: str, candidate: Candidate, success: bool,
+                             *, reward: float = 0.0) -> None:
         """Feed this lived exchange back into NYXARA's OWN learned models so they compound.
 
         Two genuinely-learned substrates improve from every real turn, no external service:
 
-        * the self-built brain (mind/self_reasoner.SelfBrain) — folds the exchange into its
-          corpus and periodically re-fits, so a keyless NYXARA's *words* sharpen with experience;
+        * the self-built brain (mind/self_reasoner.SelfBrain) — folds the exchange into its recall
+          index AND its generative *weights*, which accumulate the exchange ∝ ``reward`` (a punished
+          reply is reversibly suppressed), so a keyless NYXARA's *words* genuinely learn — not just
+          remember — with experience;
         * the distributional embedder (memory/store.LearnedEmbedder) — learns the turn's
           co-occurrence so recall reaches paraphrases it has now actually seen.
 
         Best-effort and character-safe: it only ever moves *capability* (voice, recall), never a
-        value. A failure here never touches the turn's outcome.
+        value; a doc that would teach over the immutable core is refused inside the brain. A failure
+        here never touches the turn's outcome.
         """
         text = str(stimulus or "").strip()
         reply = str(getattr(candidate, "text", "") or "").strip()
@@ -4632,7 +4636,13 @@ class NyxaraCore:
             teach = getattr(getattr(self.reasoner, "llm_reasoner", None), "teach_self_brain", None)
         if callable(teach):
             try:
-                teach(*docs)
+                teach(*docs, reward=reward)
+            except TypeError:
+                # a brain/reasoner that predates reward-aware learning — compound without it
+                try:
+                    teach(*docs)
+                except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                    pass
             except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
                 pass
         # 2) the distributional embedder learns the turn's co-occurrence (paraphrase reach)
@@ -4730,7 +4740,12 @@ class NyxaraCore:
             return
         # compound NYXARA's OWN learned models from this lived exchange (Rule 4): the self-built
         # brain and the distributional embedder both get measurably better the more she converses.
-        self._compound_own_models(stimulus, candidate, success)
+        # The turn's outcome valence is threaded in so her brain genuinely *learns* — weights
+        # accumulate ∝ reward, a punished reply is suppressed — not merely remembers (the base
+        # reward here mirrors the one shaped for the strategy learner below).
+        brain_reward = 1.0 if (disp is Disposition.ACT and success) else \
+            (0.0 if disp is Disposition.ESCALATE else -0.5)
+        self._compound_own_models(stimulus, candidate, success, reward=brain_reward)
         # tally the handoff meter: who answered this turn — her own mind or the teacher (Rule 6)
         self._tally_handoff(candidate)
         # teach the learned memory re-ranker which recalled memories actually helped this turn, so

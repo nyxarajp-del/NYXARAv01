@@ -489,12 +489,15 @@ class NyxaraReasoner:
         except Exception:  # noqa: BLE001 — a learned-skill attempt is advisory, never fatal
             return None
 
-    def teach_self_brain(self, *docs: str) -> None:
-        """Compound the own learned brain from lived exchanges (called by the kernel's _grow)."""
+    def teach_self_brain(self, *docs: str, reward: float = 0.0) -> None:
+        """Compound the own learned brain from lived exchanges (called by the kernel's _grow).
+
+        ``reward`` threads the turn's outcome through so the brain genuinely *learns* — its weights
+        accumulate ∝ reward and a punished reply is suppressed — rather than only remembering text."""
         brain = self._own_brain()
         if brain is not None:
             try:
-                brain.learn(*docs)
+                brain.learn(*docs, reward=reward)
             except Exception:  # noqa: BLE001 — compounding is best-effort
                 pass
 

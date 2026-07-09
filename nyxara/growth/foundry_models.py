@@ -489,23 +489,68 @@ class WordKNGramLM(BaseLanguageModel):
         # keep the raw m-gram counts (all orders) for the non-KN smoothing methods
         self.raw = {m: {ctx: dict(row) for ctx, row in raw[m].items()}
                     for m in range(1, self.order + 1)}
-        self.raw_tot = {m: {ctx: sum(row.values()) for ctx, row in self.raw[m].items()}
+        # derive the KN high/low tables (and all totals) from the raw counts
+        self._rebuild_smoothing()
+        loss = self._corpus_cross_entropy(corpus)
+        return TrainStats(steps=max(1, len(corpus)), final_loss=loss,
+                          seconds=time.monotonic() - start, tokens=tokens)
+
+    def unlearn(self, corpus: Sequence[str], *, strength: int = 1) -> int:
+        """The exact inverse of ``train_on(accumulate=True)``: decrement the m-gram counts for these
+        docs (never below zero) and rebuild the smoothing tables — a real *negative* learning signal.
+
+        This is how NYXARA learns from a mistake at the weight level, not just by refusing to repeat
+        it: a continuation she was corrected on is genuinely un-learned from the distribution
+        ``generate``/``perplexity`` read, across all orders (so KN backoff cannot resurrect it),
+        deterministically and reversibly (re-teaching restores it). Unknown tokens are skipped —
+        there is nothing to decrement — so it never invents or corrupts vocabulary. Returns the
+        number of (context, word) counts it reduced. Only ever touches capability counts; the
+        immutable character core is not representable in these tables, so it cannot be reached."""
+        if not self.raw:
+            return 0
+        s = max(1, int(strength))
+        reduced = 0
+        for doc in corpus:
+            seq = self._encode(doc, intern=False)          # same padded id stream training saw
+            for m in range(1, self.order + 1):
+                table = self.raw.get(m)
+                if not table:
+                    continue
+                for i in range(m - 1, len(seq)):
+                    ctx = tuple(seq[i - m + 1:i])
+                    w = seq[i]
+                    row = table.get(ctx)
+                    if not row or w not in row:
+                        continue
+                    row[w] -= s
+                    reduced += 1
+                    if row[w] <= 0:
+                        del row[w]
+                        if not row:
+                            table.pop(ctx, None)
+        if reduced:
+            self._rebuild_smoothing()
+        return reduced
+
+    def _rebuild_smoothing(self) -> None:
+        """Re-derive the raw totals and the KN high/low continuation tables from ``self.raw``.
+
+        Shared by :meth:`train_on` and :meth:`unlearn` so that after any count change (add or
+        decrement) the smoothing tables and totals are consistent with the raw counts."""
+        self.raw_tot = {m: {ctx: sum(row.values()) for ctx, row in self.raw.get(m, {}).items()}
                         for m in range(1, self.order + 1)}
         # highest order uses raw counts directly
-        self.hi = {ctx: dict(row) for ctx, row in raw[self.order].items()}
+        self.hi = {ctx: dict(row) for ctx, row in self.raw.get(self.order, {}).items()}
         # lower orders use Kneser-Ney *continuation* counts (distinct left-extensions)
         self.lo = {}
         for m in range(1, self.order):
             left: Dict[Tuple[int, ...], Dict[int, set]] = defaultdict(lambda: defaultdict(set))
-            for big_ctx, row in raw[m + 1].items():        # (m+1)-gram prefix of length m
-                pre, suffix = big_ctx[0], big_ctx[1:]       # preceding token, lower context
+            for big_ctx, row in self.raw.get(m + 1, {}).items():   # (m+1)-gram prefix of length m
+                pre, suffix = big_ctx[0], big_ctx[1:]              # preceding token, lower context
                 for w in row:
                     left[suffix][w].add(pre)
             self.lo[m] = {ctx: {w: len(s) for w, s in ws.items()} for ctx, ws in left.items()}
         self._recompute_totals()
-        loss = self._corpus_cross_entropy(corpus)
-        return TrainStats(steps=max(1, len(corpus)), final_loss=loss,
-                          seconds=time.monotonic() - start, tokens=tokens)
 
     def _recompute_totals(self) -> None:
         self._hi_tot = {ctx: sum(row.values()) for ctx, row in self.hi.items()}

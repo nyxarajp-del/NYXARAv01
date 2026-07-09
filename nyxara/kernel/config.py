@@ -368,6 +368,22 @@ class FoundryConfig(BaseModel):
     self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
     # Generative fallback backend: "auto" => nano-GPT when torch is present, else word-KN n-gram.
     self_brain_backend: Literal["auto", "kngram", "nanogpt"] = "auto"
+    # ---- Online weight learning (mind/self_reasoner.SelfBrain) — REAL learning, not just recall ---- #
+    # The offline brain's generative weights *accumulate* from lived, reward-weighted experience
+    # instead of being rebuilt from scratch off a corpus window (which is remembering, not learning).
+    # Each refit folds only the NEW exchanges on top of the existing weights (continual, EWC-anchored),
+    # so a lesson persists in the weights even after its text leaves the corpus window. A successful
+    # turn is reinforced ∝ reward; a punished turn's continuation is reversibly suppressed (weight
+    # surgery). Pure-stdlib on the KN brain, a real gradient step on the neural brain — on by default;
+    # the loyalty core is never learnable (any doc that would teach over it is refused, fail-closed).
+    self_brain_online_learn: bool = True
+    # Reinforcement strength: a reward-1.0 exchange is folded with this many extra repetitions
+    # (multiplicity = 1 + round(scale * reward)), so successful patterns earn stronger weights.
+    self_brain_reward_scale: float = Field(default=3.0, ge=0.0, le=32.0)
+    # Consolidate accumulated weights as a durable EWC anchor every N refits (forgetting-protection).
+    self_brain_consolidate_every: int = Field(default=4, ge=1, le=256)
+    # Neural (nanogpt/lora) online gradient step size per refit — a small warm-continued update.
+    self_brain_neural_online_steps: int = Field(default=24, ge=1, le=1000)
     # ---- Few-shot skill induction (cognition/skill_induction.py) ---- #
     # NYXARA learns a *task* from a handful of (input -> output) demonstrations by synthesising a
     # verified, reusable transformation she then applies to genuinely new inputs — real, transferable
