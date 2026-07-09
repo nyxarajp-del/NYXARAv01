@@ -15,7 +15,8 @@ genuine capability — the very same flywheel, only the backend swaps. Nothing h
 around a gate: a promoted model still proposes through the sovereign loop the kernel disposes.
 
     python -m nyxara.growth --backend ngram --generations 1 --bench
-    python -m nyxara.growth --tinyllama --distill --bench   # LoRA-tune TinyLlama-1.1B (her primary)
+    python -m nyxara.growth --tinyllama --distill --bench   # LoRA-tune TinyLlama-1.1B
+    python -m nyxara.growth --qwythos --distill --bench     # QLoRA-tune Qwythos-9B (her primary)
     python -m nyxara.growth --distill --backend lora --bench
 """
 
@@ -29,7 +30,7 @@ from typing import Any, List, Optional
 # The shared identity seed corpus + the TinyLlama-1.1B base live in growth/bootstrap.py, so the
 # Master-facing CLI and the auto-on-boot forge train the *same* loyal self from the *same* base.
 from nyxara.growth.bootstrap import IDENTITY_SEED as _IDENTITY_SEED
-from nyxara.growth.bootstrap import TINYLLAMA_1_1B
+from nyxara.growth.bootstrap import QWYTHOS_9B, TINYLLAMA_1_1B
 
 
 def _build_foundry(args: argparse.Namespace) -> Any:
@@ -46,12 +47,21 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     if args.tinyllama:
         settings.foundry.backend = "lora"
         settings.foundry.base_model = TINYLLAMA_1_1B
+    # --qwythos is the one-command preset for her primary 9B brain: QLoRA-tune the Qwythos
+    # safetensors parent (4-bit, custom-arch load). Explicit flags below still override it.
+    if args.qwythos:
+        settings.foundry.backend = "lora"
+        settings.foundry.base_model = QWYTHOS_9B
+        settings.foundry.load_in_4bit = True
+        settings.foundry.trust_remote_code = True
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
         settings.foundry.base_model = args.base_model
     if args.load_in_4bit:
         settings.foundry.load_in_4bit = True
+    if args.trust_remote_code:
+        settings.foundry.trust_remote_code = True
     settings.foundry.enabled = True
     return Foundry(settings=settings, seed_corpus=_IDENTITY_SEED), settings
 
@@ -118,6 +128,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="one-command preset: LoRA-tune TinyLlama/TinyLlama-1.1B-Chat-v1.0 as "
                              "her primary brain; weights download on first use. Needs .[foundry] "
                              "for the real base (degrades to the n-gram brain otherwise)")
+    parser.add_argument("--qwythos", action="store_true",
+                        help="one-command preset: QLoRA-tune the Qwythos-9B safetensors parent as "
+                             "her primary brain (backend=lora, 4-bit, trust_remote_code). Needs "
+                             ".[foundry] + a GPU (degrades to the n-gram brain otherwise)")
+    parser.add_argument("--trust-remote-code", action="store_true",
+                        help="allow the base's custom modeling code to load (needed for the "
+                             "Qwythos/Qwen3.5 hybrid arch); implied by --qwythos")
     parser.add_argument("--backend", choices=["auto", "ngram", "nanogpt", "lora"], default=None,
                         help="override the foundry backend (lora needs a GPU + .[foundry])")
     parser.add_argument("--base-model", default=None,

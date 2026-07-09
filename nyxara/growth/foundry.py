@@ -597,6 +597,7 @@ class Foundry:
                                  block_size=dims["block_size"], n_layer=dims["n_layer"],
                                  n_head=dims["n_head"], n_embd=dims["n_embd"],
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
+                                 trust_remote_code=getattr(self.cfg, "trust_remote_code", False),
                                  lora_r=self.cfg.lora_r, lora_alpha=self.cfg.lora_alpha,
                                  lora_r_auto=getattr(self.cfg, "lora_r_auto", True),
                                  lora_dropout=self.cfg.lora_dropout, lora_lr=self.cfg.lora_lr,

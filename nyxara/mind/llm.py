@@ -13,14 +13,17 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Fully local, selected by config:
 
-* :class:`TinyLlamaProvider`   — TinyLlama-1.1B-Chat, downloaded & run in-process (HuggingFace);
-  every load-time and generation-time knob is exposed via ``NYXARA_LLM__TINYLLAMA_*``,
-  including serving a foundry-forged LoRA adapter directly
+* :class:`TinyLlamaProvider`   — any HF causal-LM (TinyLlama-1.1B by default), downloaded & run
+  in-process (HuggingFace transformers); every load-/generation-time knob is exposed via
+  ``NYXARA_LLM__TINYLLAMA_*``, including serving a foundry-forged LoRA adapter directly
+* :class:`LlamaCppProvider`    — a quantized **GGUF** (the Qwythos-9B quant by default) served
+  in-process via ``llama-cpp-python``; cheap inference for a large base, configured by
+  ``NYXARA_LLM__GGUF_*`` (GGUF is inference-only — the foundry trains the safetensors parent)
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry
 * :class:`MockProvider`        — deterministic, offline; the always-available fallback
 
-No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``) are
-imported lazily and reported honestly via ``available()``, so this module works with zero
+No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``/``llama_cpp``)
+are imported lazily and reported honestly via ``available()``, so this module works with zero
 heavy deps installed (falling back to the mock).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
@@ -50,6 +53,7 @@ __all__ = [
     "LLMProviderBase",
     "MockProvider",
     "TinyLlamaProvider",
+    "LlamaCppProvider",
     "SelfProvider",
     "format_self_prompt",
     "format_self_training_doc",
@@ -437,6 +441,104 @@ class TinyLlamaProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# GGUF provider — a quantized GGUF served in-process via llama.cpp
+# --------------------------------------------------------------------------- #
+class LlamaCppProvider(LLMProviderBase):
+    """Serve a **GGUF** model in-process through ``llama-cpp-python`` (llama.cpp).
+
+    This is the cheap-inference twin of :class:`TinyLlamaProvider`: it runs the Qwythos-9B
+    (or any) *quantized* GGUF — a few gigabytes instead of the full BF16 weights — so a large
+    base is servable on a single consumer GPU or even CPU. GGUF is an inference-only format,
+    so this backend **never trains**; the foundry LoRA-tunes the safetensors parent, and (once
+    that adapter is exported to GGUF) ``gguf_lora_path`` applies it here at serve time.
+
+    All from config (``NYXARA_LLM__GGUF_*``): which repo/quant to pull (``gguf_model`` +
+    ``gguf_filename``), context window, GPU-offload layers, threads, an optional chat format
+    override, and an optional llama.cpp LoRA. Per-request :class:`LLMRequest` fields
+    (temperature/top_p/max_tokens/stop/seed) win over config. Stateless: the loaded model is a
+    cached instrument, never conversation memory.
+
+    Heavy dep imported lazily and reported honestly — with no ``llama-cpp-python`` installed
+    ``available()`` is False and the facade degrades to the mock rather than erroring.
+    """
+
+    name = "gguf"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._llama = None
+        self._loaded_key: Optional[Tuple[str, str, str]] = None  # (model, filename, lora_path)
+
+    def available(self) -> bool:
+        try:
+            import llama_cpp  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def default_model(self) -> str:
+        return self.settings.llm.gguf_model
+
+    # ---- lazy model loading (cached; reloads when model/quant/adapter changes) ---- #
+    def _ensure_model(self, model: str):
+        cfg = self.settings.llm
+        lora = str(cfg.gguf_lora_path) if cfg.gguf_lora_path else ""
+        key = (model, cfg.gguf_filename, lora)
+        if self._llama is None or self._loaded_key != key:
+            from llama_cpp import Llama
+            kwargs: Dict[str, Any] = {
+                "repo_id": model,
+                "filename": cfg.gguf_filename,
+                "n_ctx": cfg.gguf_n_ctx,
+                "n_gpu_layers": cfg.gguf_n_gpu_layers,
+                "verbose": False,
+            }
+            if cfg.gguf_n_threads > 0:
+                kwargs["n_threads"] = cfg.gguf_n_threads
+            if cfg.gguf_chat_format:
+                kwargs["chat_format"] = cfg.gguf_chat_format
+            if cfg.gguf_seed >= 0:
+                kwargs["seed"] = cfg.gguf_seed
+            if lora:
+                kwargs["lora_path"] = lora
+                kwargs["lora_scale"] = cfg.gguf_lora_scale
+            self._llama = Llama.from_pretrained(**kwargs)
+            self._loaded_key = key
+        return self._llama
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        llama = self._ensure_model(model)
+        cfg = self.settings.llm
+        system = (req.system or "").strip()
+        messages: List[Dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.extend(req.provider_messages())
+        kwargs: Dict[str, Any] = {
+            "messages": messages,
+            "temperature": req.temperature,
+            "top_p": req.top_p,
+            "max_tokens": req.max_tokens,
+            "stop": list(req.stop) or None,
+        }
+        if req.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        if req.seed is not None:      # per-request determinism wins over the config seed
+            kwargs["seed"] = req.seed
+        out = llama.create_chat_completion(**kwargs)
+        choice = out["choices"][0]
+        text = (choice.get("message", {}).get("content") or "").strip()
+        text, hit = truncate_at_stops(text, req.stop)
+        finish = "stop" if (hit or choice.get("finish_reason") == "stop") else "length"
+        u = out.get("usage", {}) or {}
+        usage = Usage(prompt_tokens=int(u.get("prompt_tokens", estimate_tokens(str(messages)))),
+                      completion_tokens=int(u.get("completion_tokens", estimate_tokens(text))))
+        return (text, finish, usage,
+                {"gguf": True, "model": model, "filename": cfg.gguf_filename,
+                 "lora": str(cfg.gguf_lora_path) if cfg.gguf_lora_path else None})
+
+
+# --------------------------------------------------------------------------- #
 # Self provider — NYXARA's OWN model, trained & promoted by the foundry
 # --------------------------------------------------------------------------- #
 # NYXARA's own model speaks through a small, consistent instruction template, so a freshly
@@ -540,6 +642,7 @@ class SelfProvider(LLMProviderBase):
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
     ProviderName.TINYLLAMA: TinyLlamaProvider,
+    ProviderName.GGUF: LlamaCppProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.MOCK: MockProvider,
 }
@@ -698,11 +801,11 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only mock)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"tinyllama", "self", "mock"}
-    for p in ("tinyllama", "self"):
+    assert set(status) == {"tinyllama", "gguf", "self", "mock"}
+    for p in ("tinyllama", "gguf", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # tinyllama is available iff torch+transformers are installed — honest either way
-    print("tinyllama/self       : registered; degrade honestly on a bare machine ✓")
+    # tinyllama/gguf are available iff their heavy deps are installed — honest either way
+    print("tinyllama/gguf/self  : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")
