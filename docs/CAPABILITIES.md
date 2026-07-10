@@ -21,7 +21,7 @@ applied to the documentation itself).
 | # | Capability | Owning module | Status |
 |---|------------|---------------|--------|
 | 1 | Universal General Intelligence | `nyxara.mind.general_intelligence` | REAL+WIRED |
-| 2 | Open-world Generalization | `nyxara.growth.open_world` | REAL+WIRED |
+| 2 | Open-world Generalization | `nyxara.growth.open_world` + `nyxara.mind.transfer` | UPGRADED |
 | 3 | First-Principles Reasoning | `nyxara.mind.first_principles` | REAL+WIRED |
 | 4 | Causal Reasoning | `nyxara.mind.causal_world_model` | REAL+WIRED |
 | 5 | Counterfactual Thinking | `nyxara.mind.world_model` | REAL+WIRED |
@@ -38,7 +38,7 @@ applied to the documentation itself).
 | 16 | Tool Creation | `nyxara.growth.capability_foundry` | REAL+WIRED |
 | 17 | Memory (working/episodic/semantic/procedural) | `nyxara.memory.store` | REAL+WIRED |
 | 18 | Continual Learning (no catastrophic forgetting) | `nyxara.memory.elastic_synapses` + `nyxara.growth.skill_rehearsal` + `nyxara.eval.continual` | UPGRADED |
-| 19 | Transfer Learning | `nyxara.mind.concept_hierarchy` | REAL+WIRED |
+| 19 | Transfer Learning | `nyxara.mind.transfer` + `nyxara.mind.concept_hierarchy` | UPGRADED |
 | 20 | Meta Learning (learn how to learn) | `nyxara.growth.meta_engine` | REAL+WIRED |
 | 21 | Self Reflection | `nyxara.growth.reflect` | REAL+WIRED |
 | 22 | Self Evaluation | `nyxara.mind.meta_intelligence` | UPGRADED |
@@ -86,8 +86,8 @@ applied to the documentation itself).
 | 64 | Novel Capability Generation | `nyxara.growth.capability_foundry` | REAL+WIRED |
 | 65 | Open-ended Learning | `nyxara.growth.explorer` | REAL |
 | 66 | Lifelong Intelligence | `nyxara.growth.flywheel` | REAL+WIRED |
-| 67 | Cross-domain Synthesis | `nyxara.mind.concept_hierarchy` | REAL+WIRED |
-| 68 | Independent Problem Solving | `nyxara.growth.open_world` | REAL+WIRED |
+| 67 | Cross-domain Synthesis | `nyxara.mind.transfer` + `nyxara.mind.concept_hierarchy` | UPGRADED |
+| 68 | Independent Problem Solving | `nyxara.growth.open_world` + `nyxara.mind.transfer` | UPGRADED |
 | 69 | Oracle-based Verification | `nyxara.growth.prover` | REAL+WIRED |
 | 70 | Honest Failure Recognition | `nyxara.observe.honesty` | UPGRADED |
 | 71 | Own-Model Ownership (Qwythos-9B foundry + GGUF serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
@@ -109,6 +109,26 @@ four capabilities — each backed by a test:
   actions become fail-closed, ledgered consent requests.
 - **#6 / #58 Long-Horizon Planning** — grand-plan leaves are now goal-specific (phase labels
   refined before fan-out), not decorative templates; the dependency DAG is unchanged.
+- **#2 / #19 / #67 / #68 Generalization by her OWN faculties (not the base LLM)** — the honest
+  answer to *"NYXARA can only generalize as far as her 9B base model; the scaffolding polishes
+  output but never breaks the ceiling."* Her real, LLM-independent generalization engines were
+  **orphaned** from the inference path: a new-domain query flowed straight to the base model.
+  This pass wires them in. A new relational-transfer engine (`nyxara.mind.transfer`) generalizes a
+  novel-domain query by structure-mapping it onto a domain she already understands and *projecting*
+  the known (higher-order) structure across — the reasoning content is hers, projected by her own
+  Gentner structure-mapper, not sampled from any language model. It is wired into both inference
+  paths: the self-model router tries it (`Route.TRANSFER`) before deferring to the teacher, and the
+  domain-general solver (`general_intelligence.AdaptiveExpert`) tries her own faculties *first*. It
+  declines honestly (→ the LLM path) when no structure maps — no faked transfer. Competence is now
+  **measured, not declared** (`nyxara.memory.competence`, Rule 4): a Beta posterior per capability,
+  seeded from the boot prior and moved by real outcomes, writes back to the self-model so routing to
+  her own mind grows with measured performance. A held-out benchmark (`nyxara.eval.generalization`)
+  proves it: on unseen domains her own faculties (structure transfer + first-principles law
+  induction) solve tasks a base-only baseline cannot, with **no LLM in the loop**. Honest scope: a
+  9B base model is not made frontier-level by code — what changed is that on structurally-
+  transferable questions her answer no longer bottlenecks solely on the base model's parametric
+  ceiling. Gated by `self_model_router.use_transfer` and `general_intelligence.competence_learning`
+  (both default on).
 - **#2 / #36 Council** — agreement is scored semantically (embedding cosine), so confidence
   reflects genuine concurrence.
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes

@@ -68,6 +68,7 @@ class LLMReasoner:
                  use_council: bool = False, council: Any = None,
                  skill_memory: Any = None, soul: Any = None, history: Any = None,
                  knowledge: Any = None, self_model: Any = None, metaprompt: Any = None,
+                 transfer_engine: Any = None,
                  max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
@@ -87,6 +88,9 @@ class LLMReasoner:
         # NYXARA's introspectable self-model — drives the PRIMARY self-model router's upfront
         # triage (which mind handles a prompt) and the verify-before-act gate on actions.
         self.self_model = self_model
+        # her own cross-domain generalizer (mind/transfer.py), shared with the domain solver so
+        # the self-model router can transfer structure from a known domain onto a new one herself
+        self.transfer_engine = transfer_engine
         # distilled operating heuristics (growth/metaprompt_distill.py), injected into the
         # system prompt so NYXARA's own past successes reshape how she reasons (recursive RSI).
         self.metaprompt = metaprompt
@@ -284,7 +288,8 @@ class LLMReasoner:
             if self._router is None:
                 self._router = Router(self.llm, settings=self.settings)
             self._smrouter = PrimarySelfModelRouter(
-                self_model=self.self_model, router=self._router, settings=self.settings)
+                self_model=self.self_model, router=self._router, settings=self.settings,
+                transfer_engine=self.transfer_engine)
         return self._smrouter
 
     def _smrouter_enabled(self) -> bool:

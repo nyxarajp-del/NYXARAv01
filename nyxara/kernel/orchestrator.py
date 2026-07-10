@@ -685,6 +685,11 @@ class NyxaraCore:
         # self-improvement). Built before the reasoner so it can ride every prompt; off when
         # growth or the feature is disabled.
         self.metaprompt = self._build_metaprompt(llm) if enable_growth else None
+        # Cross-domain generalization by her OWN faculties (mind/transfer.py): one shared
+        # relational-transfer engine, so a domain learned on any path transfers on every path.
+        # Built before the reasoner so the self-model router can generalize a new-domain query
+        # herself (structure-mapping from a known domain) instead of deferring to the base LLM.
+        self.transfer_engine = self._build_transfer_engine()
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative,
             self_model=getattr(self, "self_model", None))
@@ -957,7 +962,8 @@ class NyxaraCore:
                                use_council=use_council, council=council,
                                skill_memory=skills, soul=soul, history=self.history,
                                knowledge=self.knowledge, self_model=self_model,
-                               metaprompt=getattr(self, "metaprompt", None))
+                               metaprompt=getattr(self, "metaprompt", None),
+                               transfer_engine=getattr(self, "transfer_engine", None))
         except Exception:  # noqa: BLE001 — always have a working mind
             base = _default_reasoner
         # wrap it in the integrated mind: memory recall + dual-process routing +
@@ -2837,6 +2843,53 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — strategic analysis is a capability, never required
             return None
 
+    def _build_transfer_engine(self) -> Any:
+        """The relational-transfer engine — NYXARA's own cross-domain generalizer.
+
+        Generalizes a new-domain query by structure-mapping from a domain she already
+        understands (mind/transfer.py), so the reasoning content is hers, not sampled from the
+        base model. One shared instance rides both the conversational router and the domain
+        solver, so a domain learned on one path transfers on the other. Never required."""
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.mind.transfer import RelationalTransferEngine
+            cfg = get_settings().self_model_router
+            return RelationalTransferEngine(
+                min_score=float(getattr(cfg, "transfer_min_score", 1.0)))
+        except Exception:  # noqa: BLE001 — transfer is a capability, never required
+            return None
+
+    def _ensure_competence_ledger(self) -> Any:
+        """The measured-competence ledger (memory/competence.py, Rule 4), built lazily so it
+        seeds from the self-model's capabilities *after* they are set. Updates each capability's
+        level/confidence from real turn outcomes, so routing to her own mind grows with measured
+        performance. Off when disabled; fail-open (a missing ledger never breaks a turn)."""
+        led = getattr(self, "_competence_ledger", None)
+        if led is not None:
+            return led
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().general_intelligence, "competence_learning", True):
+                self._competence_ledger = None
+                return None
+            from nyxara.memory.competence import CompetenceLedger
+            self._competence_ledger = CompetenceLedger(
+                self_model=getattr(self, "self_model", None))
+        except Exception:  # noqa: BLE001 — competence learning is advisory, never required
+            self._competence_ledger = None
+        return self._competence_ledger
+
+    def _record_competence(self, capability: str, success: Any, *, weight: float = 1.0) -> None:
+        """Feed one *measured* outcome to the competence ledger (Rule 4). Best-effort."""
+        led = self._ensure_competence_ledger()
+        if led is None:
+            return
+        try:
+            led.record(capability, success, weight=weight,
+                       self_model=getattr(self, "self_model", None))
+        except Exception:  # noqa: BLE001 — measurement is advisory, never fatal
+            pass
+
     def _build_general_intelligence(self) -> Any:
         """General Intelligence: route a problem to the right domain expert + real engine.
 
@@ -2861,10 +2914,12 @@ class NyxaraCore:
                 tools=getattr(self, "tools", None),
                 strategic=getattr(self, "strategic_intelligence", None),
                 self_model=getattr(self, "self_model", None),
+                transfer_engine=getattr(self, "transfer_engine", None),
                 threshold=cfg.classify_threshold,
                 use_llm_refine=cfg.use_llm_refine,
                 allow_web_grounding=cfg.allow_web_grounding,
                 auto_discover=cfg.auto_discover,
+                own_faculties_first=getattr(cfg, "use_own_faculties_first", True),
             )
         except Exception:  # noqa: BLE001 — general intelligence is a capability, never required
             return None
@@ -6351,6 +6406,11 @@ class NyxaraCore:
             self.honesty.record_outcome(float(candidate.confidence), bool(correct))
         except Exception:  # noqa: BLE001 — calibration learning is best-effort, never fatal
             pass
+        # The same ground truth teaches her MEASURED competence (Rule 4): a real tool
+        # success/failure moves the ``tool_use`` capability, so routing to her own mind tracks
+        # her real performance rather than a fixed boot prior (memory/competence.py).
+        self._record_competence("tool_use", bool(correct),
+                                weight=max(0.2, float(candidate.confidence)))
         # the same ground truth teaches the prediction engine's learned base rate, so its
         # future probabilities are anchored on measured accuracy rather than hardcoded strings.
         pe = getattr(self, "prediction_engine", None)

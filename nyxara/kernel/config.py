@@ -880,6 +880,12 @@ class SelfModelRouterConfig(BaseModel):
     verify_risk_floor: str = "moderate"
     # Consult verifiable faculties (exact math / logic) before any neural triage.
     use_faculties: bool = True
+    # Attempt cross-domain structural transfer (mind/transfer.py) before consulting the teacher:
+    # generalize a new-domain query by structure-mapping from a domain she already understands,
+    # so the reasoning content is HER OWN, not sampled from the base model. Advisory & fail-open.
+    use_transfer: bool = True
+    # Minimum systematicity-weighted structural score to accept a transfer (else defer to the LLM).
+    transfer_min_score: float = Field(default=1.0, ge=0.0)
     # Topic-keyword -> capability-name map, so prompts route to the right self-rating.
     domain_capabilities: Dict[str, str] = Field(default_factory=dict)
 
@@ -949,6 +955,13 @@ class GeneralIntelligenceConfig(BaseModel):
     auto_discover: bool = True
     # Allow knowledge-heavy domains to ground answers via the governed web tools (still gated).
     allow_web_grounding: bool = True
+    # Novel-domain solving: try NYXARA's OWN faculties FIRST — first-principles law induction
+    # (growth/open_world.py) and relational transfer (mind/transfer.py) — before falling to the
+    # base LLM, so a new field is reasoned about, not just reformatted. Advisory & fail-open.
+    use_own_faculties_first: bool = True
+    # Update self-model capabilities from MEASURED turn outcomes (memory/competence.py, Rule 4),
+    # so competence — and therefore routing to her own mind — grows with real performance.
+    competence_learning: bool = True
 
 
 class SelfImprovementConfig(BaseModel):

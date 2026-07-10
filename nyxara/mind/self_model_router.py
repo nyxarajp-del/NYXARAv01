@@ -59,6 +59,7 @@ class Route(str, Enum):
     TEACHER = "teacher"                 # weak / unknown / risky / knowledge-heavy -> teacher
     VERIFY_THEN_ACT = "verify_then_act"  # an action — must clear the verifier before acting
     FACULTY = "faculty"                 # exact math / logic fits -> compute it
+    TRANSFER = "transfer"               # a new domain whose structure maps onto a known one
     ABSTAIN = "abstain"                 # nothing trustworthy and no one to consult
 
 
@@ -75,6 +76,7 @@ class RoutingPlan:
     is_action: bool = False
     verifier_score: Optional[float] = None
     cleared: Optional[bool] = None
+    transfer: Any = None                 # a mind.transfer.TransferResult on Route.TRANSFER
 
     def to_dict(self) -> dict:
         return {
@@ -88,6 +90,9 @@ class RoutingPlan:
             "verifier_score": (None if self.verifier_score is None
                                else round(self.verifier_score, 4)),
             "cleared": self.cleared,
+            "transfer": (self.transfer.to_dict()
+                         if self.transfer is not None and hasattr(self.transfer, "to_dict")
+                         else None),
         }
 
 
@@ -99,12 +104,14 @@ class PrimarySelfModelRouter:
 
     def __init__(self, *, self_model: Any = None, router: Any = None,
                  settings: Optional[NyxaraSettings] = None,
-                 verifier: Any = None, llm: Any = None) -> None:
+                 verifier: Any = None, llm: Any = None,
+                 transfer_engine: Any = None) -> None:
         self.settings = settings or (getattr(router, "settings", None) or get_settings())
         self.cfg = self.settings.self_model_router
         self.self_model = self_model
         self._router = router
         self._llm = llm
+        self._transfer = transfer_engine
         self.verifier = verifier or default_verifier()
         abstain_below = getattr(self.settings.router, "abstain_below", 0.15)
         self.meta = MetaCognition(answer_threshold=self.cfg.competence_threshold,
@@ -213,10 +220,23 @@ class PrimarySelfModelRouter:
 
             teacher = self._teacher_available()
 
-            # 4) consult the teacher when she is weak / unsure / prone to confabulate here
+            # 4) weak / unknown / hallucination-prone here — this is the *new-domain* case.
             if (risk >= self.cfg.hallucination_ceiling
                     or competence < self.cfg.competence_threshold
                     or self._knowledge_heavy(prompt)):
+                # 4a) FIRST try to generalize it herself: map the new domain's relational
+                #     structure onto one she already understands and project the known
+                #     structure across. The reasoning content is hers, not the base model's.
+                transfer = self._try_transfer(prompt)
+                if transfer is not None:
+                    conf = min(0.9, 0.5 + 0.1 * float(transfer.structural_score))
+                    return RoutingPlan(
+                        Route.TRANSFER, conf,
+                        f"new domain — generalized by structural transfer from "
+                        f"'{transfer.base_domain}'",
+                        competence=competence, hallucination_risk=risk,
+                        domains=list(domains), transfer=transfer)
+                # 4b) otherwise consult the teacher (or best-effort / abstain below)
                 if teacher:
                     return RoutingPlan(Route.TEACHER, competence,
                                        "weak / unknown / hallucination-prone — consult the teacher",
@@ -250,12 +270,38 @@ class PrimarySelfModelRouter:
         except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
             return False
 
+    def _ensure_transfer(self) -> Any:
+        """Lazily build the relational-transfer engine (her own cross-domain generalizer)."""
+        if self._transfer is None:
+            from nyxara.mind.transfer import RelationalTransferEngine
+            self._transfer = RelationalTransferEngine(
+                min_score=float(getattr(self.cfg, "transfer_min_score", 1.0)))
+        return self._transfer
+
+    def _try_transfer(self, prompt: str) -> Any:
+        """Attempt to generalize a new-domain prompt by structural transfer. Returns a
+        ``TransferResult`` or ``None`` (declines honestly when no structure maps)."""
+        if not getattr(self.cfg, "use_transfer", True):
+            return None
+        try:
+            return self._ensure_transfer().generalize(prompt)
+        except Exception:  # noqa: BLE001 — transfer is advisory; never crash a turn
+            return None
+
     # ---- dispatch a conversational reply ---- #
     def route_respond(self, prompt: str, *, system: Optional[str] = None) -> RouterResult:
         """Triage, then draft a reply via the reused reactive router (or abstain honestly)."""
         plan = self.plan(prompt)
         if plan.route is Route.ABSTAIN:
             return RouterResult(HONEST_ABSTENTION, "abstain", plan.confidence, handed_off=False)
+        # TRANSFER: answer from NYXARA's OWN structure-mapper — the reasoning content is hers,
+        # not sampled from any language model. Reported as a "faculty" handoff (like exact math).
+        if plan.route is Route.TRANSFER and plan.transfer is not None:
+            try:
+                return RouterResult(plan.transfer.render(), "faculty", plan.confidence,
+                                    handed_off=True)
+            except Exception:  # noqa: BLE001 — fall through to the reactive router on any error
+                pass
         # SELF / TEACHER / FACULTY all delegate to the battle-tested confidence router, which
         # generates own-first / teacher-fallback and re-verifies on the answer's own merits.
         return self._ensure_router().draft(prompt, system=system)

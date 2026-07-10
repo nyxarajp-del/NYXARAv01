@@ -574,9 +574,20 @@ class AdaptiveExpert(DomainExpert):
         report = self.gi._investigate(problem)
         if report is not None:
             sol.detail["investigation"] = report
-        sol.answer = self.gi._synthesise(problem, frame) or (
-            "From first principles: " + "; ".join(principles))
-        sol.confidence = 0.4 if self.gi._llm_real() else 0.3
+        # OWN FACULTIES FIRST — before reaching for the base LLM, try to generalize the new
+        # field herself by structure-mapping it onto a domain she already understands. When it
+        # fires, the reasoning content is hers (candidate inferences projected by her own
+        # engine); the LLM is not consulted. Honest: it declines when no structure maps.
+        transferred = self.gi._transfer_solve(problem) if self.gi.own_faculties_first else None
+        if transferred is not None:
+            answer, conf, detail = transferred
+            sol.answer = answer
+            sol.confidence = conf
+            sol.detail.update(detail)
+        else:
+            sol.answer = self.gi._synthesise(problem, frame) or (
+                "From first principles: " + "; ".join(principles))
+            sol.confidence = 0.4 if self.gi._llm_real() else 0.3
         # adapt: learn this field so it is recognised next time (Rule 4 — capability grows)
         label = self.gi._label_for(problem)
         if label:
@@ -599,8 +610,9 @@ class GeneralIntelligence:
     def __init__(self, *, reasoner: Any = None, council: Any = None, scientist: Any = None,
                  world_model: Any = None, memory: Any = None, knowledge: Any = None,
                  tools: Any = None, strategic: Any = None, self_model: Any = None,
-                 llm: Any = None, threshold: float = 0.18, use_llm_refine: bool = True,
-                 allow_web_grounding: bool = True, auto_discover: bool = True) -> None:
+                 transfer_engine: Any = None, llm: Any = None, threshold: float = 0.18,
+                 use_llm_refine: bool = True, allow_web_grounding: bool = True,
+                 auto_discover: bool = True, own_faculties_first: bool = True) -> None:
         self.reasoner = reasoner
         self.council = council
         self.scientist = scientist
@@ -610,6 +622,10 @@ class GeneralIntelligence:
         self.tools = tools
         self.strategic = strategic
         self.self_model = self_model
+        # her own cross-domain generalizer (mind/transfer.py) — used to reason about a NOVEL
+        # field herself (structure-mapping from a known domain) before falling to the base LLM
+        self.transfer_engine = transfer_engine
+        self.own_faculties_first = bool(own_faculties_first)
         self.llm = llm if llm is not None else getattr(reasoner, "llm", None)
         self.allow_web_grounding = bool(allow_web_grounding)
         self.auto_discover = bool(auto_discover)
@@ -685,6 +701,33 @@ class GeneralIntelligence:
             return solve_with_faculties(problem)
         except Exception:  # noqa: BLE001
             return None
+
+    def _ensure_transfer(self) -> Any:
+        """The relational-transfer engine (built lazily if none was injected)."""
+        if self.transfer_engine is None:
+            try:
+                from nyxara.mind.transfer import RelationalTransferEngine
+                self.transfer_engine = RelationalTransferEngine()
+            except Exception:  # noqa: BLE001 — transfer is advisory
+                self.transfer_engine = None
+        return self.transfer_engine
+
+    def _transfer_solve(self, problem: str) -> Optional[Tuple[str, float, Dict[str, Any]]]:
+        """Reason about a NOVEL field herself: structure-map it onto a domain she already
+        understands and project the known structure across. Returns ``(answer, confidence,
+        detail)`` — the answer is derived by NYXARA's own structure-mapper, not the base LLM —
+        or ``None`` when no structure maps (the caller then falls to the LLM)."""
+        eng = self._ensure_transfer()
+        if eng is None:
+            return None
+        try:
+            tr = eng.generalize(problem)
+        except Exception:  # noqa: BLE001 — transfer is advisory, never fatal
+            return None
+        if tr is None:
+            return None
+        conf = min(0.85, 0.5 + 0.1 * float(tr.structural_score))
+        return tr.render(), conf, {"transfer": tr.to_dict(), "own_faculty": "relational_transfer"}
 
     def _extract_code(self, problem: str) -> str:
         """Pull a fenced ```python code block out of the problem, if present."""
