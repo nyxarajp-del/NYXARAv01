@@ -6734,6 +6734,17 @@ class NyxaraCore:
                     "phases": {p.name: p.status for p in last_opt.phases}}
             except Exception:  # noqa: BLE001 — self-optimization status is best-effort
                 pass
+        # the weight-level self-improvement certificate: did she forge a genuinely smarter brain?
+        last_brain = getattr(self, "_last_brain_forge", None)
+        if last_brain is not None:
+            try:
+                rep["brain_forge"] = {
+                    "promoted": last_brain.promoted, "verified": last_brain.verified,
+                    "champion_kind": last_brain.champion_kind,
+                    "delta_perplexity": last_brain.delta_perplexity,
+                    "params": last_brain.params, "reason": last_brain.reason}
+            except Exception:  # noqa: BLE001 — brain-forge status is best-effort
+                pass
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
         if self.civilization is not None:

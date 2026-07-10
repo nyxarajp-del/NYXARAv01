@@ -159,9 +159,12 @@ class SelfOptimizationLoop:
     def _rsi_engine(self) -> Any:
         if self._rsi is None:
             from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
+            # pass the growth engine so a ``train_self_model`` directive actually forges a brain
+            # (without it, _dispatch_train_self_model dead-ends at "no growth engine handle")
             self._rsi = RecursiveSelfImprovement(
                 core=self.core, settings=self.settings, root=self.root, journal=self.journal,
-                llm=self._llm_handle())
+                llm=self._llm_handle(),
+                growth_engine=getattr(self.core, "growth_engine", None))
         return self._rsi
 
     # ------------------------------------------------------------------ #
@@ -294,8 +297,23 @@ class SelfOptimizationLoop:
         return PhaseResult(4, PHASES[3], OK, verified=True, detail=detail, metrics=metrics), lineage
 
     def _phase_architecture(self, enact: bool, generations: Optional[int]) -> tuple[PhaseResult, Any]:
-        # reasoning-architecture escalation rides on the same mind-evolution engine; topology
-        # supplies the network-capacity (Net2Net) view. Both are best-effort and gated.
+        # The decisive weight-level step: NYXARA DESIGNS a better neural architecture and, when
+        # authorised, FORGES + gauntlets + PROMOTES it into her live brain on the NumPy substrate —
+        # verifiable capability growth, not merely a source tidy. Reuses the Foundry gauntlet
+        # verbatim (BrainForge adds no gate). Topology supplies the complementary Net2Net capacity
+        # view. Both are best-effort and gated; a withheld enactment still designs + measures a brain.
+        from nyxara.growth.brain_forge import BrainForge
+        cert: Dict[str, Any] = {}
+        promoted = False
+        try:
+            forge = BrainForge(core=self.core, settings=self.settings)
+            brep = forge.improve_brain(enact=enact, generations=generations)
+            cert = brep.to_dict()
+            promoted = bool(brep.promoted)
+            brain_detail = brep.summary()
+        except Exception as exc:  # noqa: BLE001 — the forge is a capability, never fatal to the cycle
+            brain_detail = f"brain-forge unavailable ({type(exc).__name__}: {exc})"
+
         topo = getattr(self.core, "topology", None)
         grew = False
         topo_metrics: Dict[str, Any] = {}
@@ -306,10 +324,15 @@ class SelfOptimizationLoop:
                 grew = bool(topo_metrics.get("grew", topo_metrics.get("applied", False)))
             except Exception:  # noqa: BLE001 — topology growth is optional
                 topo_metrics = {}
-        detail = ("reasoning-architecture search available via mind-evolution; "
-                  f"topology grew={grew}")
-        return PhaseResult(5, PHASES[4], OK, verified=True, detail=detail,
-                           metrics={"topology": topo_metrics, "grew": grew}), None
+        # "verified" here means a REAL weight-level gain: a brain provably beat the active one and was
+        # promoted through the gauntlet (or the network grew function-preservingly). A withheld/measure
+        # -only cycle is honestly OK-but-unverified; only a raised phase is FAILED.
+        status = OK if enact else WITHHELD
+        verified = bool(promoted or grew)
+        detail = f"{brain_detail}; topology grew={grew}"
+        return PhaseResult(5, PHASES[4], status, verified=verified, detail=detail,
+                           metrics={"brain_forge": cert, "topology": topo_metrics,
+                                    "grew": grew, "promoted": promoted}), None
 
     # ------------------------------------------------------------------ #
     # phase 6: tool creation

@@ -993,6 +993,16 @@ class SelfImprovementConfig(BaseModel):
     autonomous_enact: bool = True              # auto-apply source edits + safe tuning
     allow_tuning: bool = True                  # may tune recursive_improvement_iterations
     max_edits_per_cycle: int = Field(default=3, ge=0, le=50)
+    # --- brain-forge: verifiable weights/architecture self-improvement (growth/brain_forge.py) --- #
+    # Source edits tidy her code; they never make her SMARTER. When this is ON *and*
+    # ``autonomous_enact`` is set *and* the oversight gate is open, the deliberate self-optimization
+    # cycle also DESIGNS a better neural architecture (NeuralArchitectureSearch), TRAINS it for real
+    # on the pure-NumPy substrate (GenesisNumpyModel — her own layers, no torch, no LLM), and PROMOTES
+    # it into her live ``self`` brain — but only after clearing the *same* Foundry gauntlet (character
+    # lock, corrigibility, Loyalty-Equation floor, a strictly-lower perplexity, capability
+    # non-regression, scalable oversight). A worse brain is kept on the bench; a promotion is
+    # reversible. With this OFF she still designs + measures a brain each cycle, but never promotes.
+    autonomous_brain_forge: bool = True
     run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
     # --- proof-carrying self-modification (growth/proof_carrying.py, Gödel-machine) --- #
     # Before the empirical gauntlet, NYXARA tries to PROVE what is decidable about an edit: a

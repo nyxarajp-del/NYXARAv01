@@ -156,6 +156,7 @@ from nyxara.growth.self_optimize import (
     SelfEditGenerator,
     SourceEdit,
 )
+from nyxara.growth.brain_forge import BrainForge, BrainForgeReport
 from nyxara.growth.weakness import Weakness, WeaknessReport, WeaknessSynthesizer
 from nyxara.growth.skill_factory import FactoryResult, SkillFactory
 from nyxara.growth.skilltree import (
@@ -336,6 +337,9 @@ __all__ = [
     "OptimizationOutcome",
     "GauntletResult",
     "SourceEdit",
+    # verifiable weights/architecture self-improvement (design → forge → gauntlet → promote)
+    "BrainForge",
+    "BrainForgeReport",
     "Weakness",
     "WeaknessReport",
     "WeaknessSynthesizer",
