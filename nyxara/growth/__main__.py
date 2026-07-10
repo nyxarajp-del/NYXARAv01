@@ -93,6 +93,37 @@ def _report_handoff(settings: Any) -> None:
           f"benchmark accuracy {report.accuracy:.0%}")
 
 
+def _forge_brain(args: argparse.Namespace) -> int:
+    """Design → forge → gauntlet → promote a genuinely smarter brain on the NumPy substrate.
+
+    This is the weight-level self-improvement: NYXARA searches her own architecture, trains it for
+    real on her lived corpus (no torch, no external LLM), and promotes it into her live ``self``
+    brain ONLY through the Foundry gauntlet. ``--enact`` authorises the promotion; without it she
+    designs + measures a brain but ships nothing."""
+    from nyxara.growth.brain_forge import BrainForge
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    enact = bool(args.enact)
+    print(f"· forging NYXARA's own brain (NumPy substrate){' — enacting into the live self' if enact else ' (measure-only)'}…")
+    try:
+        core = NyxaraCore()
+    except Exception:  # noqa: BLE001 — fall back to a coreless forge (seeded from the identity seed)
+        core = None
+    forge = BrainForge(core=core)
+    try:
+        rep = forge.improve_brain(enact=enact, generations=(args.forge_brain or None))
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· could not forge a brain: {exc}")
+        return 1
+    print("\n" + rep.summary())
+    if rep.promoted:
+        print(f"· PROMOTED: her live brain is now v{rep.version} "
+              f"({rep.champion_kind}, {rep.params} params) — verified smarter through the gauntlet.")
+    elif rep.rolled_back:
+        print("· kept on the bench: the designed brain did not clear the gauntlet; live brain unchanged.")
+    return 0
+
+
 def _evolve_mind(args: argparse.Namespace) -> int:
     """Run the recursive mind-evolution loop and print the generational lineage."""
     from nyxara.growth.mind_evolution import MindEvolutionEngine
@@ -147,6 +178,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="where the foundry/ state (corpus, versions, active) lives")
     parser.add_argument("--bench", action="store_true",
                         help="report the handoff rate + benchmark accuracy afterwards")
+    parser.add_argument("--forge-brain", type=int, nargs="?", const=0, default=None, metavar="GENS",
+                        help="design → forge → gauntlet → PROMOTE a smarter brain on the NumPy "
+                             "substrate (verifiable weights/architecture self-improvement). Add "
+                             "--enact to ship it into her live self; omit GENS for the configured "
+                             "search depth")
     parser.add_argument("--evolve-mind", type=int, default=0, metavar="N",
                         help="instead of forging a model, evolve NYXARA's *way of thinking* for N "
                              "generations (measured on the real benchmark) and print the lineage")
@@ -156,6 +192,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="with --evolve-mind: on a plateau, escalate to one index-steered "
                              "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
+
+    if args.forge_brain is not None:
+        return _forge_brain(args)
 
     if args.evolve_mind > 0:
         return _evolve_mind(args)
