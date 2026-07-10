@@ -1416,6 +1416,11 @@ class GroundedWorldModel:
         self.inner.observe(self.encode_state(state), action,
                            self.encode_state(next_state), reward, done)
 
+    def observe_many(self, transitions: Sequence[Transition]) -> None:
+        for t in transitions:
+            self.observe(t.state, t.action, t.next_state,
+                         getattr(t, "reward", 0.0), getattr(t, "done", False))
+
     def predict(self, state: Any, action: Action) -> Prediction:
         pred = self.inner.predict(self.encode_state(state), action)
         return self._apply_causal_prior(pred, action)
@@ -1490,6 +1495,14 @@ class GroundedWorldModel:
             return False
         inner_fn = getattr(self.inner, "load_dict", None)
         return bool(inner_fn(data.get("inner") or {})) if callable(inner_fn) else False
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate backend-specific extras (``concept_report``, ``concepts``, …) to the
+        wrapped learner, so the grounded wrapper is a drop-in for every backend."""
+        inner = self.__dict__.get("inner")
+        if inner is None or name.startswith("__"):
+            raise AttributeError(name)
+        return getattr(inner, name)
 
 
 # --------------------------------------------------------------------------- #
