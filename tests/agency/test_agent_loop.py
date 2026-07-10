@@ -36,9 +36,13 @@ def test_multi_step_tool_then_answer_through_gates():
 
 
 class _NeverDone:
+    """Always proposes another CONFIDENT low-risk tool step — it clears every gate
+    (including the initiative governor's ≥0.7 confidence bar), so only the loop's own
+    max_steps / progress guard can stop it. That is exactly the bound under test."""
+
     def __call__(self, stimulus, focus=None):
         return Candidate(text="spin", kind="act", capability=Capability.TOOL_CALL,
-                         risk=RiskTier.LOW, confidence=0.5, belief=0.5, tool="now",
+                         risk=RiskTier.LOW, confidence=0.9, belief=0.9, tool="now",
                          tool_args={}, rationale="loop")
 
 
@@ -46,6 +50,22 @@ def test_bounded_by_max_steps():
     core = NyxaraCore(reasoner=_NeverDone())
     run = AgentLoop(core, max_steps=3).run("never resolve")
     assert run.status in ("max_steps", "stalled") and run.n_steps <= 3
+    assert not run.success
+
+
+class _UnsureSpinner:
+    def __call__(self, stimulus, focus=None):
+        return Candidate(text="spin", kind="act", capability=Capability.TOOL_CALL,
+                         risk=RiskTier.LOW, confidence=0.5, belief=0.5, tool="now",
+                         tool_args={}, rationale="loop")
+
+
+def test_low_confidence_spinner_is_stopped_by_initiative_gate():
+    # an UNSURE action (< the initiative governor's confidence threshold) is deferred to
+    # the Master on the very first step — the loop is bounded even before max_steps.
+    core = NyxaraCore(reasoner=_UnsureSpinner())
+    run = AgentLoop(core, max_steps=3).run("never resolve")
+    assert run.status == "escalated" and run.n_steps == 1
     assert not run.success
 
 
