@@ -186,3 +186,39 @@ def test_reasoner_no_route_when_self_model_absent_and_router_disabled():
     settings.self_model_router.enabled = False
     reasoner = LLMReasoner(settings=settings)            # no self_model
     assert reasoner._maybe_route("hello") is None
+
+
+# --------------------------------------------------------------------------- #
+# Cross-domain structural transfer — she generalizes a new domain HERSELF
+# --------------------------------------------------------------------------- #
+def test_new_domain_with_structure_routes_to_transfer_not_teacher():
+    """A weak/unknown-domain prompt whose text carries known relational structure is
+    generalized by her own structure-mapper (Route.TRANSFER) instead of deferring to the LLM."""
+    psr = _psr()   # seeded self-model is weak on this domain → would otherwise go TEACHER
+    plan = psr.plan("the predator consumes prey and the predator reduces prey over time")
+    assert plan.route is Route.TRANSFER
+    assert plan.transfer is not None
+    assert plan.transfer.base_domain == "predator_prey"
+
+
+def test_transfer_route_answers_from_own_faculty():
+    """route_respond on a transfer plan returns a 'faculty' handoff — her own reasoning,
+    not a teacher draft — so llm_reasoner accepts it as an own-model answer."""
+    psr = _psr()
+    res = psr.route_respond("the predator consumes prey and the predator reduces prey over time")
+    assert res.source == "faculty"
+    assert res.handed_off is True
+    assert "analogy" in res.text.lower()
+
+
+def test_transfer_disabled_falls_back_to_teacher():
+    psr = _psr(_settings(use_transfer=False))
+    plan = psr.plan("the predator consumes prey and the predator reduces prey over time")
+    assert plan.route is Route.TEACHER
+
+
+def test_transfer_declines_on_unstructured_weak_prompt():
+    """No extractable structure -> no transfer -> the normal teacher path (honest decline)."""
+    psr = _psr()
+    plan = psr.plan("how do I get better at cooking pasta?")
+    assert plan.route is Route.TEACHER
