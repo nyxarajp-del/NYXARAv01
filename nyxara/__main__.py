@@ -44,6 +44,9 @@ _SESSION_MEMORY = os.path.expanduser("~/.nyxara/memory.json")
 # the elastic-synapse anchors — lifelong learning carried across restarts: which learned
 # weights are important and frozen, so she never forgets old skills (memory/elastic_synapses.py)
 _SESSION_SYNAPSES = os.path.expanduser("~/.nyxara/synapses.json")
+# the self-learned embedding space — HER OWN trained representation carried across
+# restarts (memory/neural_embedder.py): word vectors, sentence head, experience corpus
+_SESSION_EMBEDDER = os.path.expanduser("~/.nyxara/embedder.json")
 
 
 def _load_session_memory(core: NyxaraCore) -> int:
@@ -63,6 +66,31 @@ def _save_session_memory(core: NyxaraCore) -> str | None:
     try:
         os.makedirs(os.path.dirname(_SESSION_MEMORY), exist_ok=True)
         return core.memory.save(_SESSION_MEMORY)
+    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
+        return None
+
+
+def _load_session_embedder(core: NyxaraCore) -> bool:
+    """Restore the self-learned embedding space BEFORE memory loads, so restored
+    records are indexed into the same trained space their queries will use."""
+    emb = getattr(core.memory, "embedder", None) if core.memory is not None else None
+    load = getattr(emb, "load", None)
+    if not callable(load) or not os.path.exists(_SESSION_EMBEDDER):
+        return False
+    try:
+        return bool(load(_SESSION_EMBEDDER))
+    except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
+        return False
+
+
+def _save_session_embedder(core: NyxaraCore) -> str | None:
+    """Persist the self-learned embedding space so her trained representation survives."""
+    emb = getattr(core.memory, "embedder", None) if core.memory is not None else None
+    save = getattr(emb, "save", None)
+    if not callable(save):
+        return None
+    try:
+        return save(_SESSION_EMBEDDER)
     except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
         return None
 
@@ -260,6 +288,7 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "save":
         path = _save_session_memory(core) or core.save_state()
         _save_session_synapses(core)
+        _save_session_embedder(core)
         print(f"memory persisted → {path}" if path else "no memory to persist.")
     else:
         print(f"unknown command: /{cmd} — type /help")
@@ -287,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Rule 7 — continuity across restarts: restore long-term memory if any exists,
     # preferring the session snapshot (~/.nyxara/memory.json), else the kernel default.
+    # The learned embedding space loads FIRST so memories index into the trained space.
+    if _load_session_embedder(core):
+        print("learned space       : restored her self-trained embedding space ✓")
     restored = _load_session_memory(core) or core.load_state()
     if restored:
         print(f"continuity          : restored {restored} memories from a prior session ✓")
@@ -308,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         if path:
             print(f"memory persisted → {path}")
         _save_session_synapses(core)   # lifelong-learning anchors survive the restart
+        _save_session_embedder(core)   # her trained embedding space survives the restart
         print("until next time, Master.")
 
     while True:

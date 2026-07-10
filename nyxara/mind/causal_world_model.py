@@ -62,6 +62,7 @@ __all__ = [
     "CausalLink",
     "CausalVerdict",
     "Counterfactual",
+    "FunctionalCausalMechanism",
     "CausalWorldModel",
 ]
 
@@ -101,14 +102,20 @@ class Event:
     label: str
     at: float = field(default_factory=time.time)
     intervention: bool = False     # True ⇒ she brought it about (a ``do``), not merely observed
+    value: Optional[float] = None  # optional magnitude — feeds functional (how-much) mechanisms
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"label": self.label, "at": round(self.at, 4), "do": self.intervention}
+        d = {"label": self.label, "at": round(self.at, 4), "do": self.intervention}
+        if self.value is not None:
+            d["value"] = round(self.value, 6)
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Event":
+        raw = d.get("value")
         return cls(label=d["label"], at=float(d.get("at", 0.0)),
-                   intervention=bool(d.get("do", False)))
+                   intervention=bool(d.get("do", False)),
+                   value=float(raw) if raw is not None else None)
 
 
 @dataclass
@@ -174,6 +181,90 @@ class CausalVerdict:
                 "evidence": self.evidence}
 
 
+class FunctionalCausalMechanism:
+    """A *learned functional* causal relation ``value_B ≈ f(value_A)`` for one edge.
+
+    The graph above answers "does A cause B?"; this answers "**by how much**": an online
+    ridge regression (closed form, pure stdlib) fitted on the (value_A, value_B) samples
+    observed when A was followed by B within the causal window. It reports an honest
+    ``r2`` and residual spread, so counterfactuals can carry effect *sizes* with
+    calibrated trust instead of bare probability lifts."""
+
+    def __init__(self, ridge: float = 1e-3) -> None:
+        self.ridge = float(ridge)
+        self.n = 0
+        self._sx = self._sy = self._sxx = self._sxy = self._syy = 0.0
+        self.slope = 0.0
+        self.intercept = 0.0
+        self.r2 = 0.0
+        self.residual_std = 0.0
+
+    def add(self, x: float, y: float) -> None:
+        self.n += 1
+        self._sx += x
+        self._sy += y
+        self._sxx += x * x
+        self._sxy += x * y
+        self._syy += y * y
+        self._refit()
+
+    def add_many(self, pairs: Iterable[Tuple[float, float]]) -> None:
+        for x, y in pairs:
+            self.add(float(x), float(y))
+
+    def _refit(self) -> None:
+        if self.n < 2:
+            return
+        n = float(self.n)
+        var_x = self._sxx - self._sx * self._sx / n
+        cov = self._sxy - self._sx * self._sy / n
+        self.slope = cov / (var_x + self.ridge)
+        self.intercept = (self._sy - self.slope * self._sx) / n
+        var_y = self._syy - self._sy * self._sy / n
+        if var_y > 1e-12:
+            # residual sum of squares of the fitted line, in closed form
+            rss = (self._syy - 2 * self.slope * self._sxy - 2 * self.intercept * self._sy
+                   + self.slope * self.slope * self._sxx
+                   + 2 * self.slope * self.intercept * self._sx
+                   + n * self.intercept * self.intercept)
+            rss = max(0.0, rss)
+            self.r2 = _clamp(1.0 - rss / var_y)
+            self.residual_std = (rss / n) ** 0.5
+        else:
+            self.r2 = 1.0 if abs(self.slope) < 1e-9 else 0.0
+            self.residual_std = 0.0
+
+    def predict(self, x: float) -> float:
+        return self.slope * x + self.intercept
+
+    def effect_of_change(self, from_value: float, to_value: float) -> float:
+        """The learned change in the effect when the cause moves from→to."""
+        return self.slope * (to_value - from_value)
+
+    def confidence(self) -> float:
+        """Trust in the fitted function: fit quality × evidence volume."""
+        return _clamp(self.r2) * _clamp(self.n / 16.0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"n": self.n, "slope": round(self.slope, 6),
+                "intercept": round(self.intercept, 6), "r2": round(self.r2, 4),
+                "residual_std": round(self.residual_std, 6),
+                "sx": self._sx, "sy": self._sy, "sxx": self._sxx,
+                "sxy": self._sxy, "syy": self._syy}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "FunctionalCausalMechanism":
+        m = cls()
+        m.n = int(d.get("n", 0))
+        m._sx = float(d.get("sx", 0.0))
+        m._sy = float(d.get("sy", 0.0))
+        m._sxx = float(d.get("sxx", 0.0))
+        m._sxy = float(d.get("sxy", 0.0))
+        m._syy = float(d.get("syy", 0.0))
+        m._refit()
+        return m
+
+
 @dataclass
 class Counterfactual:
     """A counterfactual contrast: the target's value under the factual world vs. under an
@@ -237,6 +328,8 @@ class CausalWorldModel:
         max_vars: int = 512,
         max_events: int = 20000,
         persist_path: Optional[str] = None,
+        functional_mechanisms: bool = True,
+        min_pairs_fit: int = 8,
     ) -> None:
         self.window = float(window)
         self.min_support = max(1, int(min_support))
@@ -248,29 +341,38 @@ class CausalWorldModel:
         self.max_vars = max(8, int(max_vars))
         self.max_events = max(64, int(max_events))
         self.persist_path = persist_path
+        self.functional_mechanisms = bool(functional_mechanisms)
+        self.min_pairs_fit = max(2, int(min_pairs_fit))
 
         self._n = 0                                       # total events seen
         self._by_label: Dict[str, List[float]] = {}       # label -> sorted occurrence times
         self._int_by_label: Dict[str, List[float]] = {}   # label -> sorted *intervention* times
+        self._values: Dict[str, List[Tuple[float, float]]] = {}   # label -> [(at, value)]
         self._stream: List[Event] = []                    # full (bounded) ordered stream
         self._links: Dict[Tuple[str, str], CausalLink] = {}
+        self._mechanisms: Dict[Tuple[str, str], FunctionalCausalMechanism] = {}
 
     # ------------------------------------------------------------------ #
     # ingest
     # ------------------------------------------------------------------ #
     def observe(self, label: str, *, at: Optional[float] = None,
-                intervention: bool = False) -> Event:
+                intervention: bool = False, value: Optional[float] = None) -> Event:
         """Record one timestamped event. Set ``intervention=True`` when NYXARA brought it
-        about herself (a ``do`` — the strongest causal evidence she can generate)."""
+        about herself (a ``do`` — the strongest causal evidence she can generate). An
+        optional ``value`` records *how much* (a magnitude), feeding the learned
+        functional mechanisms that answer "by how much does A move B?"."""
         lab = str(label)
         if not lab:
             return Event(label="", at=at or time.time())
         ts = time.time() if at is None else float(at)
-        ev = Event(label=lab, at=ts, intervention=bool(intervention))
+        val = float(value) if value is not None else None
+        ev = Event(label=lab, at=ts, intervention=bool(intervention), value=val)
         self._n += 1
         self._by_label.setdefault(lab, []).append(ts)
         if intervention:
             self._int_by_label.setdefault(lab, []).append(ts)
+        if val is not None:
+            self._values.setdefault(lab, []).append((ts, val))
         self._stream.append(ev)
         if len(self._stream) > self.max_events:
             self._compact()
@@ -484,6 +586,7 @@ class CausalWorldModel:
         """Scan every well-supported ordered pair, run the full criteria, and (re)build the
         graph. Returns the links it now believes are *causal*, strongest first."""
         self._links.clear()
+        self._mechanisms.clear()
         labels = [l for l, ts in self._by_label.items() if len(ts) >= self.min_support]
         for a in labels:
             for b in labels:
@@ -501,6 +604,11 @@ class CausalWorldModel:
                 link = CausalLink(cause=a, effect=b, strength=float(strength),
                                   confidence=v.confidence, verdict=v.verdict,
                                   lag=float(v.evidence.get("lag", 0.0)), evidence=v.evidence)
+                if link.is_causal and self.functional_mechanisms:
+                    mech = self._fit_mechanism(a, b)
+                    if mech is not None:
+                        self._mechanisms[(a, b)] = mech
+                        link.evidence["mechanism"] = mech.to_dict()
                 self._links[(a, b)] = link
         if self.persist_path:
             try:
@@ -510,6 +618,32 @@ class CausalWorldModel:
         causal = [l for l in self._links.values() if l.is_causal]
         causal.sort(key=lambda l: l.confidence * abs(l.strength), reverse=True)
         return causal
+
+    # ------------------------------------------------------------------ #
+    # functional mechanisms — HOW MUCH does A move B? (learned, not assumed)
+    # ------------------------------------------------------------------ #
+    def _fit_mechanism(self, a: str, b: str) -> Optional[FunctionalCausalMechanism]:
+        """Fit ``value_B ≈ f(value_A)`` from the (A-value, first-following-B-value) samples
+        inside the causal window. None when either side lacks enough valued events."""
+        va = self._values.get(a)
+        vb = self._values.get(b)
+        if not va or not vb:
+            return None
+        b_times = [t for t, _ in vb]
+        pairs: List[Tuple[float, float]] = []
+        for t, x in va:
+            i = bisect.bisect_right(b_times, t)
+            if i < len(b_times) and b_times[i] <= t + self.window:
+                pairs.append((x, vb[i][1]))
+        if len(pairs) < self.min_pairs_fit:
+            return None
+        mech = FunctionalCausalMechanism()
+        mech.add_many(pairs)
+        return mech
+
+    def mechanism(self, cause: str, effect: str) -> Optional[FunctionalCausalMechanism]:
+        """The learned functional relation for a discovered edge, if one was fitted."""
+        return self._mechanisms.get((str(cause), str(effect)))
 
     # ------------------------------------------------------------------ #
     # queries
@@ -549,11 +683,22 @@ class CausalWorldModel:
     def as_causal_graph(self, *, min_confidence: Optional[float] = None
                         ) -> List[Tuple[str, str, float]]:
         """Export the *causal* edges as ``[(cause, effect, weight)]`` for the structural
-        propagation engine in :mod:`mind.strategies`. Weight = confidence-scaled strength."""
+        propagation engine in :mod:`mind.strategies`.
+
+        When a **learned functional mechanism** exists for an edge and has earned trust
+        (fit quality × evidence), its fitted slope is the structural coefficient — a real
+        measured effect size — instead of the probability-lift proxy."""
         thr = self.min_confidence if min_confidence is None else min_confidence
-        return [(l.cause, l.effect, l.strength * l.confidence)
-                for l in self._links.values()
-                if l.is_causal and l.confidence >= thr]
+        out: List[Tuple[str, str, float]] = []
+        for l in self._links.values():
+            if not (l.is_causal and l.confidence >= thr):
+                continue
+            weight = l.strength * l.confidence
+            mech = self._mechanisms.get((l.cause, l.effect))
+            if mech is not None and mech.confidence() >= 0.3:
+                weight = mech.slope
+            out.append((l.cause, l.effect, weight))
+        return out
 
     def _structural_model(self) -> Any:
         from nyxara.mind.strategies import CausalModel
@@ -594,10 +739,13 @@ class CausalWorldModel:
         self._stream = keep
         self._by_label = {}
         self._int_by_label = {}
+        self._values = {}
         for ev in keep:
             self._by_label.setdefault(ev.label, []).append(ev.at)
             if ev.intervention:
                 self._int_by_label.setdefault(ev.label, []).append(ev.at)
+            if ev.value is not None:
+                self._values.setdefault(ev.label, []).append((ev.at, ev.value))
         self._n = len(keep)
 
     def _prune_vars(self) -> None:
@@ -608,12 +756,15 @@ class CausalWorldModel:
                                      reverse=True)[:self.max_vars]}
         self._by_label = {v: t for v, t in self._by_label.items() if v in keep}
         self._int_by_label = {v: t for v, t in self._int_by_label.items() if v in keep}
+        self._values = {v: t for v, t in self._values.items() if v in keep}
 
     def stats(self) -> Dict[str, Any]:
         return {"events": self._n, "variables": len(self._by_label),
                 "interventions": sum(len(t) for t in self._int_by_label.values()),
+                "valued_labels": len(self._values),
                 "links": len(self._links),
-                "causal_links": sum(1 for l in self._links.values() if l.is_causal)}
+                "causal_links": sum(1 for l in self._links.values() if l.is_causal),
+                "mechanisms": len(self._mechanisms)}
 
     # ------------------------------------------------------------------ #
     # persistence
@@ -628,6 +779,7 @@ class CausalWorldModel:
         self._n = 0
         self._by_label = {}
         self._int_by_label = {}
+        self._values = {}
         self._stream = []
         for ed in d.get("stream", []):
             ev = Event.from_dict(ed)
@@ -635,15 +787,27 @@ class CausalWorldModel:
             self._by_label.setdefault(ev.label, []).append(ev.at)
             if ev.intervention:
                 self._int_by_label.setdefault(ev.label, []).append(ev.at)
+            if ev.value is not None:
+                self._values.setdefault(ev.label, []).append((ev.at, ev.value))
         self._n = len(self._stream)
         for lst in self._by_label.values():
             lst.sort()
         for lst in self._int_by_label.values():
             lst.sort()
+        for lst in self._values.values():
+            lst.sort()
         self._links = {}
+        self._mechanisms = {}
         for ld in d.get("links", []):
             link = CausalLink.from_dict(ld)
             self._links[(link.cause, link.effect)] = link
+            md = link.evidence.get("mechanism")
+            if md:                       # the learned functional relation rides the link
+                try:
+                    self._mechanisms[(link.cause, link.effect)] = \
+                        FunctionalCausalMechanism.from_dict(md)
+                except Exception:  # noqa: BLE001 — a bad mechanism never blocks a restore
+                    pass
 
     def save(self, path: Optional[str] = None) -> None:
         target = path or self.persist_path

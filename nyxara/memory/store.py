@@ -424,6 +424,19 @@ def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
         except Exception:  # noqa: BLE001 — fall back rather than fail to boot
             pass
     dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128
+    if getattr(mc, "self_learned_embeddings", True):
+        # NYXARA's OWN gradient-trained space (SGNS + contrastive head) — learned from
+        # her lived experience, no external model. Cold it equals the lexical space.
+        try:
+            from nyxara.memory.neural_embedder import SelfLearnedEmbedder
+            return SelfLearnedEmbedder(
+                dim=dim,
+                latent_dim=getattr(mc, "embedder_latent_dim", 64),
+                negatives=getattr(mc, "embedder_negatives", 5),
+                corpus_cap=getattr(mc, "embedder_corpus_cap", 20000),
+            )
+        except Exception:  # noqa: BLE001 — fall through to the simpler learned embedder
+            pass
     if getattr(mc, "learned_embeddings", True):
         return LearnedEmbedder(dim=dim)
     return LexicalSemanticEmbedder(dim=dim)
@@ -880,6 +893,7 @@ class MemoryStore:
             if embed:
                 rec.embedding = self.embedder.embed(rec.text())
                 self._index.add(rec.mem_id, rec.embedding)
+                self._stamp_embedding_version(rec)
             self._kv[rec.mem_id] = rec
             self._stats["remembered"] += 1
 
@@ -1112,12 +1126,50 @@ class MemoryStore:
             try:
                 vec = self.embedder.embed(rec.text())
                 rec.embedding = vec            # migrate the stored vector into the new space
+                self._stamp_embedding_version(rec)
             except Exception:  # noqa: BLE001 — embedding is best-effort on load
                 return
         try:
             self._index.add(rec.mem_id, vec)
         except Exception:  # noqa: BLE001 — never let one bad vector abort a restore
             pass
+
+    def _stamp_embedding_version(self, rec: MemoryRecord) -> None:
+        """Record which version of the (learning) embedding space produced this vector."""
+        version = getattr(self.embedder, "space_version", None)
+        if version is not None:
+            rec.metadata["emb_v"] = int(version)
+
+    def reembed_stale(self, budget: int = 200) -> int:
+        """Re-embed records whose vectors predate the current learned space.
+
+        A *learning* embedder (:class:`~nyxara.memory.neural_embedder.SelfLearnedEmbedder`)
+        shifts its space as it trains — it bumps ``space_version`` on every pass. Stored
+        vectors from an older version drift away from fresh query vectors, so recall
+        quality silently decays. This pass migrates the most-active stale records back
+        into the current space, a bounded slice at a time (called from consolidation,
+        dreams and the idle loop). A no-op for static embedders."""
+        version = getattr(self.embedder, "space_version", None)
+        if not version:  # static embedder, or a learning one that has never trained
+            return 0
+        with self._lock:
+            stale = [r for r in self._kv.values()
+                     if r.embedding is not None
+                     and int(r.metadata.get("emb_v", 0)) < int(version)]
+            if not stale:
+                return 0
+            now = time.time()
+            stale.sort(key=lambda r: r.activation(now), reverse=True)
+            done = 0
+            for rec in stale[: max(1, int(budget))]:
+                try:
+                    rec.embedding = self.embedder.embed(rec.text())
+                    self._index.add(rec.mem_id, rec.embedding)
+                    self._stamp_embedding_version(rec)
+                    done += 1
+                except Exception:  # noqa: BLE001 — one bad record never stops the pass
+                    continue
+            return done
 
     def stats(self) -> Dict[str, Any]:
         by_type = {t.value: len(self.by_type(t)) for t in MemoryType}

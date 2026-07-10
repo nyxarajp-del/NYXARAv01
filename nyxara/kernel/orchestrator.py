@@ -36,7 +36,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 
 def _clamp01(x: float) -> float:
@@ -469,6 +469,13 @@ class NyxaraCore:
         # actions as do-experiments. "A hua, isliye B hua" — not "A aur B saath dikhte hain".
         self.causal_world_model = self._build_causal_world_model() if enable_growth else None
         self._causal_turns = 0
+        # close the loop: discovered causal structure becomes a prior on the world model's
+        # imagination (world_model.py::GroundedWorldModel._apply_causal_prior), while the
+        # world model's confident rollouts feed causal discovery from the idle loop.
+        if self.world_model is not None and hasattr(self.world_model, "causal_model"):
+            self.world_model.causal_model = self.causal_world_model
+        # the last grounded turn-state the world model saw (feeds per-turn transitions)
+        self._wm_prev_state: Optional[str] = None
         # HANDOFF METER (North Star, docs/MASTERPLAN-sovereign-mind.md §3): a live tally of who
         # actually answered each conversational turn — NYXARA's own mind (a verifiable faculty, a
         # learned skill, her own learned brain, or her offline voice) vs the external teacher. The
@@ -479,6 +486,11 @@ class NyxaraCore:
         # learned memory re-ranker which memories actually helped (memory/retrieval.record_feedback).
         # A strict no-op unless a re-ranker is attached to the retriever, so defaults are unchanged.
         self._last_recall_results: List[Any] = []
+        # the query those results answered — with it, a helpful recall becomes a (query,
+        # memory) positive pair for the self-learned embedder (contrastive supervision).
+        self._last_recall_query: str = ""
+        # whether the turn's recall surfaced anything — one label of the causal event stream
+        self._recall_hit_last_turn: bool = False
         # Fractal Temporal Hierarchies — the multi-dimensional mind: loops within loops at
         # three time scales at once. A millisecond hardware/network monitor (Layer 1) nested
         # inside a second-scale turn observer (Layer 2) nested inside a day/month "Master AI"
@@ -1118,10 +1130,22 @@ class NyxaraCore:
 
     def _build_world_model(self) -> Any:
         try:
-            from nyxara.mind.world_model import build_world_model
+            import os
+            from nyxara.mind.world_model import (GroundedWorldModel, build_world_model,
+                                                 load_world_model)
             # "auto" → a numpy deep-ensemble (real learned dynamics + epistemic uncertainty)
-            # when numpy is present, gracefully falling back to the pure-stdlib learners
-            return build_world_model("auto")
+            # when numpy is present, gracefully falling back to the pure-stdlib learners.
+            # Wrapped in GroundedWorldModel: her REAL turns (text states) become learnable
+            # numeric transitions via the shared self-learned memory embedder, and the causal
+            # graph (attached after it is built) acts as a structural prior on predictions.
+            inner = build_world_model("auto")
+            embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
+            model = GroundedWorldModel(inner, embedder=embedder)
+            # Rule 7 — the learned dynamics survive restarts
+            path = os.path.join(self._autonomy_state_dir(), "world_model.json")
+            if os.path.exists(path):
+                load_world_model(model, path)
+            return model
         except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
             return None
 
@@ -1534,7 +1558,9 @@ class NyxaraCore:
                           min_contingency=cfg.min_contingency,
                           confounder_screening=cfg.confounder_screening,
                           use_interventions=cfg.use_interventions, max_vars=cfg.max_vars,
-                          max_events=cfg.max_events)
+                          max_events=cfg.max_events,
+                          functional_mechanisms=getattr(cfg, "functional_mechanisms", True),
+                          min_pairs_fit=getattr(cfg, "min_pairs_fit", 8))
             if path:
                 return CausalWorldModel.load(path, **kwargs)
             return CausalWorldModel(**kwargs)
@@ -2397,6 +2423,14 @@ class NyxaraCore:
                     f.write(json.dumps(self.motivation.snapshot(), default=str))
                 os.replace(tmp, path)
                 saved["motivation"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        # the learned world dynamics (weights, action embeddings, replay tail) — Rule 7
+        if self.world_model is not None:
+            try:
+                from nyxara.mind.world_model import save_world_model
+                path = os.path.join(self._autonomy_state_dir(), "world_model.json")
+                saved["world_model"] = bool(save_world_model(self.world_model, path))
             except Exception:  # noqa: BLE001
                 pass
         return saved
@@ -3658,6 +3692,8 @@ class NyxaraCore:
                 # keep the scored retriever hits (they carry .signals + .record) so a successful
                 # turn can teach the learned re-ranker which of them actually helped (D4).
                 self._last_recall_results = list(results)
+                self._last_recall_query = str(stimulus or "")
+                self._recall_hit_last_turn = bool(results)
             except Exception:  # noqa: BLE001 — recall is best-effort, never fatal
                 pass
         # Level 6 — graph traversal: extract entity mentions and find related triples
@@ -3701,7 +3737,18 @@ class NyxaraCore:
             floor = float(get_settings().memory.recall_min_semantic)
         except Exception:  # noqa: BLE001 — fall back to a sane default if config is unavailable
             floor = 0.45
-        if floor > 0.0 and self._embedder_is_lexical():
+        if floor <= 0.0:
+            return floor
+        # A SELF-LEARNING embedder sits *between* lexical and fully-semantic: scale the floor
+        # by its honest self-audit (semantic_grade 0→lexical floor, 1→full floor) so the bar
+        # rises exactly as fast as the learned space actually earns it.
+        emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        grade = getattr(emb, "semantic_grade", None)
+        if isinstance(grade, (int, float)):
+            g = max(0.0, min(1.0, float(grade)))
+            return floor * (_LEXICAL_RECALL_FLOOR_SCALE
+                            + (1.0 - _LEXICAL_RECALL_FLOOR_SCALE) * g)
+        if self._embedder_is_lexical():
             floor *= _LEXICAL_RECALL_FLOOR_SCALE
         return floor
 
@@ -4653,6 +4700,15 @@ class NyxaraCore:
                 learn(*docs)
             except Exception:  # noqa: BLE001 — compounding recall is best-effort
                 pass
+        # 3) contrastive supervision for the SELF-LEARNED embedding space: a lived
+        # (stimulus, reply) is a positive pair when the turn went well — her own data,
+        # mined by her own life, trained by her own SGD during consolidation/dreams.
+        learn_pair = getattr(embedder, "learn_pair", None)
+        if callable(learn_pair) and text and reply:
+            try:
+                learn_pair(text, reply, positive=reward > 0)
+            except Exception:  # noqa: BLE001 — supervision is best-effort
+                pass
 
     @staticmethod
     def _classify_answer_source(candidate: Candidate) -> Optional[str]:
@@ -4695,8 +4751,10 @@ class NyxaraCore:
         a re-ranker is attached to the retriever (``memory/retrieval.record_feedback``), so default
         behaviour — fixed fusion weights — is unchanged. Best-effort; never fatal to a turn."""
         results = self._last_recall_results
+        query = self._last_recall_query
         self._last_recall_results = []
-        if not results or candidate is None or getattr(self.retriever, "reranker", None) is None:
+        self._last_recall_query = ""
+        if not results or candidate is None:
             return
         if not success or getattr(candidate, "kind", "respond") != "respond":
             return
@@ -4709,6 +4767,8 @@ class NyxaraCore:
             answer_tokens = _content_words(str(getattr(candidate, "text", "")))
             if not answer_tokens:
                 return
+            embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
+            learn_pair = getattr(embedder, "learn_pair", None)
             useful_ids = []
             for res in results:
                 try:
@@ -4719,9 +4779,87 @@ class NyxaraCore:
                 # a memory helped if a real share of its content words made it into the answer
                 if mem_tokens and len(mem_tokens & answer_tokens) >= max(2, int(0.3 * len(mem_tokens))):
                     useful_ids.append(res.record.mem_id)
-            self.retriever.record_feedback(results, useful_ids, reward=1.0)
+                    # (query, memory-that-helped) is self-mined contrastive supervision:
+                    # the learned embedding space is pulled toward what recall SHOULD find
+                    if callable(learn_pair) and query:
+                        try:
+                            learn_pair(query, mem_text)
+                        except Exception:  # noqa: BLE001 — supervision is best-effort
+                            pass
+            if getattr(self.retriever, "reranker", None) is not None:
+                self.retriever.record_feedback(results, useful_ids, reward=1.0)
         except Exception:  # noqa: BLE001 — reinforcement is best-effort, never fatal to a turn
             pass
+
+    def _causal_events_for_turn(self, candidate: Any, disp: "Disposition", success: bool,
+                                *, action: str, reward: float
+                                ) -> List[Tuple[float, str, Optional[float], bool]]:
+        """The turn as a rich causal event stream: ``(time_offset, label, value, is_do)``.
+
+        Two labels per turn (act, outcome) could only ever learn "acting causes outcomes".
+        This emits the turn's whole context — the action she chose (a real do-experiment),
+        the tool if one ran, whether recall surfaced anything, her felt mood, and a VALUED
+        reward event — so causal discovery can find structure like "recall misses cause
+        failures" or "tool X causes negative reward", with learned effect sizes."""
+        events: List[Tuple[float, str, Optional[float], bool]] = []
+        # causes first (what she did / the turn's context)...
+        events.append((0.0, f"act:{action}", None, True))
+        tool = getattr(candidate, "tool", None)
+        if tool:
+            events.append((1e-4, f"tool:{tool}", None, True))
+        kind = getattr(candidate, "kind", None)
+        if kind and kind != action:
+            events.append((2e-4, f"kind:{kind}", None, False))
+        events.append((3e-4, "recall:hit" if self._recall_hit_last_turn
+                       else "recall:miss", None, False))
+        if self.affect is not None:
+            try:
+                valence = float(self.affect.mood.valence)
+                if abs(valence) >= 0.15:
+                    events.append((4e-4, "mood:positive" if valence > 0 else "mood:negative",
+                                   valence, False))
+            except Exception:  # noqa: BLE001 — mood is optional context
+                pass
+        # ...effects last (what followed)
+        outcome = ("outcome:success" if (disp is Disposition.ACT and success)
+                   else "outcome:failure")
+        events.append((1e-3, outcome, None, False))
+        events.append((1.1e-3, "outcome:reward", float(reward), False))
+        return events
+
+    def _imagination_to_causal(self, *, max_actions: int = 3,
+                               min_confidence: float = 0.6) -> int:
+        """Feed the world model's CONFIDENT imagined outcomes to causal discovery.
+
+        For a few known actions, ask the dynamics model "if I did this from the last real
+        situation, what follows?". Predictions above ``min_confidence`` become synthetic
+        interventional events (``wm:do:<action>`` → ``wm:outcome:…`` with the predicted
+        reward as a value) — imagined do-experiments that let causal structure firm up
+        between real turns. Confidence-gated so speculation never becomes causal 'fact'."""
+        start = self._wm_prev_state
+        if not start:
+            return 0
+        try:
+            actions = list(self.world_model.actions())[:max(1, max_actions)]
+        except Exception:  # noqa: BLE001
+            return 0
+        import time as _time
+        fed = 0
+        now = _time.time()
+        for i, action in enumerate(actions):
+            try:
+                pred = self.world_model.predict(start, action)
+            except Exception:  # noqa: BLE001 — one unpredictable action skips, not aborts
+                continue
+            if pred.confidence < min_confidence:
+                continue
+            base = now + i * 0.01
+            self.causal_world_model.observe(f"wm:do:{action}", at=base, intervention=True)
+            outcome = "wm:outcome:positive" if pred.reward >= 0.0 else "wm:outcome:negative"
+            self.causal_world_model.observe(outcome, at=base + 1e-3,
+                                            value=float(pred.reward))
+            fed += 2
+        return fed
 
     def _handoff_report(self) -> Dict[str, Any]:
         """Summarise the live handoff meter: turns NYXARA answered herself vs deferred (Rule 6)."""
@@ -4760,22 +4898,37 @@ class NyxaraCore:
             except Exception:  # noqa: BLE001 — the sense of time is best-effort, never fatal
                 pass
         # causal world model: this turn is a natural do-experiment — she *did* `action`, and
-        # an outcome followed. Recording (action ⇒ outcome) over many turns lets her learn
-        # which actions genuinely *cause* success, not merely correlate with it (and, over a
-        # rich event stream, the wider causal structure of her world).
+        # an outcome followed. Recording the turn's WHOLE context (action, tool, recall
+        # hit/miss, felt mood, valued reward) over many turns lets her learn which events
+        # genuinely *cause* success — and, with values, by HOW MUCH (learned mechanisms).
         if self.causal_world_model is not None:
             try:
                 import time as _time
                 now = _time.time()
-                outcome = ("outcome:success" if (disp is Disposition.ACT and success)
-                           else "outcome:failure")
-                self.causal_world_model.observe(f"act:{action}", at=now, intervention=True)
-                self.causal_world_model.observe(outcome, at=now + 1e-3)
+                for offset, label, value, is_do in self._causal_events_for_turn(
+                        candidate, disp, success, action=action,
+                        reward=brain_reward):
+                    self.causal_world_model.observe(label, at=now + offset,
+                                                    intervention=is_do, value=value)
                 self._causal_turns += 1
                 from nyxara.kernel.config import get_settings
                 if self._causal_turns % max(1, get_settings().causal.discover_every) == 0:
                     self.causal_world_model.discover()
             except Exception:  # noqa: BLE001 — causal learning is best-effort, never fatal
+                pass
+        # world model: the lived turn itself becomes a learnable transition — "in situation
+        # <stimulus>, doing <action> produced <reply>, worth <reward>". The GroundedWorldModel
+        # encodes the text states through her self-learned embedder, so REAL conversation
+        # (not only simulators) now trains the dynamics model she plans and imagines with.
+        if self.world_model is not None and hasattr(self.world_model, "encode_state") \
+                and stimulus:
+            try:
+                reply_text = str(getattr(candidate, "text", "") or "")
+                next_state = reply_text if reply_text else stimulus
+                self.world_model.observe(stimulus, f"act:{action}", next_state,
+                                         reward=brain_reward)
+                self._wm_prev_state = stimulus
+            except Exception:  # noqa: BLE001 — grounding is best-effort, never fatal
                 pass
         reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
@@ -5052,6 +5205,28 @@ class NyxaraCore:
             try:
                 report["replayed"] = len(self.consolidator.dream_replay())
             except Exception:  # noqa: BLE001
+                pass
+        # 1b) representation upkeep — after dreams train the self-learned embedding space,
+        # migrate a bounded slice of the most-active stale memory vectors into it, so stored
+        # memories and fresh queries always live in the same (improving) space.
+        if self.memory is not None and hasattr(self.memory, "reembed_stale"):
+            try:
+                migrated = self.memory.reembed_stale(budget=50)
+                if migrated:
+                    report["reembedded"] = migrated
+            except Exception:  # noqa: BLE001 — re-embedding is maintenance, never fatal
+                pass
+        # 1c) imagination → causal discovery: the world model's CONFIDENT predictions about
+        # her known actions become synthetic, wm:-tagged interventional evidence for the
+        # causal graph (rate-limited to a few per pass; low-confidence imagination is never
+        # laundered into causal fact). The reverse link — the causal graph constraining the
+        # world model's imagination — is wired at boot (GroundedWorldModel.causal_model).
+        if self.world_model is not None and self.causal_world_model is not None:
+            try:
+                fed = self._imagination_to_causal()
+                if fed:
+                    report["wm_causal_events"] = fed
+            except Exception:  # noqa: BLE001 — the imagination bridge is best-effort
                 pass
         # 2) affect tick — mood relaxes toward baseline; drives deplete and reassert
         if self.affect is not None:
