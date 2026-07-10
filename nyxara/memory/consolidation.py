@@ -82,6 +82,11 @@ class ConsolidationReport:
     pruned: List[str] = field(default_factory=list)
     reconsolidated: int = 0
     duration_s: float = 0.0
+    # representation learning (memory/neural_embedder.py): did this cycle actually
+    # train the embedding space, and how many stale vectors migrated into it
+    embedder_trained: bool = False
+    embedder_stats: Dict[str, Any] = field(default_factory=dict)
+    reembedded: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -90,6 +95,8 @@ class ConsolidationReport:
             "forgotten": len(self.forgotten),
             "pruned": len(self.pruned),
             "reconsolidated": self.reconsolidated,
+            "embedder_trained": self.embedder_trained,
+            "reembedded": self.reembedded,
             "duration_s": round(self.duration_s, 4),
         }
 
@@ -217,9 +224,17 @@ class Consolidator:
                 importance=min(1.0, 0.6 + 0.05 * len(members)), tags=tags,
             )
             abstractions.append(sem.mem_id)
+            learn_pair = getattr(self.store.embedder, "learn_pair", None)
             for m in members:
                 self.store.link(m.mem_id, sem.mem_id, "instance_of")
                 m.metadata[self.CONSOLIDATED_KEY] = True
+                # each (episode, gist) is a self-mined positive pair — contrastive
+                # supervision for the self-learned embedding space, no labels needed
+                if callable(learn_pair):
+                    try:
+                        learn_pair(m.text(), summary)
+                    except Exception:  # noqa: BLE001 — supervision is best-effort
+                        pass
             # optional pruning of redundant, low-value instances now captured by the gist
             if self.prune_consolidated:
                 keep = max(members, key=lambda r: r.importance)  # keep an exemplar
@@ -246,9 +261,38 @@ class Consolidator:
                 forgotten.append(rec.mem_id)
         return forgotten
 
+    # ---- representation learning ---- #
+    def train_embedder(self, *, budget_s: Optional[float] = None) -> Dict[str, Any]:
+        """Spend a bounded SGD budget training the self-learned embedding space, then
+        migrate the most-active stale vectors into the new space (``reembed_stale``).
+
+        This is where NYXARA's *own* representation learning actually runs: during the
+        same offline cycle a brain uses for systems consolidation. A no-op when the
+        active embedder is static (no ``train`` method)."""
+        emb = self.store.embedder
+        train = getattr(emb, "train", None)
+        if not callable(train):
+            return {"trained": False, "reason": "static embedder"}
+        settings = getattr(self.store, "_settings", None)
+        mc = getattr(settings, "memory", None)
+        if budget_s is None:
+            budget_s = float(getattr(mc, "embedder_train_budget_s", 2.0))
+        try:
+            stats = dict(train(budget_s=budget_s) or {})
+        except Exception:  # noqa: BLE001 — training must never break consolidation
+            return {"trained": False, "reason": "train failed"}
+        if stats.get("trained"):
+            try:
+                stats["reembedded"] = self.store.reembed_stale(
+                    budget=int(getattr(mc, "reembed_batch", 200)))
+            except Exception:  # noqa: BLE001
+                stats["reembedded"] = 0
+        return stats
+
     # ---- the nightly cycle ---- #
     def run_cycle(self, *, now: Optional[float] = None,
-                  do_compress: bool = True, do_forget: bool = True) -> ConsolidationReport:
+                  do_compress: bool = True, do_forget: bool = True,
+                  do_train_embedder: bool = True) -> ConsolidationReport:
         start = time.time()
         now = now or time.time()
         report = ConsolidationReport()
@@ -257,6 +301,11 @@ class Consolidator:
             report.abstractions, report.pruned = self.compress(now=now)
         if do_forget:
             report.forgotten = self.forget_pass(now=now)
+        if do_train_embedder:
+            stats = self.train_embedder()
+            report.embedder_stats = stats
+            report.embedder_trained = bool(stats.get("trained"))
+            report.reembedded = int(stats.get("reembedded", 0) or 0)
         report.duration_s = time.time() - start
         return report
 

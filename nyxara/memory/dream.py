@@ -37,6 +37,9 @@ class DreamReport:
     logs_deleted: int = 0
     synapses_fixed: int = 0
     deep_state: bool = False
+    # --- representation learning: the self-learned embedding space trains in dreams --- #
+    embedder_trained: bool = False
+    reembedded: int = 0
     insights: List[str] = field(default_factory=list)
     principles: List[str] = field(default_factory=list)
 
@@ -51,6 +54,8 @@ class DreamReport:
             "logs_deleted": self.logs_deleted,
             "synapses_fixed": self.synapses_fixed,
             "deep_state": self.deep_state,
+            "embedder_trained": self.embedder_trained,
+            "reembedded": self.reembedded,
             "insights": self.insights,
             "principles": self.principles,
         }
@@ -130,6 +135,10 @@ class DreamSession:
 
                 # Pass 7: fix distilled principles into Deep Memory Synapses (protected, durable)
                 report.synapses_fixed = self._fix_synapses(principles)
+
+                # Pass 8: representation learning — train HER OWN embedding space on the
+                # experience gathered since the last deep dream, then migrate stale vectors
+                report.embedder_trained, report.reembedded = self._representation_learning()
 
             self._sessions += 1
         except Exception:  # noqa: BLE001 — dreaming is best-effort
@@ -375,6 +384,20 @@ class DreamSession:
             except Exception:  # noqa: BLE001
                 continue
         return fixed
+
+    # ---------------------------------------------------------------------- #
+    # Pass 8 — representation learning (the embedding space itself trains)
+    # ---------------------------------------------------------------------- #
+    def _representation_learning(self):
+        """Run one budgeted training pass of the self-learned embedder via the
+        consolidator, so deep dreams are when NYXARA's own semantic space improves."""
+        if self.consolidator is None or not hasattr(self.consolidator, "train_embedder"):
+            return False, 0
+        try:
+            stats = self.consolidator.train_embedder()
+            return bool(stats.get("trained")), int(stats.get("reembedded", 0) or 0)
+        except Exception:  # noqa: BLE001 — dreaming is best-effort
+            return False, 0
 
 
 # --------------------------------------------------------------------------- #

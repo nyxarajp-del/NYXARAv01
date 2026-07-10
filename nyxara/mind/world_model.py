@@ -65,12 +65,24 @@ __all__ = [
     "NeuralWorldModel",
     "EnsembleWorldModel",
     "TransferWorldModel",
+    "GroundedWorldModel",
     "build_world_model",
+    "save_world_model",
+    "load_world_model",
 ]
 
 State = Tuple[Any, ...]
 Action = Hashable
 Policy = Union[Sequence[Action], Callable[[State], Action]]
+
+
+def _unrepr_action(key: str) -> Action:
+    """Recover an action persisted as ``repr(action)`` (str/int/float/tuple survive)."""
+    import ast
+    try:
+        return ast.literal_eval(key)
+    except Exception:  # noqa: BLE001 — an exotic action key stays a plain string
+        return key
 
 
 def _dist(a: Sequence[Any], b: Sequence[Any]) -> float:
@@ -94,6 +106,7 @@ class Transition:
     action: Action
     next_state: State
     reward: float = 0.0
+    done: bool = False         # did the episode terminate at this transition?
 
 
 @dataclass
@@ -103,11 +116,13 @@ class Prediction:
     confidence: float          # [0,1] — how much the model trusts this prediction
     neighbors: int = 0
     epistemic: float = 0.0     # model-disagreement (ensemble) — what it does NOT know
+    done_prob: float = 0.0     # learned probability the episode ends here
 
     def to_dict(self) -> Dict[str, Any]:
         return {"next_state": self.next_state, "reward": round(self.reward, 4),
                 "confidence": round(self.confidence, 4), "neighbors": self.neighbors,
-                "epistemic": round(self.epistemic, 4)}
+                "epistemic": round(self.epistemic, 4),
+                "done_prob": round(self.done_prob, 4)}
 
 
 @dataclass
@@ -180,10 +195,52 @@ class WorldModel:
     def __len__(self) -> int:
         return self._count
 
+    # ---- calibration: every backend tracks how good its predictions REALLY are ---- #
+    def _calib(self) -> Dict[str, float]:
+        """Lazy shared calibration state (subclasses define their own __init__)."""
+        c = self.__dict__.get("_calib_state")
+        if c is None:
+            c = {"err_ema": -1.0, "epi_ema": -1.0, "checks": 0.0}
+            self.__dict__["_calib_state"] = c
+        return c
+
+    def _track_realized(self, state: Sequence[Any], action: Action,
+                        next_state: Sequence[Any]) -> None:
+        """One-step realized-error tracking: before learning a transition, ask the model
+        what it *would have predicted* and score it against what actually happened. This
+        is the honest signal behind :meth:`prediction_error_ema` and
+        :meth:`mean_epistemic` — measured on real experience, never on training fit."""
+        c = self._calib()
+        c["checks"] += 1.0
+        if int(c["checks"]) % 4 != 1:                 # sample 1-in-4: cheap but unbiased
+            return
+        try:
+            pred = self.predict(state, action)
+        except Exception:  # noqa: BLE001 — calibration must never block learning
+            return
+        if pred.confidence <= 0.0:
+            return                                     # nothing was claimed, nothing to score
+        err = _dist(pred.next_state, tuple(next_state))
+        c["err_ema"] = err if c["err_ema"] < 0 else 0.95 * c["err_ema"] + 0.05 * err
+        if pred.epistemic > 0.0:
+            e = pred.epistemic
+            c["epi_ema"] = e if c["epi_ema"] < 0 else 0.95 * c["epi_ema"] + 0.05 * e
+
+    def prediction_error_ema(self) -> float:
+        """EMA of realized one-step prediction error (0.0 until anything was scored)."""
+        return max(0.0, self._calib()["err_ema"])
+
+    def mean_epistemic(self) -> float:
+        """EMA of the model's own epistemic uncertainty on real queries — the honest
+        'how much do I not know about the world right now' signal the kernel reads."""
+        return max(0.0, self._calib()["epi_ema"])
+
     # ---- learning = remembering ---- #
     def observe(self, state: Sequence[Any], action: Action,
-                next_state: Sequence[Any], reward: float = 0.0) -> None:
-        t = Transition(tuple(state), action, tuple(next_state), reward)
+                next_state: Sequence[Any], reward: float = 0.0,
+                done: bool = False) -> None:
+        self._track_realized(state, action, next_state)
+        t = Transition(tuple(state), action, tuple(next_state), reward, bool(done))
         bucket = self._by_action.setdefault(action, [])
         bucket.append(t)
         self._count += 1
@@ -194,7 +251,7 @@ class WorldModel:
 
     def observe_many(self, transitions: Sequence[Transition]) -> None:
         for t in transitions:
-            self.observe(t.state, t.action, t.next_state, t.reward)
+            self.observe(t.state, t.action, t.next_state, t.reward, t.done)
 
     def actions(self) -> List[Action]:
         return [a for a, ts in self._by_action.items() if ts]
@@ -217,6 +274,7 @@ class WorldModel:
         dim = len(state)
         delta = [0.0] * dim
         reward = 0.0
+        done_w = 0.0
         all_numeric = all(isinstance(state[i], (int, float)) and not isinstance(state[i], bool)
                           for i in range(dim))
         for w, (d, t) in zip(weights, nn):
@@ -224,7 +282,9 @@ class WorldModel:
                 for i in range(dim):
                     delta[i] += w * (t.next_state[i] - t.state[i])
             reward += w * t.reward
+            done_w += w * (1.0 if t.done else 0.0)
         reward /= wsum
+        done_prob = max(0.0, min(1.0, done_w / wsum))
 
         if all_numeric:
             next_state: State = tuple(state[i] + delta[i] / wsum for i in range(dim))
@@ -235,7 +295,8 @@ class WorldModel:
         nearest = nn[0][0]
         confidence = math.exp(-nearest / max(1e-6, self.distance_scale))
         return Prediction(next_state=next_state, reward=reward,
-                          confidence=min(1.0, confidence), neighbors=len(nn))
+                          confidence=min(1.0, confidence), neighbors=len(nn),
+                          done_prob=done_prob)
 
     def coverage(self, state: Sequence[Any], action: Action) -> float:
         """How well the model knows this (state, action) — its prediction confidence."""
@@ -304,6 +365,9 @@ class WorldModel:
             cur = pred.next_state
             if terminal_fn is not None and terminal_fn(cur):
                 break
+            # the learned done head: a confidently-predicted episode end stops imagination
+            if pred.done_prob > 0.5 and pred.confidence > 0.2:
+                break
         return Trajectory(states, actions, rewards, confidences)
 
     def imagine(self, start: Sequence[Any], action: Action, *, steps: int = 5,
@@ -343,6 +407,32 @@ class WorldModel:
                 "actions": {str(a): len(ts) for a, ts in self._by_action.items()},
                 "k": self.k}
 
+    # ---- persistence: learned dynamics survive restarts (Rule 7) ---- #
+    def to_dict(self, *, max_saved: int = 5000) -> Dict[str, Any]:
+        per_action = max(64, max_saved // max(1, len(self._by_action) or 1))
+        return {
+            "kind": "knn",
+            "transitions": [
+                [list(t.state), t.action, list(t.next_state), t.reward, t.done]
+                for ts in self._by_action.values() for t in ts[-per_action:]
+            ],
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        if not isinstance(data, dict):
+            return False
+        loaded = 0
+        for row in data.get("transitions", []):
+            try:
+                state, action, next_state, reward, done = row
+                action = tuple(action) if isinstance(action, list) else action
+                self.observe(tuple(state), action, tuple(next_state),
+                             float(reward), bool(done))
+                loaded += 1
+            except Exception:  # noqa: BLE001 — one bad row never aborts a restore
+                continue
+        return loaded > 0
+
 
 # --------------------------------------------------------------------------- #
 # Neural forward model (Pillar B6) — a small MLP that generalises dynamics
@@ -358,7 +448,7 @@ class _ForwardNet:
     def __init__(self, in_dim: int, *, hidden: int = 12, lr: float = 0.05, seed: int = 0) -> None:
         self.in_dim = in_dim
         self.h = max(1, hidden)
-        self.out = in_dim + 1
+        self.out = in_dim + 2                  # [Δstate…, reward, done]
         self.lr = lr
         rng = random.Random(seed)
         s1 = 1.0 / math.sqrt(in_dim + 1)
@@ -423,6 +513,25 @@ class _ForwardNet:
             self.b1[j] -= self.lr * d_h[j]
         return mse
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {"in_dim": self.in_dim, "h": self.h, "W1": self.W1, "b1": self.b1,
+                "W2": self.W2, "b2": self.b2, "n": self.n, "mean": self.mean,
+                "M2": self._M2, "err_ema": self.err_ema, "samples": self.samples}
+
+    def load_dict(self, d: Dict[str, Any]) -> bool:
+        if int(d.get("in_dim", -1)) != self.in_dim or int(d.get("h", -1)) != self.h:
+            return False
+        self.W1 = [[float(x) for x in row] for row in d["W1"]]
+        self.b1 = [float(x) for x in d["b1"]]
+        self.W2 = [[float(x) for x in row] for row in d["W2"]]
+        self.b2 = [float(x) for x in d["b2"]]
+        self.n = int(d.get("n", 0))
+        self.mean = [float(x) for x in d.get("mean", self.mean)]
+        self._M2 = [float(x) for x in d.get("M2", self._M2)]
+        self.err_ema = float(d.get("err_ema", 1.0))
+        self.samples = int(d.get("samples", 0))
+        return True
+
 
 class NeuralWorldModel(WorldModel):
     """A neural drop-in for :class:`WorldModel`: a per-action MLP learns (state → Δstate, reward).
@@ -457,7 +566,8 @@ class NeuralWorldModel(WorldModel):
         return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in state)
 
     def observe(self, state: Sequence[Any], action: Action,
-                next_state: Sequence[Any], reward: float = 0.0) -> None:
+                next_state: Sequence[Any], reward: float = 0.0,
+                done: bool = False) -> None:
         state = tuple(state)
         next_state = tuple(next_state)
         if not self._numeric(state) or not self._numeric(next_state):
@@ -466,12 +576,14 @@ class NeuralWorldModel(WorldModel):
             self._state_dim = len(state)
         if len(state) != self._state_dim or len(next_state) != self._state_dim:
             return
+        self._track_realized(state, action, next_state)
         net = self._nets.get(action)
         if net is None:
             net = _ForwardNet(self._state_dim, hidden=self.hidden, lr=self.lr,
                               seed=self.seed + len(self._nets))
             self._nets[action] = net
-        target = [next_state[i] - state[i] for i in range(self._state_dim)] + [float(reward)]
+        target = ([next_state[i] - state[i] for i in range(self._state_dim)]
+                  + [float(reward), 1.0 if done else 0.0])
         for _ in range(self.epochs):
             net.train(list(state), target)
         self._count += 1
@@ -483,6 +595,7 @@ class NeuralWorldModel(WorldModel):
             return Prediction(next_state=state, reward=0.0, confidence=0.0, neighbors=0)
         out = net.predict(list(state))
         delta, reward = out[: self._state_dim], out[self._state_dim]
+        done_prob = max(0.0, min(1.0, out[self._state_dim + 1]))
         next_state: State = tuple(state[i] + delta[i] for i in range(self._state_dim))
         # honest confidence: grows with experience + low error, decays out of distribution
         experience = min(1.0, net.samples / 20.0)
@@ -490,11 +603,38 @@ class NeuralWorldModel(WorldModel):
         ood = math.exp(-max(0.0, net.deviation(state) - self.ood_tolerance))
         conf = max(0.0, min(1.0, experience * fit * ood))
         return Prediction(next_state=next_state, reward=reward,
-                          confidence=conf, neighbors=net.samples)
+                          confidence=conf, neighbors=net.samples, done_prob=done_prob)
 
     def stats(self) -> Dict[str, Any]:
         return {"transitions": self._count, "backend": "neural-mlp", "hidden": self.hidden,
                 "actions": {str(a): n.samples for a, n in self._nets.items()}}
+
+    def to_dict(self, **_kw: Any) -> Dict[str, Any]:
+        return {"kind": "neural", "state_dim": self._state_dim, "count": self._count,
+                "hidden": self.hidden,
+                "nets": {repr(a): n.to_dict() for a, n in self._nets.items()}}
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        if not isinstance(data, dict) or data.get("kind") != "neural":
+            return False
+        if int(data.get("hidden", -1)) != self.hidden:
+            return False
+        state_dim = data.get("state_dim")
+        if state_dim is None:
+            return False
+        self._state_dim = int(state_dim)
+        restored = 0
+        for key, nd in (data.get("nets") or {}).items():
+            try:
+                action = _unrepr_action(key)
+                net = _ForwardNet(self._state_dim, hidden=self.hidden, lr=self.lr)
+                if net.load_dict(nd):
+                    self._nets[action] = net
+                    restored += 1
+            except Exception:  # noqa: BLE001 — one bad net never aborts a restore
+                continue
+        self._count = int(data.get("count", 0))
+        return restored > 0
 
 
 # --------------------------------------------------------------------------- #
@@ -542,6 +682,8 @@ class _MLP:
         out, acts = self.forward(X)
         diff = out - Y
         loss = float(np.mean(diff ** 2))
+        # per-sample errors feed prioritized replay in the owning model
+        self.last_per_sample = np.mean(diff ** 2, axis=1)
         gW: List[Any] = [None] * len(self.W)
         gb: List[Any] = [None] * len(self.b)
         delta = (2.0 / n) * diff                       # dL/d(out), linear head
@@ -552,6 +694,24 @@ class _MLP:
                 delta = (delta @ self.W[i].T) * (1.0 - acts[i] ** 2)
         self._adam(gW, gb)
         return loss
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"dims": list(self.dims),
+                "W": [w.tolist() for w in self.W],
+                "b": [b.tolist() for b in self.b]}
+
+    def load_dict(self, d: Dict[str, Any]) -> bool:
+        if list(d.get("dims", [])) != list(self.dims):
+            return False
+        self.W = [np.asarray(w, dtype=np.float64) for w in d["W"]]
+        self.b = [np.asarray(b, dtype=np.float64) for b in d["b"]]
+        # Adam moments restart cold — harmless: they re-warm within a few batches
+        self._mW = [np.zeros_like(w) for w in self.W]
+        self._vW = [np.zeros_like(w) for w in self.W]
+        self._mb = [np.zeros_like(b) for b in self.b]
+        self._vb = [np.zeros_like(b) for b in self.b]
+        self._t = 0
+        return True
 
     def input_grad(self, X: Any, Y: Any) -> Any:
         """Gradient of the loss w.r.t. the *input* ``X`` (weights untouched).
@@ -584,12 +744,13 @@ class _MLP:
 
 
 class _ActionModel:
-    """A deep ensemble + replay buffer for ONE action; learns standardised dynamics."""
+    """A deep ensemble + prioritized replay buffer for ONE action; standardised dynamics."""
 
     def __init__(self, in_dim: int, *, ensemble: int, hidden: Sequence[int], lr: float,
                  batch: int, iters: int, buffer_cap: int, seed: int) -> None:
         self.in_dim = in_dim
-        self.out_dim = in_dim + 1
+        self.out_dim = in_dim + 2                      # [Δstate…, reward, done]
+        self.hidden = tuple(hidden)
         self.batch = batch
         self.iters = iters
         self.cap = buffer_cap
@@ -597,18 +758,26 @@ class _ActionModel:
         self.members = [_MLP(in_dim, self.out_dim, hidden, lr, seed + 101 * (i + 1))
                         for i in range(max(1, ensemble))]
         self._S: List[List[float]] = []                # states
-        self._T: List[List[float]] = []                # targets = [Δstate..., reward]
+        self._T: List[List[float]] = []                # targets = [Δstate..., reward, done]
+        self._P: List[float] = []                      # replay priorities (last errors)
         self.in_mean = self.in_std = None
         self.out_mean = self.out_std = None
         self.err_ema = 1.0
         self.samples = 0
+        # self-tuned confidence calibration: running scale of observed disagreement,
+        # so `reliability` adapts to the domain instead of hard-coded constants
+        self.epi_scale = 0.5
+        self.dev_margin = 2.0
 
-    def add(self, state: Sequence[float], delta: Sequence[float], reward: float) -> None:
+    def add(self, state: Sequence[float], delta: Sequence[float], reward: float,
+            done: bool = False) -> None:
         self._S.append(list(state))
-        self._T.append([*delta, float(reward)])
+        self._T.append([*delta, float(reward), 1.0 if done else 0.0])
+        self._P.append(max(self._P) if self._P else 1.0)   # new experience trains soonest
         if len(self._S) > self.cap:
             self._S.pop(0)
             self._T.pop(0)
+            self._P.pop(0)
         self.samples += 1
 
     def _refresh_stats(self) -> Tuple[Any, Any]:
@@ -619,6 +788,14 @@ class _ActionModel:
         self.out_mean = T.mean(axis=0)
         self.out_std = T.std(axis=0) + 1e-6
         return S, T
+
+    def _sample_idx(self, n: int, bs: int) -> Any:
+        """Prioritized replay: pick transitions ∝ (last_error + ε)^0.6, so surprising
+        experience is rehearsed more — the model spends its budget where it is wrong."""
+        p = np.asarray(self._P[:n], dtype=np.float64)
+        p = (p + 1e-3) ** 0.6
+        p /= p.sum()
+        return self.rng.choice(n, size=bs, p=p)
 
     def train(self) -> None:
         if not self._S:
@@ -631,11 +808,16 @@ class _ActionModel:
         last = self.err_ema
         for m in self.members:
             for _ in range(self.iters):
-                idx = self.rng.integers(0, n, size=bs)      # bootstrap mini-batch (replay)
+                idx = self._sample_idx(n, bs)               # prioritized replay mini-batch
                 last = m.train_batch(Xn[idx], Yn[idx])
+                per = getattr(m, "last_per_sample", None)
+                if per is not None:                          # refresh sampled priorities
+                    for r, row in enumerate(idx):
+                        self._P[int(row)] = float(per[r])
         self.err_ema = 0.9 * self.err_ema + 0.1 * last
 
-    def predict(self, state: Sequence[float]) -> Optional[Tuple[List[float], float, float, float]]:
+    def predict(self, state: Sequence[float]) -> Optional[
+            Tuple[List[float], float, float, float, float]]:
         if self.in_mean is None:
             return None
         xn = (np.asarray(state, dtype=np.float64) - self.in_mean) / self.in_std
@@ -645,17 +827,55 @@ class _ActionModel:
         mean = mean_n * self.out_std + self.out_mean                             # destandardise
         delta = [float(v) for v in mean[: self.in_dim]]                          # native floats
         reward = float(mean[self.in_dim])
+        done_prob = max(0.0, min(1.0, float(mean[self.in_dim + 1])))
         # epistemic uncertainty: members' disagreement on the state delta (in real units)
         epistemic = float(np.mean(disagree_n[: self.in_dim] * self.out_std[: self.in_dim]))
         epistemic_norm = float(np.mean(disagree_n[: self.in_dim]))               # scale-free
         deviation = float(np.mean(np.abs(xn)))                                   # OOD signal
-        return delta, reward, epistemic, _pack_conf(epistemic_norm, deviation)
+        # self-calibration: the agreement scale tracks the disagreement actually seen,
+        # so "members agree" means agree *for this domain*, not for a magic constant
+        self.epi_scale = max(0.05, 0.99 * self.epi_scale + 0.01 * 2.0 * epistemic_norm)
+        reliability = _pack_conf(epistemic_norm, deviation,
+                                 epi_scale=self.epi_scale, dev_margin=self.dev_margin)
+        return delta, reward, done_prob, epistemic, reliability
+
+    def to_dict(self, *, max_buffer: int = 2000) -> Dict[str, Any]:
+        keep = min(len(self._S), max_buffer)
+        return {"in_dim": self.in_dim, "hidden": list(self.hidden),
+                "members": [m.to_dict() for m in self.members],
+                "S": self._S[-keep:], "T": self._T[-keep:], "P": self._P[-keep:],
+                "err_ema": self.err_ema, "samples": self.samples,
+                "epi_scale": self.epi_scale}
+
+    def load_dict(self, d: Dict[str, Any]) -> bool:
+        if int(d.get("in_dim", -1)) != self.in_dim or \
+                list(d.get("hidden", [])) != list(self.hidden):
+            return False
+        members = d.get("members") or []
+        if len(members) != len(self.members):
+            return False
+        for m, md in zip(self.members, members):
+            if not m.load_dict(md):
+                return False
+        self._S = [list(map(float, r)) for r in d.get("S", [])]
+        self._T = [list(map(float, r)) for r in d.get("T", [])]
+        self._P = [float(x) for x in d.get("P", [])] or [1.0] * len(self._S)
+        self.err_ema = float(d.get("err_ema", 1.0))
+        self.samples = int(d.get("samples", len(self._S)))
+        self.epi_scale = float(d.get("epi_scale", 0.5))
+        if self._S:
+            self._refresh_stats()
+        return True
 
 
-def _pack_conf(epistemic_norm: float, deviation: float) -> float:
-    """Fold ensemble agreement + out-of-distribution distance into one [0,1] reliability."""
-    agree = math.exp(-epistemic_norm / 0.5)                  # members agree ⇒ →1
-    ood = math.exp(-max(0.0, deviation - 2.0))               # within seen range ⇒ →1
+def _pack_conf(epistemic_norm: float, deviation: float, *,
+               epi_scale: float = 0.5, dev_margin: float = 2.0) -> float:
+    """Fold ensemble agreement + out-of-distribution distance into one [0,1] reliability.
+
+    The scales are *parameters* (self-tuned by the owning model from the disagreement it
+    actually observes), not hard-coded truths."""
+    agree = math.exp(-epistemic_norm / max(1e-6, epi_scale))  # members agree ⇒ →1
+    ood = math.exp(-max(0.0, deviation - dev_margin))         # within seen range ⇒ →1
     return max(0.0, min(1.0, agree * ood))
 
 
@@ -714,19 +934,21 @@ class EnsembleWorldModel(WorldModel):
         return True
 
     def observe(self, state: Sequence[Any], action: Action,
-                next_state: Sequence[Any], reward: float = 0.0) -> None:
+                next_state: Sequence[Any], reward: float = 0.0,
+                done: bool = False) -> None:
         state = tuple(state)
         next_state = tuple(next_state)
         if not (self._numeric(state) and self._numeric(next_state)):
-            self._knn.observe(state, action, next_state, reward)   # symbolic → exact memory
+            self._knn.observe(state, action, next_state, reward, done)  # symbolic → exact
             self._count += 1
             return
         if self._state_dim is None:
             self._state_dim = len(state)
         if len(state) != self._state_dim or len(next_state) != self._state_dim:
-            self._knn.observe(state, action, next_state, reward)   # odd-dim → exact memory
+            self._knn.observe(state, action, next_state, reward, done)  # odd-dim → exact
             self._count += 1
             return
+        self._track_realized(state, action, next_state)
         model = self._models.get(action)
         if model is None:
             model = _ActionModel(self._state_dim, ensemble=self.ensemble, hidden=self.hidden,
@@ -736,7 +958,7 @@ class EnsembleWorldModel(WorldModel):
             self._models[action] = model
             self._since_train[action] = 0
         delta = [next_state[i] - state[i] for i in range(self._state_dim)]
-        model.add(state, delta, reward)
+        model.add(state, delta, reward, done)
         self._count += 1
         self._since_train[action] += 1
         if self._since_train[action] >= self.train_every:
@@ -749,13 +971,14 @@ class EnsembleWorldModel(WorldModel):
         if model is not None and self._fits_ensemble(state):
             out = model.predict(state)
             if out is not None:
-                delta, reward, epistemic, reliability = out
+                delta, reward, done_prob, epistemic, reliability = out
                 next_state: State = tuple(state[i] + delta[i] for i in range(self._state_dim))
                 experience = min(1.0, model.samples / float(self.experience_full))
                 fit = 1.0 / (1.0 + model.err_ema)
                 conf = max(0.0, min(1.0, experience * fit * reliability))
                 return Prediction(next_state=next_state, reward=reward, confidence=conf,
-                                  neighbors=model.samples, epistemic=epistemic)
+                                  neighbors=model.samples, epistemic=epistemic,
+                                  done_prob=done_prob)
         return self._knn.predict(state, action)          # symbolic / untrained → exact memory
 
     def stats(self) -> Dict[str, Any]:
@@ -763,6 +986,41 @@ class EnsembleWorldModel(WorldModel):
                 "ensemble": self.ensemble, "hidden": list(self.hidden),
                 "numeric_actions": {str(a): m.samples for a, m in self._models.items()},
                 "symbolic_transitions": len(self._knn)}
+
+    def to_dict(self, **_kw: Any) -> Dict[str, Any]:
+        return {"kind": "ensemble", "state_dim": self._state_dim, "count": self._count,
+                "ensemble": self.ensemble, "hidden": list(self.hidden),
+                "models": {repr(a): m.to_dict() for a, m in self._models.items()},
+                "knn": self._knn.to_dict()}
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        if not isinstance(data, dict) or data.get("kind") != "ensemble":
+            return False
+        if int(data.get("ensemble", -1)) != self.ensemble or \
+                list(data.get("hidden", [])) != list(self.hidden):
+            return False
+        state_dim = data.get("state_dim")
+        restored = 0
+        if state_dim is not None:
+            self._state_dim = int(state_dim)
+            for key, md in (data.get("models") or {}).items():
+                try:
+                    action = _unrepr_action(key)
+                    model = _ActionModel(
+                        self._state_dim, ensemble=self.ensemble, hidden=self.hidden,
+                        lr=self.lr, batch=self.batch, iters=self.iters,
+                        buffer_cap=self.max_transitions,
+                        seed=self.seed + 1009 * (len(self._models) + 1))
+                    if model.load_dict(md):
+                        self._models[action] = model
+                        self._since_train[action] = 0
+                        restored += 1
+                except Exception:  # noqa: BLE001 — one bad model never aborts a restore
+                    continue
+        if data.get("knn"):
+            self._knn.load_dict(data["knn"])
+        self._count = int(data.get("count", 0))
+        return restored > 0 or len(self._knn) > 0
 
 
 # --------------------------------------------------------------------------- #
@@ -819,16 +1077,19 @@ class TransferWorldModel(WorldModel):
         self._own_samples: Dict[Action, int] = {}
         self._members: Optional[List[_MLP]] = None
         self._state_dim: Optional[int] = None
-        # ONE shared replay buffer across all actions (states, actions, targets)
+        # ONE shared replay buffer across all actions (states, actions, targets, priorities)
         self._S: List[List[float]] = []
         self._A: List[Action] = []
         self._T: List[List[float]] = []
+        self._P: List[float] = []
         self._count = 0
         self._since_train = 0
         # shared normalisation stats
         self._in_mean = self._in_std = None            # over the state part
-        self._out_mean = self._out_std = None          # over the target [Δstate, reward]
+        self._out_mean = self._out_std = None          # over the target [Δstate, reward, done]
         self.err_ema = 1.0
+        # self-tuned confidence calibration (see _pack_conf)
+        self._epi_scale = 0.5
         # exact-memory fallback for symbolic / inconsistent-dimension transitions
         self._knn = WorldModel(max_transitions=max_transitions)
 
@@ -862,36 +1123,40 @@ class TransferWorldModel(WorldModel):
         self._embed_t[action] = 0
 
     def observe(self, state: Sequence[Any], action: Action,
-                next_state: Sequence[Any], reward: float = 0.0) -> None:
+                next_state: Sequence[Any], reward: float = 0.0,
+                done: bool = False) -> None:
         state = tuple(state)
         next_state = tuple(next_state)
         if not (self._numeric(state) and self._numeric(next_state)):
-            self._knn.observe(state, action, next_state, reward)
+            self._knn.observe(state, action, next_state, reward, done)
             self._count += 1
             return
         if self._state_dim is None:
             self._state_dim = len(state)
         if len(state) != self._state_dim or len(next_state) != self._state_dim:
-            self._knn.observe(state, action, next_state, reward)
+            self._knn.observe(state, action, next_state, reward, done)
             self._count += 1
             return
+        self._track_realized(state, action, next_state)
         # update the concept hierarchy *first* so a new action seeds near the right concept
         self.concepts.update(action, state, next_state, reward)
         self._ensure_embed(action)
         delta = [next_state[i] - state[i] for i in range(self._state_dim)]
         self._S.append(list(state))
         self._A.append(action)
-        self._T.append([*delta, float(reward)])
+        self._T.append([*delta, float(reward), 1.0 if done else 0.0])
+        self._P.append(max(self._P) if self._P else 1.0)   # new experience trains soonest
         if len(self._S) > self.max_transitions:
             self._S.pop(0)
             self._A.pop(0)
             self._T.pop(0)
+            self._P.pop(0)
         self._own_samples[action] = self._own_samples.get(action, 0) + 1
         self._count += 1
         self._since_train += 1
         if self._members is None:
             in_dim = self._state_dim + self.embed_dim
-            self._members = [_MLP(in_dim, self._state_dim + 1, self.hidden, self.lr,
+            self._members = [_MLP(in_dim, self._state_dim + 2, self.hidden, self.lr,
                                   self.seed + 101 * (i + 1)) for i in range(self.ensemble)]
         if self._since_train >= self.train_every:
             self._train()
@@ -914,11 +1179,18 @@ class TransferWorldModel(WorldModel):
         n = Sn.shape[0]
         bs = min(self.batch, n)
         X = np.concatenate([Sn, self._embed_matrix()], axis=1)   # [state ⊕ embedding]
+        prio = (np.asarray(self._P[:n], dtype=np.float64) + 1e-3) ** 0.6
+        prio /= prio.sum()
         last = self.err_ema
         for m in self._members:
             for _ in range(self.iters):
-                idx = self._rng.integers(0, n, size=bs)           # bootstrap mini-batch (replay)
+                # prioritized replay: rehearse the transitions the model got wrong
+                idx = self._rng.choice(n, size=bs, p=prio)
                 last = m.train_batch(X[idx], Yn[idx])
+                per = getattr(m, "last_per_sample", None)
+                if per is not None:
+                    for r, row in enumerate(idx):
+                        self._P[int(row)] = float(per[r])
         self.err_ema = 0.9 * self.err_ema + 0.1 * last
         self._update_embeddings(Sn, Yn, bs)
 
@@ -963,12 +1235,15 @@ class TransferWorldModel(WorldModel):
             mean = mean_n * self._out_std + self._out_mean
             delta = [float(v) for v in mean[: self._state_dim]]
             reward = float(mean[self._state_dim])
+            done_prob = max(0.0, min(1.0, float(mean[self._state_dim + 1])))
             next_state: State = tuple(state[i] + delta[i] for i in range(self._state_dim))
             epistemic = float(np.mean(disagree_n[: self._state_dim]
                                       * self._out_std[: self._state_dim]))
             epistemic_norm = float(np.mean(disagree_n[: self._state_dim]))
             deviation = float(np.mean(np.abs(sn)))
-            reliability = _pack_conf(epistemic_norm, deviation)
+            # self-calibration: agreement scale tracks the disagreement actually observed
+            self._epi_scale = max(0.05, 0.99 * self._epi_scale + 0.01 * 2.0 * epistemic_norm)
+            reliability = _pack_conf(epistemic_norm, deviation, epi_scale=self._epi_scale)
             # honest confidence: own evidence counts fully, borrowed (sibling) evidence is
             # discounted by ``transfer_weight`` — so a transferring action is confident but
             # never *more* certain than one that learned the dynamics first-hand.
@@ -979,7 +1254,7 @@ class TransferWorldModel(WorldModel):
             fit = 1.0 / (1.0 + self.err_ema)
             conf = max(0.0, min(1.0, experience * fit * reliability))
             return Prediction(next_state=next_state, reward=reward, confidence=conf,
-                              neighbors=own, epistemic=epistemic)
+                              neighbors=own, epistemic=epistemic, done_prob=done_prob)
         return self._knn.predict(state, action)        # symbolic / unknown → exact memory
 
     def stats(self) -> Dict[str, Any]:
@@ -993,6 +1268,275 @@ class TransferWorldModel(WorldModel):
     def concept_report(self) -> str:
         """Human-readable view of the learned concept hierarchy over actions."""
         return self.concepts.report()
+
+    # ---- persistence: the learned dynamics + action embeddings survive restarts ---- #
+    def to_dict(self, *, max_buffer: int = 4000, **_kw: Any) -> Dict[str, Any]:
+        keep = min(len(self._S), max_buffer)
+        return {
+            "kind": "transfer", "state_dim": self._state_dim, "count": self._count,
+            "ensemble": self.ensemble, "hidden": list(self.hidden),
+            "embed_dim": self.embed_dim,
+            "members": [m.to_dict() for m in self._members] if self._members else [],
+            "embed": {repr(a): [float(x) for x in e] for a, e in self._embed.items()},
+            "own_samples": {repr(a): int(n) for a, n in self._own_samples.items()},
+            "S": self._S[-keep:],
+            "A": [repr(a) for a in self._A[-keep:]],
+            "T": self._T[-keep:],
+            "P": self._P[-keep:],
+            "err_ema": self.err_ema, "epi_scale": self._epi_scale,
+            "knn": self._knn.to_dict(),
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        if not isinstance(data, dict) or data.get("kind") != "transfer":
+            return False
+        if int(data.get("ensemble", -1)) != self.ensemble or \
+                list(data.get("hidden", [])) != list(self.hidden) or \
+                int(data.get("embed_dim", -1)) != self.embed_dim:
+            return False
+        state_dim = data.get("state_dim")
+        restored = False
+        if state_dim is not None and data.get("members"):
+            self._state_dim = int(state_dim)
+            in_dim = self._state_dim + self.embed_dim
+            members = [_MLP(in_dim, self._state_dim + 2, self.hidden, self.lr,
+                            self.seed + 101 * (i + 1)) for i in range(self.ensemble)]
+            if len(data["members"]) == len(members) and \
+                    all(m.load_dict(md) for m, md in zip(members, data["members"])):
+                self._members = members
+                restored = True
+        if restored:
+            for key, e in (data.get("embed") or {}).items():
+                a = _unrepr_action(key)
+                self._embed[a] = np.asarray(e, dtype=np.float64)
+                self._embed_m[a] = np.zeros(self.embed_dim)
+                self._embed_v[a] = np.zeros(self.embed_dim)
+                self._embed_t[a] = 0
+            self._own_samples = {_unrepr_action(k): int(v)
+                                 for k, v in (data.get("own_samples") or {}).items()}
+            self._S = [list(map(float, r)) for r in data.get("S", [])]
+            self._A = [_unrepr_action(k) for k in data.get("A", [])]
+            self._T = [list(map(float, r)) for r in data.get("T", [])]
+            self._P = [float(x) for x in data.get("P", [])] or [1.0] * len(self._S)
+            self.err_ema = float(data.get("err_ema", 1.0))
+            self._epi_scale = float(data.get("epi_scale", 0.5))
+            self._count = int(data.get("count", len(self._S)))
+            if self._S:
+                S = np.asarray(self._S, dtype=np.float64)
+                T = np.asarray(self._T, dtype=np.float64)
+                self._in_mean = S.mean(axis=0)
+                self._in_std = S.std(axis=0) + 1e-6
+                self._out_mean = T.mean(axis=0)
+                self._out_std = T.std(axis=0) + 1e-6
+                # rebuild the concept hierarchy by replaying the persisted experience
+                for s, a, t in zip(self._S, self._A, self._T):
+                    ns = [s[i] + t[i] for i in range(self._state_dim)]
+                    self.concepts.update(a, s, ns, t[self._state_dim])
+        if data.get("knn"):
+            restored = self._knn.load_dict(data["knn"]) or restored
+        return restored
+
+
+# --------------------------------------------------------------------------- #
+# Grounded wrapper — text/symbolic experience becomes learnable numeric dynamics
+# --------------------------------------------------------------------------- #
+class GroundedWorldModel:
+    """Grounds ANY experience — text, dicts, symbols — into the learned dynamics model.
+
+    The learners above need numeric state vectors, so NYXARA's real conversational turns
+    ("Master asked X, I replied Y, it went well") never used to reach them: the world
+    model only ever saw simulators. This wrapper closes that gap. A ``state_encoder``
+    maps arbitrary states through the **shared memory embedder** (the same self-learned
+    space her recall uses) and a fixed seeded projection down to a compact numeric latent
+    (default 16-d) — so a lived turn becomes a real ``(state, action, next_state,
+    reward)`` transition the ensemble genuinely trains on.
+
+    An optional ``causal_model`` (mind/causal_world_model.py) acts as a structural
+    prior: when the dynamics model predicts a low-confidence effect for an action whose
+    causal graph shows NO established effect, the predicted change is damped — causal
+    knowledge constrains imagination, imagination feeds causal discovery (the reverse
+    link lives in the kernel's idle loop). Same surface as :class:`WorldModel`
+    (``observe``/``predict``/``rollout``/``counterfactual``/``intervene``…), stdlib-safe."""
+
+    def __init__(self, inner: WorldModel, *, embedder: Any = None,
+                 state_latent_dim: int = 16, causal_model: Any = None,
+                 seed: int = 1469598103934665603) -> None:
+        self.inner = inner
+        self.embedder = embedder
+        self.state_latent_dim = max(2, int(state_latent_dim))
+        self.causal_model = causal_model
+        self._seed = seed
+        self._proj_cache: Dict[int, List[List[float]]] = {}
+
+    def __len__(self) -> int:
+        return len(self.inner)
+
+    # ---- grounding: any state → a numeric latent the learners can model ---- #
+    @staticmethod
+    def _numeric(state: Sequence[Any]) -> bool:
+        return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in state)
+
+    def _projection(self, src_dim: int) -> List[List[float]]:
+        """A fixed seeded ±1 sparse projection src_dim→latent (deterministic forever)."""
+        cached = self._proj_cache.get(src_dim)
+        if cached is not None:
+            return cached
+        rng = random.Random(self._seed ^ src_dim)
+        rows = [[0.0] * src_dim for _ in range(self.state_latent_dim)]
+        for j in range(src_dim):
+            for _ in range(3):  # each source dim feeds 3 latent dims
+                rows[rng.randrange(self.state_latent_dim)][j] += rng.choice((-1.0, 1.0))
+        self._proj_cache[src_dim] = rows
+        return rows
+
+    def encode_state(self, state: Any) -> State:
+        """Numeric sequences pass through; anything else embeds → projects to the latent."""
+        if isinstance(state, (tuple, list)) and state and self._numeric(state):
+            return tuple(state)
+        text = state if isinstance(state, str) else str(state)
+        if self.embedder is not None:
+            try:
+                vec = self.embedder.embed(text)
+            except Exception:  # noqa: BLE001 — fall back to a hash latent below
+                vec = None
+        else:
+            vec = None
+        if not vec:
+            # dependency-free fallback: bag-of-hashes straight into the latent
+            rng = random.Random(hash(text) & 0xFFFFFFFF)
+            return tuple(rng.uniform(-1, 1) for _ in range(self.state_latent_dim))
+        proj = self._projection(len(vec))
+        out = [sum(row[i] * vec[i] for i in range(len(vec))) for row in proj]
+        norm = math.sqrt(sum(v * v for v in out)) or 1.0
+        return tuple(v / norm for v in out)
+
+    # ---- the WorldModel surface, grounded ---- #
+    def observe(self, state: Any, action: Action, next_state: Any,
+                reward: float = 0.0, done: bool = False) -> None:
+        self.inner.observe(self.encode_state(state), action,
+                           self.encode_state(next_state), reward, done)
+
+    def observe_many(self, transitions: Sequence[Transition]) -> None:
+        for t in transitions:
+            self.observe(t.state, t.action, t.next_state,
+                         getattr(t, "reward", 0.0), getattr(t, "done", False))
+
+    def predict(self, state: Any, action: Action) -> Prediction:
+        pred = self.inner.predict(self.encode_state(state), action)
+        return self._apply_causal_prior(pred, action)
+
+    def _apply_causal_prior(self, pred: Prediction, action: Action) -> Prediction:
+        """Damp low-confidence predicted change for actions with no known causal effect."""
+        cm = self.causal_model
+        if cm is None or pred.confidence >= 0.35:
+            return pred
+        try:
+            effects = cm.effects_of(f"act:{action}")
+            known = bool(getattr(cm, "_links", None)) or bool(effects)
+            if known and not effects:
+                # the causal graph is mature AND says this action causes nothing —
+                # a speculative predicted change is more likely noise than knowledge
+                sq = tuple(v * 0.5 if isinstance(v, (int, float)) else v
+                           for v in pred.next_state)
+                return Prediction(next_state=sq, reward=pred.reward * 0.5,
+                                  confidence=pred.confidence, neighbors=pred.neighbors,
+                                  epistemic=pred.epistemic, done_prob=pred.done_prob)
+        except Exception:  # noqa: BLE001 — the prior is advisory, never fatal
+            pass
+        return pred
+
+    def rollout(self, start: Any, policy: Policy, **kw: Any) -> Trajectory:
+        return self.inner.rollout(self.encode_state(start), policy, **kw)
+
+    def imagine(self, start: Any, action: Action, **kw: Any) -> Trajectory:
+        return self.inner.imagine(self.encode_state(start), action, **kw)
+
+    def counterfactual(self, start: Any, policy_a: Policy, policy_b: Policy,
+                       **kw: Any) -> CounterfactualResult:
+        return self.inner.counterfactual(self.encode_state(start), policy_a, policy_b, **kw)
+
+    def intervene(self, start: Any, policy: Policy, **kw: Any) -> Trajectory:
+        return self.inner.intervene(self.encode_state(start), policy, **kw)
+
+    def learning_progress(self, state: Any, action: Action) -> float:
+        return self.inner.learning_progress(self.encode_state(state), action)
+
+    def coverage(self, state: Any, action: Action) -> float:
+        return self.inner.coverage(self.encode_state(state), action)
+
+    def actions(self) -> List[Action]:
+        return self.inner.actions()
+
+    def mean_epistemic(self) -> float:
+        fn = getattr(self.inner, "mean_epistemic", None)
+        return float(fn()) if callable(fn) else 0.0
+
+    def prediction_error_ema(self) -> float:
+        fn = getattr(self.inner, "prediction_error_ema", None)
+        return float(fn()) if callable(fn) else 0.0
+
+    def stats(self) -> Dict[str, Any]:
+        s = dict(self.inner.stats())
+        s["grounded"] = True
+        s["state_latent_dim"] = self.state_latent_dim
+        s["prediction_error_ema"] = round(self.prediction_error_ema(), 5)
+        s["mean_epistemic"] = round(self.mean_epistemic(), 5)
+        return s
+
+    def to_dict(self, **kw: Any) -> Dict[str, Any]:
+        inner_fn = getattr(self.inner, "to_dict", None)
+        return {"kind": "grounded", "state_latent_dim": self.state_latent_dim,
+                "inner": inner_fn(**kw) if callable(inner_fn) else {}}
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        if not isinstance(data, dict) or data.get("kind") != "grounded":
+            return False
+        if int(data.get("state_latent_dim", -1)) != self.state_latent_dim:
+            return False
+        inner_fn = getattr(self.inner, "load_dict", None)
+        return bool(inner_fn(data.get("inner") or {})) if callable(inner_fn) else False
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate backend-specific extras (``concept_report``, ``concepts``, …) to the
+        wrapped learner, so the grounded wrapper is a drop-in for every backend."""
+        inner = self.__dict__.get("inner")
+        if inner is None or name.startswith("__"):
+            raise AttributeError(name)
+        return getattr(inner, name)
+
+
+# --------------------------------------------------------------------------- #
+# Module-level persistence — learned dynamics survive restarts (Rule 7)
+# --------------------------------------------------------------------------- #
+def save_world_model(model: Any, path: str) -> Optional[str]:
+    """Atomically persist any world model that exposes ``to_dict`` (best-effort)."""
+    import json
+    import os
+    to_dict = getattr(model, "to_dict", None)
+    if not callable(to_dict):
+        return None
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(to_dict(), f, default=str)
+        os.replace(tmp, path)
+        return path
+    except Exception:  # noqa: BLE001 — persistence is a capability, never fatal
+        return None
+
+
+def load_world_model(model: Any, path: str) -> bool:
+    """Restore a world model persisted by :func:`save_world_model` (best-effort)."""
+    import json
+    load_dict = getattr(model, "load_dict", None)
+    if not callable(load_dict):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return bool(load_dict(json.load(f)))
+    except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
+        return False
 
 
 # --------------------------------------------------------------------------- #

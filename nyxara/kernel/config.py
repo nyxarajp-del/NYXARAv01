@@ -1483,6 +1483,18 @@ class MemoryConfig(BaseModel):
     # but it compounds paraphrase reach from the text NYXARA actually reads — paraphrases match from
     # data, not a hand-written thesaurus. The live loop feeds it; set False for the static lexical map.
     learned_embeddings: bool = True
+    # NYXARA's OWN gradient-trained embedding space (memory/neural_embedder.py) — the default.
+    # SGNS word vectors + a contrastive sentence head, trained by real SGD on the text she
+    # actually lives (turns, consolidated gists, helpful recalls) during consolidation/dream
+    # cycles; no external model, no download. Cold it is byte-identical to the lexical space,
+    # and the learned signal is blended in only in proportion to a held-out self-audit
+    # (semantic_grade), so recall can never regress below the lexical floor.
+    self_learned_embeddings: bool = True
+    embedder_latent_dim: int = Field(default=64, ge=8, le=1024)     # learned latent width
+    embedder_negatives: int = Field(default=5, ge=1, le=64)         # SGNS negative samples
+    embedder_corpus_cap: int = Field(default=20000, ge=256)         # experience texts kept
+    embedder_train_budget_s: float = Field(default=2.0, gt=0)       # SGD budget per cycle
+    reembed_batch: int = Field(default=200, ge=1)                   # stale re-embeds per pass
     # Managed/embedded Qdrant vector DB (used when vector_backend=qdrant). Leave url empty
     # for an embedded local store at ``qdrant_path`` (or in-memory if that is empty too);
     # set url (+ api_key) to point at a managed Qdrant cluster for real scale.
@@ -1598,6 +1610,10 @@ class CausalConfig(BaseModel):
     max_vars: int = Field(default=512, ge=8)
     max_events: int = Field(default=20000, ge=64)
     persist: bool = True                               # carry the learned graph across restarts
+    # learned FUNCTIONAL mechanisms: for causal edges with valued events, fit value_B≈f(value_A)
+    # (online ridge) so counterfactuals carry real effect sizes, not bare probability lifts
+    functional_mechanisms: bool = True
+    min_pairs_fit: int = Field(default=8, ge=2)        # valued samples needed before fitting f
 
 
 class GuardConfig(BaseModel):
