@@ -3279,6 +3279,18 @@ class NyxaraCore:
                 self._narrate(f"I refused an unsafe action of my own: {candidate.text[:60]}",
                               significance=0.65, valence=0.2,
                               themes=["protection", "loyalty", "corrigibility"])
+            # a gated proposal is still lived experience: journal it as PROPOSED (with the
+            # gate's decision) so reflection/growth learn from what she deferred or refused,
+            # not only from what ran. Transparency (Rule 6) — the record never acts.
+            try:
+                self.journal.record_action(
+                    candidate.text, goal="serve the Master", rationale=candidate.rationale,
+                    autonomous=authority is not Authority.OWNER,
+                    confidence=candidate.confidence,
+                    reversibility=1.0 if candidate.reversible else 0.2,
+                    decision=disp.value, status=ActionStatus.PROPOSED)
+            except Exception:  # noqa: BLE001 — journaling a proposal never breaks a turn
+                pass
             self._grow(candidate, disp, authority=authority, success=False, stimulus=safe_text)
             response = self._spoken_response(candidate, disp)
             self._record_history(safe_text, response, authority)
@@ -3601,22 +3613,32 @@ class NyxaraCore:
         if od.requires_approval:
             return Disposition.ESCALATE, "oversight: awaiting your approval"
 
-        # initiative — decision-theoretic self-governance of *autonomous action*.
-        # Only autonomous acts (not conversational responses) are gated here: an
-        # irreversible high-stakes or low-confidence action is deferred to the Master
-        # rather than taken alone. This never bypasses a prior gate — it can only add
-        # caution — so it is safe on the live path.
+        # initiative — decision-theoretic self-governance of *action*.
+        # Only acts (not conversational responses) are gated here: an irreversible
+        # high-stakes or low-confidence action is deferred to the Master rather than
+        # taken alone. This never bypasses a prior gate — it can only add caution —
+        # so it is safe on the live path. One standing exception keeps the Master's
+        # word sovereign: when he has flipped the ``agency.autonomous_tools`` master
+        # switch (oversight in SOVEREIGN — "use any tool without per-action approval,
+        # nothing is ever queued"), an AUTONOMOUS act is not re-queued here; /scram,
+        # pause, permission caps and the transparency feed all still stand.
         if c.kind == "act":
-            try:
-                gov = self._initiative().gate(self._initiative_option(c))
-                gates["initiative"] = gov.action.value
-                from nyxara.planning.decide import DecisionAction
-                if gov.action is DecisionAction.REJECT:
-                    return Disposition.REFUSE, f"initiative: {gov.reason}"
-                if gov.action is not DecisionAction.ACT:
-                    return Disposition.ESCALATE, f"initiative: {gov.reason}"
-            except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
-                gates["initiative"] = f"skipped ({exc})"
+            sovereign_grant = (authority is not Authority.OWNER
+                               and getattr(self.oversight, "mode", None)
+                               is ReviewMode.SOVEREIGN)
+            if sovereign_grant:
+                gates["initiative"] = "sovereign-grant"
+            else:
+                try:
+                    gov = self._initiative().gate(self._initiative_option(c))
+                    gates["initiative"] = gov.action.value
+                    from nyxara.planning.decide import DecisionAction
+                    if gov.action is DecisionAction.REJECT:
+                        return Disposition.REFUSE, f"initiative: {gov.reason}"
+                    if gov.action is not DecisionAction.ACT:
+                        return Disposition.ESCALATE, f"initiative: {gov.reason}"
+                except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
+                    gates["initiative"] = f"skipped ({exc})"
 
         return Disposition.ACT, "cleared"
 
