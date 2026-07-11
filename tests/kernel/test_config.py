@@ -64,6 +64,24 @@ def test_test_profile_forces_mock_llm():
     assert s.observability.telemetry_enabled is False
 
 
+def test_real_learning_defaults_on():
+    """Real, weight-changing learning is the default posture (the closed loop)."""
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
+    assert s.foundry.lora_requires_gpu is True       # no 9B download on a bare CPU box
+    assert s.autoforge.enabled is True
+    assert s.autoforge.min_examples == 10
+    assert s.flywheel.correction_weight == 3
+    assert s.llm.self_serve_any_backend is False     # the honesty serve gate
+    assert s.llm.self_reload_lean is True
+
+
+def test_test_profile_seals_the_foundry():
+    """The hermetic suite never forges to disk; tests that want it opt in explicitly."""
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    assert s.foundry.enabled is False
+
+
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
     s.llm.provider = LLMProvider.TINYLLAMA
@@ -82,8 +100,10 @@ def test_llm_active_model_and_key():
 def test_qwythos_is_the_default_foundry_base_and_gguf_serving():
     """The shipped defaults wire the Qwythos-9B integration end to end."""
     s = NyxaraSettings()
-    # serving: gguf provider by default, pointing at the Qwythos GGUF quant
-    assert s.llm.provider is LLMProvider.GGUF
+    # serving: the auto ladder by default (self→gguf→tinyllama→mock), so her own promoted
+    # weights serve the moment they exist; the gguf rung points at the Qwythos GGUF quant
+    assert s.llm.provider is LLMProvider.AUTO
+    assert s.llm.active_model() == "auto"
     assert "Qwythos-9B" in s.llm.gguf_model and s.llm.gguf_model.endswith("-GGUF")
     assert s.llm.gguf_filename.endswith(".gguf")
     # training: the foundry adapts the SAFETENSORS parent (not the -GGUF repo) with QLoRA

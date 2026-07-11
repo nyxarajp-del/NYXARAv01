@@ -126,3 +126,20 @@ def test_memory_save_without_memory_returns_null():
     r = _client().post("/v1/memory/save", json={}, headers=_auth())
     assert r.status_code == 200
     assert r.json()["saved"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Learning-status route
+# --------------------------------------------------------------------------- #
+def test_learning_route_returns_truthful_report():
+    r = _client().get("/v1/learning", headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    # every section present; absent subsystems reported absent (None), never invented
+    for key in ("foundry", "flywheel", "autoforge", "serving", "competence"):
+        assert key in body
+
+
+def test_learning_route_requires_auth():
+    r = _client().get("/v1/learning")
+    assert r.status_code == 401

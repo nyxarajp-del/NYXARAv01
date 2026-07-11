@@ -97,6 +97,8 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
+    AUTO = "auto"                 # ladder self→gguf→tinyllama→mock: her own promoted weights serve
+    #                               the moment they exist (and pass the serve gate) — no manual flip
     TINYLLAMA = "tinyllama"       # in-process TinyLlama-1.1B-Chat, downloaded via HuggingFace
     GGUF = "gguf"                 # in-process GGUF (llama.cpp) — the Qwythos-9B quant, cheap to serve
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
@@ -234,11 +236,16 @@ class LLMConfig(BaseModel):
     safetensors parent by the foundry. ``self`` serves the foundry-forged model (the
     LoRA adapter over that base) and ``mock`` is the deterministic offline fallback;
     every backend degrades to ``mock`` when its heavy deps are absent.
+
+    The default ``auto`` closes the train→serve loop: it walks the ladder
+    self→gguf→tinyllama→mock, so the moment the foundry promotes her own weights (and
+    they pass the serve gate — see ``self_serve_any_backend``) SHE serves them, with
+    zero manual reconfiguration; until then the strongest static backend answers.
     """
 
     model_config = {"validate_assignment": True}
 
-    provider: LLMProvider = LLMProvider.GGUF
+    provider: LLMProvider = LLMProvider.AUTO
     # ---- TinyLlama-1.1B: model & load-time control ---- #
     tinyllama_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     tinyllama_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
@@ -287,6 +294,14 @@ class LLMConfig(BaseModel):
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
+    # Serve gate for provider=auto: a promoted LoRA (the served base, improved) auto-serves;
+    # a small from-scratch backend replacing a large pretrained model would DEGRADE live
+    # behavior, so it needs this explicit opt-in (or provider=self). Honesty over theatre.
+    self_serve_any_backend: bool = False
+    # Hot-reload memory policy: drop a RAM/VRAM-heavy old model (LoRA base) BEFORE loading
+    # the newly-promoted one, instead of holding two bases at once. Failure restores the
+    # previous version from its on-disk dir.
+    self_reload_lean: bool = True
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -324,6 +339,7 @@ class LLMConfig(BaseModel):
 
     def active_model(self) -> str:
         return {
+            LLMProvider.AUTO: "auto",
             LLMProvider.TINYLLAMA: self.tinyllama_model,
             LLMProvider.GGUF: self.gguf_model,
             LLMProvider.SELF: "nyxara-self",
@@ -348,29 +364,19 @@ _FOUNDRY_PROFILES: Dict[str, Dict[str, int]] = {
 }
 
 
-def _torch_available() -> bool:
-    """True iff torch can be imported here — checked via ``find_spec`` so torch is *not* actually
-    imported at config-load time (fast, no side effects). Lets the heavy model foundry default ON
-    where real gradient forging is genuinely possible (a torch/GPU box) and stay OFF on a bare or
-    CI machine, where NYXARA's always-on pure-NumPy neural brain is already her real learner."""
-    try:
-        import importlib.util
-        return importlib.util.find_spec("torch") is not None
-    except Exception:  # noqa: BLE001 — a probe failure means "assume absent", never crash config
-        return False
-
-
 class FoundryConfig(BaseModel):
     """NYXARA's self-built-model foundry settings (growth/foundry.py).
 
-    Auto-on when torch is importable (a machine that can really forge/train a neural brain),
-    off on a bare/CI box — where the always-on NumPy neural brain is already her real, weight-
-    changing learner. Heavy & self-modifying, so still fully gauntlet-gated and reversible. The
-    default backend is
-    ``lora`` — LoRA fine-tuning of a pretrained base (real capability); it needs
-    torch+transformers+peft (``.[foundry]``) and degrades to the always-available
-    pure-stdlib n-gram model when they are absent. ``auto`` instead trains the optional
-    torch nano-GPT from scratch when torch is installed (n-gram otherwise).
+    **On by default, on every machine** — real, weight-changing learning is not optional
+    hardware garnish. :func:`~nyxara.growth.foundry_models.build_model` guarantees the
+    strongest *genuine* trainable backend the box allows: LoRA over a pretrained base
+    (torch+peft+GPU), a from-zero torch nano-GPT, the from-scratch NumPy-autograd
+    transformer on a torch-less box, or — the honest floor when even NumPy is absent —
+    a Kneser-Ney n-gram. Heavy & self-modifying, so still fully gauntlet-gated and
+    reversible (the TEST profile seals it off for hermetic suites). The default backend
+    is ``lora`` — LoRA fine-tuning of a pretrained base (real capability); on a CPU-only
+    box ``lora_requires_gpu`` downshifts the forge to a trainable neural backend instead
+    of stalling on a multi-GB base download.
 
     ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
     dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
@@ -379,14 +385,19 @@ class FoundryConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    # Auto-on when torch is present so she forges & promotes a stronger neural brain where the
-    # hardware allows; off on a bare/CI box (the NumPy neural brain is her real learner there).
-    # Every forge still clears the same gauntlet and is reversible. Override with NYXARA_FOUNDRY__ENABLED.
-    enabled: bool = Field(default_factory=_torch_available)
+    # ON by default everywhere: she always forges a REAL model (as neural as the machine
+    # allows — see the class docstring ladder). Every forge still clears the same gauntlet
+    # and is reversible. Override with NYXARA_FOUNDRY__ENABLED; TEST profile forces it off.
+    enabled: bool = True
     # Default to LoRA fine-tuning of a pretrained base — the path to genuine capability
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
     backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
+    # A LoRA forge on a no-CUDA box means downloading + full-precision-loading a multi-GB
+    # base just to crawl — downshift to a genuinely trainable neural backend instead
+    # (nanogpt with torch, the NumPy transformer without). Explicitly disable to force
+    # CPU LoRA anyway (e.g. a big-RAM box fine-tuning a small base).
+    lora_requires_gpu: bool = True
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
     # Pure-stdlib n-gram backend.
@@ -625,7 +636,7 @@ class AutoForgeConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = True
-    min_examples: int = Field(default=20, ge=1)     # new verified examples needed to forge
+    min_examples: int = Field(default=10, ge=1)     # new verified examples needed to forge
     eval_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
 
@@ -772,12 +783,18 @@ class FlywheelConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = True
-    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)   # below this, a turn is not kept
+    # Below this, a turn is not kept. 0.55 admits the deterministic offline reasoner's
+    # standard respond confidence (~0.58) so the autonomous learning loop actually turns on
+    # a bare box — the bar still has gate-clearance, length bounds, dedup and the verifier.
+    min_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
     min_chars: int = Field(default=8, ge=1)                      # too-short answers are noise
     max_chars: int = Field(default=8000, ge=1)                   # cap a runaway answer
     owner_only: bool = True          # only collect Master-authored turns (trusted supervision)
     respond_only: bool = True        # collect conversational/reasoning answers, not tool effects
     store_path: Optional[Path] = None   # None -> foundry_root/flywheel.jsonl
+    # A Master's correction retracts the stale wrong pair and stores the corrected answer this
+    # many times (repetition = the corpus's native weighting): being corrected teaches MORE.
+    correction_weight: int = Field(default=3, ge=1, le=20)
 
 
 class SynthesisConfig(BaseModel):
@@ -2340,6 +2357,11 @@ class NyxaraSettings(BaseSettings):
             self.llm.provider = LLMProvider.MOCK
             self.llm.allow_mock_fallback = True
             self.observability.telemetry_enabled = False
+            # The foundry is ON by default in live runs (real, weight-changing learning),
+            # but a forge writes model dirs + manifests to disk — sealed off under TEST so
+            # the suite stays hermetic (a test that wants it builds its own settings, see
+            # tests/growth/test_foundry.py).
+            self.foundry.enabled = False
             # Hermetic tests must NEVER self-modify the source tree on disk. The standing
             # authorisation to auto-enact gains applies to live DEV/PROD runs, not the suite —
             # so force every enactment path OFF under TEST (a test that wants enact sets it

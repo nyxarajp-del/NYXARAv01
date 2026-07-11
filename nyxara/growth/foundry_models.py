@@ -1365,11 +1365,17 @@ def _foundry_root(settings: Any) -> Path:
     return Path(d)
 
 
-def load_active_model(settings: Any) -> BaseLanguageModel:
-    """Load the currently-promoted model from disk (used by mind/llm.SelfProvider)."""
+def load_active_model(settings: Any, *, tag: Optional[str] = None) -> BaseLanguageModel:
+    """Load the currently-promoted model from disk (used by mind/llm.SelfProvider).
+
+    ``tag`` (e.g. ``"v3"``) loads that exact version dir instead of following the
+    ``active`` pointer — the hot-reload fallback path when a fresh promotion fails to
+    load and the provider must restore the previous, known-good weights."""
     root = _foundry_root(settings)
     version = settings.llm.self_model_version
-    if version is None:
+    if tag is not None:
+        vdir = root / tag
+    elif version is None:
         active = (root / "active").read_text(encoding="utf-8").strip()
         vdir = root / active
     else:

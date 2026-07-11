@@ -47,11 +47,12 @@ def test_config_routes_model_and_no_keys():
     assert s.llm.active_key() is None
 
 
-def test_default_provider_is_gguf():
-    # the shipped default serves the Qwythos-9B GGUF quant (cheap in-process llama.cpp);
-    # absent llama-cpp-python it degrades to the mock, so this is safe on a bare box.
+def test_default_provider_is_auto():
+    # the shipped default walks the auto ladder self→gguf→tinyllama→mock: her own promoted
+    # weights serve first when they exist; absent every backend it degrades to the mock,
+    # so this is safe on a bare box.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.llm.provider is LLMProvider.GGUF
+    assert s.llm.provider is LLMProvider.AUTO
 
 
 def test_quant_flags_mutually_exclusive():

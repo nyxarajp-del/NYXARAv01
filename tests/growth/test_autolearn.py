@@ -225,3 +225,25 @@ def test_lessons_are_taught_to_the_learned_brain():
     stored = engine._store_lessons([lesson])
     assert stored == 1
     assert brain.learned_count > before          # the lesson became learned, answerable knowledge
+
+
+def test_lessons_feed_the_flywheel_as_verified_pairs(tmp_path):
+    """A distilled lesson must also reach the foundry corpus, so the NEXT forged model
+    is trained on it — reflection reaching all the way to weights."""
+    from types import SimpleNamespace
+    from nyxara.growth.flywheel import DataFlywheel
+
+    fw = DataFlywheel(store_path=tmp_path / "fw.jsonl")
+    fake_core = SimpleNamespace(flywheel=fw, memory=None, journal=None)
+    engine = _engine_with_tmp_flywheel(tmp_path, core=fake_core)
+    lesson = SimpleNamespace(
+        kind=SimpleNamespace(value="strategy"),
+        subject="closing unused ports",
+        text="Closing unused network ports reduces a host's attack surface.",
+        confidence=0.9)
+    engine._feed_lesson_to_flywheel(lesson)
+    exs = fw.examples()
+    assert len(exs) == 1
+    assert exs[0].source == "flywheel-verified"          # a lesson is verified supervision
+    assert "closing unused ports" in exs[0].prompt
+    assert exs[0].answer == lesson.text

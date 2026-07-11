@@ -264,7 +264,21 @@ class GrowthEngine:
             # becomes retrievable knowledge she can actually speak — a text lesson consolidated
             # into her own learned weights, not just filed away (closes the lessons→weights gap).
             self._teach_self_brain(text)
+            # …and into the foundry corpus: a distilled lesson is verified supervision, so the
+            # NEXT forged model is trained on it too — reflection reaching all the way to weights.
+            self._feed_lesson_to_flywheel(lesson)
         return stored
+
+    def _feed_lesson_to_flywheel(self, lesson: Any) -> None:
+        """Append one distilled lesson to the flywheel as a verified training pair."""
+        fw = getattr(self.core, "flywheel", None) if self.core is not None else None
+        if fw is None:
+            return
+        try:
+            fw.consider(f"What have you learned about {lesson.subject}?", str(lesson.text),
+                        confidence=float(getattr(lesson, "confidence", 1.0)), verified=True)
+        except Exception:  # noqa: BLE001 — corpus feeding is best-effort, never breaks growth
+            pass
 
     def _teach_self_brain(self, *docs: str) -> None:
         """Fold text (a lesson, a verified fact) into the core reasoner's learned brain.

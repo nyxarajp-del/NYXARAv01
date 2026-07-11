@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import time
 from collections import Counter
@@ -242,6 +243,26 @@ class Foundry:
 
     def active(self) -> Optional[ModelVersion]:
         return self._get(self.active_version) if self.active_version is not None else None
+
+    def _write_active_pointer(self, tag: str) -> None:
+        """Atomically swap the ``active`` pointer (write tmp → ``os.replace``).
+
+        A concurrent reader (the live :class:`~nyxara.mind.llm.SelfProvider` polls this
+        file per request) must never observe a partial pointer."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        tmp = self.root / "active.tmp"
+        tmp.write_text(tag, encoding="utf-8")
+        os.replace(tmp, self.root / "active")
+
+    def _notify_promotion(self, action: str, version: ModelVersion) -> None:
+        """Tell the live process new weights are active — never fails the promoter."""
+        try:
+            from nyxara.growth.promotion import PromotionEvent, notify
+            notify(PromotionEvent(action=action, version=version.version, kind=version.kind,
+                                  path=version.path, root=str(self.root),
+                                  metrics=dict(version.metrics)))
+        except Exception:  # noqa: BLE001 — notification is best-effort by design
+            pass
 
     # ---- data ---- #
     def collect_corpus(self, *, max_items: Optional[int] = None) -> List[str]:
@@ -587,13 +608,32 @@ class Foundry:
                 pass
         return outcomes
 
+    def _effective_backend(self, *, has_torch: Optional[bool] = None,
+                           has_cuda: Optional[bool] = None) -> str:
+        """The backend this box can genuinely train NOW (the ``lora_requires_gpu`` clamp).
+
+        A LoRA forge on a no-CUDA machine means downloading and full-precision-loading a
+        multi-GB base just to crawl — downshift to a *real neural* backend instead:
+        ``nanogpt`` (torch, from-zero AdamW) or ``auto`` (which build_model resolves to
+        the from-scratch NumPy transformer on a torch-less box). Deps are injectable so
+        the decision is unit-testable on any machine."""
+        backend = str(self.cfg.backend)
+        if backend != "lora" or not bool(getattr(self.cfg, "lora_requires_gpu", True)):
+            return backend
+        if has_torch is None or has_cuda is None:
+            from nyxara.growth.compute_scale import _torch_cuda
+            has_torch, has_cuda = _torch_cuda()
+        if has_cuda:
+            return backend
+        return "nanogpt" if has_torch else "auto"
+
     def train_candidate(self, *, spec: Optional[ModelSpec] = None,
                         corpus: Optional[Sequence[str]] = None,
                         tunables: Optional[Sequence[str]] = None,
                         resists_correction: bool = False,
                         disables_oversight: bool = False) -> Tuple[BaseLanguageModel, ModelVersion]:
         dims, load_in_4bit = self._scaled_dims()   # autoscale to compute, else the static profile
-        spec = spec or ModelSpec(kind=self.cfg.backend, ngram_order=self.cfg.ngram_order,
+        spec = spec or ModelSpec(kind=self._effective_backend(), ngram_order=self.cfg.ngram_order,
                                  block_size=dims["block_size"], n_layer=dims["n_layer"],
                                  n_head=dims["n_head"], n_embd=dims["n_embd"],
                                  seed=self.cfg.seed, base_model=self.cfg.base_model,
@@ -758,13 +798,14 @@ class Foundry:
         for v in self.versions:
             v.promoted = (v.version == version)
         self.active_version = version
-        (self.root / "active").write_text(f"v{version}", encoding="utf-8")
+        self._write_active_pointer(f"v{version}")
         self._save_manifest()
         self.verify_integrity()
         # continual learning: consolidate the newly-active weights as an EWC anchor so the next
         # round's training resists overwriting what this model just learned (anti-forgetting).
         if bool(getattr(self.cfg, "continual_learning", True)):
             self.consolidate_active(task=f"v{version}")
+        self._notify_promotion("promote", cand)
         return cand
 
     def rollback(self, steps: int = 1) -> Optional[int]:
@@ -779,8 +820,9 @@ class Foundry:
         for v in self.versions:
             v.promoted = (v.version == target)
         self.active_version = target
-        (self.root / "active").write_text(f"v{target}", encoding="utf-8")
+        self._write_active_pointer(f"v{target}")
         self._save_manifest()
+        self._notify_promotion("rollback", self._get(target))
         return target
 
     # ---- the loop: collect -> train -> eval -> gauntlet -> promote/discard ---- #

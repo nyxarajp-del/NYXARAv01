@@ -32,8 +32,10 @@ Depends on :mod:`config` and :mod:`errors`; optionally uses a
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -599,13 +601,23 @@ class SelfProvider(LLMProviderBase):
 
     ``available()`` is honest: it returns True only once a model has been trained AND
     promoted (a ``foundry/active`` pointer exists). The model itself is loaded lazily to
-    avoid an import cycle (growth/foundry_models imports nothing from mind/llm)."""
+    avoid an import cycle (growth/foundry_models imports nothing from mind/llm).
+
+    **Hot-reload — the serve half of the train→serve loop.** The foundry's ``active``
+    pointer is checked on every completion (and on :meth:`reload`, fired by the promotion
+    bus): the moment a new version is promoted — by this process, by a background growth
+    loop, or by a *different* process entirely — the very next call serves the new
+    weights. A failed load never takes her voice away: the previous weights keep serving
+    and the error is recorded for the learning report."""
 
     name = "self"
 
     def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
         super().__init__(settings)
         self._lm = None
+        self._lm_tag: Optional[str] = None        # pointer text the loaded model came from
+        self._lock = threading.Lock()
+        self._reload_error: Optional[str] = None
 
     def _root(self):
         from pathlib import Path
@@ -618,15 +630,115 @@ class SelfProvider(LLMProviderBase):
         except Exception:
             return False
 
+    def _pointer_tag(self) -> Optional[str]:
+        """The version tag (``"vN"``) the ``active`` pointer names right now."""
+        try:
+            tag = (self._root() / "active").read_text(encoding="utf-8").strip()
+            return tag or None
+        except Exception:
+            return None
+
+    def active_kind(self) -> Optional[str]:
+        """Backend kind of the promoted version, read cheaply from the manifest
+        (no model load) — used by the ``auto`` ladder's serve gate."""
+        try:
+            data = json.loads((self._root() / "manifest.json").read_text(encoding="utf-8"))
+            active = data.get("active_version")
+            for v in data.get("versions", []):
+                if v.get("version") == active:
+                    return v.get("kind")
+        except Exception:
+            return None
+        return None
+
+    def serve_ready(self) -> bool:
+        """Honesty gate for autonomous serving (``provider=auto``).
+
+        A LoRA adapter is the served base model, improved — always safe to auto-serve.
+        A small from-scratch backend (ngram / NumPy / nanogpt) silently replacing a large
+        pretrained model would *degrade* live behavior, so it needs the explicit
+        ``self_serve_any_backend`` opt-in (or ``provider=self``)."""
+        if not self.available():
+            return False
+        if bool(getattr(self.settings.llm, "self_serve_any_backend", False)):
+            return True
+        return self.active_kind() == "lora"
+
+    def _drop_current(self) -> None:
+        """Free the currently-loaded model (lean reload for RAM/VRAM-heavy backends)."""
+        self._lm = None
+        self._lm_tag = None
+        gc.collect()
+        try:  # best-effort: only meaningful for torch-backed models
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    def _current_model(self):
+        """Return the model for the CURRENT ``active`` pointer, hot-reloading if stale.
+
+        Load-then-swap under a lock: requests in flight keep a reference to the old
+        model object (refcounting keeps it alive), so a reload never breaks a running
+        completion. On load failure the old weights keep serving (recorded in
+        ``_reload_error``); with nothing loaded yet, raise — honest unavailability."""
+        from nyxara.growth.foundry_models import load_active_model  # lazy: no import cycle
+        tag = self._pointer_tag()
+        if self._lm is not None and tag is not None and tag == self._lm_tag:
+            return self._lm
+        with self._lock:
+            tag = self._pointer_tag()                     # double-check under the lock
+            if self._lm is not None and tag is not None and tag == self._lm_tag:
+                return self._lm
+            prev_lm, prev_tag = self._lm, self._lm_tag
+            lean = bool(getattr(self.settings.llm, "self_reload_lean", True))
+            if (lean and prev_lm is not None
+                    and str(getattr(prev_lm, "kind", "")) == "lora"):
+                # a LoRA model holds a full base in RAM/VRAM — two at once may not fit:
+                # drop the old first; the version dir persists, so failure can restore it
+                self._drop_current()
+            try:
+                new_lm = load_active_model(self.settings)
+                self._lm, self._lm_tag = new_lm, tag
+                self._reload_error = None
+                return self._lm
+            except Exception as exc:  # noqa: BLE001 — keep serving, honestly recorded
+                self._reload_error = f"{type(exc).__name__}: {exc}"
+                if prev_lm is not None:               # old weights still in memory
+                    self._lm, self._lm_tag = prev_lm, prev_tag
+                    return self._lm
+                if prev_tag is not None:              # lean mode dropped them: re-load from disk
+                    try:
+                        self._lm = load_active_model(self.settings, tag=prev_tag)
+                        self._lm_tag = prev_tag
+                        return self._lm
+                    except Exception:  # noqa: BLE001
+                        pass
+                raise LLMError(f"self model unavailable: {self._reload_error}",
+                               context={"provider": self.name, "tag": tag})
+
+    def reload(self) -> bool:
+        """Force the staleness check NOW (promotion-bus fast path); True if serving."""
+        try:
+            return self._current_model() is not None
+        except Exception:  # noqa: BLE001 — unavailability is already recorded
+            return False
+
+    def learning_view(self) -> Dict[str, Any]:
+        """Truthful serving state for the learning report — never fabricates."""
+        return {"available": self.available(), "serve_ready": self.serve_ready(),
+                "served_version": self._lm_tag, "active_pointer": self._pointer_tag(),
+                "active_kind": self.active_kind(), "loaded": self._lm is not None,
+                "last_reload_error": self._reload_error}
+
     def default_model(self) -> str:
         return "nyxara-self"
 
     def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        from nyxara.growth.foundry_models import load_active_model  # lazy: no import cycle
-        if self._lm is None:
-            self._lm = load_active_model(self.settings)
+        lm = self._current_model()
         prompt = format_self_prompt(req)
-        raw = self._lm.generate(prompt, max_tokens=req.max_tokens)
+        raw = lm.generate(prompt, max_tokens=req.max_tokens)
         # keep the answer to its own turn: stop at any caller stop or a role marker
         stops = tuple(req.stop) + (f"\n{_SELF_USER_TAG}", f"\n{_SELF_ASSISTANT_TAG}",
                                    _SELF_USER_TAG, _SELF_ASSISTANT_TAG)
@@ -634,7 +746,7 @@ class SelfProvider(LLMProviderBase):
         usage = Usage(prompt_tokens=estimate_tokens(prompt),
                       completion_tokens=estimate_tokens(text))
         return (text, "stop" if hit else "length", usage,
-                {"self": True, "kind": self._lm.kind})
+                {"self": True, "kind": lm.kind, "version": self._lm_tag})
 
 
 # --------------------------------------------------------------------------- #
@@ -673,9 +785,38 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
+    # the auto ladder: her OWN promoted weights first, then the static backends, then mock.
+    _AUTO_LADDER = ("self", "gguf", "tinyllama", "mock")
+
+    def _auto_ladder(self) -> List[LLMProviderBase]:
+        """Usable providers under ``provider=auto``, strongest-first.
+
+        ``self`` joins only when it is both available (a promoted model exists) AND
+        ``serve_ready()`` (the honesty gate: a LoRA over the real base, or the explicit
+        ``self_serve_any_backend`` opt-in)."""
+        out: List[LLMProviderBase] = []
+        for name in self._AUTO_LADDER:
+            prov = self._providers.get(name)
+            if prov is None or not prov.available():
+                continue
+            if name == "self" and not getattr(prov, "serve_ready", lambda: True)():
+                continue
+            if name == "mock" and not self.settings.llm.allow_mock_fallback:
+                continue
+            out.append(prov)
+        return out
+
     # ---- provider selection ---- #
     def chosen_provider(self) -> LLMProviderBase:
         name = self.settings.llm.provider.value
+        if name == "auto":
+            ladder = self._auto_ladder()
+            if ladder:
+                return ladder[0]
+            if self.settings.llm.allow_mock_fallback:
+                return self._mock
+            raise LLMError("no provider available on the auto ladder and mock fallback disabled",
+                           context={"provider": name})
         prov = self._providers.get(name)
         if prov is not None and prov.available():
             return prov
@@ -686,6 +827,54 @@ class LLM:
 
     def provider_status(self) -> Dict[str, bool]:
         return {n: p.available() for n, p in self._providers.items()}
+
+    # ---- the serve half of the train→serve loop ---- #
+    def on_promotion(self, event: Any) -> None:
+        """React to a foundry promotion/rollback: the live brain adopts the new weights.
+
+        (a) Hot-reload the ``self`` provider immediately (its per-request pointer check
+        is the backstop when this callback is missed — e.g. a cross-process promotion).
+        (b) When the promoted version is a LoRA over the *same* HF base the TinyLlama
+        provider serves, point ``tinyllama_adapter_path`` at the fresh adapter — the
+        provider's ``(model, adapter)`` cache key reloads it on the next call. GGUF
+        stays static: a PEFT adapter is not GGUF-loadable without conversion, and under
+        ``auto`` the self rung outranks gguf anyway (honest degradation, no pretending)."""
+        prov = self._providers.get("self")
+        if prov is not None and hasattr(prov, "reload"):
+            try:
+                prov.reload()
+            except Exception:  # noqa: BLE001 — best-effort; pointer-poll retries later
+                pass
+        try:
+            if str(getattr(event, "kind", "")) != "lora":
+                return
+            from pathlib import Path
+            vdir = Path(str(getattr(event, "path", "")))
+            adapter = vdir / "adapter"
+            spec_file = vdir / "spec.json"
+            if not adapter.is_dir() or not spec_file.exists():
+                return
+            base = str(json.loads(spec_file.read_text(encoding="utf-8")).get("base_model", ""))
+            if base and base == self.settings.llm.tinyllama_model:
+                self.settings.llm.tinyllama_adapter_path = adapter
+        except Exception:  # noqa: BLE001 — adapter injection is a bonus, never a failure
+            pass
+
+    def learning_view(self) -> Dict[str, Any]:
+        """Truthful live-serving state for the learning report."""
+        try:
+            chosen = self.chosen_provider().name
+        except Exception:  # noqa: BLE001
+            chosen = None
+        view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
+                                "chosen": chosen}
+        prov = self._providers.get("self")
+        if prov is not None and hasattr(prov, "learning_view"):
+            try:
+                view["self"] = prov.learning_view()
+            except Exception:  # noqa: BLE001
+                view["self"] = None
+        return view
 
     def available_providers(self) -> List[str]:
         """Names of every currently-usable provider — the pool a council draws from."""
@@ -705,6 +894,18 @@ class LLM:
 
     # ---- core call (with retry + optional breaker, falling back to mock) ---- #
     def complete(self, req: LLMRequest) -> LLMResponse:
+        if self.settings.llm.provider.value == "auto":
+            # walk the ladder honestly: each failed rung falls to the next REAL backend
+            # before mock; the response's ``provider`` field always names who answered.
+            last: Optional[LLMError] = None
+            for prov in self._auto_ladder() or ([self._mock]
+                                                if self.settings.llm.allow_mock_fallback else []):
+                try:
+                    return self._call_with_resilience(prov, req)
+                except LLMError as exc:
+                    last = exc
+            raise last or LLMError("no provider available on the auto ladder",
+                                   context={"provider": "auto"})
         provider = self.chosen_provider()
         try:
             return self._call_with_resilience(provider, req)

@@ -163,8 +163,19 @@ def ensure_primary_model(
     """
     settings = settings or get_settings()
     say = log or (lambda _msg: None)
-    # Forge a primary brain only when NYXARA's OWN model is the selected primary provider.
-    if settings.llm.provider is not LLMProvider.SELF:
+    # Forge a primary brain when NYXARA's OWN model is the selected primary provider —
+    # explicitly (`self`), or via the default `auto` ladder where `self` is the first rung.
+    # Under `auto` the forge only runs when the result would actually SERVE (the honesty
+    # serve gate): a real LoRA stack is present, or the Master opted any backend in.
+    if settings.llm.provider is LLMProvider.AUTO:
+        if not bool(getattr(settings.llm, "self_serve_any_backend", False)):
+            try:
+                from nyxara.growth.foundry_models import _HAS_LORA
+            except Exception:  # noqa: BLE001 — no foundry stack at all
+                _HAS_LORA = False
+            if not _HAS_LORA:
+                return None
+    elif settings.llm.provider is not LLMProvider.SELF:
         return None
     if primary_model_present(settings):
         return _active_version(settings)
@@ -187,6 +198,10 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
     cfg = settings.model_copy(deep=True)
     cfg.foundry.enabled = True
     cfg.foundry.backend = "lora"
+    # Record the REAL LoRA spec even on a CPU box (build_model degrades at build time, so a
+    # GPU machine can later rebuild the very same adapter from the recorded base) — the
+    # autonomous-loop lora_requires_gpu clamp is for unattended forges, not this deliberate one.
+    cfg.foundry.lora_requires_gpu = False
     base = base_model or (TINYLLAMA_1_1B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
                           else cfg.foundry.base_model)
     cfg.foundry.base_model = base
