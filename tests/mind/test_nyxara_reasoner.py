@@ -98,3 +98,51 @@ def test_verifiable_faculty_still_short_circuits_before_any_model():
     assert cand.kind == "respond"
     assert "verifiable faculty" in cand.rationale
     assert "144" in cand.text
+
+
+# --------------------------------------------------------------------------- #
+# Problem #1 — always-maximum deep reasoning wired into the conversational path
+# --------------------------------------------------------------------------- #
+class _DeepFakeReasoner:
+    """A scripted LLMReasoner exposing the public rung accessors DeepReasoner drives."""
+
+    def is_real(self):
+        return True
+
+    def decision_to_candidate(self, data, stimulus):
+        from nyxara.agency.permissions import Capability, RiskTier
+        from nyxara.kernel.orchestrator import Candidate
+        return Candidate(text=data["text"], kind="respond",
+                         capability=Capability.MESSAGE_SEND, risk=RiskTier.LOW,
+                         reversible=True, confidence=data.get("confidence", 0.7),
+                         belief=data.get("confidence", 0.7), rationale="drafted")
+
+    def deliberate_decision(self, stimulus, *, passes=1, samples=1, temperature=None):
+        if passes >= 3:
+            return {"text": "Rayleigh scattering makes the daytime sky read blue, Master.",
+                    "confidence": 0.8}
+        return {"text": "blue blue blue blue", "confidence": 0.5}
+
+    def mcts_decision(self, stimulus, *, temperature=None):
+        return {"text": "Blue light scatters most in the atmosphere, so the sky looks blue.",
+                "confidence": 0.85}
+
+
+def test_deep_reasoning_fires_and_keeps_verifier_best_when_wired():
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.llm.deep_reasoning.enabled = True
+    r = NyxaraReasoner(llm=_FakeLLM(s), llm_reasoner=_DeepFakeReasoner(), settings=s)
+    r._router = False  # force no own-model handoff so the deep path is reached
+    cand = r("why is the sky blue?")
+    assert cand.kind == "respond"
+    assert "deep reasoning climbed" in cand.rationale
+    assert "blue blue blue" not in cand.text  # the degenerate rung was discarded
+
+
+def test_deep_reasoning_defers_on_mock_provider():
+    # TEST profile forces the mock provider, so is_real() is False and deep reasoning defers,
+    # leaving the offline sovereign-mind path exactly as before.
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.llm.deep_reasoning.enabled = True
+    r = NyxaraReasoner(llm=None, settings=s)  # no real llm, no llm_reasoner
+    assert r._deep_respond("why is the sky blue?", [], "system_2") is None

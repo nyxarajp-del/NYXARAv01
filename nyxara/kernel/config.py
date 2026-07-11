@@ -194,6 +194,35 @@ class FeatureFlags(BaseModel):
 # --------------------------------------------------------------------------- #
 # Subsystem configs
 # --------------------------------------------------------------------------- #
+class DeepReasoningConfig(BaseModel):
+    """Always-maximum deep-reasoning controller (mind/deep_reasoning.py) — Problem #1, the ceiling.
+
+    A fixed base model has a fixed single-pass depth. This controller raises NYXARA's *effective*
+    reasoning depth (not the model's raw intelligence) by climbing the whole effort ladder every
+    genuine reasoning turn — self-consistency → deliberation → MCTS search → verified refinement —
+    and keeping the answer an independent verifier scores highest. It compounds via
+    ``mind/effort_memory.py``: from lived verified outcomes it learns which rung pays off for each
+    kind of problem and aims the extra self-consistency budget there. NYXARA drives it from her own
+    measured signals, not the LLM. Only runs with a real provider; a no-op on a keyless machine, so
+    the offline path is unchanged. The kernel still disposes every proposal through every gate.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # gated at runtime on a real provider
+    # Ladder ceiling: 1 self-consistency · 2 deliberation · 3 MCTS · 4 verified refinement.
+    max_rung: int = Field(default=4, ge=1, le=4)
+    # Base self-consistency width per neural rung; the rung a signature has learned to reward gets
+    # this much again on top (same maximum budget, aimed where it measurably pays off).
+    samples: int = Field(default=3, ge=1, le=9)
+    keep_best: bool = True                                 # keep the verifier-best across all rungs
+    max_seconds: float = Field(default=60.0, ge=1.0, le=600.0)   # runaway guard, not a quality cap
+    # Compounding: learn per-problem which rung pays off and persist it across restarts.
+    learn_effort: bool = True
+    effort_min_observations: float = Field(default=3.0, ge=0.0)  # evidence before a suggestion sticks
+    effort_success_floor: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class LLMConfig(BaseModel):
     """Stateless, fully local LLM faculty settings (mind/llm.py).
 
@@ -284,6 +313,8 @@ class LLMConfig(BaseModel):
     # Level 3 — Recursive Self Improvement: iterations of critique+revise per respond turn.
     # 1 = off (single pass); 5–20 = active recursive improvement.
     recursive_improvement_iterations: int = Field(default=5, ge=1, le=20)
+    # ---- Always-maximum deep reasoning (mind/deep_reasoning.py) — Problem #1, the ceiling ---- #
+    deep_reasoning: DeepReasoningConfig = Field(default_factory=DeepReasoningConfig)
 
     @model_validator(mode="after")
     def _quant_exclusive(self) -> "LLMConfig":

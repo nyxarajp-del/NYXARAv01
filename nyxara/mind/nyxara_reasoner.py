@@ -85,6 +85,7 @@ class NyxaraReasoner:
         self._router: Any = None  # lazily built own-model-first confidence router (handoff)
         self._self_brain: Any = None  # lazily built own LEARNED brain (compounds with experience)
         self._sample_mind: Any = None  # lazily built few-shot / skill-induction mind
+        self._deep: Any = None  # lazily built always-max deep-reasoning controller (Problem #1)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -293,10 +294,22 @@ class NyxaraReasoner:
         if own is not None:
             return own
 
-        # MCTS DEEP REASONING (always-on max power): when the tool-aware LLM reasoner is wired
-        # and MCTS is enabled, delegate the whole conversational decision to it so the answer is
-        # produced by genuine search-over-reasoning (branch → simulate → backpropagate → choose),
-        # adversarially hardened, rather than a single LLM pass. It returns a Candidate; the
+        # ALWAYS-MAXIMUM DEEP REASONING (Problem #1 — the ceiling): raise her *effective* reasoning
+        # depth by climbing the whole effort ladder (self-consistency → deliberation → MCTS →
+        # verified refinement) and keeping the answer an independent verifier scores highest. The
+        # controller is NYXARA (driven by her own measured signals), and it compounds — it learns
+        # which rung pays off for each kind of problem. It folds MCTS in as one rung, so it
+        # supersedes the single-strategy MCTS branch below when enabled. Returns a Candidate the
+        # kernel still disposes through every gate; None (disabled / no real provider / failure)
+        # falls through to the exact prior behaviour.
+        deep_cand = self._deep_respond(stimulus, mems, process)
+        if deep_cand is not None:
+            return deep_cand
+
+        # MCTS DEEP REASONING (fallback when deep reasoning is off): when the tool-aware LLM reasoner
+        # is wired and MCTS is enabled, delegate the whole conversational decision to it so the
+        # answer is produced by genuine search-over-reasoning (branch → simulate → backpropagate →
+        # choose), adversarially hardened, rather than a single LLM pass. It returns a Candidate; the
         # kernel still disposes through every gate. Any failure falls through to the normal path.
         mcts_cand = self._mcts_respond(stimulus, mems, process)
         if mcts_cand is not None:
@@ -311,6 +324,65 @@ class NyxaraReasoner:
         return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                          risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                          rationale=rationale)
+
+    def _deep_reasoner(self) -> Any:
+        """Lazily build the always-max deep-reasoning controller (mind/deep_reasoning.py).
+
+        Wired over the tool-aware LLM reasoner (which owns the LLM, grounding, and decision→Candidate
+        conversion), with a RecursiveImprover for the refinement rung and a persisted EffortMemory so
+        the effort allocation genuinely compounds across turns and restarts."""
+        if self._deep is not None:
+            return self._deep or None
+        cfg = getattr(self.settings.llm, "deep_reasoning", None)
+        if self.llm_reasoner is None or cfg is None or not bool(getattr(cfg, "enabled", False)):
+            self._deep = False  # sentinel: tried and unavailable
+            return None
+        try:
+            from nyxara.mind.deep_reasoning import DeepReasoner
+            from nyxara.mind.recursive_improver import RecursiveImprover
+            improver = RecursiveImprover(
+                llm=self.llm,
+                n_iterations=int(getattr(self.settings.llm,
+                                         "recursive_improvement_iterations", 5)))
+            effort_memory = self._effort_memory() if bool(getattr(cfg, "learn_effort", True)) else None
+            self._deep = DeepReasoner(self.llm_reasoner, settings=self.settings,
+                                      improver=improver, effort_memory=effort_memory)
+        except Exception:  # noqa: BLE001 — deep reasoning is additive, never a hard dependency
+            self._deep = False
+        return self._deep or None
+
+    def _effort_memory(self) -> Any:
+        """Build the compounding effort store, persisted under paths.data_dir when available."""
+        try:
+            from nyxara.mind.effort_memory import EffortMemory
+            cfg = self.settings.llm.deep_reasoning
+            path = None
+            data_dir = getattr(getattr(self.settings, "paths", None), "data_dir", None)
+            if data_dir is not None:
+                from pathlib import Path
+                path = Path(data_dir) / "effort_memory.json"
+            return EffortMemory(
+                min_observations=float(getattr(cfg, "effort_min_observations", 3.0)),
+                success_floor=float(getattr(cfg, "effort_success_floor", 0.5)),
+                path=path)
+        except Exception:  # noqa: BLE001 — compounding is best-effort
+            return None
+
+    def _deep_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
+        """Climb the always-max effort ladder for a conversational turn; keep the verifier-best."""
+        deep = self._deep_reasoner()
+        if deep is None:
+            return None
+        try:
+            cand = deep(stimulus, None)
+        except Exception:  # noqa: BLE001 — deep reasoning is additive; fall through to the normal path
+            return None
+        if cand is None or getattr(cand, "kind", "respond") != "respond":
+            # None -> defer; an 'act' proposal (a decisive tool need) is handled by the action path.
+            return None
+        cand.rationale = (f"{process}: {getattr(cand, 'rationale', '')}; "
+                          f"grounded in {len(mems)} recalled memories").strip()
+        return cand
 
     def _mcts_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
         """Delegate a conversational turn to the MCTS-backed LLM reasoner when enabled."""
