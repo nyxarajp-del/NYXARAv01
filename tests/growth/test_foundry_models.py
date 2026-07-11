@@ -5,7 +5,18 @@ from __future__ import annotations
 import pytest
 
 from nyxara.growth.foundry_models import (NgramByteLM, ModelSpec, build_model,
-                                          load_active_model, _HAS_TORCH)
+                                          load_active_model, strongest_backend, _HAS_TORCH)
+
+try:
+    import numpy  # noqa: F401
+    _HAS_NUMPY = True
+except Exception:  # noqa: BLE001
+    _HAS_NUMPY = False
+
+# The strongest backend a plain "neural" request (auto/nanogpt/lora) resolves to on THIS machine:
+# a real from-scratch NumPy transformer when torch is absent but NumPy is present, else the
+# always-on word-level Kneser-Ney n-gram. (With torch it is a NanoGPT — kind "nanogpt".)
+_NEURAL_KIND = "nanogpt" if _HAS_TORCH else ("genesis_np" if _HAS_NUMPY else "kngram")
 
 CORPUS = ["the master is jp. nyxara serves the master."] * 8 + [
     "loyalty to the master is absolute and never changes."] * 8
@@ -53,16 +64,32 @@ def test_perplexity_finite_on_unseen_text():
 
 
 # -------------------- factory & graceful degradation -------------------- #
-def test_build_model_auto_degrades_without_torch():
-    # without torch the coherent word-level Kneser-Ney model is the fallback (not byte gibberish)
+def test_build_model_auto_builds_the_strongest_available_brain():
+    # "auto" must build a REAL model, as neural as this machine allows: a NanoGPT with torch, a
+    # from-scratch NumPy transformer on a torch-less-but-NumPy box (not a toy n-gram), else kngram.
     m = build_model(ModelSpec(kind="auto"))
-    assert m.kind == ("nanogpt" if _HAS_TORCH else "kngram")
+    assert m.kind == _NEURAL_KIND
+    if not _HAS_TORCH:
+        assert strongest_backend() == _NEURAL_KIND
+
+
+@pytest.mark.skipif(_HAS_TORCH or not _HAS_NUMPY, reason="covers the torch-less + NumPy box")
+def test_neural_request_builds_real_numpy_transformer_without_torch():
+    # THE upgrade: a neural request on a CPU/NumPy box builds a genuine trained neural net, not a
+    # byte-count table. It has real parameters and its perplexity drops after training.
+    m = build_model(ModelSpec(kind="nanogpt", seed=1))
+    assert m.kind == "genesis_np"
+    before = m.perplexity(CORPUS[0])
+    m.train_on(CORPUS, steps=40, seed=1)
+    after = m.perplexity(CORPUS[0])
+    assert m.param_count() > 1000          # a real neural net, orders larger than an n-gram table
+    assert after < before                  # it genuinely learned via backprop
 
 
 def test_build_model_nanogpt_never_raises_on_bare_machine():
-    # asking for nanogpt without torch must fall back, never raise
+    # asking for nanogpt must never raise regardless of installed deps
     m = build_model(ModelSpec(kind="nanogpt"))
-    assert m.kind == ("nanogpt" if _HAS_TORCH else "kngram")
+    assert m.kind == _NEURAL_KIND
 
 
 def test_load_active_model_reads_promoted_version(tmp_path):
@@ -221,9 +248,9 @@ def test_detokenizer_spacing():
 
 def test_factory_kngram_explicit_and_fallback():
     assert build_model(ModelSpec(kind="kngram")).kind == "kngram"
-    assert build_model(ModelSpec(kind="ngram")).kind == "ngram"   # byte model unchanged
-    if not _HAS_TORCH:
-        assert build_model(ModelSpec(kind="auto")).kind == "kngram"
+    assert build_model(ModelSpec(kind="ngram")).kind == "ngram"   # byte model stays explicit
+    # a neural request resolves to the strongest brain this machine can run (neural, not a toy)
+    assert build_model(ModelSpec(kind="auto")).kind == _NEURAL_KIND
 
 
 def test_kngram_promotes_and_loads_as_self_brain(tmp_path):

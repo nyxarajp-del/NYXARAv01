@@ -15,6 +15,12 @@ import pytest
 from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM, _HAS_LORA, _HAS_TORCH,
                                           build_model)
 
+try:
+    import numpy  # noqa: F401
+    _HAS_NUMPY = True
+except Exception:  # noqa: BLE001
+    _HAS_NUMPY = False
+
 TINY = "sshleifer/tiny-gpt2"
 
 
@@ -38,12 +44,15 @@ def test_spec_from_dict_tolerates_missing_lora_fields():
 
 
 def test_build_model_lora_never_raises_for_missing_deps():
-    # contract: build_model never raises; it degrades to the best available real backend. With
-    # torch present a from-zero NanoGPT is used (genuine neural training); a machine without torch
-    # falls back to the coherent word-level Kneser-Ney brain (WordKNGramLM), not byte gibberish.
+    # contract: build_model never raises; it degrades to the best available REAL neural backend.
+    # With torch a from-zero NanoGPT is used; a torch-less machine with NumPy builds a genuine
+    # from-scratch NumPy transformer (genesis_np) — not a toy n-gram; only a machine with neither
+    # torch nor NumPy falls back to the coherent word-level Kneser-Ney brain.
     model = build_model(ModelSpec(kind="lora", base_model="does/not/exist"))
-    assert model.kind in ("lora", "nanogpt", "kngram")
-    if not _HAS_TORCH:
+    assert model.kind in ("lora", "nanogpt", "genesis_np", "kngram")
+    if not _HAS_TORCH and _HAS_NUMPY:
+        assert model.kind == "genesis_np"
+    elif not _HAS_TORCH:
         assert isinstance(model, WordKNGramLM)
 
 

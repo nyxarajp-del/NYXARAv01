@@ -235,14 +235,17 @@ class SelfBrain:
         return None
 
     def _fresh_backend(self) -> Any:
-        """Build the generative fallback: a real neural net when torch is present (backend
-        ``auto``/``nanogpt``), else the always-on pure-stdlib word-level Kneser-Ney n-gram."""
+        """Build the generative fallback for this always-on, learn-on-every-turn brain.
+
+        The default (``auto``) and ``kngram`` use the pure-stdlib word-level Kneser-Ney n-gram: it
+        is instant to update and instant to persist, which is what an every-turn brain needs. The
+        heavyweight *neural* own-model is the foundry's job — it is forged, gauntleted and promoted,
+        and :meth:`_try_promoted` prefers it the moment one exists. ``nanogpt`` opts this fallback
+        into a real from-scratch neural net directly: a torch NanoGPT where torch is present, else a
+        genuine NumPy transformer (attention + backprop) — both via ``build_model``, never the toy
+        byte model, and its weights persist across restarts like the n-gram's do."""
         from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM, build_model)
-        if self._backend == "kngram":
-            return WordKNGramLM(order=self.order, seed=self.seed)
-        if self._backend in ("auto", "nanogpt"):
-            # build_model already degrades nanogpt -> KN when torch is absent, so this is safe
-            # on a bare box and a genuine from-zero transformer on a capable one.
+        if self._backend == "nanogpt":
             try:
                 return build_model(ModelSpec(kind="nanogpt", ngram_order=self.order,
                                              seed=self.seed))
@@ -311,14 +314,16 @@ class SelfBrain:
         corpus — survive a restart, so the brain a user meets tomorrow carries what they taught it
         today in its weights, not only in a re-read prompt. Returns True iff weights were loaded."""
         d = self._lm_persist_dir()
-        if d is None or getattr(lm, "kind", "") not in ("kngram", "ngram"):
+        if d is None or not hasattr(lm, "load"):
             return False
         try:
-            if not (d / "model.json").exists():
+            # n-gram backends persist a model.json; the NumPy/neural backend persists weights.npz
+            # (+ meta.json). Either marker means there is a real learned checkpoint to warm-start from.
+            if not ((d / "model.json").exists() or (d / "weights.npz").exists()):
                 return False
             lm.load(d)
             return True
-        except Exception:  # noqa: BLE001 — a corrupt/absent cache simply trains from seed
+        except Exception:  # noqa: BLE001 — a corrupt/absent/mismatched cache simply trains from seed
             return False
 
     def save(self) -> bool:
@@ -339,9 +344,10 @@ class SelfBrain:
             except Exception:  # noqa: BLE001
                 pass
         d = self._lm_persist_dir()
-        if d is not None and self._lm is not None \
-                and getattr(self._lm, "kind", "") in ("kngram", "ngram"):
+        if d is not None and self._lm is not None and hasattr(self._lm, "save"):
             try:
+                # persist whatever backend is in use — the n-gram count tables OR a real neural
+                # checkpoint (NumPy transformer / NanoGPT) — so accumulated learning is durable.
                 self._lm.save(d)
                 ok = True
             except Exception:  # noqa: BLE001 — a failed weight dump never fails the turn

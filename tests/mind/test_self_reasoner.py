@@ -29,9 +29,27 @@ def test_cold_reply_is_coherent_real_words_not_echo():
 
 
 def test_backend_is_pure_stdlib_kngram_without_torch():
+    # the always-on brain's DEFAULT fallback stays the instant, instantly-persisted stdlib n-gram —
+    # the heavyweight neural own-model is the foundry's job and is preferred once promoted.
     brain = _brain()
     brain.reply("hello")                      # forces lazy construction
     assert brain.kind in ("self:kngram", "self:nanogpt") or brain.kind.startswith("promoted:")
+
+
+def test_nanogpt_backend_is_a_real_neural_net_and_persists(tmp_path):
+    # opting the fallback into the neural backend gives a genuine trained net (a NumPy transformer
+    # on this torch-less box), NOT the toy byte model — and its weights persist across a restart.
+    from nyxara.mind.self_reasoner import SelfBrain
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.foundry.self_brain_backend = "nanogpt"
+    settings.paths.data_dir = tmp_path
+    brain = SelfBrain(settings=settings, persist=True)
+    brain.reply("warm up")                    # forces lazy construction + a first real train
+    assert brain.kind in ("self:genesis_np", "self:nanogpt")
+    assert brain._lm.param_count() > 1000     # orders larger than an n-gram count table
+    assert brain.save() is True               # persistence now covers neural checkpoints too
+    d = brain._lm_persist_dir()
+    assert (d / "weights.npz").exists() or (d / "model.json").exists()
 
 
 def test_compounds_taught_fact_is_retrieved_next_turn():
