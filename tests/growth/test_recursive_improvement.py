@@ -301,3 +301,34 @@ def test_run_validation_degrades_when_realworld_disabled():
     assert "realworld_accuracy" not in val          # dropped cleanly
     assert "transfer_score" in val                  # the other two rulers still produce a score
     assert 0.0 <= val["transfer_score"] <= 1.0
+
+
+def test_invention_ruler_folds_into_transfer_and_stays_bounded():
+    # the 7th ruler runs real Eureka invention and surfaces a bounded block; transfer stays in [0,1].
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.invention_reward_enabled = True
+    val = RecursiveSelfImprovement(settings=s).run_validation()
+    assert val is not None and "error" not in val
+    assert "invention" in val, val
+    inv = val["invention"]
+    assert 0.0 <= inv["invention_score"] <= 1.0
+    assert inv["eureka_kept"] >= 0 and inv["lemma_library_size"] >= 0
+    assert 0.0 <= val["transfer_score"] <= 1.0
+
+
+def test_invention_ruler_can_be_disabled():
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.invention_reward_enabled = False
+    val = RecursiveSelfImprovement(settings=s).run_validation()
+    assert val is not None and "error" not in val
+    assert "invention" not in val                    # ruler dropped entirely
+    assert 0.0 <= val["transfer_score"] <= 1.0
+
+
+def test_invention_score_is_never_a_free_lunch():
+    # invention is scored by NOVELTY of what she certifies, so it cannot be trivially maxed to 1.0 by
+    # sheer count — a saturated free ruler would let the optimiser game the transfer score.
+    s = get_settings().model_copy(deep=True)
+    s.self_improvement.invention_reward_enabled = True
+    val = RecursiveSelfImprovement(settings=s).run_validation()
+    assert val["invention"]["invention_score"] < 1.0

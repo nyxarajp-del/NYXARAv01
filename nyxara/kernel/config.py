@@ -727,6 +727,11 @@ class GenesisConfig(BaseModel):
     search_operators: bool = True
     plasticity_enabled: bool = True
     max_synth_primitives: int = Field(default=4, ge=1, le=12)   # cap on a synthesised program's length
+    # primitive_library: a crowned synth mixer is distilled into a NAMED reusable primitive that future
+    #   searches compose over — the palette self-extends from her own gauntlet-crowned inventions, so it
+    #   is no longer a fixed human ceiling. Only active when ``search_operators`` is on.
+    primitive_library: bool = True
+    primitive_library_size: int = Field(default=48, ge=1, le=512)
     # ---- Lifelong Hall-of-Fame memory: remember the best brains, warm-start future searches ---- #
     hall_of_fame: bool = True
     hall_of_fame_size: int = Field(default=32, ge=1, le=512)
@@ -1232,6 +1237,26 @@ class SelfImprovementConfig(BaseModel):
     # when the sandbox is unavailable. Folded into transfer_score alongside the other rulers.
     tool_grounding_enabled: bool = True
     transfer_weight_tool_grounded: float = Field(default=0.2, ge=0.0, le=1.0)
+    # --- open-ended invention (growth/eureka.py + growth/genesis.py) --- #
+    # A 7th ruler that makes self-driven INVENTION a first-class scored objective, not just a
+    # diagnostic. NYXARA invents her own candidates with NO LLM in the loop: Eureka machine-proves new
+    # theorems by genetic programming over a self-extending grammar (her own certified lemmas become
+    # reusable terminals), and Genesis grows a self-extending palette of learned neural primitives
+    # crowned through the Foundry gauntlet. Scored by the NOVELTY of what she certifies this cycle
+    # (tracked against everything she has ever discovered, so it neither saturates nor can be
+    # memorised) plus a bounded bonus for growing those self-authored alphabets — so it answers the
+    # "improvement is only measured on predefined benchmarks" gap without becoming Goodhartable.
+    # Dropped (not zeroed) when she invents nothing new this cycle. Eureka runs live (cheap, stdlib,
+    # deterministic); the Genesis palette is inspected read-only (no architecture search inside a
+    # validation pass).
+    invention_reward_enabled: bool = True
+    transfer_weight_invention: float = Field(default=0.2, ge=0.0, le=1.0)
+    invention_generations: int = Field(default=1, ge=1, le=8)
+    invention_population: int = Field(default=18, ge=len(("algebra", "arithmetic", "logic",
+                                                          "number_theory", "inequality")), le=200)
+    invention_novelty_share: float = Field(default=0.7, ge=0.0, le=1.0)
+    invention_weight_lemma: float = Field(default=1.0, ge=0.0, le=16.0)
+    invention_weight_primitive: float = Field(default=1.5, ge=0.0, le=16.0)
     # --- live-web grounding (growth/grounded_experiments.predict_and_verify) --- #
     # NYXARA can also check a falsifiable prediction against screened LIVE web data (SSRF-guarded +
     # injection-scanned, exactly as acquire.py screens its corpus). OFF by default so CI/offline runs

@@ -29,9 +29,9 @@ applied to the documentation itself).
 | 7 | Autonomous Goal Pursuit | `nyxara.agency.mission` | REAL+WIRED |
 | 8 | Active Curiosity | `nyxara.growth.active_curiosity` | REAL+WIRED |
 | 9 | Scientific Discovery | `nyxara.growth.autonomous_scientist` | REAL+WIRED |
-| 10 | Invent New Algorithms | `nyxara.growth.eureka` | REAL+WIRED |
-| 11 | Invent New Learning Methods | `nyxara.growth.genesis` | REAL |
-| 12 | Recursive Self-Improvement | `nyxara.growth.recursive_improvement` | REAL+WIRED |
+| 10 | Invent New Algorithms | `nyxara.growth.eureka` | UPGRADED |
+| 11 | Invent New Learning Methods | `nyxara.growth.genesis` | UPGRADED |
+| 12 | Recursive Self-Improvement | `nyxara.growth.recursive_improvement` | UPGRADED |
 | 13 | Verified Self-Modification | `nyxara.growth.verify` + `nyxara.growth.improvement_proof` | REAL+WIRED |
 | 14 | Automatic Debugging | `nyxara.growth.self_debugger` | REAL+WIRED |
 | 15 | Architecture Evolution | `nyxara.growth.topology` | UPGRADED |
@@ -226,3 +226,34 @@ credential. By construction `PRIV_ESCALATE` is **excluded** from full control's 
 envelope, so turning `FULL_CONTROL` on never confers root — only the privilege flag does. The
 `/scram` kill-switch, oversight and corrigibility gates and the owner-exclusive caps (Rule 8) all
 remain fully intact, so the Master can always halt or correct her.
+
+## Change set: self-extending invention (caps #10, #11, #12)
+
+This change set makes NYXARA's invention genuinely open-ended — she does it herself, with **no LLM
+in the loop** — rather than searching a fixed, human-written template set. The honest ceiling still
+holds: Rice's theorem forbids a universal "this is better" decider, so only what NYXARA can
+**machine-verify** (prove, or crown through the Foundry gauntlet) is ever kept. What changed is that
+the *space she searches is no longer bounded by what a human wrote down*:
+
+- **Invent New Algorithms — `nyxara.growth.eureka`.** The old `_mutate`/`_crossover` re-seeded fixed
+  string templates. They now do **genuine genetic programming** over a real expression-tree genome:
+  a child shares actual subtrees with its parents (subtree mutation / crossover), and every
+  recombination is expanded to its exact canonical polynomial so it stays a *provable* identity the
+  `Prover` certifies or refutes. Every proven-novel-interesting identity is promoted into a
+  **`LemmaLibrary`** and becomes a reusable terminal — so the grammar's alphabet grows from theorems
+  she herself certified, and later generations compose over her own discoveries.
+- **Invent New Learning Methods — `nyxara.growth.genesis`.** The `synth` mixer's 8-primitive palette
+  was a permanent human ceiling and every crowned invention was discarded. A crowned synth mixer that
+  clears the **existing** Foundry gauntlet is now distilled into a named, persisted **learned
+  primitive** (`PrimitiveLibrary`), and future searches compose new mixers over her own
+  gauntlet-crowned inventions — a palette that self-extends. Synth steps also carry searchable scalar
+  parameters (conv kernel width, low-rank rank), exercised on both the torch and torch-free substrates.
+- **Recursive Self-Improvement — `nyxara.growth.recursive_improvement`.** Open-ended invention is now
+  a **first-class scored ruler** in the `transfer_score` blend, not just a diagnostic — answering
+  "improvement is only measured on predefined benchmarks." It is scored by the *novelty* of what she
+  certifies each cycle (tracked against everything she has ever discovered, so it neither saturates
+  nor can be memorised) plus a bounded bonus for growing her self-authored alphabets; it is
+  weight-dropped (never zeroed) when she invents nothing new, exactly like every other ruler.
+
+No safety gate is bypassed or re-implemented: invention only ever *proposes*; verification (the
+`Prover`) and promotion (the gauntlet + `nyxara.growth.improvement_proof`) still *dispose*.

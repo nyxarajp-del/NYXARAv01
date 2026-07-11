@@ -57,9 +57,27 @@ _MAX_HIDDEN_MULT = 4    # channel-mixer hidden ≤ this × width
 _MAX_VOCAB = 600        # cap the output head; rare words fold onto <unk>
 _MAX_STEPS = 60         # cap optimizer steps per micro-train
 _BATCH = 16             # windows per optimizer step
-_CONV_K = 3             # depthwise causal conv kernel width
-_LOWRANK_R = 4          # rank of the learned causal token-mix
+_CONV_K = 3             # default depthwise causal conv kernel width (a synth 'conv:K' step overrides)
+_LOWRANK_R = 4          # default rank of the learned causal token-mix (a synth 'lowrank:R' step overrides)
 _GELU_K = math.sqrt(2.0 / math.pi)
+
+
+def _synth_base(step: str) -> str:
+    """The primitive name of a (possibly parameterised) synth step — ``conv:5`` -> ``conv``."""
+    return str(step).split(":", 1)[0]
+
+
+def _synth_param(step: str, default: int) -> int:
+    """The positive integer parameter of a synth step, or ``default`` — ``conv:5`` -> ``5``."""
+    s = str(step)
+    if ":" in s:
+        try:
+            v = int(s.split(":", 1)[1])
+            if v >= 1:
+                return v
+        except ValueError:
+            return default
+    return default
 
 
 # =========================================================================== #
@@ -600,19 +618,22 @@ class GenesisNumpyModel(BaseLanguageModel):
 
     def _build_synth_step(self, rng, pre, s) -> None:
         c, p = self.c, self.params
-        if s == "proj":
+        base = _synth_base(s)
+        if base == "proj":
             p[pre + "w"] = _param(rng, c, c)
-        elif s == "conv":
-            p[pre + "cw"] = _param(rng, _CONV_K, c, scale=0.3)
-        elif s == "lowrank":
-            p[pre + "a"] = _param(rng, self.ctx, _LOWRANK_R, scale=0.1)
-            p[pre + "b"] = _param(rng, _LOWRANK_R, self.ctx, scale=0.1)
-        elif s == "ssm":
+        elif base == "conv":
+            kernel = min(self.ctx, _synth_param(s, _CONV_K))     # searched kernel width (per-step)
+            p[pre + "cw"] = _param(rng, kernel, c, scale=0.3)
+        elif base == "lowrank":
+            rank = min(self.ctx, _synth_param(s, _LOWRANK_R))    # searched low-rank rank (per-step)
+            p[pre + "a"] = _param(rng, self.ctx, rank, scale=0.1)
+            p[pre + "b"] = _param(rng, rank, self.ctx, scale=0.1)
+        elif base == "ssm":
             p[pre + "in"] = _param(rng, c, c)
             p[pre + "a"] = Tensor(rng.standard_normal(c) * 0.1, requires_grad=True)
-        elif s == "gate":
+        elif base == "gate":
             p[pre + "g"] = _param(rng, c, c)
-        elif s == "shift":
+        elif base == "shift":
             p[pre + "w"] = _param(rng, c, c)
             p[pre + "sw"] = _param(rng, c, c)
         else:  # norm
@@ -733,17 +754,18 @@ class GenesisNumpyModel(BaseLanguageModel):
         cur = x
         for j, s in enumerate(steps):
             sp = f"{pre}s{j}_"
-            if s == "proj":
+            base = _synth_base(s)
+            if base == "proj":
                 cur = gelu(self._lin(cur, sp + "w"))
-            elif s == "conv":
+            elif base == "conv":                                 # kernel width read from param shape
                 cur = self._conv(cur, sp + "cw", None)
-            elif s == "lowrank":
+            elif base == "lowrank":                              # rank read from a/b param shapes
                 cur = self._lowrank(cur, sp, suffix_a="a", suffix_b="b", v_name=None, o_name=None)
-            elif s == "ssm":
+            elif base == "ssm":
                 cur = self._ssm(cur, sp, in_name="in", a_name="a", o_name=None)
-            elif s == "gate":
+            elif base == "gate":
                 cur = self._gate(cur, sp)
-            elif s == "shift":
+            elif base == "shift":
                 cur = self._shift_mix(cur, sp)
             else:  # norm
                 cur = rmsnorm(cur, self.params[sp + "g"])
@@ -947,9 +969,12 @@ class GenesisNumpyModel(BaseLanguageModel):
                 total += 2 * c * c + c
             elif op == "synth":
                 for s in (ly.get("program") or {}).get("steps", ["proj"]):
-                    total += (2 * c * c if s == "shift" else c * c if s in ("proj", "gate", "ssm")
-                              else _CONV_K * c if s == "conv"
-                              else 2 * self.ctx * _LOWRANK_R if s == "lowrank" else c)
+                    base = _synth_base(s)
+                    total += (2 * c * c if base == "shift"
+                              else c * c if base in ("proj", "gate", "ssm")
+                              else _synth_param(s, _CONV_K) * c if base == "conv"
+                              else 2 * self.ctx * _synth_param(s, _LOWRANK_R) if base == "lowrank"
+                              else c)
             else:                                            # channel mixer (gated MLP family)
                 exp = min(_MAX_HIDDEN_MULT, max(1, int(ly.get("expansion", 4))))
                 total += 3 * exp * c * c

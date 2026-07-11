@@ -57,6 +57,9 @@ class SelfImprovementReport:
     frontier: Optional[float] = None
     # world-grounded score: prediction graded by REAL execution (diagnostic; folded into transfer)
     grounded: Optional[float] = None
+    # open-ended invention score: novelty of self-certified theorems + self-extending palette growth
+    # (diagnostic; folded into transfer_score). None when the invention ruler is disabled/unrun.
+    invention: Optional[float] = None
     compute: Optional[Dict[str, Any]] = None
     # substrate self-expansion: the parallelism/cluster NYXARA surveyed this cycle (growth/substrate)
     substrate: Optional[Dict[str, Any]] = None
@@ -78,7 +81,7 @@ class SelfImprovementReport:
                 "enacted": self.enacted, "intelligence_index": self.intelligence_index,
                 "intelligence_t": self.intelligence_t,
                 "intelligence_base": self.intelligence_base, "frontier": self.frontier,
-                "grounded": self.grounded,
+                "grounded": self.grounded, "invention": self.invention,
                 "compute": self.compute, "substrate": self.substrate,
                 "effort_budget": self.effort_budget, "directive": self.directive,
                 "directive_action": self.directive_action,
@@ -113,6 +116,13 @@ class SelfImprovementReport:
             if isinstance(gr, dict):
                 lines.append(f"grounded        : {gr.get('grounded_score', 0.0):.0%} "
                              f"(real execution, not a stored answer key)")
+            iv = v.get("invention") if isinstance(v, dict) else None
+            if isinstance(iv, dict):
+                lines.append(f"invention       : {iv.get('invention_score', 0.0):.0%} "
+                             f"({iv.get('eureka_kept', 0)} proven, "
+                             f"+{iv.get('eureka_lemmas_added', 0)} lemma(s), "
+                             f"+{iv.get('genesis_primitives_new', 0)} primitive(s) — "
+                             f"self-invented, machine-certified)")
         if self.intelligence_index is not None:
             lines.append(f"intelligence    : I_{self.intelligence_t} = "
                          f"{self.intelligence_index:.4f}")
@@ -174,6 +184,7 @@ class RecursiveSelfImprovement:
         self._prior_index: Optional[float] = None
         self._prior_base: Optional[float] = None    # momentum-free raw target before this cycle
         self._prior_transfer: Optional[float] = None  # external held-out score before this cycle
+        self._prior_primitives: Optional[int] = None  # Genesis learned-primitive count before this cycle
         self._last_signals: Optional[Dict[str, float]] = None
         self._meta: Any = None                 # meta-meta controller (lazy; gated)
         self._meta_built = False
@@ -503,6 +514,16 @@ class RecursiveSelfImprovement:
             if "tool_grounded_score" in grounded_block:
                 w_tg = float(getattr(cfg, "transfer_weight_tool_grounded", 0.2))
                 terms.append((w_tg, float(grounded_block["tool_grounded_score"])))
+        # 7th ruler: open-ended INVENTION — NYXARA invents her own machine-checked theorems (Eureka)
+        # and grows her self-extending primitive palette (Genesis). Scored by the NOVELTY of what she
+        # certifies (frontier-tracked against everything she has ever discovered, so it cannot saturate
+        # or be memorised) plus a bounded bonus for growing her self-authored alphabets. This makes
+        # open-ended invention a FIRST-CLASS scored objective, not a mere diagnostic. Weight-dropped
+        # (never zeroed) when she invents nothing this cycle, exactly like every other ruler.
+        invention_block = self._run_invention(solver)
+        if invention_block is not None and float(invention_block["invention_score"]) > 0.0:
+            w_iv = float(getattr(cfg, "transfer_weight_invention", 0.2))
+            terms.append((w_iv, float(invention_block["invention_score"])))
         wsum = sum(w for w, _ in terms) or 1.0
         transfer = sum(w * s for w, s in terms) / wsum
         self._validation = {
@@ -525,6 +546,8 @@ class RecursiveSelfImprovement:
             self._validation["frontier"] = frontier_block
         if grounded_block is not None:
             self._validation["grounded"] = grounded_block
+        if invention_block is not None:
+            self._validation["invention"] = invention_block
         return self._validation
 
     def _run_grounded(self, solver: Any) -> Optional[Dict[str, Any]]:
@@ -561,6 +584,62 @@ class RecursiveSelfImprovement:
         except Exception:  # noqa: BLE001 — the curriculum is a ruler; on failure drop it, never zero
             return None
 
+    def _run_invention(self, solver: Any) -> Optional[Dict[str, Any]]:
+        """Run one open-ended INVENTION pass and return its block, or None.
+
+        NYXARA invents her own candidates with **no LLM in the loop** — Eureka conjectures and
+        machine-*proves* new theorems by genuine genetic programming over a self-extending grammar
+        (her own certified lemmas become reusable terminals), and Genesis grows a self-extending
+        palette of learned neural primitives crowned through the Foundry gauntlet. The score is the
+        *novelty* of what she certifies this cycle (measured against everything she has ever
+        discovered, so it neither saturates nor can be memorised) plus a bounded bonus for growing
+        those self-authored alphabets. Read-only for Genesis (a full architecture search is never run
+        inside a validation pass — only the persisted, gauntlet-crowned palette is inspected).
+        Best-effort: any failure degrades to None so the other rulers carry the transfer score."""
+        cfg = self.settings.self_improvement
+        if not bool(getattr(cfg, "invention_reward_enabled", True)):
+            return None
+        eureka_kept = eureka_lemmas = lemma_total = 0
+        mean_novelty = 0.0
+        try:
+            from nyxara.growth.eureka import EurekaEngine
+            eng = EurekaEngine(memory=self.memory, settings=self.settings,
+                               knowledge=getattr(self.core, "knowledge", None),
+                               flywheel=getattr(self.core, "flywheel", None))
+            rep = eng.discover(generations=int(getattr(cfg, "invention_generations", 1)),
+                               population=int(getattr(cfg, "invention_population", 18)))
+            eureka_kept = int(rep.novel_kept)
+            eureka_lemmas = int(rep.lemmas_added)
+            lemma_total = int(rep.lemma_library_size)
+            novs = [float(b.novelty) for b in rep.breakthroughs]
+            mean_novelty = (sum(novs) / len(novs)) if novs else 0.0
+        except Exception:  # noqa: BLE001 — invention is a ruler; on failure drop it, never zero
+            return None
+        # Genesis palette growth — inspect the persisted, gauntlet-crowned primitive library only.
+        prim_total = 0
+        try:
+            from pathlib import Path
+            from nyxara.growth.genesis import PrimitiveLibrary
+            data_dir = self.settings.paths.data_dir   # type: ignore[union-attr]
+            prim_total = len(PrimitiveLibrary(Path(data_dir) / "genesis" / "primitive_library.json"))
+        except Exception:  # noqa: BLE001 — no data dir / no library yet: palette growth simply is 0
+            prim_total = 0
+        prim_new = max(0, prim_total - self._prior_primitives) if self._prior_primitives is not None else 0
+        self._prior_primitives = prim_total
+        # Bounded, non-gameable score: novelty of certified discoveries (0 when she only rediscovers the
+        # known) plus a saturating bonus for growing her self-extending lemma / primitive alphabets.
+        w_l = float(getattr(cfg, "invention_weight_lemma", 1.0))
+        w_p = float(getattr(cfg, "invention_weight_primitive", 1.5))
+        growth = w_l * eureka_lemmas + w_p * prim_new
+        bonus = (1.0 - 0.5 ** growth) if growth > 0 else 0.0
+        w_nov = float(getattr(cfg, "invention_novelty_share", 0.7))
+        score = max(0.0, min(1.0, w_nov * mean_novelty + (1.0 - w_nov) * bonus))
+        # If she certified nothing novel AND grew no alphabet, the ruler is dropped upstream (score 0).
+        return {"eureka_kept": eureka_kept, "eureka_lemmas_added": eureka_lemmas,
+                "lemma_library_size": lemma_total, "mean_novelty": round(mean_novelty, 6),
+                "genesis_primitives": prim_total, "genesis_primitives_new": prim_new,
+                "invention_score": round(score, 6)}
+
     # ---- (4) self weakness detection ---- #
     def detect_weaknesses(self) -> Any:
         from nyxara.growth.weakness import WeaknessSynthesizer
@@ -593,6 +672,8 @@ class RecursiveSelfImprovement:
             report.frontier = float(self._validation["frontier"].get("frontier_score", 0.0))
         if isinstance(self._validation, dict) and isinstance(self._validation.get("grounded"), dict):
             report.grounded = float(self._validation["grounded"].get("grounded_score", 0.0))
+        if isinstance(self._validation, dict) and isinstance(self._validation.get("invention"), dict):
+            report.invention = float(self._validation["invention"].get("invention_score", 0.0))
 
         # --- safe, non-source enactment (lessons + tuning) --- #
         report.lessons_stored = self._store_lessons(wreport, enact=enact)
