@@ -166,7 +166,10 @@ def test_search_on_numpy_substrate_crowns_a_real_designed_brain():
 
     cfg = GenesisConfig(backend="stdlib", substrate="numpy", population_size=3, generations=1,
                         micro_train_steps=6, eval_seeds=1, block_size=16, max_layers=3,
-                        hall_of_fame=False, seed=0)
+                        hall_of_fame=False, seed=0,
+                        # keep the promoted-champion rebuild CI-fast (still champion-tier, just small)
+                        champion_n_embd=64, champion_block_size=32, champion_vocab_size=400,
+                        champion_train_steps=8, champion_batch=8, champion_wall_clock_s=20.0)
     nas = NeuralArchitectureSearch(cfg=cfg, seed_corpus=_CORPUS)
     report = nas.search()
 
@@ -194,3 +197,92 @@ def test_ngram_substrate_knob_still_available_and_fast():
     report = NeuralArchitectureSearch(cfg=cfg, seed_corpus=_CORPUS).search()
     assert report.champion_kind == "kngram"    # explicit n-gram substrate still selectable
     assert report.topology_active is False
+
+
+# --------------------------------------------------------------------------- #
+# Champion tier: the promoted brain trains LARGER than the search micro-model
+# --------------------------------------------------------------------------- #
+def test_default_search_tier_is_byte_identical_to_pre_change():
+    """A plain GenesisNumpyModel(genome) must stay the historical micro model (search tier)."""
+    genome = _genome([{"op": "attention", "n_head": 2}, {"op": "gated_mlp"}], n_embd=64, block_size=32)
+    m = GenesisNumpyModel(genome, seed=7)          # no scale/tokenizer kwargs
+    m.train_on(_CORPUS, steps=40, seed=7)
+    assert m.c <= 48 and m.ctx <= 24               # clamped to the search caps, exactly as before
+    assert m._tok_kind == "word" and m.bpe is None
+    assert m.params["embed"].data.dtype.name == "float64"
+
+
+def test_champion_tier_is_larger_than_search_for_the_same_genome():
+    genome = _genome([{"op": "attention", "n_head": 2}, {"op": "gated_mlp", "expansion": 4}],
+                     n_embd=128, block_size=96)
+    # the search-tier default budget dwarfed by the champion default budget (decoupled scales)
+    search = GenesisNumpyModel(genome, seed=7)
+    champ_default = GenesisNumpyModel(genome, seed=7, scale="champion", tokenizer="bpe")
+    assert champ_default._cap_embd > search._cap_embd            # wider ceiling
+    assert champ_default._cap_ctx > search._cap_ctx             # longer context ceiling
+    assert champ_default._steps_budget > search._steps_budget  # many more optimizer steps
+    # and a real (small, fast) champion genuinely builds larger than the search model
+    search.train_on(_CORPUS, steps=10, seed=7)
+    champ = GenesisNumpyModel(genome, seed=7, scale="champion", vocab_size=512, tokenizer="bpe",
+                              train_steps=20, batch=8, wall_clock_s=30)
+    champ.train_on(_CORPUS, steps=20, seed=7)
+    assert champ.c > search.c and champ.ctx > search.ctx          # genuinely wider & longer context
+    assert champ.param_count() > search.param_count()             # more real capacity
+    assert champ.params["embed"].data.dtype.name == "float32"     # champion runs in float32
+
+
+def test_bpe_covers_novel_words_the_word_tokenizer_cannot_represent():
+    """The honest, scale-independent BPE win: byte-level coverage. A word tokenizer folds any word
+    it never saw onto <unk> — it literally cannot represent it — whereas the from-scratch byte-BPE
+    reconstructs arbitrary text losslessly, so nothing is lost before the model even sees it."""
+    train = ["the master is jp and nyxara serves him with loyalty and honesty always"] * 12
+    genome = _genome([{"op": "attention"}, {"op": "gated_mlp"}], n_embd=48, block_size=48)
+    word = GenesisNumpyModel(genome, seed=3, scale="champion", tokenizer="word",
+                             train_steps=40, batch=8, wall_clock_s=30)
+    word.train_on(train, steps=40, seed=3)
+    bpe = GenesisNumpyModel(genome, seed=3, scale="champion", tokenizer="bpe", vocab_size=512,
+                            train_steps=40, batch=8, wall_clock_s=30)
+    bpe.train_on(train, steps=40, seed=3)
+
+    novel = "incomprehensibility"                                # never appears in training
+    # the word tokenizer has no id for it → folds to <unk> (information destroyed pre-model)
+    assert word.tok2id.get(novel) is None
+    assert word._encode(novel).count(word._unk_id) >= 1
+    # the byte-BPE brain represents AND reconstructs it exactly — no <unk> concept exists
+    ids = [i for i in bpe._encode(novel) if i not in (bpe._bos_id, bpe._eos_id)]
+    assert bpe.bpe.decode(ids) == novel
+    assert "<unk>" not in bpe.generate("the master", max_tokens=16)
+    assert bpe.bits_per_char("the master is jp") != float("inf")
+
+
+def test_bpe_champion_save_load_roundtrips_exactly():
+    genome = _genome([{"op": "attention"}, {"op": "swiglu", "expansion": 2}], n_embd=64, block_size=32,
+                     tie_embeddings=True)
+    m = GenesisNumpyModel(genome, seed=11, scale="champion", tokenizer="bpe", vocab_size=400,
+                          train_steps=30, batch=8, wall_clock_s=30)
+    m.train_on(_CORPUS, steps=30, seed=11)
+    pp = m.perplexity(_CORPUS[0])
+    gen = m.generate("the master", max_tokens=10)
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "v1"
+        m.save(path)
+        r = build_model(ModelSpec(kind="genesis_np", genome=genome, np_scale="champion",
+                                  np_tokenizer="bpe", np_vocab_size=400))
+        r.load(path)
+        assert abs(r.perplexity(_CORPUS[0]) - pp) < 1e-6
+        assert r.generate("the master", max_tokens=10) == gen
+        assert r.param_count() == m.param_count()
+        assert r.bpe.merges == m.bpe.merges                       # tokenizer restored exactly
+
+
+@pytest.mark.skipif(_HAS_TORCH, reason="asserts the torch-free build path")
+def test_build_model_honours_champion_scale_and_bpe():
+    spec = ModelSpec(kind="genesis_np", genome=_genome([{"op": "attention"}, {"op": "gated_mlp"}],
+                                                       n_embd=128, block_size=96),
+                     np_scale="champion", np_vocab_size=512, np_tokenizer="bpe",
+                     np_train_steps=12, np_batch=8, np_wall_clock_s=30)
+    model = build_model(spec)
+    assert model.kind == "genesis_np"
+    model.train_on(_CORPUS, steps=12, seed=0)
+    assert model.c > 48 and model.ctx > 24        # actually built at champion dims
+    assert model._tok_kind == "bpe" and model.bpe is not None

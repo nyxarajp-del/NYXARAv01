@@ -124,6 +124,17 @@ class ModelSpec:
     # the GenesisConfig; an incidental genesis spec left at the default stays fast. ``kind`` of
     # "genesis_np" forces the NumPy brain regardless of this field.
     substrate: str = "ngram"
+    # ---- Genesis-NumPy training tier (kind="genesis"/"genesis_np" on the NumPy substrate) ---- #
+    # These decouple the fast per-candidate SEARCH micro-train from the larger CHAMPION the promoted
+    # brain actually trains at. Defaults are inert — a plain spec builds the historical micro model,
+    # and the frozen ngram/kngram/torch backends ignore these fields entirely. ``np_scale`` picks the
+    # tier table in genesis_numpy._TIERS; the rest override individual budgets (0 ⇒ tier default).
+    np_scale: str = "search"          # "search" (micro, fast) | "champion" (larger, real)
+    np_vocab_size: int = 0            # 0 ⇒ tier default; the (BPE) output-head size
+    np_tokenizer: str = "word"        # "word" (frozen behaviour) | "bpe" (from-scratch byte-BPE)
+    np_train_steps: int = 0           # 0 ⇒ tier default optimizer-step budget
+    np_batch: int = 0                 # 0 ⇒ tier default windows-per-step
+    np_wall_clock_s: float = 0.0      # 0 ⇒ tier default; hard wall-clock cap on a champion forge
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
     # Load custom modeling code shipped with the base (needed for the Qwythos/Qwen3.5 hybrid
@@ -170,6 +181,9 @@ class ModelSpec:
                 "ngram_k": self.ngram_k, "block_size": self.block_size,
                 "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
                 "seed": self.seed, "genome": self.genome, "substrate": self.substrate,
+                "np_scale": self.np_scale, "np_vocab_size": self.np_vocab_size,
+                "np_tokenizer": self.np_tokenizer, "np_train_steps": self.np_train_steps,
+                "np_batch": self.np_batch, "np_wall_clock_s": self.np_wall_clock_s,
                 "base_model": self.base_model,
                 "trust_remote_code": self.trust_remote_code, "lora_r": self.lora_r,
                 "lora_r_auto": self.lora_r_auto,
@@ -243,6 +257,17 @@ class BaseLanguageModel(ABC):
 
     @abstractmethod
     def load(self, directory: Path) -> None: ...
+
+    def bits_per_char(self, text: str) -> float:
+        """Cross-entropy in nats — a quality metric the Foundry can compare ACROSS models with
+        different tokenizers (where per-token perplexity is not comparable). Best-effort default:
+        the log of perplexity (per-token nats). Backends whose tokenizer may be compared against a
+        different one (the byte-BPE Genesis brain vs a word/byte n-gram) override this to return the
+        exact per-*character* value, which is genuinely tokenizer-invariant."""
+        pp = self.perplexity(text)
+        if not (pp > 0.0) or pp == float("inf"):
+            return float("inf")
+        return math.log(pp)
 
 
 # --------------------------------------------------------------------------- #
@@ -318,6 +343,13 @@ class NgramByteLM(BaseLanguageModel):
     def perplexity(self, text: str) -> float:
         ce = self._corpus_cross_entropy([text])
         return math.exp(ce) if ce < 700 else float("inf")
+
+    def bits_per_char(self, text: str) -> float:
+        """Exact per-character cross-entropy (nats): mean byte NLL × bytes ÷ characters."""
+        data = text.encode("utf-8", errors="replace")
+        if not data:
+            return float("inf")
+        return self._corpus_cross_entropy([text]) * len(data) / max(1, len(text))
 
     # ---- generation ---- #
     def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
@@ -633,6 +665,17 @@ class WordKNGramLM(BaseLanguageModel):
     def perplexity(self, text: str) -> float:
         ce = self._corpus_cross_entropy([text])
         return math.exp(ce) if ce < 700 else float("inf")
+
+    def bits_per_char(self, text: str) -> float:
+        """Exact per-character cross-entropy (nats): mean word-token NLL × scored positions ÷ chars.
+
+        Tokenizer-invariant, so the Foundry can honestly compare this word-level brain against a
+        byte-BPE Genesis champion (whose per-token perplexity is on a different, incomparable unit)."""
+        ids = self._encode(text, intern=False)
+        n_pos = max(0, len(ids) - (self.order - 1))
+        if n_pos <= 0:
+            return float("inf")
+        return self._corpus_cross_entropy([text]) * n_pos / max(1, len(text))
 
     # ---- generation ---- #
     def _candidates(self, ctx_full: Tuple[int, ...]) -> List[int]:
@@ -1271,7 +1314,11 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
         try:
             from nyxara.growth.genesis_numpy import GenesisNumpyModel, _HAS_NUMPY  # lazy: no cycle
             if _HAS_NUMPY and (spec.genome.get("layers") if isinstance(spec.genome, dict) else None):
-                return GenesisNumpyModel(spec.genome, seed=spec.seed)
+                return GenesisNumpyModel(
+                    spec.genome, seed=spec.seed, scale=spec.np_scale,
+                    vocab_size=spec.np_vocab_size, tokenizer=spec.np_tokenizer,
+                    train_steps=spec.np_train_steps, batch=spec.np_batch,
+                    wall_clock_s=spec.np_wall_clock_s)
         except Exception:  # noqa: BLE001 — numpy build failed; fall to the n-gram substrate
             pass
     # Real neural fallback: any non-ngram request gets a from-zero NanoGPT when torch is present

@@ -50,13 +50,25 @@ __all__ = ["GenesisNumpyModel", "_HAS_NUMPY"]
 
 _UNK_TOK = "<unk>"
 
-# Bounds that keep a per-candidate micro-train fast enough for CI / an idle tick while staying real.
-_MAX_EMBD = 48          # cap the residual width (genome picks 32/48/64)
-_MAX_CTX = 24           # cap the context length actually trained over
-_MAX_HIDDEN_MULT = 4    # channel-mixer hidden ≤ this × width
-_MAX_VOCAB = 600        # cap the output head; rare words fold onto <unk>
-_MAX_STEPS = 60         # cap optimizer steps per micro-train
-_BATCH = 16             # windows per optimizer step
+# Two training *tiers*, the fix for "her served brain is permanently micro". The SEARCH tier keeps
+# every per-candidate architecture micro-train fast enough for CI / an idle tick (the historical
+# caps, unchanged). The CHAMPION tier is what the *promoted* brain trains at: a genuinely larger,
+# still-CPU-tractable small transformer (wider, longer context, a real subword vocabulary, many more
+# steps), bounded by a wall-clock budget so a forge can never hang. Which tier an instance uses is
+# chosen per-model (default "search"), so the search path stays byte-identical to before.
+_TIERS: Dict[str, Dict[str, Any]] = {
+    "search":   {"embd": 48,  "ctx": 24,  "hidden_mult": 4, "vocab": 600,
+                 "steps": 60,   "batch": 16, "wall_s": 0.0,   "dtype": "float64"},
+    "champion": {"embd": 256, "ctx": 128, "hidden_mult": 8, "vocab": 16384,
+                 "steps": 8000, "batch": 64, "wall_s": 600.0, "dtype": "float32"},
+}
+# The historical module constants ARE the search tier — imported/referenced elsewhere, kept exact.
+_MAX_EMBD = _TIERS["search"]["embd"]          # 48 — cap the residual width (genome picks 32/48/64)
+_MAX_CTX = _TIERS["search"]["ctx"]            # 24 — cap the context length actually trained over
+_MAX_HIDDEN_MULT = _TIERS["search"]["hidden_mult"]   # 4 — channel-mixer hidden ≤ this × width
+_MAX_VOCAB = _TIERS["search"]["vocab"]        # 600 — cap the (word) output head
+_MAX_STEPS = _TIERS["search"]["steps"]        # 60 — cap optimizer steps per micro-train
+_BATCH = _TIERS["search"]["batch"]            # 16 — windows per optimizer step
 _CONV_K = 3             # depthwise causal conv kernel width
 _LOWRANK_R = 4          # rank of the learned causal token-mix
 _GELU_K = math.sqrt(2.0 / math.pi)
@@ -352,7 +364,9 @@ def cross_entropy(logits: Tensor, targets: "np.ndarray", mask: "np.ndarray") -> 
     bsz, tlen, v = logits.data.shape
     flat = logits.data.reshape(-1, v)
     tgt = targets.reshape(-1)
-    m = mask.reshape(-1).astype(np.float64)
+    # cast the mask to the logits' dtype so the whole loss + backward run at the tier's precision
+    # (float64 for search — byte-identical to before; float32 for the champion — the real speed win)
+    m = mask.reshape(-1).astype(flat.dtype)
     n = max(1.0, m.sum())
     z = flat - flat.max(axis=1, keepdims=True)
     e = np.exp(z)
@@ -374,7 +388,7 @@ def mean_entropy(logits: Tensor, mask: "np.ndarray") -> Tensor:
     """Mean predictive entropy over valid positions — a real auxiliary regularizer (entropy_reg)."""
     bsz, tlen, v = logits.data.shape
     flat = logits.data.reshape(-1, v)
-    m = mask.reshape(-1).astype(np.float64)
+    m = mask.reshape(-1).astype(flat.dtype)
     n = max(1.0, m.sum())
     z = flat - flat.max(axis=1, keepdims=True)
     e = np.exp(z)
@@ -396,16 +410,18 @@ def mean_entropy(logits: Tensor, mask: "np.ndarray") -> Tensor:
 # =========================================================================== #
 # Parameter helpers
 # =========================================================================== #
-def _param(rng: "np.random.Generator", *shape: int, scale: float = 0.02) -> Tensor:
-    return Tensor(rng.standard_normal(shape) * scale, requires_grad=True)
+def _param(rng: "np.random.Generator", *shape: int, scale: float = 0.02,
+           dtype: Any = None) -> Tensor:
+    return Tensor((rng.standard_normal(shape) * scale).astype(dtype or np.float64),
+                  requires_grad=True)
 
 
-def _ones(c: int) -> Tensor:
-    return Tensor(np.ones(c), requires_grad=True)
+def _ones(c: int, *, dtype: Any = None) -> Tensor:
+    return Tensor(np.ones(c, dtype=dtype or np.float64), requires_grad=True)
 
 
-def _zeros(c: int) -> Tensor:
-    return Tensor(np.zeros(c), requires_grad=True)
+def _zeros(c: int, *, dtype: Any = None) -> Tensor:
+    return Tensor(np.zeros(c, dtype=dtype or np.float64), requires_grad=True)
 
 
 # =========================================================================== #
@@ -416,7 +432,9 @@ class GenesisNumpyModel(BaseLanguageModel):
 
     kind = "genesis_np"
 
-    def __init__(self, genome: Any = None, *, seed: int = 0) -> None:
+    def __init__(self, genome: Any = None, *, seed: int = 0, scale: str = "search",
+                 vocab_size: int = 0, tokenizer: str = "word", train_steps: int = 0,
+                 batch: int = 0, wall_clock_s: float = 0.0) -> None:
         if not _HAS_NUMPY:                       # pragma: no cover — caller guards on _HAS_NUMPY
             raise RuntimeError("GenesisNumpyModel requires NumPy")
         # Accept an ArchitectureGenome (duck-typed via to_dict) or a raw dict — no import of
@@ -424,8 +442,23 @@ class GenesisNumpyModel(BaseLanguageModel):
         gd = genome.to_dict() if hasattr(genome, "to_dict") else dict(genome or {})
         self.genome: Dict[str, Any] = gd
         self.seed = int(genome.seed if hasattr(genome, "seed") else gd.get("seed", seed))
-        self.c = max(8, min(_MAX_EMBD, int(gd.get("n_embd", 32))))
-        self.ctx = max(4, min(_MAX_CTX, int(gd.get("block_size", 16))))
+        # ---- training tier: "search" (fast micro, the default & historical behaviour) vs
+        # "champion" (the larger brain the promoted model actually trains at). The tier sets the
+        # ceilings; the genome still chooses the actual width/ctx up to those ceilings. Everything
+        # defaults so a plain GenesisNumpyModel(genome) is byte-identical to before. ----
+        self._scale = scale if scale in _TIERS else "search"
+        tier = _TIERS[self._scale]
+        self._cap_embd = int(tier["embd"])
+        self._cap_ctx = int(tier["ctx"])
+        self._cap_hidden = int(tier["hidden_mult"])
+        self._cap_vocab = int(vocab_size) or int(tier["vocab"])
+        self._tok_kind = tokenizer if tokenizer in ("word", "bpe") else "word"
+        self._steps_budget = int(train_steps) or int(tier["steps"])
+        self._batch = int(batch) or int(tier["batch"])
+        self._wall_s = float(wall_clock_s) if wall_clock_s else float(tier["wall_s"])
+        self._dtype = np.float32 if str(tier["dtype"]) == "float32" else np.float64
+        self.c = max(8, min(self._cap_embd, int(gd.get("n_embd", 32))))
+        self.ctx = max(4, min(self._cap_ctx, int(gd.get("block_size", 16))))
         self.layers: List[Dict[str, Any]] = gd.get("layers", []) or [{"op": "attention"},
                                                                       {"op": "gated_mlp"}]
         self.lr_rule: Dict[str, Any] = gd.get("learning_rule", {}) or {}
@@ -434,43 +467,63 @@ class GenesisNumpyModel(BaseLanguageModel):
         # (build_model(ModelSpec(kind="genesis_np", genome=...)) → GenesisNumpyModel → load), exactly
         # as the torch GenesisModel carries one. The saved weights are NumPy, so the kind is pinned.
         self.spec = ModelSpec(kind="genesis_np", genome=gd, n_embd=self.c,
-                              block_size=self.ctx, seed=self.seed)
+                              block_size=self.ctx, seed=self.seed, np_scale=self._scale,
+                              np_vocab_size=self._cap_vocab, np_tokenizer=self._tok_kind)
         self._degraded: List[str] = []           # ops that fell back to the nearest real op
         # vocab / params are built lazily on first train_on (vocab needs the corpus)
         self.tok2id: Dict[str, int] = {}
         self.id2tok: List[str] = []
+        self.bpe: Any = None                     # a ByteBPETokenizer when self._tok_kind == "bpe"
+        # token ids for the specials — word tier: 0/1/2; BPE tier: reset in _build_vocab
+        self._bos_id, self._eos_id, self._unk_id = 0, 1, 2
         self.params: Dict[str, Tensor] = {}
         self._built = False
 
     # ---- vocab ---- #
     def _build_vocab(self, corpus: Sequence[str]) -> None:
+        if self._tok_kind == "bpe":
+            # A real from-scratch byte-level BPE she trains on her own corpus — no <unk>, no external
+            # tokenizer. Ids come from the BPE's own space (bytes < 256, specials 256/257, merges 258+).
+            from nyxara.growth.bpe import ByteBPETokenizer
+            self.bpe = ByteBPETokenizer().train(corpus, self._cap_vocab)
+            self._bos_id = self.bpe.bos_id
+            self._eos_id = self.bpe.eos_id
+            self._unk_id = self.bpe.bos_id       # no <unk> exists; alias to a never-emitted slot
+            self.id2tok = []                     # unused in BPE mode (decode goes through self.bpe)
+            self.tok2id = {}
+            return
         from collections import Counter
         counts: Counter = Counter()
         for doc in corpus:
             counts.update(_word_tokenize(doc))
         self.id2tok = [_BOS_TOK, _EOS_TOK, _UNK_TOK]
-        for tok, _ in counts.most_common(_MAX_VOCAB):
+        for tok, _ in counts.most_common(self._cap_vocab):
             self.id2tok.append(tok)
         self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
+        self._bos_id, self._eos_id, self._unk_id = 0, 1, 2
 
     @property
-    def _bos(self) -> int: return 0
+    def _bos(self) -> int: return self._bos_id
 
     @property
-    def _eos(self) -> int: return 1
+    def _eos(self) -> int: return self._eos_id
 
     @property
-    def _unk(self) -> int: return 2
+    def _unk(self) -> int: return self._unk_id
 
     @property
     def vocab_size(self) -> int:
+        if self._tok_kind == "bpe" and self.bpe is not None:
+            return max(1, self.bpe.size)
         return max(1, len(self.id2tok))
 
     def _encode(self, text: str) -> List[int]:
-        ids = [self._bos]
+        if self._tok_kind == "bpe" and self.bpe is not None:
+            return [self._bos_id] + self.bpe.encode(text) + [self._eos_id]
+        ids = [self._bos_id]
         for t in _word_tokenize(text):
-            ids.append(self.tok2id.get(t, self._unk))
-        ids.append(self._eos)
+            ids.append(self.tok2id.get(t, self._unk_id))
+        ids.append(self._eos_id)
         return ids
 
     # ---- parameter construction from the genome ---- #
@@ -491,6 +544,13 @@ class GenesisNumpyModel(BaseLanguageModel):
         if not self.tie:
             p["head_w"] = _param(rng, c, v, scale=0.02)
             p["head_b"] = _zeros(v)
+        # Champion tier trains in float32 (≈2× BLAS throughput, half the memory); search stays
+        # float64 for numerical headroom. Cast every trainable weight to the tier dtype in one pass
+        # so the whole forward runs at that precision. Non-Tensor metadata (kinds/steps) is untouched.
+        if self._dtype != np.float64:
+            for k, t in p.items():
+                if isinstance(t, Tensor):
+                    t.data = t.data.astype(self._dtype)
         self._built = True
 
     def _build_layer_params(self, rng: "np.random.Generator", i: int, ly: Dict[str, Any]) -> None:
@@ -569,7 +629,7 @@ class GenesisNumpyModel(BaseLanguageModel):
         op = ly.get("op", "gated_mlp")
         if op == "moe_mlp":
             self._degraded.append("moe_mlp→gated_mlp")
-        exp = min(_MAX_HIDDEN_MULT, max(1, int(ly.get("expansion", 4))))
+        exp = min(self._cap_hidden, max(1, int(ly.get("expansion", 4))))
         h = exp * c
         p[pre + "w1"] = _param(rng, c, h)
         p[pre + "w2"] = _param(rng, c, h)
@@ -580,8 +640,14 @@ class GenesisNumpyModel(BaseLanguageModel):
 
     # ---- forward ---- #
     def _causal_mask(self, t: int) -> "np.ndarray":
-        m = np.triu(np.ones((t, t)), k=1)
-        return m * -1e9
+        cache = getattr(self, "_mask_cache", None)
+        if cache is None:
+            cache = self._mask_cache = {}
+        m = cache.get(t)
+        if m is None:
+            m = (np.triu(np.ones((t, t), dtype=self._dtype), k=1) * -1e9).astype(self._dtype)
+            cache[t] = m
+        return m
 
     def _lin(self, x: Tensor, w_name: str, b_name: Optional[str] = None) -> Tensor:
         out = matmul(x, self.params[w_name])
@@ -793,15 +859,21 @@ class GenesisNumpyModel(BaseLanguageModel):
         if X.shape[0] == 0:
             return TrainStats(steps=0, final_loss=0.0, seconds=time.monotonic() - start, tokens=0)
         rng = np.random.default_rng(self.seed + 1)
-        n_steps = max(1, min(_MAX_STEPS, int(steps) if steps else _MAX_STEPS))
+        # The step budget is the model's tier budget (search: 60; champion: thousands), capped by any
+        # explicit ``steps`` the caller passes. The champion also carries a WALL-CLOCK budget so a
+        # forge is always bounded — an idle tick can never hang, and successive forges warm-start and
+        # accumulate more real training (continual learning) toward genuine convergence over time.
+        n_steps = max(1, min(self._steps_budget, int(steps) if steps else self._steps_budget))
+        batch = max(1, self._batch)
         opt = _Optimizer(self.lr_rule, [t for t in self.params.values()
                                         if isinstance(t, Tensor) and t.requires_grad])
         aux = {k: float(v) for k, v in (self.lr_rule.get("aux") or {}).items()}
         ent_w = aux.get("entropy_reg", 0.0)
         loss_val = 0.0
+        done = 0
         n = X.shape[0]
         for step in range(n_steps):
-            sel = rng.integers(0, n, size=min(_BATCH, n))
+            sel = rng.integers(0, n, size=min(batch, n))
             xb, yb, mb = X[sel], Y[sel], M[sel]
             for t in self.params.values():
                 if isinstance(t, Tensor):
@@ -814,19 +886,22 @@ class GenesisNumpyModel(BaseLanguageModel):
             backward(loss)
             opt.step(step, n_steps)
             loss_val = float(ce.data)
+            done = step + 1
+            if self._wall_s > 0.0 and (time.monotonic() - start) > self._wall_s:
+                break                            # bounded champion forge — stop cleanly at the budget
         tokens = int(M.sum())
-        return TrainStats(steps=n_steps, final_loss=loss_val,
+        return TrainStats(steps=done, final_loss=loss_val,
                           seconds=time.monotonic() - start, tokens=tokens)
 
-    def perplexity(self, text: str) -> float:
-        if not self._built:
-            return float("inf")
+    def _sum_nll(self, text: str) -> Tuple[float, int]:
+        """Total next-token negative log-likelihood (nats) and the number of scored positions."""
         X, Y, M = self._windows([text])
         if X.shape[0] == 0:
-            return float("inf")
+            return 0.0, 0
         total_nll, total_n = 0.0, 0
-        for i in range(0, X.shape[0], _BATCH):
-            xb, yb, mb = X[i:i + _BATCH], Y[i:i + _BATCH], M[i:i + _BATCH]
+        bs = max(1, self._batch)
+        for i in range(0, X.shape[0], bs):
+            xb, yb, mb = X[i:i + bs], Y[i:i + bs], M[i:i + bs]
             logits = self._forward(xb).data
             flat = logits.reshape(-1, logits.shape[-1])
             tgt = yb.reshape(-1)
@@ -836,10 +911,30 @@ class GenesisNumpyModel(BaseLanguageModel):
             nll = -(logp[np.arange(flat.shape[0]), tgt]) * m
             total_nll += float(nll.sum())
             total_n += int(m.sum())
+        return total_nll, total_n
+
+    def perplexity(self, text: str) -> float:
+        if not self._built:
+            return float("inf")
+        total_nll, total_n = self._sum_nll(text)
         if total_n == 0:
             return float("inf")
         ce = total_nll / total_n
         return math.exp(ce) if ce < 700 else float("inf")
+
+    def bits_per_char(self, text: str) -> float:
+        """Cross-entropy in nats **per raw character** — a tokenizer-invariant quality metric.
+
+        Per-token perplexity is not comparable across tokenizers (a byte-BPE brain has more,
+        individually-easier tokens than a word brain), so the Foundry gauntlet compares
+        bits-per-char when a candidate's tokenizer differs from the active model's. Here it is
+        exact: total NLL over all scored positions divided by the raw character count."""
+        if not self._built:
+            return float("inf")
+        total_nll, total_n = self._sum_nll(text)
+        if total_n == 0:
+            return float("inf")
+        return total_nll / max(1, len(text))
 
     def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
         if not self._built:
@@ -856,6 +951,8 @@ class GenesisNumpyModel(BaseLanguageModel):
                 break
             out.append(nxt)
             ids.append(nxt)
+        if self._tok_kind == "bpe" and self.bpe is not None:
+            return self.bpe.decode(out)          # byte-level BPE detokenization (drops specials)
         return _word_detokenize([self.id2tok[i] for i in out if 0 <= i < len(self.id2tok)
                                  and i not in (self._bos, self._eos, self._unk)])
 
@@ -870,7 +967,7 @@ class GenesisNumpyModel(BaseLanguageModel):
 
         Monotone in width and depth, so a wider/deeper genome honestly reports more capacity — what
         the topology-growth capacity signal needs on the NumPy substrate."""
-        c, v_nom = self.c, 256
+        c, v_nom = self.c, self._cap_vocab
         total = v_nom * c + self.ctx * c                     # embedding + positional
         if not self.tie:
             total += c * v_nom + v_nom                       # untied head
@@ -893,15 +990,17 @@ class GenesisNumpyModel(BaseLanguageModel):
                               else _CONV_K * c if s == "conv"
                               else 2 * self.ctx * _LOWRANK_R if s == "lowrank" else c)
             else:                                            # channel mixer (gated MLP family)
-                exp = min(_MAX_HIDDEN_MULT, max(1, int(ly.get("expansion", 4))))
+                exp = min(self._cap_hidden, max(1, int(ly.get("expansion", 4))))
                 total += 3 * exp * c * c
         return int(total)
 
     def describe(self) -> str:
         ops = " → ".join(ly.get("op", "?") for ly in self.layers)
         note = f" (degraded: {', '.join(sorted(set(self._degraded)))})" if self._degraded else ""
-        return (f"genesis-numpy brain: embd={self.c}, ctx={self.ctx}, {len(self.layers)} layers "
-                f"[{ops}], optimizer={self.lr_rule.get('optimizer', 'adamw')}, "
+        vocab = self.bpe.size if self.bpe is not None else len(self.id2tok)
+        return (f"genesis-numpy brain [{self._scale}]: embd={self.c}, ctx={self.ctx}, "
+                f"{len(self.layers)} layers [{ops}], tokenizer={self._tok_kind}(vocab={vocab}), "
+                f"optimizer={self.lr_rule.get('optimizer', 'adamw')}, "
                 f"built+trained on the NumPy substrate (no torch){note}")
 
     # ---- persistence ---- #
@@ -914,35 +1013,87 @@ class GenesisNumpyModel(BaseLanguageModel):
         meta = {"kind": self.kind, "genome": self.genome, "seed": self.seed,
                 "c": self.c, "ctx": self.ctx, "tie": self.tie,
                 "id2tok": self.id2tok, "degraded": self._degraded,
+                # tokenizer: word (id2tok above) or the from-scratch byte-BPE she trained herself
+                "tokenizer_kind": self._tok_kind,
+                "tokenizer_state": self.bpe.to_dict() if self.bpe is not None else None,
+                # training tier so a reloaded champion keeps accumulating at champion scale
+                "scale": self._scale, "cap_vocab": self._cap_vocab,
                 # non-Tensor params (kinds / synth step lists / activations) round-trip too
                 "aux_params": {k: v for k, v in self.params.items()
                                if not isinstance(v, Tensor)}}
         (directory / "model.json").write_text(json.dumps(meta), encoding="utf-8")
 
-    def load(self, directory: Path) -> None:
-        directory = Path(directory)
-        meta = json.loads((directory / "model.json").read_text(encoding="utf-8"))
+    def _restore_meta(self, meta: Dict[str, Any]) -> None:
+        """Restore architecture + tokenizer metadata (shared by strict load and warm load)."""
         self.genome = meta["genome"]; self.seed = int(meta["seed"])
         self.c = int(meta["c"]); self.ctx = int(meta["ctx"]); self.tie = bool(meta["tie"])
         self.layers = self.genome.get("layers", []) or [{"op": "attention"}, {"op": "gated_mlp"}]
         self.lr_rule = self.genome.get("learning_rule", {}) or {}
-        self.id2tok = list(meta["id2tok"])
-        self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
         self._degraded = list(meta.get("degraded", []))
+        self._scale = meta.get("scale", self._scale)
+        self._cap_vocab = int(meta.get("cap_vocab", self._cap_vocab))
+        # tokenizer: default "word" keeps old model.json files loading byte-identically
+        self._tok_kind = meta.get("tokenizer_kind", "word")
+        if self._tok_kind == "bpe" and meta.get("tokenizer_state") is not None:
+            from nyxara.growth.bpe import ByteBPETokenizer
+            self.bpe = ByteBPETokenizer.from_dict(meta["tokenizer_state"])
+            self._bos_id, self._eos_id, self._unk_id = self.bpe.bos_id, self.bpe.eos_id, self.bpe.bos_id
+            self.id2tok = []
+            self.tok2id = {}
+        else:
+            self.bpe = None
+            self.id2tok = list(meta["id2tok"])
+            self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
+            self._bos_id, self._eos_id, self._unk_id = 0, 1, 2
+
+    def _restore_aux(self, meta: Dict[str, Any]) -> None:
+        for k, v in meta.get("aux_params", {}).items():
+            self.params[k] = v if not isinstance(v, list) or not k.endswith("_steps") else v
+        for k in list(self.params):     # _meta tensors are scalars without grad
+            if k.endswith("_meta") and isinstance(self.params[k], Tensor):
+                self.params[k].requires_grad = False
+
+    def load(self, directory: Path) -> None:
+        """Strict, exact restore — the serving path (load_active_model). Reproduces the saved
+        model's perplexity and generation bit-for-bit."""
+        directory = Path(directory)
+        meta = json.loads((directory / "model.json").read_text(encoding="utf-8"))
+        self._restore_meta(meta)
         npz = np.load(directory / "weights.npz")
         self.params = {}
         for k in npz.files:
             arr = npz[k]
             self.params[k] = Tensor(arr, requires_grad=not k.endswith(
                 ("_meta",)) and not k.startswith("_"))
-        # restore the requires_grad / non-Tensor metadata exactly
-        for k, v in meta.get("aux_params", {}).items():
-            self.params[k] = v if not isinstance(v, list) or not k.endswith("_steps") else v
-        # _meta tensors are scalars without grad
-        for k in list(self.params):
-            if k.endswith("_meta") and isinstance(self.params[k], Tensor):
-                self.params[k].requires_grad = False
+        self._restore_aux(meta)
+        # match compute dtype to the restored weights so the forward runs at the saved precision
+        emb = self.params.get("embed")
+        if isinstance(emb, Tensor):
+            self._dtype = emb.data.dtype.type
         self._built = True
+
+    def warm_load(self, directory: Path) -> int:
+        """Shape-guarded partial restore for CONTINUAL learning: load every weight whose shape
+        matches the current architecture and freshly-initialise the rest, so successive champion
+        forges resume from the last promoted brain (accumulating real training) even across a
+        topology tweak. Returns the number of tensors warm-started. Never used by the serving
+        loader — that stays strict (:meth:`load`)."""
+        directory = Path(directory)
+        meta = json.loads((directory / "model.json").read_text(encoding="utf-8"))
+        if not self._built:
+            # need a fully-built target of the current architecture to graft matching shapes onto
+            raise RuntimeError("warm_load requires an already-built model (train_on first)")
+        prev_tok = meta.get("tokenizer_kind", "word")
+        if prev_tok != self._tok_kind:
+            return 0                       # tokenizer changed → token ids incomparable, keep scratch
+        npz = np.load(directory / "weights.npz")
+        grafted = 0
+        for k in npz.files:
+            cur = self.params.get(k)
+            if isinstance(cur, Tensor) and cur.data.shape == npz[k].shape:
+                cur.data = npz[k].astype(cur.data.dtype)
+                grafted += 1
+        return grafted
 
 
 def transpose_last2_2d(a: Tensor) -> Tensor:

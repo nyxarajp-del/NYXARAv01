@@ -8,7 +8,6 @@ tests assert the real end-to-end forge AND the gates around it (measure-only, be
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
@@ -32,6 +31,15 @@ def _settings(tmp_path):
     s.genesis.generations = 2
     s.genesis.population_size = 3
     s.genesis.micro_train_steps = 8
+    # champion tier: LARGER than the search caps (embd>48, ctx>24) so we prove decoupling, but small
+    # enough — plus a hard wall-clock cap — to stay CI-fast (a real forge, not a slow one).
+    s.genesis.champion_n_embd = 64
+    s.genesis.champion_block_size = 32
+    s.genesis.champion_vocab_size = 512
+    s.genesis.champion_tokenizer = "bpe"
+    s.genesis.champion_train_steps = 25
+    s.genesis.champion_batch = 8
+    s.genesis.champion_wall_clock_s = 30.0
     return s
 
 

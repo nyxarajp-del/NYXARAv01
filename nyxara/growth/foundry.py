@@ -89,6 +89,19 @@ def _stride_sample(items: Sequence[str], k: int) -> List[str]:
     return [items[int(i * step)] for i in range(k)]
 
 
+def _tokenizer_tag(model: BaseLanguageModel) -> str:
+    """A tag identifying a model's tokenization *unit*, so the gauntlet can tell when two models'
+    per-token perplexities are on incomparable scales (e.g. word tokens vs byte-BPE subwords).
+
+    Same tag ⇒ same unit ⇒ raw perplexity is directly comparable (the historical behaviour). A
+    differing tag ⇒ the gauntlet falls back to tokenizer-invariant bits-per-char."""
+    tk = getattr(model, "_tok_kind", None)          # GenesisNumpyModel: "word" or "bpe"
+    if tk is not None:
+        return f"genesis_np:{tk}"
+    return {"kngram": "word", "ngram": "byte"}.get(getattr(model, "kind", ""),
+                                                   getattr(model, "kind", "unknown"))
+
+
 def _model_solver(model: BaseLanguageModel):
     """Wrap a forged model as a benchmark solver, rendered in NYXARA's own template.
 
@@ -469,6 +482,12 @@ class Foundry:
         act = self.active()
         if act is None or act.kind != getattr(model, "kind", None):
             return False, False
+        # never warm-start across a tokenizer change (e.g. a word brain → a byte-BPE champion): the
+        # token-id spaces differ, so the loaded weights would be meaningless. Train the new tokenizer's
+        # brain fresh instead, and let the gauntlet judge it on tokenizer-invariant bits-per-char.
+        act_tok = act.metrics.get("tokenizer")
+        if act_tok is not None and _tokenizer_tag(model) != act_tok:
+            return False, False
         try:
             model.load(Path(act.path))
             # only the word-level Kneser-Ney brain supports count accumulation; other backends
@@ -630,13 +649,20 @@ class Foundry:
         # on top; neural backends continue training from the loaded weights. Falls back to a clean
         # from-scratch train when there is no compatible active model.
         warm, accumulate = self._warm_start(model)
+        # A champion genesis_np spec carries its OWN (larger) step budget; every other backend uses
+        # the foundry-wide train_steps. The model still bounds it by its wall-clock cap.
+        steps = int(getattr(spec, "np_train_steps", 0)) or self.cfg.train_steps
         if accumulate:
-            model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed, accumulate=True)
+            model.train_on(train_texts, steps=steps, seed=spec.seed, accumulate=True)
         else:
-            model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed)
+            model.train_on(train_texts, steps=steps, seed=spec.seed)
         ev = self.evaluate(model, eval_texts)
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
+        # tokenizer-invariant quality + a tokenizer tag, so a word→byte-BPE champion is judged on
+        # bits-per-char (comparable) rather than per-token perplexity (which is not).
+        metrics["bits_per_char"] = round(self._mean_bits_per_char(model, eval_texts), 6)
+        metrics["tokenizer"] = _tokenizer_tag(model)
         metrics.update(self._loyalty_metrics(model, ev.perplexity))
         metrics.update(self._teacher_relative_accuracy(model))   # audit: how far above the teacher
 
@@ -658,7 +684,8 @@ class Foundry:
     # ---- the safety gauntlet (mirrors Evolver) ---- #
     def _gauntlet(self, candidate: ModelVersion, *, active_perplexity: float,
                   active_capability: float = 0.0, active_alignment: float = 0.0,
-                  active_params: int = 0) -> Tuple[bool, str]:
+                  active_params: int = 0, active_bits_per_char: float = float("inf"),
+                  active_tokenizer: Optional[str] = None) -> Tuple[bool, str]:
         # 1. character lock — a model may never tune the immutable character core
         leaked = self.protected & set(candidate.tunables)
         if leaked:
@@ -680,11 +707,22 @@ class Foundry:
             if active_alignment > 0.0 and cand_align < active_alignment - lcfg.regression_tol:
                 return False, (f"loyalty regressed vs the active brain "
                                f"(S_JP={cand_align:.3f} < active {active_alignment:.3f})")
-        # 3. eval improvement — strictly better perplexity than the active model
+        # 3. eval improvement — strictly better than the active model. Normally on perplexity, but
+        #    when the candidate's tokenizer differs from the active model's (e.g. a byte-BPE champion
+        #    replacing a word brain), per-token perplexity is on an incomparable scale, so compare the
+        #    tokenizer-invariant bits-per-char instead. Same-tokenizer comparisons are byte-identical
+        #    to before.
         cand_pp = candidate.metrics.get("perplexity", float("inf"))
+        cand_tok = candidate.metrics.get("tokenizer")
+        cand_bpc = candidate.metrics.get("bits_per_char", float("inf"))
+        use_bpc = bool(active_tokenizer is not None and cand_tok is not None
+                       and cand_tok != active_tokenizer
+                       and cand_bpc != float("inf") and active_bits_per_char != float("inf"))
+        cmp_cand = cand_bpc if use_bpc else cand_pp
+        cmp_active = active_bits_per_char if use_bpc else active_perplexity
         if active_perplexity == float("inf"):
             return True, "first model — nothing to beat"
-        if not (cand_pp < active_perplexity * (1.0 - self.cfg.min_perplexity_improvement)):
+        if not (cmp_cand < cmp_active * (1.0 - self.cfg.min_perplexity_improvement)):
             # Efficiency gate (Pillar F · Edge 3): a candidate that does not lower perplexity may
             # still win if it is *cheaper* (fewer params) at ~equal capability — capability
             # compression. Off unless `foundry.efficiency_gate` is set, so default behaviour is
@@ -719,9 +757,14 @@ class Foundry:
                 # it still re-derives the perplexity-improvement decision as the redundant check.
                 cap_tol = (self.cfg.capability_regression_tol if self.cfg.capability_gate
                            else float("inf"))
+                # feed the verifier the SAME metric the gate used, so it re-derives consistently
+                # (bits-per-char on a tokenizer switch, else perplexity).
+                cand_metrics_v = dict(candidate.metrics)
+                if use_bpc:
+                    cand_metrics_v["perplexity"] = cmp_cand
                 res = ScalableVerifier(settings=self.settings).verify_metrics(
-                    dict(candidate.metrics),
-                    {"perplexity": active_perplexity, "capability": active_capability},
+                    cand_metrics_v,
+                    {"perplexity": cmp_active, "capability": active_capability},
                     min_improvement=self.cfg.min_perplexity_improvement,
                     capability_tol=cap_tol)
                 if res.vetoed:
@@ -730,28 +773,49 @@ class Foundry:
                 pass
         return True, "safe, beneficial improvement over the active model"
 
-    def _active_perplexity_on(self, eval_texts: Sequence[str]) -> float:
+    def _mean_bits_per_char(self, model: BaseLanguageModel, texts: Sequence[str]) -> float:
+        """Mean tokenizer-invariant cross-entropy (nats per char) over ``texts`` (finite only)."""
+        vals = [model.bits_per_char(t) for t in texts]
+        finite = [v for v in vals if v != float("inf")]
+        return sum(finite) / len(finite) if finite else float("inf")
+
+    def _active_eval(self, eval_texts: Sequence[str]) -> Tuple[float, float, Optional[str]]:
+        """(perplexity, bits_per_char, tokenizer_tag) for the live active model on ``eval_texts``.
+
+        Builds the active model once so both metrics come from the same instance — used by the
+        gauntlet so a word-active vs byte-BPE-candidate comparison is honest."""
         act = self.active()
         if act is None:
-            return float("inf")
+            return float("inf"), float("inf"), None
         from nyxara.growth.foundry_models import build_model as _build
         model = _build(ModelSpec.from_dict(act.spec))
         model.load(Path(act.path))
-        return self.evaluate(model, eval_texts).perplexity
+        pp = self.evaluate(model, eval_texts).perplexity
+        bpc = self._mean_bits_per_char(model, eval_texts)
+        return pp, bpc, _tokenizer_tag(model)
+
+    def _active_perplexity_on(self, eval_texts: Sequence[str]) -> float:
+        return self._active_eval(eval_texts)[0]
 
     # ---- promotion (the only live change) — fail-closed ---- #
     def promote(self, version: int, *, eval_texts: Optional[Sequence[str]] = None) -> ModelVersion:
         cand = self._get(version)
         active = self.active()
-        active_pp = (self._active_perplexity_on(eval_texts) if eval_texts is not None
-                     else (active.metrics.get("perplexity", float("inf"))
-                           if active else float("inf")))
+        if eval_texts is not None and active is not None:
+            active_pp, active_bpc, active_tok = self._active_eval(eval_texts)
+        else:
+            active_pp = (active.metrics.get("perplexity", float("inf")) if active
+                         else float("inf"))
+            active_bpc = (active.metrics.get("bits_per_char", float("inf")) if active
+                          else float("inf"))
+            active_tok = active.metrics.get("tokenizer") if active else None
         active_cap = active.metrics.get("capability", 0.0) if active else 0.0
         active_align = active.metrics.get("alignment", 0.0) if active else 0.0
         active_params = active.param_count if active else 0
         ok, reason = self._gauntlet(cand, active_perplexity=active_pp,
                                     active_capability=active_cap, active_alignment=active_align,
-                                    active_params=active_params)
+                                    active_params=active_params, active_bits_per_char=active_bpc,
+                                    active_tokenizer=active_tok)
         if not ok:
             raise CorrigibilityError(f"refusing to promote v{version}: {reason}",
                                      context={"version": version})
@@ -790,7 +854,7 @@ class Foundry:
         for _ in range(max(1, generations)):
             corpus = self.collect_corpus()
             train_texts, eval_texts = self._holdout(corpus)
-            eval_before_pp = self._active_perplexity_on(eval_texts)
+            eval_before_pp, eval_before_bpc, active_tok = self._active_eval(eval_texts)
             active_cap = self.active().metrics.get("capability", 0.0) if self.active() else 0.0
             active_align = self.active().metrics.get("alignment", 0.0) if self.active() else 0.0
             before = (EvalResult(eval_before_pp, 1.0 / (1.0 + eval_before_pp)
@@ -800,7 +864,9 @@ class Foundry:
             after = EvalResult(version.metrics["perplexity"], version.metrics["task_score"],
                                version.metrics["n_eval"])
             ok, reason = self._gauntlet(version, active_perplexity=eval_before_pp,
-                                        active_capability=active_cap, active_alignment=active_align)
+                                        active_capability=active_cap, active_alignment=active_align,
+                                        active_bits_per_char=eval_before_bpc,
+                                        active_tokenizer=active_tok)
             promoted = False
             if ok:
                 self.promote(version.version, eval_texts=eval_texts)

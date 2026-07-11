@@ -669,6 +669,20 @@ class GenesisConfig(BaseModel):
     top_k: int = Field(default=0, ge=0)                       # 0 = disabled
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)         # 1.0 = disabled (full nucleus)
     repetition_penalty: float = Field(default=1.0, ge=1.0, le=4.0)   # 1.0 = disabled
+    # ---- Champion tier: the REAL brain the promoted model trains at (NumPy substrate) ---- #
+    # Architecture search must stay micro to be fast, but the champion NYXARA actually serves is
+    # rebuilt at a genuinely larger, still-CPU-tractable scale — wider, longer context, a real
+    # from-scratch byte-BPE vocabulary (no <unk>), many more steps — bounded by a wall-clock budget
+    # so a forge never hangs and successive forges warm-start and accumulate more real training.
+    # Set ``champion_scale=False`` to recover the old behaviour (champion == search-tier micro).
+    champion_scale: bool = True
+    champion_n_embd: int = Field(default=128, ge=8, le=256)      # champion residual width
+    champion_block_size: int = Field(default=96, ge=8, le=128)   # champion context length
+    champion_vocab_size: int = Field(default=8192, ge=256, le=32768)   # byte-BPE vocab size
+    champion_tokenizer: Literal["word", "bpe"] = "bpe"          # from-scratch subword by default
+    champion_train_steps: int = Field(default=3000, ge=1)       # optimizer steps per champion forge
+    champion_batch: int = Field(default=48, ge=1, le=256)       # windows per optimizer step
+    champion_wall_clock_s: float = Field(default=600.0, ge=0.0)  # hard cap on one forge (0 = none)
 
 
 class LoyaltyConfig(BaseModel):

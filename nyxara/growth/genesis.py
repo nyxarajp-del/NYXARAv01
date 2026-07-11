@@ -2713,9 +2713,28 @@ class NeuralArchitectureSearch:
         if self._champion is None:
             raise RuntimeError("run search() before requesting the champion spec")
         g = self._champion.genome
-        return ModelSpec(kind="genesis", genome=g.to_dict(), n_embd=g.n_embd,
-                         block_size=g.block_size, seed=g.seed, ngram_order=g.ngram_order,
-                         ngram_k=g.ngram_k, substrate=str(getattr(self.cfg, "substrate", "auto")))
+        gd = g.to_dict()
+        # The searched genome is a *blueprint* (layer sequence, mixers, optimizer, schedule) evolved
+        # at micro scale for search speed. The PROMOTED brain rebuilds that blueprint at champion
+        # scale: wider, longer context, a real from-scratch byte-BPE vocabulary, many more steps —
+        # a genuine ~1–10M-param small transformer she trained herself, not the micro search model.
+        champ = bool(getattr(self.cfg, "champion_scale", True))
+        n_embd, block = g.n_embd, g.block_size
+        if champ:
+            n_embd = int(getattr(self.cfg, "champion_n_embd", 128))
+            block = int(getattr(self.cfg, "champion_block_size", 96))
+            gd["n_embd"] = n_embd
+            gd["block_size"] = block
+        return ModelSpec(
+            kind="genesis", genome=gd, n_embd=n_embd, block_size=block, seed=g.seed,
+            ngram_order=g.ngram_order, ngram_k=g.ngram_k,
+            substrate=str(getattr(self.cfg, "substrate", "auto")),
+            np_scale="champion" if champ else "search",
+            np_vocab_size=int(getattr(self.cfg, "champion_vocab_size", 8192)) if champ else 0,
+            np_tokenizer=str(getattr(self.cfg, "champion_tokenizer", "bpe")) if champ else "word",
+            np_train_steps=int(getattr(self.cfg, "champion_train_steps", 0)) if champ else 0,
+            np_batch=int(getattr(self.cfg, "champion_batch", 0)) if champ else 0,
+            np_wall_clock_s=float(getattr(self.cfg, "champion_wall_clock_s", 0.0)) if champ else 0.0)
 
     def all_reports(self) -> List[GenesisReport]:
         return list(self._reports)
