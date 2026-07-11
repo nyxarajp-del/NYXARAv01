@@ -164,3 +164,60 @@ class DataFlywheel:
         self._append(ex)
         self._seen.add(key)
         return FlywheelDecision(True, f"collected ({source})", example=ex)
+
+    # ---- corrections: the Master said the old answer was WRONG ---- #
+    def retract(self, prompt: str) -> int:
+        """Remove every stored pair for ``prompt`` from the corpus; return how many.
+
+        Rewrites the JSONL without the matching lines and clears the prompt from the
+        dedup set — a wrong answer must stop being training data, and the slot must
+        reopen so the corrected answer can take it."""
+        self._ensure_loaded()
+        key = self._key(prompt)
+        if key not in self._seen or not self.store_path.exists():
+            return 0
+        kept: List[str] = []
+        dropped = 0
+        for line in self.store_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                ex_prompt = json.loads(stripped).get("prompt", "")
+            except Exception:  # noqa: BLE001 — keep malformed lines untouched
+                kept.append(stripped)
+                continue
+            if self._key(ex_prompt) == key:
+                dropped += 1
+            else:
+                kept.append(stripped)
+        tmp = self.store_path.with_suffix(self.store_path.suffix + ".tmp")
+        tmp.write_text(("\n".join(kept) + "\n") if kept else "", encoding="utf-8")
+        import os
+        os.replace(tmp, self.store_path)
+        self._seen.discard(key)
+        return dropped
+
+    def consider_correction(self, prompt: str, wrong_answer: str, corrected_answer: str,
+                            *, weight: int = 3) -> FlywheelDecision:
+        """A correction from the Master: retract the stale wrong pair, then store the
+        corrected one ``weight`` times.
+
+        Repetition is the corpus's native weighting mechanism (the same doc appearing N
+        times pulls the model N times harder), so a correction outweighs an ordinary
+        collected turn — being corrected teaches MORE than being right did. The pair is
+        stored as ``source="correction"``, first-class verified supervision."""
+        self._ensure_loaded()
+        prompt = (prompt or "").strip()
+        corrected = (corrected_answer or "").strip()
+        if not prompt or not corrected:
+            return FlywheelDecision(False, "empty prompt or corrected answer")
+        if len(corrected) > self.max_chars:
+            return FlywheelDecision(False, f"answer too long (>{self.max_chars} chars)")
+        self.retract(prompt)
+        ex = DistillationExample(prompt=prompt, answer=corrected, system=self.system,
+                                 source="correction")
+        for _ in range(max(1, int(weight))):
+            self._append(ex)
+        self._seen.add(self._key(prompt))
+        return FlywheelDecision(True, f"correction collected ×{max(1, int(weight))}", example=ex)

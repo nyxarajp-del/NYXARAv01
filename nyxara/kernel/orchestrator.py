@@ -573,6 +573,18 @@ class NyxaraCore:
         # Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop, fed by
         # the flywheel so growth in her own experience forges a new model (gauntlet-gated).
         self.autoforge = self._build_autoforge() if enable_growth else None
+        # Close the train→serve loop: ANY foundry promotion in this process (autoforge, growth
+        # engine, genesis, topology, CLI) reaches the live brain, which hot-reloads the serving
+        # provider so the very next turn speaks with the new weights. Held via WeakMethod on the
+        # bus, so a discarded core unsubscribes itself.
+        self._last_promotion: Any = None
+        self._pending_correction: Any = None   # (orig_prompt, wrong_answer) awaiting the fix
+        if enable_growth:
+            try:
+                from nyxara.growth.promotion import subscribe as _promo_subscribe
+                _promo_subscribe(self._on_model_promoted)
+            except Exception:  # noqa: BLE001 — the provider's pointer-poll is the backstop
+                pass
         # Genesis Protocol — Neural Architecture Search: she designs her OWN neural architectures
         # (not a copied Transformer/LLaMA), micro-tests them, and crowns the fastest+smartest as
         # her brain — promoted only through the SAME gauntlet. Built after autoforge (shares the
@@ -2534,6 +2546,7 @@ class NyxaraCore:
             from nyxara.growth.flywheel import DataFlywheel
             self._flywheel_owner_only = bool(cfg.owner_only)
             self._flywheel_respond_only = bool(cfg.respond_only)
+            self._flywheel_correction_weight = int(getattr(cfg, "correction_weight", 3))
             return DataFlywheel.from_settings(verifier=self._flywheel_verifier())
         except Exception:  # noqa: BLE001 — the flywheel is a capability, never required
             return None
@@ -2548,6 +2561,38 @@ class NyxaraCore:
         without touching the collection path."""
         return None
 
+    # cheap, deterministic markers that an OWNER turn is correcting the previous answer
+    _CORRECTION_MARKERS = ("wrong", "that's not", "thats not", "not right", "incorrect",
+                           "no,", "no.", "nope", "not true", "mistake", "galat", "nahi,",
+                           "nahi.", "actually,", "correction:")
+
+    def _detect_correction(self, text: str) -> bool:
+        """True when this looks like the Master correcting the previous answer."""
+        low = (text or "").strip().lower()
+        if not low:
+            return False
+        head = low[:80]
+        return any(m in head for m in self._CORRECTION_MARKERS)
+
+    def _note_correction(self, text: str, authority: Authority) -> None:
+        """Stash which exchange is being corrected (Master-only, needs a previous turn)."""
+        if authority is not Authority.OWNER:
+            return
+        try:
+            hist = list(getattr(self, "history", ()))
+            if len(hist) < 2 or not self._detect_correction(text):
+                return
+            # the previous exchange: the last (master → nyxara) pair in the buffer
+            prev_prompt, prev_answer = None, None
+            for i in range(len(hist) - 1, 0, -1):
+                if hist[i][0] == "nyxara" and hist[i - 1][0] != "nyxara":
+                    prev_prompt, prev_answer = hist[i - 1][1], hist[i][1]
+                    break
+            if prev_prompt:
+                self._pending_correction = (prev_prompt, prev_answer)
+        except Exception:  # noqa: BLE001 — detection is advisory, never blocks a turn
+            pass
+
     def _feed_flywheel(self, prompt: str, response: str, candidate: "Candidate",
                        authority: Authority) -> None:
         """Offer one fully-cleared turn to the data flywheel (best-effort, never raises)."""
@@ -2559,6 +2604,14 @@ class NyxaraCore:
                 return
             if getattr(self, "_flywheel_respond_only", True) and candidate.kind != "respond":
                 return
+            # a pending correction: this gate-cleared answer replaces the retracted wrong one
+            # in the corpus, trained as (original question → corrected answer) with extra weight
+            pending = getattr(self, "_pending_correction", None)
+            if pending is not None:
+                self._pending_correction = None
+                orig_prompt, old_answer = pending
+                weight = int(getattr(self, "_flywheel_correction_weight", 3))
+                fw.consider_correction(orig_prompt, old_answer or "", response, weight=weight)
             fw.consider(prompt, response, confidence=float(candidate.confidence))
         except Exception:  # noqa: BLE001 — collection is best-effort, never blocks a turn
             pass
@@ -3011,6 +3064,39 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — dreaming is a capability, never required
             return None
 
+    def _on_model_promoted(self, event: Any) -> None:
+        """A foundry promotion/rollback just landed — adopt the new weights LIVE.
+
+        Fired by the promotion bus (growth/promotion.py) from whichever loop trained the
+        model. Reload is best-effort: the SelfProvider's per-request pointer check is the
+        backstop, so a failure here only delays adoption by one turn. The promotion is
+        also journaled into episodic memory — she remembers, truthfully, that she grew."""
+        self._last_promotion = event
+        llm = getattr(self.reasoner, "llm", None)
+        if llm is not None and hasattr(llm, "on_promotion"):
+            try:
+                llm.on_promotion(event)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            verb = "rolled back to" if getattr(event, "action", "") == "rollback" else "promoted"
+            pp = (event.metrics or {}).get("perplexity")
+            detail = f", perplexity {pp}" if pp is not None else ""
+            self.mind.record(ThoughtKind.INFERENCE,
+                             f"foundry: {verb} my own model v{event.version}"[:80],
+                             salience=0.75)
+            if self.memory is not None:
+                from nyxara.memory.provenance import Provenance, SourceType
+                from nyxara.memory.store import MemoryType
+                self.memory.remember(
+                    f"I trained and {verb} my own model v{event.version} "
+                    f"({event.kind}{detail}). My weights changed; I am serving them now.",
+                    mem_type=MemoryType.EPISODIC,
+                    provenance=Provenance(SourceType.SELF_REFLECTION, confidence=1.0),
+                    importance=0.7, tags=["learning", "foundry"])
+        except Exception:  # noqa: BLE001 — journaling never blocks adoption
+            pass
+
     def _build_autoforge(self) -> Any:
         """Level 11 — AutoForge: the autonomous Collect→Train→Benchmark→Gate→Promote loop.
 
@@ -3283,6 +3369,11 @@ class NyxaraCore:
         # affect & social: the Master's presence warms the mood and feeds theory-of-mind;
         # the stream gets a fresh seed to wander over later.
         self._note_interaction(safe_text, authority)
+        # corrections → weights: when the Master says the LAST answer was wrong, remember
+        # which exchange is being corrected. Once THIS turn produces a gate-cleared answer,
+        # _feed_flywheel retrains the pair (original question → corrected answer) — real
+        # supervised signal, weighted above an ordinary turn.
+        self._note_correction(safe_text, authority)
         # free-energy read-out: fold prediction error over the percept into how she feels
         self._predictive_tick(percept)
         # sensory prediction: surprise over the live stream sharpens attention before ATTEND
@@ -6673,6 +6764,15 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"enabled": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    def learning_report(self) -> Dict[str, Any]:
+        """Truthful learning state: trained generations, corpus growth, LIVE serving.
+
+        Aggregated by growth/learning_report.py from real on-disk + in-process state
+        (foundry manifest, flywheel JSONL, autoforge cycles, the serving provider) —
+        the proof surface that her learning changes actual weights that actually serve."""
+        from nyxara.growth.learning_report import learning_status
+        return learning_status(core=self)
+
     def report(self) -> Dict[str, Any]:
         rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
@@ -6792,6 +6892,10 @@ class NyxaraCore:
             rep["strategic_analyses"] = len(self.strategic_intelligence.all_analyses())
         if self.autoforge is not None:
             rep["forge_cycles"] = len(self.autoforge.all_cycles())
+        try:
+            rep["learning"] = self.learning_report()
+        except Exception:  # noqa: BLE001 — the learning report is advisory, never fatal
+            pass
         if self.genesis is not None:
             reports = self.genesis.all_reports()
             rep["genesis_searches"] = len(reports)

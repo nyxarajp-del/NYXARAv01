@@ -108,6 +108,49 @@ def test_persistence_across_instances(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Corrections: the Master said the old answer was wrong
+# --------------------------------------------------------------------------- #
+def test_retract_removes_pair_and_reopens_slot(tmp_path):
+    fw = _fw(tmp_path)
+    fw.consider("capital of france?", "It is Lyon, of course.", confidence=1.0)
+    assert fw.retract("capital of france?") == 1
+    assert fw.count() == 0
+    # slot reopened: the corrected answer can now be collected normally
+    assert fw.consider("capital of france?", "It is Paris.", confidence=1.0).collected
+
+
+def test_retract_on_absent_prompt_is_noop(tmp_path):
+    fw = _fw(tmp_path)
+    fw.consider("kept?", "yes, this one stays", confidence=1.0)
+    assert fw.retract("never stored") == 0
+    assert fw.count() == 1
+
+
+def test_consider_correction_retracts_and_reweights(tmp_path):
+    fw = _fw(tmp_path)
+    fw.consider("capital of france?", "It is Lyon, of course.", confidence=1.0)
+    d = fw.consider_correction("capital of france?", "It is Lyon, of course.",
+                               "It is Paris.", weight=3)
+    assert d.collected and d.example.source == "correction"
+    lines = [json.loads(x) for x in
+             (tmp_path / "flywheel.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert len(lines) == 3                                  # weight× copies, wrong pair gone
+    assert all(l["answer"] == "It is Paris." for l in lines)
+    assert all(l["source"] == "correction" for l in lines)
+
+
+def test_correction_survives_reload_and_dedups(tmp_path):
+    fw1 = _fw(tmp_path)
+    fw1.consider("q?", "the old wrong answer", confidence=1.0)
+    fw1.consider_correction("q?", "the old wrong answer", "the corrected answer", weight=2)
+    fw2 = _fw(tmp_path)                                     # fresh instance, same file
+    assert fw2.count() == 1                                 # one unique prompt
+    assert not fw2.consider("q?", "another answer", confidence=1.0).collected  # still deduped
+    docs = fw2.examples()
+    assert all(e.answer == "the corrected answer" for e in docs)
+
+
+# --------------------------------------------------------------------------- #
 # Integration: the core feeds the flywheel
 # --------------------------------------------------------------------------- #
 def test_core_feeds_flywheel_on_owner_turn(tmp_path, monkeypatch):

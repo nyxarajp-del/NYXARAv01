@@ -4,6 +4,7 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 
 * ``GET  /health``               — liveness, unauthenticated.
 * ``GET  /v1/report``            — a calibrated status report.
+* ``GET  /v1/learning``          — truthful learning state (generations, corpus, serving).
 * ``POST /v1/chat``              — one turn: ``{message}`` → the disposed response.
 * ``POST /v1/agent``             — a multi-step gated goal: ``{goal, max_steps?}``.
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
@@ -320,6 +321,11 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.get("/v1/report", dependencies=auth)
     def report() -> dict:
         return core.report()
+
+    @app.get("/v1/learning", dependencies=auth)
+    def learning() -> dict:
+        """Truthful learning state: trained generations, corpus growth, live serving."""
+        return core.learning_report()
 
     @app.post("/v1/chat", dependencies=auth)
     def chat(req: ChatRequest) -> dict:

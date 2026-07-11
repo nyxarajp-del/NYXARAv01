@@ -903,6 +903,19 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                       params=[],
                       capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
 
+        # ---- truthful learning status: what she has ACTUALLY learned (read-only) ---- #
+        def _learning_status() -> Dict[str, Any]:
+            from nyxara.growth.learning_report import learning_status
+            return learning_status(core=None)
+
+        _add(ToolSpec("learning_status", handler=_learning_status,
+                      description="her real learning state, from disk — trained model "
+                                  "generations, perplexity trend, flywheel corpus growth and "
+                                  "corrections (honest: absent pieces reported absent, "
+                                  "never invented)",
+                      params=[],
+                      capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+
         # ---- forge her own model from lived memory (Master-gated, gauntlet-protected) ---- #
         def _train_self_model(generations: int = 1) -> Dict[str, Any]:
             from nyxara.growth.autolearn import GrowthEngine

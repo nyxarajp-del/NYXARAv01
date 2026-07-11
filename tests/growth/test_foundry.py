@@ -400,3 +400,28 @@ def test_efficiency_gate_rejects_cheaper_but_much_worse(tmp_path):
     ok, reason = f._gauntlet(cand, active_perplexity=10.0, active_capability=0.80,
                              active_params=7_000_000)
     assert not ok
+
+
+# -------------------- the lora_requires_gpu clamp -------------------- #
+def test_effective_backend_downshifts_lora_without_cuda(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.backend = "lora"
+    f.cfg.lora_requires_gpu = True
+    # no CUDA: a real neural backend is trained instead of stalling on a 9B base
+    assert f._effective_backend(has_torch=True, has_cuda=False) == "nanogpt"
+    assert f._effective_backend(has_torch=False, has_cuda=False) == "auto"
+    # CUDA present: LoRA proceeds as configured
+    assert f._effective_backend(has_torch=True, has_cuda=True) == "lora"
+
+
+def test_effective_backend_clamp_can_be_disabled(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.backend = "lora"
+    f.cfg.lora_requires_gpu = False
+    assert f._effective_backend(has_torch=True, has_cuda=False) == "lora"
+
+
+def test_effective_backend_leaves_non_lora_untouched(tmp_path):
+    f = _foundry(tmp_path)
+    f.cfg.backend = "ngram"
+    assert f._effective_backend(has_torch=False, has_cuda=False) == "ngram"
