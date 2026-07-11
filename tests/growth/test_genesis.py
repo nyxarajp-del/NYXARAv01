@@ -641,14 +641,21 @@ def test_learning_rule_roundtrips_through_dict():
 
 
 def test_mixer_program_roundtrips_and_stays_valid():
-    from nyxara.growth.genesis import MixerProgram, _SYNTH_PRIMS
+    from nyxara.growth.genesis import (MixerProgram, _SYNTH_PRIMS, _synth_base, _synth_param,
+                                       _SYNTH_PARAM_PRIMS)
     rng = random.Random(4)
     for _ in range(50):
         p = MixerProgram.random(rng)
         p.mutate(rng)
         assert MixerProgram.from_dict(p.to_dict()).to_dict() == p.to_dict()
         assert 1 <= len(p.steps) <= 6
-        assert all(s in _SYNTH_PRIMS for s in p.steps)
+        # each step is a valid base primitive, optionally carrying an in-range scalar parameter
+        for s in p.steps:
+            base = _synth_base(s)
+            assert base in _SYNTH_PRIMS
+            param = _synth_param(s)
+            if param is not None:
+                assert base in _SYNTH_PARAM_PRIMS and param in _SYNTH_PARAM_PRIMS[base]
 
 
 def test_genome_carries_learning_rule_and_synth_roundtrips():
@@ -771,3 +778,76 @@ def test_torch_plasticity_and_synth_op_train_and_roundtrip(tmp_path):
     reloaded = build_model(model.spec)
     reloaded.load(path)
     assert reloaded.param_count() == model.param_count()
+
+
+# --------------------------------------------------------------------------- #
+# The self-extending primitive library — crowned synth mixers become reusable building blocks.
+# --------------------------------------------------------------------------- #
+def test_primitive_library_add_dedupe_and_single_step_rejected():
+    from nyxara.growth.genesis import PrimitiveLibrary, MixerProgram
+    lib = PrimitiveLibrary(path=None)
+    n1 = lib.add(MixerProgram(steps=["conv:5", "gate", "proj"]))
+    n2 = lib.add(MixerProgram(steps=["conv:5", "gate", "proj"]))     # duplicate -> None
+    n3 = lib.add(MixerProgram(steps=["ssm"]))                        # single base prim -> None
+    assert n1 == "synth_0" and n2 is None and n3 is None
+    assert len(lib) == 1
+
+
+def test_primitive_library_persists_and_reloads(tmp_path):
+    from nyxara.growth.genesis import PrimitiveLibrary, MixerProgram
+    path = tmp_path / "genesis" / "primitive_library.json"
+    lib = PrimitiveLibrary(path=path)
+    assert lib.add(MixerProgram(steps=["conv:3", "lowrank:8", "gate"])) == "synth_0"
+    assert path.exists()
+    reloaded = PrimitiveLibrary(path=path)                            # a fresh search reloads it
+    assert len(reloaded) == 1
+    assert reloaded.sample_steps(random.Random(0)) == ["conv:3", "lowrank:8", "gate"]
+
+
+def test_random_synth_composes_over_library_primitives():
+    from nyxara.growth.genesis import PrimitiveLibrary, MixerProgram
+    lib = PrimitiveLibrary(path=None)
+    lib.add(MixerProgram(steps=["conv:5", "gate", "proj"]))
+    rng = random.Random(0)
+    reused = sum(1 for _ in range(400)
+                 if "conv:5" in MixerProgram.random(rng, library=lib).steps)
+    # some fresh programs are seeded from her own crowned mixer, some invented from base prims
+    assert 40 < reused < 360
+
+
+def test_promoted_champion_extends_the_palette(tmp_path):
+    # a gauntlet-crowned champion carrying a synth mixer distils it into a reusable named primitive.
+    # Isolate the persisted library under tmp_path so the test never collides with a shared data dir.
+    from nyxara.growth.genesis import MixerProgram, LayerGene
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.paths.data_dir = tmp_path
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "ngram"
+    foundry = Foundry(settings=settings, seed_corpus=_CORPUS)
+    nas = NeuralArchitectureSearch(settings=settings, cfg=_cfg(), foundry=foundry)
+    assert nas._library is not None and len(nas._library) == 0
+    g = ArchitectureGenome(
+        layers=[LayerGene(op="synth", program=MixerProgram(steps=["conv:5", "gate", "proj"])),
+                LayerGene(op="gated_mlp")])
+    g._fixup()
+    learned = nas._library.add_from_genome(g)
+    assert learned == 1 and len(nas._library) == 1
+    # the growth is persisted, so the NEXT search reloads it into its search alphabet
+    nas2 = NeuralArchitectureSearch(settings=settings, cfg=_cfg(), foundry=foundry)
+    assert len(nas2._library) == 1
+
+
+def test_parameterised_synth_builds_and_trains_on_numpy_substrate():
+    from nyxara.growth.genesis import MixerProgram, LayerGene
+    from nyxara.growth.foundry_models import ModelSpec, build_model
+    g = ArchitectureGenome(
+        n_embd=32, block_size=16,
+        layers=[LayerGene(op="synth", program=MixerProgram(steps=["conv:5", "lowrank:8", "gate"])),
+                LayerGene(op="gated_mlp")])
+    g._fixup()
+    spec = ModelSpec(kind="genesis", genome=g.to_dict(), n_embd=32, block_size=16,
+                     seed=1, substrate="numpy")
+    model = build_model(spec)
+    before = model.perplexity(_CORPUS[0])
+    model.train_on(_CORPUS, steps=10, seed=1)
+    assert model.perplexity(_CORPUS[0]) <= before             # the parameterised mixer really trains

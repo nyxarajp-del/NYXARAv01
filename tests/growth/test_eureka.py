@@ -155,3 +155,105 @@ def test_total_breakthroughs_accumulates_across_runs():
     assert first > 0
     eng.discover(2, 18)
     assert eng.total_breakthroughs >= first
+
+
+# --------------------------------------------------------------------------- #
+# Genuine genetic programming — mutate/crossover recombine real subtrees (not template re-seeding).
+# --------------------------------------------------------------------------- #
+def test_tree_expansion_is_always_an_exact_identity():
+    # every algebra tree the factory builds expands to a polynomial the Prover certifies PROVEN.
+    from nyxara.growth.eureka import _TreeFactory, LemmaLibrary
+    from random import Random
+    tf = _TreeFactory(Random(0), LemmaLibrary())
+    checker = Prover(seed=3)
+    proven = 0
+    for _ in range(60):
+        tree = tf.fresh(allow_var=True, depth=3)
+        stmt = f"{tree.render()} = {tree.evaluate().render()}"
+        res = checker.prove(ProofClaim(kind="algebra", statement=stmt))
+        assert res.verdict is ProofVerdict.PROVEN, f"tree is not an identity: {stmt}"
+        proven += 1
+    assert proven == 60
+
+
+def test_crossover_child_shares_real_subtree_structure_with_parents():
+    from nyxara.growth.eureka import _TreeFactory, LemmaLibrary
+    from random import Random
+    tf = _TreeFactory(Random(1), LemmaLibrary())
+    a = tf.fresh(depth=3)
+    while a.size() < 4:
+        a = tf.fresh(depth=3)
+    b = tf.fresh(depth=3)
+    while b.size() < 4:
+        b = tf.fresh(depth=3)
+    shared = 0
+    for _ in range(60):
+        child = tf.crossover(a, b)
+        if child is None:
+            continue
+        child_renders = {n.render() for n in child.nodes()}
+        parent_renders = {n.render() for n in a.nodes()} | {n.render() for n in b.nodes()}
+        if child_renders & parent_renders:
+            shared += 1
+    # a real subtree splice almost always leaves a subtree in common with a parent (not a re-seed)
+    assert shared >= 50
+
+
+def test_mutate_child_is_distinct_but_related_to_its_parent():
+    from nyxara.growth.eureka import _TreeFactory, LemmaLibrary
+    from random import Random
+    tf = _TreeFactory(Random(3), LemmaLibrary())
+    parent = tf.fresh(depth=3)
+    while parent.size() < 6:
+        parent = tf.fresh(depth=3)
+    related = 0
+    for _ in range(100):
+        child = tf.mutate(parent)
+        if child is None or child.render() == parent.render():
+            continue
+        if {n.render() for n in child.nodes()} & {n.render() for n in parent.nodes()}:
+            related += 1
+    assert related >= 60
+
+
+# --------------------------------------------------------------------------- #
+# The self-extending lemma library — proven identities become reusable terminals of the grammar.
+# --------------------------------------------------------------------------- #
+def test_lemma_library_grows_from_proven_discoveries():
+    eng = _engine(seed=7)
+    rep = eng.discover(generations=4, population=28)
+    assert rep.lemmas_added > 0, "proven algebraic identities should promote into lemmas"
+    assert len(eng.lemmas) == rep.lemma_library_size
+    # every stored lemma is a genuine (degree >= 1) polynomial, usable as a grammar terminal
+    terminals = eng.lemmas.terminals()
+    assert terminals, "library should expose reusable terminals"
+    for name, poly in terminals:
+        assert name.startswith("L") and poly.degree() >= 1
+
+
+def test_lemma_library_dedupes_and_persists_round_trip():
+    from nyxara.growth.eureka import LemmaLibrary, _Poly
+    lib = LemmaLibrary()
+    n1 = lib.add(_Poly({2: 1, 1: 2, 0: 1}), "(n + 1)^2 = n^2 + 2*n + 1")   # degree 2 -> kept
+    n2 = lib.add(_Poly({2: 1, 1: 2, 0: 1}), "restated")                    # duplicate -> None
+    n3 = lib.add(_Poly({0: 5}), "5 = 5")                                   # constant -> None
+    assert n1 == "L0" and n2 is None and n3 is None and len(lib) == 1
+    restored = LemmaLibrary()
+    restored.from_dict(lib.to_dict())
+    assert [p.key() for _, p in restored.terminals()] == [p.key() for _, p in lib.terminals()]
+
+
+def test_later_generations_compose_over_self_certified_lemmas():
+    # once she has proven lemmas, some children are built by composing over them (the alphabet grew).
+    eng = _engine(seed=7)
+    rep = eng.discover(generations=5, population=30)
+    assert len(eng.lemmas) > 0
+    composed = [b for b in rep.breakthroughs
+                if any(str(x).startswith("uses L") for x in b.conjecture.lineage)]
+    assert composed, "expected at least one discovery composed over a self-certified lemma"
+    # and anything kept is still an independently re-provable theorem
+    checker = Prover(seed=123)
+    for b in composed:
+        c = b.conjecture
+        assert checker.prove(ProofClaim(kind=c.domain, statement=c.statement)).verdict \
+            is ProofVerdict.PROVEN

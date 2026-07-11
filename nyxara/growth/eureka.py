@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover, _eval_rational
 
-__all__ = ["Conjecture", "Breakthrough", "BreakthroughReport", "EurekaEngine"]
+__all__ = ["Conjecture", "Breakthrough", "BreakthroughReport", "EurekaEngine", "LemmaLibrary"]
 
 # The verifiable domains over which the engine invents and certifies. Each maps to a Prover ``kind``.
 DOMAINS: Tuple[str, ...] = ("algebra", "arithmetic", "logic", "number_theory", "inequality")
@@ -69,6 +69,9 @@ class Conjecture:
     origin: str = "seed"                         # seed | mutate | crossover | generalize
     lineage: Tuple[str, ...] = ()                # parent statements / observed instance
     ops: int = 0                                 # operator count — a cheap complexity proxy
+    # the expression genome behind an algebraic conjecture (when one exists) — carried so the next
+    # generation can *genuinely* mutate/recombine its subtrees, not merely re-seed a template.
+    tree: Any = field(default=None, repr=False, compare=False)
 
     def key(self) -> str:
         """A canonical de-duplication key (domain + whitespace-stripped statement)."""
@@ -129,6 +132,9 @@ class BreakthroughReport:
     refuted: int = 0
     abstained: int = 0
     novel_kept: int = 0
+    # certified identities promoted into the self-extending lemma library this run + its total size
+    lemmas_added: int = 0
+    lemma_library_size: int = 0
     by_domain: Dict[str, int] = field(default_factory=dict)   # kept count per domain
     breakthroughs: List[Breakthrough] = field(default_factory=list)
     fed_knowledge: int = 0
@@ -144,6 +150,7 @@ class BreakthroughReport:
         return {"generations": self.generations, "population": self.population,
                 "generated": self.generated, "proven": self.proven, "refuted": self.refuted,
                 "abstained": self.abstained, "novel_kept": self.novel_kept,
+                "lemmas_added": self.lemmas_added, "lemma_library_size": self.lemma_library_size,
                 "by_domain": dict(self.by_domain),
                 "breakthroughs": [b.to_dict() for b in self.breakthroughs[:12]],
                 "best": self.best().to_dict() if self.best() else None,
@@ -171,6 +178,44 @@ class _Poly:
                 out[p1 + p2] = out.get(p1 + p2, 0) + v1 * v2
         return _Poly(out)
 
+    def __add__(self, other: "_Poly") -> "_Poly":
+        out = dict(self.c)
+        for p, v in other.c.items():
+            out[p] = out.get(p, 0) + v
+        return _Poly(out)
+
+    def __sub__(self, other: "_Poly") -> "_Poly":
+        out = dict(self.c)
+        for p, v in other.c.items():
+            out[p] = out.get(p, 0) - v
+        return _Poly(out)
+
+    def __pow__(self, exp: int) -> "_Poly":
+        exp = int(exp)
+        if exp < 0:
+            raise ValueError("negative polynomial power")
+        result = _Poly({0: 1})
+        base = _Poly(dict(self.c))
+        for _ in range(exp):
+            result = result * base
+        return result
+
+    def degree(self) -> int:
+        return max(self.c) if self.c else 0
+
+    def key(self) -> Tuple[Tuple[int, int], ...]:
+        """A canonical, hashable identity of this polynomial (for de-dup / lemma equality)."""
+        return tuple(sorted(self.c.items()))
+
+    @staticmethod
+    def var() -> "_Poly":
+        """The identity polynomial ``n`` -> ``{1: 1}``."""
+        return _Poly({1: 1})
+
+    @staticmethod
+    def const(value: int) -> "_Poly":
+        return _Poly({0: int(value)})
+
     def render(self) -> str:
         """A canonical, prover-parseable string like ``n^2 + -1*n + 6`` (descending powers)."""
         if not self.c:
@@ -190,6 +235,266 @@ class _Poly:
     def linear(root: int) -> "_Poly":
         """The factor ``(n - root)`` -> ``{1: 1, 0: -root}``."""
         return _Poly({1: 1, 0: -root})
+
+
+# --------------------------------------------------------------------------- #
+# The expression GENOME — a real syntax tree over one variable ``n`` that the engine
+# recombines. This is what makes mutate/crossover *genuine* structural recombination instead
+# of re-seeding a fixed template: a child shares real subtrees with its parents, and because a
+# tree is expanded to its exact canonical polynomial for the right-hand side, every recombination
+# still yields a *provable* identity — the Prover certifies or refutes it, never the engine.
+# --------------------------------------------------------------------------- #
+_BINOPS: Tuple[str, ...] = ("add", "sub", "mul")
+_MAX_NODES = 22            # hard cap on tree size (mutation/crossover reject past this)
+_MAX_DEGREE = 10           # reject an expansion whose polynomial degree explodes past this
+_MAX_COEFF = 1_000_000     # reject an expansion whose coefficients blow up (keeps lemmas tidy + fast)
+
+
+@dataclass
+class _Node:
+    """One node of the expression tree. ``kind`` ∈ {var, const, lemma, add, sub, mul, pow}."""
+
+    kind: str
+    value: Any = None                                    # const int / pow exponent / (lemma_name, _Poly)
+    children: Tuple["_Node", ...] = ()
+
+    def copy(self) -> "_Node":
+        return _Node(self.kind, self.value, tuple(c.copy() for c in self.children))
+
+    def nodes(self) -> List["_Node"]:
+        """This node and every descendant, pre-order — the pool mutation/crossover picks from."""
+        out = [self]
+        for c in self.children:
+            out.extend(c.nodes())
+        return out
+
+    def size(self) -> int:
+        return 1 + sum(c.size() for c in self.children)
+
+    def lemmas_used(self) -> List[str]:
+        found: List[str] = []
+        for nd in self.nodes():
+            if nd.kind == "lemma" and nd.value is not None:
+                found.append(nd.value[0])
+        return found
+
+    def render(self) -> str:
+        """Render to a prover-parseable string — always explicit ``*`` and parenthesised."""
+        if self.kind == "var":
+            return "n"
+        if self.kind == "const":
+            return str(int(self.value))
+        if self.kind == "lemma":
+            return f"({self.value[1].render()})"
+        if self.kind == "pow":
+            return f"({self.children[0].render()})^{int(self.value)}"
+        op = {"add": " + ", "sub": " - ", "mul": " * "}[self.kind]
+        return f"({self.children[0].render()}{op}{self.children[1].render()})"
+
+    def evaluate(self) -> _Poly:
+        """Expand the tree to its exact canonical polynomial (this becomes the identity's RHS)."""
+        if self.kind == "var":
+            return _Poly.var()
+        if self.kind == "const":
+            return _Poly.const(int(self.value))
+        if self.kind == "lemma":
+            return _Poly(dict(self.value[1].c))
+        if self.kind == "pow":
+            return self.children[0].evaluate() ** int(self.value)
+        a, b = self.children[0].evaluate(), self.children[1].evaluate()
+        if self.kind == "add":
+            return a + b
+        if self.kind == "sub":
+            return a - b
+        return a * b
+
+
+class _TreeFactory:
+    """Builds and recombines expression trees deterministically from a shared RNG, drawing terminals
+    from ``{n, small integers}`` **plus** the lemmas NYXARA has herself proven (a self-extending
+    alphabet). All growth bounded so the expanded polynomial can never explode."""
+
+    def __init__(self, rng: Random, lemmas: "LemmaLibrary") -> None:
+        self.rng = rng
+        self.lemmas = lemmas
+
+    def _terminal(self, allow_var: bool) -> _Node:
+        pool = self.lemmas.terminals()
+        # ~30% of the time, if she has proven lemmas, compose over one of her own theorems.
+        if allow_var and pool and self.rng.random() < 0.30:
+            name, poly = self.rng.choice(pool)
+            return _Node("lemma", (name, poly))
+        if allow_var and self.rng.random() < 0.5:
+            return _Node("var")
+        return _Node("const", self.rng.randint(-6, 6))
+
+    def random(self, depth: int, allow_var: bool = True) -> _Node:
+        if depth <= 0 or self.rng.random() < 0.32:
+            return self._terminal(allow_var)
+        roll = self.rng.random()
+        if roll < 0.22:                                  # a power of a smaller subtree
+            base = self.random(depth - 1, allow_var)
+            return _Node("pow", self.rng.randint(2, 3), (base,))
+        kind = self.rng.choice(_BINOPS)
+        left = self.random(depth - 1, allow_var)
+        right = self.random(depth - 1, allow_var)
+        return _Node(kind, None, (left, right))
+
+    def _acceptable(self, tree: _Node) -> bool:
+        if tree.size() > _MAX_NODES:
+            return False
+        try:
+            poly = tree.evaluate()
+        except Exception:  # noqa: BLE001 — a pathological expansion is simply rejected
+            return False
+        if poly.degree() > _MAX_DEGREE:
+            return False
+        return all(abs(v) <= _MAX_COEFF for v in poly.c.values())
+
+    def fresh(self, allow_var: bool = True, depth: int = 3) -> _Node:
+        for _ in range(8):
+            t = self.random(depth, allow_var)
+            if self._acceptable(t):
+                return t
+        return _Node("var") if allow_var else _Node("const", self.rng.randint(1, 9))
+
+    def mutate(self, parent: _Node, allow_var: bool = True) -> Optional[_Node]:
+        """Genuine subtree mutation: copy the parent, replace one randomly chosen node with a fresh
+        subtree (or point-mutate a constant), keeping shared structure with the parent."""
+        for _ in range(8):
+            child = parent.copy()
+            pool = child.nodes()
+            target = self.rng.choice(pool)
+            if target.kind == "const" and self.rng.random() < 0.5:
+                target.value = int(target.value) + self.rng.choice((-3, -2, -1, 1, 2, 3))
+            else:
+                repl = self.random(self.rng.randint(0, 2), allow_var)
+                target.kind, target.value, target.children = repl.kind, repl.value, repl.children
+            if self._acceptable(child):
+                return child
+        return None
+
+    def crossover(self, a: _Node, b: _Node, allow_var: bool = True) -> Optional[_Node]:
+        """Genuine subtree crossover: splice a randomly chosen subtree of ``b`` into a copy of ``a``."""
+        for _ in range(8):
+            child = a.copy()
+            donor = self.rng.choice(b.nodes()).copy()
+            target = self.rng.choice(child.nodes())
+            target.kind, target.value, target.children = donor.kind, donor.value, donor.children
+            if self._acceptable(child):
+                return child
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# The LEMMA LIBRARY — every proven ∧ novel ∧ interesting algebraic identity becomes a named,
+# reusable definition the grammar can compose over in later generations. This is the honest form
+# of "inventing beyond the templates a human wrote down": the *alphabet itself grows* from what
+# NYXARA has certified. Persisted through memory (best-effort) so invention compounds across runs.
+# --------------------------------------------------------------------------- #
+_LEMMA_TAG = "eureka-lemma-library"
+
+
+@dataclass
+class _Lemma:
+    name: str
+    poly: _Poly
+    statement: str
+    at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "coeffs": {str(p): v for p, v in self.poly.c.items()},
+                "statement": self.statement, "at": self.at}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "_Lemma":
+        coeffs = {int(p): int(v) for p, v in (d.get("coeffs") or {}).items()}
+        return cls(name=str(d.get("name", "L?")), poly=_Poly(coeffs),
+                   statement=str(d.get("statement", "")), at=float(d.get("at", 0.0)))
+
+
+class LemmaLibrary:
+    """A growing, deduplicated set of NYXARA's own certified algebraic identities, usable as terminals."""
+
+    def __init__(self, *, memory: Any = None, max_lemmas: int = 64) -> None:
+        self.memory = memory
+        self.max_lemmas = int(max_lemmas)
+        self._lemmas: List[_Lemma] = []
+        self._keys: set = set()
+        self._counter = 0
+        self.added_this_session = 0
+        self._load()
+
+    def __len__(self) -> int:
+        return len(self._lemmas)
+
+    def terminals(self) -> List[Tuple[str, _Poly]]:
+        """The reusable terminals the grammar may compose over — her proven, non-trivial lemmas."""
+        return [(lm.name, lm.poly) for lm in self._lemmas]
+
+    def add(self, poly: _Poly, statement: str) -> Optional[str]:
+        """Record a certified identity as a named lemma; returns the name, or None if trivial/dup."""
+        if poly.degree() < 1 or not poly.c:              # skip constants / the empty polynomial
+            return None
+        k = poly.key()
+        if k in self._keys:
+            return None
+        name = f"L{self._counter}"
+        self._counter += 1
+        self._keys.add(k)
+        self._lemmas.append(_Lemma(name=name, poly=poly, statement=statement))
+        self.added_this_session += 1
+        if len(self._lemmas) > self.max_lemmas:          # keep the most recent (freshest niches)
+            drop = self._lemmas.pop(0)
+            self._keys.discard(drop.poly.key())
+        return name
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"counter": self._counter, "lemmas": [lm.to_dict() for lm in self._lemmas]}
+
+    def from_dict(self, d: Dict[str, Any]) -> None:
+        self._counter = int(d.get("counter", 0))
+        for ld in d.get("lemmas", []):
+            lm = _Lemma.from_dict(ld)
+            k = lm.poly.key()
+            if k in self._keys:
+                continue
+            self._keys.add(k)
+            self._lemmas.append(lm)
+
+    # ---- persistence (best-effort, mirrors FrontierEngine.save) ---- #
+    def _load(self) -> None:
+        if self.memory is None:
+            return
+        try:
+            for rec in self.memory._kv.values():
+                if _LEMMA_TAG in rec.tags and "library" in rec.metadata:
+                    self.from_dict(rec.metadata.get("library", {}))
+                    return
+        except Exception:  # noqa: BLE001 — a fresh library is a valid state
+            return
+
+    def save(self) -> bool:
+        if self.memory is None or not self._lemmas:
+            return False
+        try:
+            from nyxara.memory.provenance import Provenance, SourceType
+            from nyxara.memory.store import MemoryType
+        except Exception:  # noqa: BLE001
+            return False
+        try:
+            for rec in list(getattr(self.memory, "_kv", {}).values()):
+                if _LEMMA_TAG in rec.tags and "library" in rec.metadata:
+                    self.memory.forget(rec.mem_id)
+            self.memory.remember(
+                f"[eureka-lemmas] {len(self._lemmas)} self-certified identities",
+                mem_type=MemoryType.SEMANTIC,
+                provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.9),
+                importance=1.0, tags=[_LEMMA_TAG, "discovery"],
+                metadata={"library": self.to_dict()})
+            return True
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            return False
 
 
 # --------------------------------------------------------------------------- #
@@ -226,6 +531,10 @@ class EurekaEngine:
         self._elites: Dict[str, List[Conjecture]] = {d: [] for d in DOMAINS}
         self._seen: set[str] = set()
         self.total_breakthroughs: int = 0   # cumulative kept discoveries across all runs
+        # the self-extending grammar: her own certified identities become reusable terminals, and a
+        # deterministic tree factory does the *genuine* subtree recombination (no template re-seeding).
+        self.lemmas = LemmaLibrary(memory=memory)
+        self._trees = _TreeFactory(self.rng, self.lemmas)
 
     @staticmethod
     def _default_frontier(memory: Any, settings: Any) -> Any:
@@ -276,9 +585,13 @@ class EurekaEngine:
                     report.fed_knowledge += self._feed_knowledge(bt)
                     report.fed_flywheel += self._feed_flywheel(bt)
                     self._remember(bt)
+                    report.lemmas_added += self._promote_lemma(bt)
             self._prune_elites()
         report.breakthroughs.sort(key=Breakthrough.score, reverse=True)
         self.total_breakthroughs += report.novel_kept
+        report.lemma_library_size = len(self.lemmas)
+        if report.lemmas_added:
+            self.lemmas.save()
         report.frontier = self._frontier_snapshot()
         report.reason = (f"invented {report.generated}, proven {report.proven}, "
                          f"kept {report.novel_kept} novel+interesting across {generations} gen(s)")
@@ -328,20 +641,43 @@ class EurekaEngine:
             "inequality": self._seed_inequality,
         }.get(domain, self._seed_algebra)()
 
-    # ---- algebra: factored ↔ expanded polynomial identities (genuinely true, varied) ---- #
-    def _seed_algebra(self) -> Conjecture:
-        roots = [self.rng.randint(-6, 6) for _ in range(self.rng.choice((2, 2, 3)))]
-        factors = [_Poly.linear(r) for r in roots]
-        prod = factors[0]
-        for f in factors[1:]:
-            prod = prod * f
-        lhs = "*".join(f"(n + {(-r)})" for r in roots)   # (n + 3) means root -3
-        rhs = prod.render()
-        # ~25% of the time, perturb the rhs so the conjecture is *false* — a real, refutable guess.
-        if self.rng.random() < 0.25:
-            rhs = self._perturb_poly(prod).render()
-        ops = lhs.count("*") + lhs.count("+") + rhs.count("*") + rhs.count("+")
-        return Conjecture(domain="algebra", statement=f"{lhs} = {rhs}", origin="seed", ops=ops)
+    # ---- algebra: an expression TREE ↔ its exact expansion — genuine, recombinable identities ---- #
+    def _conj_from_tree(self, tree: Any, *, domain: str, origin: str,
+                        lineage: Tuple[str, ...] = ()) -> Optional[Conjecture]:
+        """Turn an expression tree into a conjecture ``tree = expansion``. The right-hand side is the
+        tree's *exact* canonical polynomial, so a true instance is genuinely provable; ~25% of the
+        time the expansion is perturbed into a real, refutable false guess. Returns None if trivial."""
+        try:
+            poly = tree.evaluate()
+        except Exception:  # noqa: BLE001 — a pathological tree is simply dropped
+            return None
+        lhs = tree.render()
+        true_rhs = poly.render()
+        rhs = true_rhs
+        if self.rng.random() < 0.25:                     # a real, refutable perturbation
+            rhs = self._perturb_poly(poly).render()
+        if "".join(lhs.split()) == "".join(rhs.split()):  # already canonical ⇒ vacuous "x = x"
+            return None
+        ops = sum(1 for nd in tree.nodes() if nd.kind in _BINOPS or nd.kind == "pow")
+        lin = lineage + tuple(f"uses {nm}" for nm in dict.fromkeys(tree.lemmas_used()))
+        return Conjecture(domain=domain, statement=f"{lhs} = {rhs}", origin=origin,
+                          lineage=lin, ops=ops, tree=tree)
+
+    def _seed_algebra(self) -> Optional[Conjecture]:
+        tree = self._trees.fresh(allow_var=True, depth=self.rng.choice((2, 3, 3)))
+        return self._conj_from_tree(tree, domain="algebra", origin="seed")
+
+    def _promote_lemma(self, bt: Breakthrough) -> int:
+        """Record a proven algebraic identity as a reusable lemma so later generations compose over
+        it — the self-extending alphabet. Only genuine (degree ≥ 1) identities from a real tree."""
+        conj = bt.conjecture
+        if conj.domain != "algebra" or conj.tree is None:
+            return 0
+        try:
+            name = self.lemmas.add(conj.tree.evaluate(), conj.statement)
+        except Exception:  # noqa: BLE001
+            return 0
+        return 1 if name else 0
 
     def _perturb_poly(self, p: _Poly) -> _Poly:
         c = dict(p.c) or {0: 0}
@@ -349,16 +685,10 @@ class EurekaEngine:
         c[power] = c.get(power, 0) + self.rng.choice((-2, -1, 1, 2))
         return _Poly(c)
 
-    # ---- arithmetic: two random expressions, asserted equal (the Prover decides) ---- #
-    def _seed_arithmetic(self) -> Conjecture:
-        a, b, c = (self.rng.randint(2, 19) for _ in range(3))
-        op1, op2 = (self.rng.choice("+-*") for _ in range(2))
-        lhs = f"{a} {op1} {b} {op2} {c}"
-        val = _eval_rational(lhs)
-        rhs = str(val) if (val is not None and val.denominator == 1) else "0"
-        if self.rng.random() < 0.30 and val is not None and val.denominator == 1:
-            rhs = str(int(val) + self.rng.choice((-2, -1, 1, 2)))   # a refutable guess
-        return Conjecture(domain="arithmetic", statement=f"{lhs} = {rhs}", origin="seed", ops=2)
+    # ---- arithmetic: a constant expression TREE ↔ its exact value (the Prover decides) ---- #
+    def _seed_arithmetic(self) -> Optional[Conjecture]:
+        tree = self._trees.fresh(allow_var=False, depth=self.rng.choice((2, 2, 3)))
+        return self._conj_from_tree(tree, domain="arithmetic", origin="seed")
 
     # ---- logic: equivalence between a formula and a transform of it (De Morgan etc.) ---- #
     def _seed_logic(self) -> Conjecture:
@@ -411,8 +741,18 @@ class EurekaEngine:
             stmt, ops = f"{a}*n^2 + {b} >= 0", 2
         return Conjecture(domain="inequality", statement=stmt, origin="seed", ops=ops)
 
-    # ---- mutate / crossover over proven elites ---- #
+    # ---- mutate / crossover over proven elites — GENUINE structural recombination ---- #
     def _mutate(self, parent: Conjecture) -> Optional[Conjecture]:
+        # Real subtree mutation when the parent carries an expression genome: the child keeps most of
+        # the parent's structure and swaps one subtree (or point-mutates a constant) — not a re-seed.
+        if parent.tree is not None and parent.domain in ("algebra", "arithmetic"):
+            child_tree = self._trees.mutate(parent.tree, allow_var=(parent.domain == "algebra"))
+            if child_tree is not None:
+                conj = self._conj_from_tree(child_tree, domain=parent.domain, origin="mutate",
+                                            lineage=(parent.statement[:60],))
+                if conj is not None:
+                    return conj
+        # Domains without a tree genome (logic / number_theory / inequality) re-seed honestly.
         if parent.domain == "number_theory":
             return self._seed_number_theory()
         base = self._seed(parent.domain)
@@ -423,7 +763,16 @@ class EurekaEngine:
         return base
 
     def _crossover(self, a: Conjecture, b: Conjecture) -> Optional[Conjecture]:
-        # Recombine by inventing a fresh candidate in the shared domain, crediting both parents.
+        # Real subtree crossover when both parents share a tree genome: splice a subtree of ``b`` into
+        # ``a`` so the child genuinely inherits structure from both — not a fresh template instance.
+        if (a.tree is not None and b.tree is not None and a.domain == b.domain
+                and a.domain in ("algebra", "arithmetic")):
+            child_tree = self._trees.crossover(a.tree, b.tree, allow_var=(a.domain == "algebra"))
+            if child_tree is not None:
+                conj = self._conj_from_tree(child_tree, domain=a.domain, origin="crossover",
+                                            lineage=(a.statement[:48], b.statement[:48]))
+                if conj is not None:
+                    return conj
         child = self._seed(a.domain if a.domain == b.domain else self.rng.choice((a.domain, b.domain)))
         if child is None:
             return None
@@ -673,6 +1022,11 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"\ninvented={rep.generated}  proven={rep.proven}  refuted={rep.refuted}  "
           f"abstained={rep.abstained}  kept(novel+interesting)={rep.novel_kept}")
     print(f"by domain: {rep.by_domain}")
+    print(f"lemmas added this run: {rep.lemmas_added}  (library size: {rep.lemma_library_size})")
+    if eng.lemmas.terminals():
+        print("self-extending alphabet (her own certified lemmas, now reusable terminals):")
+        for nm, poly in eng.lemmas.terminals()[:5]:
+            print(f"  {nm}(n) := {poly.render()}")
     print("\ntop self-discovered, machine-certified theorems:")
     for b in rep.breakthroughs[:8]:
         print(f"  [{b.conjecture.domain:13s}|{b.conjecture.origin:10s}] {b.statement}")

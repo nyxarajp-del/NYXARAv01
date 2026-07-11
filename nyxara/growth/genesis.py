@@ -73,6 +73,7 @@ if _HAS_TORCH:  # optional — the n-gram substrate always works without it
 __all__ = [
     "LayerGene",
     "MixerProgram",
+    "PrimitiveLibrary",
     "LearningRule",
     "ArchitectureGenome",
     "GenesisModel",
@@ -133,6 +134,37 @@ _N_PREDICT: Tuple[int, ...] = (1, 2)                # multi-token-prediction dep
 # the same building blocks as the named mixers (attention core, conv, low-rank, ssm, gating, …).
 _SYNTH_PRIMS: Tuple[str, ...] = ("attn", "conv", "lowrank", "ssm", "gate", "proj", "shift", "norm")
 _SYNTH_MIN, _SYNTH_MAX = 1, 6        # bounds on a synthesised program's length (genome _fixup-clamped)
+# A synth step may carry a searchable scalar parameter, encoded ``base:param`` — richer than a flat
+# op set: a ``conv`` step searches its kernel width, a ``lowrank`` step searches its rank. Every other
+# primitive ignores a param. Back-compatible: a bare ``"conv"`` still loads (its builder's default).
+_SYNTH_CONV_KERNELS: Tuple[int, ...] = (3, 5, 7)
+_SYNTH_LOWRANK_RANKS: Tuple[int, ...] = (2, 4, 8)
+_SYNTH_PARAM_PRIMS: Dict[str, Tuple[int, ...]] = {"conv": _SYNTH_CONV_KERNELS,
+                                                  "lowrank": _SYNTH_LOWRANK_RANKS}
+
+
+def _synth_base(step: str) -> str:
+    """The primitive name of a (possibly parameterised) synth step — ``conv:5`` -> ``conv``."""
+    return step.split(":", 1)[0]
+
+
+def _synth_param(step: str) -> Optional[int]:
+    """The integer parameter of a synth step, or None — ``conv:5`` -> ``5``, ``conv`` -> ``None``."""
+    if ":" in step:
+        try:
+            return int(step.split(":", 1)[1])
+        except ValueError:
+            return None
+    return None
+
+
+def _rand_synth_step(rng: random.Random) -> str:
+    """A random synth step, attaching a searched scalar parameter to the primitives that take one."""
+    base = rng.choice(_SYNTH_PRIMS)
+    choices = _SYNTH_PARAM_PRIMS.get(base)
+    if choices is not None and rng.random() < 0.7:
+        return f"{base}:{rng.choice(choices)}"
+    return base
 
 # --------------------------------------------------------------------------- #
 # Searchable LEARNING RULE — *how* a brain learns is itself evolved, not frozen. The search no longer
@@ -183,8 +215,22 @@ class MixerProgram:
 
     steps: List[str] = field(default_factory=lambda: ["proj"])
 
+    @staticmethod
+    def _clean_step(s: str) -> Optional[str]:
+        """Validate one (possibly parameterised) step; drop an unknown primitive, strip an invalid or
+        out-of-range parameter down to the bare primitive. Keeps a genome always buildable."""
+        base = _synth_base(str(s))
+        if base not in _SYNTH_PRIMS:
+            return None
+        param = _synth_param(str(s))
+        allowed = _SYNTH_PARAM_PRIMS.get(base)
+        if param is not None and allowed is not None and param in allowed:
+            return f"{base}:{param}"
+        return base
+
     def _fixup(self) -> None:
-        self.steps = [s for s in self.steps if s in _SYNTH_PRIMS][:_SYNTH_MAX]
+        cleaned = [c for c in (self._clean_step(s) for s in self.steps) if c is not None]
+        self.steps = cleaned[:_SYNTH_MAX]
         if not self.steps:
             self.steps = ["proj"]
 
@@ -198,24 +244,117 @@ class MixerProgram:
         return p
 
     @classmethod
-    def random(cls, rng: random.Random) -> "MixerProgram":
+    def random(cls, rng: random.Random, library: Any = None) -> "MixerProgram":
+        # ~40% of the time, compose over one of NYXARA's own gauntlet-crowned mixers (the
+        # self-extending palette): start from a learned primitive, then optionally mutate once. The
+        # rest of the time invent a fresh program over base primitives, so exploration never starves.
+        if library is not None and rng.random() < 0.40:
+            steps = library.sample_steps(rng)
+            if steps is not None:
+                p = cls(steps=list(steps))
+                p._fixup()
+                if rng.random() < 0.5:
+                    p.mutate(rng)
+                return p
         n = rng.randint(_SYNTH_MIN, _SYNTH_MAX)
-        p = cls(steps=[rng.choice(_SYNTH_PRIMS) for _ in range(n)])
+        p = cls(steps=[_rand_synth_step(rng) for _ in range(n)])
         p._fixup()
         return p
 
     def mutate(self, rng: random.Random) -> None:
         choice = rng.randrange(3)
         if choice == 0 and len(self.steps) < _SYNTH_MAX:
-            self.steps.insert(rng.randrange(len(self.steps) + 1), rng.choice(_SYNTH_PRIMS))
+            self.steps.insert(rng.randrange(len(self.steps) + 1), _rand_synth_step(rng))
         elif choice == 1 and len(self.steps) > _SYNTH_MIN:
             del self.steps[rng.randrange(len(self.steps))]
         else:
-            self.steps[rng.randrange(len(self.steps))] = rng.choice(_SYNTH_PRIMS)
+            self.steps[rng.randrange(len(self.steps))] = _rand_synth_step(rng)
         self._fixup()
 
     def fingerprint(self) -> str:
         return "+".join(self.steps)
+
+
+# --------------------------------------------------------------------------- #
+# The self-extending PRIMITIVE LIBRARY — the palette is no longer a fixed human ceiling. Whenever a
+# champion carrying a synthesised mixer clears the Foundry gauntlet, that mixer's program is distilled
+# into a NAMED, reusable primitive and persisted; future searches compose new mixers over NYXARA's own
+# gauntlet-crowned inventions. Pure stdlib JSON (mirrors :class:`HallOfFame`). Promotion stays
+# gauntlet-gated — the library only seeds the *search*, it never crowns or ships a brain by itself.
+# --------------------------------------------------------------------------- #
+class PrimitiveLibrary:
+    """A growing, deduplicated set of learned token-mixer primitives NYXARA has herself crowned."""
+
+    def __init__(self, path: Optional[Path] = None, *, capacity: int = 48) -> None:
+        self.path = Path(path) if path else None
+        self.capacity = max(1, int(capacity))
+        self.entries: List[Dict[str, Any]] = []          # [{name, steps}]
+        self._fps: set = set()
+        self._counter = 0
+        self.added_this_session = 0
+        self._load()
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    def _load(self) -> None:
+        if self.path and self.path.exists():
+            try:
+                d = json.loads(self.path.read_text(encoding="utf-8"))
+                self.entries = list(d.get("entries", []))
+                self._counter = int(d.get("counter", len(self.entries)))
+                self._fps = {"+".join(e.get("steps", [])) for e in self.entries}
+            except Exception:  # noqa: BLE001 — a corrupt library file never crashes a search
+                self.entries = []
+
+    def _save(self) -> None:
+        if not self.path:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps({"counter": self._counter, "entries": self.entries}, indent=2),
+                encoding="utf-8")
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def add(self, program: MixerProgram) -> Optional[str]:
+        """Distil a synth program into a named learned primitive. Only genuine composites (≥2 steps)
+        are kept — a single-step program is just a base primitive already in the palette."""
+        prog = MixerProgram.from_dict(program.to_dict())     # copy + validate
+        if len(prog.steps) < 2:
+            return None
+        fp = prog.fingerprint()
+        if fp in self._fps:
+            return None
+        name = f"synth_{self._counter}"
+        self._counter += 1
+        self._fps.add(fp)
+        self.entries.append({"name": name, "steps": list(prog.steps)})
+        self.added_this_session += 1
+        if len(self.entries) > self.capacity:                # keep the most recent inventions
+            drop = self.entries.pop(0)
+            self._fps.discard("+".join(drop.get("steps", [])))
+        self._save()
+        return name
+
+    def add_from_genome(self, genome: Any) -> int:
+        """Promote every synthesised mixer carried by a (gauntlet-crowned) genome. Returns the count."""
+        added = 0
+        for ly in getattr(genome, "layers", []):
+            if getattr(ly, "op", None) == "synth" and getattr(ly, "program", None) is not None:
+                if self.add(ly.program):
+                    added += 1
+        return added
+
+    def primitives(self) -> List[MixerProgram]:
+        return [MixerProgram.from_dict({"steps": e["steps"]}) for e in self.entries]
+
+    def sample_steps(self, rng: random.Random) -> Optional[List[str]]:
+        """A copy of a random learned primitive's steps, for composing a new synth program over it."""
+        if not self.entries:
+            return None
+        return list(rng.choice(self.entries)["steps"])
 
 
 @dataclass
@@ -362,12 +501,12 @@ class LayerGene:
 
     @classmethod
     def random(cls, rng: random.Random, n_embd: int, *,
-               ops: Optional[Sequence[str]] = None) -> "LayerGene":
+               ops: Optional[Sequence[str]] = None, library: Any = None) -> "LayerGene":
         heads = [h for h in (1, 2, 4, 8) if n_embd % h == 0] or [1]
         nh = rng.choice(heads)
         kv_choices = [k for k in (1, 2, 4, 8) if k <= nh and nh % k == 0] or [nh]
         op = rng.choice(list(ops) if ops is not None else _OPS)
-        prog = MixerProgram.random(rng) if op == "synth" else None
+        prog = MixerProgram.random(rng, library=library) if op == "synth" else None
         return cls(op=op, norm=rng.choice(_NORMS),
                    activation=rng.choice(_ACTIVATIONS), n_head=nh,
                    residual=rng.random() < 0.85, expansion=rng.choice(_EXPANSIONS),
@@ -456,10 +595,10 @@ class ArchitectureGenome:
     def random(cls, rng: random.Random, *, max_layers: int = 5, block_size: int = 32,
                pos_encoding: Optional[str] = None, ops: Optional[Sequence[str]] = None,
                search_learning_rule: bool = True,
-               allow_plasticity: bool = True) -> "ArchitectureGenome":
+               allow_plasticity: bool = True, library: Any = None) -> "ArchitectureGenome":
         n_embd = rng.choice(_EMBD_CHOICES)
         n_layer = rng.randint(2, max(2, max_layers))
-        layers = [LayerGene.random(rng, n_embd, ops=ops) for _ in range(n_layer)]
+        layers = [LayerGene.random(rng, n_embd, ops=ops, library=library) for _ in range(n_layer)]
         lr = (LearningRule.random(rng, allow_plasticity=allow_plasticity)
               if search_learning_rule else LearningRule())
         return cls(n_embd=n_embd, block_size=block_size, layers=layers,
@@ -471,18 +610,20 @@ class ArchitectureGenome:
 
     def mutate(self, rng: random.Random, *, max_layers: int = 6,
                ops: Optional[Sequence[str]] = None, search_learning_rule: bool = True,
-               allow_plasticity: bool = True) -> "ArchitectureGenome":
+               allow_plasticity: bool = True, library: Any = None) -> "ArchitectureGenome":
         """Return a mutated copy — add/drop/replace a layer, tweak a layer's knobs, swap the
         positional scheme / embedding tying, shift the n-gram substrate, evolve the *learning rule*
         (optimizer / loss objectives / schedule / plasticity), or rewrite a synthesised mixer."""
         g = ArchitectureGenome.from_dict(self.to_dict())
         choice = rng.randrange(9)
         if choice == 0 and len(g.layers) < max_layers:
-            g.layers.insert(rng.randrange(len(g.layers) + 1), LayerGene.random(rng, g.n_embd, ops=ops))
+            g.layers.insert(rng.randrange(len(g.layers) + 1),
+                            LayerGene.random(rng, g.n_embd, ops=ops, library=library))
         elif choice == 1 and len(g.layers) > 1:
             del g.layers[rng.randrange(len(g.layers))]
         elif choice == 2:
-            g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops)
+            g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops,
+                                                                      library=library)
         elif choice == 3:
             ly = g.layers[rng.randrange(len(g.layers))]
             ly.activation = rng.choice(_ACTIVATIONS)
@@ -520,7 +661,8 @@ class ArchitectureGenome:
             if synth:
                 rng.choice(synth).program.mutate(rng)
             else:
-                g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops)
+                g.layers[rng.randrange(len(g.layers))] = LayerGene.random(rng, g.n_embd, ops=ops,
+                                                                          library=library)
         g.seed = rng.randint(0, 1 << 30)
         g._fixup()
         return g
@@ -606,11 +748,12 @@ class ArchitectureGenome:
                 total += (2.0 * ly.top_k + 0.1 * ly.n_experts) * ly.expansion * ne * ne
             elif ly.op == "synth":                             # sum the synthesised primitives' cost
                 for s in (ly.program.steps if ly.program else ["proj"]):
-                    if s == "attn":
+                    base = _synth_base(s)
+                    if base == "attn":
                         total += 4.0 * ne * ne + 2.0 * t * ne
-                    elif s in ("conv", "ssm", "gate", "proj", "shift"):
+                    elif base in ("conv", "ssm", "gate", "proj", "shift"):
                         total += 2.0 * ne * ne
-                    elif s == "lowrank":
+                    elif base == "lowrank":
                         total += 2.0 * ne * ne + 4.0 * t
                     else:                                      # norm — cheap
                         total += 2.0 * ne
@@ -1210,20 +1353,23 @@ if _HAS_TORCH:
             super().__init__()
             steps: List[nn.Module] = []
             for s in (gene.program.steps if gene.program else ["proj"]):
-                if s == "attn":
+                base, param = _synth_base(s), _synth_param(s)
+                if base == "attn":
                     steps.append(_CausalAttention(n_embd, gene.n_head, gene.n_head, block_size, pos,
                                                   gene.dropout, gene.qk_norm))
-                elif s == "conv":
-                    steps.append(_ConvMix(n_embd))
-                elif s == "lowrank":
-                    steps.append(_LowRankMix(n_embd, block_size))
-                elif s == "ssm":
+                elif base == "conv":                              # searched kernel width (per-step)
+                    steps.append(_ConvMix(n_embd, kernel=min(block_size, param))
+                                 if param else _ConvMix(n_embd))
+                elif base == "lowrank":                           # searched low-rank rank (per-step)
+                    steps.append(_LowRankMix(n_embd, block_size, rank=min(block_size, param))
+                                 if param else _LowRankMix(n_embd, block_size))
+                elif base == "ssm":
                     steps.append(_SSMScan(n_embd))
-                elif s == "gate":
+                elif base == "gate":
                     steps.append(_SynthGate(n_embd))
-                elif s == "shift":
+                elif base == "shift":
                     steps.append(_SynthShift(n_embd))
-                elif s == "norm":
+                elif base == "norm":
                     steps.append(_RMSNorm(n_embd))
                 else:                                         # "proj" / default
                     steps.append(_SynthProj(n_embd, gene.activation))
@@ -2329,6 +2475,13 @@ class NeuralArchitectureSearch:
         self._synth_cap = int(getattr(self.cfg, "max_synth_primitives", 4))
         # the operator palette this search may draw from (drop ``synth`` when operator search is off)
         self._ops: Tuple[str, ...] = _OPS if self._search_ops else tuple(o for o in _OPS if o != "synth")
+        # the self-extending primitive library: crowned synth mixers become reusable building blocks
+        # the search composes over. Only active when operator synthesis is on (nothing to grow otherwise).
+        self._library: Optional[PrimitiveLibrary] = None
+        if self._search_ops and bool(getattr(self.cfg, "primitive_library", True)):
+            self._library = PrimitiveLibrary(
+                self._primlib_path(),
+                capacity=int(getattr(self.cfg, "primitive_library_size", 48)))
         self._champion: Optional[Candidate] = None
         self._last_report: Optional[GenesisReport] = None
         self._reports: List[GenesisReport] = []
@@ -2361,6 +2514,15 @@ class NeuralArchitectureSearch:
             data_dir = self.settings.paths.data_dir   # type: ignore[union-attr]
             return Path(data_dir) / "genesis" / "hall_of_fame.json"
         except Exception:  # noqa: BLE001 — no settings/paths: keep memory in-process only
+            return None
+
+    def _primlib_path(self) -> Optional[Path]:
+        """Where the self-extending primitive library lives — beside the Hall of Fame under the data
+        dir. ``None`` (in-memory only) when no data dir is configured."""
+        try:
+            data_dir = self.settings.paths.data_dir   # type: ignore[union-attr]
+            return Path(data_dir) / "genesis" / "primitive_library.json"
+        except Exception:  # noqa: BLE001 — no settings/paths: keep the library in-process only
             return None
 
     # ---- data ---- #
@@ -2535,7 +2697,7 @@ class NeuralArchitectureSearch:
             return max(rng.sample(scored, k), key=lambda c: c.fitness).genome
 
         mkw = dict(max_layers=max_layers, ops=self._ops, search_learning_rule=self._search_lr,
-                   allow_plasticity=self._plasticity)
+                   allow_plasticity=self._plasticity, library=self._library)
 
         def propose() -> ArchitectureGenome:
             if strategy == "elitism":
@@ -2635,7 +2797,7 @@ class NeuralArchitectureSearch:
             ArchitectureGenome.random(rng, max_layers=max_layers, block_size=block,
                                       pos_encoding=getattr(self.cfg, "pos_encoding", None),
                                       ops=self._ops, search_learning_rule=self._search_lr,
-                                      allow_plasticity=self._plasticity)
+                                      allow_plasticity=self._plasticity, library=self._library)
             for _ in range(pop_size - len(warm))]
         population = [self._conform(g) for g in population]   # keep warm + random inside the space
         seen: Dict[str, Candidate] = {}
@@ -2749,9 +2911,19 @@ class NeuralArchitectureSearch:
             promoted, reason = True, f"champion v{version.version} promoted through the gauntlet"
         except Exception as exc:  # noqa: BLE001 — gauntlet refusal is reported, never crashes
             reason = f"kept on the bench (candidate v{version.version}): {exc}"
+        # Only a GAUNTLET-CROWNED champion extends the palette: distil its synthesised mixer(s) into
+        # named learned primitives future searches compose over. A benched candidate teaches nothing.
+        learned = 0
+        if promoted and self._library is not None:
+            try:
+                learned = self._library.add_from_genome(self._champion.genome)
+            except Exception:  # noqa: BLE001 — library growth is best-effort, never blocks promotion
+                learned = 0
         return {"promoted": promoted, "version": version.version, "reason": reason,
                 "kind": spec.kind, "genome": spec.genome,
                 "perplexity": version.metrics.get("perplexity"),
+                "primitives_learned": learned,
+                "primitive_library_size": len(self._library) if self._library is not None else 0,
                 "describe": self._champion.genome.describe()}
 
     # ---- the autonomous triggers (mirror AutoForge) ---- #
