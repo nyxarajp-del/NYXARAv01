@@ -736,15 +736,36 @@ class RecursiveSelfImprovement:
                 ceiling = max(1, int(self._effort["recursion_depth"]))
             step = 3 if (deepen or escalate) else 2      # push harder when the index demands it
             target = max(1, min(ceiling, current + step))
-            if target == current:
+            changes: Dict[str, Any] = {}
+            if target != current:
+                # rung 4 of the deep-reasoning ladder: more verified critique-improve cycles.
+                self.settings.llm.recursive_improvement_iterations = target
+                changes["recursive_improvement_iterations"] = {"from": current, "to": target}
+            # Genuinely deepen *thinking*, not just polish: when reasoning is the diagnosed
+            # bottleneck (deepen) or the index has stalled (escalate), widen the deep-reasoning
+            # search itself — more self-consistency samples per rung, ladder to its ceiling, and
+            # ensure the controller is on. This searches more lines of reasoning (real added depth),
+            # not more text passes over one answer.
+            dcfg = getattr(self.settings.llm, "deep_reasoning", None)
+            if dcfg is not None and (deepen or escalate):
+                if not bool(dcfg.enabled):
+                    dcfg.enabled = True
+                    changes["deep_reasoning_enabled"] = {"from": False, "to": True}
+                cur_s = int(dcfg.samples)
+                tgt_s = min(9, cur_s + (2 if deepen else 1))   # 9 = self-consistency ceiling
+                if tgt_s != cur_s:
+                    dcfg.samples = tgt_s
+                    changes["deep_reasoning_samples"] = {"from": cur_s, "to": tgt_s}
+                if int(dcfg.max_rung) < 4:
+                    changes["deep_reasoning_max_rung"] = {"from": int(dcfg.max_rung), "to": 4}
+                    dcfg.max_rung = 4
+            if not changes:
                 return None
-            self.settings.llm.recursive_improvement_iterations = target
             reason = (f"directive '{directive.get('action')}'"
                       + (" — plateau, escalating" if escalate else "")
                       + (f"; accuracy {acc:.0%}" if acc is not None else "")
                       + f" (depth ceiling {ceiling})")
-            return {"recursive_improvement_iterations": {"from": current, "to": target},
-                    "reason": reason, "directive": directive.get("action")}
+            return {**changes, "reason": reason, "directive": directive.get("action")}
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 

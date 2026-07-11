@@ -389,21 +389,69 @@ class LLMReasoner:
             return None
 
     def _deliberate(self, stimulus: str, temperature: float) -> Any:
+        return self.deliberate_decision(stimulus, temperature=temperature)
+
+    # ---- public rung accessors (used by mind/deep_reasoning.py to compose the effort ladder) ---- #
+    # These expose each real reasoning strategy as a decision-dict producer with *explicit* budgets,
+    # so the DeepReasoner can drive self-consistency / deliberation / MCTS at chosen widths and keep
+    # the verifier-best across them — without duplicating this module's prompt/context/conversion
+    # machinery. They reuse the exact same internals the single-strategy path already uses.
+    def is_real(self) -> bool:
+        """True iff a genuine (non-mock) provider is available — the deep ladder needs one."""
+        return self._is_real()
+
+    def context_block(self, stimulus: str) -> str:
+        """The recalled-memory + skill + tool-catalog grounding for ``stimulus`` (public)."""
+        return self._context_block(stimulus)
+
+    def effective_system(self) -> str:
+        """The soul-voiced, heuristic-distilled system prompt (public)."""
+        return self._effective_system()
+
+    def decision_to_candidate(self, data: Dict[str, Any], stimulus: str) -> Candidate:
+        """Turn a decision dict into a gated-ready ``Candidate`` (public wrapper)."""
+        return self._candidate_from(data, stimulus)
+
+    def _reason_temperature(self, temperature: Optional[float]) -> float:
+        return min(self.settings.llm.temperature, 0.5) if temperature is None else temperature
+
+    def single_decision(self, stimulus: str, *, temperature: Optional[float] = None) -> Any:
+        """A single-shot structured decision (ladder rung 0 / the shallow baseline)."""
+        cfg = self.settings.llm
+        return self.llm.generate_json(
+            self._build_prompt(stimulus), system=self._effective_system(),
+            temperature=self._reason_temperature(temperature), max_tokens=cfg.max_output_tokens)
+
+    def deliberate_decision(self, stimulus: str, *, passes: Optional[int] = None,
+                            samples: Optional[int] = None,
+                            temperature: Optional[float] = None) -> Any:
+        """A think→decide→critique decision at explicit ``passes``/``samples`` budgets.
+
+        ``passes``/``samples`` default to config; the DeepReasoner overrides them to run
+        self-consistency (passes=1, samples>1) and full deliberation (passes>=3) as distinct rungs.
+        """
         from nyxara.mind.critique import Critic
         from nyxara.mind.deliberate import DeliberativeReasoner
         from nyxara.mind.router import default_verifier
         cfg = self.settings.llm
+        p = cfg.reasoning_passes if passes is None else max(1, int(passes))
+        s = cfg.reasoning_samples if samples is None else max(1, int(samples))
         # when sampling several reasoning paths, pick the best by an INDEPENDENT answer-quality
         # verifier (search-over-reasoning, B4) rather than the model's own stated confidence.
-        verifier = default_verifier() if cfg.reasoning_samples > 1 else None
+        verifier = default_verifier() if s > 1 else None
         deliberator = DeliberativeReasoner(
-            self.llm, passes=cfg.reasoning_passes, samples=cfg.reasoning_samples,
-            think_tokens=cfg.reasoning_think_tokens, temperature=temperature,
+            self.llm, passes=p, samples=s,
+            think_tokens=cfg.reasoning_think_tokens,
+            temperature=self._reason_temperature(temperature),
             max_tokens=cfg.max_output_tokens, critic=Critic(), verifier=verifier)
         result = deliberator.deliberate(
             stimulus=stimulus, context=self._context_block(stimulus),
             decision_instructions=_DECISION_INSTRUCTIONS, system=self._effective_system())
         return result.decision
+
+    def mcts_decision(self, stimulus: str, *, temperature: Optional[float] = None) -> Any:
+        """A search-over-reasoning decision via MCTS (ladder rung 3), or None if unavailable."""
+        return self._mcts(stimulus, self._reason_temperature(temperature))
 
     def _candidate_from(self, data: Dict[str, Any], stimulus: str) -> Candidate:
         kind = "act" if str(data.get("kind", "respond")).lower() == "act" else "respond"
