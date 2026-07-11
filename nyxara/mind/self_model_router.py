@@ -230,9 +230,15 @@ class PrimarySelfModelRouter:
                 transfer = self._try_transfer(prompt)
                 if transfer is not None:
                     conf = min(0.9, 0.5 + 0.1 * float(transfer.structural_score))
+                    # a loose (analogical) transfer aligns unfamiliar terms by structure alone —
+                    # real reasoning, but a weaker guarantee, so it never claims strong confidence
+                    if getattr(transfer, "analogical", False):
+                        conf = min(conf, 0.6)
+                    kind = ("loose structural analogy"
+                            if getattr(transfer, "analogical", False) else "structural transfer")
                     return RoutingPlan(
                         Route.TRANSFER, conf,
-                        f"new domain — generalized by structural transfer from "
+                        f"new domain — generalized by {kind} from "
                         f"'{transfer.base_domain}'",
                         competence=competence, hallucination_risk=risk,
                         domains=list(domains), transfer=transfer)

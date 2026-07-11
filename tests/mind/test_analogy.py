@@ -164,3 +164,56 @@ def test_mapper_custom_attribute_weight():
     sm = StructureMapper(attribute_weight=0.0)
     res = sm.map([r("yellow", e("sun"))], [r("yellow", e("nucleus"))])
     assert res.structural_score == 0.0  # attributes worth nothing
+
+
+# -------------------- analogical (non-identical) mapping -------------------- #
+def _solar_base():
+    return [
+        r("attracts", e("sun"), e("planet")),
+        r("more_massive", e("sun"), e("planet")),
+        r("revolves_around", e("planet"), e("sun")),
+        r("causes", r("attracts", e("sun"), e("planet")),
+          r("revolves_around", e("planet"), e("sun"))),
+    ]
+
+
+def test_strict_mode_rejects_renamed_relations_by_default():
+    """A novel domain using its OWN verbs must NOT map under strict identicality — this is the
+    default behaviour every existing caller depends on."""
+    base = _solar_base()
+    novel = [r("tugs", e("magnet"), e("filing")), r("circles", e("filing"), e("magnet"))]
+    res = StructureMapper().map(base, novel)          # analogical defaults to False
+    assert res.relation_matches == []
+    assert res.entity_mapping == {}
+    assert res.used_renamed is False
+
+
+def test_analogical_mode_aligns_renamed_relations_by_structure():
+    """With analogical mode on, the same fresh-vocabulary domain maps by structure alone: the
+    entity correspondence is recovered and the higher-order CAUSE is projected in known terms."""
+    base = _solar_base()
+    novel = [r("tugs", e("magnet"), e("filing")), r("circles", e("filing"), e("magnet"))]
+    res = StructureMapper(analogical=True).map(base, novel)
+    assert res.used_renamed is True
+    assert res.entity_mapping == {"sun": "magnet", "planet": "filing"}
+    inferred = {str(p) for p in res.candidate_inferences}
+    assert any("causes" in s and "magnet" in s and "filing" in s for s in inferred)
+
+
+def test_analogical_prefers_identical_when_available():
+    """Tiered SME: when an identical-name match exists it outranks a renamed one — a strict
+    solution is never displaced by a loose alignment."""
+    base = [r("attracts", e("sun"), e("planet"))]
+    # target offers both an identical 'attracts' and a renamed 'tugs' over different entities
+    target = [r("tugs", e("a"), e("b")), r("attracts", e("nucleus"), e("electron"))]
+    res = StructureMapper(analogical=True).map(base, target)
+    assert res.entity_mapping == {"sun": "nucleus", "planet": "electron"}
+    assert res.used_renamed is False   # the identical correspondence won
+
+
+def test_analogical_still_needs_arity_and_consistency():
+    """Analogical is not anything-goes: arity must match and the entity map must stay one-to-one,
+    so unrelated structure yields no spurious correspondence."""
+    base = [r("attracts", e("sun"), e("planet"))]
+    bad_arity = [r("spins", e("x"))]                  # arity 1 vs 2 -> no match
+    assert StructureMapper(analogical=True).map(base, bad_arity).relation_matches == []
