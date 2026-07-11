@@ -80,6 +80,7 @@ __all__ = [
     "NanoGPTModel",
     "LoRAModel",
     "build_model",
+    "strongest_backend",
     "load_active_model",
     "_should_quantize",
     "_quant_kwargs",
@@ -249,11 +250,14 @@ class BaseLanguageModel(ABC):
 # Always-on backend: a pure-stdlib byte-level n-gram model, trained from zero
 # --------------------------------------------------------------------------- #
 class NgramByteLM(BaseLanguageModel):
-    """A from-scratch byte-level n-gram language model with add-k smoothing.
+    """A from-scratch byte-level n-gram language model with interpolated back-off smoothing.
 
-    Counts are exact (one pass over the corpus). The model starts empty — it *is* trained
-    from zero — and every probability is smoothed, so perplexity is always finite and the
-    model can score text it has never seen. Pure standard library: dict-of-dicts counts.
+    Counts are exact (one pass over the corpus, accumulating every context order n..1). The model
+    starts empty — it *is* trained from zero — and scores with recursive Jelinek-Mercer
+    interpolation: a full-order context unseen for a given byte still profits from the shorter
+    contexts it *did* see, backing off smoothly down to a smoothed unigram rather than collapsing
+    straight to it. So every probability is finite, and held-out text is scored far better than
+    plain add-k. Pure standard library: dict-of-dicts counts, unchanged on-disk schema.
     """
 
     kind = "ngram"
@@ -283,12 +287,17 @@ class NgramByteLM(BaseLanguageModel):
         for doc in corpus:
             data = doc.encode("utf-8", errors="replace")
             for ctx, nxt in self._contexts(data):
-                row = self.counts.get(ctx)
-                if row is None:
-                    row = {}
-                    self.counts[ctx] = row
-                row[nxt] = row.get(nxt, 0) + 1
-                self.totals[ctx] = self.totals.get(ctx, 0) + 1
+                # count EVERY suffix of the context (orders n..1), so _prob can interpolate down
+                # through the shorter contexts instead of dropping straight to the unigram. Same
+                # dict-of-dicts schema — just more keys — so save/load round-trips unchanged.
+                for j in range(len(ctx)):
+                    sub = ctx[j:]
+                    row = self.counts.get(sub)
+                    if row is None:
+                        row = {}
+                        self.counts[sub] = row
+                    row[nxt] = row.get(nxt, 0) + 1
+                    self.totals[sub] = self.totals.get(sub, 0) + 1
                 self.unigram[nxt] += 1
                 self.unigram_total += 1
                 tokens += 1
@@ -299,12 +308,21 @@ class NgramByteLM(BaseLanguageModel):
 
     # ---- probability ---- #
     def _prob(self, ctx: Tuple[int, ...], nxt: int) -> float:
-        row = self.counts.get(ctx)
-        if row is not None:
-            total = self.totals.get(ctx, 0)
-            return (row.get(nxt, 0) + self.k) / (total + self.k * _VOCAB)
-        # unseen context -> back off to the unigram distribution (also smoothed)
-        return (self.unigram[nxt] + self.k) / (self.unigram_total + self.k * _VOCAB)
+        # Recursive Jelinek-Mercer interpolation, highest order down to the smoothed unigram:
+        #   p(nxt|ctx) = λ·p_ml(nxt|ctx) + (1-λ)·p(nxt|shorter ctx),  λ = N(ctx)/(N(ctx)+k·V).
+        # λ grows with the evidence a context carries, so a well-seen (n-1)-gram rescues a full
+        # context that never saw THIS byte — real back-off, not a hard fall to the unigram.
+        p = (self.unigram[nxt] + self.k) / (self.unigram_total + self.k * _VOCAB)
+        for i in range(1, len(ctx) + 1):
+            sub = ctx[len(ctx) - i:]          # the i most-recent context bytes (a suffix)
+            total = self.totals.get(sub, 0)
+            if total <= 0:
+                continue
+            row = self.counts.get(sub) or {}
+            p_ml = row.get(nxt, 0) / total
+            lam = total / (total + self.k * _VOCAB)
+            p = lam * p_ml + (1.0 - lam) * p
+        return p
 
     def _corpus_cross_entropy(self, corpus: Sequence[str]) -> float:
         total_nll, n = 0.0, 0
@@ -1234,14 +1252,63 @@ class LoRAModel(BaseLanguageModel):
 # --------------------------------------------------------------------------- #
 # Factory & active-model loader
 # --------------------------------------------------------------------------- #
+def _numpy_available() -> bool:
+    """True iff NumPy is importable — the substrate for a real CPU-only neural transformer."""
+    try:
+        import numpy  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def strongest_backend() -> str:
+    """The most capable model backend THIS machine can actually run, resolved honestly.
+
+    LoRA on an open pretrained base (torch+transformers+peft) → a from-scratch NanoGPT (torch) →
+    a real from-scratch NumPy transformer (NumPy only) → the always-on word-level Kneser-Ney n-gram.
+    Never raises; the final option needs no third-party dependency at all. This is what lets
+    ``kind="auto"`` mean *"the best brain you can genuinely train here"* on a GPU box, a CPU box,
+    or a bare machine alike — so NYXARA's own model is a trained neural net wherever one can run."""
+    if _HAS_LORA:
+        return "lora"
+    if _HAS_TORCH:
+        return "nanogpt"
+    if _numpy_available():
+        return "genesis_np"
+    return "kngram"
+
+
+def _default_neural_genome(seed: int = 0, *, width: int = 64, depth: int = 2,
+                           block_size: int = 64) -> Dict[str, Any]:
+    """A real, ready-to-train decoder genome for the NumPy transformer backend — no search needed.
+
+    ``depth`` blocks of (causal self-attention → gated MLP) over learned token + positional
+    embeddings with a tied LM head — the same decoder shape the torch path builds, sized to train
+    fast on a CPU while staying a genuine neural network (not a byte-count table). Widths/context
+    are clamped by genesis_numpy's own safety caps, so requesting more here is always safe."""
+    layers: List[Dict[str, Any]] = []
+    for _ in range(max(1, int(depth))):
+        layers.append({"op": "attention"})
+        layers.append({"op": "gated_mlp"})
+    return {
+        "layers": layers,
+        "n_embd": int(width),
+        "block_size": int(block_size),
+        "tie_embeddings": True,
+        "learning_rule": {"optimizer": "adamw", "lr": 3e-3, "schedule": "cosine"},
+        "seed": int(seed),
+    }
+
+
 def build_model(spec: ModelSpec) -> BaseLanguageModel:
     """Build a model for ``spec`` — NEVER raises for missing deps (degrades sensibly).
 
-    When torch is installed, a missing LoRA stack (transformers/peft) or a missing genome no
-    longer drops all the way to the n-gram backend: a real from-zero NanoGPT still delivers
-    genuine neural training (AdamW over a decoder-only transformer), which is far closer to the
-    requested intent than counting byte n-grams. Only an explicit ``kind="ngram"`` — or a machine
-    without torch at all — uses the pure-stdlib backend."""
+    The degradation ladder is "always a *real* model, as neural as this machine allows": a missing
+    LoRA stack or genome no longer drops to counting bytes. With torch, a from-zero NanoGPT delivers
+    genuine gradient training. WITHOUT torch, a neural request builds a real from-scratch **NumPy**
+    transformer (attention + gated-MLP + backprop) via :class:`GenesisNumpyModel` — so NYXARA's own
+    model is a trained neural net even on a bare CPU box, not a toy n-gram. Only an explicit
+    ``kind="ngram"``/``"kngram"`` — or a machine with neither torch nor NumPy — uses a stdlib n-gram."""
     want = spec.kind
     # explicit word-level Kneser-Ney: the coherent, fully-local own brain (no deps)
     if want == "kngram":
@@ -1260,18 +1327,26 @@ def build_model(spec: ModelSpec) -> BaseLanguageModel:
             return GenesisModel(spec)
         except Exception:  # noqa: BLE001 — torch present but the searched net failed; fall back
             pass
-    # The genome's neural architecture is NOT inert without torch: build NYXARA's self-designed brain
-    # for real on the always-on NumPy substrate (genesis_numpy.GenesisNumpyModel) — what makes "she
-    # designs and trains her own brain, herself" real on a bare machine. Gated so it is built only
-    # when explicitly requested (kind="genesis_np") or when a genesis/auto spec opted in via
-    # ``substrate`` — an incidental genesis spec at the default ("ngram") stays on the fast path.
+    # NYXARA's self-designed neural brain on the always-on NumPy substrate
+    # (genesis_numpy.GenesisNumpyModel) — what makes "she designs and trains her own brain, herself"
+    # real on a bare machine. Built when: a searched genome is supplied (kind="genesis_np", or a
+    # genesis/auto spec that opted in via ``substrate``), OR — the key upgrade — ANY neural request
+    # (auto/nanogpt/genesis/lora) on a machine WITHOUT torch: rather than fall to counting n-grams,
+    # build a real from-scratch NumPy transformer with a ready-to-train default genome.
     _sub = str(getattr(spec, "substrate", "ngram")).lower()
-    if (want == "genesis_np"
-            or (want in ("genesis", "auto") and spec.genome and _sub in ("numpy", "auto"))):
+    # a plain "give me a strong brain" request — upgraded to the NumPy net on a torch-less box
+    _neural = want in ("auto", "nanogpt", "lora")
+    # a searched architecture (genesis/genesis_np) — built on NumPy only when it opted into the
+    # substrate, so an incidental genesis spec at the default substrate stays on the fast path
+    _searched = (want == "genesis_np"
+                 or (want in ("genesis", "auto") and spec.genome and _sub in ("numpy", "auto")))
+    if _searched or (_neural and not _HAS_TORCH):
         try:
             from nyxara.growth.genesis_numpy import GenesisNumpyModel, _HAS_NUMPY  # lazy: no cycle
-            if _HAS_NUMPY and (spec.genome.get("layers") if isinstance(spec.genome, dict) else None):
-                return GenesisNumpyModel(spec.genome, seed=spec.seed)
+            if _HAS_NUMPY:
+                genome = (spec.genome if (isinstance(spec.genome, dict) and spec.genome.get("layers"))
+                          else _default_neural_genome(spec.seed))
+                return GenesisNumpyModel(genome, seed=spec.seed)
         except Exception:  # noqa: BLE001 — numpy build failed; fall to the n-gram substrate
             pass
     # Real neural fallback: any non-ngram request gets a from-zero NanoGPT when torch is present
@@ -1350,14 +1425,31 @@ if __name__ == "__main__":  # pragma: no cover
         assert reloaded.generate("the master", max_tokens=40) == g1
     print("save/load round-trip : OK ✓")
 
-    # the factory degrades honestly when torch is absent (to the coherent word-level KN model)
+    # the factory builds the STRONGEST brain this machine can run — as neural as possible, never a toy
+    print(f"\nstrongest_backend()  : {strongest_backend()}  (_HAS_TORCH={_HAS_TORCH})")
     m = build_model(ModelSpec(kind="auto"))
-    print(f"\nbuild_model(auto)    : kind={m.kind}  (_HAS_TORCH={_HAS_TORCH})")
-    assert m.kind in ("kngram", "nanogpt")
-    # asking for nanogpt on a bare machine must NOT raise — it falls back to the KN model
+    print(f"build_model(auto)    : kind={m.kind}")
+    assert m.kind in ("kngram", "genesis_np", "nanogpt")
+    # asking for nanogpt must NOT raise on any machine — with neither torch nor NumPy it degrades to KN
     m2 = build_model(ModelSpec(kind="nanogpt"))
-    assert m2.kind == ("nanogpt" if _HAS_TORCH else "kngram")
-    print("nanogpt fallback     : no crash on a bare machine ✓")
+    assert m2.kind == strongest_backend()
+    print("nanogpt (never toy)  : no crash on a bare machine ✓")
+
+    # THE upgrade: on a torch-less box with NumPy, her own model is a REAL trained neural transformer
+    if not _HAS_TORCH and _numpy_available():
+        print("\n[torch absent, NumPy present] training a from-scratch NumPy transformer ...")
+        net = build_model(ModelSpec(kind="auto", seed=1))
+        assert net.kind == "genesis_np"
+        b4 = net.perplexity(corpus[0])
+        net.train_on(corpus, steps=40, seed=1)
+        af = net.perplexity(corpus[0])
+        print(f"NumPy-GPT perplexity : {b4:.1f} -> {af:.2f}  (params={net.param_count()})")
+        assert net.param_count() > 1000 and af < b4     # a real neural net that genuinely learned
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "v1"; net.save(p)
+            again = build_model(ModelSpec(kind="genesis_np", genome=net.genome, seed=1)); again.load(p)
+            assert again.param_count() == net.param_count()
+        print("NumPy-GPT save/load  : OK ✓")
 
     # the coherent own brain: word-level Kneser-Ney generates real words, not byte gibberish
     kn = build_model(ModelSpec(kind="kngram", ngram_order=3, seed=3))
