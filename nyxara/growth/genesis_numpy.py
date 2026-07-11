@@ -453,6 +453,60 @@ class GenesisNumpyModel(BaseLanguageModel):
             self.id2tok.append(tok)
         self.tok2id = {t: i for i, t in enumerate(self.id2tok)}
 
+    def grow_vocab(self, corpus: Sequence[str]) -> int:
+        """Extend the vocabulary with genuinely new words seen in lived experience, resizing
+        the embedding (and untied output head) **in place** so the learned rows are preserved
+        and only the fresh rows are initialized small.
+
+        This is the substrate for "learns concepts not present at boot": her representation
+        space physically grows to hold words that did not exist when the brain was first built,
+        instead of folding every novel token onto ``<unk>`` forever. Bounded by ``_MAX_VOCAB``
+        and fully fail-open — a growth mishap leaves the model exactly as it was. Returns the
+        number of new tokens actually admitted."""
+        if not self._built:
+            return 0
+        room = _MAX_VOCAB - (len(self.id2tok) - 3)   # 3 reserved specials (BOS/EOS/UNK)
+        if room <= 0:
+            return 0
+        from collections import Counter
+        counts: Counter = Counter()
+        for doc in corpus:
+            for tok in _word_tokenize(doc):
+                if tok not in self.tok2id:
+                    counts[tok] += 1
+        if not counts:
+            return 0
+        new_toks = [t for t, _ in counts.most_common(room)]
+        if not new_toks:
+            return 0
+        try:
+            added = len(new_toks)
+            c = self.c
+            rng = np.random.default_rng(self.seed + 7919 + len(self.id2tok))
+            # build the grown matrices first (this is where any error would surface) so the
+            # commit below is atomic: id-maps and weights never drift out of sync.
+            emb_new = np.concatenate(
+                [self.params["embed"].data, rng.standard_normal((added, c)) * 0.02], axis=0)
+            hw_new = hb_new = None
+            if not self.tie and "head_w" in self.params:
+                hw_new = np.concatenate(
+                    [self.params["head_w"].data, rng.standard_normal((c, added)) * 0.02], axis=1)
+                hb_new = np.concatenate([self.params["head_b"].data, np.zeros(added)])
+            start_id = len(self.id2tok)
+            self.id2tok.extend(new_toks)
+            for i, t in enumerate(new_toks):
+                self.tok2id[t] = start_id + i
+            self.params["embed"].data = emb_new
+            self.params["embed"].grad = None
+            if hw_new is not None:
+                self.params["head_w"].data = hw_new
+                self.params["head_w"].grad = None
+                self.params["head_b"].data = hb_new
+                self.params["head_b"].grad = None
+            return added
+        except Exception:  # noqa: BLE001 — vocab growth is best-effort, never breaks a train step
+            return 0
+
     @property
     def _bos(self) -> int: return 0
 
@@ -789,6 +843,10 @@ class GenesisNumpyModel(BaseLanguageModel):
             self.seed = int(seed) or self.seed
             self._build_vocab(corpus)
             self._build_params()
+        else:
+            # continual learning: admit genuinely new words before encoding this corpus, so
+            # they train as real tokens instead of collapsing onto <unk>.
+            self.grow_vocab(corpus)
         X, Y, M = self._windows(corpus)
         if X.shape[0] == 0:
             return TrainStats(steps=0, final_loss=0.0, seconds=time.monotonic() - start, tokens=0)

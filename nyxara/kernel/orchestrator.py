@@ -4786,6 +4786,16 @@ class NyxaraCore:
                 learn_pair(text, reply, positive=reward > 0)
             except Exception:  # noqa: BLE001 — supervision is best-effort
                 pass
+        # 4) MEASURED competence (Rule 4): when she actually answered from her OWN learned brain,
+        # feed that real turn outcome to the competence ledger so her self-model's own-brain
+        # capability rises/falls with measured performance rather than a fixed boot prior. This is
+        # what makes "competence" an honest, evidence-driven signal — recorded only for turns her
+        # own mind produced, so it tracks her real learner, not the teacher. Best-effort.
+        try:
+            if self._classify_answer_source(candidate) == "self":
+                self._record_competence("self_brain", bool(success))
+        except Exception:  # noqa: BLE001 — competence measurement is advisory, never fatal
+            pass
 
     @staticmethod
     def _classify_answer_source(candidate: Candidate) -> Optional[str]:
