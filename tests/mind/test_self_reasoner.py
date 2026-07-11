@@ -28,12 +28,20 @@ def test_cold_reply_is_coherent_real_words_not_echo():
     assert len(words) >= 4
 
 
-def test_backend_is_pure_stdlib_kngram_without_torch():
-    # the always-on brain's DEFAULT fallback stays the instant, instantly-persisted stdlib n-gram —
-    # the heavyweight neural own-model is the foundry's job and is preferred once promoted.
+def test_default_backend_is_a_real_neural_net_not_statistics():
+    # the always-on brain's DEFAULT is now a real, weight-changing neural net — the pure-NumPy
+    # transformer on a torch-less box (backprop, no torch/LLM/cloud), the torch NanoGPT where torch
+    # is present — so her lived learning changes weights, not just n-gram counts. It falls to the
+    # stdlib Kneser-Ney n-gram only when even NumPy is absent, and a forged foundry model is still
+    # preferred once promoted.
     brain = _brain()
     brain.reply("hello")                      # forces lazy construction
-    assert brain.kind in ("self:kngram", "self:nanogpt") or brain.kind.startswith("promoted:")
+    assert brain.kind in ("self:genesis_np", "self:nanogpt", "self:kngram") \
+        or brain.kind.startswith("promoted:")
+    from nyxara.growth.foundry_models import _numpy_available, _HAS_TORCH
+    if _numpy_available() and not _HAS_TORCH:
+        # the normal case (NumPy present, no torch): her default learner is the real neural brain
+        assert brain.kind == "self:genesis_np", brain.kind
 
 
 def test_nanogpt_backend_is_a_real_neural_net_and_persists(tmp_path):

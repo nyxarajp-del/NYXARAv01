@@ -174,7 +174,10 @@ class SelfBrain:
         self._seeded = False
         self._dirty = False
         self._since_fit = 0
-        self._refit_every = 8          # re-fit after this many new learned docs (amortised cost)
+        # re-fit after this many new learned docs (amortised cost). Configurable so higher training
+        # intensity (a lower value) folds lived experience into her weights more often.
+        self._refit_every = max(1, int(getattr(
+            getattr(settings, "foundry", None), "self_brain_refit_every", 4)))
         self._lock = threading.RLock()
         # ---- retrieval-augmented general intelligence ---- #
         cfg = getattr(settings, "foundry", None)
@@ -235,20 +238,34 @@ class SelfBrain:
         return None
 
     def _fresh_backend(self) -> Any:
-        """Build the generative fallback for this always-on, learn-on-every-turn brain.
+        """Build the generative core for this always-on, learn-on-every-turn brain.
 
-        The default (``auto``) and ``kngram`` use the pure-stdlib word-level Kneser-Ney n-gram: it
-        is instant to update and instant to persist, which is what an every-turn brain needs. The
-        heavyweight *neural* own-model is the foundry's job — it is forged, gauntleted and promoted,
-        and :meth:`_try_promoted` prefers it the moment one exists. ``nanogpt`` opts this fallback
-        into a real from-scratch neural net directly: a torch NanoGPT where torch is present, else a
-        genuine NumPy transformer (attention + backprop) — both via ``build_model``, never the toy
-        byte model, and its weights persist across restarts like the n-gram's do."""
-        from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM, build_model)
-        if self._backend == "nanogpt":
+        The default (``auto``) is now **neural-when-possible**: a real from-scratch neural net is
+        her lived-learning substrate, not an n-gram count table. It resolves to a torch NanoGPT
+        where torch is present, else a genuine pure-NumPy transformer (attention + gated-MLP +
+        real backprop, :class:`~nyxara.growth.genesis_numpy.GenesisNumpyModel`) — so her weights
+        genuinely change from experience on any machine with NumPy, with **no torch, no LLM, no
+        cloud**. Only a box without even NumPy falls to the pure-stdlib Kneser-Ney n-gram. The
+        heavier LoRA own-model stays the foundry's job — forged, gauntleted, promoted, and
+        preferred by :meth:`_try_promoted` the moment one exists. Every backend persists its
+        weights across restarts (``weights.npz`` / count tables), so learning is durable.
+
+        ``genesis_np`` pins the NumPy neural brain regardless of torch; ``nanogpt``/``kngram`` pin
+        those explicitly."""
+        from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM, build_model,
+                                                  _HAS_TORCH, _numpy_available)
+        want = self._backend
+        if want == "auto":
+            # neural-when-possible, but capped below LoRA: the always-on brain must stay light to
+            # build/persist every turn, so nanogpt (torch) → genesis_np (numpy) → kngram (stdlib).
+            want = "nanogpt" if _HAS_TORCH else ("genesis_np" if _numpy_available() else "kngram")
+        if want in ("nanogpt", "genesis_np"):
             try:
-                return build_model(ModelSpec(kind="nanogpt", ngram_order=self.order,
-                                             seed=self.seed))
+                lm = build_model(ModelSpec(kind=want, ngram_order=self.order, seed=self.seed))
+                # build_model degrades to kngram if a neural build is impossible here — honest,
+                # and the rest of the brain (fold/persist/generate) is backend-agnostic anyway.
+                if lm is not None:
+                    return lm
             except Exception:  # noqa: BLE001 — never let backend choice crash a turn
                 pass
         return WordKNGramLM(order=self.order, seed=self.seed)

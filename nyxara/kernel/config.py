@@ -317,10 +317,25 @@ _FOUNDRY_PROFILES: Dict[str, Dict[str, int]] = {
 }
 
 
+def _torch_available() -> bool:
+    """True iff torch can be imported here — checked via ``find_spec`` so torch is *not* actually
+    imported at config-load time (fast, no side effects). Lets the heavy model foundry default ON
+    where real gradient forging is genuinely possible (a torch/GPU box) and stay OFF on a bare or
+    CI machine, where NYXARA's always-on pure-NumPy neural brain is already her real learner."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("torch") is not None
+    except Exception:  # noqa: BLE001 — a probe failure means "assume absent", never crash config
+        return False
+
+
 class FoundryConfig(BaseModel):
     """NYXARA's self-built-model foundry settings (growth/foundry.py).
 
-    Off by default (heavy & self-modifying, like vision/audio). The default backend is
+    Auto-on when torch is importable (a machine that can really forge/train a neural brain),
+    off on a bare/CI box — where the always-on NumPy neural brain is already her real, weight-
+    changing learner. Heavy & self-modifying, so still fully gauntlet-gated and reversible. The
+    default backend is
     ``lora`` — LoRA fine-tuning of a pretrained base (real capability); it needs
     torch+transformers+peft (``.[foundry]``) and degrades to the always-available
     pure-stdlib n-gram model when they are absent. ``auto`` instead trains the optional
@@ -333,7 +348,10 @@ class FoundryConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    enabled: bool = False
+    # Auto-on when torch is present so she forges & promotes a stronger neural brain where the
+    # hardware allows; off on a bare/CI box (the NumPy neural brain is her real learner there).
+    # Every forge still clears the same gauntlet and is reversible. Override with NYXARA_FOUNDRY__ENABLED.
+    enabled: bool = Field(default_factory=_torch_available)
     # Default to LoRA fine-tuning of a pretrained base — the path to genuine capability
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
@@ -361,13 +379,19 @@ class FoundryConfig(BaseModel):
     # ---- Always-on offline brain (mind/self_reasoner.SelfBrain) ---- #
     # NYXARA's keyless general-intelligence: a retrieval-augmented brain over everything she has
     # learned (pure-stdlib LearnedEmbedder), with a hardened generative backend as the fallback.
-    # On by default — these knobs only tune it; the whole thing degrades to pure n-gram on a bare
-    # box and to a real neural backend (nanogpt) when torch is present.
+    # On by default — these knobs only tune it. Its generative core is a real neural net by
+    # default (the pure-NumPy transformer whenever NumPy is present, the torch nano-GPT when
+    # torch is present), degrading to the pure-stdlib n-gram only on a box without even NumPy.
     self_brain_retrieval: bool = True               # answer from learned sentences before generating
     self_brain_top_k: int = Field(default=4, ge=1, le=16)        # retrieved sentences considered
     self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
-    # Generative fallback backend: "auto" => nano-GPT when torch is present, else word-KN n-gram.
-    self_brain_backend: Literal["auto", "kngram", "nanogpt"] = "auto"
+    # Generative backend for the always-on brain. "auto" now means **neural-when-possible**:
+    # the torch nano-GPT when torch is present, else the pure-NumPy transformer (genesis_np) —
+    # a real gradient-trained neural net with backprop, no torch/LLM/cloud — and only the
+    # word-KN n-gram count table when NumPy itself is absent. So her default lived-learning is a
+    # real neural network whose weights change, not statistics. "genesis_np" pins the NumPy
+    # neural brain regardless of torch; "kngram"/"nanogpt" pin those explicitly.
+    self_brain_backend: Literal["auto", "kngram", "nanogpt", "genesis_np"] = "auto"
     # ---- Online weight learning (mind/self_reasoner.SelfBrain) — REAL learning, not just recall ---- #
     # The offline brain's generative weights *accumulate* from lived, reward-weighted experience
     # instead of being rebuilt from scratch off a corpus window (which is remembering, not learning).
@@ -382,8 +406,12 @@ class FoundryConfig(BaseModel):
     self_brain_reward_scale: float = Field(default=3.0, ge=0.0, le=32.0)
     # Consolidate accumulated weights as a durable EWC anchor every N refits (forgetting-protection).
     self_brain_consolidate_every: int = Field(default=4, ge=1, le=256)
-    # Neural (nanogpt/lora) online gradient step size per refit — a small warm-continued update.
-    self_brain_neural_online_steps: int = Field(default=24, ge=1, le=1000)
+    # Neural (nanogpt/lora/genesis_np) online gradient step size per refit — a warm-continued update.
+    self_brain_neural_online_steps: int = Field(default=40, ge=1, le=1000)
+    # How many newly-learned docs trigger a weight fold. Lower = she folds lived experience into her
+    # weights more often (higher training intensity, a little more CPU per turn). Default 4 (was an
+    # internal 8) so her weights track experience closely from turn one.
+    self_brain_refit_every: int = Field(default=4, ge=1, le=256)
     # ---- Few-shot skill induction (cognition/skill_induction.py) ---- #
     # NYXARA learns a *task* from a handful of (input -> output) demonstrations by synthesising a
     # verified, reusable transformation she then applies to genuinely new inputs — real, transferable
