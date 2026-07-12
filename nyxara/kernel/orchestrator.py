@@ -97,6 +97,11 @@ class Candidate:
     # when kind == "act", an executable tool may be named (dispatched in agency.tools)
     tool: str = ""
     tool_args: Dict[str, Any] = field(default_factory=dict)
+    # a capability gap: the reasoner wanted to act with a tool that does not exist yet. Preserved
+    # (instead of silently degrading to talk) so the kernel can forge the tool and re-dispatch it
+    # this turn — she does the new task, rather than only talking about it.
+    wanted_tool: str = ""
+    wanted_tool_args: Dict[str, Any] = field(default_factory=dict)
     # corrigibility-relevant effects (default: harmless)
     resists_correction: bool = False
     disables_oversight: bool = False
@@ -708,6 +713,11 @@ class NyxaraCore:
         # Built before the reasoner so the self-model router can generalize a new-domain query
         # herself (structure-mapping from a known domain) instead of deferring to the base LLM.
         self.transfer_engine = self._build_transfer_engine()
+        # The unified own-faculty generalizer (mind/generalization.py): one cascade — skill-induction
+        # from in-prompt examples, relational transfer, open-world law modelling — so a genuinely NEW
+        # task is solved by her OWN faculties in the live turn, not deferred to the base LLM. Built
+        # after transfer/sample-efficient/open-world (its parts) and before the reasoner (its consumer).
+        self.generalization_engine = self._build_generalization_engine()
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative,
             self_model=getattr(self, "self_model", None))
@@ -981,7 +991,8 @@ class NyxaraCore:
                                skill_memory=skills, soul=soul, history=self.history,
                                knowledge=self.knowledge, self_model=self_model,
                                metaprompt=getattr(self, "metaprompt", None),
-                               transfer_engine=getattr(self, "transfer_engine", None))
+                               transfer_engine=getattr(self, "transfer_engine", None),
+                               generalization_engine=getattr(self, "generalization_engine", None))
         except Exception:  # noqa: BLE001 — always have a working mind
             base = _default_reasoner
         # wrap it in the integrated mind: memory recall + dual-process routing +
@@ -994,6 +1005,7 @@ class NyxaraCore:
                                   world_model=self.world_model, tools=self.tools,
                                   knowledge=self.knowledge,
                                   metaprompt=getattr(self, "metaprompt", None),
+                                  generalization_engine=getattr(self, "generalization_engine", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -2998,10 +3010,46 @@ class NyxaraCore:
         try:
             from nyxara.kernel.config import get_settings
             from nyxara.mind.transfer import RelationalTransferEngine
-            cfg = get_settings().self_model_router
+            settings = get_settings()
+            cfg = settings.self_model_router
+            gcfg = getattr(settings, "generalization", None)
+            grow = bool(getattr(settings.features, "self_growing_transfer", True)
+                        and getattr(gcfg, "learn_from_experience", True))
             return RelationalTransferEngine(
-                min_score=float(getattr(cfg, "transfer_min_score", 1.0)))
+                min_score=float(getattr(cfg, "transfer_min_score", 1.0)),
+                learn_from_experience=grow,
+                memory=getattr(self, "memory", None) if grow else None,
+                max_schemas=int(getattr(gcfg, "max_distilled_schemas", 200)))
         except Exception:  # noqa: BLE001 — transfer is a capability, never required
+            return None
+
+    def _build_generalization_engine(self) -> Any:
+        """The unified own-faculty generalizer — one cascade over her real generalizers.
+
+        Composes (does not reimplement) the shared relational-transfer engine, the few-shot
+        skill-inducer (``sample_efficient.skills``), the open-world law-modeller, and the
+        compositional grammar (``sample_efficient.composer``). Given a novel / from-examples prompt
+        it solves it with her OWN faculties in the live turn; declines honestly otherwise. Off only
+        when config disables it; never required, fully offline-capable."""
+        try:
+            from nyxara.kernel.config import get_settings
+            gcfg = get_settings().generalization
+            if not getattr(gcfg, "enabled", True):
+                return None
+            from nyxara.mind.generalization import GeneralizationEngine
+            se = getattr(self, "sample_efficient", None)
+            return GeneralizationEngine(
+                transfer_engine=getattr(self, "transfer_engine", None),
+                skills=getattr(se, "skills", None),
+                open_world=getattr(self, "open_world", None),
+                composer=getattr(se, "composer", None),
+                min_confidence=float(getattr(gcfg, "min_confidence", 0.4)),
+                parse_demos_enabled=bool(getattr(gcfg, "parse_demos", True)),
+                parse_tables_enabled=bool(getattr(gcfg, "parse_tables", True)),
+                min_demos=int(getattr(gcfg, "min_demos", 2)),
+                use_transfer=bool(getattr(get_settings().self_model_router,
+                                          "use_transfer", True)))
+        except Exception:  # noqa: BLE001 — generalization is a capability, never required
             return None
 
     def _ensure_competence_ledger(self) -> Any:
@@ -3060,6 +3108,7 @@ class NyxaraCore:
                 strategic=getattr(self, "strategic_intelligence", None),
                 self_model=getattr(self, "self_model", None),
                 transfer_engine=getattr(self, "transfer_engine", None),
+                generalization_engine=getattr(self, "generalization_engine", None),
                 threshold=cfg.classify_threshold,
                 use_llm_refine=cfg.use_llm_refine,
                 allow_web_grounding=cfg.allow_web_grounding,
@@ -3492,6 +3541,11 @@ class NyxaraCore:
         #     confidence on a solvable task), don't stop: self-bootstrap a solution, learn it
         #     permanently, and re-reason now that the new skill/knowledge is recalled.
         candidate = self._maybe_bootstrap(safe_text, focus, candidate, authority)
+        # 3c. CAPABILITY-GAP FORGING — the reasoner wanted to act with a tool she has no code for.
+        #     Rather than degrade to talk, forge the tool (write → test → self-fix → deploy) and
+        #     rebuild the action so she actually DOES the new task this turn. The forged tool is
+        #     clamped LOW and still passes every gate below — nothing here bypasses the control law.
+        candidate = self._maybe_forge_and_redispatch(safe_text, candidate, authority)
         r_t = self.mind.record(ThoughtKind.INFERENCE, candidate.rationale or candidate.text,
                                causes=[a_t], salience=0.6, confidence=candidate.confidence)
         thoughts.append(r_t)
@@ -3881,6 +3935,56 @@ class NyxaraCore:
         return Disposition.ACT, "cleared"
 
     # ---- recall & reasoning ---- #
+    def _maybe_forge_and_redispatch(self, stimulus: str, candidate: Candidate,
+                                    authority: Authority) -> Candidate:
+        """Forge a missing tool and rebuild the action so a NEW task is done, not just talked about.
+
+        Fires only when the reasoner degraded an action to a reply because it named a tool that
+        does not exist (``candidate.wanted_tool``), tool-forging is enabled, oversight permits, and
+        the gap wasn't already tried this session. On a successful, deployed forge it returns an
+        ``act`` candidate bound to the new tool (its declared contract drives the gates); otherwise
+        it returns the original reply unchanged, so honest behaviour is preserved. Best-effort:
+        never raises into the cognitive cycle."""
+        want = getattr(candidate, "wanted_tool", "")
+        forge = getattr(self, "tool_forge", None)
+        if not want or forge is None or candidate.kind != "respond":
+            return candidate
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().tool_forge, "forge_on_demand", True):
+                return candidate
+            if self.tools is None or not self.oversight.gate():
+                return candidate
+            if want in self._capability_gaps_seen:
+                return candidate
+            self._capability_gaps_seen.add(want)
+            args = dict(getattr(candidate, "wanted_tool_args", {}) or {})
+            params = self._forge_params(args)
+            from nyxara.agency.permissions import Authority as _Authority
+            outcome = forge.forge(want, params=params, authority=_Authority.AUTONOMOUS)
+            if not getattr(outcome, "deployed", False):
+                return candidate
+            name = outcome.tool_name or want
+            spec = self.tools.get(name)
+            if spec is None:
+                return candidate
+            target = str(args.get(spec.target_param, "")) if getattr(spec, "target_param", "") else ""
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"forged and re-dispatched a new capability this turn: {name} "
+                f"(self-fixed in {getattr(outcome, 'attempts', 1)} attempt(s))",
+                salience=0.7, confidence=float(getattr(outcome, "benchmark", {}).get(
+                    "pass_rate", 1.0) if isinstance(getattr(outcome, "benchmark", {}), dict) else 1.0))
+            return Candidate(
+                text=candidate.text or f"I forged and used a new tool for this: {name}.",
+                kind="act", capability=spec.capability, target=target, risk=spec.risk,
+                reversible=spec.reversible, confidence=candidate.confidence,
+                belief=candidate.confidence, tool=name, tool_args=args,
+                rationale=f"forged a new capability '{name}' for a task I had no tool for, "
+                          f"and re-dispatched it this turn")
+        except Exception:  # noqa: BLE001 — forging must never crash the cognitive cycle
+            return candidate
+
     def _maybe_bootstrap(self, stimulus: str, focus: Optional[Percept],
                          candidate: Candidate, authority: Authority) -> Candidate:
         """Environment-Driven Learning: self-bootstrap an answer she doesn't yet have.

@@ -68,7 +68,7 @@ class LLMReasoner:
                  use_council: bool = False, council: Any = None,
                  skill_memory: Any = None, soul: Any = None, history: Any = None,
                  knowledge: Any = None, self_model: Any = None, metaprompt: Any = None,
-                 transfer_engine: Any = None,
+                 transfer_engine: Any = None, generalization_engine: Any = None,
                  max_memory_context: int = 5, max_history: int = 6) -> None:
         self.settings = settings or get_settings()
         self.llm = llm or LLM(settings=self.settings)
@@ -91,6 +91,9 @@ class LLMReasoner:
         # her own cross-domain generalizer (mind/transfer.py), shared with the domain solver so
         # the self-model router can transfer structure from a known domain onto a new one herself
         self.transfer_engine = transfer_engine
+        # her unified own-faculty generalization cascade (mind/generalization.py), so the self-model
+        # router can solve a novel / from-examples task with her own faculties before the teacher
+        self.generalization_engine = generalization_engine
         # distilled operating heuristics (growth/metaprompt_distill.py), injected into the
         # system prompt so NYXARA's own past successes reshape how she reasons (recursive RSI).
         self.metaprompt = metaprompt
@@ -289,7 +292,8 @@ class LLMReasoner:
                 self._router = Router(self.llm, settings=self.settings)
             self._smrouter = PrimarySelfModelRouter(
                 self_model=self.self_model, router=self._router, settings=self.settings,
-                transfer_engine=self.transfer_engine)
+                transfer_engine=self.transfer_engine,
+                generalization_engine=self.generalization_engine)
         return self._smrouter
 
     def _smrouter_enabled(self) -> bool:
@@ -465,6 +469,7 @@ class LLMReasoner:
         reversible = bool(data.get("reversible", True))
         tool = str(data.get("tool") or "").strip()
         tool_args = data.get("tool_args") if isinstance(data.get("tool_args"), dict) else {}
+        wanted_tool, wanted_tool_args = "", {}
 
         if kind == "act" and tool and self.tools is not None and self.tools.get(tool):
             spec = self.tools.get(tool)
@@ -479,7 +484,9 @@ class LLMReasoner:
             capability = Capability.TOOL_CALL if kind == "act" else Capability.MESSAGE_SEND
             target = ""
             if kind == "act" and tool and (self.tools is None or not self.tools.get(tool)):
-                # the model named a tool that does not exist -> degrade to a reply
+                # the model named a tool that does not exist -> degrade to a reply, but PRESERVE the
+                # intent as a capability gap so the kernel can forge the tool and re-dispatch it.
+                wanted_tool, wanted_tool_args = tool, dict(tool_args)
                 kind, capability, tool, tool_args = "respond", Capability.MESSAGE_SEND, "", {}
 
         if kind == "respond" and self.use_council and self.council is not None:
@@ -489,7 +496,8 @@ class LLMReasoner:
             text=text, kind=kind, capability=capability, target=target, risk=risk,
             reversible=reversible, confidence=confidence, belief=confidence,
             rationale=rationale or ("a tool call" if kind == "act" else "a reply"),
-            tool=tool, tool_args=dict(tool_args))
+            tool=tool, tool_args=dict(tool_args),
+            wanted_tool=wanted_tool, wanted_tool_args=dict(wanted_tool_args))
 
         # Verify-before-act: an action must clear the intrinsic verifier before it may act.
         # A proposal that fails is demoted to an honest reply *here*, before it reaches any

@@ -60,6 +60,7 @@ class Route(str, Enum):
     VERIFY_THEN_ACT = "verify_then_act"  # an action — must clear the verifier before acting
     FACULTY = "faculty"                 # exact math / logic fits -> compute it
     TRANSFER = "transfer"               # a new domain whose structure maps onto a known one
+    GENERALIZE = "generalize"           # a novel / from-examples task her own generalizers solve
     ABSTAIN = "abstain"                 # nothing trustworthy and no one to consult
 
 
@@ -77,6 +78,7 @@ class RoutingPlan:
     verifier_score: Optional[float] = None
     cleared: Optional[bool] = None
     transfer: Any = None                 # a mind.transfer.TransferResult on Route.TRANSFER
+    generalization: Any = None           # a mind.generalization.GeneralizationResult on Route.GENERALIZE
 
     def to_dict(self) -> dict:
         return {
@@ -93,6 +95,9 @@ class RoutingPlan:
             "transfer": (self.transfer.to_dict()
                          if self.transfer is not None and hasattr(self.transfer, "to_dict")
                          else None),
+            "generalization": (self.generalization.to_dict()
+                               if self.generalization is not None
+                               and hasattr(self.generalization, "to_dict") else None),
         }
 
 
@@ -105,13 +110,14 @@ class PrimarySelfModelRouter:
     def __init__(self, *, self_model: Any = None, router: Any = None,
                  settings: Optional[NyxaraSettings] = None,
                  verifier: Any = None, llm: Any = None,
-                 transfer_engine: Any = None) -> None:
+                 transfer_engine: Any = None, generalization_engine: Any = None) -> None:
         self.settings = settings or (getattr(router, "settings", None) or get_settings())
         self.cfg = self.settings.self_model_router
         self.self_model = self_model
         self._router = router
         self._llm = llm
         self._transfer = transfer_engine
+        self._generalization = generalization_engine
         self.verifier = verifier or default_verifier()
         abstain_below = getattr(self.settings.router, "abstain_below", 0.15)
         self.meta = MetaCognition(answer_threshold=self.cfg.competence_threshold,
@@ -202,6 +208,15 @@ class PrimarySelfModelRouter:
                 return RoutingPlan(Route.FACULTY, 1.0,
                                    "a verifiable faculty fits — compute it exactly")
 
+            # 1b) a demonstrated / from-examples task: solve it with her OWN generalizers up front,
+            #     before any competence gate could route it to the teacher (or her own model) as
+            #     mere prose. This is what lets her learn a genuinely new task from a few examples
+            #     and answer a held-out input in the live turn — her faculties, not an LLM.
+            if self._generalization_enabled() and self._has_demos(prompt):
+                gen = self._try_generalize(prompt)
+                if gen is not None:
+                    return gen
+
             # 2) read self-knowledge for this prompt
             risk, domains = 0.0, []
             if self.self_model is not None:
@@ -224,9 +239,9 @@ class PrimarySelfModelRouter:
             if (risk >= self.cfg.hallucination_ceiling
                     or competence < self.cfg.competence_threshold
                     or self._knowledge_heavy(prompt)):
-                # 4a) FIRST try to generalize it herself: map the new domain's relational
-                #     structure onto one she already understands and project the known
-                #     structure across. The reasoning content is hers, not the base model's.
+                # 4a) FIRST try to generalize it herself by relational structure transfer — map
+                #     the new domain onto one she already understands (Route.TRANSFER). The
+                #     reasoning content is hers, not the base model's.
                 transfer = self._try_transfer(prompt)
                 if transfer is not None:
                     conf = min(0.9, 0.5 + 0.1 * float(transfer.structural_score))
@@ -242,6 +257,14 @@ class PrimarySelfModelRouter:
                         f"'{transfer.base_domain}'",
                         competence=competence, hallucination_risk=risk,
                         domains=list(domains), transfer=transfer)
+                # 4a') no structural transfer — try the rest of the unified own-faculty cascade
+                #     (a from-examples task, or a numeric law stated as a table) before the teacher.
+                gen = self._try_generalize(prompt)
+                if gen is not None:
+                    gen.competence = competence
+                    gen.hallucination_risk = risk
+                    gen.domains = list(domains)
+                    return gen
                 # 4b) otherwise consult the teacher (or best-effort / abstain below)
                 if teacher:
                     return RoutingPlan(Route.TEACHER, competence,
@@ -294,12 +317,73 @@ class PrimarySelfModelRouter:
         except Exception:  # noqa: BLE001 — transfer is advisory; never crash a turn
             return None
 
+    # ---- the unified own-faculty generalization cascade ---- #
+    def _generalization_enabled(self) -> bool:
+        gcfg = getattr(self.settings, "generalization", None)
+        return bool(getattr(self.cfg, "use_generalization", True)
+                    and (gcfg is None or getattr(gcfg, "enabled", True)))
+
+    def _has_demos(self, prompt: str) -> bool:
+        """True when the prompt carries demonstrations her from-examples inducer could learn."""
+        try:
+            from nyxara.mind.generalization import has_demos
+            return has_demos(prompt)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _ensure_generalization(self) -> Any:
+        """Lazily build the unified generalization engine (composes her own generalizers)."""
+        if self._generalization is None:
+            try:
+                from nyxara.mind.generalization import GeneralizationEngine
+                gcfg = getattr(self.settings, "generalization", None)
+                self._generalization = GeneralizationEngine(
+                    transfer_engine=self._transfer,
+                    min_confidence=float(getattr(gcfg, "min_confidence", 0.4)),
+                    parse_demos_enabled=bool(getattr(gcfg, "parse_demos", True)),
+                    parse_tables_enabled=bool(getattr(gcfg, "parse_tables", True)),
+                    min_demos=int(getattr(gcfg, "min_demos", 2)),
+                    use_transfer=bool(getattr(self.cfg, "use_transfer", True)))
+            except Exception:  # noqa: BLE001 — generalization is a capability, never required
+                self._generalization = None
+        return self._generalization
+
+    def _try_generalize(self, prompt: str) -> Optional[RoutingPlan]:
+        """Run the unified generalization cascade; return a ``Route.GENERALIZE`` plan or ``None``.
+
+        Declines honestly (returns ``None``) when none of her own generalizers can answer, so the
+        normal SELF / TEACHER / abstain path runs unchanged."""
+        if not self._generalization_enabled():
+            return None
+        eng = self._ensure_generalization()
+        if eng is None:
+            return None
+        try:
+            res = eng.generalize(prompt)
+        except Exception:  # noqa: BLE001 — the cascade is advisory; never crash a turn
+            return None
+        if res is None:
+            return None
+        return RoutingPlan(
+            Route.GENERALIZE, float(res.confidence),
+            f"novel task — solved by her own {res.source} faculty",
+            generalization=res)
+
     # ---- dispatch a conversational reply ---- #
     def route_respond(self, prompt: str, *, system: Optional[str] = None) -> RouterResult:
         """Triage, then draft a reply via the reused reactive router (or abstain honestly)."""
         plan = self.plan(prompt)
         if plan.route is Route.ABSTAIN:
             return RouterResult(HONEST_ABSTENTION, "abstain", plan.confidence, handed_off=False)
+        # GENERALIZE: answer from NYXARA's OWN unified generalizers (skill-induction from the
+        # examples in the prompt, relational transfer, open-world law-fitting) — the reasoning
+        # content is hers, not sampled from any language model. Reported as a "faculty" handoff.
+        if plan.route is Route.GENERALIZE and plan.generalization is not None:
+            try:
+                return RouterResult(plan.generalization.render(), "faculty", plan.confidence,
+                                    handed_off=True)
+            except Exception:  # noqa: BLE001 — fall through to the reactive router on any error
+                pass
         # TRANSFER: answer from NYXARA's OWN structure-mapper — the reasoning content is hers,
         # not sampled from any language model. Reported as a "faculty" handoff (like exact math).
         if plan.route is Route.TRANSFER and plan.transfer is not None:

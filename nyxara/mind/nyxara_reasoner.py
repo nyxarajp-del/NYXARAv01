@@ -59,6 +59,7 @@ class NyxaraReasoner:
                  tools: Any = None, llm_reasoner: Any = None, use_council: bool = False,
                  settings: Optional[NyxaraSettings] = None, narrative: Any = None,
                  knowledge: Any = None, metaprompt: Any = None,
+                 generalization_engine: Any = None,
                  max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
@@ -76,6 +77,11 @@ class NyxaraReasoner:
         # generation engine when a genuine provider is available, so tool selection is kept.
         # It is also where MCTS deep reasoning runs, so conversational turns delegate to it.
         self.llm_reasoner = llm_reasoner
+        # her unified own-faculty generalizer (mind/generalization.py) — the cascade that solves a
+        # genuinely NEW task (from examples / novel domain / table) with her own faculties, in the
+        # live turn, offline. Injected by the kernel; lazily built from her sub-minds if absent.
+        self.generalization_engine = generalization_engine
+        self._gen_lazy: Any = None
         # distilled operating heuristics (growth/metaprompt_distill.py), injected into the voice.
         self.metaprompt = metaprompt
         self.use_council = use_council
@@ -275,6 +281,20 @@ class NyxaraReasoner:
                              rationale=f"{process} via a learned skill (few-shot induced + "
                                        f"verified, applied to a new input); "
                                        f"{len(mems)} memories recalled")
+        # unified own-faculty generalization: a genuinely NEW task — shown by a few examples in the
+        # prompt, or a novel domain whose relational structure maps onto one she already understands,
+        # or a numeric law stated as a table — solved by her OWN faculties in the live turn (program
+        # induction / structural transfer / open-world law-fitting). Her reasoning, not the LLM's, so
+        # it runs whether or not a provider is configured. Conservative: the cascade declines on
+        # ordinary conversation (it needs real, extractable structure), so it never hijacks a turn.
+        gen = self._generalize_answer(stimulus)
+        if gen is not None:
+            text, conf, source, analogical = gen
+            how = " by analogy" if analogical else ""
+            return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
+                             risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
+                             rationale=f"{process} via her own {source} faculty (generalized{how}, "
+                                       f"no LLM); {len(mems)} memories recalled")
         if not self._real_llm():
             # keyless machine: the sovereign offline mind answers from her own faculties
             # (NLP + knowledge base + recalled memory) instead of echoing "I understand: X".
@@ -560,6 +580,44 @@ class NyxaraReasoner:
             return mind.solve(stimulus)
         except Exception:  # noqa: BLE001 — a learned-skill attempt is advisory, never fatal
             return None
+
+    def _generalization(self) -> Any:
+        """The unified own-faculty generalizer (injected, or lazily built from her sub-minds)."""
+        if self.generalization_engine is not None:
+            return self.generalization_engine
+        gcfg = getattr(self.settings, "generalization", None)
+        if gcfg is not None and not getattr(gcfg, "enabled", True):
+            return None
+        if self._gen_lazy is None:
+            try:
+                from nyxara.mind.generalization import GeneralizationEngine
+                se = self._sample_efficient_mind()
+                self._gen_lazy = GeneralizationEngine(
+                    skills=getattr(se, "skills", None),
+                    composer=getattr(se, "composer", None),
+                    min_confidence=float(getattr(gcfg, "min_confidence", 0.4)),
+                    parse_demos_enabled=bool(getattr(gcfg, "parse_demos", True)),
+                    parse_tables_enabled=bool(getattr(gcfg, "parse_tables", True)),
+                    min_demos=int(getattr(gcfg, "min_demos", 2)))
+            except Exception:  # noqa: BLE001 — generalization is a capability, never required
+                self._gen_lazy = None
+        return self._gen_lazy
+
+    def _generalize_answer(self, stimulus: str) -> Optional[Tuple[str, float, str, bool]]:
+        """Solve a genuinely new / from-examples task with her unified own-faculty cascade.
+
+        Returns ``(answer, confidence, source, analogical)`` or ``None`` when the cascade honestly
+        declines (no learnable structure) — the normal offline / LLM path then runs unchanged."""
+        eng = self._generalization()
+        if eng is None:
+            return None
+        try:
+            res = eng.generalize(stimulus)
+        except Exception:  # noqa: BLE001 — the cascade is advisory, never fatal
+            return None
+        if res is None:
+            return None
+        return res.render(), float(res.confidence), str(res.source), bool(res.analogical)
 
     def teach_self_brain(self, *docs: str, reward: float = 0.0) -> None:
         """Compound the own learned brain from lived exchanges (called by the kernel's _grow).

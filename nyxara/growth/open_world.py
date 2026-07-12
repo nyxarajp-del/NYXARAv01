@@ -429,6 +429,89 @@ class OpenWorldGeneralizer:
                             residual, box, t0, fold, usable)
 
     # ---------------------------------------------------------------------- #
+    # STATIC DATASET — crack a law stated as an (input, output) table (no live box)
+    # ---------------------------------------------------------------------- #
+    def model_dataset(self, pairs: Sequence[Tuple[Any, Any]], *, query: Any = None,
+                      holdout: float = 0.25, label: str = "dataset",
+                      fold: bool = False) -> UnderstandingReport:
+        """Fit the simplest law that GENERALIZES to a held-out row of a given ``(x, y)`` table.
+
+        Unlike :meth:`understand`, there is no live box to probe — the evidence is exactly the
+        rows provided. She fits candidate laws on a training split, validates on the held-out
+        rows (the honest generalization signal), then refits the winner on all rows for the best
+        final model. Single numeric input only; returns an honest ``UNMODELLED`` verdict when
+        nothing generalizes. Reuses the same law family / MDL / judging machinery as ``understand``.
+        """
+        t0 = time.monotonic()
+        clean: List[Tuple[float, float]] = []
+        for x, y in pairs:
+            try:
+                clean.append((float(x), float(y)))
+            except (TypeError, ValueError):
+                continue
+        # dedup by input, order preserved
+        seen: set = set()
+        rows: List[Tuple[float, float]] = []
+        for x, y in clean:
+            if x not in seen:
+                seen.add(x)
+                rows.append((x, y))
+        spec = DomainSpec(dims=1, kind=("int" if all(v == int(v) for v, _ in rows) else "real"),
+                          scalar=True)
+        if len(rows) < 3:
+            return UnderstandingReport(system=label, domain=spec.to_dict(),
+                                       verdict=Verdict.INCONCLUSIVE, confidence=0.0,
+                                       elapsed_ms=(time.monotonic() - t0) * 1000.0)
+        probes = [Probe(action=x, observation=y, vec=_to_vec(x, spec)) for x, y in rows]
+
+        # deterministic holdout split: every k-th row is held out (at least one)
+        n_hold = max(1, int(round(holdout * len(probes))))
+        step = max(2, len(probes) // n_hold)
+        held = [p for i, p in enumerate(probes) if (i + 1) % step == 0]
+        train = [p for p in probes if p not in held]
+        if len(train) < 2:
+            train, held = probes, probes[-1:]
+
+        train_cands = self._fit_candidates(train, spec)
+        winner = train_cands[0] if train_cands else None
+        acc, residual = self._validate_static(winner, held)
+        verdict, confidence = self._judge(train_cands, acc)
+
+        # refit the winner on ALL rows so the reported model uses every datum
+        all_cands = self._fit_candidates(probes, spec)
+        if all_cands:
+            winner = all_cands[0]
+        report = UnderstandingReport(
+            system=label, domain=spec.to_dict(), verdict=verdict, confidence=confidence,
+            law=winner.description if winner else None,
+            law_family=winner.family.value if winner else LawFamily.UNMODELLED.value,
+            holdout_accuracy=acc, residual=residual, probes_used=len(probes),
+            candidates=all_cands or train_cands, winner=winner,
+            samples=[(p.vec, p.observation) for p in probes],
+            elapsed_ms=(time.monotonic() - t0) * 1000.0)
+        return report
+
+    @staticmethod
+    def _validate_static(winner: Optional[CandidateLaw],
+                         held: Sequence[Probe]) -> Tuple[float, float]:
+        """Held-out accuracy / mean error of ``winner`` on rows it was not fitted on."""
+        if winner is None or not held:
+            return 0.0, math.inf
+        hits, errs = 0, []
+        for p in held:
+            try:
+                pred = winner.predict(p.vec)
+                actual = float(p.observation)
+                err = abs(float(pred) - actual)
+            except (TypeError, ValueError):
+                continue
+            errs.append(err)
+            if err <= 1e-4 + 1e-3 * abs(actual):
+                hits += 1
+        n = len(errs)
+        return (hits / n, sum(errs) / n) if n else (0.0, math.inf)
+
+    # ---------------------------------------------------------------------- #
     # OBSERVE — choosing what to poke
     # ---------------------------------------------------------------------- #
     def _seed_actions(self, spec: DomainSpec, rng: random.Random,

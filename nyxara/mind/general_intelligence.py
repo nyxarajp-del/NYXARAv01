@@ -575,10 +575,13 @@ class AdaptiveExpert(DomainExpert):
         if report is not None:
             sol.detail["investigation"] = report
         # OWN FACULTIES FIRST — before reaching for the base LLM, try to generalize the new
-        # field herself by structure-mapping it onto a domain she already understands. When it
-        # fires, the reasoning content is hers (candidate inferences projected by her own
-        # engine); the LLM is not consulted. Honest: it declines when no structure maps.
-        transferred = self.gi._transfer_solve(problem) if self.gi.own_faculties_first else None
+        # field herself. The unified cascade (skill-induction from any examples in the prompt,
+        # relational transfer, open-world law modelling) is tried first; it subsumes bare transfer.
+        # When it fires, the reasoning content is hers; the LLM is not consulted. Honest: each
+        # stage declines when it cannot answer, so bare transfer and then the LLM still follow.
+        transferred = None
+        if self.gi.own_faculties_first:
+            transferred = self.gi._generalize_solve(problem) or self.gi._transfer_solve(problem)
         if transferred is not None:
             answer, conf, detail = transferred
             sol.answer = answer
@@ -610,7 +613,8 @@ class GeneralIntelligence:
     def __init__(self, *, reasoner: Any = None, council: Any = None, scientist: Any = None,
                  world_model: Any = None, memory: Any = None, knowledge: Any = None,
                  tools: Any = None, strategic: Any = None, self_model: Any = None,
-                 transfer_engine: Any = None, llm: Any = None, threshold: float = 0.18,
+                 transfer_engine: Any = None, generalization_engine: Any = None,
+                 llm: Any = None, threshold: float = 0.18,
                  use_llm_refine: bool = True, allow_web_grounding: bool = True,
                  auto_discover: bool = True, own_faculties_first: bool = True) -> None:
         self.reasoner = reasoner
@@ -625,6 +629,10 @@ class GeneralIntelligence:
         # her own cross-domain generalizer (mind/transfer.py) — used to reason about a NOVEL
         # field herself (structure-mapping from a known domain) before falling to the base LLM
         self.transfer_engine = transfer_engine
+        # her unified own-faculty generalizer (mind/generalization.py) — the full cascade
+        # (skill-induction from examples, relational transfer, open-world modelling), used to solve
+        # a novel field herself before reaching for the base LLM
+        self.generalization_engine = generalization_engine
         self.own_faculties_first = bool(own_faculties_first)
         self.llm = llm if llm is not None else getattr(reasoner, "llm", None)
         self.allow_web_grounding = bool(allow_web_grounding)
@@ -733,6 +741,24 @@ class GeneralIntelligence:
             conf = min(conf, 0.6)
         return tr.render(), conf, {"transfer": tr.to_dict(), "own_faculty": "relational_transfer",
                                    "analogical": bool(getattr(tr, "analogical", False))}
+
+    def _generalize_solve(self, problem: str) -> Optional[Tuple[str, float, Dict[str, Any]]]:
+        """Solve a novel field with her unified own-faculty cascade (mind/generalization.py):
+        skill-induction from any examples in the prompt, relational transfer, open-world law
+        modelling. Returns ``(answer, confidence, detail)`` — content derived by her own faculties,
+        never the base LLM — or ``None`` when none of them can honestly answer."""
+        eng = self.generalization_engine
+        if eng is None:
+            return None
+        try:
+            res = eng.generalize(problem)
+        except Exception:  # noqa: BLE001 — the cascade is advisory, never fatal
+            return None
+        if res is None:
+            return None
+        return res.render(), float(res.confidence), {
+            "own_faculty": res.source, "generalization": res.to_dict(),
+            "analogical": bool(res.analogical)}
 
     def _extract_code(self, problem: str) -> str:
         """Pull a fenced ```python code block out of the problem, if present."""
