@@ -461,6 +461,19 @@ class FoundryConfig(BaseModel):
     # weights more often (higher training intensity, a little more CPU per turn). Default 4 (was an
     # internal 8) so her weights track experience closely from turn one.
     self_brain_refit_every: int = Field(default=4, ge=1, le=256)
+    # ---- Real-time weight learning (mind/self_reasoner.SelfBrain.online_step) ---- #
+    # The above knobs made online folding *possible*; these make it genuinely LIVE and CONTINUOUS.
+    # Every turn (and every autonomic tick when idle) NYXARA folds queued lived experience into her
+    # generative core weights herself — not only when she happens to generate a reply. Each fold is
+    # gauntlet-gated on the neural path exactly like weight surgery: snapshot -> step -> verify the
+    # held-out perplexity did not regress beyond the tolerance -> keep, else roll back to the exact
+    # prior weights. So a bad online step can never degrade the core. On by default.
+    # Max fractional perplexity regression a kept online step may cause on the held-out probe.
+    # Defaults to the weight-surgery tolerance; lower = stricter (rolls back more aggressively).
+    self_brain_online_verify_tol: float = Field(default=0.25, ge=0.0, le=2.0)
+    # Max queued exchanges folded per live flush (per turn / per tick). Bounds the CPU a single
+    # real-time fold may cost so the turn stays responsive; the remainder folds on the next flush.
+    self_brain_flush_budget: int = Field(default=8, ge=1, le=256)
     # ---- Few-shot skill induction (cognition/skill_induction.py) ---- #
     # NYXARA learns a *task* from a handful of (input -> output) demonstrations by synthesising a
     # verified, reusable transformation she then applies to genuinely new inputs — real, transferable

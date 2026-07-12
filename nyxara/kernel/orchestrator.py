@@ -5137,6 +5137,28 @@ class NyxaraCore:
                     pass
             except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
                 pass
+        # 1b) REAL-TIME weight learning: fold the just-queued exchange into her generative CORE
+        # weights *now* — every turn — instead of only when she later happens to generate a reply.
+        # The fold is reversible and gauntlet-gated inside the brain (a regressing neural step rolls
+        # back); here it is strictly best-effort and never touches the turn's outcome. The result is
+        # published on the signal bus so the rest of the mind can see her weights genuinely moved.
+        flush = getattr(self.reasoner, "flush_online_learning", None)
+        if flush is None:
+            flush = getattr(getattr(self.reasoner, "llm_reasoner", None),
+                            "flush_online_learning", None)
+        if callable(flush):
+            try:
+                learn_report = flush()
+            except Exception:  # noqa: BLE001 — real-time learning is best-effort
+                learn_report = None
+            if learn_report is not None and hasattr(learn_report, "to_dict"):
+                try:
+                    from nyxara.growth.signal_bus import get_signal_bus
+                    get_signal_bus().post(
+                        "weight_update", learn_report.to_dict(), source="self_brain",
+                        weight=1.0 if getattr(learn_report, "changed", lambda: False)() else 0.0)
+                except Exception:  # noqa: BLE001 — telemetry is best-effort, never fatal
+                    pass
         # 2) the distributional embedder learns the turn's co-occurrence (paraphrase reach)
         embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
         learn = getattr(embedder, "learn", None)
