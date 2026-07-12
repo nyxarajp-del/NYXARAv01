@@ -3533,6 +3533,11 @@ class NyxaraCore:
                                f"focus: {(focus.content[:40] if focus else 'none')}",
                                causes=[p_t], salience=0.5)
         thoughts.append(a_t)
+        # 2b. GROUND — before reasoning, fire the *perceptual meaning* of the salient words in
+        #     the input so understanding engages the senses (apple → sweet/red/round/edible),
+        #     not tokens alone. Floor-only and fail-soft: it uses meanings NYXARA already holds,
+        #     never a network, and never blocks the turn.
+        self._ground_input(safe_text, a_t, thoughts)
 
         # 3. REASON — the probabilistic proposal, grounded in associative recall
         recalled = self._recall_for(safe_text)
@@ -5974,21 +5979,34 @@ class NyxaraCore:
             try:
                 if self.oversight.gate():
                     from nyxara.sim.embodied import embodied_stream
+                    # Wire perception → grounded meaning: the embodied loop grounds every
+                    # percept it binds into the *same* lexicon `understand()` reads, so a
+                    # thing NYXARA *perceives* (a red apple, a barking dog) becomes real
+                    # multimodal meaning, not just a transition. Lazy so it survives init
+                    # order and a mock/absent grounder; best-effort, never fatal.
+                    if getattr(self.embodied_agent, "grounder", None) is None:
+                        try:
+                            self.embodied_agent.grounder = self._symbol_grounder()
+                        except Exception:  # noqa: BLE001 — grounding is optional
+                            pass
                     stream = embodied_stream(self.embodied_agent, steps=6)
                     if stream:
                         tr = stream[-1]
                         st = self.embodied_agent.status()
                         novel = sum(1 for t in stream if t.novelty)
+                        grounded = st.get("grounded_concepts", 0)
                         report["embodiment"] = {
                             "action": tr.action, "reward": round(tr.reward, 3),
                             "stream": len(stream), "novel_percepts": novel,
                             "distinct_entities": st["distinct_entities"],
+                            "grounded": grounded,
                             "perceived": st["perceived_artifacts"]}
                         report["world_transitions"] = len(self.world_model)
                         self.mind.record(
                             ThoughtKind.INFERENCE,
                             f"embodied burst x{len(stream)}: {tr.action} r={tr.reward:.2f} "
-                            f"({st['distinct_entities']} entities grounded)", salience=0.4)
+                            f"({st['distinct_entities']} entities perceived, "
+                            f"{grounded} grounded in the senses)", salience=0.4)
                         # Abyss · 2 — Butterfly Effect: which tiny detail of the present most
                         # controls the far future? Perturb each state dimension and rank the
                         # cascade. Raises attention on the decisive factor; advisory only.
@@ -6302,6 +6320,40 @@ class NyxaraCore:
     # backwards-friendly alias
     def ground_word(self, word: str) -> Dict[str, Any]:
         return self.understand(word)
+
+    def _ground_input(self, text: str, cause: Any, thoughts: List[Any]) -> None:
+        """Engage grounded meaning while *understanding* an input, not only on an explicit
+        :meth:`understand` call. For the salient content words of ``text``, fire the multimodal
+        meaning NYXARA already holds (apple → taste/vision/touch/physics/affordance) and surface
+        the strongest as a thought so the senses participate in comprehension. Floor-only —
+        queries known meanings with no LLM and no network — and fully fail-soft: any fault is a
+        no-op that never delays or blocks the turn."""
+        if not text or not text.strip():
+            return
+        try:
+            lex = self._symbol_grounder()
+            seen: set = set()
+            grounded: List[str] = []
+            for raw in text.split():
+                w = "".join(ch for ch in raw.lower() if ch.isalpha())
+                if len(w) < 3 or w in seen:
+                    continue
+                seen.add(w)
+                c = lex.get(w)                       # known meaning only — no LLM, no network
+                if c is not None and c.active_senses():
+                    grounded.append(c.name)
+                if len(grounded) >= 4:
+                    break
+            if not grounded:
+                return
+            gloss = lex.explain(grounded[0])
+            t = self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"grounded meaning of {grounded}: {gloss[:100]}",
+                causes=[cause] if cause is not None else None, salience=0.4)
+            thoughts.append(t)
+        except Exception:  # noqa: BLE001 — grounding participation is a capability, never required
+            pass
 
     def learn_from_text(self, text: str) -> Dict[str, Any]:
         """Learn world dynamics *and* grounded meaning from a natural-language passage.

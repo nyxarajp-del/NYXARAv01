@@ -156,6 +156,57 @@ DESCRIPTOR_ONTOLOGY: Dict[str, Tuple[Sense, str, float]] = {
     "animate": (Sense.ACTION, "animate", 1.0), "alive": (Sense.ACTION, "animate", 1.0),
     "living": (Sense.ACTION, "animate", 1.0), "fast": (Sense.ACTION, "fast", 1.0),
     "slow": (Sense.ACTION, "fast", -1.0), "flying": (Sense.ACTION, "flies", 1.0),
+    # --- floor upgrade: a wider innate descriptor vocabulary (still pure stdlib) ---
+    # taste
+    "juicy": (Sense.TASTE, "sweet", 0.4), "ripe": (Sense.TASTE, "sweet", 0.5),
+    "creamy": (Sense.TASTE, "savory", 0.4),
+    # smell
+    "musty": (Sense.SMELL, "pungent", 0.7), "rotten": (Sense.SMELL, "pungent", 1.0),
+    "floral": (Sense.SMELL, "fragrant", 1.0), "smoky": (Sense.SMELL, "pungent", 0.6),
+    # vision — colour / shape / size
+    "golden": (Sense.VISION, "yellow", 0.8), "silver": (Sense.VISION, "grey", 0.8),
+    "transparent": (Sense.VISION, "transparent", 1.0), "clear": (Sense.VISION, "transparent", 0.7),
+    "tall": (Sense.VISION, "size", 0.8), "wide": (Sense.VISION, "size", 0.6),
+    "thin": (Sense.VISION, "size", -0.5), "narrow": (Sense.VISION, "size", -0.5),
+    "oval": (Sense.VISION, "round", 0.7), "triangular": (Sense.VISION, "pointy", 0.7),
+    "straight": (Sense.VISION, "long", 0.5),
+    # vision — brightness
+    "gleaming": (Sense.VISION, "brightness", 1.0), "sparkling": (Sense.VISION, "brightness", 1.0),
+    "gloomy": (Sense.VISION, "brightness", -0.7),
+    # sound
+    "deafening": (Sense.SOUND, "loudness", 1.0), "faint": (Sense.SOUND, "loudness", -0.7),
+    "melodic": (Sense.SOUND, "musical", 1.0), "harsh": (Sense.SOUND, "musical", -0.6),
+    "rhythmic": (Sense.SOUND, "musical", 0.7),
+    # touch — texture / thermal-touch
+    "slippery": (Sense.TOUCH, "smooth", 0.8), "silky": (Sense.TOUCH, "smooth", 0.9),
+    "coarse": (Sense.TOUCH, "rough", 0.9), "bumpy": (Sense.TOUCH, "rough", 0.8),
+    "prickly": (Sense.TOUCH, "sharp", 0.8), "squishy": (Sense.TOUCH, "soft", 0.9),
+    "solid": (Sense.TOUCH, "hard", 0.8), "rigid": (Sense.TOUCH, "hard", 0.9),
+    "metal": (Sense.TOUCH, "hard", 0.8), "metallic": (Sense.TOUCH, "hard", 0.8),
+    "flexible": (Sense.TOUCH, "hard", -0.6), "damp": (Sense.TOUCH, "wet", 0.6),
+    "moist": (Sense.TOUCH, "wet", 0.6), "greasy": (Sense.TOUCH, "sticky", 0.7),
+    # physics — weight / temperature
+    "heavyweight": (Sense.PHYSICS, "weight", 1.0), "featherlight": (Sense.PHYSICS, "weight", -1.0),
+    "dense": (Sense.PHYSICS, "weight", 0.7), "icy": (Sense.PHYSICS, "temperature", -1.0),
+    "scalding": (Sense.PHYSICS, "temperature", 1.0), "lukewarm": (Sense.PHYSICS, "temperature", 0.2),
+    "boiling": (Sense.PHYSICS, "temperature", 1.0), "frozen": (Sense.PHYSICS, "temperature", -1.0),
+    # affordance
+    "portable": (Sense.AFFORDANCE, "graspable", 0.8), "readable": (Sense.AFFORDANCE, "readable", 1.0),
+    "openable": (Sense.AFFORDANCE, "openable", 1.0), "flammable": (Sense.AFFORDANCE, "flammable", 1.0),
+    "breakable": (Sense.AFFORDANCE, "breakable", 1.0), "washable": (Sense.AFFORDANCE, "washable", 1.0),
+    # emotion / valence
+    "beautiful": (Sense.EMOTION, "pleasant", 1.0), "soothing": (Sense.EMOTION, "pleasant", 1.0),
+    "joyful": (Sense.EMOTION, "pleasant", 1.0), "peaceful": (Sense.EMOTION, "pleasant", 0.8),
+    "terrifying": (Sense.EMOTION, "fear", 1.0), "threatening": (Sense.EMOTION, "fear", 0.9),
+    "menacing": (Sense.EMOTION, "fear", 0.9), "gross": (Sense.EMOTION, "disgust", 1.0),
+    "revolting": (Sense.EMOTION, "disgust", 1.0), "sad": (Sense.EMOTION, "sad", 1.0),
+    "gloomily": (Sense.EMOTION, "sad", 0.6),
+    # action / animacy / motion
+    "swift": (Sense.ACTION, "fast", 0.9), "rapid": (Sense.ACTION, "fast", 0.9),
+    "sluggish": (Sense.ACTION, "fast", -0.8), "swimming": (Sense.ACTION, "swims", 1.0),
+    "crawling": (Sense.ACTION, "fast", -0.6), "running": (Sense.ACTION, "fast", 0.8),
+    "still": (Sense.ACTION, "animate", -0.5), "motionless": (Sense.ACTION, "animate", -0.7),
+    "inanimate": (Sense.ACTION, "animate", -1.0),
 }
 
 # Verbs that reveal an *affordance* (what can be done with/to the thing) or a physical law.
@@ -173,6 +224,26 @@ _AFFORDANCE_VERBS: Dict[str, Tuple[Sense, str, float]] = {
     "bark": (Sense.SOUND, "loudness", 1.0), "sing": (Sense.SOUND, "musical", 1.0),
     "ring": (Sense.SOUND, "loudness", 1.0), "buzz": (Sense.SOUND, "loudness", 1.0),
     "roar": (Sense.SOUND, "loudness", 1.0),
+    # --- floor upgrade: more affordances, laws and motions (still pure stdlib) ---
+    "read": (Sense.AFFORDANCE, "readable", 1.0), "write": (Sense.AFFORDANCE, "readable", 0.7),
+    "open": (Sense.AFFORDANCE, "openable", 1.0), "close": (Sense.AFFORDANCE, "openable", 0.7),
+    "wash": (Sense.AFFORDANCE, "washable", 1.0), "kick": (Sense.AFFORDANCE, "throwable", 0.7),
+    "burn": (Sense.AFFORDANCE, "flammable", 1.0), "break": (Sense.AFFORDANCE, "breakable", 1.0),
+    "push": (Sense.AFFORDANCE, "graspable", 0.6), "carry": (Sense.AFFORDANCE, "graspable", 0.8),
+    "sit": (Sense.AFFORDANCE, "sittable", 1.0), "cook": (Sense.AFFORDANCE, "edible", 0.6),
+    "plant": (Sense.ACTION, "animate", 0.6),
+    # physical law: things fall, float, roll
+    "float": (Sense.PHYSICS, "gravity", -1.0), "rise": (Sense.PHYSICS, "gravity", -1.0),
+    "roll": (Sense.VISION, "round", 0.6), "bounce": (Sense.TOUCH, "bouncy", 1.0),
+    "melt": (Sense.PHYSICS, "temperature", 0.6), "freeze": (Sense.PHYSICS, "temperature", -1.0),
+    "glow": (Sense.VISION, "brightness", 1.0), "shine": (Sense.VISION, "brightness", 1.0),
+    # motion verbs → action
+    "run": (Sense.ACTION, "fast", 0.8), "fly": (Sense.ACTION, "flies", 1.0),
+    "swim": (Sense.ACTION, "swims", 1.0), "crawl": (Sense.ACTION, "fast", -0.6),
+    # more noise verbs
+    "whisper": (Sense.SOUND, "loudness", -0.8), "shout": (Sense.SOUND, "loudness", 1.0),
+    "hum": (Sense.SOUND, "musical", 0.7), "chirp": (Sense.SOUND, "musical", 0.7),
+    "meow": (Sense.SOUND, "loudness", 0.5), "growl": (Sense.SOUND, "loudness", 0.8),
 }
 
 _COPULA = frozenset(
@@ -181,6 +252,8 @@ _COPULA = frozenset(
 )
 _ARTICLES = frozenset("a an the this that these those its his her their my your".split())
 _NEGATORS = frozenset("not no n't never without".split())
+# leading pronouns that co-refer to the previous sentence's subject ("A tiger is big. It is …")
+_PRONOUN_SUBJECTS = frozenset("it they he she them".split())
 _VERB_SUFFIXES = ("ing", "ed", "es", "s")
 _NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
@@ -419,6 +492,50 @@ _SEED: Dict[str, Tuple[List[str], Dict[Sense, Dict[str, float]]]] = {
     "balloon": (["light", "round", "colorful"], _phys(0.01, gravity=-0.3)),
     "thunder": (["loud", "dangerous"], _phys(gravity=0.0)),
     "music": (["musical", "pleasant"], _phys(gravity=0.0)),
+    # --- floor upgrade: a broader innate world (still pure stdlib) ---
+    # more fruit & food  (mango is intentionally *not* seeded — it stays the canonical
+    # "learn a brand-new word by reading" example in the demo and tests)
+    "watermelon": (["sweet", "green", "round", "big", "edible", "juicy"], _phys(5.0)),
+    "cherry": (["sweet", "red", "round", "small", "edible"], _phys(0.008)),
+    "sugar": (["sweet", "white", "edible"], _phys(0.5)),
+    "salt": (["salty", "white", "edible"], _phys(0.5)),
+    "pepper": (["spicy", "black", "edible"], _phys(0.05)),
+    "cheese": (["savory", "yellow", "soft", "edible"], _phys(0.4)),
+    "egg": (["white", "oval", "smooth", "edible"], _phys(0.06)),
+    "soup": (["hot", "savory", "edible", "wet"], _phys(0.4)),
+    "tea": (["hot", "bitter", "drinkable", "brown", "wet", "aromatic"], _phys(0.3)),
+    "juice": (["sweet", "drinkable", "wet", "colorful"], _phys(0.3)),
+    # more nature / weather
+    "wind": (["fast", "cold"], _phys(gravity=0.0)),
+    "cloud": (["white", "soft", "big"], _phys(gravity=0.0)),
+    "lightning": (["bright", "fast", "dangerous", "yellow"], _phys(gravity=0.0, temperature=1.0)),
+    "river": (["wet", "blue", "cold", "long"], _phys(0.0)),
+    "mountain": (["big", "hard", "grey", "tall"], _phys(1000.0)),
+    "sand": (["dry", "brown", "rough"], _phys(0.0)),
+    "mud": (["wet", "brown", "soft", "sticky"], _phys(0.0)),
+    "leaf": (["green", "light", "soft", "flat"], _phys(0.001)),
+    "flower": (["colorful", "soft", "fragrant", "pleasant"], _phys(0.01)),
+    # more animals
+    "horse": (["big", "animate", "brown", "fast", "rideable"], _phys(500.0)),
+    "cow": (["big", "animate", "slow"], _phys(700.0)),
+    "snake": (["long", "animate", "smooth", "dangerous"], _phys(2.0)),
+    "elephant": (["big", "grey", "animate", "loud", "slow"], _phys(5000.0)),
+    "butterfly": (["small", "colorful", "animate", "flying", "pleasant"], _phys(0.001)),
+    "mouse": (["small", "animate", "grey", "fast", "quiet"], _phys(0.02)),
+    "frog": (["small", "green", "animate", "wet"], _phys(0.05)),
+    # more objects / tools
+    "book": (["hard", "brown", "readable"], _phys(0.4)),
+    "chair": (["hard", "brown"], _phys(5.0)),
+    "phone": (["small", "hard", "shiny", "loud"], _phys(0.2)),
+    "lamp": (["bright", "hard"], _phys(1.0)),
+    "cup": (["hard", "round", "graspable"], _phys(0.2)),
+    "key": (["small", "hard", "shiny", "metal"], _phys(0.02)),
+    "rope": (["long", "rough", "flexible"], _phys(0.5)),
+    "glass": (["hard", "transparent", "smooth", "breakable"], _phys(0.3)),
+    "paper": (["white", "flat", "light", "thin", "readable"], _phys(0.005)),
+    "candle": (["bright", "hot", "small"], _phys(0.1, temperature=0.7)),
+    "drum": (["loud", "hard", "round", "musical"], _phys(3.0)),
+    "guitar": (["musical", "brown", "hard"], _phys(2.5)),
 }
 
 
@@ -493,10 +610,13 @@ class GroundedLexicon:
         # LLM ceiling: if a real model is configured and a single concept is named but
         # unknown, enrich it once before the deterministic pass (best-effort).
         touched: Dict[str, int] = {}
+        last_subject = _singular(concept) if concept else None
         for sentence in (nlp.sentences(text) or [text]):
-            subj, added = self._ground_sentence(sentence, concept)
-            if subj and added:
-                touched[subj] = touched.get(subj, 0) + added
+            subj, added = self._ground_sentence(sentence, concept, last_subject)
+            if subj:
+                last_subject = subj                      # carry to resolve a later "it"/"they"
+                if added:
+                    touched[subj] = touched.get(subj, 0) + added
         for name in touched:
             self.concepts[name].sources += 1
         self.total_reads += 1
@@ -507,12 +627,13 @@ class GroundedLexicon:
             "via": "deterministic",
         }
 
-    def _ground_sentence(self, sentence: str,
-                         concept: Optional[str]) -> Tuple[Optional[str], int]:
+    def _ground_sentence(self, sentence: str, concept: Optional[str],
+                         last_subject: Optional[str] = None) -> Tuple[Optional[str], int]:
         toks = nlp.tokenize(sentence, lower=True)
         if not toks:
             return None, 0
-        subject = _singular(concept) if concept else self._detect_subject(toks)
+        subject = _singular(concept) if concept \
+            else self._detect_subject(toks, last_subject)
         if not subject:
             return None, 0
         c = self._concept(subject)
@@ -545,8 +666,18 @@ class GroundedLexicon:
         return (subject, added) if added else (subject, 0)
 
     @staticmethod
-    def _detect_subject(toks: Sequence[str]) -> Optional[str]:
-        """Find the noun a sentence is *about* (stdlib heuristics, no POS model)."""
+    def _detect_subject(toks: Sequence[str],
+                        last_subject: Optional[str] = None) -> Optional[str]:
+        """Find the noun a sentence is *about* (stdlib heuristics, no POS model).
+
+        A leading pronoun ("It is dangerous", "They fall") resolves to ``last_subject`` — the
+        subject of the previous sentence — so a short paragraph grounds the thing it keeps
+        talking about, not a scatter of unrelated words."""
+        # 0) a leading pronoun refers back to what the paragraph was just about
+        if last_subject:
+            head = next((t for t in toks if t not in _ARTICLES), None)
+            if head in _PRONOUN_SUBJECTS:
+                return last_subject
         # 1) the content word right before a copula ("the apple is …")
         cop = next((i for i, t in enumerate(toks) if t in _COPULA), -1)
         if cop > 0:
@@ -567,32 +698,100 @@ class GroundedLexicon:
     # ------------------------------------------------------------------ #
     # Learning from real percepts — the embodied/sensory path
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _percept_words(p: Any) -> List[str]:
+        """Every descriptor-bearing word a percept carries: its content, its tags, and any
+        OCR / transcript text riding in ``.data`` — all lower-cased. This is the raw evidence
+        a single percept offers about what the thing it sees/hears *is like* in the senses."""
+        content = getattr(p, "content", "") or ""
+        data = getattr(p, "data", None) or {}
+        extra = " ".join(str(data.get(k, "") or "")
+                         for k in ("ocr", "ocr_text", "transcript"))
+        words = list(nlp.tokenize(f"{content} {extra}", lower=True))
+        words += [str(t).lower() for t in (getattr(p, "tags", None) or [])]
+        return words
+
+    @staticmethod
+    def _percept_sense(p: Any) -> Optional[Sense]:
+        """The perceptual sense a percept's *input channel* feeds (image→vision, audio→sound).
+        Text/web/document flow through the language path and map to no sense here."""
+        modality = getattr(getattr(p, "modality", None), "value", None) \
+            or getattr(p, "modality", None)
+        return _CHANNEL_TO_SENSE.get(str(modality))
+
+    def _ground_words(self, c: "GroundedConcept", words: Sequence[str]) -> int:
+        """Fold each descriptor / affordance-verb in ``words`` into concept ``c`` at its own
+        perceptual sense (red→vision, sweet→taste, eat→edible, falls→gravity). A preceding
+        negator flips the sign. Returns how many pieces of evidence were bound."""
+        added = 0
+        for i, w in enumerate(words):
+            negated = i > 0 and words[i - 1] in _NEGATORS
+            mapped = DESCRIPTOR_ONTOLOGY.get(w)
+            if mapped:
+                s, feat, val = mapped
+                c.reinforce(s, feat, -val if negated else val)
+                added += 1
+                continue
+            av = _AFFORDANCE_VERBS.get(_verb_stem(w))
+            if av:
+                s, feat, val = av
+                c.reinforce(s, feat, -val if negated else val)
+                added += 1
+        return added
+
     def learn_from_percepts(self, symbol: str, percepts: Iterable[Any]) -> Dict[str, Any]:
-        """Bind features carried by real percepts (a :class:`senses.binding.PerceptualFrame`
-        or any iterable of percept-like objects) to ``symbol`` — grounding from the senses
-        themselves. Each percept may expose ``.modality``/``.content``/``.tags``; we read
-        the channel→sense mapping and mine the content text through the same ontology.
+        """Bind features carried by real percepts (a :class:`senses.binding.PerceptualFrame`,
+        a single :class:`senses.binding.Percept`, or any iterable of percept-like objects) to
+        a **known** ``symbol`` — grounding from the senses themselves. Each percept's content,
+        tags and OCR/transcript are mined through the ontology, and the input channel it came
+        in on (image→vision, audio→sound) is recorded as ``perceived`` evidence for that sense:
+        a thing NYXARA has *seen* lights up vision, a thing she has *heard* lights up sound.
         """
         c = self._concept(symbol)
         added = 0
-        # a PerceptualFrame exposes .percepts; otherwise treat the arg as the iterable
-        items = getattr(percepts, "percepts", percepts)
-        for p in (items or []):
-            modality = getattr(getattr(p, "modality", None), "value", None) \
-                or getattr(p, "modality", None)
-            sense = _CHANNEL_TO_SENSE.get(str(modality), None)
-            content = getattr(p, "content", "") or ""
-            tags = getattr(p, "tags", None) or []
-            for word in (*nlp.tokenize(str(content), lower=True), *map(str.lower, tags)):
-                mapped = DESCRIPTOR_ONTOLOGY.get(word)
-                if mapped:
-                    s, feat, val = mapped
-                    # a percept on a real sensory channel reinforces *that* channel too
-                    c.reinforce(sense or s, feat if sense is None else f"{feat}", val)
-                    added += 1
+        for p in _iter_percepts(percepts):
+            added += self._ground_words(c, self._percept_words(p))
+            channel = self._percept_sense(p)
+            if channel is not None:          # she perceived it *through this sense*
+                c.reinforce(channel, "perceived", 0.3)
+                added += 1
         if added:
             c.sources += 1
         return {"symbol": c.name, "features_added": added}
+
+    def learn_from_frame(self, frame: Any) -> Dict[str, Any]:
+        """Ground **every entity** a :class:`senses.binding.PerceptualFrame` (or a single
+        :class:`~senses.binding.Percept`) carries — the *experience → meaning* path.
+
+        This is the piece that turns perception into grounded understanding: real percepts
+        produced by :mod:`senses.vision` / :mod:`senses.audio` / :mod:`senses.nlp` name the
+        entities they are *about* (``percept.entities``); those entities become the symbols,
+        and the descriptor words the same percept carries become the evidence, grounded at
+        their perceptual sense. The input channel (image→vision, audio→sound) reinforces the
+        sense the entity was perceived *through*, so a seen apple activates vision and a heard
+        dog activates sound. No LLM, no network — meaning learned from the senses themselves.
+        Best-effort; returns a report dict.
+        """
+        grounded: Dict[str, int] = {}
+        for p in _iter_percepts(frame):
+            entities = [e for e in (getattr(p, "entities", None) or []) if e and str(e).strip()]
+            if not entities:
+                continue
+            words = self._percept_words(p)
+            channel = self._percept_sense(p)
+            for ent in entities:
+                c = self._concept(str(ent))
+                added = self._ground_words(c, words)
+                if channel is not None:      # perceived through a real sense channel
+                    c.reinforce(channel, "perceived", 0.3)
+                    added += 1
+                if added:
+                    c.sources += 1
+                    grounded[c.name] = grounded.get(c.name, 0) + added
+        if grounded:
+            self.total_reads += 1
+        return {"grounded": sorted(grounded), "features_added": sum(grounded.values()),
+                "concepts": len(self.concepts), "via": "perception"}
 
     # ------------------------------------------------------------------ #
     # LLM ceiling — enrich an unknown concept (optional, degrades to floor)
@@ -815,6 +1014,28 @@ class GroundedLexicon:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+def _iter_percepts(source: Any) -> List[Any]:
+    """Normalise a percept source into a flat list of percept-like objects.
+
+    Accepts a :class:`senses.binding.PerceptualFrame` (whose ``.percepts`` is a *method*), a
+    single :class:`~senses.binding.Percept` (has ``.content``/``.entities`` but no ``.percepts``),
+    or any iterable of percepts. Returns ``[]`` for ``None``."""
+    if source is None:
+        return []
+    percepts = getattr(source, "percepts", None)
+    if callable(percepts):                       # a PerceptualFrame — .percepts() returns the list
+        try:
+            return list(percepts())
+        except Exception:                        # noqa: BLE001 — never let normalisation crash
+            return []
+    if hasattr(source, "content") or hasattr(source, "entities"):
+        return [source]                          # a lone percept
+    try:
+        return list(source)
+    except TypeError:
+        return [source]
+
+
 def _is_noun_like(tok: str) -> bool:
     return (tok not in nlp.STOPWORDS and tok not in _COPULA and tok not in _ARTICLES
             and len(tok) > 2 and _NUMBER_RE.fullmatch(tok) is None)
