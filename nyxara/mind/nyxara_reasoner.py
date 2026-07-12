@@ -365,8 +365,20 @@ class NyxaraReasoner:
                 n_iterations=int(getattr(self.settings.llm,
                                          "recursive_improvement_iterations", 5)))
             effort_memory = self._effort_memory() if bool(getattr(cfg, "learn_effort", True)) else None
+            # Compute-scaled test-time-compute budget (Problem #1 — Scale): the compute NYXARA
+            # actually has decides how hard she thinks. Scales *up* from the config floor only, so
+            # a bare box is unchanged; any failure falls back to the static config. This is the
+            # honest way her small model buys effective scale — see growth/effective_scale.py.
+            budget = None
+            try:
+                from nyxara.growth.effective_scale import scaled_budget
+                from nyxara.kernel.compute import compute_report
+                budget = scaled_budget(compute_report(), cfg)
+            except Exception:  # noqa: BLE001 — budget scaling is additive; never a hard dependency
+                budget = None
             self._deep = DeepReasoner(self.llm_reasoner, settings=self.settings,
-                                      improver=improver, effort_memory=effort_memory)
+                                      improver=improver, effort_memory=effort_memory,
+                                      budget=budget)
         except Exception:  # noqa: BLE001 — deep reasoning is additive, never a hard dependency
             self._deep = False
         return self._deep or None
