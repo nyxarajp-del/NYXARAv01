@@ -103,3 +103,82 @@ def test_render_is_honest_hypothesis_language():
     text = tr.render().lower()
     assert "analogy" in text
     assert "likely" in text or "hypothes" in text   # hedged, not asserted as fact
+
+
+# --------------------------------------------------------------------------- #
+# The critique, answered: a GENUINELY NEW domain (fresh vocabulary, absent from every schema)
+# is understood by NYXARA's own faculties — no LLM — via analogical structural transfer.
+# --------------------------------------------------------------------------- #
+def _novel_vocab_target():
+    """A magnet/filing domain described with verbs that are in NO seed schema."""
+    e, r = entity, relation
+    magnet, filing = e("magnet"), e("filing")
+    return [r("tugs", magnet, filing), r("circles", filing, magnet)]
+
+
+def test_novel_vocabulary_domain_transfers_by_analogy():
+    """Verbs 'tugs'/'circles' are not in any known schema, so strict identicality can't map them.
+    The analogical pass must still recover the structure and project the higher-order cause."""
+    eng = RelationalTransferEngine()
+    tr = eng.generalize("a strange device", target_relations=_novel_vocab_target())
+    assert tr is not None, "a novel-vocabulary domain must still transfer by structure"
+    assert tr.analogical is True, "it should be reached by loose (renamed) alignment"
+    assert tr.base_domain == "solar_system"
+    assert tr.entity_mapping.get("sun") == "magnet"
+    assert tr.entity_mapping.get("planet") == "filing"
+    inferred = " ".join(str(p) for p in tr.candidate_inferences)
+    assert "causes" in inferred and "magnet" in inferred and "filing" in inferred
+
+
+def test_analogical_transfer_is_disabled_when_turned_off():
+    """The analogical faculty is opt-in at the engine level; with it off, a fresh-vocabulary
+    domain honestly declines (returns None) rather than pretending to a strict match."""
+    eng = RelationalTransferEngine(analogical=False)
+    assert eng.generalize("a strange device", target_relations=_novel_vocab_target()) is None
+
+
+def test_open_domain_text_extraction_recovers_novel_verbs():
+    """Raw prose whose verbs are NOT in the known relation vocabulary still yields a relational
+    skeleton (open-domain Tier-B extraction) and drives a transfer end-to-end from text alone."""
+    eng = RelationalTransferEngine()
+    tr = eng.generalize("in the gadget the emitter zaps the mote and the mote whirls the emitter")
+    assert tr is not None
+    assert tr.analogical is True
+    inferred = " ".join(str(p) for p in tr.candidate_inferences)
+    assert "causes" in inferred
+
+
+def test_still_declines_on_nonrelational_chat():
+    """Honesty preserved: no verb-between-two-entities means no structure, so the engine declines
+    and the LLM path would run — the open-domain extractor never fabricates structure."""
+    eng = RelationalTransferEngine()
+    assert eng.generalize("hi there, how are you doing today?") is None
+
+
+def test_router_routes_novel_domain_to_own_transfer_not_the_teacher():
+    """The decisive end-to-end check: with a teacher available, a genuinely novel-vocabulary
+    prompt is answered by NYXARA's OWN structure-mapper (Route.TRANSFER), not handed to the LLM."""
+    from nyxara.kernel.config import NyxaraSettings, Profile
+    from nyxara.mind.router import Router
+    from nyxara.mind.self_model_router import PrimarySelfModelRouter, Route
+
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.self_model_router.enabled = True
+
+    class _Teacher:
+        def available_providers(self):
+            return ["tinyllama", "mock"]
+
+        def complete_with(self, name, req):
+            return type("_R", (), {"text": "[teacher] a generic answer"})()
+
+    router = Router(_Teacher(), settings=s)
+    psr = PrimarySelfModelRouter(self_model=None, router=router, settings=s)
+    prompt = "in the gadget the emitter zaps the mote and the mote whirls the emitter"
+    plan = psr.plan(prompt)
+    assert plan.route is Route.TRANSFER, f"expected own-transfer, got {plan.route} (LLM fallback)"
+    assert plan.transfer is not None and plan.transfer.analogical is True
+    # and the drafted reply is her own projected inference, reported as a faculty (not a handoff)
+    res = psr.route_respond(prompt)
+    assert res.source == "faculty"
+    assert "analogy" in res.text.lower()

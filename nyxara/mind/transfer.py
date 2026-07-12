@@ -42,6 +42,7 @@ __all__ = [
     "TransferResult",
     "RelationalTransferEngine",
     "seed_library",
+    "lemma",
 ]
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
@@ -168,6 +169,7 @@ class TransferResult:
     candidate_inferences: List[Predicate]
     structural_score: float
     systematicity: float
+    analogical: bool = False   # True when the base was reached by *loose* (renamed) alignment
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -176,15 +178,23 @@ class TransferResult:
             "candidate_inferences": [str(p) for p in self.candidate_inferences],
             "structural_score": round(self.structural_score, 3),
             "systematicity": round(self.systematicity, 3),
+            "analogical": self.analogical,
         }
 
     def render(self) -> str:
-        """A human-readable, honestly-hedged statement of the transfer."""
+        """A human-readable, honestly-hedged statement of the transfer.
+
+        A *loose* (analogical) transfer — where the new domain's own vocabulary was aligned to a
+        known base by structure alone — is hedged more strongly than a strict one: its content is
+        NYXARA's own projection, but it is a conjecture across unfamiliar terms, not a tight match.
+        """
+        strength = ("by loose analogy (unfamiliar terms aligned by structure — a conjecture "
+                    "to verify)" if self.analogical else "by analogy")
         if not self.candidate_inferences:
             pairs = ", ".join(f"{b}→{t}" for b, t in self.entity_mapping.items())
             return (f"By analogy to {self.base_domain} ({pairs}), the same relational structure "
                     f"holds, but nothing new is projected.")
-        lines = [f"By analogy to {self.base_domain}, NYXARA's structure-mapper projects "
+        lines = [f"Reasoning {strength} to {self.base_domain}, NYXARA's structure-mapper projects "
                  f"(hypotheses to verify, not asserted facts):"]
         for p in self.candidate_inferences:
             lines.append(f"  • so it is likely that {_humanize(p)}")
@@ -215,9 +225,14 @@ class RelationalTransferEngine:
 
     def __init__(self, *, store: Optional[DomainSchemaStore] = None,
                  mapper: Optional[StructureMapper] = None, min_score: float = 1.0,
-                 max_bases: int = 4) -> None:
+                 max_bases: int = 4, analogical: bool = True) -> None:
         self.store = store if store is not None else DomainSchemaStore()
         self.mapper = mapper if mapper is not None else StructureMapper()
+        # A second, opt-in mapper that aligns relations by *structure* even when their names
+        # differ — the faculty that lets a genuinely-new domain (its own fresh vocabulary) map
+        # onto one NYXARA already understands, instead of surrendering to the base LLM.
+        self.analogical = bool(analogical)
+        self.mapper_analogical = StructureMapper(analogical=True)
         self.min_score = float(min_score)
         self.max_bases = int(max_bases)
 
@@ -241,13 +256,41 @@ class RelationalTransferEngine:
         tokens = _WORD.findall(query or "")
         target_rel_names = {p.name for p in target}
         ranked = self.store.rank(tokens, target_rel_names)
+
+        # Pass 1 — STRICT identicality (preferred): a base whose relation names literally match.
+        best = self._best_over(self.mapper, [s for _sc, s in ranked[:self.max_bases]], target,
+                               analogical=False)
+        if best is not None:
+            return best
+
+        # Pass 2 — ANALOGICAL (only if strict found nothing and it is enabled): map the new
+        # domain's *structure* onto a known base even though its verbs are unfamiliar. A truly
+        # novel domain shares no surface/relation vocabulary, so ranking is uninformative here —
+        # consider every known base and let structural corroboration decide.
+        if self.analogical:
+            bases = [s for _sc, s in ranked] + [self.store.get(n) for n in self.store.names()]
+            uniq: List[DomainSchema] = []
+            seen_names: set = set()
+            for s in bases:
+                if s is not None and s.name not in seen_names:
+                    seen_names.add(s.name)
+                    uniq.append(s)
+            best = self._best_over(self.mapper_analogical, uniq[:max(self.max_bases * 3, 12)],
+                                   target, analogical=True)
+        return best
+
+    def _best_over(self, mapper: StructureMapper, schemas: Sequence[DomainSchema],
+                   target: Sequence[Predicate], *, analogical: bool) -> Optional[TransferResult]:
+        """Map ``target`` against each candidate base with ``mapper``; keep the strongest transfer
+        that clears ``min_score`` and actually projects something new."""
         best: Optional[TransferResult] = None
-        for _score, schema in ranked[:self.max_bases]:
-            result = self.mapper.map(schema.relations, target)
+        for schema in schemas:
+            result = mapper.map(schema.relations, target)
             cand = self._novel_inferences(result, target)
             if result.structural_score >= self.min_score and cand:
                 tr = TransferResult(schema.name, dict(result.entity_mapping), cand,
-                                    result.structural_score, result.systematicity)
+                                    result.structural_score, result.systematicity,
+                                    analogical=bool(analogical or result.used_renamed))
                 if best is None or tr.structural_score > best.structural_score:
                     best = tr
         return best
@@ -259,37 +302,64 @@ class RelationalTransferEngine:
         have = {str(t) for t in target}
         return [p for p in result.candidate_inferences if str(p) not in have]
 
-    # ---- best-effort text → relational structure (honest, conservative) ---- #
+    # ---- best-effort text → relational structure (honest, two-tier) ---- #
     def _extract(self, query: str) -> List[Predicate]:
-        """Recover relation(entity, entity) facts from free text using the store's known
-        relation vocabulary. Conservative by design: emits a relation only when a known
-        relation word sits between two entity-like tokens. Yields [] when it can't — the
-        engine then declines rather than inventing structure."""
+        """Recover ``relation(entity, entity)`` facts from free text — including from a domain
+        NYXARA has *never seen*, whose relation words are not in any known schema.
+
+        Two tiers, high precision first:
+
+        * **Tier A** scans for relation words already in the store's vocabulary (exact names, so
+          the recovered structure maps *strictly* onto a known base). If it alone recovers ≥2
+          relations, those are used unchanged — the strict path is preferred.
+        * **Tier B** (open-domain) fires when Tier A is thin: it recovers a relation wherever a
+          **verb-like token sits between two entity-like tokens**, judged by morphology and
+          position rather than a fixed lexicon. This is what gives a brand-new domain a
+          relational skeleton at all — which the analogical mapper can then align by structure.
+
+        Honest either way: a clause with no plausible verb-between-two-entities yields nothing, so
+        free-form chat ("hi, how are you") returns ``[]`` and the engine declines rather than
+        inventing structure it cannot see.
+        """
         text = (query or "").lower()
         toks = _WORD.findall(text)
         if len(toks) < 3:
             return []
-        # the union of relation names across known domains is our relation lexicon
         rel_vocab: set = set()
         for name in self.store.names():
             s = self.store.get(name)
             if s is not None:
                 rel_vocab |= {n.lower() for n in s.relation_names()}
+
+        # Tier A — known relation vocabulary (exact names -> strict-mappable structure)
+        tier_a = self._extract_between(toks, lambda tok: tok in rel_vocab, lemmatize=False)
+        if len(tier_a) >= 2:
+            return tier_a
+
+        # Tier B — open-domain: any verb-like token flanked by two entities (novel verbs welcome)
+        tier_b = self._extract_between(
+            toks, lambda tok: tok in rel_vocab or _looks_verb(tok), lemmatize=True)
+        return tier_b if len(tier_b) >= 2 else tier_a
+
+    @staticmethod
+    def _extract_between(toks: Sequence[str], is_relation, *, lemmatize: bool) -> List[Predicate]:
+        """Emit ``relation(word, left_entity, right_entity)`` for every token accepted by
+        ``is_relation`` that has a distinct entity on either side. Deduped, order preserved."""
         rels: List[Predicate] = []
-        for i, tok in enumerate(toks):
-            if tok in rel_vocab:
-                left = _prev_entity(toks, i)
-                right = _next_entity(toks, i)
-                if left and right and left != right:
-                    rels.append(relation(tok, entity(left), entity(right)))
-        # dedupe, preserve order
         seen: set = set()
-        out: List[Predicate] = []
-        for r in rels:
+        for i, tok in enumerate(toks):
+            if not is_relation(tok):
+                continue
+            left = _prev_entity(toks, i)
+            right = _next_entity(toks, i)
+            if not (left and right) or left == right:
+                continue
+            name = lemma(tok) if lemmatize else tok
+            r = relation(name, entity(left), entity(right))
             if str(r) not in seen:
                 seen.add(str(r))
-                out.append(r)
-        return out
+                rels.append(r)
+        return rels
 
 
 def _prev_entity(toks: Sequence[str], i: int) -> Optional[str]:
@@ -304,6 +374,36 @@ def _next_entity(toks: Sequence[str], i: int) -> Optional[str]:
         if toks[j] not in _STOP and len(toks[j]) > 1:
             return toks[j]
     return None
+
+
+# Verb-shaped endings that flag a token as a *relation word* even when NYXARA has never seen it —
+# the morphology of an action, not a fixed lexicon. Copulas/auxiliaries live in ``_STOP`` and are
+# excluded first, so a bare "is/are" never becomes a standalone relation (chat stays un-parsed).
+_STRONG_VERB_SUFFIX = ("ates", "izes", "ises", "ifies", "ing", "ed")
+_WEAK_VERB_SUFFIX = ("es", "s")
+
+
+def _looks_verb(tok: str) -> bool:
+    """True if ``tok`` is shaped like a content verb (a relation word), by morphology alone."""
+    if len(tok) < 3 or tok in _STOP:
+        return False
+    if tok.endswith(_STRONG_VERB_SUFFIX):
+        return True
+    # a trailing -s/-es signals a 3rd-person verb, but also a plural noun; require some length and
+    # avoid the "-ss" ending (e.g. "process", "mass") so common nouns are not mistaken for verbs.
+    if len(tok) >= 4 and tok.endswith(_WEAK_VERB_SUFFIX) and not tok.endswith("ss"):
+        return True
+    return False
+
+
+def lemma(word: str) -> str:
+    """Fold a surface verb to a stable base form so tense/number don't fragment one relation
+    (``pulls``/``pulled``/``pulling`` → ``pull``). Conservative: never shortens below 3 chars."""
+    w = word.lower()
+    for suf, repl in (("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", "")):
+        if w.endswith(suf) and not w.endswith("ss") and len(w) - len(suf) + len(repl) >= 3:
+            return w[: len(w) - len(suf)] + repl
+    return w
 
 
 # --------------------------------------------------------------------------- #
@@ -364,7 +464,54 @@ def seed_library() -> List[DomainSchema]:
         frozenset({"market", "economy", "cost", "buyers", "sellers", "goods", "trade"}),
     )
 
-    return [solar, fluid, ecosystem, market]
+    # Regulated feedback — a thermostat / homeostatic loop. The base for *any* self-correcting
+    # controller: a regulator drives an effector, the effector moves the variable back, and the
+    # correction sustains the regulation (the higher-order loop that gets projected).
+    controller, effector, variable = e("controller"), e("effector"), e("variable")
+    feedback = DomainSchema(
+        "regulated_feedback",
+        [
+            r("regulates", controller, variable),
+            r("drives", controller, effector),
+            r("corrects", effector, variable),
+            r("causes", r("corrects", effector, variable),
+              r("regulates", controller, variable)),
+        ],
+        frozenset({"feedback", "thermostat", "setpoint", "homeostasis", "regulator",
+                   "equilibrium", "balance", "stabilize", "stabilise"}),
+    )
+
+    # Signal transmission — a sender/channel/receiver communication chain. The base for messaging,
+    # networking, and any encode→carry→decode pipeline.
+    sender, receiver, signal = e("sender"), e("receiver"), e("signal")
+    comms = DomainSchema(
+        "signal_transmission",
+        [
+            r("encodes", sender, signal),
+            r("transmits", sender, receiver),
+            r("decodes", receiver, signal),
+            r("causes", r("transmits", sender, receiver), r("decodes", receiver, signal)),
+        ],
+        frozenset({"signal", "message", "communication", "network", "protocol", "packet",
+                   "channel", "transmit", "broadcast", "encode", "decode"}),
+    )
+
+    # Command hierarchy — a directed containment/authority tree. The base for org charts, taxonomies,
+    # and any parent→child delegation structure.
+    superior, subordinate = e("superior"), e("subordinate")
+    hierarchy = DomainSchema(
+        "command_hierarchy",
+        [
+            r("directs", superior, subordinate),
+            r("reports_to", subordinate, superior),
+            r("causes", r("directs", superior, subordinate),
+              r("reports_to", subordinate, superior)),
+        ],
+        frozenset({"hierarchy", "organization", "organisation", "manager", "command",
+                   "delegate", "parent", "child", "tree", "authority", "chain"}),
+    )
+
+    return [solar, fluid, ecosystem, market, feedback, comms, hierarchy]
 
 
 # --------------------------------------------------------------------------- #
@@ -402,6 +549,17 @@ if __name__ == "__main__":  # pragma: no cover
     # Honest decline: a query with no extractable relational structure yields None.
     assert eng.generalize("hi how are you today") is None
     print("\nno structure        : declines (None) — LLM path would run  ✓")
+
+    # A GENUINELY NEW domain — its own fresh verbs, none in any schema — extracted from raw prose
+    # and transferred by ANALOGY, no LLM. This is the ceiling the critique named, lifted.
+    novel_q = ("in this device the emitter zaps the mote and then the mote whirls "
+               "the emitter continuously")
+    tr_novel = eng.generalize(novel_q)
+    assert tr_novel is not None, "a novel-vocabulary domain must still transfer by structure"
+    assert tr_novel.analogical, "it should be reached by loose (renamed) alignment"
+    proj = {str(p) for p in tr_novel.candidate_inferences}
+    print(f"novel-vocab domain  : ← {tr_novel.base_domain} (analogical); projects {sorted(proj)}")
+    assert any("causes" in s for s in proj), "the higher-order cause must be projected"
 
     # Learning a domain grows the store so it transfers next time.
     spring, mass = e("spring"), e("mass")

@@ -727,7 +727,12 @@ class GeneralIntelligence:
         if tr is None:
             return None
         conf = min(0.85, 0.5 + 0.1 * float(tr.structural_score))
-        return tr.render(), conf, {"transfer": tr.to_dict(), "own_faculty": "relational_transfer"}
+        # a loose (analogical) transfer maps a new domain's own vocabulary onto a known base by
+        # structure alone — her own reasoning, but a conjecture, so its confidence is held down
+        if getattr(tr, "analogical", False):
+            conf = min(conf, 0.6)
+        return tr.render(), conf, {"transfer": tr.to_dict(), "own_faculty": "relational_transfer",
+                                   "analogical": bool(getattr(tr, "analogical", False))}
 
     def _extract_code(self, problem: str) -> str:
         """Pull a fenced ```python code block out of the problem, if present."""
