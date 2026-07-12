@@ -81,7 +81,7 @@ applied to the documentation itself).
 | 59 | Economic Reasoning | `nyxara.agency.negotiate` | UPGRADED |
 | 60 | Ethical Constraint Following | `nyxara.guard.value_learning` | REAL+WIRED |
 | 61 | Self Monitoring (interoception) | `nyxara.identity.interoception` | REAL+WIRED |
-| 62 | Compute Scaling | `nyxara.growth.compute_scale` | REAL |
+| 62 | Compute Scaling | `nyxara.growth.compute_scale` + `nyxara.growth.effective_scale` | REAL+WIRED |
 | 63 | Autonomous Benchmarking | `nyxara.eval.benchmark` | REAL+WIRED |
 | 64 | Novel Capability Generation | `nyxara.growth.capability_foundry` | REAL+WIRED |
 | 65 | Open-ended Learning | `nyxara.growth.explorer` | REAL |
@@ -129,6 +129,20 @@ four capabilities — each backed by a test:
   transferable questions her answer no longer bottlenecks solely on the base model's parametric
   ceiling. Gated by `self_model_router.use_transfer` and `general_intelligence.competence_learning`
   (both default on).
+- **#62 Compute Scaling — the honest answer to "NYXARA runs a small model."** Other AIs stand on a
+  billion-parameter trained model; NYXARA runs a small one. She does not fake a bigger model — she
+  **spends her own compute** on the small one and reports, truthfully, what that buys. Two real,
+  wired pieces (`nyxara.growth.effective_scale`): (1) the test-time-compute budget of her deep
+  reasoner (`mind.deep_reasoning`) is now **scaled to the compute she actually has** — `scaled_budget`
+  maps the shared `IntelligenceEngine.compute_capacity` score to concrete rungs / self-consistency
+  width / wall-clock, scaling *up* from the configured floor only (a bare box is unchanged, a strong
+  box thinks harder), so more compute genuinely buys harder thinking; (2) `estimate_effective_scale`
+  is a live meter — her promoted model's real `param_count` × a **bounded (≤8×), conservative**
+  amplification from the amplifiers available *right now* (test-time compute, retrieval grounding,
+  ensembling) — reachable from the running system as `core.scale_report()` / `GET /v1/scale`. Honest
+  scope: this is effective-*capability* parity on verifiable tasks, **never** a literal parameter
+  count, and it degrades to `amplification 1.0` when nothing is available. Enabled by default via
+  `llm.deep_reasoning` (a no-op on a keyless box, so the offline path is unchanged).
 - **#2 / #36 Council** — agreement is scored semantically (embedding cosine), so confidence
   reflects genuine concurrence.
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes

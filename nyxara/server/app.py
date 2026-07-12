@@ -327,6 +327,11 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         """Truthful learning state: trained generations, corpus growth, live serving."""
         return core.learning_report()
 
+    @app.get("/v1/scale", dependencies=auth)
+    def scale() -> dict:
+        """Honest effective scale (Problem #1): small model × the amplifiers she can spend now."""
+        return core.scale_report()
+
     @app.post("/v1/chat", dependencies=auth)
     def chat(req: ChatRequest) -> dict:
         result = core.process(req.message, authority=_authority(req.authority))

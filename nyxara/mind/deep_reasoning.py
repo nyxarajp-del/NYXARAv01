@@ -64,10 +64,14 @@ class LadderResult:
     best_score: float
     rungs_run: List[int] = field(default_factory=list)
     scores: List[Tuple[int, float]] = field(default_factory=list)
+    samples: int = 0                       # self-consistency width the compute bought this climb
 
     def trace(self) -> str:
         ran = ", ".join(_RUNG_NAMES.get(r, str(r)) for r in self.rungs_run) or "none"
-        return (f"deep reasoning climbed [{ran}] and kept the "
+        # report the effective scale the climb bought — the test-time compute NYXARA spent to
+        # reach past a single forward pass (Problem #1, the ceiling; see growth/effective_scale.py).
+        width = f" at up to {self.samples} samples/rung" if self.samples else ""
+        return (f"deep reasoning climbed [{ran}]{width} and kept the "
                 f"{_RUNG_NAMES.get(self.winning_rung, self.winning_rung)} answer "
                 f"(verified {self.best_score:.2f})")
 
@@ -77,12 +81,17 @@ class DeepReasoner:
 
     def __init__(self, reasoner: Any, *, settings: Optional[NyxaraSettings] = None,
                  verifier: Any = None, improver: Any = None,
-                 effort_memory: Any = None) -> None:
+                 effort_memory: Any = None, budget: Any = None) -> None:
         # ``reasoner`` is the LLMReasoner — it owns the LLM, the grounding context, and the
         # decision->Candidate conversion; we only orchestrate its public rung accessors.
         self.reasoner = reasoner
         self.settings = settings or get_settings()
         self.cfg = getattr(self.settings.llm, "deep_reasoning", None)
+        # Optional compute-scaled budget (growth/effective_scale.ReasoningBudget): when supplied it
+        # overrides the static config's max_rung / samples / max_seconds so the compute NYXARA
+        # actually has decides how hard she thinks. It only ever scales *up* from the config floor,
+        # so a bare box is unchanged. None → the exact prior static-config behaviour.
+        self.budget = budget
         if verifier is None:
             from nyxara.mind.router import default_verifier
             verifier = default_verifier()
@@ -117,10 +126,15 @@ class DeepReasoner:
 
     def deliberate(self, stimulus: str) -> Optional[LadderResult]:
         """Run the ladder and return the full :class:`LadderResult` (candidate + trace)."""
-        deadline = time.monotonic() + float(getattr(self.cfg, "max_seconds", 60.0))
-        max_rung = int(getattr(self.cfg, "max_rung", RUNG_REFINE))
+        b = self.budget
+        max_seconds = float(getattr(b, "max_seconds", None) if b is not None
+                            else getattr(self.cfg, "max_seconds", 60.0))
+        deadline = time.monotonic() + max_seconds
+        max_rung = int(getattr(b, "max_rung", None) if b is not None
+                       else getattr(self.cfg, "max_rung", RUNG_REFINE))
         keep_best = bool(getattr(self.cfg, "keep_best", True))
-        base_samples = max(1, int(getattr(self.cfg, "samples", 3)))
+        base_samples = max(1, int(getattr(b, "samples", None) if b is not None
+                                  else getattr(self.cfg, "samples", 3)))
 
         sig = self._signature(stimulus)
         favoured = self._favoured_rung(sig)
@@ -176,9 +190,10 @@ class DeepReasoner:
                     best_cand, best_score, best_rung = refined, rscore, RUNG_REFINE
 
         self._learn(sig, best_rung, best_score)
-        self._annotate(best_cand, LadderResult(best_cand, best_rung, best_score, rungs_run, scores))
-        return LadderResult(candidate=best_cand, winning_rung=best_rung, best_score=best_score,
-                            rungs_run=rungs_run, scores=scores)
+        result = LadderResult(best_cand, best_rung, best_score, rungs_run, scores,
+                              samples=base_samples)
+        self._annotate(best_cand, result)
+        return result
 
     # ------------------------------------------------------------------ #
     # rung runners (each reuses the LLMReasoner's real machinery)

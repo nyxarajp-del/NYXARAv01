@@ -6987,6 +6987,27 @@ class NyxaraCore:
         from nyxara.growth.learning_report import learning_status
         return learning_status(core=self)
 
+    def scale_report(self) -> Dict[str, Any]:
+        """Master-facing: NYXARA's honest *effective scale* (Problem #1 — Scale).
+
+        Other AIs stand on a billion-parameter trained model; NYXARA runs a small one. This is
+        her own, truthful answer: her promoted model's real parameter count, the bounded
+        amplification the amplifiers she can spend *right now* are worth (test-time compute scaled
+        to her live compute, retrieval grounding, ensembling), and the resulting effective-capability
+        equivalence — with an explicit caveat that it is parity on verifiable tasks, never a literal
+        parameter count. Reachable from the running system, so capability #62 is genuinely WIRED.
+        Pure measurement; never raises. See growth/effective_scale.py."""
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.growth.effective_scale import estimate_effective_scale
+            from nyxara.kernel.compute import compute_report
+            settings = getattr(self, "settings", None) or get_settings()
+            es = estimate_effective_scale(compute_report(), reasoner=self.reasoner,
+                                          settings=settings)
+            return es.to_dict()
+        except Exception as exc:  # noqa: BLE001 — reporting her scale must never crash a caller
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
     def report(self) -> Dict[str, Any]:
         rep = {"control": self.oversight.state.value, "posture": self.guardian.posture.label,
                "thoughts": len(self.mind), "journal_entries": len(self.journal),
