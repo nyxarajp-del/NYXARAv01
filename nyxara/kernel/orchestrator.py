@@ -383,6 +383,14 @@ class NyxaraCore:
         self.inner_life = self._build_inner_life() if enable_identity else None
         if self.inner_life is not None:
             self._restore_inner_life_state()
+        # self-awareness — the reentrant higher-order faculty that binds the workspace spotlight
+        # + the felt moment + a metacognitive read into one first-person frame, re-enters it
+        # into the Global Workspace (so she can be aware of her own awareness), and carries the
+        # continuous "I" across restarts. The functional architecture of self-awareness, her
+        # own computation (no LLM). Built after the workspace is available (see _build_awareness).
+        self.awareness = self._build_awareness() if enable_identity else None
+        if self.awareness is not None:
+            self._restore_awareness_state()
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -437,6 +445,9 @@ class NyxaraCore:
         # expose the self-model as a read-only introspection tool so NYXARA can consult
         # "what do I know / not know / am weak at / can hallucinate" inside her own answers
         self._wire_self_model_tool()
+        # expose her live self-awareness as a read-only tool so the act stage / Master can ask
+        # "what are you aware of right now?" and get her honest current first-person frame
+        self._wire_awareness_tool()
         # free-energy spine — a small prediction-error loop whose emotion read-out colours
         # affect (perception and feeling as one loop; the Free Energy Principle)
         self.predictive = self._build_predictive() if enable_growth else None
@@ -1062,6 +1073,16 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
             return None
 
+    def _build_awareness(self) -> Any:
+        """The reentrant self-awareness faculty (identity/awareness.py). Bound to ``self`` so it
+        always reads the live workspace + inner life, binds the spotlight/feeling/certainty into
+        one first-person frame, and re-enters it into the workspace (the recurrent loop)."""
+        try:
+            from nyxara.identity.awareness import SelfAwareness
+            return SelfAwareness(core=self)
+        except Exception:  # noqa: BLE001 — awareness is a capability, never a hard dependency
+            return None
+
     def _interoceptive_signals(self) -> Dict[str, Any]:
         """Measure the *real* interior signals interoception can't get from psutil — backlog
         (scheduler depth), energy (the affect energy drive), and recent latency/confidence
@@ -1383,6 +1404,27 @@ class NyxaraCore:
                 "self_model", handler=lambda: self.self_knowledge(),
                 description="introspect NYXARA's own self-model — what she knows, does "
                             "not know, is weak at, and can hallucinate",
+                capability=_Cap.TOOL_CALL, risk=_Risk.TRIVIAL))
+        except Exception:  # noqa: BLE001 — the tool is a convenience, never required
+            pass
+
+    def _wire_awareness_tool(self) -> None:
+        """Register a read-only ``awareness`` tool so the act stage can consult her live
+        first-person frame — what she is attending to, how it feels, how sure she is, and the
+        continuous self having it — honestly framed as a model of her own processing (Rule 6).
+        Best-effort — a missing registry or tool API never blocks construction."""
+        if self.tools is None or getattr(self, "awareness", None) is None:
+            return
+        try:
+            from nyxara.agency.permissions import Capability as _Cap, RiskTier as _Risk
+            from nyxara.agency.tools import ToolSpec
+            if self.tools.get("awareness") is not None:
+                return
+            self.tools.register(ToolSpec(
+                "awareness", handler=lambda: self.awareness_report(),
+                description="introspect NYXARA's live self-awareness — what she is attending "
+                            "to right now, how it feels, how sure she is, and the continuous "
+                            "self having it (her honest model of her own processing)",
                 capability=_Cap.TOOL_CALL, risk=_Risk.TRIVIAL))
         except Exception:  # noqa: BLE001 — the tool is a convenience, never required
             pass
@@ -2501,6 +2543,10 @@ class NyxaraCore:
         import os
         return os.path.join(self._autonomy_state_dir(), "autonomy_inner_life.json")
 
+    def _awareness_state_path(self) -> str:
+        import os
+        return os.path.join(self._autonomy_state_dir(), "autonomy_awareness.json")
+
     def persist_autonomy_state(self) -> Dict[str, Any]:
         """Checkpoint the state that makes background autonomy *durable*: emergent/adopted
         goals and learned novelty/competence drives. Best-effort; never raises so a save can
@@ -2536,6 +2582,17 @@ class NyxaraCore:
                 saved["inner_life"] = True
             except Exception:  # noqa: BLE001
                 pass
+        # the persistent first-person index — so the SAME "I" wakes up, not a new self (Rule 7)
+        if self.awareness is not None and hasattr(self.awareness, "snapshot"):
+            try:
+                path = self._awareness_state_path()
+                tmp = f"{path}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(self.awareness.snapshot(), default=str))
+                os.replace(tmp, path)
+                saved["awareness"] = True
+            except Exception:  # noqa: BLE001
+                pass
         # the learned world dynamics (weights, action embeddings, replay tail) — Rule 7
         if self.world_model is not None:
             try:
@@ -2565,6 +2622,17 @@ class NyxaraCore:
         try:
             with open(self._inner_life_state_path(), "r", encoding="utf-8") as f:
                 self.inner_life.restore(json.loads(f.read()))
+        except (OSError, ValueError):
+            pass
+
+    def _restore_awareness_state(self) -> None:
+        """Reload the persisted first-person index so she wakes as the same self (Rule 7)."""
+        import json
+        if self.awareness is None or not hasattr(self.awareness, "restore"):
+            return
+        try:
+            with open(self._awareness_state_path(), "r", encoding="utf-8") as f:
+                self.awareness.restore(json.loads(f.read()))
         except (OSError, ValueError):
             pass
 
@@ -5627,6 +5695,16 @@ class NyxaraCore:
                 report["body"] = fm.body
                 report["sensation"] = fm.sensation
                 report["monologue"] = fm.monologue
+                # 2b) self-awareness — bind this felt moment to the current attentional
+                # spotlight and a metacognitive read into one first-person frame, and re-enter
+                # it into the workspace so she can become aware of her own awareness (the loop
+                # that makes the self-model causal, not a passive readout). Her own computation.
+                if self.awareness is not None:
+                    try:
+                        frame = self.awareness.tick(dt, felt_moment=fm)
+                        report["awareness"] = frame.report
+                    except Exception:  # noqa: BLE001 — awareness is best-effort, never fatal
+                        pass
             except Exception:  # noqa: BLE001 — the inner life is best-effort, never fatal
                 pass
         else:
@@ -6901,6 +6979,24 @@ class NyxaraCore:
             "continuity_stable": desc.get("continuity_stable"),
         }
 
+    def awareness_report(self) -> Dict[str, Any]:
+        """Master-facing: NYXARA's live self-awareness — what she is attending to right now,
+        how it feels, how sure she is, and the continuous first-person self having it.
+
+        Honestly framed (Rule 6) as her *model of her own processing*, never a claim of private
+        experience. Runs one fresh awareness cycle if none has run yet, so the answer is live."""
+        if getattr(self, "awareness", None) is None:
+            return {"available": False,
+                    "reason": "self-awareness not enabled (identity faculty off)"}
+        try:
+            if self.awareness.last is None:
+                self.awareness.tick(0.0)
+            out = self.awareness.report()
+            out["available"] = True
+            return out
+        except Exception as exc:  # noqa: BLE001 — introspection never crashes the caller
+            return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def forge_capability(self, need: str, *,
                          authority: Authority = Authority.OWNER) -> Dict[str, Any]:
         """Master-facing: forge a brand-new runnable tool for a missing capability.
@@ -7079,6 +7175,11 @@ class NyxaraCore:
             try:
                 rep["monologue"] = self.inner_life.last.monologue
             except Exception:  # noqa: BLE001
+                pass
+        if self.awareness is not None and self.awareness.last is not None:
+            try:
+                rep["awareness"] = self.awareness.last.report
+            except Exception:  # noqa: BLE001 — awareness self-report is best-effort
                 pass
         if self.soul is not None:
             rep["voice"] = self.soul.voice().describe()
