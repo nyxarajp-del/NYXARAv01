@@ -290,7 +290,14 @@ class NyxaraReasoner:
         gen = self._generalize_answer(stimulus)
         if gen is not None:
             text, conf, source, analogical = gen
-            how = " by analogy" if analogical else ""
+            # domain-genesis reasons from the alien field's OWN internal structure — not by
+            # analogy to a known domain — so it earns its own honest label.
+            if source == "domain_genesis":
+                how = " from its own structure, from scratch"
+            elif analogical:
+                how = " by analogy"
+            else:
+                how = ""
             return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
                              risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                              rationale=f"{process} via her own {source} faculty (generalized{how}, "

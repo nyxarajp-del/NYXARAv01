@@ -253,28 +253,41 @@ class PrimarySelfModelRouter:
                 #     the new domain onto one she already understands (Route.TRANSFER). The
                 #     reasoning content is hers, not the base model's.
                 transfer = self._try_transfer(prompt)
-                if transfer is not None:
+                transfer_analogical = bool(getattr(transfer, "analogical", False))
+                # A *strict* transfer (relation names identical to a known base) is a strong,
+                # faithful mapping — take it immediately. A *loose analogical* transfer forces an
+                # alien field onto a known base by structure alone; that is weaker than modelling
+                # the field from its OWN structure, so defer it and let the unified cascade (which
+                # includes her from-scratch domain-genesis faculty) try first — mirroring
+                # GeneralizationEngine.generalize. The analogical transfer is used only as a
+                # fallback if the cascade also declines.
+                if transfer is not None and not transfer_analogical:
                     conf = min(0.9, 0.5 + 0.1 * float(transfer.structural_score))
-                    # a loose (analogical) transfer aligns unfamiliar terms by structure alone —
-                    # real reasoning, but a weaker guarantee, so it never claims strong confidence
-                    if getattr(transfer, "analogical", False):
-                        conf = min(conf, 0.6)
-                    kind = ("loose structural analogy"
-                            if getattr(transfer, "analogical", False) else "structural transfer")
                     return RoutingPlan(
                         Route.TRANSFER, conf,
-                        f"new domain — generalized by {kind} from "
+                        f"new domain — generalized by structural transfer from "
                         f"'{transfer.base_domain}'",
                         competence=competence, hallucination_risk=risk,
                         domains=list(domains), transfer=transfer)
-                # 4a') no structural transfer — try the rest of the unified own-faculty cascade
-                #     (a from-examples task, or a numeric law stated as a table) before the teacher.
+                # 4a') try the rest of the unified own-faculty cascade — her from-scratch
+                #     domain-genesis model, a from-examples task, or a numeric law stated as a
+                #     table — before falling back to a loose analogy or the teacher.
                 gen = self._try_generalize(prompt)
                 if gen is not None:
                     gen.competence = competence
                     gen.hallucination_risk = risk
                     gen.domains = list(domains)
                     return gen
+                # 4a'') the cascade declined — use the loose analogical transfer if we have one
+                #     (still her own reasoning, just a weaker guarantee than a from-scratch model).
+                if transfer is not None:
+                    conf = min(0.6, 0.5 + 0.1 * float(transfer.structural_score))
+                    return RoutingPlan(
+                        Route.TRANSFER, conf,
+                        f"new domain — generalized by loose structural analogy from "
+                        f"'{transfer.base_domain}'",
+                        competence=competence, hallucination_risk=risk,
+                        domains=list(domains), transfer=transfer)
                 # 4b) otherwise consult the teacher (or best-effort / abstain below)
                 if teacher:
                     return RoutingPlan(Route.TEACHER, competence,

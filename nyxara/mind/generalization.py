@@ -206,13 +206,17 @@ class GeneralizationEngine:
 
     def __init__(self, *, transfer_engine: Any = None, skills: Any = None,
                  open_world: Any = None, composer: Any = None,
+                 domain_genesis: Any = None,
                  min_confidence: float = 0.4, parse_demos_enabled: bool = True,
                  parse_tables_enabled: bool = True, min_demos: int = 2,
-                 use_transfer: bool = True) -> None:
+                 use_transfer: bool = True, use_domain_genesis: bool = True) -> None:
         self._transfer = transfer_engine
         self._skills = skills
         self._open_world = open_world
         self._composer = composer
+        # her from-scratch domain-mastery faculty (mind/domain_genesis.py): when no known base
+        # maps, model a genuinely alien field from its OWN internal structure rather than the LLM.
+        self._domain_genesis = domain_genesis
         self.min_confidence = float(min_confidence)
         self.parse_demos_enabled = bool(parse_demos_enabled)
         self.parse_tables_enabled = bool(parse_tables_enabled)
@@ -220,6 +224,7 @@ class GeneralizationEngine:
         # relational transfer is also reachable as its own route; this flag lets a caller that
         # already runs transfer separately (the self-model router) turn off the cascade's copy.
         self.use_transfer = bool(use_transfer)
+        self.use_domain_genesis = bool(use_domain_genesis)
 
     # ---- lazy builders (so the engine works standalone, offline) ---- #
     def _ensure_transfer(self) -> Any:
@@ -249,21 +254,48 @@ class GeneralizationEngine:
                 self._composer = None
         return self._composer
 
+    def _ensure_domain_genesis(self) -> Any:
+        if self._domain_genesis is None:
+            try:
+                from nyxara.mind.domain_genesis import DomainGenesisEngine
+                # share the transfer engine's store so a field mastered from scratch is learned
+                # into the same library and recognised (and transferable) next time.
+                self._domain_genesis = DomainGenesisEngine(
+                    transfer_engine=self._ensure_transfer(),
+                    min_confidence=self.min_confidence)
+            except Exception:  # noqa: BLE001 — domain genesis is a capability, never required
+                self._domain_genesis = None
+        return self._domain_genesis
+
     # ---- the public cascade ---- #
     def generalize(self, prompt: str) -> Optional[GeneralizationResult]:
-        """Return the strongest genuine own-faculty result for ``prompt``, or ``None``."""
+        """Return the strongest genuine own-faculty result for ``prompt``, or ``None``.
+
+        A *strict* transfer onto a known base (relation names identical) wins immediately, as
+        does an exact faculty or an induced skill. A *loose analogical* transfer — a new domain
+        forced onto a known base by structure alone — is weaker than a faithful model of the
+        alien field's OWN structure, so it is held as a fallback and domain-genesis is tried
+        first; the analogical transfer is used only if genesis (and everything after) declines."""
         prompt = (prompt or "").strip()
         if not prompt:
             return None
+        fallback: Optional[GeneralizationResult] = None
         for stage in (self._try_faculties, self._try_skill_induction, self._try_transfer,
-                      self._try_open_world, self._try_composition):
+                      self._try_domain_genesis, self._try_open_world, self._try_composition):
             try:
                 res = stage(prompt)
             except Exception:  # noqa: BLE001 — a stage never crashes the cascade
                 res = None
-            if res is not None and res.confidence >= self.min_confidence:
-                return res
-        return None
+            if res is None or res.confidence < self.min_confidence:
+                continue
+            # a loose cross-domain analogy is weaker than her own from-scratch domain model —
+            # defer it and let domain-genesis (the next stage) try to master the field directly.
+            if res.source == "relational_transfer" and res.analogical:
+                if fallback is None:
+                    fallback = res
+                continue
+            return res
+        return fallback
 
     # ---- stage 1: exact verifiable faculties / first-principles ---- #
     def _try_faculties(self, prompt: str) -> Optional[GeneralizationResult]:
@@ -323,6 +355,26 @@ class GeneralizationEngine:
             answer=tr.render(), source="relational_transfer", confidence=conf,
             analogical=analogical,
             detail={"transfer": tr.to_dict() if hasattr(tr, "to_dict") else {}})
+
+    # ---- stage 3b: domain mastery FROM SCRATCH (no known base, no LLM) ---- #
+    def _try_domain_genesis(self, prompt: str) -> Optional[GeneralizationResult]:
+        """Model a genuinely alien field from its OWN internal structure — the from-scratch
+        mastery that replaces the honest LLM fallback when nothing maps onto a known base.
+
+        Declines (returns ``None``) when there is too little structure, or no induced law
+        projects a genuinely new inference, so the normal path still runs."""
+        if not self.use_domain_genesis:
+            return None
+        eng = self._ensure_domain_genesis()
+        if eng is None:
+            return None
+        res = eng.generalize(prompt)
+        if res is None:
+            return None
+        return GeneralizationResult(
+            answer=res.render(), source="domain_genesis", confidence=float(res.confidence),
+            analogical=bool(getattr(res, "analogical", True)),
+            detail={"genesis": res.to_dict() if hasattr(res, "to_dict") else {}})
 
     # ---- stage 4: open-world law modelling from an in-prompt numeric table ---- #
     def _try_open_world(self, prompt: str) -> Optional[GeneralizationResult]:
