@@ -234,6 +234,43 @@ class AutoCurriculum:
         return report
 
     # ------------------------------------------------------------------ #
+    # probe — a READ-ONLY, deterministic ruler for the "provably better" gate
+    # ------------------------------------------------------------------ #
+    def probe(self, solver: Callable[[str], str], *, seed: int,
+              tier: Optional[int] = None, per_tier: int = 4) -> CurriculumReport:
+        """Grade ``solver`` on a freshly-seeded batch around the frontier WITHOUT moving or
+        persisting the edge — the non-saturating ruler the improvement gate certifies against.
+
+        Unlike :meth:`evaluate`, this never advances/demotes the frontier and never writes to
+        memory, so it can be run twice (on before-edit and after-edit code) without perturbing
+        NYXARA's live curriculum. The single ``seed`` makes the batch **byte-identical** across
+        those two runs: a strictly higher weighted score is then a genuine *dominance* on the same
+        problems — a sound, decidable proof of improvement — not merely a luckier draw. The batch
+        is still freshly generated (never a stored answer key) and every answer is prover-certified,
+        so the ruler cannot be memorised and, because the tier can rise without bound, cannot
+        saturate."""
+        t0 = time.perf_counter()
+        frontier = max(1, int(tier) if tier is not None else self.frontier_tier())
+        # a private RNG seeded ONLY by ``seed`` (the instance RNG is never touched), so two probes
+        # with the same seed pose the identical set of questions — the crux of the dominance proof.
+        r = Random(seed)
+        tiers = list(range(1, frontier + 2))     # probe up to one tier beyond the mastered edge
+        by_tier: Dict[int, float] = {}
+        n_total = n_correct = 0
+        for t in tiers:
+            problems = self.generate(per_tier, tier=t, rng=r)
+            c, n = self.grade(solver, problems)
+            by_tier[t] = (c / n) if n else 0.0
+            n_total += n
+            n_correct += c
+        wsum = sum(tiers) or 1
+        score = sum(t * by_tier.get(t, 0.0) for t in tiers) / wsum
+        report = CurriculumReport(frontier_tier=frontier, frontier_score=_clamp01(score),
+                                  by_tier=by_tier, n_problems=n_total, n_correct=n_correct)
+        report.elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return report
+
+    # ------------------------------------------------------------------ #
     # optional novelty enrichment from the Eureka engine (prover-certified)
     # ------------------------------------------------------------------ #
     def _maybe_enrich(self) -> int:
@@ -374,5 +411,20 @@ if __name__ == "__main__":  # pragma: no cover
     a = [p.prompt for p in cur.generate(10, tier=4)]
     b = [p.prompt for p in cur.generate(10, tier=4)]
     assert a != b, "each batch must be freshly generated (anti-memorisation)"
+
+    # probe() is the read-only gate ruler: same seed ⇒ identical score, and the frontier is not moved
+    cur3 = AutoCurriculum(seed=11)
+    tier_before = cur3.frontier_tier()
+    p1 = cur3.probe(smart, seed=99, tier=3, per_tier=6)
+    p2 = cur3.probe(smart, seed=99, tier=3, per_tier=6)
+    # identical capability content (score + per-tier + counts); elapsed_ms is wall-clock, not content
+    assert (p1.frontier_score, p1.by_tier, p1.n_problems, p1.n_correct) == \
+           (p2.frontier_score, p2.by_tier, p2.n_problems, p2.n_correct), \
+           "probe must be deterministic for a fixed seed (dominance)"
+    assert cur3.frontier_tier() == tier_before, "probe must NOT move or persist the frontier tier"
+    p_dumb = cur3.probe(lambda _p: "0", seed=99, tier=3, per_tier=6)
+    assert p1.frontier_score > p_dumb.frontier_score, "a smart solver must dominate a dumb one"
+    print(f"probe (read-only)   : det score {p1.frontier_score:.3f} > dumb {p_dumb.frontier_score:.3f}, "
+          f"tier unmoved @ {cur3.frontier_tier()} ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

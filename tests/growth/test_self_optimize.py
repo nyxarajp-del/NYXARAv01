@@ -35,6 +35,46 @@ def test_insert_docstring_transform():
     assert out and '"""' in out and _parses(out)
 
 
+# ---- Method D wiring: the gate reads before/after frontier probes ---- #
+def _write_probe(path: Path, score: float, by_tier: dict, tier: int = 2) -> Path:
+    import json
+    path.write_text(json.dumps({"frontier_score": score, "by_tier": by_tier,
+                                "frontier_tier": tier}), encoding="utf-8")
+    return path
+
+
+def test_prove_improvement_certifies_frontier_advancement(tmp_path: Path):
+    # a mastered fixed battery gives Method A nothing to fire on; a strict frontier dominance
+    # (loaded from the saved probes exactly as the gauntlet writes them) must still certify better.
+    opt = Optimizer(settings=_enacting_settings())
+    opt._frontier_baseline_path = _write_probe(
+        tmp_path / "fb.json", 0.40, {"1": 1.0, "2": 0.5, "3": 0.0})
+    opt._frontier_after_path = _write_probe(
+        tmp_path / "fa.json", 0.62, {"1": 1.0, "2": 0.9, "3": 0.4})
+    edit = SourceEdit(str(tmp_path / "m.py"), "self:rewrite", "x = 1\n", "x = 2\n", "rewrite")
+    cert = opt._prove_improvement(edit)          # no benchmark baselines ⇒ A cannot fire
+    assert cert.better
+    assert cert.method == "frontier-advancement"
+
+
+def test_prove_improvement_without_probes_is_source_only(tmp_path: Path):
+    # with no frontier probes on disk, the gate degrades exactly to the A/B/C source path.
+    opt = Optimizer(settings=_enacting_settings())
+    edit = SourceEdit(str(tmp_path / "m.py"), "bare_except",
+                      "try:\n    pass\nexcept:\n    pass\n",
+                      "try:\n    pass\nexcept Exception:\n    pass\n", "fix")
+    cert = opt._prove_improvement(edit)
+    assert cert.better and cert.method == "defect-elimination"
+
+
+def test_frontier_baseline_disabled_under_flag(tmp_path: Path):
+    s = _enacting_settings()
+    s.self_improvement.frontier_gate_enabled = False
+    opt = Optimizer(settings=s)
+    opt._ensure_frontier_baseline()
+    assert opt._frontier_baseline_path is None   # no subprocess, no snapshot when disabled
+
+
 # ---- the safety proof: rollback ---- #
 def test_failing_gauntlet_rolls_back_byte_for_byte(tmp_path: Path):
     f = tmp_path / "victim.py"

@@ -1199,7 +1199,7 @@ class RecursiveSelfImprovement:
         if not llm_gen.available():
             llm_gen = None
         optimizer = Optimizer(root=self.root, settings=self.settings,
-                              journal=self.journal,
+                              journal=self.journal, memory=self.memory,
                               permissions=getattr(self.core, "permissions", None))
         try:
             budget = int(getattr(cfg, "max_edits_per_cycle", 3))
