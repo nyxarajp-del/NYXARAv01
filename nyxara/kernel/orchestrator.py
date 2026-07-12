@@ -1185,9 +1185,29 @@ class NyxaraCore:
                 "0", "false", "no", "off")
             raw_urls = os.environ.get("NYXARA_EMBODIED_WEB_URLS", "").strip()
             urls = [u.strip() for u in raw_urls.split(",") if u.strip()]
+            # Live real-world perception (camera / screen / microphone) is genuine device I/O and
+            # privacy-sensitive, so it is DOUBLE-gated and OFF by default: it needs the oversight
+            # gate below AND an explicit opt-in (NYXARA_EMBODIED_LIVE). Per-modality toggles narrow
+            # it further; a modality also only ever fires when a real device is actually reachable.
+            def _on(name: str, default: str = "0") -> bool:
+                return os.environ.get(name, default).strip().lower() not in (
+                    "0", "false", "no", "off")
+            live_on = _on("NYXARA_EMBODIED_LIVE", "0")
+            live = None
+            if live_on:
+                try:
+                    from nyxara.senses.live import LiveSensor
+                    live = LiveSensor(enabled={
+                        "camera": _on("NYXARA_EMBODIED_CAMERA", "1"),
+                        "screen": _on("NYXARA_EMBODIED_SCREEN", "1"),
+                        "mic": _on("NYXARA_EMBODIED_MIC", "1")})
+                except Exception:  # noqa: BLE001 — live sensing is optional, never fatal
+                    live = None
+                    live_on = False
             return EmbodiedAgent(
                 world_model=self.world_model, env=self.real_environment,
                 web_enabled=web_on, web_urls=urls,
+                live_enabled=live_on, live=live,
                 gate=lambda: self._embodied_gate(),
                 planner=self._embodied_planner)
         except Exception:  # noqa: BLE001 — embodiment is a capability, never a hard dependency
