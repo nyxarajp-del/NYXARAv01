@@ -30,7 +30,10 @@ _REPLY = "zzqx wobbex flurgle plarn"
 def _kn_brain(*, settings=None, persist=False, **kw) -> SelfBrain:
     """An always-on brain pinned to the pure-stdlib KN backend (deterministic on any machine)."""
     settings = settings or NyxaraSettings.for_profile(Profile.TEST)
-    brain = build_self_brain(settings=settings, persist=persist, **kw)
+    # prefer_promoted=False keeps the test hermetic: a promoted foundry model another test may have
+    # left on disk must not override the pinned KN backend (else _cold_build's _try_promoted wins and
+    # brain._lm is the promoted neural model, not the WordKNGramLM these tests exercise).
+    brain = build_self_brain(settings=settings, persist=persist, prefer_promoted=False, **kw)
     brain._backend = "kngram"        # pin the guaranteed-real substrate (torch would pick nanogpt)
     brain._ensure()                  # cold-build now so we can measure the before-state
     return brain

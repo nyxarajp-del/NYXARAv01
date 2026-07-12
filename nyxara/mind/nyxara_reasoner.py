@@ -643,6 +643,22 @@ class NyxaraReasoner:
             except Exception:  # noqa: BLE001 — compounding is best-effort
                 pass
 
+    def flush_online_learning(self, *, budget: Optional[int] = None) -> Any:
+        """Fold queued lived experience into the own brain's *weights* now (real-time learning).
+
+        The turn/tick-driven counterpart to :meth:`teach_self_brain` (which only *queues*): this makes
+        the weight update actually happen every turn — and every autonomic tick when idle — instead of
+        waiting for her to generate a reply. Returns the brain's :class:`LiveLearnReport`, or None when
+        there is no own brain yet. Best-effort: never raises, never touches the turn's outcome."""
+        brain = self._own_brain()
+        step = getattr(brain, "online_step", None)
+        if not callable(step):
+            return None
+        try:
+            return step(budget=budget)
+        except Exception:  # noqa: BLE001 — real-time learning is best-effort, never fatal
+            return None
+
     def _offline_mind(self) -> Any:
         """Lazily build the sovereign offline mind (keyless machine), wired to her faculties."""
         if self._offline is None:

@@ -141,6 +141,32 @@ class AutonomicLoop:
         except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
             pass
 
+    def _maybe_learn(self) -> None:
+        """Fold any queued lived experience into her generative CORE weights on the background cadence.
+
+        The always-on counterpart to the per-turn flush in ``_compound_own_models``: even when the
+        code-driven mind never calls ``core.process`` (so the per-turn flush never runs) — or the
+        machine is simply idle between the Master's turns — her weights keep folding queued experience
+        here every tick. That is what makes real-time weight learning genuinely CONTINUOUS rather than
+        only reactive. Bounded (the brain's own flush budget) and best-effort; never crashes the loop."""
+        reasoner = getattr(self.core, "reasoner", None)
+        flush = getattr(reasoner, "flush_online_learning", None)
+        if flush is None:
+            flush = getattr(getattr(reasoner, "llm_reasoner", None), "flush_online_learning", None)
+        if not callable(flush):
+            return
+        try:
+            report = flush()
+        except Exception:  # noqa: BLE001 — real-time learning is best-effort, never fatal
+            return
+        if report is not None and getattr(report, "changed", lambda: False)():
+            try:
+                from nyxara.growth.signal_bus import get_signal_bus
+                get_signal_bus().post("weight_update", report.to_dict(),
+                                      source="autonomic", weight=1.0)
+            except Exception:  # noqa: BLE001 — telemetry is best-effort
+                pass
+
     def _advance_mission(self) -> None:
         """Advance the highest-priority standing mission by one gated milestone.
 
@@ -463,6 +489,7 @@ class AutonomicLoop:
                 self.escalations.append(result)
         self._beat_health(result)
         self._advance_mission()
+        self._maybe_learn()
         self._maybe_grow()
         self._maybe_persist()
         return result
@@ -514,6 +541,7 @@ class AutonomicLoop:
                                 self.escalations.append(result)
                         self._beat_health(result)
                         self._advance_mission()
+                        self._maybe_learn()
                         self._maybe_grow()
                         self._maybe_persist()
                 except asyncio.CancelledError:

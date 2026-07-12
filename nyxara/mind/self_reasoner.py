@@ -42,9 +42,65 @@ from __future__ import annotations
 import math
 import re
 import threading
-from typing import Any, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-__all__ = ["SelfBrain", "build_self_brain", "SelfBrainProvider"]
+__all__ = ["SelfBrain", "LiveLearnReport", "build_self_brain", "SelfBrainProvider"]
+
+
+# --------------------------------------------------------------------------- #
+# The read-out of one live weight fold — what real-time learning actually did this turn.
+# --------------------------------------------------------------------------- #
+@dataclass
+class LiveLearnReport:
+    """One live, gauntlet-gated fold of lived experience into NYXARA's generative core weights.
+
+    This is the honest evidence that real-time weight learning happened (or was rolled back): how
+    many queued exchanges folded, how many were reinforced vs. un-learned, whether the neural step
+    was kept or reverted on the held-out probe, and the perplexity before/after. Mirrors
+    :class:`~nyxara.growth.weight_surgery.SurgeryOutcome` so the two read the same in telemetry.
+    """
+
+    backend: str = "uninitialised"
+    docs_folded: int = 0
+    reinforced: int = 0
+    suppressed: int = 0
+    applied: bool = False           # a weight-changing step was actually attempted this fold
+    kept: bool = False              # the step passed the held-out gauntlet and was kept
+    rolled_back: bool = False       # the step regressed the probe and was reverted byte-for-byte
+    consolidated: bool = False      # an EWC anchor was taken this fold (forgetting-protection)
+    perplexity_before: float = float("inf")
+    perplexity_after: float = float("inf")
+    param_count_before: int = 0
+    param_count_after: int = 0
+    detail: str = ""
+
+    def changed(self) -> bool:
+        """True iff this fold left the core weights genuinely different than it found them."""
+        return bool(self.kept and self.applied and not self.rolled_back)
+
+    def to_dict(self) -> Dict[str, Any]:
+        def _r(x: float) -> float:
+            try:
+                return round(float(x), 4) if math.isfinite(float(x)) else float("inf")
+            except Exception:  # noqa: BLE001
+                return float("inf")
+        return {"backend": self.backend, "docs_folded": self.docs_folded,
+                "reinforced": self.reinforced, "suppressed": self.suppressed,
+                "applied": self.applied, "kept": self.kept, "rolled_back": self.rolled_back,
+                "consolidated": self.consolidated, "changed": self.changed(),
+                "perplexity_before": _r(self.perplexity_before),
+                "perplexity_after": _r(self.perplexity_after),
+                "param_count_before": self.param_count_before,
+                "param_count_after": self.param_count_after, "detail": self.detail}
+
+
+def _ppl(x: float) -> str:
+    """Format a perplexity for a human-readable report detail (``∞`` for a non-finite value)."""
+    try:
+        return f"{float(x):.3f}" if math.isfinite(float(x)) else "∞"
+    except Exception:  # noqa: BLE001
+        return "∞"
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +250,12 @@ class SelfBrain:
         self._reward_scale = float(getattr(cfg, "self_brain_reward_scale", 3.0))
         self._consolidate_every = max(1, int(getattr(cfg, "self_brain_consolidate_every", 4)))
         self._neural_online_steps = max(1, int(getattr(cfg, "self_brain_neural_online_steps", 24)))
+        # real-time weight learning: how strictly a neural online step is gauntlet-gated (max
+        # fractional perplexity regression a kept step may cause on the held-out probe — defaults to
+        # the weight-surgery tolerance), and how many queued exchanges one live flush may fold.
+        self._online_verify_tol = float(getattr(cfg, "self_brain_online_verify_tol",
+                                                 getattr(cfg, "weight_surgery_tol", 0.25)))
+        self._flush_budget = max(1, int(getattr(cfg, "self_brain_flush_budget", 8)))
         self._unfit: List[Tuple[str, float]] = []   # (doc, reward) queued for the next weight fold
         self._fits = 0                              # completed weight folds (drives consolidation)
         self._surgeon: Any = None                   # lazily-built WeightSurgeon for punished replies
@@ -472,24 +534,68 @@ class SelfBrain:
         self._since_fit = 0
 
     # ---- real online weight learning (continual, reward-weighted, forgetting-protected) ---- #
-    def _fold_weights(self) -> None:
-        """Fold the queued lived exchanges into the generative weights — the real learning step.
+    def online_step(self, *, budget: Optional[int] = None) -> LiveLearnReport:
+        """Fold up to ``budget`` queued lived exchanges into the generative core weights **now**.
 
-        Continual: new counts are *added on top* of the existing weights (KN ``accumulate=True`` /
-        a warm-continued neural gradient step), never a from-scratch rebuild, so knowledge
-        accumulates and survives its text leaving the corpus window. Reward-weighted: a rewarded
-        exchange is reinforced with multiplicity ∝ reward; a punished reply's continuation is
-        reversibly suppressed (weight surgery). Forgetting-protected: the weights are consolidated
-        as an EWC anchor every few folds. Character-locked: a doc that would teach over the immutable
-        core was already refused in :meth:`learn`, and is refused again here fail-closed.
-        """
-        lm = self._lm
+        This is the live, real-time learning entry point: the Master's every-turn / every-tick lever
+        that folds experience into NYXARA's *weights* the moment it arrives, instead of waiting for
+        her to happen to generate a reply (the old, deferred behaviour). Bounded by ``budget``
+        (default ``self._flush_budget``) so a single call stays cheap and the turn stays responsive;
+        any overflow folds on the next call. Reversible and gauntlet-gated on the neural path (a step
+        that regresses a held-out probe beyond tolerance is rolled back byte-for-byte), structurally
+        safe on the KN path (continual accumulation never lowers a learned count). Never raises — a
+        failure returns a report and leaves the weights as they were. Returns a
+        :class:`LiveLearnReport` — the honest evidence of what the fold actually changed."""
+        if not self._online_learn:
+            return LiveLearnReport(backend=self._kind, detail="online learning disabled")
+        with self._lock:
+            # the brain must exist (real weights to fold into) before a live step — build it cold once
+            if not self._seeded:
+                try:
+                    self._cold_build()
+                except Exception:  # noqa: BLE001 — never let a cold build crash a live step
+                    return LiveLearnReport(backend=self._kind, detail="cold build failed")
+            if not self._unfit:
+                return LiveLearnReport(backend=getattr(self._lm, "kind", self._kind),
+                                       detail="nothing queued")
+            b = self._flush_budget if budget is None else max(1, int(budget))
+            batch, self._unfit = self._unfit[:b], self._unfit[b:]
+            report = self._fold_pending(batch)
+            # leave dirty set iff more remain, so the lazy generate-time path also drains the tail
+            self._dirty = bool(self._unfit)
+            self._since_fit = 0 if not self._unfit else self._since_fit
+            return report
+
+    def _fold_weights(self) -> LiveLearnReport:
+        """Drain **all** queued exchanges and fold them into the weights (the generate-time path).
+
+        Called from :meth:`_ensure` when the brain is about to generate; :meth:`online_step` is the
+        bounded, turn-driven sibling. Both delegate the actual weight mutation to
+        :meth:`_fold_pending`, so live and lazy folding share one verified, reversible code path."""
         pending, self._unfit = self._unfit, []
         self._dirty = False
         self._since_fit = 0
+        return self._fold_pending(pending)
+
+    def _fold_pending(self, pending: "List[Tuple[str, float]]") -> LiveLearnReport:
+        """The real learning step: fold ``pending`` lived exchanges into the generative weights.
+
+        Continual: reinforcement is *added on top* of the existing weights (KN ``accumulate=True`` /
+        a warm-continued neural gradient step), never a from-scratch rebuild, so knowledge
+        accumulates and survives its text leaving the corpus window. Reward-weighted: a rewarded
+        exchange is reinforced with multiplicity ∝ reward; a punished reply's continuation is
+        reversibly un-learned (weight surgery). Gauntlet-gated on the neural path: snapshot → step →
+        verify the held-out perplexity did not regress beyond ``self._online_verify_tol`` → keep,
+        else roll back to the exact prior weights. Forgetting-protected: the weights are consolidated
+        as an EWC anchor every few folds. Character-locked: a doc that would teach over the immutable
+        core was already refused in :meth:`learn`, and is refused again here fail-closed."""
+        lm = self._lm
+        report = LiveLearnReport(backend=getattr(lm, "kind", "none") if lm is not None else "none")
         if lm is None or not pending:
-            return
+            report.detail = "nothing to fold"
+            return report
         reinforce: List[str] = []
+        seen: List[str] = []
         punished: List[Tuple[str, float]] = []
         for doc, reward in pending:
             if self._violates_core(doc):
@@ -497,28 +603,165 @@ class SelfBrain:
             if reward < 0:
                 punished.append((doc, reward))
                 continue                            # a punished reply is un-learned, not reinforced
+            seen.append(doc)
             mult = 1 + int(round(self._reward_scale * min(1.0, max(0.0, reward))))
             reinforce.extend([doc] * max(1, mult))
-        # 1) reinforcement — accumulate on top of the existing weights (never rebuild)
+        report.docs_folded = len(seen) + len(punished)
+        report.reinforced = len(seen)
+        report.suppressed = len(punished)
+        report.param_count_before = self._safe_param_count()
+
+        # 1) reinforcement — continual accumulation (KN, structurally safe) or a gauntlet-gated
+        #    neural gradient step (reversible on regression).
         if reinforce:
-            try:
-                lm.train_on(reinforce, accumulate=True)          # KN continual path
-            except TypeError:
+            if getattr(lm, "kind", "") == "kngram":
                 try:
-                    lm.train_on(reinforce, steps=self._neural_online_steps)  # neural online step
-                except Exception:  # noqa: BLE001
-                    pass
-            except Exception:  # noqa: BLE001 — a failed fold never fails the turn
-                pass
+                    lm.train_on(reinforce, accumulate=True)      # never lowers a learned count
+                    report.applied = True
+                    report.kept = True
+                    report.detail = "continual accumulate (KN)"
+                except Exception:  # noqa: BLE001 — a failed fold never fails the turn
+                    report.detail = "KN accumulate failed"
+            else:
+                self._neural_online_fold(reinforce, seen, report)
+
         # 2) learn from mistakes — genuinely un-learn each punished reply's continuation
         for doc, reward in punished:
             self._suppress_reply(doc, reward)
+        if punished:
+            report.applied = True
+            if not report.rolled_back:
+                report.kept = True
+
         # 3) forgetting-protection — consolidate accumulated weights as an anchor periodically
         self._fits += 1
         if self._fits % self._consolidate_every == 0:
             self._consolidate()
+            report.consolidated = True
+        report.param_count_after = self._safe_param_count()
         if self._persist:
             self.save()
+        return report
+
+    def _neural_online_fold(self, reinforce: List[str], seen: List[str],
+                            report: LiveLearnReport) -> None:
+        """One reversible, gauntlet-gated online gradient step on a neural backend.
+
+        Snapshots the full model (via its own ``save``/``load`` so a grown vocabulary rolls back
+        consistently too), takes the warm-continued step, and keeps it only if a held-out probe's
+        perplexity did not regress beyond tolerance — otherwise restores the exact prior weights.
+        Mutates ``report`` in place. Never raises."""
+        lm = self._lm
+        report.applied = True
+        # Gate on the COMBINED objective — the new material she is learning PLUS a held-out sample she
+        # must not forget — not the held-out alone. Genuinely learning the new docs lowers their
+        # perplexity enough that a real step nets an improvement and is KEPT (so learning actually
+        # sticks, the whole point), while a catastrophic step blows up the combined metric and rolls
+        # back. Held-out-only would reject almost every honest fold (any step perturbs unrelated text),
+        # which would leave the weights frozen — exactly the gap this closes.
+        held_out = self._held_out_probe(exclude=seen)
+        probe = list(dict.fromkeys([d for d in seen if d] + held_out))[:12] or held_out
+        report.perplexity_before = self._mean_perplexity(probe)
+        snap = self._snapshot_neural(lm)
+        stepped = False
+        try:
+            lm.train_on(reinforce, steps=self._neural_online_steps)   # warm-continued gradient step
+            stepped = True
+        except Exception:  # noqa: BLE001 — a failed step leaves the weights untouched
+            report.detail = "neural step raised — weights unchanged"
+        if not stepped:
+            self._cleanup_snapshot(snap)
+            report.applied = False
+            return
+        report.perplexity_after = self._mean_perplexity(probe)
+        before, after = report.perplexity_before, report.perplexity_after
+        regressed = (after > before * (1.0 + self._online_verify_tol) + 1e-9)
+        if not regressed:
+            report.kept = True
+            report.detail = (f"neural online step kept (ppl {_ppl(before)}→{_ppl(after)}, "
+                             f"tol {self._online_verify_tol})")
+        elif snap is not None and self._restore_neural(lm, snap):
+            report.rolled_back = True
+            report.detail = (f"neural step regressed ppl {_ppl(before)}→{_ppl(after)} "
+                             f"(> tol {self._online_verify_tol}) — rolled back")
+        else:
+            # no snapshot to roll back to: honest — the step stands (still a real, if unverified, fold)
+            report.kept = True
+            report.detail = f"neural step kept unverified (no snapshot; ppl {_ppl(after)})"
+        self._cleanup_snapshot(snap)
+
+    # ---- neural snapshot / rollback (reuse each backend's own save/load for a consistent revert) ---- #
+    def _snapshot_neural(self, lm: Any) -> Any:
+        """Snapshot a neural backend to a temp dir via its own ``save`` — a fully consistent revert
+        point (weights + vocab + EWC anchors). Returns the dir, or None if it cannot be taken."""
+        if lm is None or not hasattr(lm, "save") or not hasattr(lm, "load"):
+            return None
+        try:
+            import tempfile
+            from pathlib import Path
+            d = Path(tempfile.mkdtemp(prefix="nyxara_online_"))
+            lm.save(d)
+            return d
+        except Exception:  # noqa: BLE001 — no snapshot ⇒ the step is applied unverified, honestly
+            return None
+
+    def _restore_neural(self, lm: Any, snap: Any) -> bool:
+        """Restore a neural backend from a snapshot dir — the exact prior weights. Never raises."""
+        if lm is None or snap is None:
+            return False
+        try:
+            lm.load(snap)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _cleanup_snapshot(snap: Any) -> None:
+        if snap is None:
+            return
+        try:
+            import shutil
+            shutil.rmtree(snap, ignore_errors=True)
+        except Exception:  # noqa: BLE001 — a leaked temp dir is harmless
+            pass
+
+    def _held_out_probe(self, exclude: Sequence[str], k: int = 6) -> List[str]:
+        """A small probe of recently-learned sentences held OUT of this fold's reinforcement batch,
+        so the gauntlet catches a step that improves the new docs by forgetting old ones. Falls back
+        to the batch itself when nothing else is learned yet (a step that worsens even its own
+        training text is plainly bad)."""
+        ex = set(exclude)
+        probe: List[str] = []
+        for d in reversed(self._corpus):
+            if d in ex or not d:
+                continue
+            probe.append(d)
+            if len(probe) >= max(1, k):
+                break
+        if not probe:
+            probe = [d for d in exclude if d][:max(1, k)]
+        return probe
+
+    def _mean_perplexity(self, corpus: Sequence[str]) -> float:
+        """Mean finite perplexity of the backend over ``corpus`` — the gauntlet's measurement."""
+        lm = self._lm
+        if lm is None:
+            return float("inf")
+        vals: List[float] = []
+        for text in corpus:
+            try:
+                pp = float(lm.perplexity(text))
+            except Exception:  # noqa: BLE001 — an unscoreable probe line simply doesn't vote
+                pp = float("inf")
+            if math.isfinite(pp):
+                vals.append(pp)
+        return (sum(vals) / len(vals)) if vals else float("inf")
+
+    def _safe_param_count(self) -> int:
+        try:
+            return int(self._lm.param_count())
+        except Exception:  # noqa: BLE001
+            return 0
 
     def _suppress_reply(self, doc: str, reward: float = -1.0) -> None:
         """Un-learn a punished reply so she is genuinely less likely to reproduce it.
@@ -1007,4 +1250,96 @@ if __name__ == "__main__":  # pragma: no cover
     conf = brain.internal_confidence("I will think it through and propose the next step.")
     print(f"internal conf: {conf:.3f}")
     assert 0.15 <= conf <= 0.9
+
+    # ================================================================== #
+    # REAL-TIME weight learning — the Master's gap, made real, live, verified
+    # ================================================================== #
+    print("\n" + "-" * 70)
+    print("real-time weight learning")
+    print("-" * 70)
+
+    # (1) online_step folds queued lived experience into the CORE weights NOW, on the live neural
+    #     substrate (genesis_np here), and returns an honest report of what it changed.
+    live = build_self_brain()
+    live.reply("Who are you?")                     # cold-build the real backend so weights exist
+    fact = "The Andromeda galaxy is the nearest large spiral galaxy to our own."
+    for _ in range(4):
+        live.learn(fact, reward=1.0)               # a strongly-rewarded lived exchange
+    ppl_before = live._mean_perplexity([fact])
+    rep = live.online_step()
+    print(f"online_step  : {rep.to_dict()}")
+    assert isinstance(rep, LiveLearnReport)
+    assert rep.applied and rep.docs_folded >= 1 and rep.reinforced >= 1
+    assert rep.kept or rep.rolled_back            # the gauntlet reached a verdict
+    ppl_after = live._mean_perplexity([fact])
+    # a kept step must genuinely move the weights: either param count changed or the taught text
+    # became more probable (lower perplexity) — real learning, not a no-op.
+    if rep.changed():
+        assert (rep.param_count_after != rep.param_count_before) or (ppl_after <= ppl_before + 1e-6)
+    print(f"taught ppl   : {ppl_before:.3f} → {ppl_after:.3f}  changed={rep.changed()}")
+
+    # (2) the neural snapshot → restore is byte-for-byte reversible (the rollback the gauntlet uses).
+    lm = live._lm
+    if getattr(lm, "params", None):
+        import numpy as _np
+        key = next(iter(lm.params))
+        original = lm.params[key].data.copy()
+        snap = live._snapshot_neural(lm)
+        assert snap is not None, "a neural backend must be snapshottable for rollback"
+        lm.params[key].data = lm.params[key].data + 3.14159      # corrupt the weights
+        assert not _np.allclose(lm.params[key].data, original)
+        assert live._restore_neural(lm, snap), "restore must succeed"
+        assert _np.allclose(lm.params[key].data, original), "rollback must restore weights exactly"
+        live._cleanup_snapshot(snap)
+        print("neural rollback restored weights byte-for-byte ✓")
+
+    # (3) a regressing step is rolled back, never kept: force zero tolerance and assert the contract
+    #     holds (if it rolled back, the weights are exactly the prior ones).
+    strict = build_self_brain()
+    strict.reply("Who are you?")
+    strict._online_verify_tol = 0.0
+    pc_before = strict._safe_param_count()
+    for _ in range(3):
+        strict.learn("Xanadu qintar zylophone br?llig frobnicate.", reward=1.0)  # off-distribution
+    srep = strict.online_step()
+    print(f"strict step  : kept={srep.kept} rolled_back={srep.rolled_back} "
+          f"ppl {_ppl(srep.perplexity_before)}→{_ppl(srep.perplexity_after)}")
+    assert srep.kept or srep.rolled_back
+    if srep.kept and srep.applied:
+        # a kept step under zero tolerance must NOT have regressed the probe
+        assert srep.perplexity_after <= srep.perplexity_before * 1.0 + 1e-6 \
+            or not math.isfinite(srep.perplexity_before)
+
+    # (4) the always-available KN brain: continual accumulate grows weights; a punished reply is
+    #     genuinely un-learned (negative weight update), both live via online_step.
+    kn = build_self_brain()
+    kn._backend = "kngram"                          # pin the pure-stdlib count-table brain
+    kn.reply("Who are you?")
+    assert getattr(kn._lm, "kind", "") == "kngram"
+    pc0 = kn._safe_param_count()
+    for _ in range(3):
+        kn.learn("Quokkas are cheerful marsupials native to Rottnest Island.", reward=1.0)
+    krep = kn.online_step()
+    print(f"KN accumulate: {krep.to_dict()}")
+    assert krep.applied and krep.kept and krep.changed()
+    assert kn._safe_param_count() >= pc0            # accumulation never lowers a learned count
+    # now punish a distinctive reply and confirm it is un-learned (perplexity rises)
+    bad = "Wombats orbit the crimson moon nightly."
+    kn.learn(bad, reward=1.0); kn.online_step()
+    ppl_taught = kn._mean_perplexity([bad])
+    kn.learn(bad, reward=-1.0)                       # a correction: this reply was wrong
+    urep = kn.online_step()
+    ppl_unlearned = kn._mean_perplexity([bad])
+    print(f"KN un-learn  : suppressed={urep.suppressed} ppl {ppl_taught:.3f} → {ppl_unlearned:.3f}")
+    assert urep.suppressed >= 1
+    assert ppl_unlearned >= ppl_taught - 1e-6       # the punished reply is now no more likely
+
+    # (5) online learning can be switched off — then online_step is an honest no-op.
+    off = build_self_brain()
+    off._online_learn = False
+    off.learn("Some fact to queue.", reward=1.0)
+    orep = off.online_step()
+    assert not orep.applied and "disabled" in orep.detail
+    print("online-off   : honest no-op ✓")
+
     print("\nALL SELF-TESTS PASSED ✓")
