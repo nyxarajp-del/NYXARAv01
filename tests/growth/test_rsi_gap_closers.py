@@ -109,6 +109,31 @@ def test_curriculum_frontier_advances_for_capable_solver() -> None:
     assert cur.frontier_tier() > start                       # POET: the edge moves as she masters it
 
 
+def test_probe_is_deterministic_and_read_only() -> None:
+    # probe() is the read-only ruler the improvement gate certifies against (Method D). The same
+    # seed must pose identical questions (so before/after edits are compared fairly) and it must
+    # NOT move or persist the frontier tier.
+    from nyxara.growth.curriculum import AutoCurriculum
+
+    cur = AutoCurriculum(seed=3)
+    tier_before = cur.frontier_tier()
+    p1 = cur.probe(_smart_solver, seed=42, tier=3, per_tier=6)
+    p2 = cur.probe(_smart_solver, seed=42, tier=3, per_tier=6)
+    assert (p1.frontier_score, p1.by_tier, p1.n_problems, p1.n_correct) == \
+           (p2.frontier_score, p2.by_tier, p2.n_problems, p2.n_correct)
+    assert cur.frontier_tier() == tier_before                # never advanced/persisted by a probe
+
+
+def test_probe_smart_dominates_dumb_on_same_batch() -> None:
+    # a strictly higher score on the identical seeded batch is a genuine dominance (the proof D uses).
+    from nyxara.growth.curriculum import AutoCurriculum
+
+    cur = AutoCurriculum(seed=3)
+    smart = cur.probe(_smart_solver, seed=42, tier=3, per_tier=6)
+    dumb = cur.probe(lambda _p: "0", seed=42, tier=3, per_tier=6)
+    assert smart.frontier_score > dumb.frontier_score
+
+
 def test_curriculum_low_for_wrong_solver_and_unmemorisable() -> None:
     from nyxara.growth.curriculum import AutoCurriculum
 

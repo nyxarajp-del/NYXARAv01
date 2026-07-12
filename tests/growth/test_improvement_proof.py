@@ -133,6 +133,70 @@ def test_defect_claim_without_actual_fix_is_rejected():
 
 
 # --------------------------------------------------------------------------- #
+# D · open-ended frontier advancement (the non-saturating licence)
+# --------------------------------------------------------------------------- #
+def _mastered() -> "_Rep":
+    # a fixed battery scored 100% — Method A can NEVER fire again (no newly-passing task).
+    return _Rep([_Res("t1", True), _Res("t2", True)], 1.00)
+
+
+def test_frontier_advancement_licenses_gain_when_battery_is_mastered():
+    saturated = _mastered()
+    fb = {"frontier_score": 0.40, "by_tier": {1: 1.0, 2: 0.5, 3: 0.0}, "frontier_tier": 2}
+    fa = {"frontier_score": 0.62, "by_tier": {1: 1.0, 2: 0.9, 3: 0.4}, "frontier_tier": 2}
+    cert = ImprovementProver().prove(
+        before=saturated, after=saturated, before_src="x = 1\n", after_src="x = 2\n",
+        edit_kind="self:rewrite", frontier_before=fb, frontier_after=fa)
+    assert cert.better
+    assert cert.method == "frontier-advancement"
+    assert cert.proof.get("verdict") == "frontier-dominates"
+
+
+def test_frontier_per_tier_regression_is_refused():
+    # aggregate score rose but tier 2 got worse ⇒ NOT a clean dominance ⇒ refused.
+    saturated = _mastered()
+    fb = {"frontier_score": 0.40, "by_tier": {1: 1.0, 2: 0.5, 3: 0.0}, "frontier_tier": 2}
+    fa = {"frontier_score": 0.65, "by_tier": {1: 1.0, 2: 0.2, 3: 0.9}, "frontier_tier": 2}
+    cert = ImprovementProver().prove(
+        before=saturated, after=saturated, before_src="x = 1\n", after_src="x = 2\n",
+        edit_kind="self:rewrite", frontier_before=fb, frontier_after=fa)
+    assert not cert.better
+
+
+def test_flat_frontier_is_not_a_licence():
+    saturated = _mastered()
+    fb = {"frontier_score": 0.50, "by_tier": {1: 1.0, 2: 0.5}, "frontier_tier": 1}
+    cert = ImprovementProver().prove(
+        before=saturated, after=saturated, before_src="x = 1\n", after_src="x = 2\n",
+        edit_kind="self:rewrite", frontier_before=fb, frontier_after=dict(fb))
+    assert not cert.better
+    assert cert.method == "none"
+
+
+def test_frontier_gain_with_fixed_battery_regression_is_refused():
+    # a real frontier gain cannot buy back a regression on the fixed battery — soundness first.
+    before = _Rep([_Res("t1", True), _Res("t2", True)], 0.90)
+    after = _Rep([_Res("t1", True), _Res("t2", False)], 0.50)   # lost t2
+    fb = {"frontier_score": 0.40, "by_tier": {1: 0.5}, "frontier_tier": 1}
+    fa = {"frontier_score": 0.80, "by_tier": {1: 0.9}, "frontier_tier": 1}
+    cert = ImprovementProver().prove(
+        before=before, after=after, before_src="x = 1\n", after_src="x = 2\n",
+        edit_kind="self:rewrite", frontier_before=fb, frontier_after=fa)
+    assert not cert.better
+    assert "t2" in cert.regressed
+
+
+def test_frontier_absent_falls_back_to_abc_unchanged():
+    # with no frontier probes, the gate behaves exactly like before (Method C still fires).
+    before = "try:\n    pass\nexcept:\n    pass\n"
+    after = "try:\n    pass\nexcept Exception:\n    pass\n"
+    cert = ImprovementProver().prove(before_src=before, after_src=after, edit_kind="bare_except",
+                                     frontier_before=None, frontier_after=None)
+    assert cert.better
+    assert cert.method == "defect-elimination"
+
+
+# --------------------------------------------------------------------------- #
 # the cost ruler
 # --------------------------------------------------------------------------- #
 def test_static_cost_monotone_and_syntax_safe():

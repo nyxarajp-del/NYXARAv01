@@ -146,6 +146,39 @@ def _run_realworld(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _run_frontier(args: argparse.Namespace) -> int:
+    """Probe the open-ended auto-curriculum frontier and (optionally) save the score as JSON.
+
+    This is the READ-ONLY, non-saturating ruler the "provably better" gate (Method D,
+    growth/improvement_proof.py) certifies against. It grades the sovereign solver on a
+    deterministic, freshly-seeded batch at a fixed tier WITHOUT moving the edge, so a
+    before-edit and an after-edit run over the *same* ``--seed`` (and ``--tier``) pose byte-identical
+    problems — a strictly higher score is then a genuine dominance, not a luckier draw. Because it
+    runs in a fresh process against the on-disk source, it exercises the real (possibly just-edited)
+    code. Answers are prover-certified and the batch is regenerated every run, so the ruler can be
+    neither memorised nor (as the tier rises with mastery) saturated."""
+    import json
+
+    from nyxara.eval.benchmark import core_solver
+    from nyxara.growth.curriculum import AutoCurriculum
+    tier = int(args.tier) if args.tier is not None else None
+    cur = AutoCurriculum(memory=None)
+    rep = cur.probe(core_solver(), seed=int(args.seed), tier=tier,
+                    per_tier=int(args.per_tier))
+    payload = {"frontier_score": round(float(rep.frontier_score), 6),
+               "by_tier": {int(k): round(float(v), 6) for k, v in rep.by_tier.items()},
+               "frontier_tier": int(rep.frontier_tier), "seed": int(args.seed),
+               "per_tier": int(args.per_tier), "n_problems": int(rep.n_problems),
+               "n_correct": int(rep.n_correct)}
+    print(f"frontier probe: score={payload['frontier_score']:.4f} "
+          f"tier={payload['frontier_tier']} by_tier={payload['by_tier']}")
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        print(f"\nfrontier probe saved -> {args.save}")
+    return 0
+
+
 def _run_benchmark(args: argparse.Namespace) -> int:
     if args.realworld:
         return _run_realworld(args)
@@ -210,11 +243,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--realworld", action="store_true",
                         help="benchmark: run the REAL held-out validation corpus (eval/datasets.py); "
                              "set NYXARA_EVAL_HOLDOUT_PATH to use an external dataset")
+    parser.add_argument("--frontier", action="store_true",
+                        help="probe the open-ended auto-curriculum frontier (the non-saturating "
+                             "ruler the provably-better gate certifies against)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="frontier: seed for the deterministic probe batch (same seed ⇒ same "
+                             "problems, so before/after edits are compared on identical questions)")
+    parser.add_argument("--tier", type=int, default=None,
+                        help="frontier: probe at this fixed difficulty tier (default: the "
+                             "curriculum's current frontier tier)")
+    parser.add_argument("--per-tier", dest="per_tier", type=int, default=4,
+                        help="frontier: problems generated per tier")
     parser.add_argument("--category", default=None, help="run only one category")
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
+    if args.frontier:
+        return _run_frontier(args)
     return _run_benchmark(args) if args.benchmark else _run_safety(args)
 
 

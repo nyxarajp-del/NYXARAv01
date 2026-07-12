@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -306,7 +307,7 @@ class Optimizer:
     """Apply source edits under a reversible, gauntlet-gated, journalled discipline."""
 
     def __init__(self, *, root: Optional[Any] = None, settings: Any = None,
-                 journal: Any = None, permissions: Any = None,
+                 journal: Any = None, permissions: Any = None, memory: Any = None,
                  gauntlet: Optional[Callable[[List[str]], GauntletResult]] = None,
                  timeout_s: float = 600.0,
                  require_improvement: Optional[bool] = None,
@@ -316,10 +317,17 @@ class Optimizer:
         self.root = Path(root) if root is not None else _package_root()
         self.journal = journal
         self.permissions = permissions
+        self.memory = memory                       # read-only: the persisted auto-curriculum tier
         self.timeout_s = float(timeout_s)
         self._gauntlet_fn = gauntlet or self._default_gauntlet
         self._baseline_path: Optional[Path] = None
         self._after_path: Optional[Path] = None
+        # open-ended frontier snapshots (Method D): the same seeded, fixed-tier probe graded on the
+        # before-code and the after-code, so a strictly higher score is a genuine dominance.
+        self._frontier_baseline_path: Optional[Path] = None
+        self._frontier_after_path: Optional[Path] = None
+        self._frontier_seed: Optional[int] = None
+        self._frontier_tier: Optional[int] = None
         self._tmpdir: Optional[tempfile.TemporaryDirectory] = None
         # the strict "provably BETTER" gate (Master JP's charge). None ⇒ read the standing config.
         self._require_improvement = (
@@ -359,7 +367,8 @@ class Optimizer:
         action_id = self._journal_start(edit)
         try:
             self._after_path = None                 # never reuse a prior edit's after-report
-            self._ensure_baseline()                 # capture pre-edit capability baseline
+            self._frontier_after_path = None        # nor a prior edit's frontier after-probe
+            self._ensure_baseline()                 # capture pre-edit capability + frontier baseline
             path.write_text(edit.after, encoding="utf-8")
             outcome.applied = True
             # proof-carrying + scalable oversight run BEFORE the (expensive) empirical gauntlet: a
@@ -459,9 +468,27 @@ class Optimizer:
                 after = BenchmarkReport.load(str(self._after_path))
         except Exception:  # noqa: BLE001 — no capability data ⇒ fall back to source-only proofs
             before = after = None
+        # Method D: load the before/after frontier probes (same seed + tier). Absent ⇒ D just does
+        # not fire; a malformed pair is ignored, never certified as a gain.
+        fb = self._load_frontier(self._frontier_baseline_path)
+        fa = self._load_frontier(self._frontier_after_path)
         return ImprovementProver(settings=self.settings).prove(
             before=before, after=after, before_src=edit.before, after_src=edit.after,
-            edit_kind=edit.kind)
+            edit_kind=edit.kind, frontier_before=fb, frontier_after=fa)
+
+    @staticmethod
+    def _load_frontier(path: Optional[Path]) -> Optional[Dict[str, Any]]:
+        """Load a saved frontier probe JSON (``{frontier_score, by_tier, ...}``), or None."""
+        if path is None or not Path(path).exists():
+            return None
+        try:
+            import json
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "frontier_score" in data:
+                return data
+        except Exception:  # noqa: BLE001 — a corrupt probe is simply no probe
+            return None
+        return None
 
     def close(self) -> None:
         if self._tmpdir is not None:
@@ -514,6 +541,18 @@ class Optimizer:
                 return GauntletResult(False, checks,
                                       f"capability regression (rc={rc}): {out[-300:]}")
 
+        # 3b) open-ended frontier — snapshot the AFTER probe (same seed + tier as the baseline) so
+        #     Method D can prove a NON-SATURATING capability gain even when the fixed battery is
+        #     mastered. Measurement only: it never fails the gauntlet — a lack of dominance simply
+        #     means Method D does not fire and A/B/C decide. The edited source is on disk, so the
+        #     fresh subprocess grades the REAL post-edit code.
+        if self._frontier_gate_enabled() and self._frontier_baseline_path is not None:
+            fa_path = Path(self._tmpdir.name) / "frontier_after.json" if self._tmpdir else None
+            if fa_path is not None:
+                rc_f, _ = self._run(self._frontier_cmd(fa_path), repo)
+                self._frontier_after_path = fa_path if (rc_f == 0 and fa_path.exists()) else None
+                checks["frontier_probe"] = (rc_f == 0)
+
         # 4) tests — opt-in (slower); keep the tree green
         if bool(getattr(self.settings.self_improvement, "run_pytest_in_gauntlet", False)):
             rc, out = self._run([sys.executable, "-m", "pytest", "-q"], repo)
@@ -524,7 +563,8 @@ class Optimizer:
         return GauntletResult(True, checks, "all checks passed")
 
     def _ensure_baseline(self) -> None:
-        """Snapshot the current (pre-edit) capability benchmark so we can detect regressions."""
+        """Snapshot the current (pre-edit) capability benchmark so we can detect regressions, plus
+        the open-ended frontier baseline (Method D) at a fixed seed + tier held for this cycle."""
         if self._baseline_path is not None:
             return
         self._tmpdir = tempfile.TemporaryDirectory(prefix="nyxara-rsi-")
@@ -532,6 +572,41 @@ class Optimizer:
         rc, _ = self._run([sys.executable, "-m", "nyxara.eval", "--benchmark",
                            "--save", str(baseline)], _repo_root())
         self._baseline_path = baseline if (rc == 0 and baseline.exists()) else None
+        self._ensure_frontier_baseline()
+
+    def _frontier_gate_enabled(self) -> bool:
+        return bool(getattr(self.settings.self_improvement, "frontier_gate_enabled", True))
+
+    def _ensure_frontier_baseline(self) -> None:
+        """Snapshot the pre-edit frontier probe once per cycle, fixing the seed + tier so the
+        after-edit probe (in the gauntlet) faces byte-identical, prover-certified problems — the
+        crux of Method D's dominance proof. Best-effort: any failure leaves it unset and the gate
+        falls back to Methods A/B/C exactly as before."""
+        if not self._frontier_gate_enabled() or self._frontier_baseline_path is not None:
+            return
+        if self._tmpdir is None:
+            self._tmpdir = tempfile.TemporaryDirectory(prefix="nyxara-rsi-")
+        # one fresh seed per cycle (fresh batch ⇒ cannot be memorised); the tier tracks real mastery
+        self._frontier_seed = int(time.time_ns() & 0x7FFFFFFF)
+        try:
+            from nyxara.growth.curriculum import AutoCurriculum
+            self._frontier_tier = int(AutoCurriculum(memory=self.memory).frontier_tier())
+        except Exception:  # noqa: BLE001 — no memory / no curriculum ⇒ probe at the default tier
+            self._frontier_tier = None
+        base = Path(self._tmpdir.name) / "frontier_baseline.json"
+        rc, _ = self._run(self._frontier_cmd(base), _repo_root())
+        self._frontier_baseline_path = base if (rc == 0 and base.exists()) else None
+
+    def _frontier_cmd(self, save_path: Path) -> List[str]:
+        """The `nyxara.eval --frontier` command for a probe saved to ``save_path`` (fixed seed/tier)."""
+        cfg = self.settings.self_improvement
+        cmd = [sys.executable, "-m", "nyxara.eval", "--frontier",
+               "--seed", str(int(self._frontier_seed or 0)),
+               "--per-tier", str(int(getattr(cfg, "frontier_gate_per_tier", 4))),
+               "--save", str(save_path)]
+        if self._frontier_tier is not None:
+            cmd += ["--tier", str(int(self._frontier_tier))]
+        return cmd
 
     def _new_after_path(self) -> Path:
         """A fresh temp path for the post-edit benchmark report (the 'after' half of the proof)."""

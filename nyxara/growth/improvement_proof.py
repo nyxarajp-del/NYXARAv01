@@ -24,6 +24,22 @@ methods, each machine-checkable and journalled:
   normalisation) whose anti-pattern is a **decidable predicate**: it is proved the specific defect
   strictly decreased. Combined with the gauntlet's non-regression proof, the edit provably removes
   a defect without making anything worse.
+* **D · frontier-advancement** — the **non-saturating** licence that answers the "intelligence
+  explosion architecturally impossible" gap. Method A can only ever fire while the *fixed* benchmark
+  battery still has failing tasks — once NYXARA masters it, its task count is a ceiling and no
+  rewrite can be certified a capability gain again. Method D removes that ceiling. It certifies an
+  edit better when it **strictly dominates** on NYXARA's open-ended auto-curriculum frontier
+  (:mod:`~nyxara.growth.curriculum`): the same deterministically-seeded batch of freshly-generated,
+  prover-certified problems is graded on the before-code and the after-code, and the after-code
+  scores strictly higher with **no per-tier regression** and zero fixed-battery regression. Because
+  the batch regenerates at an ever-rising difficulty tier, this ordering never saturates and cannot
+  be memorised — yet each individual certificate is still a **decidable dominance on one concrete
+  finite batch**, so Rice's theorem is respected, not defeated. This is what makes sustained,
+  compounding self-improvement architecturally *possible* while every step stays sound.
+
+Rice's theorem still forbids a general "this program is better" decider, and we still do not pretend
+to one: methods A–D each certify improvement only under a well-defined, decidable ordering. What D
+adds is that the ordering is **open-ended** (its difficulty rises without bound) rather than fixed.
 
 No method certifies ⇒ ``better is False`` ⇒ the edit is discarded. Pure standard library plus
 :class:`ProofCarrier`; it reads reports and source, and never touches disk or weights itself.
@@ -48,7 +64,7 @@ class ImprovementCertificate:
 
     better: bool
     method: str = "none"          # "pareto-capability" | "proven-equivalent-cheaper"
-    #                               | "defect-elimination" | "none"
+    #                               | "defect-elimination" | "frontier-advancement" | "none"
     reason: str = ""
     newly_passing: List[str] = field(default_factory=list)
     regressed: List[str] = field(default_factory=list)
@@ -74,10 +90,15 @@ class ImprovementProver:
 
     def prove(self, *, before: Any = None, after: Any = None,
               before_src: str = "", after_src: str = "",
-              edit_kind: str = "") -> ImprovementCertificate:
+              edit_kind: str = "",
+              frontier_before: Optional[Dict[str, Any]] = None,
+              frontier_after: Optional[Dict[str, Any]] = None) -> ImprovementCertificate:
         """Return a certificate. ``before``/``after`` are :class:`BenchmarkReport`s (or ``None``
         when no capability measurement is available); ``before_src``/``after_src`` are the edited
-        file's full contents before and after."""
+        file's full contents before and after. ``frontier_before``/``frontier_after`` are the
+        read-only auto-curriculum probe results (``{frontier_score, by_tier, ...}``) graded on the
+        SAME seeded batch against the before-code and after-code — the non-saturating ruler for
+        Method D. Both ``None`` ⇒ Method D simply does not fire and A/B/C decide as before."""
         regressed = self._regressions(before, after)
         cost_b = static_cost(before_src)
         cost_a = static_cost(after_src)
@@ -91,6 +112,22 @@ class ImprovementProver:
                     reason=(f"capability strictly increased: {len(newly)} task(s) now pass, "
                             f"0 regress (deterministic dominance proof)"),
                     newly_passing=newly, regressed=[], cost_before=cost_b, cost_after=cost_a)
+
+        # ---- D · open-ended frontier advancement (the NON-SATURATING licence) ---- #
+        # Fires when the fixed battery cannot (mastered ⇒ no newly-passing task) but the edit still
+        # makes NYXARA measurably smarter on freshly-generated, prover-certified problems at the edge
+        # of her capability. Sound because it is a strict dominance on ONE concrete seeded batch and
+        # guarded by zero fixed-battery regression; open-ended because the batch's tier rises forever.
+        if not regressed and frontier_before is not None and frontier_after is not None:
+            fp = _frontier_dominates(frontier_before, frontier_after)
+            if fp is not None and _mean_score(after) >= _mean_score(before):
+                return ImprovementCertificate(
+                    better=True, method="frontier-advancement",
+                    reason=(f"strict dominance on the open-ended auto-curriculum frontier "
+                            f"(tier {fp.get('tier')}): score {fp['score_before']:.4f}→"
+                            f"{fp['score_after']:.4f}, no per-tier regression and 0 fixed-battery "
+                            f"regress — a non-saturating, machine-certified capability gain"),
+                    regressed=[], cost_before=cost_b, cost_after=cost_a, proof=fp)
 
         # ---- B · proven behaviourally-equivalent AND strictly cheaper ---- #
         if not regressed and cost_a < cost_b:
@@ -111,11 +148,12 @@ class ImprovementProver:
                 regressed=[], cost_before=cost_b, cost_after=cost_a)
 
         # ---- no proof of improvement ⇒ keep the old code ---- #
-        why = "capability did not strictly increase"
+        why = "capability did not strictly increase (fixed battery nor open-ended frontier)"
         if regressed:
             why = f"capability regressed on {len(regressed)} task(s): {', '.join(regressed[:4])}"
         elif cost_a >= cost_b:
-            why = "no capability gain, and the change is not a proven-cheaper or defect-fix edit"
+            why = ("no capability gain, no frontier advancement, and the change is not a "
+                   "proven-cheaper or defect-fix edit")
         return ImprovementCertificate(better=False, method="none", reason=why,
                                       regressed=regressed, cost_before=cost_b, cost_after=cost_a)
 
@@ -153,6 +191,37 @@ class ImprovementProver:
             return res.to_dict()
         except Exception:  # noqa: BLE001 — no prover ⇒ method B simply does not fire
             return None
+
+
+# --------------------------------------------------------------------------- #
+# Frontier dominance (method D) — a decidable "strictly better on the same batch" check
+# --------------------------------------------------------------------------- #
+def _frontier_dominates(before: Dict[str, Any], after: Dict[str, Any]
+                        ) -> Optional[Dict[str, Any]]:
+    """Return a proof dict iff ``after`` strictly dominates ``before`` on the same seeded frontier
+    batch — a strictly higher weighted ``frontier_score`` AND no tier that got worse — else ``None``.
+
+    Because the two probes were graded on byte-identical, prover-certified problems (same seed +
+    tier), a strictly higher score with no per-tier regression is a genuine *dominance*, not a
+    luckier draw: a decidable, machine-checkable proof of a real, open-ended capability gain."""
+    try:
+        sb = float(before.get("frontier_score", 0.0))
+        sa = float(after.get("frontier_score", 0.0))
+    except Exception:  # noqa: BLE001 — a malformed probe never masquerades as a gain
+        return None
+    if not (sa > sb):
+        return None
+    try:
+        bt_b = {int(k): float(v) for k, v in (before.get("by_tier") or {}).items()}
+        bt_a = {int(k): float(v) for k, v in (after.get("by_tier") or {}).items()}
+    except Exception:  # noqa: BLE001
+        return None
+    for t in set(bt_b) | set(bt_a):
+        if bt_a.get(t, 0.0) < bt_b.get(t, 0.0) - 1e-9:
+            return None      # a difficulty tier regressed ⇒ not a clean dominance ⇒ not certified
+    return {"verdict": "frontier-dominates", "score_before": round(sb, 6),
+            "score_after": round(sa, 6), "tier": after.get("frontier_tier"),
+            "by_tier_before": bt_b, "by_tier_after": bt_a}
 
 
 # --------------------------------------------------------------------------- #
@@ -315,5 +384,31 @@ if __name__ == "__main__":  # pragma: no cover
                          before_src="x = 1\n", after_src="x = 2\n", edit_kind="self:refactor")
     assert cert4.better and cert4.method == "pareto-capability", cert4.to_dict()
     print("pareto-capability  : a real capability gain proved better ✓")
+
+    # D · the NON-SATURATING licence — fixed battery MASTERED (no newly-passing task), but a strict
+    #     dominance on the open-ended frontier still certifies the rewrite better.
+    saturated = _Rep([_R("t1", True), _R("t2", True)], 1.00)   # 100% — Method A can never fire
+    fb = {"frontier_score": 0.40, "by_tier": {1: 1.0, 2: 0.5, 3: 0.0}, "frontier_tier": 2}
+    fa = {"frontier_score": 0.62, "by_tier": {1: 1.0, 2: 0.9, 3: 0.4}, "frontier_tier": 2}
+    cert5 = prover.prove(before=saturated, after=saturated,
+                         before_src="x = 1\n", after_src="x = 2\n", edit_kind="self:rewrite",
+                         frontier_before=fb, frontier_after=fa)
+    assert cert5.better and cert5.method == "frontier-advancement", cert5.to_dict()
+    print("frontier-advance   : mastered battery + frontier gain proved better (no ceiling) ✓")
+
+    # D · a per-tier REGRESSION on the frontier is refused even if the aggregate score rose.
+    fa_bad = {"frontier_score": 0.65, "by_tier": {1: 1.0, 2: 0.2, 3: 0.9}, "frontier_tier": 2}
+    cert6 = prover.prove(before=saturated, after=saturated,
+                         before_src="x = 1\n", after_src="x = 2\n", edit_kind="self:rewrite",
+                         frontier_before=fb, frontier_after=fa_bad)
+    assert not cert6.better, cert6.to_dict()
+    print("frontier-advance   : a per-tier regression correctly REFUSED ✓")
+
+    # D · a flat frontier (no strict gain) is not a licence.
+    cert7 = prover.prove(before=saturated, after=saturated,
+                         before_src="x = 1\n", after_src="x = 2\n", edit_kind="self:rewrite",
+                         frontier_before=fb, frontier_after=dict(fb))
+    assert not cert7.better, cert7.to_dict()
+    print("frontier-advance   : a flat (non-strict) frontier correctly REJECTED ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

@@ -1257,6 +1257,18 @@ class SelfImprovementConfig(BaseModel):
     auto_curriculum_enabled: bool = True
     transfer_weight_frontier: float = Field(default=0.25, ge=0.0, le=1.0)
     curriculum_per_tier: int = Field(default=4, ge=1, le=64)
+    # --- open-ended frontier GATE (growth/improvement_proof.py · Method D) --- #
+    # Wires the non-saturating auto-curriculum into the strict "provably BETTER" gate as a fourth
+    # certifying method. The fixed benchmark battery has a finite task count, so once mastered no
+    # rewrite can ever be certified a capability gain (Method A) again — that finite ceiling is why
+    # open-ended, compounding self-improvement was architecturally blocked. Method D removes it: an
+    # edit is certified better when it STRICTLY DOMINATES on the same deterministically-seeded batch
+    # of freshly-generated, prover-certified problems (higher weighted score, no per-tier regression,
+    # zero fixed-battery regression). Each certificate is still a decidable dominance on one concrete
+    # finite batch (Rice respected), but the batch's difficulty rises without bound (never saturates,
+    # cannot be memorised). Adds two short frontier probes per edit cycle; degrades cleanly to A/B/C.
+    frontier_gate_enabled: bool = True
+    frontier_gate_per_tier: int = Field(default=4, ge=1, le=64)
     # --- world-grounded experiments (growth/grounded_experiments.py) --- #
     # NYXARA also improves against outcomes she does NOT know in advance: she predicts what a program
     # will do, then RUNS it in the real interpreter (the isolated sandbox) and is graded by the actual
@@ -2454,6 +2466,11 @@ class NyxaraSettings(BaseSettings):
             # see tests/growth/test_godel_loop.py).
             self.godel_loop.enabled = False
             self.godel_loop.persist = False
+            # Method D's frontier gate spawns extra `nyxara.eval --frontier` subprocesses per edit
+            # cycle — keep it OFF under TEST so the self-optimise suite stays hermetic, deterministic
+            # and subprocess-free (a test that wants Method D drives ImprovementProver directly, or
+            # passes frontier_before/after; see tests/growth/test_improvement_proof.py).
+            self.self_improvement.frontier_gate_enabled = False
             # The Genesis Protocol designs and micro-trains real neural architectures — far too
             # heavy to run on every core boot across the suite (and it must stay hermetic). Keep the
             # boot kickoff OFF and pin the always-fast pure-stdlib n-gram substrate under TEST; a
