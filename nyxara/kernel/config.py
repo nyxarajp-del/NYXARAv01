@@ -219,6 +219,12 @@ class DeepReasoningConfig(BaseModel):
     # this much again on top (same maximum budget, aimed where it measurably pays off).
     samples: int = Field(default=3, ge=1, le=9)
     keep_best: bool = True                                 # keep the verifier-best across all rungs
+    # Ground the keep-best selection in *truth* where the domain is decidable (exact faculty oracle
+    # / machine-checkable Prover certificate — mind/grounded_verifier.py), so the climb selects
+    # correct answers over merely fluent ones. Falls through to the intrinsic verifier on every
+    # non-decidable prompt, so open-ended/offline behaviour is unchanged. This is the actual
+    # ceiling-break: search steered by correctness, not polish.
+    ground_verifier: bool = True
     max_seconds: float = Field(default=60.0, ge=1.0, le=600.0)   # runaway guard, not a quality cap
     # Compounding: learn per-problem which rung pays off and persist it across restarts.
     learn_effort: bool = True

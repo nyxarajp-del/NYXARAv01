@@ -93,8 +93,20 @@ class DeepReasoner:
         # so a bare box is unchanged. None → the exact prior static-config behaviour.
         self.budget = budget
         if verifier is None:
-            from nyxara.mind.router import default_verifier
-            verifier = default_verifier()
+            # Ground the climb in *truth* where the domain is decidable — an oracle/prover-backed
+            # verifier so the ladder selects correct answers over merely fluent ones (Problem #1,
+            # the ceiling). Honestly gated: falls through to the intrinsic verifier when the config
+            # switch is off, when grounding is unavailable, and on every non-decidable prompt.
+            verifier = None
+            if bool(getattr(self.cfg, "ground_verifier", True)):
+                try:
+                    from nyxara.mind.grounded_verifier import grounded_verifier
+                    verifier = grounded_verifier(settings=self.settings)
+                except Exception:  # noqa: BLE001 — grounding is additive; never a hard dependency
+                    verifier = None
+            if verifier is None:
+                from nyxara.mind.router import default_verifier
+                verifier = default_verifier()
         self.verifier = verifier
         self.improver = improver              # RecursiveImprover (rung 4); optional
         self.effort_memory = effort_memory    # EffortMemory; optional (enables compounding)

@@ -86,6 +86,27 @@ def _score_candidate(candidate: Any) -> float:
     return 0.4 * cal + 0.35 * txt_score + 0.25 * rat_score
 
 
+def _grounded_score(stimulus: str, candidate: Any) -> float:
+    """Keep-best score for the refinement loop, grounded in *truth* where the domain is decidable.
+
+    On a decidable prompt (an exact faculty oracle answers it), correctness dominates: a refinement
+    that carries the ground truth scores near 1.0, one that drifts away from it scores near 0.0 —
+    so the loop never "improves" a correct answer into a fluent-but-wrong one (the ceiling-break at
+    rung 4). On every non-decidable prompt it is exactly :func:`_score_candidate`, so open-ended
+    behaviour is unchanged. Never raises."""
+    text = str(getattr(candidate, "text", "") or "")
+    shape = _score_candidate(candidate)
+    try:
+        from nyxara.mind.grounded_verifier import answer_carries_truth, ground_truth
+        truth = ground_truth(stimulus)
+        if truth is not None:
+            return min(1.0, 0.9 + 0.1 * shape) if answer_carries_truth(truth, text) \
+                else min(0.15, 0.05 + 0.10 * shape)
+    except Exception:  # noqa: BLE001 — grounding is additive; fall back to the shape score
+        pass
+    return shape
+
+
 # --------------------------------------------------------------------------- #
 # Improver
 # --------------------------------------------------------------------------- #
@@ -131,13 +152,13 @@ class RecursiveImprover:
         trace = ImprovementTrace(n_iterations=n)
 
         best = candidate
-        best_score = _score_candidate(candidate)
+        best_score = _grounded_score(stimulus, candidate)
         trace.scores.append(best_score)
 
         for i in range(1, n + 1):
             try:
                 current = self._iterate(stimulus, best, iteration=i)
-                score = _score_candidate(current)
+                score = _grounded_score(stimulus, current)
                 trace.scores.append(score)
                 if score > best_score:
                     best = current

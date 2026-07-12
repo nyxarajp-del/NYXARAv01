@@ -37,6 +37,16 @@ from nyxara.mind.router import RouterResult, default_verifier
 
 __all__ = ["Route", "RoutingPlan", "PrimarySelfModelRouter"]
 
+
+def _grounded_or_default() -> Any:
+    """Verifier grounded in truth where decidable, else the intrinsic verifier. Never raises."""
+    try:
+        from nyxara.mind.grounded_verifier import grounded_verifier
+        return grounded_verifier()
+    except Exception:  # noqa: BLE001 — grounding is additive
+        return default_verifier()
+
+
 _WORD = re.compile(r"[A-Za-z0-9']+")
 
 
@@ -118,7 +128,7 @@ class PrimarySelfModelRouter:
         self._llm = llm
         self._transfer = transfer_engine
         self._generalization = generalization_engine
-        self.verifier = verifier or default_verifier()
+        self.verifier = verifier or _grounded_or_default()
         abstain_below = getattr(self.settings.router, "abstain_below", 0.15)
         self.meta = MetaCognition(answer_threshold=self.cfg.competence_threshold,
                                   abstain_below=abstain_below)
