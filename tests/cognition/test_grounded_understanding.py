@@ -232,3 +232,77 @@ def test_learn_from_percepts_binds_features():
         "apple", [_Percept("a red round shiny thing", tags=["sweet"])])
     assert rep["features_added"] > 0
     assert lex.activate("apple").grounded
+
+
+# -------------------- experience → meaning: grounding from perception -------------------- #
+class _FramePercept:
+    """A minimal stand-in for senses.binding.Percept (content/modality/entities/tags/data)."""
+
+    def __init__(self, content, modality="image", entities=None, tags=None, data=None):
+        self.content = content
+        self.modality = modality
+        self.entities = entities or []
+        self.tags = tags or []
+        self.data = data or {}
+
+
+class _Frame:
+    """A minimal stand-in for senses.binding.PerceptualFrame (percepts() is a method)."""
+
+    def __init__(self, percepts):
+        self._percepts = list(percepts)
+
+    def percepts(self):
+        return list(self._percepts)
+
+
+def test_learn_from_frame_grounds_entities_from_perception():
+    lex = GroundedLexicon(seed=False)               # nothing known: meaning purely perceived
+    frame = _Frame([
+        _FramePercept("a red round shiny thing", entities=["apple"]),
+        _FramePercept("a big loud animal", modality="audio", entities=["truck"], tags=["loud"]),
+    ])
+    rep = lex.learn_from_frame(frame)
+    assert "apple" in rep["grounded"] and "truck" in rep["grounded"]
+    assert rep["via"] == "perception"
+    # the apple was SEEN: colour/shape ground vision, and it activates vision
+    apple = lex.activate("apple")
+    assert apple.grounded and apple.fires(Sense.VISION)
+    # the truck was HEARD: loudness grounds sound, and it activates sound
+    truck = lex.activate("truck")
+    assert truck.grounded and truck.fires(Sense.SOUND)
+
+
+def test_learn_from_frame_channel_records_the_perceiving_sense():
+    lex = GroundedLexicon(seed=False)
+    # a percept with NO descriptor words at all — pure channel evidence
+    lex.learn_from_frame(_FramePercept("", modality="image", entities=["blob"]))
+    blob = lex.get("blob")
+    assert blob is not None
+    assert blob.senses[Sense.VISION].get("perceived", 0) > 0   # "I saw it" is itself grounding
+
+
+def test_learn_from_frame_accepts_a_single_percept():
+    lex = GroundedLexicon(seed=False)
+    rep = lex.learn_from_frame(
+        _FramePercept("a sweet soft yellow fruit", entities=["banana"]))
+    assert "banana" in rep["grounded"]
+    b = lex.get("banana")
+    assert b.senses[Sense.TASTE].get("sweet", 0) > 0
+    assert b.senses[Sense.TOUCH].get("soft", 0) > 0
+
+
+def test_learn_from_frame_skips_percepts_without_entities():
+    lex = GroundedLexicon(seed=False)
+    rep = lex.learn_from_frame(_Frame([_FramePercept("red and round", entities=[])]))
+    assert rep["grounded"] == [] and rep["features_added"] == 0
+
+
+def test_pronoun_carries_the_subject_across_sentences():
+    lex = GroundedLexicon(seed=False)
+    lex.learn_from_text("A tiger is big. It is dangerous and fast.")
+    tiger = lex.get("tiger")
+    assert tiger is not None
+    assert tiger.senses[Sense.VISION].get("size", 0) > 0        # "big" from sentence 1
+    assert tiger.senses[Sense.EMOTION].get("fear", 0) > 0       # "dangerous" via "It"
+    assert tiger.senses[Sense.ACTION].get("fast", 0) > 0        # "fast" via "It"

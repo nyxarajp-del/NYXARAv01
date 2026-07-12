@@ -72,6 +72,44 @@ def test_curiosity_habituates_on_re_perception():
 
 
 # --------------------------------------------------------------------------- #
+# Perception → grounded meaning (experience → understanding)
+# --------------------------------------------------------------------------- #
+def test_perception_grounds_meaning_into_the_lexicon():
+    """The headline wire: what the agent PERCEIVES becomes grounded meaning, not just a
+    transition. An EmbodiedAgent given a GroundedLexicon grounds the entities it reads from
+    its own authored world — meaning learned from lived perception, no LLM, no network."""
+    from nyxara.cognition.grounded_understanding import GroundedLexicon
+
+    lex = GroundedLexicon()                            # seeded, offline
+    with EmbodiedAgent(seed=11, grounder=lex) as agent:
+        for _ in range(3):
+            agent.step("write_note")                  # author perceivable notes
+        for _ in range(6):
+            agent.step("perceive")                    # read them back with the senses
+        st = agent.status()
+        assert st["distinct_entities"] > 0, "the senses never perceived any entity"
+        assert st["grounded_concepts"] > 0, \
+            "perception did not become grounded meaning — the wire is dead"
+        # every entity the agent grounded is now really understood in the senses
+        for name in agent._grounded:
+            act = lex.activate(name)
+            assert act.grounded and act.modalities, f"{name!r} perceived but not grounded"
+
+
+def test_grounding_is_optional_and_never_breaks_the_loop():
+    """With no grounder the loop runs exactly as before; a broken grounder is swallowed."""
+    class _BoomGrounder:
+        def learn_from_frame(self, _frame):
+            raise RuntimeError("grounding exploded")
+
+    with EmbodiedAgent(seed=12, grounder=_BoomGrounder()) as agent:
+        agent.step("write_note")
+        tr = agent.step("perceive")                   # must not raise despite the boom
+        assert tr.action == "perceive"
+        assert agent.status()["grounded_concepts"] == 0
+
+
+# --------------------------------------------------------------------------- #
 # Learning real dynamics
 # --------------------------------------------------------------------------- #
 def test_world_model_learns_action_conditioned_dynamics():

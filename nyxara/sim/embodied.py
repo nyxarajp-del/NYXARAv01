@@ -142,6 +142,7 @@ class EmbodiedAgent:
                  live_enabled: bool = False, live: Any = None,
                  explore_weight: float = 0.6, reward_weight: float = 1.0,
                  epsilon: float = 0.1, env_model: Optional[EnvironmentModel] = None,
+                 grounder: Any = None,
                  planner: Optional[Callable[[Tuple[float, ...], List[str]],
                                             Optional[str]]] = None) -> None:
         self.env = env if env is not None else RealEnvironment(seed=seed)
@@ -177,9 +178,17 @@ class EmbodiedAgent:
         self.live_enabled = bool(live_enabled)
         self._live = live
 
+        # Grounded understanding (optional): a nyxara.cognition.grounded_understanding
+        # .GroundedLexicon. When present, every real percept the loop binds is turned into
+        # *grounded meaning* — the entities it perceives (a red apple, a barking dog) accrue
+        # multimodal features in the senses, so perception becomes understanding, not just a
+        # transition signal. Best-effort and fail-soft: a grounding fault never breaks the loop.
+        self.grounder = grounder
+
         # perceptual long-term bookkeeping
         self._perceived: set = set()                  # artifact paths already sensed
         self._distinct_entities: set = set()          # cumulative entity vocabulary
+        self._grounded: set = set()                   # entities turned into grounded meaning
         self._novelty_ewma = 0.0
         self._last_state_surprise = 0.0
         self._note_seq = 0
@@ -393,6 +402,23 @@ class EmbodiedAgent:
         except Exception:  # noqa: BLE001
             return -1.0
 
+    def _ground_percept(self, bound: Any) -> None:
+        """Turn a freshly-bound percept into grounded meaning (best-effort, fail-soft).
+
+        This is the wire that makes NYXARA *understand* what she perceives rather than only
+        reacting to it: the percept's entities become grounded symbols, its descriptors become
+        multimodal features, and its channel (image→vision, audio→sound) records which sense
+        she perceived it through. A grounding fault is silently ignored — perception must never
+        crash on it."""
+        if self.grounder is None:
+            return
+        try:
+            rep = self.grounder.learn_from_frame(bound)
+            for name in rep.get("grounded", ()):
+                self._grounded.add(name)
+        except Exception:  # noqa: BLE001 — grounding is a capability, never required by the loop
+            pass
+
     def _perceive_artifact(self) -> Tuple[float, float, bool, Optional[Dict[str, Any]],
                                           Dict[str, float]]:
         """Read one artifact with the right sense, bind it, and reward resolved curiosity."""
@@ -410,6 +436,7 @@ class EmbodiedAgent:
         surprise = self.percept_predictor.observe(bound, boost_salience=True)
         for e in bound.entities:
             self._distinct_entities.add(e.lower())
+        self._ground_percept(bound)                   # perception → grounded meaning
         nov = bool(surprise.novelty) and fresh
         # curiosity reward: novelty + resolved surprise, habituating on re-perception
         base = 0.2 if fresh else 0.02
@@ -438,6 +465,7 @@ class EmbodiedAgent:
         percept = Percept.from_webpage(page)          # low trust; injection already screened
         bound, _ = self.binder.perceive(percept)
         surprise = self.percept_predictor.observe(bound, boost_salience=True)
+        self._ground_percept(bound)                   # perception → grounded meaning (data-only)
         hostile = bool(getattr(page, "injection", None) and page.injection.suspicious)
         nov = bool(surprise.novelty)
         # genuine curiosity, but a hostile page is mildly aversive (learned caution — still data)
@@ -476,6 +504,7 @@ class EmbodiedAgent:
         surprise = self.percept_predictor.observe(bound, boost_salience=True)
         for e in bound.entities:
             self._distinct_entities.add(e.lower())
+        self._ground_percept(bound)                   # live perception → grounded meaning
         nov = bool(surprise.novelty)
         curiosity = 0.2 + 0.4 * min(1.0, surprise.surprise) + (0.2 if nov else 0.0)
         self._note_novelty(1.0 if nov else 0.0)
@@ -637,6 +666,7 @@ class EmbodiedAgent:
     def status(self) -> Dict[str, Any]:
         return {"steps": self.steps_taken, "percepts": len(self.binder.frame),
                 "distinct_entities": len(self._distinct_entities),
+                "grounded_concepts": len(self._grounded),
                 "perceived_artifacts": len(self._perceived),
                 "novelty_rate": round(self._novelty_ewma, 3),
                 "world_transitions": len(self.world_model),
