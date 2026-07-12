@@ -155,6 +155,51 @@ def test_still_declines_on_nonrelational_chat():
     assert eng.generalize("hi there, how are you doing today?") is None
 
 
+# --------------------------------------------------------------------------- #
+# Widened reach: copula/comparative extraction, more seed bases, autonomous growth
+# --------------------------------------------------------------------------- #
+def test_copula_comparative_extraction():
+    """A linked predicate a bare content verb misses: "is bigger than" / "is part of"."""
+    from nyxara.mind.transfer import extract_relations
+    rels = {str(p) for p in extract_relations(
+        "the server is faster than the client and the client is slower than the server")}
+    assert "faster(server, client)" in rels and "slower(client, server)" in rels
+    parts = {str(p) for p in extract_relations(
+        "the wheel is part of the car and the engine is part of the car")}
+    assert "part_of(wheel, car)" in parts and "part_of(engine, car)" in parts
+
+
+def test_copula_extraction_does_not_fabricate_on_chat():
+    from nyxara.mind.transfer import extract_relations
+    # still no genuine relational skeleton in chat → empty (≥2 relations required)
+    assert extract_relations("hi there, how are you doing today?") == []
+
+
+def test_seed_library_grew_with_more_bases():
+    names = {s.name for s in seed_library()}
+    for expected in ("reinforcement_loop", "diffusion_gradient", "catalysis", "lever_tradeoff"):
+        assert expected in names
+    assert len(seed_library()) >= 13
+
+
+def test_transfer_onto_a_new_seed_base():
+    """A reward→behaviour loop maps onto the new reinforcement base by its own structure."""
+    eng = RelationalTransferEngine()
+    tr = eng.generalize("the reward strengthens the behaviour and the behaviour produces "
+                        "the reward")
+    assert tr is not None and tr.base_domain == "reinforcement_loop"
+
+
+def test_self_growth_is_on_by_default():
+    """learn_from_experience defaults on: a novel field recovered from prose is distilled into
+    the store by her own action, so it is recognised next time — no LLM, no manual teaching."""
+    eng = RelationalTransferEngine()
+    before = set(eng.store.names())
+    eng.generalize("in the gadget the emitter zaps the mote and the mote whirls the emitter")
+    after = set(eng.store.names())
+    assert len(after) > len(before), "a transferred novel field should be learned into the store"
+
+
 def test_router_routes_novel_domain_to_own_faculty_not_the_teacher():
     """The decisive end-to-end check: with a teacher available, a genuinely novel-vocabulary
     prompt is answered by one of NYXARA's OWN faculties, not handed to the LLM.

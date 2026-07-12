@@ -80,6 +80,17 @@ def test_faculty_route_for_exact_math():
     assert _psr().plan("what is 12 * 12").route is Route.FACULTY
 
 
+def test_faculty_route_for_general_symbolic_derivation():
+    """A stated law rearranged for a variable is now solved by her own first-principles faculty
+    (verifiable), so with a teacher available it still routes to FACULTY, never the teacher."""
+    assert _psr().plan("given F = m*a, solve for a").route is Route.FACULTY
+
+
+def test_faculty_route_for_first_order_syllogism():
+    """The classic syllogism — a universal rule + a fact — is derived by her own logic faculty."""
+    assert _psr().plan("all humans are mortal. socrates is a human.").route is Route.FACULTY
+
+
 def test_self_route_when_competent_and_low_risk():
     plan = _psr().plan("How do I harden my network firewall?")
     assert plan.route is Route.SELF

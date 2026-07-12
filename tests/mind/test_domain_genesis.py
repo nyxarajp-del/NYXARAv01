@@ -106,6 +106,27 @@ def test_learning_can_be_disabled():
     assert shared.store.get(res.theory.label) is None
 
 
+def test_multi_hop_transitive_closure_to_a_fixpoint():
+    """Transitivity is iterated to a fixpoint: a→b→c→d yields the whole chain, not just one hop."""
+    q = ("the alpha zorbs the beta and the beta zorbs the gamma "
+         "and the gamma zorbs the delta")
+    theory = DomainGenesisEngine().build(q)
+    assert theory is not None
+    proj = {str(p) for p in theory.inferences}
+    assert "zorb(alpha, gamma)" in proj        # one hop
+    assert "zorb(alpha, delta)" in proj        # two hops — only a fixpoint recovers this
+    assert "zorb(beta, delta)" in proj
+
+
+def test_induces_a_composition_law():
+    """R(a,b) ∧ S(b,c) ∧ T(a,c) ⇒ T = R∘S, induced from the field's own structure."""
+    q = ("the manager hires the worker and the worker builds the widget "
+         "and the manager owns the widget")
+    theory = DomainGenesisEngine().build(q)
+    assert theory is not None
+    assert any(law.kind == "composition" for law in theory.laws)
+
+
 def test_theory_and_law_serialize():
     theory = DomainGenesisEngine().build(_ALIEN)
     assert theory is not None

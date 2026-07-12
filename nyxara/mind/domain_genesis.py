@@ -206,76 +206,135 @@ class DomainGenesisEngine:
         laws: List[DomainLaw] = []
         inferences: List[Predicate] = []
         seen_inf: set = set()
+        # the working fact set GROWS with projections, so closure is multi-step (a fixpoint):
+        # a projected edge can itself feed the next transitive/compositional step.
+        facts: set = set(stated)
+        law_index: Dict[Tuple[str, str], DomainLaw] = {}
 
-        def add_inf(p: Predicate) -> None:
+        def note_law(kind: str, statement: str, rel: str = "", support: int = 1) -> None:
+            law = law_index.get((kind, rel))
+            if law is None:
+                law = DomainLaw(kind, statement, rel, support)
+                law_index[(kind, rel)] = law
+                laws.append(law)
+            else:
+                law.support += support
+
+        def add_pred(p: Predicate) -> None:
             if str(p) not in seen_inf:
                 seen_inf.add(str(p))
                 inferences.append(p)
 
-        # per-relation adjacency, for transitivity and symmetry
-        by_rel: Dict[str, List[Tuple[str, str]]] = {}
-        for (n, a, b) in edges:
-            by_rel.setdefault(n, []).append((a, b))
+        def project(name: str, a: str, b: str) -> bool:
+            """Add a projected binary edge to the working set + inferences (once)."""
+            if a == b or (name, a, b) in facts:
+                return False
+            facts.add((name, a, b))
+            add_pred(relation(name, entity(a), entity(b)))
+            return True
 
-        # 1) TRANSITIVITY / chaining: R(a,b) ∧ R(b,c) ⇒ R(a,c) (when unstated)
-        for name, pairs in by_rel.items():
-            succ: Dict[str, List[str]] = {}
-            for a, b in pairs:
-                succ.setdefault(a, []).append(b)
-            chains = 0
-            for a, b in pairs:
-                for c in succ.get(b, []):
-                    if a != c and (name, a, c) not in stated:
-                        add_inf(relation(name, entity(a), entity(c)))
-                        chains += 1
-            if chains:
-                laws.append(DomainLaw("transitivity",
-                                      f"'{name}' chains through the domain (a→b, b→c ⇒ a→c)",
-                                      relation=name, support=chains))
+        by_rel_stated: Dict[str, set] = {}
+        for (n, a, b) in stated:
+            by_rel_stated.setdefault(n, set()).add((a, b))
 
-        # 2) SYMMETRY: R(a,b) ∧ R(b,a) ⇒ R is symmetric; project the missing mirror elsewhere
-        for name, pairs in by_rel.items():
-            pset = set(pairs)
-            if any((b, a) in pset for (a, b) in pairs):
-                laws.append(DomainLaw("symmetry", f"'{name}' is symmetric (holds both ways)",
-                                      relation=name, support=1))
-                for a, b in pairs:
-                    if (b, a) not in pset and a != b and (name, b, a) not in stated:
-                        add_inf(relation(name, entity(b), entity(a)))
+        # 1) SYMMETRY (from stated): R(a,b) ∧ R(b,a) ⇒ R symmetric; project the missing mirror.
+        symmetric: set = set()
+        for name, pairs in by_rel_stated.items():
+            if any((b, a) in pairs for (a, b) in pairs):
+                symmetric.add(name)
+                note_law("symmetry", f"'{name}' is symmetric (holds both ways)", name)
+                for (a, b) in list(pairs):
+                    if (b, a) not in pairs:
+                        project(name, b, a)
 
-        # 3) INVERSE: R(a,b) ∧ S(b,a) with R≠S ⇒ S is the converse of R; project S over other R.
-        #    Each unordered {R, S} pair yields one converse law (deduped), not two mirror copies.
+        # 2) INVERSE (from stated): S(b,a) mirrors R(a,b), R≠S ⇒ S is the converse of R.
         inverse_seen: set = set()
-        for (rn, ra, rb) in edges:
-            for (sn, sa, sb) in edges:
+        for (rn, ra, rb) in list(stated):
+            for (sn, sa, sb) in list(stated):
                 if rn != sn and (sa, sb) == (rb, ra):
                     key = tuple(sorted((rn, sn)))
                     if key not in inverse_seen:
                         inverse_seen.add(key)
-                        laws.append(DomainLaw(
-                            "inverse",
-                            f"'{sn}' is the converse of '{rn}' (S(b,a) mirrors R(a,b))",
-                            relation=f"{rn}/{sn}", support=1))
-                    for (n2, a2, b2) in edges:
-                        if n2 == rn and (sn, b2, a2) not in stated and a2 != b2:
-                            add_inf(relation(sn, entity(b2), entity(a2)))
+                        note_law("inverse",
+                                 f"'{sn}' is the converse of '{rn}' (S(b,a) mirrors R(a,b))",
+                                 f"{rn}/{sn}")
+                    for (n2, a2, b2) in list(stated):
+                        if n2 == rn:
+                            project(sn, b2, a2)
 
-        # 4) FEEDBACK LOOP: a cycle over the (name-agnostic) relational graph is self-sustaining —
-        #    project the higher-order closure (the last step sustains the first), the systematic
-        #    glue every seed schema carries, here induced from the alien domain itself.
+        # 3) COMPOSITION (from stated): R(a,b) ∧ S(b,c) ∧ T(a,c) ⇒ T = R∘S; project T over chains.
+        comp_seen: set = set()
+        for (rn, ra, rb) in list(stated):
+            for (sn, sa, sb) in list(stated):
+                if sa != rb or sb == ra:
+                    continue
+                for (tn, ta, tb) in list(stated):
+                    if (ta, tb) != (ra, sb) or tn in (rn, sn):
+                        continue
+                    if (rn, sn, tn) not in comp_seen:
+                        comp_seen.add((rn, sn, tn))
+                        note_law("composition",
+                                 f"'{tn}' is '{rn}' then '{sn}' (T = R∘S)", f"{rn}∘{sn}={tn}")
+                    for (n1, x, y) in list(stated):
+                        if n1 != rn:
+                            continue
+                        for (n2, y2, z) in list(stated):
+                            if n2 == sn and y2 == y:
+                                project(tn, x, z)
+
+        # 4) TRANSITIVITY to a FIXPOINT (multi-hop): R(a,b) ∧ R(b,c) ⇒ R(a,c), iterated until no
+        #    new edge appears — so a→b→c→d yields the whole chain, not just one hop. Symmetric
+        #    relations are skipped (their closure is an uninformative full mesh).
+        changed = True
+        while changed:
+            changed = False
+            by_rel: Dict[str, List[Tuple[str, str]]] = {}
+            for (n, a, b) in facts:
+                if n not in symmetric:
+                    by_rel.setdefault(n, []).append((a, b))
+            for name, pairs in by_rel.items():
+                succ: Dict[str, List[str]] = {}
+                for a, b in pairs:
+                    succ.setdefault(a, []).append(b)
+                for a, b in list(pairs):
+                    for c in succ.get(b, []):
+                        if a != c and (name, a, c) not in facts:
+                            if project(name, a, c):
+                                note_law("transitivity",
+                                         f"'{name}' chains through the domain (a→b, b→c ⇒ a→c)",
+                                         name)
+                                changed = True
+
+        # 5) FEEDBACK LOOP: a cycle over the relational graph is self-sustaining — project the
+        #    higher-order closure (the last step sustains the first), the systematic glue.
         cycle = self._find_cycle(edges)
         if cycle:
             first, last = cycle[0], cycle[-1]
             fp = relation(first[0], entity(first[1]), entity(first[2]))
             lp = relation(last[0], entity(last[1]), entity(last[2]))
-            closure = relation("sustains", lp, fp)
-            add_inf(closure)
+            add_pred(relation("sustains", lp, fp))
             names = "→".join(e[1] for e in cycle) + "→" + cycle[-1][2]
-            laws.append(DomainLaw("feedback_loop",
-                                  f"the domain closes a self-sustaining loop ({names})",
-                                  relation="sustains", support=len(cycle)))
+            note_law("feedback_loop", f"the domain closes a self-sustaining loop ({names})",
+                     "sustains", len(cycle))
 
-        # 5) HUB / driver: the highest-degree entity governs the domain (descriptive, not projected
+        # 6) ORDERING: a relation that is transitive AND antisymmetric is a strict partial order.
+        transitive_rels = {rel for (kind, rel) in law_index if kind == "transitivity"}
+        for name, pairs in by_rel_stated.items():
+            if name in transitive_rels and name not in symmetric \
+                    and not any((b, a) in pairs for (a, b) in pairs):
+                note_law("ordering", f"'{name}' is a strict order (transitive and antisymmetric)",
+                         name)
+
+        # 7) FUNCTIONAL DEPENDENCY: each source relates to exactly one target under R (a mapping).
+        for name, pairs in by_rel_stated.items():
+            srcs: Dict[str, set] = {}
+            for a, b in pairs:
+                srcs.setdefault(a, set()).add(b)
+            if len(pairs) >= 2 and all(len(v) == 1 for v in srcs.values()) and len(srcs) >= 2:
+                note_law("functional",
+                         f"'{name}' is functional (each source relates to one target)", name)
+
+        # 8) HUB / driver: the highest-degree entity governs the domain (descriptive, not projected
         #    as a fabricated edge — kept honest by leaving it out of `inferences`).
         degree: Dict[str, int] = {}
         for (_n, a, b) in edges:
@@ -284,9 +343,8 @@ class DomainGenesisEngine:
         if degree:
             hub = max(degree, key=lambda e: degree[e])
             if degree[hub] >= 3:
-                laws.append(DomainLaw("hub", f"'{hub}' is the central hub of the domain "
-                                             f"(participates in {degree[hub]} relations)",
-                                      relation="", support=degree[hub]))
+                note_law("hub", f"'{hub}' is the central hub of the domain "
+                                f"(participates in {degree[hub]} relations)", "", degree[hub])
         return laws, inferences
 
     @staticmethod
