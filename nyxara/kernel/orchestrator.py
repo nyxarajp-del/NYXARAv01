@@ -3106,18 +3106,41 @@ class NyxaraCore:
                 return None
             from nyxara.mind.generalization import GeneralizationEngine
             se = getattr(self, "sample_efficient", None)
+            genesis = self._build_domain_genesis_engine(gcfg)
             return GeneralizationEngine(
                 transfer_engine=getattr(self, "transfer_engine", None),
                 skills=getattr(se, "skills", None),
                 open_world=getattr(self, "open_world", None),
                 composer=getattr(se, "composer", None),
+                domain_genesis=genesis,
                 min_confidence=float(getattr(gcfg, "min_confidence", 0.4)),
                 parse_demos_enabled=bool(getattr(gcfg, "parse_demos", True)),
                 parse_tables_enabled=bool(getattr(gcfg, "parse_tables", True)),
                 min_demos=int(getattr(gcfg, "min_demos", 2)),
                 use_transfer=bool(getattr(get_settings().self_model_router,
-                                          "use_transfer", True)))
+                                          "use_transfer", True)),
+                use_domain_genesis=bool(getattr(gcfg, "domain_genesis", True)))
         except Exception:  # noqa: BLE001 — generalization is a capability, never required
+            return None
+
+    def _build_domain_genesis_engine(self, gcfg: Any) -> Any:
+        """Her from-scratch domain-mastery faculty (mind/domain_genesis.py).
+
+        When a genuinely alien field maps onto no known base, this models it from its OWN
+        internal structure — inducing its laws and projecting held-out facts — instead of
+        deferring to the base LLM, and *learns* the field into the shared, memory-backed
+        transfer store so it is recognised (and transferable) next time. Off only when config
+        disables it; never required, fully offline-capable."""
+        try:
+            if not bool(getattr(gcfg, "domain_genesis", True)):
+                return None
+            from nyxara.mind.domain_genesis import DomainGenesisEngine
+            return DomainGenesisEngine(
+                transfer_engine=getattr(self, "transfer_engine", None),
+                min_relations=int(getattr(gcfg, "domain_genesis_min_relations", 2)),
+                min_confidence=float(getattr(gcfg, "domain_genesis_min_confidence", 0.4)),
+                learn_from_experience=bool(getattr(gcfg, "learn_from_experience", True)))
+        except Exception:  # noqa: BLE001 — domain genesis is a capability, never required
             return None
 
     def _ensure_competence_ledger(self) -> Any:

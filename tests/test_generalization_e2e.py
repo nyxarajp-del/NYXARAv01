@@ -86,3 +86,46 @@ def test_forge_gap_tried_once_then_left_as_reply():
                       wanted_tool_args={"text": "yo"})
     out = core._maybe_forge_and_redispatch("x", again, Authority.OWNER)
     assert out.kind == "respond" and out.text == "fallback reply"
+
+
+def test_alien_domain_mastered_from_scratch_in_live_turn_not_the_llm():
+    """A genuinely alien field — fresh verbs, and a relational topology that maps onto no known
+    base — is answered in the live turn by her own domain-genesis faculty: she builds a model of
+    it from its OWN internal structure and projects a held-out fact, rather than falling to the
+    base LLM. (The offline MockProvider would never produce this reasoning.)"""
+    core = NyxaraCore()
+    alien = ("in this device the glorp zephs the drine and the drine zephs the quon "
+             "and the quon flumps the glorp")
+    r = core.process(alien, authority=Authority.OWNER)
+    cand = r.candidate
+    # her OWN faculty answered, and it is explicitly LLM-free. On first sight she models the field
+    # from scratch (domain_genesis); once she has learned it (Rule 4, mid-turn) she recognises it
+    # via her structure-mapper — both are her own reasoning, neither is the base LLM.
+    assert "no LLM" in cand.rationale
+    assert ("domain_genesis" in cand.rationale) or ("relational_transfer" in cand.rationale)
+    assert "[teacher]" not in cand.text and "I understand:" not in cand.text
+    # the reasoning content is hers: a held-out projection over the alien field's own entities
+    assert "glorp" in cand.text and "quon" in cand.text
+    # a normal reply candidate that cleared the gates — nothing was bypassed
+    assert cand.kind == "respond"
+    assert r.gates.get("oversight") == "allowed"
+
+
+def test_alien_domain_is_learned_so_it_is_mastered_next_time():
+    """Rule 4 growth end-to-end: modelling an alien field from scratch distils and learns it into
+    the shared transfer store, so the same core recognises the field on a later turn."""
+    core = NyxaraCore()
+    alien = ("in this device the glorp zephs the drine and the drine zephs the quon "
+             "and the quon flumps the glorp")
+    core.process(alien, authority=Authority.OWNER)
+    store = core.transfer_engine.store
+    learned = [n for n in store.names() if n.startswith("genesis_")]
+    assert learned, "the alien field must be distilled and learned into the shared store"
+
+
+def test_alien_prompt_does_not_hijack_ordinary_chat():
+    core = NyxaraCore()
+    r = core.process("hello, how are you today?", authority=Authority.OWNER)
+    # a greeting must not be treated as an alien domain to model
+    assert "domain_genesis" not in r.candidate.rationale
+    assert "from its own internal structure" not in r.candidate.text

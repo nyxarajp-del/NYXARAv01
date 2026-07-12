@@ -155,9 +155,14 @@ def test_still_declines_on_nonrelational_chat():
     assert eng.generalize("hi there, how are you doing today?") is None
 
 
-def test_router_routes_novel_domain_to_own_transfer_not_the_teacher():
+def test_router_routes_novel_domain_to_own_faculty_not_the_teacher():
     """The decisive end-to-end check: with a teacher available, a genuinely novel-vocabulary
-    prompt is answered by NYXARA's OWN structure-mapper (Route.TRANSFER), not handed to the LLM."""
+    prompt is answered by one of NYXARA's OWN faculties, not handed to the LLM.
+
+    A loose analogical transfer forces the alien field onto a known base; her from-scratch
+    domain-genesis faculty models it from its OWN internal structure and is *preferred* over the
+    forced analogy, so this now routes to :data:`Route.GENERALIZE` (``domain_genesis``). Either
+    way the guarantee that matters holds: her own reasoning, never the teacher."""
     from nyxara.kernel.config import NyxaraSettings, Profile
     from nyxara.mind.router import Router
     from nyxara.mind.self_model_router import PrimarySelfModelRouter, Route
@@ -175,10 +180,16 @@ def test_router_routes_novel_domain_to_own_transfer_not_the_teacher():
     router = Router(_Teacher(), settings=s)
     psr = PrimarySelfModelRouter(self_model=None, router=router, settings=s)
     prompt = "in the gadget the emitter zaps the mote and the mote whirls the emitter"
+    # FIRST encounter (fresh router, empty store): a from-scratch model of the alien field is
+    # preferred over a forced cross-domain analogy — Route.GENERALIZE via domain_genesis.
     plan = psr.plan(prompt)
-    assert plan.route is Route.TRANSFER, f"expected own-transfer, got {plan.route} (LLM fallback)"
-    assert plan.transfer is not None and plan.transfer.analogical is True
-    # and the drafted reply is her own projected inference, reported as a faculty (not a handoff)
+    assert plan.route is Route.GENERALIZE, \
+        f"expected her own from-scratch faculty, got {plan.route} (LLM fallback)"
+    assert plan.generalization is not None
+    assert plan.generalization.source == "domain_genesis"
+    # the drafted reply is her own reasoning, reported as a faculty (never the teacher). By now
+    # the field is learned, so re-encountering it is recognised instantly by her structure-mapper
+    # (transfer onto the just-learned schema) — either way her own faculty, never the LLM.
     res = psr.route_respond(prompt)
     assert res.source == "faculty"
-    assert "analogy" in res.text.lower()
+    assert "[teacher]" not in res.text

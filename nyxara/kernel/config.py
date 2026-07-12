@@ -1019,6 +1019,14 @@ class GeneralizationConfig(BaseModel):
     learn_from_experience: bool = True
     # Cap on the number of self-distilled domain schemas retained in the transfer store.
     max_distilled_schemas: int = Field(default=200, ge=1, le=100000)
+    # Domain mastery FROM SCRATCH (mind/domain_genesis.py): when a genuinely alien field maps
+    # onto no known base, model it from its OWN internal structure (induce its laws, project
+    # held-out facts) instead of falling to the base LLM. Off only when disabled; fail-open.
+    domain_genesis: bool = True
+    # Least number of relations extractable from the prompt before a field may be modelled.
+    domain_genesis_min_relations: int = Field(default=2, ge=2, le=64)
+    # A from-scratch model below this confidence is not surfaced (the normal path runs).
+    domain_genesis_min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
 
 
 class RoleCouncilConfig(BaseModel):

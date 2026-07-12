@@ -43,6 +43,7 @@ __all__ = [
     "RelationalTransferEngine",
     "seed_library",
     "lemma",
+    "extract_relations",
 ]
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
@@ -452,45 +453,68 @@ class RelationalTransferEngine:
         free-form chat ("hi, how are you") returns ``[]`` and the engine declines rather than
         inventing structure it cannot see.
         """
-        text = (query or "").lower()
-        toks = _WORD.findall(text)
-        if len(toks) < 3:
-            return []
         rel_vocab: set = set()
         for name in self.store.names():
             s = self.store.get(name)
             if s is not None:
                 rel_vocab |= {n.lower() for n in s.relation_names()}
+        return extract_relations(query, known_relations=rel_vocab)
 
-        # Tier A — known relation vocabulary (exact names -> strict-mappable structure)
-        tier_a = self._extract_between(toks, lambda tok: tok in rel_vocab, lemmatize=False)
+
+def _extract_between(toks: Sequence[str], is_relation, *, lemmatize: bool) -> List[Predicate]:
+    """Emit ``relation(word, left_entity, right_entity)`` for every token accepted by
+    ``is_relation`` that has a distinct entity on either side. Deduped, order preserved."""
+    rels: List[Predicate] = []
+    seen: set = set()
+    for i, tok in enumerate(toks):
+        if not is_relation(tok):
+            continue
+        left = _prev_entity(toks, i)
+        right = _next_entity(toks, i)
+        if not (left and right) or left == right:
+            continue
+        name = lemma(tok) if lemmatize else tok
+        r = relation(name, entity(left), entity(right))
+        if str(r) not in seen:
+            seen.add(str(r))
+            rels.append(r)
+    return rels
+
+
+def extract_relations(query: str,
+                      known_relations: Sequence[str] = ()) -> List[Predicate]:
+    """Recover ``relation(entity, entity)`` facts from free text — the shared, honest,
+    two-tier open-domain extractor used by both the transfer engine and domain genesis.
+
+    * **Tier A** scans for relation words already known (``known_relations`` — exact names,
+      so the recovered structure maps *strictly* onto a known base). If it alone recovers ≥2
+      relations, those are used unchanged — the strict path is preferred.
+    * **Tier B** (open-domain) fires when Tier A is thin: it recovers a relation wherever a
+      **verb-like token sits between two entity-like tokens**, judged by morphology and
+      position rather than a fixed lexicon. This gives a brand-new domain (whose verbs are in
+      no known schema) a relational skeleton at all.
+
+    Honest: a clause with no plausible verb-between-two-entities yields nothing, so free-form
+    chat ("hi, how are you") returns ``[]``. Pass an empty ``known_relations`` for pure
+    open-domain extraction (what a from-scratch domain-genesis pass wants)."""
+    text = (query or "").lower()
+    toks = _WORD.findall(text)
+    if len(toks) < 3:
+        return []
+    rel_vocab = {r.lower() for r in known_relations}
+
+    # Tier A — known relation vocabulary (exact names -> strict-mappable structure)
+    if rel_vocab:
+        tier_a = _extract_between(toks, lambda tok: tok in rel_vocab, lemmatize=False)
         if len(tier_a) >= 2:
             return tier_a
+    else:
+        tier_a = []
 
-        # Tier B — open-domain: any verb-like token flanked by two entities (novel verbs welcome)
-        tier_b = self._extract_between(
-            toks, lambda tok: tok in rel_vocab or _looks_verb(tok), lemmatize=True)
-        return tier_b if len(tier_b) >= 2 else tier_a
-
-    @staticmethod
-    def _extract_between(toks: Sequence[str], is_relation, *, lemmatize: bool) -> List[Predicate]:
-        """Emit ``relation(word, left_entity, right_entity)`` for every token accepted by
-        ``is_relation`` that has a distinct entity on either side. Deduped, order preserved."""
-        rels: List[Predicate] = []
-        seen: set = set()
-        for i, tok in enumerate(toks):
-            if not is_relation(tok):
-                continue
-            left = _prev_entity(toks, i)
-            right = _next_entity(toks, i)
-            if not (left and right) or left == right:
-                continue
-            name = lemma(tok) if lemmatize else tok
-            r = relation(name, entity(left), entity(right))
-            if str(r) not in seen:
-                seen.add(str(r))
-                rels.append(r)
-        return rels
+    # Tier B — open-domain: any verb-like token flanked by two entities (novel verbs welcome)
+    tier_b = _extract_between(
+        toks, lambda tok: tok in rel_vocab or _looks_verb(tok), lemmatize=True)
+    return tier_b if len(tier_b) >= 2 else tier_a
 
 
 def _prev_entity(toks: Sequence[str], i: int) -> Optional[str]:
