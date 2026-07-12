@@ -393,43 +393,63 @@ class Audio:
             return [], self.inspect(path)
 
     # ---- transcription ---- #
-    def transcribe(self, path: str) -> Tuple[Optional[str], str]:
-        """Real speech-to-text via Whisper. We decode and resample the audio ourselves and
-        hand Whisper a 16 kHz mono float array, so it needs neither ``ffmpeg`` nor any extra
-        decode stack — it runs on exactly the samples this module already perceives. The
-        model is loaded once and cached. Degrades honestly to a note when Whisper is absent."""
+    def _transcribe_signal(self, sig: Sequence[float], info: Optional[AudioInfo]
+                           ) -> Tuple[Optional[str], str]:
+        """Whisper transcription of an already-decoded mono signal (shared file/bytes path)."""
         try:
             import whisper  # type: ignore  # noqa: F401
             import numpy as np  # noqa: F401
         except ImportError:
             return None, "whisper not installed; transcription unavailable"
         try:  # pragma: no cover - exercised only with the lib installed
-            sig, info = self.samples(path)
             if not sig:
                 return None, "no audio decoded for transcription"
             sr = info.sample_rate if info is not None and info.sample_rate else _WHISPER_SR
-            audio = _resample_to_16k(sig, sr)
+            audio = _resample_to_16k(list(sig), sr)
             model = _load_whisper(self.whisper_model)
             text = model.transcribe(audio, fp16=False).get("text", "")
             return text.strip(), ""
         except Exception as exc:  # noqa: BLE001
             return None, f"transcription failed: {exc}"
 
-    # ---- full analysis ---- #
-    def analyze(self, path: str, *, transcribe: bool = False) -> AudioAnalysis:
+    def transcribe(self, path: str) -> Tuple[Optional[str], str]:
+        """Real speech-to-text via Whisper. We decode and resample the audio ourselves and
+        hand Whisper a 16 kHz mono float array, so it needs neither ``ffmpeg`` nor any extra
+        decode stack — it runs on exactly the samples this module already perceives. The
+        model is loaded once and cached. Degrades honestly to a note when Whisper is absent."""
         sig, info = self.samples(path)
+        return self._transcribe_signal(sig, info)
+
+    # ---- full analysis ---- #
+    def _analyze_signal(self, sig: Sequence[float], info: Optional[AudioInfo],
+                        transcribe: bool) -> AudioAnalysis:
         if not sig:
             return AudioAnalysis(info=info,
                                  note="no PCM decoded (install soundfile for non-WAV/AIFF)")
         transcript = None
         note = ""
         if transcribe:
-            transcript, note = self.transcribe(path)
+            transcript, note = self._transcribe_signal(sig, info)
         return AudioAnalysis(
             info=info, rms=rms(sig), peak=peak(sig),
             zero_crossing_rate=zero_crossing_rate(sig),
             silence_ratio=silence_ratio(sig, threshold=self.silence_threshold),
             fingerprint=audio_fingerprint(sig), transcript=transcript, note=note)
+
+    def analyze(self, path: str, *, transcribe: bool = False) -> AudioAnalysis:
+        sig, info = self.samples(path)
+        return self._analyze_signal(sig, info, transcribe)
+
+    def analyze_bytes(self, data: bytes, *, transcribe: bool = False) -> AudioAnalysis:
+        """Analyse raw audio *bytes* (WAV/AIFF) — same features as :meth:`analyze`, no temp file.
+
+        This is the intake path for live microphone capture (:mod:`nyxara.senses.live`), which
+        hands over a WAV blob straight from the device. Non-WAV/AIFF bytes that stdlib can't
+        decode return an honest header/note, never a crash."""
+        sig, info = decode_pcm(data)
+        if not sig and info is None:
+            info = parse_header(data)
+        return self._analyze_signal(sig, info, transcribe)
 
     # ---- deduplication ---- #
     def is_duplicate(self, fp_a: int, fp_b: int, *, threshold: Optional[int] = None) -> bool:

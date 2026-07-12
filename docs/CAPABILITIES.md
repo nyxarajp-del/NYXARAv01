@@ -60,7 +60,7 @@ applied to the documentation itself).
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
 | 39 | Language Understanding | `nyxara.mind.llm` | REAL+WIRED |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
-| 41 | Embodied Intelligence | `nyxara.sim.embodied` | REAL |
+| 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
 | 42 | Real-time Decision Making (System 1/2) | `nyxara.mind.dual_process` | REAL+WIRED |
 | 43 | Robustness | `nyxara.guard.shield` | REAL+WIRED |
 | 44 | Reliability | `nyxara.eval.harness` | REAL+WIRED |
@@ -203,6 +203,22 @@ reach; `browse_actions` is high-risk/irreversible (it submits forms) so the gate
 accordingly. The engine is import-guarded: with no `playwright` installed the tools return an
 honest "engine unavailable" note rather than failing (`NYXARA_WEB__BROWSER_ENABLED`, default
 `true`; `pip install playwright && python -m playwright install chromium` makes it real).
+
+**Live real-world perception — she sees, hears, and watches the physical world.** Until now every
+sense took in *stored* media (image/audio files, web pages); `senses/live.py` lets NYXARA grab the
+*live* world directly. `LiveSensor` captures a real **camera frame**, a real **screen frame**, and a
+real **microphone clip** from the actual hardware — genuine device I/O (OpenCV/v4l2, `mss`/Pillow/X11,
+`sounddevice`/`pyaudio`/ALSA) — and returns them as PNG/WAV bytes that flow through the *same*
+`Vision`/`Audio` → `Percept` → binder → predictive-surprise pipeline as everything else (via the new
+`analyze_bytes` intake). This is wired into the embodied loop (`sim/embodied.py`) as three new
+perception-actions — `look` (camera), `watch` (screen), `listen` (mic) — so live intake drives the
+same curiosity, novelty, and world-model learning as reading a file, closing a genuine
+perceive→act→consequence→learn loop on the real world. Because camera/mic are privacy-sensitive it is
+**off by default and double-gated**: it needs the explicit `NYXARA_EMBODIED_LIVE` opt-in *and* the
+runtime oversight gate, per-modality toggles (`NYXARA_EMBODIED_CAMERA`/`_SCREEN`/`_MIC`) narrow it, and
+a modality only ever fires when a real device is actually reachable. On a headless box with no
+camera/display/mic it reports an honest "no device" — it **never fabricates a frame or a sample**
+(`pip install mss sounddevice` — opencv/pillow also work).
 
 ## Privilege escalation (off by default, opt-in)
 

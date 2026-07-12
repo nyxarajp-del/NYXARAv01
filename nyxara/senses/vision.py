@@ -563,6 +563,64 @@ class Vision:
             average_hash=average_hash(gray), difference_hash=difference_hash(gray),
             perceptual_hash=perceptual_hash(gray), ocr_text=ocr_text, note=note)
 
+    def analyze_bytes(self, data: bytes, *, ocr: bool = False, max_dim: int = 256
+                      ) -> ImageAnalysis:
+        """Analyse raw image *bytes* (PNG/BMP) — same result as :meth:`analyze`, no temp file.
+
+        This is the intake path for live camera/screen capture (:mod:`nyxara.senses.live`), which
+        hands over PNG bytes straight from the device. Formats stdlib can't decode (JPEG/WEBP/GIF)
+        return a header-only analysis with a note, exactly like :meth:`analyze`."""
+        info = parse_header(data)
+        dec = decode_image(data)
+        if dec is None:
+            # Pillow can still decode formats stdlib can't (JPEG/WEBP/GIF) from an in-memory buffer.
+            if _HAS_PIL:
+                try:  # pragma: no cover - exercised only with Pillow
+                    import io
+                    with _PILImage.open(io.BytesIO(data)) as im:
+                        rgb = im.convert("RGB")
+                        rgb.thumbnail((max_dim, max_dim))
+                        w, h = rgb.size
+                        px = list(rgb.getdata())
+                        dec = (w, h, px)
+                        if info is None:
+                            info = ImageInfo(im.format or "?", im.width, im.height, len(data))
+                except Exception:  # noqa: BLE001
+                    dec = None
+            if dec is None:
+                return ImageAnalysis(
+                    info=info,
+                    note="could not decode pixels (unsupported format and Pillow absent); "
+                         "header-only analysis")
+        w, h, px = dec
+        gray = gray_from_pixels(w, h, px)
+        if max(w, h) > max_dim and w and h:
+            scale = max_dim / max(w, h)
+            gray = resize_gray(gray, max(1, int(w * scale)), max(1, int(h * scale)))
+        ocr_text = None
+        note = ""
+        if ocr:
+            ocr_text, note = self._ocr_bytes(data)
+        return ImageAnalysis(
+            info=info, dominant_colors=dominant_colors(px),
+            average_hash=average_hash(gray), difference_hash=difference_hash(gray),
+            perceptual_hash=perceptual_hash(gray), ocr_text=ocr_text, note=note)
+
+    def _ocr_bytes(self, data: bytes) -> Tuple[Optional[str], str]:
+        """OCR from in-memory image bytes (Pillow + pytesseract); honest note when absent."""
+        try:
+            import pytesseract  # type: ignore
+        except ImportError:
+            return None, "pytesseract not installed; OCR unavailable"
+        if not _HAS_PIL:
+            return None, "Pillow not installed; OCR unavailable"
+        try:  # pragma: no cover - exercised only with the lib + tesseract binary
+            import io
+            with _PILImage.open(io.BytesIO(data)) as im:
+                return pytesseract.image_to_string(im.convert("L")).strip(), ""
+        except Exception as exc:  # noqa: BLE001
+            return None, f"OCR failed: {exc}"
+
     # ---- deduplication ---- #
     def is_duplicate(self, hash_a: int, hash_b: int, *, threshold: Optional[int] = None
                      ) -> bool:

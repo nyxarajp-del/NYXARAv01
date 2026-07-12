@@ -213,6 +213,89 @@ def test_web_failure_is_a_negative_observation_not_a_crash():
 
 
 # --------------------------------------------------------------------------- #
+# Live real-world perception: camera / screen / mic through the same senses
+# --------------------------------------------------------------------------- #
+class _StubLiveSensor:
+    """A live sensor that yields REAL PNG/WAV bytes (crafted, not fabricated percepts)."""
+
+    def __init__(self, *, camera=True, screen=False, mic=True, boom=False):
+        self._avail = {"camera": camera, "screen": screen, "mic": mic}
+        self._boom = boom
+
+    def available(self):
+        return dict(self._avail)
+
+    def capture(self, kind, **kw):
+        from nyxara.senses.generate import encode_png, identicon_rows
+        from nyxara.senses.live import pcm16_to_wav_bytes
+        if self._boom:
+            raise RuntimeError("device fault")
+        if kind == "camera":
+            return encode_png(24, 24, identicon_rows("cam", size=24, grid=8)), "stub cam"
+        if kind == "mic":
+            return pcm16_to_wav_bytes(b"\x33\x00" * 8000, rate=16000), "stub mic"
+        return None, "stub: unavailable"
+
+
+def test_live_actions_absent_when_disabled():
+    with EmbodiedAgent(seed=20, live_enabled=False) as agent:
+        agent.step("write_note")
+        acts = agent.safe_actions()
+        assert not ({"look", "watch", "listen"} & set(acts))
+
+
+def test_live_actions_gated_on_availability():
+    with EmbodiedAgent(seed=21, live_enabled=True,
+                       live=_StubLiveSensor(camera=True, screen=False, mic=True)) as agent:
+        acts = agent.safe_actions()
+        assert "look" in acts and "listen" in acts   # available modalities offered
+        assert "watch" not in acts                    # unavailable one withheld
+
+
+def test_live_actions_gated_by_oversight():
+    paused = {"open": False}
+    with EmbodiedAgent(seed=22, live_enabled=True, live=_StubLiveSensor(),
+                       gate=lambda: paused["open"]) as agent:
+        assert "look" not in agent.safe_actions()     # gate closed ⇒ no live sensing
+        paused["open"] = True
+        assert "look" in agent.safe_actions()          # gate open ⇒ capability available
+
+
+def test_live_camera_perception_closes_the_loop():
+    """A live camera frame is really sensed, bound, and learned from."""
+    with EmbodiedAgent(seed=23, live_enabled=True, live=_StubLiveSensor()) as agent:
+        before_frame = len(agent.binder.frame)
+        before_tx = len(agent.world_model)
+        tr = agent.step("look")
+        assert tr.action == "look"
+        assert tr.percept is not None                  # a real image percept entered the loop
+        assert "image" in tr.percept.get("tags", [])
+        assert len(agent.binder.frame) > before_frame  # it reached working memory
+        assert len(agent.world_model) > before_tx      # the transition taught the world model
+
+
+def test_live_mic_perception_binds_audio():
+    with EmbodiedAgent(seed=24, live_enabled=True, live=_StubLiveSensor()) as agent:
+        tr = agent.step("listen")
+        assert tr.percept is not None
+        assert "audio" in tr.percept.get("tags", [])
+
+
+def test_live_capture_failure_is_a_negative_observation_not_a_crash():
+    with EmbodiedAgent(seed=25, live_enabled=True, live=_StubLiveSensor(boom=True)) as agent:
+        tr = agent.step("look")                        # must not raise
+        assert tr.reward <= 0.0
+        assert tr.percept is None
+
+
+def test_live_status_reports_availability():
+    with EmbodiedAgent(seed=26, live_enabled=True, live=_StubLiveSensor()) as agent:
+        st = agent.status()
+        assert st["live_enabled"] is True
+        assert st["live_available"] == {"camera": True, "screen": False, "mic": True}
+
+
+# --------------------------------------------------------------------------- #
 # embodied_stream mirroring into a shared planning model
 # --------------------------------------------------------------------------- #
 def test_embodied_stream_mirrors_into_shared_model():

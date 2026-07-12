@@ -128,13 +128,18 @@ class EmbodiedAgent:
     ACTIONS: Tuple[str, ...] = (
         "noop", "observe", "write_note", "write_image", "perceive",
         "create_file", "append", "delete_file", "organize", "web_perceive",
+        "look", "watch", "listen",
     )
+
+    # live real-world perception actions → the live modality they sense
+    _LIVE_ACTIONS: Dict[str, str] = {"look": "camera", "watch": "screen", "listen": "mic"}
 
     def __init__(self, world_model: Any = None, *, env: Optional[RealEnvironment] = None,
                  binder: Optional[Binder] = None, motivation: Optional[MotivationSystem] = None,
                  seed: int = 0, soft_clutter: int = 24, frame_cap: int = 96,
                  web_enabled: bool = False, web_urls: Sequence[str] = (),
                  web: Any = None, gate: Optional[Callable[[], bool]] = None,
+                 live_enabled: bool = False, live: Any = None,
                  explore_weight: float = 0.6, reward_weight: float = 1.0,
                  epsilon: float = 0.1, env_model: Optional[EnvironmentModel] = None,
                  planner: Optional[Callable[[Tuple[float, ...], List[str]],
@@ -165,6 +170,12 @@ class EmbodiedAgent:
         self.web_urls = list(web_urls)
         self._web = web
         self._gate = gate or (lambda: True)
+
+        # live real-world perception (oversight + flag gated): a genuine camera/screen/mic
+        # snapshot each step, sensed through the SAME senses as everything else. Sensitive, so
+        # off unless explicitly enabled; built lazily and injectable for tests.
+        self.live_enabled = bool(live_enabled)
+        self._live = live
 
         # perceptual long-term bookkeeping
         self._perceived: set = set()                  # artifact paths already sensed
@@ -229,7 +240,31 @@ class EmbodiedAgent:
             actions.append("organize")
         if self.web_enabled and self.web_urls and self._gate():
             actions.append("web_perceive")
+        if self.live_enabled and self._gate():
+            avail = self._live_availability()
+            for act, kind in self._LIVE_ACTIONS.items():
+                if avail.get(kind):
+                    actions.append(act)
         return actions
+
+    def live_sensor(self) -> Any:
+        """The live real-world sensor, built on first use (never fatal)."""
+        if self._live is None:
+            try:
+                from nyxara.senses.live import LiveSensor
+                self._live = LiveSensor()
+            except Exception:  # noqa: BLE001 — live perception is a capability, never required
+                self._live = False
+        return self._live or None
+
+    def _live_availability(self) -> Dict[str, bool]:
+        sensor = self.live_sensor()
+        if sensor is None:
+            return {}
+        try:
+            return sensor.available()
+        except Exception:  # noqa: BLE001
+            return {}
 
     def _artifacts(self) -> List[str]:
         """Files in the scratch world that could be perceived, newest first."""
@@ -289,7 +324,7 @@ class EmbodiedAgent:
             return n + 1
         if action == "delete_file":
             return max(1, n - 2)
-        if action in ("perceive", "web_perceive"):
+        if action in ("perceive", "web_perceive", "look", "watch", "listen"):
             return n
         return 1                                      # noop / observe change nothing
 
@@ -319,6 +354,8 @@ class EmbodiedAgent:
             return self._perceive_artifact()
         if action == "web_perceive":
             return self._perceive_web()
+        if action in self._LIVE_ACTIONS:
+            return self._perceive_live(self._LIVE_ACTIONS[action])
         # the original physical ops, delegated to the safe RealEnvironment
         if action in ("create_file", "append", "delete_file", "organize"):
             env_action = "make_dir" if action == "organize" else action
@@ -410,6 +447,52 @@ class EmbodiedAgent:
         self._note_novelty(1.0 if nov else 0.0)
         self._maybe_reset_frame()
         return curiosity, surprise.surprise, nov, bound.to_dict(), {"curiosity": curiosity}
+
+    def _perceive_live(self, kind: str) -> Tuple[float, float, bool, Optional[Dict[str, Any]],
+                                                 Dict[str, float]]:
+        """Sense the *live* world (camera/screen/mic) through the real senses (gated, fail-soft).
+
+        A genuine device snapshot is captured as bytes (PNG for camera/screen, WAV for mic),
+        analysed by the SAME :class:`~nyxara.senses.vision.Vision` /
+        :class:`~nyxara.senses.audio.Audio` used everywhere else, bound, and scored for
+        surprise — so live intake drives curiosity, novelty and world-model learning identically
+        to reading a file. A missing device is an honest negative observation, never a crash."""
+        if not (self.live_enabled and self._gate()):
+            return 0.0, 0.0, False, None, {"curiosity": 0.0}
+        sensor = self.live_sensor()
+        if sensor is None:
+            return -0.05, 0.0, False, None, {"curiosity": -0.05}
+        try:
+            data, note = sensor.capture(kind)
+        except Exception:  # noqa: BLE001 — a device fault is a negative observation, not a crash
+            data, note = None, "capture error"
+        if not data:
+            # honest absence: NYXARA looked/listened and there was nothing there to perceive
+            return -0.05, 0.0, False, None, {"curiosity": -0.05, "live_miss": 1.0}
+        percept = self._sense_live_bytes(kind, data, note)
+        if percept is None:
+            return -0.05, 0.0, False, None, {"curiosity": -0.05}
+        bound, _ = self.binder.perceive(percept)
+        surprise = self.percept_predictor.observe(bound, boost_salience=True)
+        for e in bound.entities:
+            self._distinct_entities.add(e.lower())
+        nov = bool(surprise.novelty)
+        curiosity = 0.2 + 0.4 * min(1.0, surprise.surprise) + (0.2 if nov else 0.0)
+        self._note_novelty(1.0 if nov else 0.0)
+        self._maybe_reset_frame()
+        return curiosity, surprise.surprise, nov, bound.to_dict(), {"curiosity": curiosity}
+
+    def _sense_live_bytes(self, kind: str, data: bytes, note: str) -> Optional[Percept]:
+        """Turn a live capture (PNG/WAV bytes) into a bound-ready percept via the right sense."""
+        src = f"live:{kind}"
+        try:
+            if kind == "mic":
+                from nyxara.senses.audio import Audio
+                return Percept.from_audio(Audio().analyze_bytes(data, transcribe=True), source=src)
+            from nyxara.senses.vision import Vision
+            return Percept.from_image(Vision().analyze_bytes(data, ocr=True), source=src)
+        except Exception:  # noqa: BLE001 — an undecodable capture is just low-information
+            return None
 
     def _sense_file(self, path: str) -> Optional[Percept]:
         """Pick the right sense for an artifact and return a bound-ready percept (best-effort)."""
@@ -559,7 +642,8 @@ class EmbodiedAgent:
                 "world_transitions": len(self.world_model),
                 "env_model_coverage": round(self.env_coverage(), 3),
                 "env_actions_learned": len(self.env_model.templates),
-                "web_enabled": self.web_enabled}
+                "web_enabled": self.web_enabled, "live_enabled": self.live_enabled,
+                "live_available": self._live_availability() if self.live_enabled else {}}
 
     def cleanup(self) -> None:
         self.env.cleanup()
@@ -632,5 +716,37 @@ if __name__ == "__main__":  # pragma: no cover
 
         # 5) it is a genuine *closed* loop — perception is an action with a consequence
         assert "perceive" in actions, "perception never entered the action loop"
+
+    # 6) LIVE real-world perception closes the loop too. On this box there may be no camera/mic,
+    #    so we inject a stub sensor that returns REAL PNG/WAV bytes (crafted, not fabricated
+    #    percepts) to prove the full capture→sense→bind→learn path end-to-end.
+    from nyxara.senses.generate import identicon_rows, encode_png
+    from nyxara.senses.live import pcm16_to_wav_bytes
+
+    class _StubSensor:
+        def available(self):
+            return {"camera": True, "screen": False, "mic": True}
+
+        def capture(self, kind, **kw):
+            if kind == "camera":
+                return encode_png(32, 32, identicon_rows("live-demo", size=32, grid=8)), "stub cam"
+            if kind == "mic":
+                return pcm16_to_wav_bytes(b"\x11\x00" * 8000, rate=16000), "stub mic"
+            return None, "stub: unavailable"
+
+    with EmbodiedAgent(seed=3, live_enabled=True, live=_StubSensor()) as live_agent:
+        opts = live_agent.safe_actions()
+        assert "look" in opts and "listen" in opts and "watch" not in opts, \
+            f"live actions not gated on availability: {opts}"
+        before_tx = len(live_agent.world_model)
+        tr_look = live_agent.step("look")
+        tr_listen = live_agent.step("listen")
+        print(f"\nlive look reward     : {tr_look.reward:+.3f}  percept={bool(tr_look.percept)}")
+        print(f"live listen reward   : {tr_listen.reward:+.3f}  percept={bool(tr_listen.percept)}")
+        assert tr_look.percept and tr_listen.percept, "live capture never produced a percept"
+        assert len(live_agent.binder.frame) > 0, "live percepts never entered working memory"
+        assert len(live_agent.world_model) > before_tx, "live steps taught the world model nothing"
+        print(f"live status          : live_enabled={live_agent.status()['live_enabled']} "
+              f"available={live_agent.status()['live_available']}")
 
     print("\nALL SELF-TESTS PASSED ✓")

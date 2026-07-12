@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 __all__ = ["GenerationResult", "ImageGenerator", "SpeechSynthesizer",
-           "write_png", "identicon_rows"]
+           "encode_png", "write_png", "identicon_rows"]
 
 
 @dataclass
@@ -50,8 +50,8 @@ class GenerationResult:
 # --------------------------------------------------------------------------- #
 # A tiny, dependency-free PNG encoder (RGB, 8-bit)
 # --------------------------------------------------------------------------- #
-def write_png(path: str, width: int, height: int, rows: List[bytes]) -> int:
-    """Write an 8-bit RGB PNG from ``rows`` (each ``width*3`` bytes). Returns bytes written."""
+def encode_png(width: int, height: int, rows: List[bytes]) -> bytes:
+    """Encode an 8-bit RGB PNG in-memory from ``rows`` (each ``width*3`` bytes)."""
     def _chunk(typ: bytes, data: bytes) -> bytes:
         body = typ + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
@@ -63,7 +63,12 @@ def write_png(path: str, width: int, height: int, rows: List[bytes]) -> int:
         raw.append(0)             # filter byte: none
         raw.extend(row)
     idat = zlib.compress(bytes(raw), 9)
-    blob = sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b"")
+    return sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b"")
+
+
+def write_png(path: str, width: int, height: int, rows: List[bytes]) -> int:
+    """Write an 8-bit RGB PNG from ``rows`` (each ``width*3`` bytes). Returns bytes written."""
+    blob = encode_png(width, height, rows)
     with open(path, "wb") as f:
         f.write(blob)
     return len(blob)
