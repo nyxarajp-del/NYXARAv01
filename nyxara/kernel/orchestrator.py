@@ -372,6 +372,12 @@ class NyxaraCore:
         # reload learned novelty/competence so intrinsic drives survive a restart (best-effort)
         if self.motivation is not None:
             self._restore_motivation_state()
+        # inner life — the one faculty that *integrates* the above into a single felt moment
+        # each idle tick (body → mood → self, with the character locked) and generates her own
+        # self-talk from that state. Bound to the core so it always reads the live faculties.
+        self.inner_life = self._build_inner_life() if enable_identity else None
+        if self.inner_life is not None:
+            self._restore_inner_life_state()
         # goals — the objective space, seeded with service to the Master (Rule 1)
         self.goals = goals if goals is not None else (self._build_goals() if enable_goals else None)
         # social — a theory of mind, with the Master modelled from the first turn
@@ -1033,6 +1039,45 @@ class NyxaraCore:
             return MotivationSystem(affect=affect)
         except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
             return None
+
+    def _build_inner_life(self) -> Any:
+        """The unified inner-life faculty (identity/inner_life.py). Bound to ``self`` so it
+        always reads the live soul/affect/interoception/motivation, then integrates them into
+        one felt moment per idle tick and generates her own self-talk from that state."""
+        try:
+            from nyxara.identity.inner_life import InnerLife
+            return InnerLife(core=self)
+        except Exception:  # noqa: BLE001 — identity is a capability, never a hard dependency
+            return None
+
+    def _interoceptive_signals(self) -> Dict[str, Any]:
+        """Measure the *real* interior signals interoception can't get from psutil — backlog
+        (scheduler depth), energy (the affect energy drive), and recent latency/confidence
+        (the signal log) — so the felt body reflects the whole substrate, not just CPU/RAM."""
+        sig: Dict[str, Any] = {}
+        try:
+            if self.scheduler is not None and hasattr(self.scheduler, "pending"):
+                sig["queue_depth"] = len(self.scheduler.pending())
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.affect is not None and "energy" in self.affect.drives:
+                sig["energy"] = float(self.affect.drives["energy"].level)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            log = getattr(self, "_signal_log", None)
+            if log:
+                tail = list(log)[-8:]
+                confs = [c for (_, c, _) in tail if c is not None]
+                lats = [l for (_, _, l) in tail if l is not None]
+                if confs:
+                    sig["confidence"] = sum(confs) / len(confs)
+                if lats:
+                    sig["latency_ms"] = 1000.0 * (sum(lats) / len(lats))
+        except Exception:  # noqa: BLE001
+            pass
+        return sig
 
     # owner-relevant terms lift a queued topic's priority (Rule 1: service outranks curiosity)
     _OWNER_TERMS = ("master", "owner", "jp", "loyal", "protect", "defen", "serve", "safety")
@@ -2440,6 +2485,10 @@ class NyxaraCore:
         import os
         return os.path.join(self._autonomy_state_dir(), "autonomy_motivation.json")
 
+    def _inner_life_state_path(self) -> str:
+        import os
+        return os.path.join(self._autonomy_state_dir(), "autonomy_inner_life.json")
+
     def persist_autonomy_state(self) -> Dict[str, Any]:
         """Checkpoint the state that makes background autonomy *durable*: emergent/adopted
         goals and learned novelty/competence drives. Best-effort; never raises so a save can
@@ -2463,6 +2512,18 @@ class NyxaraCore:
                 saved["motivation"] = True
             except Exception:  # noqa: BLE001
                 pass
+        # the felt state itself — mood, drives, the transient self, body baseline — so she
+        # wakes where she went to sleep instead of resetting to neutral each restart
+        if self.inner_life is not None and hasattr(self.inner_life, "snapshot"):
+            try:
+                path = self._inner_life_state_path()
+                tmp = f"{path}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(self.inner_life.snapshot(), default=str))
+                os.replace(tmp, path)
+                saved["inner_life"] = True
+            except Exception:  # noqa: BLE001
+                pass
         # the learned world dynamics (weights, action embeddings, replay tail) — Rule 7
         if self.world_model is not None:
             try:
@@ -2481,6 +2542,17 @@ class NyxaraCore:
         try:
             with open(self._motivation_state_path(), "r", encoding="utf-8") as f:
                 self.motivation.restore(json.loads(f.read()))
+        except (OSError, ValueError):
+            pass
+
+    def _restore_inner_life_state(self) -> None:
+        """Reload the persisted felt state (mood/drives/self/body) into the live faculty."""
+        import json
+        if self.inner_life is None or not hasattr(self.inner_life, "restore"):
+            return
+        try:
+            with open(self._inner_life_state_path(), "r", encoding="utf-8") as f:
+                self.inner_life.restore(json.loads(f.read()))
         except (OSError, ValueError):
             pass
 
@@ -4590,6 +4662,14 @@ class NyxaraCore:
 
     # ---- identity / social / growth (faculties that colour but never govern) ---- #
     def _feel_threat(self, level: float, *, cause: str = "threat") -> None:
+        # Route through genuine appraisal (a blameworthy other → anger, circumstance → fear),
+        # which also spikes the safety drive. Fall back to affect's direct threat note.
+        if self.inner_life is not None:
+            try:
+                self.inner_life.feel_threat(level, by_other=True, cause=cause)
+                return
+            except Exception:  # noqa: BLE001 — feeling is best-effort, never fatal
+                pass
         if self.affect is None:
             return
         try:
@@ -5426,30 +5506,40 @@ class NyxaraCore:
                     report["wm_causal_events"] = fed
             except Exception:  # noqa: BLE001 — the imagination bridge is best-effort
                 pass
-        # 2) affect tick — mood relaxes toward baseline; drives deplete and reassert
-        if self.affect is not None:
+        # 2) inner life — ONE integrated felt moment: feel the whole body (load, backlog,
+        # energy, latency — not just CPU/RAM), let a genuinely strained body colour mood, age
+        # the affect (mood relaxes, drives reassert), and bend the transient self by that mood
+        # while the character stays locked (Rule 4). She then narrates her own state (Rule 6).
+        if self.inner_life is not None:
             try:
-                self.affect.tick(dt)
-                report["mood"] = round(self.affect.mood.valence, 3)
-            except Exception:  # noqa: BLE001
+                fm = self.inner_life.tick(dt, signals=self._interoceptive_signals())
+                report["mood"] = round(fm.valence, 3)
+                report["comfort"] = round(fm.comfort, 3)
+                report["body"] = fm.body
+                report["sensation"] = fm.sensation
+                report["monologue"] = fm.monologue
+            except Exception:  # noqa: BLE001 — the inner life is best-effort, never fatal
                 pass
-        # 2.5) interoception — feel the substrate (load/latency/energy), let the felt body
-        # colour mood, and report it honestly (Rule 6). The body sense closes the loop:
-        # NYXARA doesn't just carry load, she feels loaded — and it shows in how she speaks.
-        if self.interoception is not None:
-            try:
-                self.interoception.sample()
-                comfort = self.interoception.comfort()
-                report["comfort"] = round(comfort, 3)
-                report["body"] = self.interoception.body_report()
-                report["sensation"] = self.interoception.felt().dominant()
-                # only a body under real strain colours mood; an easy body lets affect relax
-                # toward baseline rather than injecting a tone every idle tick.
-                if self.affect is not None and comfort < 0.7:
-                    self.interoception.push_to_affect(self.affect)
+        else:
+            # degraded path (identity disabled): keep affect/interoception ticking directly
+            if self.affect is not None:
+                try:
+                    self.affect.tick(dt)
                     report["mood"] = round(self.affect.mood.valence, 3)
-            except Exception:  # noqa: BLE001
-                pass
+                except Exception:  # noqa: BLE001
+                    pass
+            if self.interoception is not None:
+                try:
+                    self.interoception.sample()
+                    comfort = self.interoception.comfort()
+                    report["comfort"] = round(comfort, 3)
+                    report["body"] = self.interoception.body_report()
+                    report["sensation"] = self.interoception.felt().dominant()
+                    if self.affect is not None and comfort < 0.7:
+                        self.interoception.push_to_affect(self.affect)
+                        report["mood"] = round(self.affect.mood.valence, 3)
+                except Exception:  # noqa: BLE001
+                    pass
         # 3) goals — re-rank the objective space (service to the Master stays first)
         if self.goals is not None:
             try:
@@ -6807,6 +6897,11 @@ class NyxaraCore:
                 rep["comfort"] = round(self.interoception.comfort(), 3)
                 rep["body"] = self.interoception.body_report()
             except Exception:  # noqa: BLE001 — self-report is best-effort, never fatal
+                pass
+        if self.inner_life is not None and self.inner_life.last is not None:
+            try:
+                rep["monologue"] = self.inner_life.last.monologue
+            except Exception:  # noqa: BLE001
                 pass
         if self.soul is not None:
             rep["voice"] = self.soul.voice().describe()
