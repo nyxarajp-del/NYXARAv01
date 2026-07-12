@@ -85,8 +85,12 @@ def test_scaled_budget_never_raises_on_garbage():
 # --------------------------------------------------------------------------- #
 # estimate_effective_scale: honest floor, bounded amplification, real caveat
 # --------------------------------------------------------------------------- #
-def test_effective_scale_bounded_and_honest_floor():
-    es = estimate_effective_scale(_BIG, reasoner=None)
+def test_effective_scale_bounded_and_honest_floor(tmp_path):
+    # Isolate the foundry data dir so the "no promoted model" guarantee is tested hermetically,
+    # regardless of any model promoted into the ambient default data dir by this environment.
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.paths.data_dir = tmp_path
+    es = estimate_effective_scale(_BIG, reasoner=None, settings=settings)
     assert isinstance(es, EffectiveScale)
     assert 1.0 <= es.amplification <= _AMP_CEILING
     # a bare checkout has no promoted model → nominal unknown, effective 0 (never faked)
