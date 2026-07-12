@@ -59,6 +59,10 @@ _AMP_CEILING = 8.0          # a hard, honest cap: no amplifier stack is ever cla
 _W_TTC = 2.5                # test-time compute is the strongest, best-evidenced amplifier
 _RETRIEVAL_FACTOR = 1.30    # grounding in retrieved evidence, when a retriever/memory is present
 _ENSEMBLE_FACTOR = 1.25     # combining specialist views (council / multi-member), when available
+_VERIFY_FACTOR = 1.35       # grounding the search's *selection* in truth (exact oracle / prover),
+#                             so test-time compute finds correct answers, not merely fluent ones —
+#                             the strongest lever, but only real when both search (TTC) and a
+#                             decidable-domain oracle are actually available.
 
 
 def _capacity(compute: Any) -> float:
@@ -221,6 +225,19 @@ def _has_attr_truthy(reasoner: Any, *names: str) -> bool:
     return any(bool(getattr(reasoner, n, None)) for n in names)
 
 
+def _oracle_available() -> bool:
+    """True iff an exact-oracle faculty is genuinely importable (the ground-truth selector).
+
+    This is what makes grounded verification a *real* amplifier rather than a claimed one — it is
+    only counted when NYXARA can actually decide a domain and select by truth. Never raises."""
+    try:
+        from nyxara.mind.grounded_verifier import ground_truth  # noqa: F401
+        from nyxara.mind.verified_answer import faculty_oracle   # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def estimate_effective_scale(compute: Any = None, *, reasoner: Any = None,
                              settings: Optional[NyxaraSettings] = None) -> EffectiveScale:
     """Measure NYXARA's honest *effective* scale: small model × the amplifiers she can spend now.
@@ -251,12 +268,21 @@ def estimate_effective_scale(compute: Any = None, *, reasoner: Any = None,
 
     # 1) test-time compute — the strongest amplifier: more sampled reasoning, keep verifier-best.
     dcfg = getattr(getattr(settings, "llm", None), "deep_reasoning", None)
-    if dcfg is not None and bool(getattr(dcfg, "enabled", False)) and _provider_real(reasoner):
+    ttc_on = (dcfg is not None and bool(getattr(dcfg, "enabled", False))
+              and _provider_real(reasoner))
+    if ttc_on:
         budget = scaled_budget(compute, dcfg, capacity=cap)
         # normalise the spend to [0,1]: fraction of the rung ladder × log-scaled sample width.
         effort = (budget.max_rung / _RUNG_CEILING) * (
             math.log2(1 + budget.samples) / math.log2(1 + _SAMPLES_CEILING))
         factors["test_time_compute"] = 1.0 + _W_TTC * max(0.0, min(1.0, effort))
+
+    # 1b) grounded verification — the search selecting by *truth* where the domain is decidable
+    #     (mind/grounded_verifier.py). Only counted when the ladder actually runs (there is a
+    #     search to steer), the ground_verifier switch is on, and an exact oracle faculty is
+    #     genuinely importable — otherwise it is silently absent (honest floor).
+    if ttc_on and bool(getattr(dcfg, "ground_verifier", True)) and _oracle_available():
+        factors["grounded_verification"] = _VERIFY_FACTOR
 
     # 2) retrieval — grounded answers need less parametric knowledge (rag / memory present).
     if _has_attr_truthy(reasoner, "retriever", "memory", "knowledge"):
@@ -274,9 +300,9 @@ def estimate_effective_scale(compute: Any = None, *, reasoner: Any = None,
 
     caveat = (
         "Effective-CAPABILITY equivalence on verifiable tasks — NOT a literal parameter count. "
-        "NYXARA runs a small model and trades her own compute (test-time sampling, retrieval "
-        "grounding, ensembling) for quality; the multiplier is bounded ("
-        f"≤{_AMP_CEILING:g}×) and only counts amplifiers available right now."
+        "NYXARA runs a small model and trades her own compute (test-time sampling, selecting by "
+        "ground truth where decidable, retrieval grounding, ensembling) for quality; the "
+        f"multiplier is bounded (≤{_AMP_CEILING:g}×) and only counts amplifiers available right now."
     )
     return EffectiveScale(nominal_params=nominal, nominal_known=known,
                           amplification=amplification, effective_params=effective,
@@ -336,6 +362,9 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"factors         : {es.to_dict()['factors']}")
     assert es.amplification >= 1.0 and es.amplification <= _AMP_CEILING
     assert es.factors.get("test_time_compute", 0) > 1.0   # deep reasoning on by default
+    # grounded verification is counted when the ladder runs and an exact oracle is importable —
+    # the search now selects by truth, the real ceiling-break (Problem #1).
+    assert es.factors.get("grounded_verification", 0) > 1.0
     assert not es.nominal_known and es.effective_params == 0, \
         "no promoted model in a bare checkout → nominal unknown, effective 0 (honest)"
     assert "NOT a literal parameter count" in es.caveat

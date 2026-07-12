@@ -270,6 +270,27 @@ class LLMCouncil:
                    key=lambda i: (answered[i].weight, -i))
         return answered[best].text, f"weighted:{answered[best].provider}"
 
+    # ---- truth beats consensus (the ceiling-break, applied to the ensemble) ---- #
+    @staticmethod
+    def _oracle_consensus(req: LLMRequest,
+                          answered: Sequence[MemberVerdict]) -> Optional[Tuple[str, str]]:
+        """If an exact faculty oracle decides this prompt, return the member answer that carries
+        that ground truth — provably correct beats any synthesised/majority consensus.
+
+        Returns ``None`` on every non-decidable prompt (the common case), so normal deliberation
+        is unchanged. Best-effort and import-guarded; never raises."""
+        try:
+            from nyxara.mind.grounded_verifier import answer_carries_truth, ground_truth
+            truth = ground_truth(req.last_user())
+            if truth is None:
+                return None
+            for v in answered:
+                if answer_carries_truth(truth, v.text):
+                    return v.text.strip(), f"oracle:{v.provider}"
+        except Exception:  # noqa: BLE001 — grounding is additive; defer to normal deliberation
+            return None
+        return None
+
     # ---- vote (weighted majority over normalised short answers) ---- #
     @staticmethod
     def _normalise(text: str) -> str:
@@ -307,6 +328,15 @@ class LLMCouncil:
                            context={"members": seated})
         agreement = self._agreement(answered)
         coverage = self._coverage(verdicts)
+        # Truth beats consensus: a provably-correct member answer wins outright over synthesis or
+        # majority, so the council can't average toward a confident-but-wrong majority on a
+        # verifiable prompt. No-op on non-decidable prompts (normal deliberation below).
+        oracle_pick = self._oracle_consensus(req, answered)
+        if oracle_pick is not None:
+            answer, synthesizer = oracle_pick
+            return CouncilResult(answer=answer, mode=mode, synthesizer=synthesizer,
+                                 verdicts=verdicts, agreement=agreement, coverage=coverage,
+                                 tally={})
         if mode is DeliberationMode.VOTE:
             answer, tally = self._vote(answered)
             synthesizer = "vote"
@@ -360,7 +390,7 @@ if __name__ == "__main__":  # pragma: no cover
             return (self._answer, "stop", Usage(1, 1), None)
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.LOCAL
+    settings.llm.provider = ProviderName.AUTO
 
     # three "open-source"-style members agree the master is JP; one dissents and one is down
     providers = {

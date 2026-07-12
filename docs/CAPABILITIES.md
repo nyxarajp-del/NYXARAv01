@@ -138,11 +138,31 @@ four capabilities — each backed by a test:
   width / wall-clock, scaling *up* from the configured floor only (a bare box is unchanged, a strong
   box thinks harder), so more compute genuinely buys harder thinking; (2) `estimate_effective_scale`
   is a live meter — her promoted model's real `param_count` × a **bounded (≤8×), conservative**
-  amplification from the amplifiers available *right now* (test-time compute, retrieval grounding,
-  ensembling) — reachable from the running system as `core.scale_report()` / `GET /v1/scale`. Honest
-  scope: this is effective-*capability* parity on verifiable tasks, **never** a literal parameter
-  count, and it degrades to `amplification 1.0` when nothing is available. Enabled by default via
-  `llm.deep_reasoning` (a no-op on a keyless box, so the offline path is unchanged).
+  amplification from the amplifiers available *right now* (test-time compute, **selecting by ground
+  truth where decidable**, retrieval grounding, ensembling) — reachable from the running system as
+  `core.scale_report()` / `GET /v1/scale`. Honest scope: this is effective-*capability* parity on
+  verifiable tasks, **never** a literal parameter count, and it degrades to `amplification 1.0` when
+  nothing is available. Enabled by default via `llm.deep_reasoning` (a no-op on a keyless box, so the
+  offline path is unchanged).
+- **#1 / #3 / #29 The ceiling-break — her search now selects by TRUTH, not fluency**
+  (`nyxara.mind.grounded_verifier`). The honest answer to *"NYXARA's reasoning is capped at her
+  1.1B–9B base model; scaffolding polishes the output, it doesn't break the ceiling."* Her deepest
+  search — the always-max effort ladder (`mind.deep_reasoning`: self-consistency → deliberation →
+  MCTS → verified-refine) — used to keep the answer an **intrinsic** verifier scored highest, and
+  that verifier (`router.answer_quality`) *cannot know correctness*; it rewards fluent, non-degenerate
+  prose. So extra test-time compute bought polish, not truth. This pass grounds the selection: a
+  drop-in verifier consults her **exact faculty oracle** (`mind.verified_answer.faculty_oracle`) and
+  the **machine-checkable `Prover` certificate** (`nyxara.growth.prover`) — on a decidable prompt a
+  correct answer scores near 1.0 and a contradiction near 0.0, so the ladder is pushed off the
+  plausible-wrong answer and onto the correct one; on every non-decidable prompt it is *exactly* the
+  intrinsic score (no regression on open-ended turns). It is wired into every search/ensemble surface
+  she owns — the deep-reasoning ladder, MCTS and self-consistency selection (`mind.llm_reasoner`), the
+  refinement loop (`mind.recursive_improver`), the primary router (`mind.self_model_router`), and the
+  council, where a provably-correct member answer now beats a confident-but-wrong majority
+  (`mind.council`). Honest scope: a small base model is not made frontier-level by code — what changed
+  is that on *verifiable* questions her own search, steered by her own verifiers (not the teacher),
+  reaches correct conclusions a single forward pass misses. Gated on by `llm.deep_reasoning.ground_verifier`
+  (default on; a no-op on a keyless box and on any prompt no oracle can decide).
 - **#2 / #36 Council** — agreement is scored semantically (embedding cosine), so confidence
   reflects genuine concurrence.
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes

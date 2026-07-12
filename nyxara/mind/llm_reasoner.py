@@ -38,6 +38,23 @@ from nyxara.mind.self_reasoner import SelfBrain, build_self_brain
 
 __all__ = ["LLMReasoner"]
 
+
+def _selection_verifier() -> Any:
+    """The verifier used to *rank candidates* in a search — grounded in truth where decidable.
+
+    Prefers :func:`~nyxara.mind.grounded_verifier.grounded_verifier` (exact oracle / Prover
+    certificate, falling through to intrinsic quality on non-decidable prompts) so MCTS and
+    self-consistency selection are steered by correctness, not just fluency. Falls back to the
+    intrinsic :func:`~nyxara.mind.router.default_verifier` if grounding is unavailable. Never
+    raises — the offline/open-prompt path is unchanged."""
+    try:
+        from nyxara.mind.grounded_verifier import grounded_verifier
+        return grounded_verifier()
+    except Exception:  # noqa: BLE001 — grounding is additive; keep the intrinsic verifier
+        from nyxara.mind.router import default_verifier
+        return default_verifier()
+
+
 _RISK = {
     "trivial": RiskTier.TRIVIAL, "low": RiskTier.LOW, "moderate": RiskTier.MODERATE,
     "medium": RiskTier.MODERATE, "high": RiskTier.HIGH, "critical": RiskTier.CRITICAL,
@@ -362,8 +379,8 @@ class LLMReasoner:
         """Monte Carlo Tree Search over reasoning steps; returns a decision dict or None."""
         from nyxara.mind.critique import Critic
         from nyxara.mind.mcts_reasoner import MCTSReasoner, MCTSUnavailable
-        from nyxara.mind.router import default_verifier
         cfg = self.settings.llm
+        verifier = _selection_verifier()
         m = self.settings.mcts
         rlsp = None
         rcfg = getattr(self.settings, "rlsp", None)
@@ -382,7 +399,7 @@ class LLMReasoner:
                 rollout_depth=m.rollout_depth, c_puct=m.c_puct, max_seconds=m.max_seconds,
                 temperature=temperature, max_tokens=cfg.max_output_tokens,
                 think_tokens=cfg.reasoning_think_tokens, critic=Critic(),
-                verifier=default_verifier(), rlsp=rlsp)
+                verifier=verifier, rlsp=rlsp)
             result = searcher.search(stimulus=stimulus,
                                      context=self._context_block(stimulus),
                                      system=self._effective_system())
@@ -436,13 +453,13 @@ class LLMReasoner:
         """
         from nyxara.mind.critique import Critic
         from nyxara.mind.deliberate import DeliberativeReasoner
-        from nyxara.mind.router import default_verifier
         cfg = self.settings.llm
         p = cfg.reasoning_passes if passes is None else max(1, int(passes))
         s = cfg.reasoning_samples if samples is None else max(1, int(samples))
-        # when sampling several reasoning paths, pick the best by an INDEPENDENT answer-quality
-        # verifier (search-over-reasoning, B4) rather than the model's own stated confidence.
-        verifier = default_verifier() if s > 1 else None
+        # when sampling several reasoning paths, pick the best by an INDEPENDENT verifier grounded
+        # in truth where decidable (search-over-reasoning, B4) rather than the model's own stated
+        # confidence — so self-consistency selection is steered by correctness, not just fluency.
+        verifier = _selection_verifier() if s > 1 else None
         deliberator = DeliberativeReasoner(
             self.llm, passes=p, samples=s,
             think_tokens=cfg.reasoning_think_tokens,
