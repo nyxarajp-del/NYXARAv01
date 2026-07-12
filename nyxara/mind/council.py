@@ -390,7 +390,7 @@ if __name__ == "__main__":  # pragma: no cover
             return (self._answer, "stop", Usage(1, 1), None)
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.LOCAL
+    settings.llm.provider = ProviderName.AUTO
 
     # three "open-source"-style members agree the master is JP; one dissents and one is down
     providers = {
