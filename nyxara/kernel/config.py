@@ -178,6 +178,7 @@ class FeatureFlags(BaseModel):
     dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
+    self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
@@ -967,8 +968,38 @@ class SelfModelRouterConfig(BaseModel):
     use_transfer: bool = True
     # Minimum systematicity-weighted structural score to accept a transfer (else defer to the LLM).
     transfer_min_score: float = Field(default=1.0, ge=0.0)
+    # Run the unified own-faculty generalization cascade (mind/generalization.py) on a novel /
+    # from-examples prompt — skill-induction from in-prompt demos, relational transfer, open-world
+    # law modelling — before the teacher. Her OWN faculties answer; the LLM is not consulted.
+    use_generalization: bool = True
     # Topic-keyword -> capability-name map, so prompts route to the right self-rating.
     domain_capabilities: Dict[str, str] = Field(default_factory=dict)
+
+
+class GeneralizationConfig(BaseModel):
+    """Unified own-faculty generalization (mind/generalization.py).
+
+    One cascade that lets NYXARA do a genuinely NEW task without being taught: it parses
+    demonstrations / numeric tables straight out of the prompt and runs her real from-examples
+    skill-inducer, relational-transfer engine, and black-box law-modeller — strongest-guarantee
+    first — returning the first genuine, self-verified result or declining honestly. No LLM.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Parse `a -> b` demonstrations out of the prompt and induce a from-examples skill.
+    parse_demos: bool = True
+    # Parse a numeric `x -> y` table out of the prompt and fit a generalizing law.
+    parse_tables: bool = True
+    # Minimum demonstrations required before an in-prompt task may be induced.
+    min_demos: int = Field(default=2, ge=1, le=64)
+    # A generalization result below this confidence is not surfaced (the normal path runs).
+    min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    # Distil a fresh DomainSchema from lived structure and grow the transfer library from it.
+    learn_from_experience: bool = True
+    # Cap on the number of self-distilled domain schemas retained in the transfer store.
+    max_distilled_schemas: int = Field(default=200, ge=1, le=100000)
 
 
 class RoleCouncilConfig(BaseModel):
@@ -1568,6 +1599,10 @@ class ToolForgeConfig(BaseModel):
     clamp_low: bool = True          # force TOOL_CALL/LOW on autonomously-forged tools
     max_fix_attempts: int = Field(default=4, ge=1, le=12)   # write→run→read-error→revise rounds
     test_timeout_s: float = Field(default=5.0, ge=0.5, le=60.0)
+    # Forge the missing tool AND re-dispatch it in the SAME turn (so a novel action is actually
+    # done, not degraded to talk), rather than only forging it post-hoc for next time. The forged
+    # tool still passes the full gate pipeline before it may act.
+    forge_on_demand: bool = True
 
 
 class MetaPromptConfig(BaseModel):
@@ -2312,6 +2347,7 @@ class NyxaraSettings(BaseSettings):
         default_factory=GeneralIntelligenceConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     self_model_router: SelfModelRouterConfig = Field(default_factory=SelfModelRouterConfig)
+    generalization: GeneralizationConfig = Field(default_factory=GeneralizationConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)

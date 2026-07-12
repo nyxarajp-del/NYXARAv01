@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.mind.analogy import AnalogyResult, StructureMapper, entity, relation
 from nyxara.mind.lot import Const, Predicate, Term
@@ -97,6 +97,40 @@ class DomainSchema:
                          | {n.lower() for n in self.relation_names()}
                          | {e.lower() for e in self.entities()})
 
+    # ---- serialization (so a domain learned once survives a restart) ---- #
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "name": self.name,
+            "relations": [_term_to_dict(r) for r in self.relations],
+            "keywords": sorted(self.keywords),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, object]) -> "DomainSchema":
+        rels = [_term_from_dict(r) for r in d.get("relations", [])]  # type: ignore[arg-type]
+        rels = [r for r in rels if isinstance(r, Predicate)]
+        kw = frozenset(str(k).lower() for k in d.get("keywords", []) if k)  # type: ignore[union-attr]
+        return cls(name=str(d.get("name", "")), relations=rels, keywords=kw)
+
+
+def _term_to_dict(t: Term) -> Dict[str, object]:
+    """Recursively serialize a Language-of-Thought term (entity or nested relation) to JSON."""
+    if isinstance(t, Const):
+        return {"k": "c", "n": t.name}
+    if isinstance(t, Predicate):
+        return {"k": "p", "n": t.name, "a": [_term_to_dict(a) for a in t.args]}
+    return {"k": "c", "n": str(t)}
+
+
+def _term_from_dict(d: Dict[str, object]) -> Term:
+    """Inverse of :func:`_term_to_dict`; rebuilds entities and nested higher-order relations."""
+    if not isinstance(d, dict):
+        return Const(str(d))
+    if d.get("k") == "p":
+        args = tuple(_term_from_dict(a) for a in d.get("a", []))  # type: ignore[arg-type]
+        return Predicate(str(d.get("n", "")), args)
+    return Const(str(d.get("n", "")))
+
 
 # --------------------------------------------------------------------------- #
 # The store of known domains — seeded, and grown from lived structure
@@ -104,29 +138,97 @@ class DomainSchema:
 class DomainSchemaStore:
     """Known domains NYXARA can transfer *from*, ranked for a query by surface + structural fit."""
 
-    def __init__(self, schemas: Optional[Sequence[DomainSchema]] = None) -> None:
+    def __init__(self, schemas: Optional[Sequence[DomainSchema]] = None, *,
+                 memory: Any = None, tag: str = "domain_schema",
+                 max_schemas: int = 200) -> None:
         self._schemas: Dict[str, DomainSchema] = {}
         for s in (schemas if schemas is not None else seed_library()):
             self._schemas[s.name] = s
+        # the seed/base domains are permanent; only self-distilled domains are capped/evicted.
+        self._seed_names = set(self._schemas)
+        self.memory = memory
+        self.tag = str(tag)
+        self.max_schemas = max(1, int(max_schemas))
+        self._hydrated = False
 
     def __len__(self) -> int:
+        self._hydrate()
         return len(self._schemas)
 
     def names(self) -> List[str]:
+        self._hydrate()
         return list(self._schemas)
 
     def get(self, name: str) -> Optional[DomainSchema]:
+        self._hydrate()
         return self._schemas.get(name)
 
     def add(self, schema: DomainSchema) -> None:
+        self._hydrate()
         self._schemas[schema.name] = schema
+
+    # ---- persistence: a domain distilled once is reloaded on the next boot ---- #
+    def _hydrate(self) -> None:
+        """Load self-distilled domains from long-term memory (once, best-effort)."""
+        if self._hydrated:
+            return
+        self._hydrated = True
+        if self.memory is None:
+            return
+        try:
+            hits = self.memory.recall("", k=10000, tags=[self.tag], strengthen=False)
+        except Exception:  # noqa: BLE001 — hydration is best-effort, never fatal
+            return
+        for rec, _score in hits:
+            meta = getattr(rec, "metadata", None)
+            data = meta.get("schema") if isinstance(meta, dict) else None
+            if isinstance(data, dict):
+                try:
+                    schema = DomainSchema.from_dict(data)
+                except Exception:  # noqa: BLE001 — skip a corrupt record, keep the rest
+                    continue
+                if schema.name and schema.relations:
+                    self._absorb(schema)
+
+    def _absorb(self, schema: DomainSchema) -> None:
+        """Merge a schema into the store in memory (no re-persist), union-style."""
+        prior = self._schemas.get(schema.name)
+        if prior is not None:
+            seen = {str(r) for r in prior.relations}
+            merged = list(prior.relations) + [r for r in schema.relations if str(r) not in seen]
+            self._schemas[schema.name] = DomainSchema(schema.name, merged,
+                                                      prior.keywords | schema.keywords)
+        else:
+            self._schemas[schema.name] = schema
+
+    def _persist(self, schema: DomainSchema) -> None:
+        if self.memory is None:
+            return
+        try:
+            from nyxara.memory.store import MemoryType
+            self.memory.remember(
+                f"domain schema: {schema.name} "
+                f"({', '.join(sorted(schema.relation_names()))})",
+                mem_type=MemoryType.SEMANTIC, importance=0.6, tags=[self.tag],
+                metadata={"schema": schema.to_dict(), "name": schema.name})
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _evict_over_cap(self) -> None:
+        """Keep the store bounded: drop the oldest self-distilled domains beyond the cap."""
+        distilled = [n for n in self._schemas if n not in self._seed_names]
+        overflow = len(distilled) - self.max_schemas
+        for n in distilled[:max(0, overflow)]:
+            self._schemas.pop(n, None)
 
     def learn(self, name: str, relations: Sequence[Predicate],
               keywords: Sequence[str] = ()) -> DomainSchema:
         """Grow the store from lived structure so a domain met once transfers next time.
 
         Merges into an existing domain of the same name (union of relations/keywords) rather
-        than clobbering it, so recognition and structure *accumulate*."""
+        than clobbering it, so recognition and structure *accumulate*, and persists the result
+        to long-term memory so the growth survives a restart."""
+        self._hydrate()
         rels = list(relations)
         kw = frozenset(k.lower() for k in keywords if k)
         prior = self._schemas.get(name)
@@ -137,6 +239,8 @@ class DomainSchemaStore:
         else:
             schema = DomainSchema(name, rels, kw)
         self._schemas[name] = schema
+        self._evict_over_cap()
+        self._persist(schema)
         return schema
 
     def rank(self, tokens: Sequence[str], target_rel_names: Sequence[str] = ()) -> List[
@@ -145,6 +249,7 @@ class DomainSchemaStore:
 
         A shared *relation name* (the query says "attracts", a domain has ``attracts``) counts
         double a shared surface word — relational structure is what actually transfers."""
+        self._hydrate()
         toks = {t.lower() for t in tokens}
         trn = {n.lower() for n in target_rel_names}
         scored: List[Tuple[float, DomainSchema]] = []
@@ -225,8 +330,11 @@ class RelationalTransferEngine:
 
     def __init__(self, *, store: Optional[DomainSchemaStore] = None,
                  mapper: Optional[StructureMapper] = None, min_score: float = 1.0,
-                 max_bases: int = 4, analogical: bool = True) -> None:
-        self.store = store if store is not None else DomainSchemaStore()
+                 max_bases: int = 4, analogical: bool = True,
+                 learn_from_experience: bool = False, memory: Any = None,
+                 max_schemas: int = 200) -> None:
+        self.store = store if store is not None else DomainSchemaStore(
+            memory=memory, max_schemas=max_schemas)
         self.mapper = mapper if mapper is not None else StructureMapper()
         # A second, opt-in mapper that aligns relations by *structure* even when their names
         # differ — the faculty that lets a genuinely-new domain (its own fresh vocabulary) map
@@ -235,6 +343,10 @@ class RelationalTransferEngine:
         self.mapper_analogical = StructureMapper(analogical=True)
         self.min_score = float(min_score)
         self.max_bases = int(max_bases)
+        # When on, a novel domain recovered from raw text (its relations extracted, not supplied)
+        # is distilled into a DomainSchema and learned — so her transfer library grows from lived
+        # structure, by her own action, and (with a memory) survives a restart.
+        self.learn_from_experience = bool(learn_from_experience)
 
     def learn_domain(self, name: str, relations: Sequence[Predicate],
                      keywords: Sequence[str] = ()) -> DomainSchema:
@@ -250,6 +362,7 @@ class RelationalTransferEngine:
         new domain's relational skeleton directly; otherwise a conservative text extractor
         recovers it from the query. Either way the result's inferences are projected by
         NYXARA's own structure-mapper — never sampled from a language model."""
+        extracted = target_relations is None
         target = list(target_relations) if target_relations else self._extract(query)
         if len(target) < 2:
             return None  # too little structure to transfer honestly
@@ -260,14 +373,12 @@ class RelationalTransferEngine:
         # Pass 1 — STRICT identicality (preferred): a base whose relation names literally match.
         best = self._best_over(self.mapper, [s for _sc, s in ranked[:self.max_bases]], target,
                                analogical=False)
-        if best is not None:
-            return best
 
         # Pass 2 — ANALOGICAL (only if strict found nothing and it is enabled): map the new
         # domain's *structure* onto a known base even though its verbs are unfamiliar. A truly
         # novel domain shares no surface/relation vocabulary, so ranking is uninformative here —
         # consider every known base and let structural corroboration decide.
-        if self.analogical:
+        if best is None and self.analogical:
             bases = [s for _sc, s in ranked] + [self.store.get(n) for n in self.store.names()]
             uniq: List[DomainSchema] = []
             seen_names: set = set()
@@ -277,7 +388,27 @@ class RelationalTransferEngine:
                     uniq.append(s)
             best = self._best_over(self.mapper_analogical, uniq[:max(self.max_bases * 3, 12)],
                                    target, analogical=True)
+
+        # Self-growth: a novel domain recovered from raw text and successfully transferred is worth
+        # keeping — distil its relational skeleton into a DomainSchema so it is recognised (and can
+        # itself serve as a transfer base) next time. Only from extracted structure (not caller-
+        # supplied), and never fatal.
+        if best is not None and extracted and self.learn_from_experience:
+            try:
+                self._distill_and_learn(query, target, tokens)
+            except Exception:  # noqa: BLE001 — growth is best-effort, never breaks a transfer
+                pass
         return best
+
+    def _distill_and_learn(self, query: str, target: Sequence[Predicate],
+                           tokens: Sequence[str]) -> Optional[DomainSchema]:
+        """Turn a freshly-extracted relational skeleton into a learned :class:`DomainSchema`."""
+        label = _label_from(query, tokens, self.store)
+        if not label:
+            return None
+        keywords = [t.lower() for t in tokens
+                    if len(t) >= 4 and t.lower() not in _STOP][:8]
+        return self.store.learn(label, target, keywords)
 
     def _best_over(self, mapper: StructureMapper, schemas: Sequence[DomainSchema],
                    target: Sequence[Predicate], *, analogical: bool) -> Optional[TransferResult]:
@@ -396,6 +527,34 @@ def _looks_verb(tok: str) -> bool:
     return False
 
 
+def _label_from(query: str, tokens: Sequence[str], store: "DomainSchemaStore") -> str:
+    """A short, stable label for a self-distilled domain, from its most distinctive terms.
+
+    Prefers the two longest content tokens that are not already a known relation word, joined —
+    so ``the emitter zaps the mote`` becomes ``emitter_mote``. Deterministic (same query ⇒ same
+    label) so re-meeting a field merges into the same schema rather than fragmenting it."""
+    known: set = set()
+    try:
+        for n in store.names():
+            s = store.get(n)
+            if s is not None:
+                known |= {r.lower() for r in s.relation_names()}
+    except Exception:  # noqa: BLE001
+        known = set()
+    content = [t.lower() for t in tokens
+               if len(t) >= 4 and t.lower() not in _STOP and t.lower() not in known]
+    # keep first-seen order but rank by length; ties broken by position for determinism
+    uniq: List[str] = []
+    for t in content:
+        if t not in uniq:
+            uniq.append(t)
+    uniq.sort(key=lambda w: (-len(w), content.index(w)))
+    picked = uniq[:2]
+    if not picked:
+        return ""
+    return "learned_" + "_".join(sorted(picked))
+
+
 def lemma(word: str) -> str:
     """Fold a surface verb to a stable base form so tense/number don't fragment one relation
     (``pulls``/``pulled``/``pulling`` → ``pull``). Conservative: never shortens below 3 chars."""
@@ -511,7 +670,39 @@ def seed_library() -> List[DomainSchema]:
                    "delegate", "parent", "child", "tree", "authority", "chain"}),
     )
 
-    return [solar, fluid, ecosystem, market, feedback, comms, hierarchy]
+    # Epidemic spread — a contact-driven contagion loop. The base for any diffusion/propagation
+    # process (rumours, adoption, cascading failure): a carrier infects a susceptible, which
+    # swells the infected pool, which drives yet more infection (the higher-order amplification).
+    infected, susceptible = e("infected"), e("susceptible")
+    epidemic = DomainSchema(
+        "epidemic_spread",
+        [
+            r("infects", infected, susceptible),
+            r("increases", infected, susceptible),
+            r("causes", r("infects", infected, susceptible),
+              r("increases", infected, susceptible)),
+        ],
+        frozenset({"virus", "contagion", "outbreak", "epidemic", "spread", "infection",
+                   "transmission", "immunity", "pandemic", "propagate", "diffuse"}),
+    )
+
+    # Natural selection — a variation→selection→inheritance loop. The base for any optimization-
+    # under-pressure process (markets weeding firms, training pruning weights): the environment
+    # selects a trait, the trait raises fitness, fitness raises reproduction, which propagates it.
+    environment, trait, fitness = e("environment"), e("trait"), e("fitness")
+    selection = DomainSchema(
+        "natural_selection",
+        [
+            r("selects", environment, trait),
+            r("raises", trait, fitness),
+            r("propagates", fitness, trait),
+            r("causes", r("raises", trait, fitness), r("propagates", fitness, trait)),
+        ],
+        frozenset({"evolution", "mutation", "adaptation", "gene", "fitness", "species",
+                   "survival", "reproduce", "variation", "inherit"}),
+    )
+
+    return [solar, fluid, ecosystem, market, feedback, comms, hierarchy, epidemic, selection]
 
 
 # --------------------------------------------------------------------------- #
