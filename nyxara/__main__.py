@@ -151,6 +151,8 @@ commands:
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
+  /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
+  /adapt [systems]   adapt to a new environment (model its systems + re-organize her brain under pressure)
   /meta-discover <t> meta-research: invent → sandbox-test → (gated) integrate new theories
   /dream             enter a Dream State: distil logs → prune useless → fix Deep Memory Synapses
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
@@ -263,6 +265,30 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             budget = 48
         print(json.dumps(core.generalize(budget=budget), indent=2, default=str))
+    elif cmd in ("understand", "crack"):
+        # /understand {"dataset": [[0,1],[1,3],[2,5]]}  or  {"family":"affine","params":{"w":[1,2]}}
+        if not arg:
+            print('usage: /understand <json spec> '
+                  '(e.g. {"dataset": [[0,1],[1,3],[2,5]]} or {"family":"affine","params":{"w":[1,2]}})')
+        else:
+            try:
+                spec = json.loads(arg)
+            except (ValueError, TypeError):
+                print("  invalid JSON spec")
+            else:
+                print(json.dumps(core.understand(spec), indent=2, default=str))
+    elif cmd in ("adapt", "environment"):
+        # /adapt            → adapt to a demo environment of hidden alien machines
+        # /adapt <json list> → adapt to declared systems, e.g. [{"family":"affine","params":{"w":[1,2]}}]
+        environment = None
+        if arg:
+            try:
+                environment = json.loads(arg)
+            except (ValueError, TypeError):
+                print("  invalid JSON environment")
+                environment = ...
+        if environment is not ...:
+            print(json.dumps(core.adapt(environment), indent=2, default=str))
     elif cmd in ("meta-discover", "metadiscover", "invent"):
         if not arg:
             print("usage: /meta-discover <topic>")

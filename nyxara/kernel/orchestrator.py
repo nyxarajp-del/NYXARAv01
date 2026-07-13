@@ -675,6 +675,9 @@ class NyxaraCore:
         # the simplest law that generalizes, or honestly reporting she could not crack it. Built
         # after the world / causal / belief models it composes. Gated by ``open_world_generalization``.
         self.open_world = self._build_open_world_generalizer() if enable_growth else None
+        # self-driven environment adaptation — composes open_world + topology + registry (built
+        # after both, since it references them). No LLM in the loop.
+        self.environment_adapter = self._build_environment_adapter() if enable_growth else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -2997,9 +3000,47 @@ class NyxaraCore:
                 novelty=getattr(getattr(self, "eureka", None), "frontier", None),
                 memory=getattr(self, "memory", None),
                 knowledge=getattr(self, "knowledge", None),
+                registry=self._env_registry(),
                 seed=int(_time.time() * 1000) & 0x7FFFFFFF,
             )
         except Exception:  # noqa: BLE001 — open-world generalization is a capability, never required
+            return None
+
+    def _env_registry(self) -> Any:
+        """The persistent memory of cracked environments (built once, shared). Best-effort → None."""
+        cached = getattr(self, "_env_registry_cached", None)
+        if cached is not None:
+            return cached
+        try:
+            from nyxara.kernel.config import get_settings
+            from nyxara.growth.env_registry import EnvironmentRegistry
+            reg = EnvironmentRegistry(settings=get_settings())
+        except Exception:  # noqa: BLE001 — recognition memory is a capability, never required
+            reg = None
+        self._env_registry_cached = reg
+        return reg
+
+    def _build_environment_adapter(self) -> Any:
+        """Self-driven environment adaptation (Rule 4): model an unfamiliar environment with her own
+        faculties and, under real pressure, structurally re-organize her brain (topology growth) to
+        meet it. Composes the open-world generalizer, the topology engine and the environment
+        registry — no LLM in the loop. Gated by the ``environment_adaptation`` feature flag."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = get_settings()
+            if not (getattr(settings.features, "environment_adaptation", True)
+                    and getattr(settings.environment_adaptation, "enabled", True)):
+                return None
+            from nyxara.growth.adaptation import EnvironmentAdapter
+            return EnvironmentAdapter(
+                open_world=getattr(self, "open_world", None),
+                topology=getattr(self, "topology", None),
+                registry=self._env_registry(),
+                growth_source=self._growth_source,
+                cfg=settings.environment_adaptation,
+                settings=settings,
+            )
+        except Exception:  # noqa: BLE001 — environment adaptation is a capability, never required
             return None
 
     def _recent_salient_events(self) -> List[str]:
@@ -3414,7 +3455,17 @@ class NyxaraCore:
                 return None
             from nyxara.growth.foundry import Foundry
             from nyxara.growth.topology import DynamicTopology
-            return DynamicTopology(settings=settings, cfg=settings.topology, foundry=Foundry())
+            # Size the growth ceiling to the REAL machine (CPU/RAM/GPU), not an arbitrary cap:
+            # a bigger box grows a genuinely bigger brain. Best-effort — degrades to the static
+            # ceiling if hardware can't be read.
+            report = None
+            try:
+                from nyxara.kernel.compute import compute_report
+                report = compute_report()
+            except Exception:  # noqa: BLE001 — no introspection ⇒ static ceiling
+                report = None
+            return DynamicTopology(settings=settings, cfg=settings.topology,
+                                   foundry=Foundry(), report=report)
         except Exception:  # noqa: BLE001 — topology growth is a capability, never required
             return None
 
@@ -6607,6 +6658,61 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
+    def understand(self, spec: Dict[str, Any], *, budget: int = 48) -> Dict[str, Any]:
+        """Model a black box handed to her as a *declarative spec* (so it can cross an API boundary).
+
+        A live callable cannot cross the wire, so the Master describes the system instead — either a
+        ``{"dataset": [[x, y], ...]}`` of observed input→output rows (fit the simplest law that
+        generalizes to a held-out row), or a named law ``{"family": "affine", "params": {...},
+        "dims": 1, ...}`` which is rebuilt into a box and cracked by probing. She then models it from
+        first principles with her OWN generalizer (no LLM) and returns the report as a dict.
+        """
+        if self.open_world is None:
+            return {"error": "open_world generalizer unavailable"}
+        try:
+            if isinstance(spec, dict) and spec.get("dataset"):
+                pairs = [(row[0], row[1]) for row in spec["dataset"]
+                         if isinstance(row, (list, tuple)) and len(row) >= 2]
+                label = str(spec.get("label", "dataset"))
+                return self.open_world.model_dataset(pairs, label=label).to_dict()
+            if isinstance(spec, dict) and spec.get("family"):
+                from nyxara.growth.open_world import build_system
+                system, domain = build_system(
+                    spec["family"], spec.get("params", {}),
+                    dims=int(spec.get("dims", 1)), kind=str(spec.get("kind", "real")),
+                    low=float(spec.get("low", -6.0)), high=float(spec.get("high", 6.0)),
+                    scalar=spec.get("scalar"))
+                if system is None:
+                    return {"error": f"cannot build a system from family={spec.get('family')!r}"}
+                label = str(spec.get("label", str(spec.get("family"))))
+                return self.open_world.understand(system, domain=domain, budget=budget,
+                                                  label=label).to_dict()
+            return {"error": "spec must contain either 'dataset' or 'family'"}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def adapt(self, environment: Any = None, *, budget: Optional[int] = None,
+              label: str = "environment") -> Dict[str, Any]:
+        """Adapt to an environment — model its systems with her own faculties and, under real
+        pressure, structurally re-organize her brain (topology growth). ``environment`` is a mapping
+        or list of black boxes / declarative ``{family, params}`` specs. With none given she adapts to
+        a small demo environment of hidden alien machines, to show the capability. Returns a dict.
+        """
+        if self.environment_adapter is None:
+            return {"error": "environment adapter unavailable"}
+        try:
+            if environment is None:
+                from nyxara.growth.open_world import build_alien_machine
+                environment = {}
+                for i in range(4):
+                    machine, domain, _secret = build_alien_machine(self._turns + i)
+                    environment[f"alien-{i}"] = (machine, domain)
+                label = "alien-environment"
+            report = self.environment_adapter.adapt(environment, budget=budget, label=label)
+            return report.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
     def meta_discover(self, topic: str) -> Dict[str, Any]:
         """Run one meta-research pass on ``topic`` (best-effort).
 
@@ -7355,6 +7461,20 @@ class NyxaraCore:
         if self.topology is not None:
             growths = self.topology.all_reports()
             rep["topology_growths"] = sum(1 for r in growths if r.grew)
+            try:
+                # the REAL, hardware-derived growth ceiling she can reach on this box
+                rep["topology_ceiling"] = {"max_n_embd": int(self.topology.max_n_embd),
+                                           "max_layers": int(self.topology.max_layers)}
+            except Exception:  # noqa: BLE001
+                pass
+        if getattr(self, "environment_adapter", None) is not None:
+            rep["environment_adaptation"] = "ready"
+            reg = self._env_registry()
+            if reg is not None:
+                try:
+                    rep["environments_remembered"] = len(reg)
+                except Exception:  # noqa: BLE001
+                    pass
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
             try:

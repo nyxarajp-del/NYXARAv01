@@ -132,13 +132,37 @@ class AutonomicLoop:
                 self.mission_executive = None
 
     def _maybe_grow(self) -> None:
-        if not self.growth_every or self.growth_engine is None:
+        if not self.growth_every or self.ticks % self.growth_every != 0:
             return
-        if self.ticks % self.growth_every != 0:
+        if self.growth_engine is not None:
+            try:
+                self.growth_reports.append(self.growth_engine.run())
+            except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+                pass
+        self._maybe_grow_topology()
+
+    def _maybe_grow_topology(self) -> None:
+        """Also let the ALWAYS-ON daemon re-organize her own brain under real capacity pressure.
+
+        The orchestrator's foreground ``idle_maintenance`` already ticks topology; without this the
+        daemon (which may run for days between the Master's turns) never would. Reuses the core's own
+        lived-telemetry capacity signal and champion genome, gauntlet-gated exactly the same way, so
+        the daemon path grows toward the real hardware ceiling too. Best-effort; never fatal."""
+        topo = getattr(self.core, "topology", None)
+        if topo is None:
             return
         try:
-            self.growth_reports.append(self.growth_engine.run())
-        except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+            gate = getattr(getattr(self.core, "oversight", None), "gate", None)
+            if callable(gate) and not gate():
+                return
+            signal = self.core._capacity_signal()
+            source = self.core._growth_source()
+            if signal is None or source is None:
+                return
+            result = topo.maybe_grow(signal, source=source)
+            if result:
+                self.growth_reports.append(result)
+        except Exception:  # noqa: BLE001 — topology growth is a capability, never fatal
             pass
 
     def _maybe_learn(self) -> None:

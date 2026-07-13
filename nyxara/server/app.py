@@ -28,7 +28,7 @@ over-eager request is refused or escalated exactly as it would be at the console
 single bearer token — the Master's credential, this being a single-Master system.
 """
 
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -78,6 +78,28 @@ class DiscoverRequest(BaseModel):
 class GeneralizeRequest(BaseModel):
     # Probe budget for cracking a hidden alien machine from first principles; kept bounded.
     budget: int = Field(default=48, ge=8, le=256)
+
+
+class UnderstandRequest(BaseModel):
+    # Hand NYXARA a black box to crack — declaratively, since a callable can't cross the wire.
+    # Provide EITHER a dataset of observed rows OR a named law family + params to rebuild a box.
+    dataset: Optional[List[List[float]]] = None       # [[x, y], ...] observed input→output rows
+    family: Optional[str] = None                      # a law family name, e.g. "affine"
+    params: Dict[str, Any] = Field(default_factory=dict)
+    dims: int = Field(default=1, ge=1, le=6)
+    kind: str = "real"                                # "real" | "int" | "bool"
+    low: float = -6.0
+    high: float = 6.0
+    label: Optional[str] = None
+    budget: int = Field(default=48, ge=8, le=256)
+
+
+class AdaptRequest(BaseModel):
+    # A brand-new environment as a list of declarative systems ({family, params, ...}); she models
+    # each with her own faculties and, under real pressure, re-organizes her own brain. Bounded.
+    systems: List[Dict[str, Any]] = Field(default_factory=list)
+    budget: int = Field(default=48, ge=8, le=256)
+    label: str = "environment"
 
 
 class BreakthroughRequest(BaseModel):
@@ -367,6 +389,30 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         # No system can cross the wire, so this demonstrates the capability on a hidden,
         # randomly-parameterized alien machine she has never seen — observe→hypothesize→test→model.
         return core.generalize(budget=req.budget)
+
+    @app.post("/v1/understand", dependencies=auth)
+    def understand(req: UnderstandRequest) -> dict:
+        # A callable can't cross HTTP, so the Master hands her a *declarative* black box: either a
+        # dataset of observed input→output rows, or a named law family + params she rebuilds into a
+        # box and cracks by probing. Her own faculties model it — no LLM.
+        spec: Dict[str, Any] = {}
+        if req.dataset:
+            spec["dataset"] = req.dataset
+        if req.family:
+            spec.update({"family": req.family, "params": req.params, "dims": req.dims,
+                         "kind": req.kind, "low": req.low, "high": req.high})
+        if req.label:
+            spec["label"] = req.label
+        if not spec:
+            return {"error": "provide either 'dataset' or 'family'"}
+        return core.understand(spec, budget=req.budget)
+
+    @app.post("/v1/adapt", dependencies=auth)
+    def adapt(req: AdaptRequest) -> dict:
+        # Drop her into a brand-new environment (declared as a list of systems): she models each with
+        # her own faculties and, under real pressure, structurally re-organizes her own brain.
+        environment = req.systems if req.systems else None
+        return core.adapt(environment, budget=req.budget, label=req.label)
 
     @app.post("/v1/breakthrough", dependencies=auth)
     def breakthrough(req: BreakthroughRequest) -> dict:
