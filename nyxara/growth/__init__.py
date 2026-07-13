@@ -192,7 +192,16 @@ from nyxara.growth.open_world import (
     Probe,
     UnderstandingReport,
     build_alien_machine,
+    build_system,
+    rebuild_predict,
 )
+from nyxara.growth.env_registry import EnvironmentProfile, EnvironmentRegistry
+from nyxara.growth.adaptation import (
+    AdaptationReport,
+    EnvironmentAdapter,
+    SystemOutcome,
+)
+from nyxara.growth.topology import hardware_ceiling
 
 __all__ = [
     "AutonomousResearcher",
@@ -225,6 +234,15 @@ __all__ = [
     "CandidateLaw",
     "UnderstandingReport",
     "build_alien_machine",
+    "build_system",
+    "rebuild_predict",
+    # persistent memory of cracked environments + self-driven environment adaptation
+    "EnvironmentProfile",
+    "EnvironmentRegistry",
+    "EnvironmentAdapter",
+    "AdaptationReport",
+    "SystemOutcome",
+    "hardware_ceiling",
     "MetaResearcher",
     "MetaResearchReport",
     "CandidateTheory",

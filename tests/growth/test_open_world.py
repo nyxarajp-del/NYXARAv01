@@ -84,6 +84,97 @@ def test_recovers_boolean_and_as_named_operator():
 
 
 # --------------------------------------------------------------------------- #
+# Max-level law families — the shapes a polynomial can't reach
+# --------------------------------------------------------------------------- #
+import math  # noqa: E402
+
+
+def test_recovers_power_law():
+    rep = _g().understand(lambda x: 3.0 * x ** 1.5, domain=DomainSpec(1, "real", 0.5, 8),
+                          label="power")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.POWER.value
+    assert rep.predict(4.0) == pytest.approx(3.0 * 4.0 ** 1.5, rel=1e-2)
+
+
+def test_recovers_exponential_law():
+    rep = _g().understand(lambda x: 2.0 * math.exp(0.5 * x), domain=DomainSpec(1, "real", 0, 5),
+                          label="exp")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.EXPONENTIAL.value
+    assert rep.predict(4.0) == pytest.approx(2.0 * math.exp(0.5 * 4.0), rel=1e-2)
+
+
+def test_recovers_logarithmic_law():
+    rep = _g().understand(lambda x: 2.5 * math.log(abs(x)) + 1 if x else 1,
+                          domain=DomainSpec(1, "real", 1, 8), label="log")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.LOGARITHMIC.value
+
+
+def test_recovers_rational_law():
+    rep = _g().understand(lambda x: 30.0 / (x + 2.0) + 1.0, domain=DomainSpec(1, "real", 0, 9),
+                          label="rational")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.RATIONAL.value
+    assert rep.predict(4.0) == pytest.approx(30.0 / 6.0 + 1.0, rel=1e-2)
+
+
+def test_recovers_sinusoidal_law():
+    rep = _g().understand(lambda x: 3.0 * math.sin(1.0 * x) + 2.0, domain=DomainSpec(1, "real"),
+                          label="sine")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.SINUSOIDAL.value
+
+
+def test_recovers_gcd_over_integers():
+    rep = _g().understand(lambda xy: math.gcd(int(xy[0]), int(xy[1])),
+                          domain=DomainSpec(2, "int", 1, 12, scalar=False), label="gcd")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.GCD.value
+    assert rep.predict((8, 12)) == 4
+
+
+def test_models_a_stateful_recurrence_fibonacci():
+    """The first family that models a system WITH MEMORY: out[n] = out[n-1] + out[n-2]."""
+    memo = {0: 1, 1: 1}
+
+    def fib(n):
+        n = int(round(n))
+        if n < 0:
+            return 1
+        while n not in memo:
+            k = max(memo)
+            memo[k + 1] = memo[k] + memo[k - 1]
+        return memo[n]
+
+    rep = _g().understand(fib, domain=DomainSpec(1, "int", 0, 20), label="fib")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.RECURRENCE.value
+    assert rep.predict(21) == pytest.approx(fib(21), rel=1e-6)
+
+
+def test_arithmetic_sequence_stays_affine_not_recurrence():
+    """A clean line must NOT be over-explained as a memory law — Occam keeps it affine."""
+    rep = _g().understand(lambda n: 2 * int(round(n)) + 3, domain=DomainSpec(1, "int", 0, 20),
+                          label="arith")
+    assert rep.verdict is Verdict.MODELLED
+    assert rep.law_family == LawFamily.AFFINE.value
+
+
+def test_new_families_serialize_and_rebuild():
+    from nyxara.growth.open_world import rebuild_predict, _to_vec
+    rep = _g().understand(lambda x: 2.0 * math.exp(0.5 * x), domain=DomainSpec(1, "real", 0, 5),
+                          label="exp")
+    w = rep.winner
+    assert w is not None and w.coeffs
+    pred = rebuild_predict(w.family, w.coeffs, dims=1)
+    assert pred is not None
+    spec = DomainSpec(1, "real")
+    assert pred(_to_vec(3.0, spec)) == pytest.approx(rep.predict(3.0), rel=1e-9)
+
+
+# --------------------------------------------------------------------------- #
 # Honesty — when she cannot crack it, she must say so
 # --------------------------------------------------------------------------- #
 def test_unmodellable_random_system_is_honestly_unmodelled():

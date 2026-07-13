@@ -25,9 +25,13 @@ How it works, concretely and *for real* (pure stdlib, deterministic, numpy-free 
    (so each input's effect is isolated), the domain boundaries, then a deterministic spread.
 2. **Hypothesize** — from the ``(input → output)`` pairs it *fits candidate laws from first
    principles*: constant, affine (least squares), low-degree polynomial, multiplicative,
-   modular/periodic, threshold/piecewise, and — for discrete boxes — boolean operators and
-   categorical lookups. Each candidate is ranked by **MDL** (fit + simplicity), so the *simplest
-   law that actually fits* wins — never an over-fit table.
+   modular/periodic, threshold/piecewise; the transcendental/periodic shapes a polynomial cannot
+   reach — power, exponential, logarithmic, rational, and true real-valued sinusoids; structural
+   laws — absolute value, min/max extrema, and integer gcd; a **linear recurrence** for stateful /
+   sequential systems whose next output depends on their own recent outputs (Fibonacci-like,
+   feedback); and — for discrete boxes — boolean operators and categorical lookups. Each candidate
+   is ranked by **MDL** (fit + simplicity), so the *simplest law that actually fits* wins — never an
+   over-fit table.
 3. **Test** — it then runs the experiment a real scientist would: it picks the next probe where
    the surviving candidates **disagree most** (maximum information gain), queries the box there,
    and prunes whatever mispredicts. A handful of decisive experiments, not brute force.
@@ -60,6 +64,8 @@ __all__ = [
     "CandidateLaw",
     "UnderstandingReport",
     "build_alien_machine",
+    "build_system",
+    "rebuild_predict",
 ]
 
 
@@ -76,6 +82,16 @@ class LawFamily(str, Enum):
     THRESHOLD = "threshold"
     BOOLEAN = "boolean"
     CATEGORICAL = "categorical"
+    # --- max-level additions: wider first-principles reach into new environment classes --- #
+    POWER = "power"              # out = a·x^b
+    EXPONENTIAL = "exponential"  # out = a·e^(k·x)
+    LOGARITHMIC = "logarithmic"  # out = a·ln|x| + b
+    RATIONAL = "rational"        # out = a/(x+b) + c
+    SINUSOIDAL = "sinusoidal"    # out = a·sin(ωx) + b·cos(ωx) + c (real periodicity)
+    RECURRENCE = "recurrence"    # out_n = Σ cᵢ·out_(n-i) + b (stateful / sequential systems)
+    ABSOLUTE = "absolute"        # out = a·|x_j| + b
+    EXTREMUM = "extremum"        # out = min/max over the inputs (with scale + offset)
+    GCD = "gcd"                  # out = gcd(x_i, x_j)   (integer structure)
     UNMODELLED = "unmodelled"
 
 
@@ -182,11 +198,15 @@ class CandidateLaw:
     numeric: bool = True
     train_error: float = math.inf
     mdl: float = math.inf
+    # JSON-safe parameters of the law, so a cracked system can be *persisted* and its predictor
+    # rebuilt later (:func:`rebuild_predict`) without re-probing. Empty ⇒ not serialisable
+    # (e.g. a raw lookup that only memorises what it saw).
+    coeffs: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"family": self.family.value, "description": self.description,
                 "params": self.params, "train_error": _round(self.train_error),
-                "mdl": _round(self.mdl)}
+                "mdl": _round(self.mdl), "coeffs": dict(self.coeffs)}
 
 
 @dataclass
@@ -205,6 +225,7 @@ class UnderstandingReport:
     winner: Optional[CandidateLaw] = field(default=None, repr=False)
     samples: List[Tuple[Tuple[float, ...], Any]] = field(default_factory=list, repr=False)
     elapsed_ms: float = 0.0
+    recognized: bool = False   # True ⇒ this system was recognised from the registry, not re-cracked
 
     def predict(self, action: Any) -> Any:
         """Use the learned model to predict the box's output for a *new* action."""
@@ -224,6 +245,7 @@ class UnderstandingReport:
             "holdout_accuracy": _round(self.holdout_accuracy),
             "residual": _round(self.residual),
             "probes_used": self.probes_used,
+            "recognized": self.recognized,
             "candidates": [c.to_dict() for c in self.candidates[:6]],
             "elapsed_ms": _round(self.elapsed_ms, 1),
         }
@@ -373,13 +395,16 @@ class OpenWorldGeneralizer:
 
     def __init__(self, *, world_model: Any = None, causal_model: Any = None,
                  belief_model: Any = None, novelty: Any = None, memory: Any = None,
-                 knowledge: Any = None, seed: int = 0) -> None:
+                 knowledge: Any = None, registry: Any = None, seed: int = 0) -> None:
         self.world_model = world_model
         self.causal_model = causal_model
         self.belief_model = belief_model if belief_model is not None else BeliefModel()
         self.novelty = novelty
         self.memory = memory
         self.knowledge = knowledge
+        # Optional persistent memory of cracked environments (nyxara.growth.env_registry). When
+        # wired, a re-encountered system is RECOGNISED instantly instead of being re-probed.
+        self.registry = registry
         self.seed = int(seed)
 
     # ---------------------------------------------------------------------- #
@@ -399,6 +424,14 @@ class OpenWorldGeneralizer:
         rng = random.Random(self.seed)
         spec = domain or (DomainSpec.infer(example_action) if example_action is not None
                           else DomainSpec())
+
+        # 0. RECOGNISE — if she has cracked this environment before, reuse the saved law instantly
+        # (a few cheap confirmation probes) instead of re-deriving it from scratch. Adaptation is
+        # remembering, not amnesia.
+        recognized = self._recognize(system, spec, t0)
+        if recognized is not None:
+            return recognized
+
         box = _Interactor(system)
 
         # 1. OBSERVE — seed the input space and poke the box.
@@ -427,6 +460,53 @@ class OpenWorldGeneralizer:
         verdict, confidence = self._judge(candidates, acc)
         return self._finish(label, spec, candidates, winner, verdict, confidence, acc,
                             residual, box, t0, fold, usable)
+
+    # ---------------------------------------------------------------------- #
+    # RECOGNITION — reuse a previously-cracked environment instead of re-probing it
+    # ---------------------------------------------------------------------- #
+    def _recognize(self, system: Any, spec: DomainSpec,
+                   t0: float) -> Optional[UnderstandingReport]:
+        """If the registry holds this exact environment (verified by re-poking), return a
+        MODELLED report built straight from the saved law — no full inquiry. Else ``None``."""
+        if self.registry is None:
+            return None
+        try:
+            prof = self.registry.match(system, spec)      # cheap: replays the fingerprint only
+        except Exception:  # noqa: BLE001 — recognition is a shortcut, never required
+            return None
+        if prof is None:
+            return None
+        predict = prof.rebuild()
+        if predict is None:
+            return None
+        try:
+            family = LawFamily(prof.law_family)
+        except ValueError:
+            family = LawFamily.UNMODELLED
+        numeric = family not in (LawFamily.BOOLEAN, LawFamily.CATEGORICAL)
+        winner = CandidateLaw(family, prof.law_description, params=1, predict=predict,
+                              numeric=numeric, coeffs=dict(prof.coeffs), train_error=0.0, mdl=0.0)
+        # count the confirmation probes the match spent, so the report is honest about the cost
+        probes = min(len(prof.fingerprint), getattr(self.registry, "min_checks", 3))
+        return UnderstandingReport(
+            system=prof.label, domain=dict(prof.domain), verdict=Verdict.MODELLED,
+            confidence=float(prof.confidence), law=prof.law_description,
+            law_family=prof.law_family, holdout_accuracy=1.0, residual=0.0,
+            probes_used=probes, candidates=[winner], winner=winner, recognized=True,
+            elapsed_ms=(time.monotonic() - t0) * 1000.0)
+
+    def _remember(self, report: UnderstandingReport) -> None:
+        """Best-effort: persist a freshly-modelled environment so it is recognised next time."""
+        if self.registry is None or report.recognized:
+            return
+        if report.verdict not in (Verdict.MODELLED, Verdict.PARTIAL):
+            return
+        try:
+            prof = self.registry.build_profile(report)
+            if prof is not None:
+                self.registry.save(prof)
+        except Exception:  # noqa: BLE001 — persistence is a capability, never required
+            pass
 
     # ---------------------------------------------------------------------- #
     # STATIC DATASET — crack a law stated as an (input, output) table (no live box)
@@ -524,6 +604,14 @@ class OpenWorldGeneralizer:
             # small discrete space → enumerate it (exhaustive truth is better than sampling)
             if spec.kind == "bool":
                 levels = [0.0, 1.0]
+            elif d == 1:
+                # A single integer axis: enumerate a LONG contiguous run (bounded), so a sequential
+                # law with memory (a linear recurrence) has enough consecutive terms to be induced,
+                # while staying within the stated domain.
+                lo, hi = int(spec.low), int(spec.high)
+                start = max(lo, -8)
+                end = min(hi, start + 23)
+                levels = [float(v) for v in range(start, end + 1)]
             else:
                 lo, hi = int(spec.low), int(spec.high)
                 levels = [float(v) for v in range(max(lo, -4), min(hi, 4) + 1)]
@@ -535,20 +623,26 @@ class OpenWorldGeneralizer:
             seeds.extend(grid)
             return _dedup(seeds)
 
-        bound = max(1.0, spec.high)
-        # origin
-        seeds.append((0.0,) * d)
-        # vary one axis at a time around the origin — isolates each input's effect
+        # Continuous domain: probe *within the stated bounds* only (a law is only defined where the
+        # Master said the system lives — probing outside it invents undefined/complex outputs).
+        lo, hi = float(spec.low), float(spec.high)
+        span = hi - lo if hi > lo else max(1.0, abs(hi))
+        baseline = 0.0 if lo <= 0.0 <= hi else lo   # the "hold other axes here" reference point
+        axis_vals = sorted({round(lo + span * f, 6)
+                            for f in (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0)}
+                           | ({0.0} if lo <= 0.0 <= hi else set()))
+        # vary one axis at a time (others at the baseline) — isolates each input's effect
+        seeds.append((baseline,) * d)
         for axis in range(d):
-            for val in (-bound, -2.0, -1.0, 1.0, 2.0, bound):
-                v = [0.0] * d
+            for val in axis_vals:
+                v = [baseline] * d
                 v[axis] = val
                 seeds.append(tuple(v))
         # a deterministic joint spread so interactions (products) become visible
         for _ in range(max(8, budget // 3)):
-            seeds.append(tuple(rng.uniform(spec.low, spec.high) for _ in range(d)))
-        for combo in ((1.0,) * d, (2.0,) * d, (-1.0,) * d, (bound,) * d):
-            seeds.append(combo)
+            seeds.append(tuple(rng.uniform(lo, hi) for _ in range(d)))
+        for frac in (0.25, 0.5, 0.75, 1.0):
+            seeds.append((round(lo + span * frac, 6),) * d)
         return _dedup(seeds)
 
     def _probe(self, box: _Interactor, vec: Tuple[float, ...], spec: DomainSpec) -> Probe:
@@ -571,6 +665,9 @@ class OpenWorldGeneralizer:
             cands.extend(self._fit_numeric(xs, ys))
             cands.extend(self._fit_modular(xs, ys))
             cands.extend(self._fit_threshold(xs, ys))
+            cands.extend(self._fit_transcendental(xs, ys))
+            cands.extend(self._fit_structural(xs, ys))
+            cands.extend(self._fit_recurrence(xs, ys))
             for c in cands:
                 errs = _numeric_errors(c.predict, xs, ys)
                 c.mdl, c.train_error = _mdl_numeric(errs, c.params)
@@ -590,13 +687,13 @@ class OpenWorldGeneralizer:
         # CONSTANT
         c = _mean(ys)
         out.append(CandidateLaw(LawFamily.CONSTANT, f"out = {c:.4g}", 1,
-                                predict=(lambda _x, c=c: c)))
+                                predict=(lambda _x, c=c: c), coeffs={"c": c}))
         # AFFINE: out = b + Σ wᵢ·xᵢ
         phi = [[1.0] + list(x) for x in xs]
         w = _least_squares(phi, ys)
         if w is not None:
             out.append(CandidateLaw(LawFamily.AFFINE, _affine_str(w), d + 1,
-                                    predict=_affine_pred(w)))
+                                    predict=_affine_pred(w), coeffs={"w": [float(v) for v in w]}))
         # POLYNOMIAL (degree 2: squares + pairwise products), only for small d
         if d <= 3:
             labels, feats = _poly_features(d)
@@ -604,14 +701,210 @@ class OpenWorldGeneralizer:
             w2 = _least_squares(phi2, ys)
             if w2 is not None:
                 out.append(CandidateLaw(LawFamily.POLYNOMIAL, _poly_describe(w2, labels),
-                                        len(feats), predict=_poly_pred(w2, feats)))
+                                        len(feats), predict=_poly_pred(w2, feats),
+                                        coeffs={"w": [float(v) for v in w2], "d": d}))
         # MULTIPLICATIVE: out = c · Πxᵢ
         prod = [math.prod(x) for x in xs]
         denom = sum(p * p for p in prod)
         if denom > 1e-12:
             cm = sum(p * y for p, y in zip(prod, ys)) / denom
             out.append(CandidateLaw(LawFamily.MULTIPLICATIVE, f"out = {cm:.4g}·∏xᵢ", 1,
-                                    predict=(lambda x, cm=cm: cm * math.prod(x))))
+                                    predict=(lambda x, cm=cm: cm * math.prod(x)),
+                                    coeffs={"c": float(cm)}))
+        return out
+
+    # ---- max-level families: transcendental / periodic / rational (single-input) ---- #
+    def _fit_transcendental(self, xs: List[Tuple[float, ...]],
+                            ys: List[float]) -> List[CandidateLaw]:
+        """POWER / EXPONENTIAL / LOG / RATIONAL / SINUSOIDAL — the shapes a polynomial can't reach.
+
+        Single-input only (``d == 1``): these laws are about how one quantity bends, saturates or
+        oscillates, and multi-input versions would overfit. Each is fitted by a *linearising*
+        transform + least squares (so the fit is exact when the law holds), guarded against invalid
+        domains (log/^ of non-positive values), and left to the shared MDL/holdout machinery to
+        accept or reject — a shape that does not truly hold simply loses to a simpler law or fails
+        the fresh-input validation."""
+        if len(xs[0]) != 1:
+            return []
+        out: List[CandidateLaw] = []
+        x1 = [x[0] for x in xs]
+        _MIN_VALID = 5   # enough valid points that a transform fit is real, not two-point luck
+
+        # POWER: y = a·x^b  →  ln y = ln a + b·ln x   (fit on the x>0, y>0 subset)
+        pw = [(v, y) for v, y in zip(x1, ys) if v > 1e-9 and y > 1e-9]
+        if len(pw) >= _MIN_VALID:
+            lw = _least_squares([[1.0, math.log(v)] for v, _ in pw], [math.log(y) for _, y in pw])
+            if lw is not None:
+                a, b = math.exp(lw[0]), lw[1]
+                out.append(CandidateLaw(LawFamily.POWER, f"out = {a:.4g}·x^{b:.4g}", 2,
+                                        predict=(lambda x, a=a, b=b:
+                                                 a * (x[0] ** b) if x[0] > 0 else 0.0),
+                                        coeffs={"a": float(a), "b": float(b)}))
+
+        # EXPONENTIAL: y = a·e^(k·x)  →  ln|y| = ln|a| + k·x   (fit on the single-signed subset)
+        pos = [(v, y) for v, y in zip(x1, ys) if y > 1e-9]
+        neg = [(v, y) for v, y in zip(x1, ys) if y < -1e-9]
+        ex = pos if len(pos) >= len(neg) else neg
+        if len(ex) >= _MIN_VALID:
+            sign = 1.0 if ex is pos else -1.0
+            lw = _least_squares([[1.0, v] for v, _ in ex], [math.log(abs(y)) for _, y in ex])
+            if lw is not None:
+                a, k = sign * math.exp(lw[0]), lw[1]
+                out.append(CandidateLaw(LawFamily.EXPONENTIAL, f"out = {a:.4g}·e^({k:.4g}·x)", 2,
+                                        predict=(lambda x, a=a, k=k: a * math.exp(k * x[0])),
+                                        coeffs={"a": float(a), "k": float(k)}))
+
+        # LOGARITHMIC: y = a·ln|x| + b   (fit on the x≠0 subset)
+        lg = [(v, y) for v, y in zip(x1, ys) if abs(v) > 1e-9]
+        if len(lg) >= _MIN_VALID:
+            lw = _least_squares([[1.0, math.log(abs(v))] for v, _ in lg], [y for _, y in lg])
+            if lw is not None:
+                b, a = lw[0], lw[1]
+                out.append(CandidateLaw(LawFamily.LOGARITHMIC, f"out = {a:.4g}·ln|x| + {b:.4g}", 2,
+                                        predict=(lambda x, a=a, b=b:
+                                                 a * math.log(abs(x[0])) + b if x[0] else b),
+                                        coeffs={"a": float(a), "b": float(b)}))
+
+        # RATIONAL: y = a/(x+p) + c — grid the pole offset p, least-squares a,c for each, keep best.
+        best_rat = self._fit_rational(x1, ys)
+        if best_rat is not None:
+            out.append(best_rat)
+
+        # SINUSOIDAL: y = a·sin(ωx) + b·cos(ωx) + c — grid ω, least-squares [sin,cos,1].
+        best_sin = self._fit_sinusoid(x1, ys)
+        if best_sin is not None:
+            out.append(best_sin)
+        return out
+
+    @staticmethod
+    def _fit_rational(x1: List[float], ys: List[float]) -> Optional[CandidateLaw]:
+        """out = a/(x+p) + c. Solved EXACTLY, not by grid: the identity y·x = (a+c·p) + c·x − p·y
+        is linear in (a+c·p, c, −p), so ordinary least squares over features ``[1, x, y]`` recovers
+        the pole and both coefficients in one shot when the law holds."""
+        if len(x1) < 4:
+            return None
+        w = _least_squares([[1.0, v, y] for v, y in zip(x1, ys)], [v * y for v, y in zip(x1, ys)])
+        if w is None:
+            return None
+        c = w[1]
+        p = -w[2]
+        a = w[0] - c * p                      # w[0] = a + c·p
+        if abs(a) < 1e-9 or any(abs(v + p) < 1e-6 for v in x1):
+            return None                       # degenerate (constant) or a pole sitting on the data
+        sign = "+" if p >= 0 else "-"
+        return CandidateLaw(LawFamily.RATIONAL,
+                            f"out = {a:.4g}/(x {sign} {abs(p):.4g}) + {c:.4g}", 3,
+                            predict=(lambda x, a=a, p=p, c=c:
+                                     a / (x[0] + p) + c if abs(x[0] + p) > 1e-9 else c),
+                            coeffs={"a": float(a), "p": float(p), "c": float(c)})
+
+    @staticmethod
+    def _fit_sinusoid(x1: List[float], ys: List[float]) -> Optional[CandidateLaw]:
+        best: Optional[Tuple[float, float, float, float, float]] = None  # (sse, a, b, c, w)
+        for j in range(1, 61):
+            omega = 0.1 * j
+            phi = [[math.sin(omega * v), math.cos(omega * v), 1.0] for v in x1]
+            wv = _least_squares(phi, ys)
+            if wv is None:
+                continue
+            a, b, c = wv
+            sse = sum((a * math.sin(omega * v) + b * math.cos(omega * v) + c - y) ** 2
+                      for v, y in zip(x1, ys))
+            if best is None or sse < best[0]:
+                best = (sse, a, b, c, omega)
+        if best is None:
+            return None
+        _sse, a, b, c, omega = best
+        return CandidateLaw(LawFamily.SINUSOIDAL,
+                            f"out = {a:.4g}·sin({omega:.4g}x) + {b:.4g}·cos({omega:.4g}x) + {c:.4g}",
+                            4,
+                            predict=(lambda x, a=a, b=b, c=c, w=omega:
+                                     a * math.sin(w * x[0]) + b * math.cos(w * x[0]) + c),
+                            coeffs={"a": float(a), "b": float(b), "c": float(c),
+                                    "omega": float(omega)})
+
+    # ---- structural families: absolute value, extremum, integer gcd ---- #
+    def _fit_structural(self, xs: List[Tuple[float, ...]], ys: List[float]) -> List[CandidateLaw]:
+        out: List[CandidateLaw] = []
+        d = len(xs[0])
+        # ABSOLUTE: out = a·|x_j| + b (per axis)
+        for j in range(d):
+            phi = [[1.0, abs(x[j])] for x in xs]
+            w = _least_squares(phi, ys)
+            if w is not None:
+                b, a = w
+                out.append(CandidateLaw(LawFamily.ABSOLUTE, f"out = {a:.4g}·|x[{j}]| + {b:.4g}", 2,
+                                        predict=(lambda x, a=a, b=b, j=j: a * abs(x[j]) + b),
+                                        coeffs={"a": float(a), "b": float(b), "j": j}))
+        if d >= 2:
+            # EXTREMUM: out = s·min(x) + t  and  out = s·max(x) + t
+            for which, fn in (("min", min), ("max", max)):
+                phi = [[1.0, fn(x)] for x in xs]
+                w = _least_squares(phi, ys)
+                if w is not None:
+                    t, s = w
+                    out.append(CandidateLaw(
+                        LawFamily.EXTREMUM, f"out = {s:.4g}·{which}(x) + {t:.4g}", 2,
+                        predict=(lambda x, s=s, t=t, fn=fn: s * fn(x) + t),
+                        coeffs={"s": float(s), "t": float(t), "which": which}))
+            # GCD: out = gcd(x_i, x_j) — only when everything is integer-valued
+            if _all_int(ys) and all(_all_int(x) for x in xs):
+                for i in range(d):
+                    for k in range(i + 1, d):
+                        pred = (lambda x, i=i, k=k:
+                                float(math.gcd(int(round(x[i])), int(round(x[k])))))
+                        if all(abs(pred(x) - y) < 1e-9 for x, y in zip(xs, ys)):
+                            out.append(CandidateLaw(
+                                LawFamily.GCD, f"out = gcd(x[{i}], x[{k}])", 1,
+                                predict=pred, coeffs={"i": i, "k": k}))
+                            break
+        return out
+
+    # ---- recurrence: the first family that models a system WITH MEMORY ---- #
+    def _fit_recurrence(self, xs: List[Tuple[float, ...]], ys: List[float]) -> List[CandidateLaw]:
+        """out_n = Σ_{i=1..order} cᵢ·out_(n-i) + b — fitted over the sequence ordered by a 1-D
+        integer index. This is the shape a stateless polynomial cannot reach: a system whose next
+        output depends on its own recent outputs (Fibonacci-like, feedback, decay). Requires a
+        contiguous/arithmetic 1-D integer index so 'the next value' is well defined."""
+        if len(xs[0]) != 1:
+            return []
+        pairs = sorted(zip((x[0] for x in xs), ys), key=lambda p: p[0])
+        idx = [p[0] for p in pairs]
+        seq = [p[1] for p in pairs]
+        if len(seq) < 6 or not _all_int(idx):
+            return []
+        # index must be a clean arithmetic progression (so out_(n-1) is the true predecessor)
+        steps = {round(idx[i + 1] - idx[i], 6) for i in range(len(idx) - 1)}
+        if len(steps) != 1 or abs(next(iter(steps))) < 1e-9:
+            return []
+        out: List[CandidateLaw] = []
+        for order in (1, 2, 3):
+            if len(seq) <= order + 2:
+                break
+            phi = [[*seq[n - order:n][::-1], 1.0] for n in range(order, len(seq))]
+            tgt = seq[order:]
+            w = _least_squares(phi, tgt)
+            if w is None:
+                continue
+            coeffs = [float(v) for v in w[:order]]
+            b = float(w[order])
+            err = sum(abs(sum(c * s for c, s in zip(coeffs, phi[n][:order])) + b - tgt[n])
+                      for n in range(len(tgt))) / max(1, len(tgt))
+            # STRICT: accept only a recurrence that holds (near-)exactly, so a merely
+            # near-geometric sequence (e.g. Fibonacci at order 1) is rejected in favour of the
+            # true lowest exact order — never an approximate memory law that then diverges.
+            if err > 1e-6 * (max(abs(v) for v in seq) + 1.0):
+                continue
+            terms = " + ".join(f"{c:.4g}·out[n-{i + 1}]" for i, c in enumerate(coeffs))
+            desc = f"out[n] = {terms}" + (f" + {b:.4g}" if abs(b) > 1e-9 else "")
+            # a recurrence predicts the NEXT value from the last `order` outputs; as a point law
+            # over the index it extrapolates the sequence forward deterministically.
+            pred = _recurrence_pred(coeffs, b, idx[0], idx[1] - idx[0], seq[:order])
+            out.append(CandidateLaw(LawFamily.RECURRENCE, desc, order + 1, predict=pred,
+                                    coeffs={"c": coeffs, "b": b, "x0": float(idx[0]),
+                                            "step": float(idx[1] - idx[0]),
+                                            "seed": [float(v) for v in seq[:order]]}))
+            break  # the lowest order that fits is the honest one
         return out
 
     def _fit_modular(self, xs: List[Tuple[float, ...]], ys: List[float]) -> List[CandidateLaw]:
@@ -634,7 +927,8 @@ class OpenWorldGeneralizer:
                             out.append(CandidateLaw(
                                 LawFamily.MODULAR, desc.replace("+ -", "- "), 2,
                                 predict=(lambda x, a=a, b=b, m=m, j=j:
-                                         (a * int(round(x[j])) + b) % m)))
+                                         (a * int(round(x[j])) + b) % m),
+                                coeffs={"a": a, "b": b, "m": m, "j": j}))
                             return out  # one exact modular law is enough
         return out
 
@@ -661,7 +955,8 @@ class OpenWorldGeneralizer:
                 out.append(CandidateLaw(
                     LawFamily.THRESHOLD,
                     f"out = {lm:.4g} if x[{j}] < {t:.4g} else {hm:.4g}", 3,
-                    predict=(lambda x, t=t, lm=lm, hm=hm, j=j: lm if x[j] < t else hm)))
+                    predict=(lambda x, t=t, lm=lm, hm=hm, j=j: lm if x[j] < t else hm),
+                    coeffs={"t": float(t), "lo": float(lm), "hi": float(hm), "j": j}))
         return out
 
     def _fit_boolean(self, xs: List[Tuple[float, ...]], ys: List[int]) -> List[CandidateLaw]:
@@ -672,7 +967,8 @@ class OpenWorldGeneralizer:
         for name, fn, params in _boolean_ops(d):
             if all(fn(b) == y for b, y in zip(bits, ys)):
                 out.append(CandidateLaw(LawFamily.BOOLEAN, f"out = {name}", params,
-                                        predict=_bool_pred(fn), numeric=False))
+                                        predict=_bool_pred(fn), numeric=False,
+                                        coeffs={"op": name, "d": d}))
         # always offer the exact lookup as a fallback (penalised by its size)
         table = {b: y for b, y in zip(bits, ys)}
         maj = round(_mean(ys)) if ys else 0
@@ -834,6 +1130,7 @@ class OpenWorldGeneralizer:
             elapsed_ms=(time.monotonic() - t0) * 1000.0)
         if fold:
             self._fold(report, box, spec)
+        self._remember(report)
         return report
 
     def _fold(self, report: UnderstandingReport, box: _Interactor, spec: DomainSpec) -> None:
@@ -1005,6 +1302,95 @@ def _lookup_pred(table: Dict[Tuple[float, ...], Any],
     return pred
 
 
+def _recurrence_pred(coeffs: Sequence[float], b: float, x0: float, step: float,
+                     seed: Sequence[float]) -> Callable[[Tuple[float, ...]], float]:
+    """Roll a linear recurrence forward from its seed to predict the value at any index.
+
+    ``out[n] = Σ coeffsᵢ·out[n-1-i] + b`` with ``out[0..order-1] = seed``. The index of an action
+    is ``n = round((x - x0)/step)``; values below the seed clamp to the seed, values above are
+    computed deterministically by iterating the recurrence — so the law *extrapolates the sequence*
+    rather than memorising it."""
+    order = len(coeffs)
+
+    def pred(x: Tuple[float, ...], coeffs=tuple(coeffs), b=float(b), x0=float(x0),
+             step=float(step), seed=tuple(float(s) for s in seed), order=order) -> float:
+        if not step or order == 0:
+            return seed[0] if seed else 0.0
+        n = int(round((x[0] - x0) / step))
+        if n < 0:
+            return seed[0] if seed else 0.0
+        cur = list(seed)
+        while len(cur) <= n:
+            m = len(cur)
+            cur.append(sum(c * cur[m - 1 - i] for i, c in enumerate(coeffs)) + b)
+        return cur[n]
+    return pred
+
+
+def rebuild_predict(family: Any, coeffs: Dict[str, Any],
+                    dims: int = 1) -> Optional[Callable[[Tuple[float, ...]], Any]]:
+    """Reconstruct a law's predictor from its serialised ``coeffs`` — the inverse of fitting.
+
+    This is what lets a cracked system be *persisted* and its behaviour reused later without
+    re-probing (:class:`~nyxara.growth.env_registry.EnvironmentRegistry`). Returns ``None`` for a
+    law with no serialisable parameters (a raw lookup that only memorised what it saw), so the
+    caller can fall back to re-modelling honestly."""
+    try:
+        fam = family.value if hasattr(family, "value") else str(family)
+        c = coeffs or {}
+        if fam == LawFamily.CONSTANT.value:
+            k = float(c["c"]); return lambda _x, k=k: k
+        if fam == LawFamily.AFFINE.value:
+            return _affine_pred([float(v) for v in c["w"]])
+        if fam == LawFamily.POLYNOMIAL.value:
+            _labels, feats = _poly_features(int(c.get("d", dims)))
+            return _poly_pred([float(v) for v in c["w"]], feats)
+        if fam == LawFamily.MULTIPLICATIVE.value:
+            cm = float(c["c"]); return lambda x, cm=cm: cm * math.prod(x)
+        if fam == LawFamily.MODULAR.value:
+            a, b, m, j = int(c["a"]), int(c["b"]), int(c["m"]), int(c["j"])
+            return lambda x, a=a, b=b, m=m, j=j: (a * int(round(x[j])) + b) % m
+        if fam == LawFamily.THRESHOLD.value:
+            t, lo, hi, j = float(c["t"]), float(c["lo"]), float(c["hi"]), int(c["j"])
+            return lambda x, t=t, lo=lo, hi=hi, j=j: lo if x[j] < t else hi
+        if fam == LawFamily.POWER.value:
+            a, b = float(c["a"]), float(c["b"])
+            return lambda x, a=a, b=b: a * (x[0] ** b) if x[0] > 0 else 0.0
+        if fam == LawFamily.EXPONENTIAL.value:
+            a, k = float(c["a"]), float(c["k"])
+            return lambda x, a=a, k=k: a * math.exp(k * x[0])
+        if fam == LawFamily.LOGARITHMIC.value:
+            a, b = float(c["a"]), float(c["b"])
+            return lambda x, a=a, b=b: a * math.log(abs(x[0])) + b if x[0] else b
+        if fam == LawFamily.RATIONAL.value:
+            a, p, cc = float(c["a"]), float(c["p"]), float(c["c"])
+            return lambda x, a=a, p=p, cc=cc: a / (x[0] + p) + cc if abs(x[0] + p) > 1e-9 else cc
+        if fam == LawFamily.SINUSOIDAL.value:
+            a, b, cc, w = float(c["a"]), float(c["b"]), float(c["c"]), float(c["omega"])
+            return lambda x, a=a, b=b, cc=cc, w=w: a * math.sin(w * x[0]) + b * math.cos(w * x[0]) + cc
+        if fam == LawFamily.RECURRENCE.value:
+            return _recurrence_pred([float(v) for v in c["c"]], float(c["b"]),
+                                    float(c["x0"]), float(c["step"]),
+                                    [float(v) for v in c["seed"]])
+        if fam == LawFamily.ABSOLUTE.value:
+            a, b, j = float(c["a"]), float(c["b"]), int(c["j"])
+            return lambda x, a=a, b=b, j=j: a * abs(x[j]) + b
+        if fam == LawFamily.EXTREMUM.value:
+            s, t, fn = float(c["s"]), float(c["t"]), (min if c.get("which") == "min" else max)
+            return lambda x, s=s, t=t, fn=fn: s * fn(x) + t
+        if fam == LawFamily.GCD.value:
+            i, k = int(c["i"]), int(c["k"])
+            return lambda x, i=i, k=k: float(math.gcd(int(round(x[i])), int(round(x[k]))))
+        if fam == LawFamily.BOOLEAN.value:
+            name = c["op"]
+            for nm, fn, _p in _boolean_ops(int(c.get("d", dims))):
+                if nm == name:
+                    return _bool_pred(fn)
+        return None
+    except Exception:  # noqa: BLE001 — a malformed profile is simply not rebuildable
+        return None
+
+
 def _output_kind(obs: List[Any]) -> str:
     vals = [o for o in obs if o is not None]
     if vals and all(isinstance(o, bool) for o in vals):
@@ -1049,6 +1435,30 @@ def _dedup(vecs: List[Tuple[float, ...]]) -> List[Tuple[float, ...]]:
             seen.add(key)
             out.append(v)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Build a black box from a *declarative* law spec (so a system can cross an API boundary)
+# --------------------------------------------------------------------------- #
+def build_system(family: Any, params: Dict[str, Any], *, dims: int = 1, kind: str = "real",
+                 low: float = -6.0, high: float = 6.0,
+                 scalar: Optional[bool] = None) -> Tuple[Optional[Callable[[Any], Any]], DomainSpec]:
+    """Turn a named law family + parameters into a callable black box and its :class:`DomainSpec`.
+
+    A live callable cannot cross an HTTP/RPC boundary, but a *declaration* of one can — a family
+    name (``"affine"``, ``"sinusoidal"`` …) plus its parameters. This rebuilds the predictor with
+    :func:`rebuild_predict` and wraps it to accept ordinary actions, so the Master can hand NYXARA a
+    system to model over the wire. Returns ``(system, spec)``; ``system`` is ``None`` when the
+    family/params are not rebuildable."""
+    spec = DomainSpec(dims=int(dims), kind=str(kind), low=float(low), high=float(high),
+                      scalar=(int(dims) == 1 if scalar is None else bool(scalar)))
+    predict = rebuild_predict(family, params or {}, dims=int(dims))
+    if predict is None:
+        return None, spec
+
+    def system(action: Any, predict=predict, spec=spec) -> Any:
+        return predict(_to_vec(action, spec))
+    return system, spec
 
 
 # --------------------------------------------------------------------------- #

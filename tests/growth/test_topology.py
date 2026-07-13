@@ -88,6 +88,63 @@ def test_report_round_trips():
     assert d["after_n_embd"] >= d["before_n_embd"] and "reason" in d
 
 
+# --------------------------------------------------------------------------- #
+# Hardware-aware ceiling — grow toward what the box can carry, not an arbitrary cap
+# --------------------------------------------------------------------------- #
+from nyxara.growth.topology import hardware_ceiling  # noqa: E402
+from nyxara.kernel.compute import ComputeReport, GPUInfo  # noqa: E402
+
+
+def _big_box() -> ComputeReport:
+    return ComputeReport(cpu_count=32, memory={"total_mb": 131072, "available_mb": 120000},
+                         gpu=GPUInfo(available=False), torch_available=True)
+
+
+def _tiny_box() -> ComputeReport:
+    return ComputeReport(cpu_count=2, memory={"total_mb": 256, "available_mb": 200},
+                         gpu=GPUInfo(available=False), torch_available=False)
+
+
+def test_hardware_ceiling_scales_up_on_a_big_machine():
+    max_embd, max_layers, k = hardware_ceiling(TopologyConfig(), report=_big_box())
+    # a large box grows a genuinely bigger brain than the arbitrary static 256/16 default
+    assert max_embd > 256 and max_layers >= 16
+    assert 8 <= max_embd <= 8192 and 2 <= max_layers <= 128 and k >= 8
+
+
+def test_hardware_ceiling_never_drops_below_the_static_default():
+    # the static default is a FLOOR: hardware only ever raises the ceiling, never shrinks it below
+    # the tested default (so a tiny box degrades to today's 256/16 exactly — CI stays green).
+    max_embd, max_layers, _k = hardware_ceiling(TopologyConfig(), report=_tiny_box())
+    assert max_embd == 256 and max_layers == 16
+
+
+def test_no_readable_memory_keeps_the_static_ceiling():
+    blind = ComputeReport(cpu_count=4, memory={}, gpu=GPUInfo(available=False))
+    assert hardware_ceiling(TopologyConfig(), report=blind) == (256, 16, 8)
+
+
+def test_explicit_master_override_is_used_verbatim():
+    # a deliberately small ceiling must hold EXACTLY even on a huge box (the Master's word is final)
+    cfg = TopologyConfig(max_n_embd=64, max_layers=3)
+    max_embd, max_layers, _k = hardware_ceiling(cfg, report=_big_box())
+    assert max_embd == 64 and max_layers == 3
+
+
+def test_hardware_aware_off_returns_static_ceiling():
+    cfg = TopologyConfig(hardware_aware=False)
+    assert hardware_ceiling(cfg, report=_big_box()) == (256, 16, 8)
+
+
+def test_monitor_uses_the_hardware_derived_ceiling():
+    # with a big box the monitor lets a brain at the OLD 256 ceiling keep widening
+    mon = CapacityMonitor(cfg=TopologyConfig(), report=_big_box())
+    assert mon.max_n_embd > 256
+    hot = CapacitySignal(problem_difficulty=0.95, saturation=0.95, loss_plateau=0.95)
+    big = ArchitectureGenome(n_embd=256, block_size=16, layers=[LayerGene(op="gated_mlp")])
+    assert mon.should_grow(hot, genome=big).should_grow is True
+
+
 @pytest.mark.skipif(not _HAS_TORCH, reason="torch required for function-preserving morphisms")
 def test_net2deepernet_preserves_function_exactly():
     from nyxara.growth.genesis import GenesisModel, _GENESIS_SEED

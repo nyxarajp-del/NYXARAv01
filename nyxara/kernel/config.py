@@ -178,6 +178,7 @@ class FeatureFlags(BaseModel):
     dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
+    environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
@@ -863,11 +864,47 @@ class TopologyConfig(BaseModel):
     grow_dims_k: int = Field(default=8, ge=1, le=256)         # extra width k added per widen
     max_n_embd: int = Field(default=256, ge=8, le=8192)       # hardware-aware width ceiling
     max_layers: int = Field(default=16, ge=2, le=128)         # hardware-aware depth ceiling
+    # When on, the width/depth ceilings above are treated as the *floor* of what the box permits:
+    # growth/topology.py::hardware_ceiling reads the real machine (kernel/compute.compute_report —
+    # CPU, RAM, GPU/VRAM) and raises the ceiling toward what the hardware can actually carry, so a
+    # bigger machine grows a genuinely bigger brain instead of being capped by an arbitrary size
+    # chosen up front. An explicit Master override (a non-default max_n_embd/max_layers) always
+    # wins and is never lowered. Off ⇒ the static ceilings above are used verbatim (today's
+    # behaviour). Still bounded by the absolute Field limits (≤ 8192 width / ≤ 128 depth).
+    hardware_aware: bool = True
     difficulty_threshold: float = Field(default=0.7, ge=0.0, le=1.0)   # "hard problem" trigger
     saturation_threshold: float = Field(default=0.8, ge=0.0, le=1.0)   # "capacity full" trigger
     plateau_threshold: float = Field(default=0.8, ge=0.0, le=1.0)      # "loss stalled" trigger
     preserve_tolerance: float = Field(default=1e-3, ge=0.0)   # max relative behaviour drift on grow
     require_gauntlet: bool = True     # a grown brain ships only through the Foundry gauntlet
+    seed: int = 0
+
+
+class EnvironmentAdaptationConfig(BaseModel):
+    """Self-driven environment adaptation (growth/adaptation.py), Rule 4.
+
+    Dropped into a brand-new environment, NYXARA does not wait to be taught. She probes every
+    unknown system in it and models each from first principles with her OWN open-world generalizer
+    (:mod:`nyxara.growth.open_world`) — no LLM in the loop — then, if the environment strains her
+    current capacity, she **structurally re-organizes her own brain** via runtime topology growth
+    (:mod:`nyxara.growth.topology`), up to the real hardware ceiling. Every cracked system is saved
+    to a persistent registry so a re-encountered environment is recognised instantly instead of
+    being re-probed from scratch. On by default; every probe is sandboxed exactly like the rest of
+    :mod:`nyxara.growth`, and any grown brain still ships only through the Foundry gauntlet."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Per-system probe budget when modelling an unknown box (bounded so adaptation is never runaway).
+    probe_budget: int = Field(default=48, ge=8, le=256)
+    # Fraction of an environment's systems that must be left UNMODELLED/low-confidence before the
+    # environment is judged to strain current capacity and topology growth is considered.
+    pressure_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Grow her own brain under environmental pressure (still gauntlet-gated). Off ⇒ model + persist
+    # only, never restructure.
+    grow_under_pressure: bool = True
+    # Persist a profile of every cracked system so re-entry is instant. Off ⇒ model fresh each time.
+    persist_profiles: bool = True
     seed: int = 0
 
 
@@ -2379,6 +2416,8 @@ class NyxaraSettings(BaseSettings):
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
+    environment_adaptation: EnvironmentAdaptationConfig = Field(
+        default_factory=EnvironmentAdaptationConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     swarm: SwarmConfig = Field(default_factory=SwarmConfig)

@@ -23,10 +23,17 @@ from there. This module implements both:
   :class:`~nyxara.growth.genesis.ArchitectureGenome` itself — more embedding width, more layers —
   and rebuilds over the always-runnable substrate, so growth is fully CI-testable.
 
+The ceiling is **genuinely hardware-aware**, not an arbitrary number chosen up front.
+:func:`hardware_ceiling` reads the real machine via :func:`nyxara.kernel.compute.compute_report`
+(CPU, RAM, GPU) and sizes ``max_n_embd``/``max_layers``/``grow_dims_k`` to what the box can carry:
+a bigger machine grows a genuinely bigger brain, a bare CI box stays small, and an explicit Master
+override is honoured as a floor that is never lowered. So growth reaches *toward the hardware limit*
+— the very thing a fixed matrix size denies — while staying bounded by an absolute cap.
+
 Safety is non-negotiable and **not re-implemented here**: a grown brain becomes *live* only by
 clearing the very same Foundry gauntlet every other model must pass (character-lock,
 corrigibility, perplexity improvement, capability non-regression, loyalty) — exactly as the
-Genesis champion does. Growth is bounded by a hardware-aware ceiling, and never bypasses a gate.
+Genesis champion does. Growth is bounded by that hardware-aware ceiling, and never bypasses a gate.
 """
 
 from __future__ import annotations
@@ -50,7 +57,110 @@ __all__ = [
     "TopologyReport",
     "CapacityMonitor",
     "DynamicTopology",
+    "hardware_ceiling",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Hardware-aware ceiling — grow toward what the *box* can carry, not an arbitrary cap
+# --------------------------------------------------------------------------- #
+# Rough, honest cost model for one of NYXARA's own genesis/NumPy brains: a decoder of width
+# ``E`` and ``L`` layers costs on the order of ``L · (12·E²)`` parameters (attention + MLP), plus
+# the byte/word-vocab embedding+head. At fp32 that is 4 bytes/param; we budget training too (grads
+# + optimiser state ≈ 4× the weights), so ~16 bytes/param end to end. These constants are
+# deliberately conservative so the derived ceiling never over-commits the machine.
+_BYTES_PER_PARAM = 16.0          # weights + grads + optimiser state, fp32, end-to-end
+_PARAMS_PER_LAYER_PER_E2 = 12.0  # ~12·E² params per transformer-style layer
+_MEM_FRACTION = 0.25             # never budget the brain past this share of usable memory
+
+
+def _usable_memory_mb(report: Any) -> Optional[float]:
+    """Best-effort usable memory in MB from a compute report: VRAM if a GPU is present, else RAM.
+
+    Prefers ``available_mb`` (what is actually free) and falls back to ``total_mb``. Returns
+    ``None`` when nothing is knowable, so the caller keeps the static ceiling rather than guessing.
+    """
+    gpu = getattr(report, "gpu", None)
+    if gpu is not None and bool(getattr(gpu, "available", False)):
+        # torch does not expose VRAM through the light compute report; approximate from device
+        # count (a modern accelerator carries at least ~16 GB) so a real GPU box grows large.
+        count = max(1, int(getattr(gpu, "count", 1) or 1))
+        return 16_384.0 * count
+    mem = getattr(report, "memory", None) or {}
+    for key in ("available_mb", "total_mb"):
+        val = mem.get(key) if isinstance(mem, dict) else None
+        if val:
+            return float(val)
+    return None
+
+
+def _field_default(cfg: Any, name: str, fallback: Any) -> Any:
+    """The built-in default of a pydantic field, so we can tell 'left at default' from an override."""
+    try:
+        return type(cfg).model_fields[name].default
+    except Exception:  # noqa: BLE001 — non-pydantic cfg (e.g. a plain stub) ⇒ use the fallback
+        return fallback
+
+
+def hardware_ceiling(cfg: Any, report: Any = None) -> Tuple[int, int, int]:
+    """Derive ``(max_n_embd, max_layers, grow_dims_k)`` for the *actual* machine.
+
+    This is what makes "grow toward the hardware limit instead of an arbitrary architecture chosen
+    up front" literally true. It reads the real box via
+    :func:`nyxara.kernel.compute.compute_report` (CPU / RAM / GPU) and sizes the ceiling to what the
+    hardware can carry, honouring three invariants:
+
+    * **The Master's word is final.** A ceiling the Master set *away from the built-in default* is
+      used **verbatim** — never raised and never lowered. Only a field left at its default is
+      hardware-derived, so a deliberately small (or large) cap always holds exactly.
+    * **Bounded.** Every derived value is clamped to the config's absolute Field limits (≤ 8192
+      width, ≤ 128 depth, ≤ 256 k), so even a huge box can never run growth away.
+    * **Honest on a bare box.** With no readable memory, or ``hardware_aware`` off, it returns the
+      static config values unchanged (today's behaviour, so CI stays green).
+    """
+    static_embd = int(getattr(cfg, "max_n_embd", 256))
+    static_layers = int(getattr(cfg, "max_layers", 16))
+    static_k = int(getattr(cfg, "grow_dims_k", 8))
+    if not bool(getattr(cfg, "hardware_aware", True)):
+        return static_embd, static_layers, static_k
+
+    # Which fields did the Master leave at their default? Only those get hardware-derived.
+    embd_default = static_embd == int(_field_default(cfg, "max_n_embd", 256))
+    layers_default = static_layers == int(_field_default(cfg, "max_layers", 16))
+    k_default = static_k == int(_field_default(cfg, "grow_dims_k", 8))
+    if not (embd_default or layers_default or k_default):
+        return static_embd, static_layers, static_k   # every ceiling is an explicit override
+
+    if report is None:
+        try:
+            from nyxara.kernel.compute import compute_report
+            report = compute_report()
+        except Exception:  # noqa: BLE001 — no introspection ⇒ keep the static ceiling
+            return static_embd, static_layers, static_k
+
+    usable_mb = _usable_memory_mb(report)
+    if not usable_mb or usable_mb <= 0:
+        return static_embd, static_layers, static_k
+
+    # Parameter budget the box can carry, then split it across a sensible depth.
+    budget_bytes = usable_mb * 1024.0 * 1024.0 * _MEM_FRACTION
+    param_budget = budget_bytes / _BYTES_PER_PARAM
+
+    # Depth scales gently with cores (more parallelism ⇒ a deeper stack is affordable); width then
+    # absorbs the remaining parameter budget: L·12·E² ≤ param_budget ⇒ E ≤ √(param_budget/(12·L)).
+    cores = max(1, int(getattr(report, "cpu_count", 1) or 1))
+    derived_layers = min(128, max(static_layers, 8 + 2 * cores))
+    per_layer = _PARAMS_PER_LAYER_PER_E2 * max(1, derived_layers)
+    derived_embd = int((param_budget / per_layer) ** 0.5)
+    derived_embd = (max(static_embd, derived_embd) // 8) * 8   # multiple of 8, never below static
+    derived_embd = min(8192, max(8, derived_embd))
+
+    # Apply derivation ONLY to fields left at their default; explicit overrides stay verbatim.
+    max_embd = derived_embd if embd_default else static_embd
+    max_layers = derived_layers if layers_default else static_layers
+    # widen in larger strides on a bigger brain so growth actually reaches the *final* ceiling
+    grow_k = min(256, max(static_k, max_embd // 16)) if k_default else static_k
+    return max_embd, max_layers, grow_k
 
 
 class GrowthMode(str, Enum):
@@ -132,11 +242,14 @@ class CapacityMonitor:
     or a stalled (plateaued) loss — and never past the configured hardware ceiling. This keeps an
     idle tick cheap: with no pressure, the answer is an immediate ``no``."""
 
-    def __init__(self, *, cfg: Any = None, settings: Any = None) -> None:
+    def __init__(self, *, cfg: Any = None, settings: Any = None, report: Any = None) -> None:
         self.cfg = cfg or getattr(settings, "topology", None)
         if self.cfg is None:
             from nyxara.kernel.config import TopologyConfig
             self.cfg = TopologyConfig()
+        # The *effective* ceiling is hardware-derived (or the static config when hardware_aware is
+        # off / nothing is knowable). Computed once so every decision uses the same real limit.
+        self.max_n_embd, self.max_layers, self.grow_dims_k = hardware_ceiling(self.cfg, report)
 
     def should_grow(self, signal: CapacitySignal,
                     *, genome: Optional[ArchitectureGenome] = None) -> GrowthDecision:
@@ -147,8 +260,8 @@ class CapacityMonitor:
         if not (hard and (saturated or plateaued)):
             return GrowthDecision(False, GrowthMode.NONE.value, 0, "no capacity pressure")
 
-        max_embd = int(getattr(cfg, "max_n_embd", 256))
-        max_layers = int(getattr(cfg, "max_layers", 16))
+        max_embd = int(self.max_n_embd)
+        max_layers = int(self.max_layers)
         n_embd = genome.n_embd if genome is not None else 0
         n_layers = len(genome.layers) if genome is not None else 0
         can_widen = genome is None or n_embd < max_embd
@@ -166,7 +279,7 @@ class CapacityMonitor:
         else:
             mode = GrowthMode.WIDEN.value
 
-        k = int(getattr(cfg, "grow_dims_k", 8))
+        k = int(self.grow_dims_k)
         if genome is not None and mode in (GrowthMode.WIDEN.value, GrowthMode.BOTH.value):
             k = max(1, min(k, max_embd - n_embd))
         return GrowthDecision(True, mode, k,
@@ -181,14 +294,18 @@ class DynamicTopology:
     only through the Foundry gauntlet (the same path as a Genesis champion)."""
 
     def __init__(self, *, settings: Any = None, cfg: Any = None, foundry: Any = None,
-                 monitor: Optional[CapacityMonitor] = None, seed: int = 0) -> None:
+                 monitor: Optional[CapacityMonitor] = None, seed: int = 0,
+                 report: Any = None) -> None:
         self.settings = settings
         self.cfg = cfg or getattr(settings, "topology", None)
         if self.cfg is None:
             from nyxara.kernel.config import TopologyConfig
             self.cfg = TopologyConfig()
         self.foundry = foundry
-        self.monitor = monitor or CapacityMonitor(cfg=self.cfg)
+        self.monitor = monitor or CapacityMonitor(cfg=self.cfg, report=report)
+        # Share the monitor's hardware-derived ceiling so growth reaches the same real limit.
+        self.max_n_embd = self.monitor.max_n_embd
+        self.max_layers = self.monitor.max_layers
         self.rng = random.Random(seed or int(getattr(self.cfg, "seed", 0)))
         self._reports: List[TopologyReport] = []
 
@@ -290,8 +407,8 @@ class DynamicTopology:
     def _grow_genome(self, genome: ArchitectureGenome,
                      decision: GrowthDecision) -> ArchitectureGenome:
         g = ArchitectureGenome.from_dict(genome.to_dict())
-        max_embd = int(getattr(self.cfg, "max_n_embd", 256))
-        max_layers = int(getattr(self.cfg, "max_layers", 16))
+        max_embd = int(self.max_n_embd)
+        max_layers = int(self.max_layers)
         if decision.mode in (GrowthMode.WIDEN.value, GrowthMode.BOTH.value):
             g.n_embd = min(max_embd, g.n_embd + max(1, int(decision.k)))
         if decision.mode in (GrowthMode.DEEPEN.value, GrowthMode.BOTH.value):
