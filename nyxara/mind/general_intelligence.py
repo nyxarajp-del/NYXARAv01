@@ -742,12 +742,29 @@ class GeneralIntelligence:
         return tr.render(), conf, {"transfer": tr.to_dict(), "own_faculty": "relational_transfer",
                                    "analogical": bool(getattr(tr, "analogical", False))}
 
+    def _ensure_generalization(self) -> Any:
+        """The unified own-faculty cascade (built lazily if none was injected).
+
+        Composes her exact faculties + first-principles, skill-induction from in-prompt demos,
+        relational transfer, from-scratch domain-genesis, and open-world law modelling — so the
+        own-faculty path is populated *by default*, not only when an orchestrator injects it. This
+        is what makes the base LLM a genuine last resort rather than the first thing reached."""
+        if self.generalization_engine is None:
+            try:
+                from nyxara.mind.generalization import GeneralizationEngine
+                self.generalization_engine = GeneralizationEngine(
+                    transfer_engine=self._ensure_transfer())
+            except Exception:  # noqa: BLE001 — the cascade is a capability, never required
+                self.generalization_engine = None
+        return self.generalization_engine
+
     def _generalize_solve(self, problem: str) -> Optional[Tuple[str, float, Dict[str, Any]]]:
         """Solve a novel field with her unified own-faculty cascade (mind/generalization.py):
-        skill-induction from any examples in the prompt, relational transfer, open-world law
-        modelling. Returns ``(answer, confidence, detail)`` — content derived by her own faculties,
-        never the base LLM — or ``None`` when none of them can honestly answer."""
-        eng = self.generalization_engine
+        exact faculties + first-principles, skill-induction from any examples in the prompt,
+        relational transfer, from-scratch domain-genesis, open-world law modelling. Returns
+        ``(answer, confidence, detail)`` — content derived by her own faculties, never the base
+        LLM — or ``None`` when none of them can honestly answer."""
+        eng = self._ensure_generalization()
         if eng is None:
             return None
         try:
@@ -874,7 +891,17 @@ class GeneralIntelligence:
     # Synthesis helpers
     # ---------------------------------------------------------------------- #
     def _synthesise(self, problem: str, frame: DomainFrame) -> str:
-        """Domain-framed free-form answer: LLM when real, else a structured offline answer."""
+        """A domain-framed answer, own-faculties FIRST and the base LLM only as a last resort.
+
+        Order (the whole point of the last-resort rewiring): (1) try NYXARA's own unified
+        generalizer — exact faculties, first-principles derivation, skill-induction, relational
+        transfer, from-scratch domain-genesis — so a problem she *can* reason about herself never
+        reaches the LLM; (2) only if every own faculty declines, consult the base LLM, and pass its
+        output through :meth:`_verify_answer` so the verdict is hers, not the model's; (3) with no
+        LLM, a structured offline answer."""
+        own = self._own_faculty_answer(problem)
+        if own is not None:
+            return own
         if self._llm_real():
             steps = " ".join(f"{i}) {s}" for i, s in enumerate(frame.methodology, 1))
             prompt = (f"Solve this as {frame.persona}. Method: {steps}\n\nProblem: {problem}\n\n"
@@ -883,10 +910,60 @@ class GeneralIntelligence:
                 out = self.llm.generate(prompt, system=_SOLVE_SYSTEM, temperature=0.3,
                                         max_tokens=600)
                 if out and out.strip():
-                    return out.strip()
+                    return self._verify_answer(problem, out.strip())
             except Exception:  # noqa: BLE001
                 pass
         return self._synthesise_offline(problem, frame)
+
+    def _own_faculty_answer(self, problem: str) -> Optional[str]:
+        """The answer from NYXARA's own faculties (cascade → bare transfer), or ``None`` to defer.
+
+        Reused everywhere the LLM would otherwise be reached, so *every* domain — not just the
+        novel-field path — prefers her own verified/structural reasoning before the base model."""
+        got = self._generalize_solve(problem) or self._transfer_solve(problem)
+        return got[0] if got is not None else None
+
+    def _verify_answer(self, problem: str, answer: str) -> str:
+        """Cross-check the base LLM's answer with NYXARA's OWN exact faculties before it stands.
+
+        Any concrete arithmetic equality the model asserts ("2 + 3 * 4 = 20") is recomputed
+        exactly; a false one is flagged and corrected, a correct one is endorsed — so even when the
+        LLM drafts, the *verdict* is hers. Free of a checkable claim, the answer passes through
+        unchanged (nothing to verify, so nothing is asserted)."""
+        notes: List[str] = []
+        for lhs, claimed in self._checkable_equalities(answer):
+            actual = self._eval_arith(lhs)
+            if actual is None:
+                continue
+            if abs(actual - claimed) < 1e-9:
+                notes.append(f"✓ verified {lhs.strip()} = {_fmt_num(actual)}")
+            else:
+                notes.append(f"⚠ corrected: {lhs.strip()} = {_fmt_num(actual)}, not {_fmt_num(claimed)}")
+        if notes:
+            return answer + "\n\n[NYXARA self-check — her own faculties] " + "; ".join(notes)
+        return answer
+
+    @staticmethod
+    def _checkable_equalities(text: str) -> List[Tuple[str, float]]:
+        """Recover ``<arithmetic> = <number>`` claims from prose (numbers and operators only)."""
+        out: List[Tuple[str, float]] = []
+        for m in re.finditer(r"([0-9][0-9\s+\-*/().^%]*[0-9)])\s*=\s*(-?\d+(?:\.\d+)?)", text):
+            lhs = m.group(1)
+            if not re.search(r"[-+*/^%]", lhs):    # need a real operation, not "3 = 3"
+                continue
+            try:
+                out.append((lhs, float(m.group(2))))
+            except ValueError:
+                continue
+        return out
+
+    def _eval_arith(self, expr: str) -> Optional[float]:
+        """Evaluate a pure arithmetic expression exactly via the verifiable MathEngine."""
+        try:
+            from nyxara.mind.math import MathEngine
+            return float(MathEngine().evaluate(expr.replace("^", "**")))
+        except Exception:  # noqa: BLE001
+            return None
 
     def _synthesise_grounded(self, problem: str, frame: DomainFrame,
                              evidence: List[str]) -> str:
@@ -930,6 +1007,15 @@ class GeneralIntelligence:
 # --------------------------------------------------------------------------- #
 # Module helpers / constants
 # --------------------------------------------------------------------------- #
+def _fmt_num(v: float) -> str:
+    """Render a number cleanly — an integral float prints without the trailing ``.0``."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
 def _llm_real(llm: Any) -> bool:
     """True only when a genuine (non-mock) provider is available."""
     if llm is None:

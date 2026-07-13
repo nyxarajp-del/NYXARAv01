@@ -21,8 +21,8 @@ applied to the documentation itself).
 | # | Capability | Owning module | Status |
 |---|------------|---------------|--------|
 | 1 | Universal General Intelligence | `nyxara.mind.general_intelligence` | REAL+WIRED |
-| 2 | Open-world Generalization | `nyxara.growth.open_world` + `nyxara.mind.transfer` | UPGRADED |
-| 3 | First-Principles Reasoning | `nyxara.mind.first_principles` | REAL+WIRED |
+| 2 | Open-world Generalization | `nyxara.growth.open_world` + `nyxara.mind.transfer` + `nyxara.mind.domain_genesis` | UPGRADED |
+| 3 | First-Principles Reasoning | `nyxara.mind.first_principles` + `nyxara.mind.generalization` | REAL+WIRED |
 | 4 | Causal Reasoning | `nyxara.mind.causal_world_model` | REAL+WIRED |
 | 5 | Counterfactual Thinking | `nyxara.mind.world_model` | REAL+WIRED |
 | 6 | Long-Horizon Planning | `nyxara.planning.grand_plan` | UPGRADED |
@@ -129,6 +129,27 @@ four capabilities — each backed by a test:
   transferable questions her answer no longer bottlenecks solely on the base model's parametric
   ceiling. Gated by `self_model_router.use_transfer` and `general_intelligence.competence_learning`
   (both default on).
+- **#1 / #2 / #3 Widened own-faculty reach + LLM made last-resort & self-verified** — the follow-up
+  to the bullet above: her own faculties existed but their *reach* was narrow, so most problems
+  still fell through to the small local base LLM. This pass widens the reach and demotes the LLM to
+  a genuine last resort. **`nyxara.mind.first_principles`** grew from four hand-written derivations
+  into a general symbolic engine: a `SymbolicEngine` rearranges *any* stated law for *any* variable
+  and solves systems (verified by back-substitution), integrates a rate law as an ODE, the
+  dimensional table is far larger and *extensible* (a new quantity can be defined from a stated
+  equation), and the `LogicEngine` now does first-order (universally-quantified) chaining — the
+  classic syllogism, not just propositional modus ponens. **`nyxara.mind.transfer`** gained more
+  seed bases, a copula/comparative extractor (`A is bigger than B`, `A is part of B`) that roughly
+  doubles the prose a novel field is recovered from, and self-growth **on by default** so a field
+  met once is learned into the store by her own action. **`nyxara.mind.domain_genesis`** induces
+  richer laws (composition `R∘S`, ordering, functional dependency) and iterates transitivity to a
+  fixpoint, so multi-step held-out facts are projected. **`nyxara.mind.general_intelligence`** now
+  routes *every* domain through her own unified cascade before the LLM, wires that cascade by
+  default, and — when the LLM is reached at all — passes its output through a self-check
+  (`_verify_answer`) that recomputes any concrete arithmetic the model asserts, so the verdict is
+  hers. `scripts/reach_metric.py` measures the effect: a battery of prompts that used to defer to the
+  LLM is now solved by her own faculties, offline, with only genuine chat / open-fact queries left
+  as the honest residual. Honest scope unchanged: a small base model is not made frontier-level by
+  code — what changed is how much reasoning is hers, verified, before the model is ever consulted.
 - **#62 Compute Scaling — the honest answer to "NYXARA runs a small model."** Other AIs stand on a
   billion-parameter trained model; NYXARA runs a small one. She does not fake a bigger model — she
   **spends her own compute** on the small one and reports, truthfully, what that buys. Two real,

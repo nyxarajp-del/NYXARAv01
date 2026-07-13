@@ -129,3 +129,34 @@ def test_solve_never_raises(gi: GeneralIntelligence) -> None:
     for junk in ("", "   ", "?!?", "\n\n"):
         out = gi.solve(junk)
         assert isinstance(out, dict) and "domain" in out
+
+
+# --------------------------------------------------------------------------- #
+# LLM last-resort + self-verification (NYXARA checks the base model's output)
+# --------------------------------------------------------------------------- #
+def test_own_faculty_cascade_is_wired_by_default(gi: GeneralIntelligence) -> None:
+    """The unified generalizer is built lazily even with no orchestrator injecting it, so her
+    own faculties are reached before any LLM would be."""
+    assert gi._ensure_generalization() is not None
+
+
+def test_self_check_corrects_a_false_llm_arithmetic(gi: GeneralIntelligence) -> None:
+    checked = gi._verify_answer("q", "The answer is clearly 2 + 3 * 4 = 20.")
+    assert "self-check" in checked and "14" in checked and "not 20" in checked
+
+
+def test_self_check_endorses_correct_arithmetic(gi: GeneralIntelligence) -> None:
+    checked = gi._verify_answer("q", "Note that 10 / 2 = 5 here.")
+    assert "✓ verified" in checked
+
+
+def test_self_check_passes_through_when_nothing_checkable(gi: GeneralIntelligence) -> None:
+    ans = "A thoughtful qualitative answer with no equations."
+    assert gi._verify_answer("q", ans) == ans
+
+
+def test_science_derivation_answered_by_own_faculties_offline(gi: GeneralIntelligence) -> None:
+    """A physics derivation (no LLM available) is answered by her own first-principles faculty
+    via the cascade — the reasoning content is hers, reached before any LLM fallback."""
+    out = gi.solve("derive the escape velocity from energy conservation")
+    assert "Derivation" in out["answer"] and "escape velocity" in out["answer"].lower()

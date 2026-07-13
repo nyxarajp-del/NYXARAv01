@@ -54,6 +54,7 @@ a an the of to in on at by for with from into onto over under and or but if then
 was were be been being do does did will would can could should may might must this that these
 those it its it's their there here what which who whom whose why how when where does do can what's
 some any each every both all no not more most much many few least how's like about between within
+around across along through toward towards upon beyond near against
 """.split())
 
 
@@ -332,7 +333,7 @@ class RelationalTransferEngine:
     def __init__(self, *, store: Optional[DomainSchemaStore] = None,
                  mapper: Optional[StructureMapper] = None, min_score: float = 1.0,
                  max_bases: int = 4, analogical: bool = True,
-                 learn_from_experience: bool = False, memory: Any = None,
+                 learn_from_experience: bool = True, memory: Any = None,
                  max_schemas: int = 200) -> None:
         self.store = store if store is not None else DomainSchemaStore(
             memory=memory, max_schemas=max_schemas)
@@ -493,10 +494,14 @@ def extract_relations(query: str,
       **verb-like token sits between two entity-like tokens**, judged by morphology and
       position rather than a fixed lexicon. This gives a brand-new domain (whose verbs are in
       no known schema) a relational skeleton at all.
+    * **Tier C** (copula / comparative) recovers the structure a bare verb misses: a linked
+      predicate — ``A is bigger than B`` → ``bigger(A, B)``, ``A is part of B`` → ``part_of(A, B)``.
+      This roughly doubles the prose a genuinely-new field can be recovered from.
 
-    Honest: a clause with no plausible verb-between-two-entities yields nothing, so free-form
-    chat ("hi, how are you") returns ``[]``. Pass an empty ``known_relations`` for pure
-    open-domain extraction (what a from-scratch domain-genesis pass wants)."""
+    Honest: a clause with no plausible relation (no verb-between-two-entities and no linked
+    predicate) yields nothing, so free-form chat ("hi, how are you") returns ``[]``. Pass an empty
+    ``known_relations`` for pure open-domain extraction (what a from-scratch domain-genesis pass
+    wants)."""
     text = (query or "").lower()
     toks = _WORD.findall(text)
     if len(toks) < 3:
@@ -514,7 +519,64 @@ def extract_relations(query: str,
     # Tier B — open-domain: any verb-like token flanked by two entities (novel verbs welcome)
     tier_b = _extract_between(
         toks, lambda tok: tok in rel_vocab or _looks_verb(tok), lemmatize=True)
-    return tier_b if len(tier_b) >= 2 else tier_a
+    # Tier C — copula/comparative linked predicates ("is bigger than", "is part of")
+    tier_c = _extract_copula(toks)
+    have = {str(r) for r in tier_b}
+    combined = list(tier_b) + [r for r in tier_c if str(r) not in have]
+    # honest: only a genuine skeleton (≥2 relations) is returned; otherwise defer (chat stays
+    # un-parsed and the caller falls through), preserving the no-fabrication contract.
+    return combined if len(combined) >= 2 else tier_a
+
+
+# Copula/auxiliary verbs and the link words that turn "X is <descriptor> <link> Y" into a
+# genuine binary relation — the structure a plain content verb misses.
+_COPULA = frozenset({"is", "are", "was", "were", "be", "been", "being", "become", "becomes"})
+_LINK = frozenset({"than", "of", "to", "for", "from", "with", "over", "under", "above", "below",
+                   "within", "into", "onto"})
+
+
+def _extract_copula(toks: Sequence[str]) -> List[Predicate]:
+    """Recover ``relation(entity, entity)`` from a copula + descriptor + link pattern.
+
+    ``A is bigger than B`` → ``bigger(A, B)``; ``A is part of B`` → ``part_of(A, B)``. Requires a
+    real left entity, a content descriptor, a link word, and a right entity — so a bare
+    ``how are you`` (no descriptor+link+entity) never yields a relation and chat stays un-parsed."""
+    rels: List[Predicate] = []
+    seen: set = set()
+    n = len(toks)
+    for i, tok in enumerate(toks):
+        if tok not in _COPULA:
+            continue
+        left = _prev_entity(toks, i)
+        if not left:
+            continue
+        # the descriptor: first content token after the copula (skip degree words / articles)
+        j = i + 1
+        while j < n and toks[j] in _STOP and toks[j] not in _LINK:
+            j += 1
+        if j >= n or toks[j] in _LINK or len(toks[j]) < 2:
+            continue
+        descriptor = toks[j]
+        # a link word must follow within a couple of tokens; anything else means "not this pattern"
+        k, link = j + 1, None
+        while k < n and k <= j + 2:
+            if toks[k] in _LINK:
+                link = toks[k]
+                break
+            if toks[k] not in _STOP:
+                break
+            k += 1
+        if link is None:
+            continue
+        right = _next_entity(toks, k)
+        if not right or right == left:
+            continue
+        name = lemma(descriptor) if link == "than" else f"{descriptor}_{link}"
+        r = relation(name, entity(left), entity(right))
+        if str(r) not in seen:
+            seen.add(str(r))
+            rels.append(r)
+    return rels
 
 
 def _prev_entity(toks: Sequence[str], i: int) -> Optional[str]:
@@ -536,6 +598,8 @@ def _next_entity(toks: Sequence[str], i: int) -> Optional[str]:
 # excluded first, so a bare "is/are" never becomes a standalone relation (chat stays un-parsed).
 _STRONG_VERB_SUFFIX = ("ates", "izes", "ises", "ifies", "ing", "ed")
 _WEAK_VERB_SUFFIX = ("es", "s")
+# singular noun endings that merely *look* like a 3rd-person verb's -s (nucleus, analysis, mass)
+_NOUN_S_ENDING = ("ss", "us", "is", "ous", "ics")
 
 
 def _looks_verb(tok: str) -> bool:
@@ -545,8 +609,9 @@ def _looks_verb(tok: str) -> bool:
     if tok.endswith(_STRONG_VERB_SUFFIX):
         return True
     # a trailing -s/-es signals a 3rd-person verb, but also a plural noun; require some length and
-    # avoid the "-ss" ending (e.g. "process", "mass") so common nouns are not mistaken for verbs.
-    if len(tok) >= 4 and tok.endswith(_WEAK_VERB_SUFFIX) and not tok.endswith("ss"):
+    # avoid endings that flag a singular Latin/Greek noun ("nucleus", "analysis", "process",
+    # "mass") so a common noun is not mistaken for a verb.
+    if len(tok) >= 4 and tok.endswith(_WEAK_VERB_SUFFIX) and not tok.endswith(_NOUN_S_ENDING):
         return True
     return False
 
@@ -726,7 +791,69 @@ def seed_library() -> List[DomainSchema]:
                    "survival", "reproduce", "variation", "inherit"}),
     )
 
-    return [solar, fluid, ecosystem, market, feedback, comms, hierarchy, epidemic, selection]
+    # Reinforcement — a reward→strengthen→repeat loop. The base for learning, habit, addiction,
+    # incentive design: a reward strengthens a behaviour, the behaviour produces more reward, and
+    # that reward sustains the strengthening (the higher-order habit loop).
+    reward, behaviour = e("reward"), e("behaviour")
+    reinforcement = DomainSchema(
+        "reinforcement_loop",
+        [
+            r("strengthens", reward, behaviour),
+            r("produces", behaviour, reward),
+            r("causes", r("strengthens", reward, behaviour), r("produces", behaviour, reward)),
+        ],
+        frozenset({"reward", "reinforce", "habit", "learning", "incentive", "dopamine",
+                   "conditioning", "motivation", "addiction", "loop"}),
+    )
+
+    # Diffusion — a gradient→flux→equalization loop. The base for any spreading-down-a-gradient
+    # process (heat conduction, osmosis, price arbitrage): a gradient drives a flux, the flux
+    # reduces the gradient, and that reduction regulates the flux (negative feedback to balance).
+    gradient, flux = e("gradient"), e("flux")
+    diffusion = DomainSchema(
+        "diffusion_gradient",
+        [
+            r("drives", gradient, flux),
+            r("reduces", flux, gradient),
+            r("causes", r("reduces", flux, gradient), r("drives", gradient, flux)),
+        ],
+        frozenset({"diffusion", "gradient", "concentration", "osmosis", "conduction",
+                   "equilibrium", "spread", "flux", "permeate"}),
+    )
+
+    # Catalysis — a facilitator that accelerates a conversion without being consumed. The base for
+    # enzymes, brokers, platforms, and any accelerant: a catalyst lowers a barrier, the barrier
+    # impedes conversion, so lowering it accelerates conversion (the higher-order enablement).
+    catalyst, barrier, conversion = e("catalyst"), e("barrier"), e("conversion")
+    catalysis = DomainSchema(
+        "catalysis",
+        [
+            r("lowers", catalyst, barrier),
+            r("impedes", barrier, conversion),
+            r("accelerates", catalyst, conversion),
+            r("causes", r("lowers", catalyst, barrier), r("accelerates", catalyst, conversion)),
+        ],
+        frozenset({"catalyst", "enzyme", "facilitate", "accelerate", "broker", "platform",
+                   "substrate", "reaction", "activation"}),
+    )
+
+    # Lever — a trade-off that conserves a quantity across two dimensions. The base for mechanical
+    # advantage, gears, and any effort/reach exchange: effort moves a load, distance trades against
+    # force, and their product (work) is conserved (the higher-order invariant).
+    effort, load, reach = e("effort"), e("load"), e("reach")
+    lever = DomainSchema(
+        "lever_tradeoff",
+        [
+            r("moves", effort, load),
+            r("trades", reach, effort),
+            r("conserves", r("moves", effort, load), r("trades", reach, effort)),
+        ],
+        frozenset({"lever", "leverage", "gear", "mechanical", "tradeoff", "fulcrum",
+                   "advantage", "pulley", "torque"}),
+    )
+
+    return [solar, fluid, ecosystem, market, feedback, comms, hierarchy, epidemic, selection,
+            reinforcement, diffusion, catalysis, lever]
 
 
 # --------------------------------------------------------------------------- #

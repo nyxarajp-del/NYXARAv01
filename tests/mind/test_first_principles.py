@@ -140,6 +140,78 @@ def test_solve_with_faculties_routes_to_first_principles():
     assert conf == 1.0 and "5 O2" in answer
 
 
+# --------------------------------------------------------------------------- #
+# Symbolic — general law rearrangement (solve any stated law for any variable)
+# --------------------------------------------------------------------------- #
+def test_symbolic_rearranges_a_stated_law_and_verifies():
+    d = derive_from_first_principles("given F = m*a, solve for a")
+    assert d is not None and d.verified
+    assert d.result.replace(" ", "") == "a=F/m"
+
+
+def test_symbolic_solves_a_famous_relation():
+    d = derive_from_first_principles("solve E = m*c^2 for m")
+    assert d is not None and d.verified
+    assert "m = E/c**2" in d.result
+
+
+def test_symbolic_solves_a_system_eliminating_the_intermediate():
+    d = derive_from_first_principles("given p = f/A and f = m*a, find p")
+    assert d is not None and d.verified
+    # p is expressed in the base quantities m, a, A (f eliminated)
+    r = d.result.replace(" ", "")
+    assert "f" not in r.split("=", 1)[1] and "m" in r and "A" in r
+
+
+def test_symbolic_integrates_a_rate_law_ode():
+    d = derive_from_first_principles("given dv/dt = a, find v")
+    assert d is not None and d.verified and d.domain == "physics"
+    assert "a*t" in d.result.replace(" ", "")
+
+
+def test_symbolic_defers_to_algebra_faculty_for_single_unknown():
+    # a single equation in one unknown is the AlgebraFaculty's job — the symbolic engine defers
+    from nyxara.mind.first_principles import SymbolicEngine
+    assert SymbolicEngine().derive("solve 2x + 3 = 9") is None
+
+
+# --------------------------------------------------------------------------- #
+# Logic — first-order (universally-quantified) chaining, the classic syllogism
+# --------------------------------------------------------------------------- #
+def test_first_order_syllogism_copula():
+    d = derive_from_first_principles("all humans are mortal. socrates is a human.")
+    assert d is not None and d.domain == "logic" and d.verified
+    assert "mortal(socrates)" in d.result
+
+
+def test_first_order_verb_phrase_predicate():
+    d = derive_from_first_principles("every bird can fly. tweety is a bird.")
+    assert d is not None and "can_fly(tweety)" in d.result
+
+
+def test_first_order_if_then_variable_rule():
+    d = derive_from_first_principles("if X is a metal then X conducts. copper is a metal.")
+    assert d is not None and "conduct(copper)" in d.result
+
+
+def test_logic_defers_on_bare_facts_and_chat():
+    # a bare list of facts with no rule is not a derivation → defer (None), not "nothing follows"
+    assert derive_from_first_principles("hi how are you today") is None
+    assert derive_from_first_principles("the sky is blue") is None
+
+
+# --------------------------------------------------------------------------- #
+# Dimensional analysis — a new quantity defined from a stated equation
+# --------------------------------------------------------------------------- #
+def test_dimensional_define_new_quantity_from_equation():
+    from nyxara.mind.first_principles import DimensionalAnalysis
+    da = DimensionalAnalysis()
+    # power is not asserted directly — it is defined from energy/time and then dimensionally placed
+    dim = da.define("thrust_power", "energy / time")
+    assert dim is not None
+    assert da.dim_of("thrust_power") == da.dim_of("power")
+
+
 def test_arithmetic_still_routes_correctly_no_regression():
     from nyxara.mind.reasoning_faculties import solve_with_faculties
     out = solve_with_faculties("2 + 3 * 4")
