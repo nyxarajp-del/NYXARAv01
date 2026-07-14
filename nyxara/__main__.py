@@ -148,6 +148,7 @@ commands:
   /proactive         detect & govern self-initiated actions (one initiative pass)
   /research <topic>  run one autonomous research pass on a topic
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
+  /selfcorrect <goal> pursue a goal with self-correction: detect wrong/stuck → experiment to fill the gap → abstain honestly
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
@@ -247,6 +248,11 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /investigate <question>")
         else:
             print(json.dumps(core.investigate(arg), indent=2, default=str))
+    elif cmd in ("selfcorrect", "self-correct", "self_correct"):
+        if not arg:
+            print("usage: /selfcorrect <goal>")
+        else:
+            print(json.dumps(core.self_correct(arg), indent=2, default=str))
     elif cmd == "discover":
         try:
             n = int(arg) if arg else 3

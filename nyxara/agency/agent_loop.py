@@ -85,6 +85,7 @@ class AgentLoop:
     def __init__(self, core: Optional[NyxaraCore] = None, *, max_steps: int = 12,
                  authority: Authority = Authority.OWNER, skill_memory: Any = None,
                  max_observation_chars: int = 600, no_progress_patience: int = 4,
+                 self_correction: Any = None, max_recoveries: Optional[int] = None,
                  on_step: Optional[Callable[["AgentStep"], None]] = None) -> None:
         self.core = core or NyxaraCore()
         self.max_steps = max(1, max_steps)
@@ -92,6 +93,14 @@ class AgentLoop:
         # optional: capture successful runs as reusable skills (closes the learning loop)
         self.skill_memory = skill_memory
         self.max_observation_chars = max_observation_chars
+        # Active self-correction & epistemic uncertainty. Instead of silently stopping when the
+        # stall/progress guard trips, the controller assesses whether she is stuck/likely-wrong,
+        # runs a real experiment to fill the gap, and injects the finding so the loop can continue
+        # with genuinely new information. Defaults to the core's controller when present.
+        self.self_correction = (self_correction if self_correction is not None
+                                else getattr(self.core, "self_correction", None))
+        self.max_recoveries = (int(max_recoveries) if max_recoveries is not None
+                               else int(getattr(self.self_correction, "max_recoveries", 2)))
         # progress guard: stop after this many consecutive steps that yield no *new*
         # observation (a broader signal than the legacy "identical action twice"). Keeps a
         # long run from spinning while still allowing genuine multi-step work to proceed.
@@ -145,12 +154,19 @@ class AgentLoop:
         last_signature: Optional[str] = None
         seen_observations: set = set()
         no_progress = 0
+        # epistemic self-correction bookkeeping (one trajectory of state signatures + confidences)
+        signatures: List[str] = []
+        confidences: List[float] = []
+        last_surprise = 0.0
+        recovery_budget = self.max_recoveries
         for i in range(1, self.max_steps + 1):
             stimulus = self._build_stimulus(goal, run.steps)
             result = self.core.process(stimulus, authority=self.authority)
             candidate = result.candidate
             kind = candidate.kind if candidate else "respond"
             tool = (candidate.tool or None) if candidate else None
+            _conf = getattr(candidate, "confidence", None) if candidate else None
+            confidence = float(_conf) if _conf is not None else 1.0
             step = AgentStep(index=i, stimulus=stimulus,
                              disposition=result.disposition.value,
                              text=(candidate.text if candidate else result.response),
@@ -175,6 +191,10 @@ class AgentLoop:
                 run.status, run.final_answer = "escalated", result.response
                 return run
 
+            # predict-then-verify: before we judge the step, predict whether this kind of move
+            # makes progress; surprise (below) is how wrong that prediction turns out to be.
+            self._predict(f"{kind}:{tool or 'respond'}")
+
             # ACT: either a tool ran (observe & continue) or a final reply was given (done)
             if tool and result.tool_value is not None:
                 step.observation = result.tool_value
@@ -183,6 +203,12 @@ class AgentLoop:
                 step.observation = result.response
                 run.steps.append(step)
                 self._emit(step)
+                # honest final-answer gate: never speak a confident-but-wrong / low-confidence
+                # answer — abstain ("I don't know") when it cannot be trusted.
+                gated = self._gate_answer(goal, result.response, confidence)
+                if gated is not None:
+                    run.status, run.final_answer, run.success = "abstained", gated, False
+                    return run
                 run.status, run.final_answer, run.success = "completed", result.response, True
                 return run
             else:
@@ -191,20 +217,36 @@ class AgentLoop:
                 run.steps.append(step)
             self._emit(step)
 
-            # stall guard: identical action twice in a row -> stop rather than spin
             signature = f"{kind}:{tool}:{self._short(step.observation)}"
+            obs_sig = self._short(step.observation)
+            made_progress = obs_sig not in seen_observations
+            last_surprise = self._observe_surprise(f"{kind}:{tool or 'respond'}", made_progress)
+            signatures.append(signature)
+            confidences.append(confidence)
+
+            # stall guard: identical action twice in a row. Rather than silently give up, try to
+            # self-correct first — run an experiment and inject what it finds so the loop can move.
             if signature == last_signature:
+                recovered, recovery_budget = self._recover_into(
+                    run, goal, signatures, confidences, no_progress, last_surprise, recovery_budget)
+                if recovered:
+                    last_signature, no_progress = None, 0
+                    continue
                 run.status, run.final_answer = "stalled", self._short(step.observation)
                 return run
             last_signature = signature
 
-            # progress guard: count consecutive steps that produced no *new* observation.
-            # A run that keeps acting but never learns anything new is going nowhere — stop
-            # before the (now larger) step budget is wasted spinning in place.
-            obs_sig = self._short(step.observation)
+            # progress guard: consecutive steps that produced no *new* observation. Same policy —
+            # attempt an epistemic recovery before declaring the run stalled.
             if obs_sig in seen_observations:
                 no_progress += 1
                 if no_progress >= self.no_progress_patience:
+                    recovered, recovery_budget = self._recover_into(
+                        run, goal, signatures, confidences, no_progress, last_surprise,
+                        recovery_budget)
+                    if recovered:
+                        last_signature, no_progress = None, 0
+                        continue
                     run.status, run.final_answer = "stalled", obs_sig
                     return run
             else:
@@ -214,6 +256,71 @@ class AgentLoop:
         run.status = "max_steps"
         run.final_answer = run.steps[-1].text if run.steps else ""
         return run
+
+    # ---- self-correction helpers (all no-op when no controller is present) ---- #
+    def _predict(self, intent: str) -> None:
+        if self.self_correction is None:
+            return
+        try:
+            self.self_correction.predict_step(intent)
+        except Exception:  # noqa: BLE001 — prediction is advisory, never fatal to a run
+            pass
+
+    def _observe_surprise(self, intent: str, made_progress: bool) -> float:
+        if self.self_correction is None:
+            return 0.0
+        try:
+            return float(self.self_correction.observe_surprise(intent, made_progress))
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _gate_answer(self, goal: str, answer: str, confidence: float) -> Optional[str]:
+        """Return an honest-abstention string if the answer can't be trusted, else ``None``.
+
+        Only genuinely low-confidence answers are gated, so confident conversational replies
+        pass through untouched (and the loop behaves exactly as before when no controller runs)."""
+        ctrl = self.self_correction
+        if ctrl is None or confidence >= float(getattr(ctrl, "answer_min_confidence", 0.0)):
+            return None
+        try:
+            verdict = ctrl.gate_answer(goal, answer, confidence)
+            if verdict.get("abstain"):
+                return str(verdict.get("answer") or answer)
+        except Exception:  # noqa: BLE001 — the gate is best-effort, never breaks a run
+            pass
+        return None
+
+    def _recover_into(self, run: AgentRun, goal: str, signatures: List[str],
+                      confidences: List[float], no_progress: int, surprise: float,
+                      budget: int) -> tuple:
+        """Try to self-correct a stuck/likely-wrong run. Spends up to ``budget`` recovery attempts,
+        working through the strategy ladder (bandit-ranked) until one yields genuinely new
+        information; that finding is appended as a fresh observation so the loop can continue.
+        Returns ``(recovered, remaining_budget)``."""
+        ctrl = self.self_correction
+        if ctrl is None or budget <= 0:
+            return False, budget
+        try:
+            verdict = ctrl.assess(signatures=signatures, confidences=confidences,
+                                  no_progress=no_progress, surprise=surprise)
+            if not verdict.needs_correction:
+                return False, budget
+            observations = [self._short(s.observation) for s in run.steps]
+            while budget > 0:
+                budget -= 1
+                rec = ctrl.recover(goal, observations, verdict)
+                if getattr(rec, "new_info", False):
+                    finding = AgentStep(
+                        index=len(run.steps) + 1,
+                        stimulus=f"[self-correction:{rec.strategy.value}]",
+                        disposition="act", text=rec.finding, kind="self_correction",
+                        tool=None, observation=rec.finding, ok=True)
+                    run.steps.append(finding)
+                    self._emit(finding)
+                    return True, budget
+        except Exception:  # noqa: BLE001 — recovery must never crash the loop
+            return False, budget
+        return False, budget
 
 
 # --------------------------------------------------------------------------- #
@@ -270,6 +377,27 @@ if __name__ == "__main__":  # pragma: no cover
     core3 = NyxaraCore(reasoner=NeverDone())
     run3 = AgentLoop(core3, max_steps=3).run("never resolve")
     print(f"\nbounded run         : status={run3.status} steps={run3.n_steps}")
-    assert run3.status in ("max_steps", "stalled") and run3.n_steps <= 3
+    # bounded no matter the reasoner: capped by max_steps, halted by the stall/progress guard,
+    # or escalated by the kernel when a low-confidence action needs the Master — never unbounded.
+    assert run3.status in ("max_steps", "stalled", "escalated") and run3.n_steps <= 3
+
+    # 4) self-correction: a stuck loop is BROKEN by an experiment rather than silently stalling.
+    #    A reasoner that keeps repeating the same tool result would end 'stalled' — with a
+    #    controller wired, the loop instead recovers (injects a finding) and keeps going.
+    class Repeater:
+        def __call__(self, stimulus, focus=None):
+            return Candidate(text="same again", kind="act",
+                             capability=Capability.TOOL_CALL, risk=RiskTier.LOW,
+                             confidence=0.8, belief=0.8, tool="calculate",
+                             tool_args={"expression": "2*(3+4)"},
+                             rationale="always the same result")
+    from nyxara.growth.self_correction import SelfCorrectionLoop
+    core4 = NyxaraCore(reasoner=Repeater())
+    loop4 = AgentLoop(core4, max_steps=6,
+                      self_correction=SelfCorrectionLoop(path=None), max_recoveries=2)
+    run4 = loop4.run("keep hitting the same wall")
+    recovered = any(s.kind == "self_correction" for s in run4.steps)
+    print(f"self-correction run : status={run4.status} steps={run4.n_steps} recovered={recovered}")
+    assert recovered, "a stuck loop must trigger at least one self-correction recovery"
 
     print("\nALL SELF-TESTS PASSED ✓")

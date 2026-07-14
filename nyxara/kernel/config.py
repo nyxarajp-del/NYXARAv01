@@ -179,6 +179,7 @@ class FeatureFlags(BaseModel):
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
+    self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
@@ -907,6 +908,34 @@ class EnvironmentAdaptationConfig(BaseModel):
     # Persist a profile of every cracked system so re-entry is instant. Off ⇒ model fresh each time.
     persist_profiles: bool = True
     seed: int = 0
+
+
+class SelfCorrectionConfig(BaseModel):
+    """Active self-correction & epistemic uncertainty (growth/self_correction.py), Rules 4 & 6.
+
+    NYXARA can *act*, but a mind must also know **when it is wrong**. This faculty is the active
+    controller that, while she works, notices she is likely-wrong or stuck in a loop, honestly
+    names the gap ("I don't know"), and **runs a real experiment to fill it** before changing
+    course — composing her existing uncertainty, metacognition, critique, prediction, VoI,
+    planner and Scientist faculties, with **no LLM in the loop**. On by default; every experiment
+    is sandboxed and the last rung of the recovery ladder is an honest escalation to the Master."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Max recovery attempts spent on one stuck/uncertain episode before the loop stops honestly.
+    max_recoveries: int = Field(default=2, ge=0, le=8)
+    # Epistemic-uncertainty at/above which she judges "I may not know this" and abstains/experiments.
+    epistemic_floor: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Prediction-error (surprise) at/above which a *confident* move is judged likely-wrong.
+    surprise_floor: float = Field(default=0.55, ge=0.0, le=1.0)
+    # Consecutive no-new-information steps that count as "stuck".
+    stuck_repeat: int = Field(default=2, ge=1, le=16)
+    # Below this calibrated confidence a final answer is abstained rather than spoken.
+    answer_min_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
+    # Persist the learned recovery policy + lessons so competence compounds across restarts.
+    persist: bool = True
+    seed: int = 1729
 
 
 class CouncilConfig(BaseModel):
@@ -2419,6 +2448,7 @@ class NyxaraSettings(BaseSettings):
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
         default_factory=EnvironmentAdaptationConfig)
+    self_correction: SelfCorrectionConfig = Field(default_factory=SelfCorrectionConfig)
     council: CouncilConfig = Field(default_factory=CouncilConfig)
     role_council: RoleCouncilConfig = Field(default_factory=RoleCouncilConfig)
     swarm: SwarmConfig = Field(default_factory=SwarmConfig)

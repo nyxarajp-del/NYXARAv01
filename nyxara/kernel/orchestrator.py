@@ -678,6 +678,12 @@ class NyxaraCore:
         # self-driven environment adaptation — composes open_world + topology + registry (built
         # after both, since it references them). No LLM in the loop.
         self.environment_adapter = self._build_environment_adapter() if enable_growth else None
+        # active self-correction & epistemic uncertainty — the controller that, while she works,
+        # notices she is likely-wrong or stuck in a loop, honestly names the gap ("I don't know")
+        # and runs a real sandboxed experiment to fill it before changing course. Composes the
+        # uncertainty / metacognition / critique / prediction / VoI / planner / Scientist faculties
+        # it is built after. No LLM in the loop. Gated by the ``self_correction`` feature flag.
+        self.self_correction = self._build_self_correction() if enable_growth else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
@@ -3127,6 +3133,49 @@ class NyxaraCore:
                 events_source=self._recent_salient_events,
             )
         except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
+            return None
+
+    def _build_self_correction(self) -> Any:
+        """Active self-correction & epistemic uncertainty (growth/self_correction.py), Rules 4 & 6.
+
+        The controller that turns her epistemic *primitives* into behaviour: predict-then-verify
+        (surprise exposes a wrong belief), loop/cycle detection (she notices she is spinning),
+        calibrated abstention ("I don't know"), and — the point — **running a real experiment to
+        fill the gap** and changing strategy via a learned recovery bandit, before honestly
+        escalating to the Master. Composes the Scientist / prediction engine / VoI / active
+        curiosity / reflector / memory it is built after; the remaining epistemic faculties
+        (uncertainty, metacognition, critique, grounded verifier, planner) are owned defaults so
+        it works standalone. No LLM in the loop. A capability, never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not getattr(settings.features, "self_correction", True):
+                return None
+            cfg = getattr(settings, "self_correction", None)
+            from nyxara.growth.self_correction import SelfCorrectionLoop
+            kwargs: Dict[str, Any] = dict(
+                predictor=getattr(self, "prediction_engine", None),
+                voi=self._voi(),
+                scientist=getattr(self, "scientist", None),
+                active_curiosity=getattr(self, "active_curiosity", None),
+                reflector=getattr(self, "reflector", None),
+                memory=getattr(self, "memory", None),
+                settings=settings,
+            )
+            if cfg is not None:
+                kwargs.update(
+                    max_recoveries=int(getattr(cfg, "max_recoveries", 2)),
+                    epistemic_floor=float(getattr(cfg, "epistemic_floor", 0.5)),
+                    surprise_floor=float(getattr(cfg, "surprise_floor", 0.55)),
+                    stuck_repeat=int(getattr(cfg, "stuck_repeat", 2)),
+                    answer_min_confidence=float(getattr(cfg, "answer_min_confidence", 0.55)),
+                    seed=int(getattr(cfg, "seed", 1729)),
+                )
+                if not getattr(cfg, "persist", True):
+                    kwargs["path"] = None
+            return SelfCorrectionLoop(**kwargs)
+        except Exception:  # noqa: BLE001 — self-correction is a capability, never required
             return None
 
     def _build_open_world_generalizer(self) -> Any:
@@ -6759,6 +6808,28 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"question": question, "error": str(exc)}
 
+    def self_correct(self, goal: str, *, authority: Authority = Authority.OWNER,
+                     max_steps: int = 6) -> Dict[str, Any]:
+        """Pursue ``goal`` with active self-correction & epistemic uncertainty engaged.
+
+        Runs the multi-step agent loop, but with the :class:`SelfCorrectionLoop` controller
+        watching every step: it predicts-then-verifies each move (surprise exposes a wrong
+        belief), detects loops/cycles, and — instead of silently spinning or giving up — honestly
+        names the gap and **runs a real experiment to fill it** before changing strategy, only
+        stopping (or escalating to the Master) once recovery is genuinely exhausted. Returns the
+        run transcript plus the controller's report. Nothing here side-steps the control law."""
+        from nyxara.agency.agent_loop import AgentLoop
+        loop = AgentLoop(self, max_steps=max_steps, authority=authority,
+                         skill_memory=self.skills, self_correction=self.self_correction)
+        run = loop.run(goal)
+        out = run.to_dict() if hasattr(run, "to_dict") else {"goal": goal}
+        if self.self_correction is not None:
+            try:
+                out["self_correction"] = self.self_correction.report()
+            except Exception as exc:  # noqa: BLE001 — reporting is best-effort
+                out["self_correction"] = {"error": str(exc)}
+        return out
+
     def discover(self, cycles: int = 3) -> Dict[str, Any]:
         """Run the autonomous discovery loop for ``cycles`` turns (best-effort).
 
@@ -7643,6 +7714,11 @@ class NyxaraCore:
                     rep["environments_remembered"] = len(reg)
                 except Exception:  # noqa: BLE001
                     pass
+        if getattr(self, "self_correction", None) is not None:
+            try:
+                rep["self_correction"] = self.self_correction.report()
+            except Exception:  # noqa: BLE001 — reporting is best-effort
+                rep["self_correction"] = "ready"
         if self.dream_session is not None:
             rep["dream_sessions"] = self.dream_session.sessions_count
             try:

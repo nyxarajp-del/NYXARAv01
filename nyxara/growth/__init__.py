@@ -202,6 +202,13 @@ from nyxara.growth.adaptation import (
     SystemOutcome,
 )
 from nyxara.growth.topology import hardware_ceiling
+from nyxara.growth.self_correction import (
+    EpistemicState,
+    EpistemicVerdict,
+    Recovery,
+    SelfCorrectionLoop,
+    Strategy,
+)
 
 __all__ = [
     "AutonomousResearcher",
@@ -243,6 +250,12 @@ __all__ = [
     "AdaptationReport",
     "SystemOutcome",
     "hardware_ceiling",
+    # active self-correction & epistemic uncertainty — know when you're wrong, experiment to fix it
+    "SelfCorrectionLoop",
+    "EpistemicState",
+    "EpistemicVerdict",
+    "Recovery",
+    "Strategy",
     "MetaResearcher",
     "MetaResearchReport",
     "CandidateTheory",
