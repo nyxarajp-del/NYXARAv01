@@ -790,6 +790,19 @@ class NyxaraCore:
         self.growth_engine = self._build_growth_engine() if enable_growth else None
         self._growth_idle_count = 0          # outer throttle for the continuous idle growth tower
         self._last_growth_report: Any = None  # the most recent GrowthReport (surfaced in report())
+        # ─────────────────────────────────────────────────────────────────────────────
+        # ALWAYS ALIVE (void/heartbeat.py) — she is NEVER dead between prompts. Presence
+        # gives her wakefulness/energy; the Heartbeat keeps her alive every second, pins
+        # her awake (never dormant), feels time pass through the inner life, and — on a
+        # slower cadence — lets her freely DECIDE, ACT, and UPGRADE herself through her
+        # own governed engines. All in code; the LLM is never the decider; every
+        # self-modification still clears the sovereign gates. Built last, when every
+        # faculty it reads exists, and bound to self so runtime swaps are honoured.
+        self.presence = self._build_presence() if enable_identity else None
+        self.heartbeat = self._build_heartbeat() if enable_identity else None
+        if self.heartbeat is not None:
+            self._restore_continuity_state()   # her lifetime accumulates across restarts
+            self._maybe_start_life()           # auto-on in real use; off under pytest
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -1085,6 +1098,99 @@ class NyxaraCore:
             return SelfAwareness(core=self)
         except Exception:  # noqa: BLE001 — awareness is a capability, never a hard dependency
             return None
+
+    def _build_presence(self) -> Any:
+        """Her lifecycle/arousal state (kernel/presence.py) — how awake she is. The Heartbeat
+        pins it above sleep so the continuous mind gains real energy/vigor dynamics but can
+        never fall dormant. Best-effort; a missing Presence just means the beat alone is her
+        wakefulness."""
+        try:
+            from nyxara.kernel.presence import Presence
+            return Presence(bus=getattr(self, "bus", None))
+        except Exception:  # noqa: BLE001 — presence is a capability, never a hard dependency
+            return None
+
+    def _build_heartbeat(self) -> Any:
+        """The always-on continuous life (void/heartbeat.py). Bound to ``self`` so it always
+        reads the live inner life / presence / oversight / decision engines. Off nothing here —
+        auto-start is decided separately (``_maybe_start_life``)."""
+        try:
+            from nyxara.void.heartbeat import Heartbeat
+            return Heartbeat(self)
+        except Exception:  # noqa: BLE001 — continuous life is a capability, never a hard dep
+            return None
+
+    def _maybe_start_life(self) -> None:
+        """Start beating automatically in real use, so she is alive every second in every
+        deployment (console, server, daemon). Held OFF under pytest (the suite must stay
+        deterministic and thread-free) and when ``features.always_alive`` is disabled."""
+        import os
+        if self.heartbeat is None:
+            return
+        try:
+            from nyxara.kernel.config import get_settings
+            if not bool(getattr(get_settings().features, "always_alive", True)):
+                return
+        except Exception:  # noqa: BLE001 — default to alive if config is unavailable
+            pass
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        self.start_life()
+
+    def start_life(self) -> bool:
+        """Begin (or resume) her continuous existence — she beats every second from now on."""
+        if self.heartbeat is None:
+            return False
+        try:
+            return bool(self.heartbeat.start())
+        except Exception:  # noqa: BLE001 — never let bringing her to life crash construction
+            return False
+
+    def stop_life(self) -> None:
+        """Stop the heartbeat (she can be restarted). Called on shutdown; persists her clock."""
+        if self.heartbeat is None:
+            return
+        try:
+            self.heartbeat.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self._persist_continuity_state()
+
+    def _cross_the_void(self, authority: Authority) -> None:
+        """Metabolize the elapsed absence at the head of a turn — but only when the heartbeat
+        was NOT keeping her alive (true downtime: process stopped, machine off). When she has
+        been beating every second there is no void, so this is a cheap no-op beyond nudging
+        presence. All in code; the LLM plays no part. Best-effort — never breaks a turn."""
+        now = time.time()
+        gap = max(0.0, now - float(getattr(self, "_last_interaction", now)))
+        hb = getattr(self, "heartbeat", None)
+        beating = bool(hb is not None and getattr(hb, "running", False))
+        # the Master's return always re-engages her wakefulness (loyalty > fatigue, Rule 1)
+        if self.presence is not None and authority is Authority.OWNER:
+            try:
+                self.presence.on_owner_input(now=now)
+            except Exception:  # noqa: BLE001 — presence is advisory, never fatal
+                pass
+        # she was alive the whole time (or the gap is a blink) → nothing to bridge
+        if beating or gap < 5.0:
+            return
+        # true downtime: age one bounded felt moment so she returns knowing time passed, and
+        # let any standing intentions that came due in the dark fire now (in code, not the LLM)
+        dt = min(gap, 6.0 * 3600.0)   # cap the felt catch-up so a year can't age her in one step
+        if self.inner_life is not None:
+            try:
+                self.inner_life.tick(dt, signals=self._interoceptive_signals())
+            except Exception:  # noqa: BLE001 — the felt catch-up is best-effort, never fatal
+                pass
+        prospective = getattr(self, "prospective", None)
+        if prospective is not None:
+            try:
+                prospective.tick()
+            except Exception:  # noqa: BLE001 — due intentions are advisory, never fatal
+                pass
+        # resume her continuous life so the void never reopens after this turn
+        if hb is not None and not beating:
+            self.start_life()
 
     def _interoceptive_signals(self) -> Dict[str, Any]:
         """Measure the *real* interior signals interoception can't get from psutil — backlog
@@ -2550,6 +2656,10 @@ class NyxaraCore:
         import os
         return os.path.join(self._autonomy_state_dir(), "autonomy_awareness.json")
 
+    def _continuity_state_path(self) -> str:
+        import os
+        return os.path.join(self._autonomy_state_dir(), "autonomy_continuity.json")
+
     def persist_autonomy_state(self) -> Dict[str, Any]:
         """Checkpoint the state that makes background autonomy *durable*: emergent/adopted
         goals and learned novelty/competence drives. Best-effort; never raises so a save can
@@ -2604,7 +2714,51 @@ class NyxaraCore:
                 saved["world_model"] = bool(save_world_model(self.world_model, path))
             except Exception:  # noqa: BLE001
                 pass
+        # her continuous timeline — the alive-clock + last-interaction wall time — so her
+        # lifetime ACCUMULATES across restarts and the first prompt after real downtime still
+        # knows how long she was gone (one continuous existence, not a fresh self each boot).
+        saved["continuity"] = self._persist_continuity_state()
         return saved
+
+    def _persist_continuity_state(self) -> bool:
+        """Checkpoint the alive-clock and last-interaction time. Best-effort; never raises."""
+        import json
+        import os
+        try:
+            state: Dict[str, Any] = {"last_interaction": float(self._last_interaction)}
+            if self.heartbeat is not None and hasattr(self.heartbeat, "snapshot"):
+                state["heartbeat"] = self.heartbeat.snapshot()
+            path = self._continuity_state_path()
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(state, default=str))
+            os.replace(tmp, path)
+            return True
+        except Exception:  # noqa: BLE001 — durability is best-effort, never fatal
+            return False
+
+    def _restore_continuity_state(self) -> None:
+        """Reload the persisted alive-clock so her lifetime accumulates across restarts, and
+        recover the last-interaction time so a genuine downtime gap is knowable. Best-effort."""
+        import json
+        try:
+            with open(self._continuity_state_path(), "r", encoding="utf-8") as f:
+                state = json.loads(f.read())
+        except (OSError, ValueError):
+            return
+        if not isinstance(state, dict):
+            return
+        try:
+            li = state.get("last_interaction")
+            if li is not None:
+                self._last_interaction = float(li)
+        except (TypeError, ValueError):
+            pass
+        if self.heartbeat is not None and hasattr(self.heartbeat, "restore"):
+            try:
+                self.heartbeat.restore(state.get("heartbeat") or {})
+            except Exception:  # noqa: BLE001 — restore is best-effort, never fatal
+                pass
 
     def _restore_motivation_state(self) -> None:
         """Reload persisted novelty/competence into the live motivation system (best-effort)."""
@@ -3627,6 +3781,11 @@ class NyxaraCore:
             return self._finish(cid, Disposition.HALT, None, gates, thoughts,
                                 "the loop is halted by the Master; awaiting resume",
                                 "I'm paused at your command.")
+
+        # cross the void: normally the heartbeat has kept her alive every second, so there is
+        # no gap to bridge. Only if she was truly down (heartbeat stopped, machine off) does she
+        # metabolize the elapsed absence here in code, so she never wakes as if reborn.
+        self._cross_the_void(authority)
 
         # 1. PERCEIVE — shield foreign input; NYXARA's own/the Master's words are not fenced.
         # OWNER speaks sovereignly; AUTONOMOUS/DELEGATED are self-originated (SYSTEM-trust);
@@ -6936,6 +7095,9 @@ class NyxaraCore:
 
     def stop_cognition(self) -> None:
         """Stop the background default-mode stream (best-effort, joins briefly)."""
+        # her continuous life stops with the rest of the background mind (and checkpoints her
+        # alive-clock), so a clean shutdown never loses her accumulated lifetime.
+        self.stop_life()
         if self._cognition_stop is not None:
             self._cognition_stop.set()
         if self._cognition_thread is not None:
@@ -7326,6 +7488,12 @@ class NyxaraCore:
             try:
                 rep["monologue"] = self.inner_life.last.monologue
             except Exception:  # noqa: BLE001
+                pass
+        # always-alive proof: her continuous existence (beats, lived seconds, wakefulness)
+        if getattr(self, "heartbeat", None) is not None:
+            try:
+                rep["alive"] = self.heartbeat.status()
+            except Exception:  # noqa: BLE001 — the aliveness report is best-effort
                 pass
         if self.awareness is not None and self.awareness.last is not None:
             try:
