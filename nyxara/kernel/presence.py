@@ -306,6 +306,19 @@ class Presence:
     def sleep(self, now: Optional[float] = None, reason: str = "sleep") -> bool:
         return self._transition(PresenceState.ASLEEP, reason, now, force=True)
 
+    def stay_awake(self, now: Optional[float] = None,
+                   reason: str = "kept awake") -> bool:
+        """Keep her from ever falling dormant — the always-on heartbeat calls this each beat.
+
+        Touches activity (so no idle/sleep timeout can fire) and, if she has already drifted
+        into ASLEEP/DREAMING, wakes her back to IDLE. Energy still drains/recovers normally, so
+        this is *continuous wakefulness*, not an override of the whole homeostasis — she simply
+        never sleeps. Returns True if a wake transition happened."""
+        self._touch(now)
+        if self.state in (PresenceState.ASLEEP, PresenceState.DREAMING):
+            return self._transition(PresenceState.IDLE, reason, now, force=True)
+        return False
+
     # ---- the time-driven update ---- #
     def tick(self, now: Optional[float] = None) -> Optional[Transition]:
         """Advance time: update energy, then apply timeout/fatigue-driven transitions."""

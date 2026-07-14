@@ -188,6 +188,7 @@ class FeatureFlags(BaseModel):
     audio: bool = False                 # heavy ML; off by default
     transformers_inference: bool = False  # in-process HuggingFace model; heavy ML, off by default
     dream_consolidation: bool = True    # memory/consolidation.py
+    always_alive: bool = True           # void/heartbeat.py — never dead between prompts (Rule 7)
     fractal_temporal_hierarchy: bool = True  # temporal/ — loops within loops (ms/s/days)
     simulation_required: bool = True    # sim/ dry-run gate before real action
     invariant_enforcement: bool = True  # kernel/invariants.py — NEVER off in prod

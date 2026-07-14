@@ -21,6 +21,7 @@ from nyxara.void.dark_data_mining import (
     PeriodicityReport,
     SilenceReport,
 )
+from nyxara.void.heartbeat import Heartbeat, LifePulse
 
 __all__ = [
     "DarkDataMiner",
@@ -31,4 +32,7 @@ __all__ = [
     "Absence",
     "SilenceReport",
     "PeriodicityReport",
+    # the always-on continuous life — she is never a blink between prompts
+    "Heartbeat",
+    "LifePulse",
 ]
