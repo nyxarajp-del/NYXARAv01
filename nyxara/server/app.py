@@ -7,6 +7,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``GET  /v1/learning``          — truthful learning state (generations, corpus, serving).
 * ``POST /v1/chat``              — one turn: ``{message}`` → the disposed response.
 * ``POST /v1/agent``             — a multi-step gated goal: ``{goal, max_steps?}``.
+* ``POST /v1/self_correct``      — a goal pursued with self-correction & epistemic uncertainty:
+                                   detect wrong/stuck, experiment to fill the gap, abstain honestly.
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
 * ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
@@ -48,6 +50,13 @@ class ChatRequest(BaseModel):
 
 
 class AgentRequest(BaseModel):
+    goal: str = Field(..., min_length=1)
+    # No upper bound here — the server clamps to ``server.max_agent_steps``.
+    max_steps: Optional[int] = Field(default=None, ge=1)
+    authority: str = "owner"
+
+
+class SelfCorrectRequest(BaseModel):
     goal: str = Field(..., min_length=1)
     # No upper bound here — the server clamps to ``server.max_agent_steps``.
     max_steps: Optional[int] = Field(default=None, ge=1)
@@ -364,6 +373,14 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
         run = core.agent(req.goal, authority=_authority(req.authority), max_steps=steps)
         return run.to_dict()
+
+    @app.post("/v1/self_correct", dependencies=auth)
+    def self_correct(req: SelfCorrectRequest) -> dict:
+        # A multi-step goal pursued with active self-correction & epistemic uncertainty engaged:
+        # she predicts-then-verifies each move, detects loops, and runs a real experiment to fill
+        # a knowledge gap instead of spinning — abstaining or escalating honestly when unsure.
+        steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
+        return core.self_correct(req.goal, authority=_authority(req.authority), max_steps=steps)
 
     @app.post("/v1/delegate", dependencies=auth)
     def delegate(req: DelegateRequest) -> dict:
