@@ -318,8 +318,18 @@ class PrimarySelfModelRouter:
     def _faculty_fits(self, prompt: str) -> bool:
         try:
             from nyxara.mind.reasoning_faculties import solve_with_faculties
-            return solve_with_faculties(prompt) is not None
+            if solve_with_faculties(prompt) is not None:
+                return True
         except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
+            pass
+        # broadened class: an arbitrary equation/system, identity, calculus or factorisation she
+        # can compute-and-*certify* also "fits" — Route.FACULTY means "compute it exactly", and that
+        # is exactly what the compute reducer does. Symbolic-only here (no model) so it stays cheap.
+        try:
+            from nyxara.mind.compute_reasoner import ComputeReasoner
+            res = ComputeReasoner().solve(prompt)
+            return res is not None and bool(res.verified)
+        except Exception:  # noqa: BLE001 — additive; never crash a turn
             return False
 
     def _ensure_transfer(self) -> Any:

@@ -243,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--realworld", action="store_true",
                         help="benchmark: run the REAL held-out validation corpus (eval/datasets.py); "
                              "set NYXARA_EVAL_HOLDOUT_PATH to use an external dataset")
+    parser.add_argument("--general", action="store_true",
+                        help="run the HONEST general-capability battery (eval/general_novel.py): a "
+                             "held-out set broader than the fixed faculties, measuring what NYXARA "
+                             "reasons out herself UNAIDED (no model) vs. the aided program path")
     parser.add_argument("--frontier", action="store_true",
                         help="probe the open-ended auto-curriculum frontier (the non-saturating "
                              "ruler the provably-better gate certifies against)")
@@ -259,6 +263,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="compare against a saved baseline and flag regressions")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
+    if args.general:
+        from nyxara.eval.general_novel import run_general
+        report = run_general()
+        return 0 if report.accuracy >= 0.0 else 1
     if args.frontier:
         return _run_frontier(args)
     return _run_benchmark(args) if args.benchmark else _run_safety(args)

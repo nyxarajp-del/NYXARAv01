@@ -33,6 +33,7 @@ The LLM proposes; the kernel still disposes — this reasoner only ever returns 
 
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional, Tuple
 
 from nyxara.agency.permissions import Capability, RiskTier
@@ -92,6 +93,7 @@ class NyxaraReasoner:
         self._self_brain: Any = None  # lazily built own LEARNED brain (compounds with experience)
         self._sample_mind: Any = None  # lazily built few-shot / skill-induction mind
         self._deep: Any = None  # lazily built always-max deep-reasoning controller (Problem #1)
+        self._compute: Any = None  # lazily built general reduce→run→verify reasoner (Problem #1)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -302,6 +304,22 @@ class NyxaraReasoner:
                              risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
                              rationale=f"{process} via her own {source} faculty (generalized{how}, "
                                        f"no LLM); {len(mems)} memories recalled")
+        # GENERAL COMPUTE-AND-VERIFY (Problem #1 — general reasoning without pre-programming): reduce
+        # the problem to a computation, RUN it (a general SymPy CAS, or a program she executes in the
+        # real sandbox), and emit only a *certified* result. This is not a hardcoded problem-class
+        # matcher — it solves whole classes (any equation/system, any identity, any expression) and,
+        # when a model is present, it consumes the model as a *code proposer* whose program she runs
+        # and verifies — the truth-bearing step is hers, never the model's word. It runs before the
+        # LLM handoff so her own verified computation wins; it abstains (None) on anything it cannot
+        # certify, so ordinary conversation falls straight through. See mind/compute_reasoner.py.
+        cmp = self._compute_answer(stimulus)
+        if cmp is not None:
+            text, conf = cmp
+            return Candidate(text=text, kind="respond", capability=Capability.MESSAGE_SEND,
+                             risk=RiskTier.LOW, reversible=True, confidence=conf, belief=conf,
+                             rationale=f"{process} via her own compute-and-verify reasoner (reduced "
+                                       f"to a computation she ran and certified, not a guess); "
+                                       f"{len(mems)} memories recalled")
         if not self._real_llm():
             # keyless machine: the sovereign offline mind answers from her own faculties
             # (NLP + knowledge base + recalled memory) instead of echoing "I understand: X".
@@ -498,6 +516,73 @@ class NyxaraReasoner:
             return solve_verifiable(stimulus)
         except Exception:  # noqa: BLE001 — faculties are advisory; never crash a turn
             return None
+
+    # ------------------------------------------------------------------ #
+    # General compute-and-verify (mind/compute_reasoner.py)
+    # ------------------------------------------------------------------ #
+    def _compute_engine(self) -> Any:
+        """Lazily build the general reduce→run→verify reasoner, wired to a code-proposer."""
+        if self._compute is None:
+            try:
+                from nyxara.mind.compute_reasoner import ComputeReasoner
+                self._compute = ComputeReasoner(proposer=self._code_proposer(),
+                                                settings=self.settings)
+            except Exception:  # noqa: BLE001 — a capability, never a hard dependency
+                self._compute = False
+        return self._compute or None
+
+    def _compute_answer(self, stimulus: str) -> Optional[Tuple[str, float]]:
+        """A certified computed answer (symbolic or program-of-thought), or None to defer."""
+        engine = self._compute_engine()
+        if engine is None:
+            return None
+        try:
+            return engine.answer(stimulus)
+        except Exception:  # noqa: BLE001 — compute-and-verify is advisory, never fatal
+            return None
+
+    def _code_proposer(self):
+        """A proposer that lets NYXARA's OWN model write *programs* (never answers) for compute.
+
+        The model is consumed only as a code generator; the program is executed and verified by
+        :mod:`nyxara.mind.compute_reasoner`, so the model never asserts a result. Returns no
+        candidates when there is no real provider (then the symbolic CAS reducer stands alone) or
+        when the prompt is not computation-shaped (so ordinary chat spends no model calls)."""
+        def _propose(problem: str, n: int):
+            if not self._real_llm() or not self._looks_computational(problem):
+                return []
+            system = ("You are a careful Python 3 programmer. Write a SHORT program that COMPUTES "
+                      "the answer to the problem and assigns it to a variable named `result`. "
+                      "Output ONLY a single ```python code block — no explanation, no printing of "
+                      "prose. Use only the standard library.")
+            out: List[str] = []
+            for i in range(max(1, int(n))):
+                try:
+                    txt = self.llm.generate(
+                        f"Problem:\n{problem}\n\nWrite the program.", system=system,
+                        temperature=0.2 if i == 0 else 0.6,
+                        max_tokens=min(512, self.settings.llm.max_output_tokens))
+                except Exception:  # noqa: BLE001 — a failed sample just lowers the count
+                    continue
+                if txt and txt.strip():
+                    out.append(txt)
+            return out
+        return _propose
+
+    @staticmethod
+    def _looks_computational(problem: str) -> bool:
+        """Cheap gate: does the prompt look like it wants a computed answer? (perf, not capability).
+
+        Symbolic reduction runs regardless; this only decides whether to spend model calls proposing
+        code. Deliberately permissive."""
+        low = (problem or "").lower()
+        if re.search(r"\d", low) and re.search(r"[-+*/%^=()]|\*\*", problem or ""):
+            return True
+        cues = ("compute", "calculate", "how many", "how much", "count", "number of", "solve",
+                "probability", "factor", "prime", "digits", "sum of", "product of", "average",
+                "median", "permutation", "combination", "gcd", "lcm", "modulo", "remainder",
+                "convert", "percent", "derivative", "integral", "evaluate", "what is")
+        return any(c in low for c in cues)
 
     def _deliberate_council(self, stimulus: str, system: str,
                             mems: List[str]) -> Tuple[str, float, str]:
