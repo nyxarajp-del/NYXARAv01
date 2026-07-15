@@ -126,3 +126,33 @@ def test_checker_never_raises():
     for kind in ("arithmetic", "algebra", "logic", "inequality", "number_theory"):
         r = _p().prove(ProofClaim(kind, ""))         # empty / garbage input
         assert r.verdict in (ProofVerdict.UNPROVABLE, ProofVerdict.REFUTED, ProofVerdict.PROVEN)
+
+
+# --------------------------------------------------------------------------- #
+# General decision procedure — kind auto-detected from the statement's structure
+# --------------------------------------------------------------------------- #
+def test_certify_autodetects_arithmetic():
+    assert _p().certify("2 + 2 = 4").verdict is ProofVerdict.PROVEN
+    assert _p().certify("2 + 2 = 5").verdict is ProofVerdict.REFUTED
+
+
+def test_certify_autodetects_algebra_identity_and_candidate():
+    assert _p().certify("(x+1)^2 = x^2 + 2*x + 1").verdict is ProofVerdict.PROVEN
+    assert _p().certify("2*x + 3 = 7", "x = 2").verdict is ProofVerdict.PROVEN
+    assert _p().certify("2*x + 3 = 7", "x = 5").verdict is ProofVerdict.REFUTED
+
+
+def test_certify_autodetects_logic_and_number_theory():
+    assert _p().certify("A or not A").verdict is ProofVerdict.PROVEN
+    assert _p().certify("A and not A").verdict is ProofVerdict.REFUTED
+    assert _p().certify("is 17 prime").verdict is ProofVerdict.PROVEN
+
+
+def test_unknown_kind_falls_through_to_detection():
+    # a caller that does not know the kind still gets a decision, not a blanket abstain
+    r = Prover(seed=1).prove(ProofClaim("mystery", "2 + 2 = 4"))
+    assert r.verdict is ProofVerdict.PROVEN
+
+
+def test_certify_abstains_on_undecidable_prose():
+    assert _p().certify("the meaning of life is happiness").verdict is ProofVerdict.UNPROVABLE

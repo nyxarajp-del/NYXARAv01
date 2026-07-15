@@ -475,6 +475,17 @@ class MathExpert(DomainExpert):
             sol.confidence = max(0.7, float(conf))
             sol.detail["method"] = "verifiable_faculty"
             return sol
+        # beyond the fixed faculties: general compute-and-verify (any equation/system, identity,
+        # calculus, factorisation, or a program she runs). Certified result → she owns the answer.
+        computed = self.gi._compute_solve(problem)
+        if computed is not None:
+            answer, conf, cert = computed
+            sol.answer = answer
+            sol.verified = True
+            sol.confidence = max(0.7, float(conf))
+            sol.detail["method"] = "compute_and_verify"
+            sol.detail["certificate"] = cert
+            return sol
         # no decidable method matched — synthesise, but say it is not certified
         sol.answer = self.gi._synthesise(problem, frame)
         sol.confidence = 0.45 if self.gi._llm_real() else 0.3
@@ -582,11 +593,20 @@ class AdaptiveExpert(DomainExpert):
         transferred = None
         if self.gi.own_faculties_first:
             transferred = self.gi._generalize_solve(problem) or self.gi._transfer_solve(problem)
+        computed = self.gi._compute_solve(problem) if transferred is None else None
         if transferred is not None:
             answer, conf, detail = transferred
             sol.answer = answer
             sol.confidence = conf
             sol.detail.update(detail)
+        elif computed is not None:
+            # a genuinely new problem she nonetheless reduced to a computation and *certified*.
+            answer, conf, cert = computed
+            sol.answer = answer
+            sol.confidence = conf
+            sol.verified = True
+            sol.detail["method"] = "compute_and_verify"
+            sol.detail["certificate"] = cert
         else:
             sol.answer = self.gi._synthesise(problem, frame) or (
                 "From first principles: " + "; ".join(principles))
@@ -709,6 +729,48 @@ class GeneralIntelligence:
             return solve_with_faculties(problem)
         except Exception:  # noqa: BLE001
             return None
+
+    def _compute_solve(self, problem: str) -> Optional[Tuple[str, float, str]]:
+        """General *reduce → run → verify* (mind/compute_reasoner): solve whole classes herself.
+
+        Returns ``(answer, confidence, certificate)`` when NYXARA can compute-and-certify the
+        result, else ``None``. Beyond the fixed faculties: any equation/system, identity, calculus,
+        factorisation, or a program she writes and runs. A real LLM (if present) is consumed only as
+        a *code proposer* whose program she executes and verifies — never as the source of truth."""
+        try:
+            from nyxara.mind.compute_reasoner import ComputeReasoner
+            reasoner = ComputeReasoner(proposer=self._code_proposer())
+            res = reasoner.solve(problem)
+        except Exception:  # noqa: BLE001 — compute-and-verify is additive, never fatal
+            return None
+        if res is None or not (res.answer or "").strip():
+            return None
+        return res.answer, float(res.confidence), res.certificate
+
+    def _code_proposer(self):
+        """Let her own model propose *programs* for the compute reducer (verifier-gated).
+
+        No real provider → ``None`` (the symbolic CAS reducer stands alone, so this stays
+        deterministic and CI-safe)."""
+        if not self._llm_real():
+            return None
+
+        def _propose(problem: str, n: int):
+            system = ("You are a careful Python 3 programmer. Write a SHORT program that COMPUTES "
+                      "the answer and assigns it to a variable named `result`. Output ONLY a "
+                      "```python code block, standard library only.")
+            out: List[str] = []
+            for i in range(max(1, int(n))):
+                try:
+                    txt = self.llm.generate(f"Problem:\n{problem}\n\nWrite the program.",
+                                            system=system, temperature=0.2 if i == 0 else 0.6,
+                                            max_tokens=512)
+                except Exception:  # noqa: BLE001
+                    continue
+                if txt and txt.strip():
+                    out.append(txt)
+            return out
+        return _propose
 
     def _ensure_transfer(self) -> Any:
         """The relational-transfer engine (built lazily if none was injected)."""

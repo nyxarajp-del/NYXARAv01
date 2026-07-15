@@ -104,7 +104,14 @@ class Prover:
                 "inequality": self._prove_inequality,
                 "number_theory": self._prove_number_theory,
             }
-            fn = dispatch.get((claim.kind or "").strip().lower())
+            kind = (claim.kind or "").strip().lower()
+            # General decision procedure: when the caller does not know (or names an unknown)
+            # kind, infer it from the *structure* of the statement rather than abstaining. This is
+            # what makes the prover general — a caller can hand it any decidable claim and let the
+            # checker pick the right procedure, so new phrasings are covered without new call-sites.
+            if kind in ("", "auto", "any", "general", "unknown") or kind not in dispatch:
+                kind = self._detect_kind(claim)
+            fn = dispatch.get(kind)
             if fn is None:
                 return self._abstain(claim, f"no decision procedure for kind={claim.kind!r}")
             return fn(claim)
@@ -114,6 +121,42 @@ class Prover:
     def check_answer(self, kind: str, statement: str, candidate: str) -> ProofResult:
         """Convenience: certify that ``candidate`` is correct for ``statement``."""
         return self.prove(ProofClaim(kind=kind, statement=statement, candidate_answer=candidate))
+
+    def certify(self, statement: str, candidate: Optional[str] = None) -> ProofResult:
+        """Certify ``statement`` (optionally against ``candidate``) with the kind auto-detected.
+
+        The general entry point: the caller need not know which decision procedure applies — the
+        prover infers it from the statement's structure (equation / comparison / boolean / number
+        theory / arithmetic) and dispatches, abstaining honestly when nothing decidable fits."""
+        return self.prove(ProofClaim(kind="auto", statement=statement, candidate_answer=candidate))
+
+    # ------------------------------------------------------------------ #
+    # Structure detection — infer the right decision procedure from the claim
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _detect_kind(claim: ProofClaim) -> str:
+        stmt = (claim.statement or "")
+        low = stmt.lower()
+        # number theory: primality / gcd / divisibility phrasings
+        if re.search(r"\bprime\b", low) or re.search(r"\bgcd\s*\(", low) \
+                or re.search(r"\bdivides\b", low):
+            return "number_theory"
+        # logic: boolean connectives (word or symbol) and no arithmetic relation
+        if re.search(r"\b(and|or|not|implies|iff)\b", low) or re.search(r"[∧∨¬→↔]|->|<->|&&|\|\|", stmt):
+            if not re.search(r"\d\s*[-+*/]\s*\d", stmt):
+                return "logic"
+        # inequality: a comparison operator
+        if re.search(r"<=|>=|(?<![=<>!])<(?!=)|(?<![=<>!])>(?!=)", stmt):
+            return "inequality"
+        # equation / identity: a single '=' with a variable present
+        if "=" in stmt and not re.search(r"[<>=!]=", stmt):
+            if re.search(r"[A-Za-z]", stmt.split("=", 1)[0]) or claim.candidate_answer is not None:
+                return "algebra"
+            return "arithmetic"
+        # a bare closed expression -> arithmetic evaluation
+        if re.search(r"\d", stmt) and re.search(r"[-+*/%()]|\*\*", stmt):
+            return "arithmetic"
+        return ""   # nothing decidable recognised -> the caller abstains
 
     # ------------------------------------------------------------------ #
     # arithmetic — exact over the rationals

@@ -136,13 +136,15 @@ def _prover_verdict(prompt: str, candidate: str) -> Optional[bool]:
     Returns ``True`` (proven), ``False`` (refuted), or ``None`` (the prover abstained / not a
     decidable claim / anything went wrong). Only attempted when ``prompt`` reads like an
     equation and ``candidate`` carries a number, so it never fires on open prose. Never raises."""
-    if "=" not in (prompt or "") or not _numbers(candidate or ""):
+    has_relation = any(op in (prompt or "") for op in ("=", "<", ">"))
+    if not has_relation or not _numbers(candidate or ""):
         return None
     try:
         from nyxara.growth.prover import Prover
         stmt = prompt.strip().rstrip("?.! ")
-        # algebra covers both a candidate-solution check and pure arithmetic (it delegates).
-        res = Prover().check_answer("algebra", stmt, candidate.strip())
+        # auto-detect the decision procedure (equation / identity / inequality / number theory /
+        # arithmetic) so the truth-check is general, not limited to the algebra path.
+        res = Prover().certify(stmt, candidate.strip())
         verdict = getattr(res, "verdict", None)
         name = getattr(verdict, "value", getattr(verdict, "name", "")) or ""
         name = str(name).lower()

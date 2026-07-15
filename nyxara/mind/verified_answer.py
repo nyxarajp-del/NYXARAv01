@@ -71,12 +71,26 @@ def faculty_oracle(prompt: str) -> Optional[Tuple[str, float]]:
     """The default exact oracle: NYXARA's verifiable reasoning faculties (exact math/logic).
 
     Returns ``(answer, confidence)`` when a faculty can answer ``prompt`` exactly, else ``None``.
-    Best-effort and import-guarded so this module is usable on the barest machine."""
+    First the fixed verifiable faculties; then, for the whole broadened class they do not cover
+    (arbitrary equations/systems, identities, calculus, factorisation…), the general compute-and-
+    verify reducer — but *only* its exactly-certified (``verified``) results, so the oracle stays
+    provably correct. Both are best-effort and import-guarded so this is usable on the barest
+    machine; the compute path here uses no model (symbolic only), so it is cheap and deterministic."""
     try:
         from nyxara.mind.reasoning_faculties import solve_with_faculties
-        return solve_with_faculties(prompt)
-    except Exception:  # noqa: BLE001 — a missing/!broken faculty simply means "no oracle here"
-        return None
+        hit = solve_with_faculties(prompt)
+        if hit is not None:
+            return hit
+    except Exception:  # noqa: BLE001 — a missing/broken faculty simply means "no oracle here"
+        pass
+    try:
+        from nyxara.mind.compute_reasoner import ComputeReasoner
+        res = ComputeReasoner().solve(prompt)   # no proposer -> symbolic CAS only
+        if res is not None and res.verified and (res.answer or "").strip():
+            return res.answer, float(res.confidence)
+    except Exception:  # noqa: BLE001 — the compute reducer is additive; abstain on any trouble
+        pass
+    return None
 
 
 def _majority(candidates: List[str], *, agree_at: float = 0.6) -> Tuple[str, float, float]:
