@@ -32,7 +32,7 @@ from nyxara.growth.meta_engine import (
 )
 from nyxara.growth.bootstrap import (
     IDENTITY_SEED,
-    TINYLLAMA_1_1B,
+    QWEN_0_5B,
     ensure_primary_model,
     primary_model_present,
 )
@@ -308,7 +308,7 @@ __all__ = [
     "ensure_primary_model",
     "primary_model_present",
     "IDENTITY_SEED",
-    "TINYLLAMA_1_1B",
+    "QWEN_0_5B",
     "NeuralArchitectureSearch",
     "ArchitectureGenome",
     "LayerGene",

@@ -68,7 +68,7 @@ def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
     s = NyxaraSettings.for_profile(Profile.DEV)
     assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
-    assert s.foundry.lora_requires_gpu is True       # no 9B download on a bare CPU box
+    assert s.foundry.lora_requires_gpu is False      # 0.5B base LoRA-tunes on a CPU, no GPU needed
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
     assert s.flywheel.correction_weight == 3
@@ -84,11 +84,9 @@ def test_test_profile_seals_the_foundry():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
-    s.llm.provider = LLMProvider.TINYLLAMA
-    assert s.llm.active_model() == s.llm.tinyllama_model
-    assert s.llm.tinyllama_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    s.llm.provider = LLMProvider.GGUF
-    assert s.llm.active_model() == s.llm.gguf_model
+    s.llm.provider = LLMProvider.QWEN
+    assert s.llm.active_model() == s.llm.qwen_model
+    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
     # every backend is local now — there are no API keys anywhere
@@ -97,22 +95,22 @@ def test_llm_active_model_and_key():
     assert s.llm.active_key() is None
 
 
-def test_qwythos_is_the_default_foundry_base_and_gguf_serving():
-    """The shipped defaults wire the Qwythos-9B integration end to end."""
+def test_qwen_is_the_single_base_and_foundry_base():
+    """The shipped defaults wire the single Qwen2.5-0.5B base end to end."""
     s = NyxaraSettings()
-    # serving: the auto ladder by default (self→gguf→tinyllama→mock), so her own promoted
-    # weights serve the moment they exist; the gguf rung points at the Qwythos GGUF quant
+    # serving: the auto ladder by default (self→qwen→mock), so her own promoted
+    # weights serve the moment they exist; until then the Qwen base answers
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    assert "Qwythos-9B" in s.llm.gguf_model and s.llm.gguf_model.endswith("-GGUF")
-    assert s.llm.gguf_filename.endswith(".gguf")
-    # training: the foundry adapts the SAFETENSORS parent (not the -GGUF repo) with QLoRA
-    assert s.foundry.base_model == "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
-    assert not s.foundry.base_model.endswith("-GGUF")
-    assert s.foundry.load_in_4bit is True
-    assert s.foundry.trust_remote_code is True
-    # empty target modules -> peft infers them for the hybrid Qwen3.5 arch
-    assert s.foundry.lora_target_modules == []
+    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    # training: the foundry LoRA-tunes that same single base — everything above it is hers
+    assert s.foundry.base_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    # a 0.5B base needs no QLoRA and no remote code
+    assert s.foundry.load_in_4bit is False
+    assert s.foundry.trust_remote_code is False
+    # Qwen2.5 uses llama-style projection names — the default pins the full set
+    assert s.foundry.lora_target_modules == [
+        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
 def test_resource_limits_validation():
@@ -145,11 +143,11 @@ def test_save_and_from_file_roundtrip(tmp_path):
 
 def test_env_override(monkeypatch):
     monkeypatch.setenv("NYXARA_PROFILE", "prod")
-    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "tinyllama")
+    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "qwen")
     monkeypatch.setenv("NYXARA_RESOURCES__MAX_CONCURRENT_TASKS", "128")
     s = NyxaraSettings()
     assert s.profile is Profile.PROD
-    assert s.llm.provider is LLMProvider.TINYLLAMA
+    assert s.llm.provider is LLMProvider.QWEN
     assert s.resources.max_concurrent_tasks == 128
 
 

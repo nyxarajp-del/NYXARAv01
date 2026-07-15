@@ -1,4 +1,4 @@
-"""The ``auto`` provider ladder (mind/llm.py): self→gguf→tinyllama→mock.
+"""The ``auto`` provider ladder (mind/llm.py): self→qwen→mock.
 
 Her own promoted weights answer first — but only past the honesty serve gate (a LoRA over
 the real base, or the explicit any-backend opt-in). Every rung degrades honestly; the

@@ -1,6 +1,6 @@
 """Tests for growth/bootstrap.py — auto-forge NYXARA's OWN primary brain on boot (CPU/n-gram).
 
-The real path QLoRA-tunes the Qwythos-9B base; on a deps-free CI box the foundry degrades to its
+The real path LoRA-tunes the Qwen2.5-0.5B base; on a deps-free CI box the foundry degrades to its
 always-on n-gram backend, so these tests exercise the *wiring* (provider gating, idempotency,
 the recorded base, SelfProvider hand-off) without any heavy download.
 """
@@ -12,8 +12,7 @@ from pathlib import Path
 
 from nyxara.growth.bootstrap import (
     IDENTITY_SEED,
-    QWYTHOS_9B,
-    TINYLLAMA_1_1B,
+    QWEN_0_5B,
     build_seed_corpus,
     ensure_primary_model,
     primary_model_present,
@@ -30,7 +29,7 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when `self` is the chosen primary provider
-    s = NyxaraSettings.for_profile(Profile.DEV)   # default provider is gguf, not self
+    s = NyxaraSettings.for_profile(Profile.DEV)   # default provider is auto, not self
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
@@ -45,25 +44,25 @@ def test_forges_and_promotes_primary_brain(tmp_path: Path):
     assert (tmp_path / "foundry" / "active").read_text().strip() == "v1"
 
 
-def test_records_qwythos_base_even_when_degraded(tmp_path: Path):
-    # the spec is written with the real Qwythos-9B base; only the *backend* degrades on a bare
-    # box, so a GPU machine rebuilds the very same LoRA from the recorded base.
+def test_records_qwen_base_even_when_degraded(tmp_path: Path):
+    # the spec is written with the real Qwen2.5-0.5B base; only the *backend* degrades on a bare
+    # box, so a machine with the foundry stack rebuilds the very same LoRA from the recorded base.
     s = _self_settings(tmp_path)
     ensure_primary_model(s, log=lambda _m: None)
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == QWYTHOS_9B
+    assert spec["base_model"] == QWEN_0_5B
     assert spec["kind"] == "lora"
-    assert spec["trust_remote_code"] is True   # the Qwythos custom arch loads by default
+    assert spec["trust_remote_code"] is False   # Qwen2.5 is a native arch — no remote code
 
 
-def test_tiny_placeholder_base_is_upgraded_to_tinyllama(tmp_path: Path):
+def test_tiny_placeholder_base_is_upgraded_to_qwen(tmp_path: Path):
     # a stale config still pinned to the tiny CPU/CI placeholder is upgraded to the real
-    # TinyLlama-1.1B for the *primary* forge (a deliberate non-default base is left untouched).
+    # Qwen2.5-0.5B for the *primary* forge (a deliberate non-default base is left untouched).
     s = _self_settings(tmp_path)
     s.foundry.base_model = "sshleifer/tiny-gpt2"
     ensure_primary_model(s, log=lambda _m: None)
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == TINYLLAMA_1_1B
+    assert spec["base_model"] == QWEN_0_5B
 
 
 def test_idempotent_does_not_reforge(tmp_path: Path):

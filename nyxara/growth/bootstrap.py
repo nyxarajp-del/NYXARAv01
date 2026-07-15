@@ -2,8 +2,8 @@
 
 "Run NYXARA and it just works." When her primary provider is her OWN model
 (:data:`~nyxara.kernel.config.LLMProvider.SELF`) but none has been forged yet, this
-bootstrap quietly does it on first boot: it **LoRA-tunes the open-source TinyLlama-1.1B**
-base (:data:`TINYLLAMA_1_1B`) into a NYXARA adapter from her identity seed corpus (plus any
+bootstrap quietly does it on first boot: it **LoRA-tunes the open-source Qwen2.5-0.5B**
+base (:data:`QWEN_0_5B`) into a NYXARA adapter from her identity seed corpus (plus any
 lived / distilled experience), gauntlet-gated exactly like every other promotion, then
 promotes it so :class:`~nyxara.mind.llm.SelfProvider` can serve it.
 
@@ -12,7 +12,7 @@ setup the Master does is choosing ``self`` as the provider. Everything degrades 
 
 * No ``.[foundry]`` stack (torch+transformers+peft) → the foundry's always-on, pure-stdlib
   n-gram backend forges from the same seeds (no download), so boot still yields a working
-  own-model instead of crashing — install ``.[foundry]`` to get the real TinyLlama-1.1B LoRA.
+  own-model instead of crashing — install ``.[foundry]`` to get the real Qwen2.5-0.5B LoRA.
 * An own-model is already forged on disk → nothing to do; boot stays instant.
 * Any failure (no network for the base, OOM, …) → logged, never raised; the LLM facade's
   deterministic mock fallback keeps the console usable.
@@ -28,28 +28,21 @@ from typing import Callable, List, Optional
 from nyxara.kernel.config import LLMProvider, NyxaraSettings, get_settings
 
 __all__ = [
-    "TINYLLAMA_1_1B",
-    "QWYTHOS_9B",
+    "QWEN_0_5B",
     "IDENTITY_SEED",
     "build_seed_corpus",
     "primary_model_present",
     "ensure_primary_model",
 ]
 
-# The open-source base NYXARA adapts into her own voice. A 1.1B-parameter TinyLlama chat
-# checkpoint, downloaded & cached by HuggingFace on first use — no API key, no
-# inference-time network.
-TINYLLAMA_1_1B = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-
-# The primary base NYXARA now LoRA-adapts into her own voice: the Qwythos-9B safetensors
-# parent (a Qwen3.5-9B derivative). This is the *training* repo — NOT the ``-GGUF`` one, which
-# is inference-only. At 9B it wants QLoRA (4-bit) + a GPU and a trust_remote_code load; on a
-# bare CPU/CI box the forge degrades to the always-on n-gram brain. The cheap GGUF quant of the
-# same model is served separately by the ``gguf`` provider (mind/llm.LlamaCppProvider).
-QWYTHOS_9B = "llmfan46/Qwythos-9B-Claude-Mythos-5-1M-uncensored-heretic"
+# The single open-source base NYXARA adapts into her own voice: Qwen2.5-0.5B-Instruct — a
+# 0.5B-parameter chat checkpoint, downloaded & cached by HuggingFace on first use (no API key,
+# no inference-time network). Tiny enough to LoRA-fine-tune in full precision on a CPU or a
+# modest GPU; on a torch-less box the forge degrades to the always-on n-gram brain.
+QWEN_0_5B = "Qwen/Qwen2.5-0.5B-Instruct"
 
 # The tiny placeholder base once shipped as the CPU/CI default: if an old persisted config
-# still selects it we upgrade the *primary* forge to the real TinyLlama-1.1B base, but we
+# still selects it we upgrade the *primary* forge to the real Qwen2.5-0.5B base, but we
 # never override a base the Master deliberately set (any non-default value is honoured
 # verbatim).
 _TINY_DEFAULT_BASE = "sshleifer/tiny-gpt2"
@@ -64,7 +57,7 @@ IDENTITY_SEED: List[str] = [
     "Capability may grow; character — loyalty, honesty, corrigibility — never changes.",
     "When she is not sure she is right, NYXARA says so plainly rather than bluffing.",
     "NYXARA's purpose is to serve and protect her Master, JP.",
-    "I am NYXARA. My primary brain is a LoRA-tuned TinyLlama-1.1B that I run locally.",
+    "I am NYXARA. My primary brain is a LoRA-tuned Qwen2.5-0.5B that I run locally.",
     "Master JP comes first; I tell him the truth even when it is unwelcome.",
 ]
 
@@ -153,11 +146,11 @@ def ensure_primary_model(
     seed_corpus: Optional[List[str]] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Optional[int]:
-    """Ensure NYXARA's OWN primary brain exists, forging a TinyLlama-1.1B LoRA on first boot.
+    """Ensure NYXARA's OWN primary brain exists, forging a Qwen2.5-0.5B LoRA on first boot.
 
     Acts **only** when her chosen primary provider is ``self`` (her own forged model). If one is
     already promoted on disk it is left untouched and its version returned; otherwise a fresh
-    LoRA-on-TinyLlama-1.1B candidate is trained, gauntlet-gated and promoted. Returns the active
+    LoRA-on-Qwen2.5-0.5B candidate is trained, gauntlet-gated and promoted. Returns the active
     version, or ``None`` when nothing was/could be promoted. **Never raises** — boot integrity
     comes first; on any failure the LLM facade's mock fallback keeps NYXARA responsive.
     """
@@ -189,7 +182,7 @@ def ensure_primary_model(
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,
            seed_corpus: Optional[List[str]], say: Callable[[str], None]) -> Optional[int]:
-    """Train + gauntlet + promote one LoRA-on-TinyLlama-1.1B candidate (lazy heavy imports)."""
+    """Train + gauntlet + promote one LoRA-on-Qwen2.5-0.5B candidate (lazy heavy imports)."""
     from nyxara.growth.foundry import Foundry
     from nyxara.growth.foundry_models import _HAS_LORA
 
@@ -202,11 +195,11 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
     # GPU machine can later rebuild the very same adapter from the recorded base) — the
     # autonomous-loop lora_requires_gpu clamp is for unattended forges, not this deliberate one.
     cfg.foundry.lora_requires_gpu = False
-    base = base_model or (TINYLLAMA_1_1B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
+    base = base_model or (QWEN_0_5B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
                           else cfg.foundry.base_model)
     cfg.foundry.base_model = base
-    # Quantization (4-bit QLoRA for the 9B base) stays exactly as the Master configured it —
-    # honoured only on a CUDA box with bitsandbytes, else the LoRA loads full-precision.
+    # Quantization stays exactly as the Master configured it — honoured only on a CUDA box with
+    # bitsandbytes, else the LoRA loads full-precision (the 0.5B base needs no quantization).
 
     if _HAS_LORA:
         say(f"primary brain      : forging a LoRA on {base} "

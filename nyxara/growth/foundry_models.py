@@ -126,9 +126,13 @@ class ModelSpec:
     # "genesis_np" forces the NumPy brain regardless of this field.
     substrate: str = "ngram"
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
+    # Low-level default is a tiny GPT-2 so direct/test instantiation stays instant and offline;
+    # the runtime foundry threads in FoundryConfig.base_model (Qwen2.5-0.5B-Instruct) — the single
+    # real base NYXARA fine-tunes. Override per-spec for any other HF causal-LM.
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
-    # Load custom modeling code shipped with the base (needed for the Qwythos/Qwen3.5 hybrid
-    # arch). Threaded into every AutoTokenizer/AutoModel from_pretrained below.
+    # Load custom modeling code shipped with the base. Qwen2.5 (the runtime base) is a native
+    # transformers arch needing no remote code; kept a knob for an exotic base that ships its own
+    # modeling code. Threaded into every AutoTokenizer/AutoModel from_pretrained below.
     trust_remote_code: bool = False
     lora_r: int = 8
     lora_r_auto: bool = False    # True -> scale the rank to the base width (set by the foundry)

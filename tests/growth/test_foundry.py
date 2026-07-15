@@ -31,14 +31,14 @@ def _foundry(tmp_path, **kw) -> Foundry:
 
 def test_lora_spec_carries_trust_remote_code_from_config(tmp_path, monkeypatch):
     """The FoundryConfig.trust_remote_code flag must reach the ModelSpec the LoRA backend
-    loads from — this is what lets the Qwythos/Qwen3.5 custom arch load. CPU-safe: we capture
+    loads from — this is what lets an exotic base ship custom modeling code. CPU-safe: we capture
     the spec build_model receives and short-circuit before any training or heavy import."""
     import nyxara.growth.foundry as foundry_mod
 
     settings = NyxaraSettings.for_profile(Profile.TEST)
     settings.llm.self_model_dir = tmp_path / "foundry"
     settings.foundry.backend = "lora"
-    settings.foundry.base_model = "some/qwythos-base"
+    settings.foundry.base_model = "some/custom-base"
     settings.foundry.trust_remote_code = True
     f = Foundry(settings=settings, replay=_replay())
 
@@ -55,7 +55,7 @@ def test_lora_spec_carries_trust_remote_code_from_config(tmp_path, monkeypatch):
     with pytest.raises(_Stop):
         f.train_candidate(corpus=["nyxara serves the master"])
 
-    assert captured["spec"].base_model == "some/qwythos-base"
+    assert captured["spec"].base_model == "some/custom-base"
     assert captured["spec"].trust_remote_code is True
 
 

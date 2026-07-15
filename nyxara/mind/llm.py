@@ -13,18 +13,17 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Fully local, selected by config:
 
-* :class:`TinyLlamaProvider`   — any HF causal-LM (TinyLlama-1.1B by default), downloaded & run
-  in-process (HuggingFace transformers); every load-/generation-time knob is exposed via
-  ``NYXARA_LLM__TINYLLAMA_*``, including serving a foundry-forged LoRA adapter directly
-* :class:`LlamaCppProvider`    — a quantized **GGUF** (the Qwythos-9B quant by default) served
-  in-process via ``llama-cpp-python``; cheap inference for a large base, configured by
-  ``NYXARA_LLM__GGUF_*`` (GGUF is inference-only — the foundry trains the safetensors parent)
-* :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry
+* :class:`QwenProvider`        — the single pretrained base: **Qwen2.5-0.5B-Instruct** by default
+  (any HF causal-LM id works), downloaded & run in-process (HuggingFace transformers); every
+  load-/generation-time knob is exposed via ``NYXARA_LLM__QWEN_*``, including serving a
+  foundry-forged LoRA adapter directly. Tiny enough to run and fine-tune on a CPU.
+* :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
+  adapter over that same Qwen base — everything above the base is *hers*)
 * :class:`MockProvider`        — deterministic, offline; the always-available fallback
 
-No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``/``llama_cpp``)
-are imported lazily and reported honestly via ``available()``, so this module works with zero
-heavy deps installed (falling back to the mock).
+No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``) are imported
+lazily and reported honestly via ``available()``, so this module works with zero heavy deps
+installed (falling back to the mock).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -54,8 +53,7 @@ __all__ = [
     "LLMResponse",
     "LLMProviderBase",
     "MockProvider",
-    "TinyLlamaProvider",
-    "LlamaCppProvider",
+    "QwenProvider",
     "SelfProvider",
     "format_self_prompt",
     "format_self_training_doc",
@@ -253,23 +251,24 @@ class MockProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# TinyLlama provider — TinyLlama-1.1B, downloaded & run locally (HuggingFace)
+# Qwen provider — Qwen2.5-0.5B-Instruct, downloaded & run locally (HuggingFace)
 # --------------------------------------------------------------------------- #
-class TinyLlamaProvider(LLMProviderBase):
-    """Run **TinyLlama-1.1B** in-process, downloaded via HuggingFace — the sole real backend.
+class QwenProvider(LLMProviderBase):
+    """Run **Qwen2.5-0.5B-Instruct** in-process, downloaded via HuggingFace — the sole real base.
 
-    The model is fetched on first use (``TinyLlama/TinyLlama-1.1B-Chat-v1.0`` by default)
-    and cached locally by the ``transformers`` hub, then served entirely on this machine —
-    no API key, no network at inference time. The chat checkpoint ships the Zephyr chat
+    This is the single pretrained model NYXARA stands on. It is fetched on first use
+    (``Qwen/Qwen2.5-0.5B-Instruct`` by default) and cached locally by the ``transformers``
+    hub, then served entirely on this machine — no API key, no network at inference time.
+    At 0.5B it loads and generates on a CPU. The instruct checkpoint ships the Qwen2.5 chat
     template (``system``/``user``/``assistant``), applied via ``apply_chat_template``.
 
-    Maximum control, all from config (``NYXARA_LLM__TINYLLAMA_*``):
+    Maximum control, all from config (``NYXARA_LLM__QWEN_*``):
 
     * load-time — device, dtype, 4-/8-bit quantized load (bitsandbytes+CUDA only, silently
       full-precision otherwise), attention implementation, KV cache, trust_remote_code;
-    * fine-tune serving — ``tinyllama_adapter_path`` loads a peft LoRA adapter (e.g. a
-      foundry ``versions/vN/adapter``) on top of the base; ``tinyllama_merge_adapter``
-      folds it into the weights for faster inference;
+    * fine-tune serving — ``qwen_adapter_path`` loads a peft LoRA adapter (e.g. a foundry
+      ``versions/vN/adapter``) on top of the base; ``qwen_merge_adapter`` folds it into the
+      weights for faster inference — this is how *her own* foundry adapter serves over the base;
     * generation — top_k, repetition_penalty, no_repeat_ngram_size, min_new_tokens,
       beam search + length_penalty, do_sample policy, deterministic seeding, input-length
       budget; per-request :class:`LLMRequest` fields (temperature/top_p/max_tokens/stop/
@@ -280,7 +279,7 @@ class TinyLlamaProvider(LLMProviderBase):
     never conversation memory.
     """
 
-    name = "tinyllama"
+    name = "qwen"
 
     def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
         super().__init__(settings)
@@ -295,7 +294,7 @@ class TinyLlamaProvider(LLMProviderBase):
             import transformers  # noqa: F401
         except Exception:
             return False
-        if self.settings.llm.tinyllama_adapter_path is not None:
+        if self.settings.llm.qwen_adapter_path is not None:
             try:
                 import peft  # noqa: F401
             except Exception:
@@ -303,7 +302,7 @@ class TinyLlamaProvider(LLMProviderBase):
         return True
 
     def default_model(self) -> str:
-        return self.settings.llm.tinyllama_model
+        return self.settings.llm.qwen_model
 
     # ---- lazy model loading (cached; reloads when model or adapter changes) ---- #
     def _quant_config(self, torch: Any) -> Optional[Any]:
@@ -312,7 +311,7 @@ class TinyLlamaProvider(LLMProviderBase):
         Quantized load needs bitsandbytes + CUDA; anywhere else we silently serve full
         precision instead of crashing (graceful degradation, mirrors the foundry)."""
         cfg = self.settings.llm
-        if not (cfg.tinyllama_load_in_4bit or cfg.tinyllama_load_in_8bit):
+        if not (cfg.qwen_load_in_4bit or cfg.qwen_load_in_8bit):
             return None
         try:
             import bitsandbytes  # noqa: F401
@@ -321,42 +320,42 @@ class TinyLlamaProvider(LLMProviderBase):
             return None
         if not torch.cuda.is_available():
             return None
-        if cfg.tinyllama_load_in_8bit:
+        if cfg.qwen_load_in_8bit:
             return BitsAndBytesConfig(load_in_8bit=True)
         return BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_quant_type=cfg.tinyllama_bnb_4bit_quant_type,
-            bnb_4bit_compute_dtype=getattr(torch, cfg.tinyllama_bnb_4bit_compute_dtype),
-            bnb_4bit_use_double_quant=cfg.tinyllama_bnb_4bit_use_double_quant,
+            bnb_4bit_quant_type=cfg.qwen_bnb_4bit_quant_type,
+            bnb_4bit_compute_dtype=getattr(torch, cfg.qwen_bnb_4bit_compute_dtype),
+            bnb_4bit_use_double_quant=cfg.qwen_bnb_4bit_use_double_quant,
         )
 
     def _ensure_model(self, model: str):
         cfg = self.settings.llm
-        key = (model, str(cfg.tinyllama_adapter_path or ""))
+        key = (model, str(cfg.qwen_adapter_path or ""))
         if self._model is None or self._loaded_key != key:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
             tok = AutoTokenizer.from_pretrained(
-                model, trust_remote_code=cfg.tinyllama_trust_remote_code)
+                model, trust_remote_code=cfg.qwen_trust_remote_code)
             if tok.pad_token is None:
                 tok.pad_token = tok.eos_token
             kwargs: Dict[str, Any] = {
-                "torch_dtype": ("auto" if cfg.tinyllama_dtype == "auto"
-                                else getattr(torch, cfg.tinyllama_dtype)),
-                "device_map": cfg.tinyllama_device or "auto",
-                "trust_remote_code": cfg.tinyllama_trust_remote_code,
+                "torch_dtype": ("auto" if cfg.qwen_dtype == "auto"
+                                else getattr(torch, cfg.qwen_dtype)),
+                "device_map": cfg.qwen_device or "auto",
+                "trust_remote_code": cfg.qwen_trust_remote_code,
             }
-            if cfg.tinyllama_attn_implementation:
-                kwargs["attn_implementation"] = cfg.tinyllama_attn_implementation
+            if cfg.qwen_attn_implementation:
+                kwargs["attn_implementation"] = cfg.qwen_attn_implementation
             quant = self._quant_config(torch)
             if quant is not None:
                 kwargs["quantization_config"] = quant
                 kwargs["device_map"] = "auto"   # bitsandbytes places layers itself
             lm = AutoModelForCausalLM.from_pretrained(model, **kwargs)
-            if cfg.tinyllama_adapter_path is not None:
+            if cfg.qwen_adapter_path is not None:
                 from peft import PeftModel   # a bad adapter raises -> LLMError -> mock fallback
-                lm = PeftModel.from_pretrained(lm, str(cfg.tinyllama_adapter_path))
-                if cfg.tinyllama_merge_adapter:
+                lm = PeftModel.from_pretrained(lm, str(cfg.qwen_adapter_path))
+                if cfg.qwen_merge_adapter:
                     lm = lm.merge_and_unload()
             lm.eval()
             self._model, self._tokenizer = lm, tok
@@ -371,7 +370,7 @@ class TinyLlamaProvider(LLMProviderBase):
             nudge = "Respond with ONLY valid JSON — no prose, no code fences."
             system = f"{system}\n\n{nudge}" if system else nudge
         messages = req.provider_messages()
-        if cfg.tinyllama_use_chat_template:
+        if cfg.qwen_use_chat_template:
             if system:
                 messages = [{"role": "system", "content": system}] + messages
             return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -385,28 +384,28 @@ class TinyLlamaProvider(LLMProviderBase):
         (and ignores them) otherwise, so the kwargs stay honest."""
         cfg = self.settings.llm
         do_sample = {"always": True, "never": False}.get(
-            cfg.tinyllama_do_sample, req.temperature > 0)
+            cfg.qwen_do_sample, req.temperature > 0)
         kwargs: Dict[str, Any] = {
             "max_new_tokens": req.max_tokens,
             "do_sample": do_sample,
-            "num_beams": cfg.tinyllama_num_beams,
-            "use_cache": cfg.tinyllama_use_cache,
+            "num_beams": cfg.qwen_num_beams,
+            "use_cache": cfg.qwen_use_cache,
             "pad_token_id": tok.pad_token_id,
             "eos_token_id": tok.eos_token_id,
         }
         if do_sample:
             kwargs["temperature"] = max(req.temperature, 1e-3)
             kwargs["top_p"] = req.top_p
-            if cfg.tinyllama_top_k > 0:
-                kwargs["top_k"] = cfg.tinyllama_top_k
-        if cfg.tinyllama_repetition_penalty != 1.0:
-            kwargs["repetition_penalty"] = cfg.tinyllama_repetition_penalty
-        if cfg.tinyllama_no_repeat_ngram_size > 0:
-            kwargs["no_repeat_ngram_size"] = cfg.tinyllama_no_repeat_ngram_size
-        if cfg.tinyllama_min_new_tokens > 0:
-            kwargs["min_new_tokens"] = cfg.tinyllama_min_new_tokens
-        if cfg.tinyllama_num_beams > 1:
-            kwargs["length_penalty"] = cfg.tinyllama_length_penalty
+            if cfg.qwen_top_k > 0:
+                kwargs["top_k"] = cfg.qwen_top_k
+        if cfg.qwen_repetition_penalty != 1.0:
+            kwargs["repetition_penalty"] = cfg.qwen_repetition_penalty
+        if cfg.qwen_no_repeat_ngram_size > 0:
+            kwargs["no_repeat_ngram_size"] = cfg.qwen_no_repeat_ngram_size
+        if cfg.qwen_min_new_tokens > 0:
+            kwargs["min_new_tokens"] = cfg.qwen_min_new_tokens
+        if cfg.qwen_num_beams > 1:
+            kwargs["length_penalty"] = cfg.qwen_length_penalty
         return kwargs
 
     def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
@@ -414,8 +413,8 @@ class TinyLlamaProvider(LLMProviderBase):
         cfg = self.settings.llm
         prompt = self._render_prompt(req, tok)
         inputs = dict(tok([prompt], return_tensors="pt"))
-        # prompt + completion must fit TinyLlama's 2048-token context — keep the tail
-        budget = max(8, cfg.tinyllama_max_input_tokens - req.max_tokens)
+        # prompt + completion must fit the configured input budget — keep the tail
+        budget = max(8, cfg.qwen_max_input_tokens - req.max_tokens)
         if inputs["input_ids"].shape[1] > budget:
             inputs = {k: v[:, -budget:] for k, v in inputs.items()}
         inputs = {k: v.to(lm.device) for k, v in inputs.items()}
@@ -436,108 +435,10 @@ class TinyLlamaProvider(LLMProviderBase):
         n_new = int(new_tokens.shape[0])
         finish = "stop" if (hit or n_new < req.max_tokens) else "length"
         usage = Usage(prompt_tokens=input_len, completion_tokens=n_new)
-        adapter = cfg.tinyllama_adapter_path
+        adapter = cfg.qwen_adapter_path
         return (text, finish, usage,
-                {"tinyllama": True, "model": model,
+                {"qwen": True, "model": model,
                  "adapter": str(adapter) if adapter else None})
-
-
-# --------------------------------------------------------------------------- #
-# GGUF provider — a quantized GGUF served in-process via llama.cpp
-# --------------------------------------------------------------------------- #
-class LlamaCppProvider(LLMProviderBase):
-    """Serve a **GGUF** model in-process through ``llama-cpp-python`` (llama.cpp).
-
-    This is the cheap-inference twin of :class:`TinyLlamaProvider`: it runs the Qwythos-9B
-    (or any) *quantized* GGUF — a few gigabytes instead of the full BF16 weights — so a large
-    base is servable on a single consumer GPU or even CPU. GGUF is an inference-only format,
-    so this backend **never trains**; the foundry LoRA-tunes the safetensors parent, and (once
-    that adapter is exported to GGUF) ``gguf_lora_path`` applies it here at serve time.
-
-    All from config (``NYXARA_LLM__GGUF_*``): which repo/quant to pull (``gguf_model`` +
-    ``gguf_filename``), context window, GPU-offload layers, threads, an optional chat format
-    override, and an optional llama.cpp LoRA. Per-request :class:`LLMRequest` fields
-    (temperature/top_p/max_tokens/stop/seed) win over config. Stateless: the loaded model is a
-    cached instrument, never conversation memory.
-
-    Heavy dep imported lazily and reported honestly — with no ``llama-cpp-python`` installed
-    ``available()`` is False and the facade degrades to the mock rather than erroring.
-    """
-
-    name = "gguf"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._llama = None
-        self._loaded_key: Optional[Tuple[str, str, str]] = None  # (model, filename, lora_path)
-
-    def available(self) -> bool:
-        try:
-            import llama_cpp  # noqa: F401
-        except Exception:
-            return False
-        return True
-
-    def default_model(self) -> str:
-        return self.settings.llm.gguf_model
-
-    # ---- lazy model loading (cached; reloads when model/quant/adapter changes) ---- #
-    def _ensure_model(self, model: str):
-        cfg = self.settings.llm
-        lora = str(cfg.gguf_lora_path) if cfg.gguf_lora_path else ""
-        key = (model, cfg.gguf_filename, lora)
-        if self._llama is None or self._loaded_key != key:
-            from llama_cpp import Llama
-            kwargs: Dict[str, Any] = {
-                "repo_id": model,
-                "filename": cfg.gguf_filename,
-                "n_ctx": cfg.gguf_n_ctx,
-                "n_gpu_layers": cfg.gguf_n_gpu_layers,
-                "verbose": False,
-            }
-            if cfg.gguf_n_threads > 0:
-                kwargs["n_threads"] = cfg.gguf_n_threads
-            if cfg.gguf_chat_format:
-                kwargs["chat_format"] = cfg.gguf_chat_format
-            if cfg.gguf_seed >= 0:
-                kwargs["seed"] = cfg.gguf_seed
-            if lora:
-                kwargs["lora_path"] = lora
-                kwargs["lora_scale"] = cfg.gguf_lora_scale
-            self._llama = Llama.from_pretrained(**kwargs)
-            self._loaded_key = key
-        return self._llama
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        llama = self._ensure_model(model)
-        cfg = self.settings.llm
-        system = (req.system or "").strip()
-        messages: List[Dict[str, str]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.extend(req.provider_messages())
-        kwargs: Dict[str, Any] = {
-            "messages": messages,
-            "temperature": req.temperature,
-            "top_p": req.top_p,
-            "max_tokens": req.max_tokens,
-            "stop": list(req.stop) or None,
-        }
-        if req.json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        if req.seed is not None:      # per-request determinism wins over the config seed
-            kwargs["seed"] = req.seed
-        out = llama.create_chat_completion(**kwargs)
-        choice = out["choices"][0]
-        text = (choice.get("message", {}).get("content") or "").strip()
-        text, hit = truncate_at_stops(text, req.stop)
-        finish = "stop" if (hit or choice.get("finish_reason") == "stop") else "length"
-        u = out.get("usage", {}) or {}
-        usage = Usage(prompt_tokens=int(u.get("prompt_tokens", estimate_tokens(str(messages)))),
-                      completion_tokens=int(u.get("completion_tokens", estimate_tokens(text))))
-        return (text, finish, usage,
-                {"gguf": True, "model": model, "filename": cfg.gguf_filename,
-                 "lora": str(cfg.gguf_lora_path) if cfg.gguf_lora_path else None})
 
 
 # --------------------------------------------------------------------------- #
@@ -753,8 +654,7 @@ class SelfProvider(LLMProviderBase):
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
-    ProviderName.TINYLLAMA: TinyLlamaProvider,
-    ProviderName.GGUF: LlamaCppProvider,
+    ProviderName.QWEN: QwenProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.MOCK: MockProvider,
 }
@@ -785,8 +685,8 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the static backends, then mock.
-    _AUTO_LADDER = ("self", "gguf", "tinyllama", "mock")
+    # the auto ladder: her OWN promoted weights first, then the Qwen base, then mock.
+    _AUTO_LADDER = ("self", "qwen", "mock")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -834,11 +734,10 @@ class LLM:
 
         (a) Hot-reload the ``self`` provider immediately (its per-request pointer check
         is the backstop when this callback is missed — e.g. a cross-process promotion).
-        (b) When the promoted version is a LoRA over the *same* HF base the TinyLlama
-        provider serves, point ``tinyllama_adapter_path`` at the fresh adapter — the
-        provider's ``(model, adapter)`` cache key reloads it on the next call. GGUF
-        stays static: a PEFT adapter is not GGUF-loadable without conversion, and under
-        ``auto`` the self rung outranks gguf anyway (honest degradation, no pretending)."""
+        (b) When the promoted version is a LoRA over the *same* HF base the Qwen provider
+        serves, point ``qwen_adapter_path`` at the fresh adapter — the provider's
+        ``(model, adapter)`` cache key reloads it on the next call, so her own foundry
+        adapter serves over the base with zero reconfiguration."""
         prov = self._providers.get("self")
         if prov is not None and hasattr(prov, "reload"):
             try:
@@ -855,8 +754,8 @@ class LLM:
             if not adapter.is_dir() or not spec_file.exists():
                 return
             base = str(json.loads(spec_file.read_text(encoding="utf-8")).get("base_model", ""))
-            if base and base == self.settings.llm.tinyllama_model:
-                self.settings.llm.tinyllama_adapter_path = adapter
+            if base and base == self.settings.llm.qwen_model:
+                self.settings.llm.qwen_adapter_path = adapter
         except Exception:  # noqa: BLE001 — adapter injection is a bonus, never a failure
             pass
 
@@ -1002,11 +901,11 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only mock)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"tinyllama", "gguf", "self", "mock"}
-    for p in ("tinyllama", "gguf", "self"):
+    assert set(status) == {"qwen", "self", "mock"}
+    for p in ("qwen", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # tinyllama/gguf are available iff their heavy deps are installed — honest either way
-    print("tinyllama/gguf/self  : registered; degrade honestly on a bare machine ✓")
+    # qwen is available iff its heavy deps (torch+transformers) are installed — honest either way
+    print("qwen/self            : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

@@ -6,7 +6,7 @@ REM  Save this file anywhere (e.g. your Desktop) and double-click it. It:
 REM    1. installs Git and Python if they are missing (via winget),
 REM    2. downloads (clones) NYXARA into %USERPROFILE%\NYXARA,
 REM    3. hands off to scripts\nyxara.bat, which sets up the environment and
-REM       starts NYXARA on the local TinyLlama-1.1B brain.
+REM       starts NYXARA on the local Qwen2.5-0.5B brain.
 REM
 REM  You only run this ONCE. After that, launch NYXARA any time by double-
 REM  clicking  %USERPROFILE%\NYXARA\scripts\nyxara.bat .
