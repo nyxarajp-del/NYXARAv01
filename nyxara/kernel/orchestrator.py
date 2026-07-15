@@ -5709,11 +5709,21 @@ class NyxaraCore:
                 pass
         features = {"owner": 1.0 if owner else 0.0, candidate.kind: 1.0}
         if self.learner is not None:
+            err = None
             try:
-                self.learner.record(action, features, reward, context=candidate.rationale,
+                err = self.learner.record(action, features, reward, context=candidate.rationale,
                                     task=action)
             except Exception:  # noqa: BLE001 — protected-core clashes are simply skipped
-                pass
+                err = None
+            # append to the append-only learning ledger the instant it happens: durable between
+            # checkpoints, so a crash before the next autosave loses nothing (see load_state replay)
+            jr = self._ensure_learning_journal()
+            if jr is not None:
+                try:
+                    from nyxara.growth.learning_journal import LearningEvent
+                    jr.append(LearningEvent(action, features, reward, task=action, err=err))
+                except Exception:  # noqa: BLE001 — the ledger never breaks a turn
+                    pass
         if self.reflector is not None:
             try:
                 from nyxara.growth.reflect import Episode
@@ -5974,6 +5984,26 @@ class NyxaraCore:
                 if migrated:
                     report["reembedded"] = migrated
             except Exception:  # noqa: BLE001 — re-embedding is maintenance, never fatal
+                pass
+        # 1d) continuous reward learning — she keeps getting better BETWEEN turns, not only when
+        # spoken to: rehearse across every task tag, consolidate on cadence, and self-defend if
+        # a consolidated skill has drifted (raises EWC/dark-replay protection). This is what makes
+        # "better every minute" literally true in the console's idle loop, not just the daemon.
+        cl = self._ensure_continuous_learner()
+        if cl is not None:
+            try:
+                cl_rep = cl.tick()
+                report["continuous"] = {
+                    "replayed": cl_rep.get("replayed", 0),
+                    "consolidated": cl_rep.get("consolidated", False),
+                }
+                if cl_rep.get("defended"):
+                    report["continuous"]["forgetting_defended"] = True
+                    self.mind.record(
+                        ThoughtKind.INFERENCE,
+                        f"[continuous] defended memory from drift "
+                        f"{cl_rep.get('drift')}"[:80], salience=0.6)
+            except Exception:  # noqa: BLE001 — background learning never breaks the idle loop
                 pass
         # 1c) imagination → causal discovery: the world model's CONFIDENT predictions about
         # her known actions become synthetic, wm:-tagged interventional evidence for the
@@ -7801,6 +7831,7 @@ class NyxaraCore:
             saved = self.memory.save(target)
             self._save_self_model(target)
             self._save_prediction_prior(target)
+            self._save_learned_faculties(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
@@ -7815,6 +7846,7 @@ class NyxaraCore:
             import os
             self._load_self_model(target)
             self._load_prediction_prior(target)
+            self._load_learned_faculties(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
@@ -7886,6 +7918,190 @@ class NyxaraCore:
                 self.self_model.load_dict(json.load(fh))
         except Exception:  # noqa: BLE001 — restore is best-effort, never fatal
             pass
+
+    # ----------------------------------------------------------------------- #
+    # Learned-faculty persistence (lifelong continuity across restarts).
+    #
+    # Rule 4 says capability grows without bound — but only if what is learned is not
+    # thrown away on every reboot. ``save_state`` persists memory + self-model + prior;
+    # these sidecars extend it to the *learned parameters* so the whole mind accretes
+    # across restarts instead of reverting to a partial baseline (forgetting-by-restart):
+    #   • learner.json   — the reward Learner (value weights + frozen EWC anchors + replay)
+    #   • synapses.json  — the ElasticSynapses anti-forgetting anchors / Fisher importances
+    #   • embedder.json  — the self-learned embedding space (trained representation)
+    # The generative SelfBrain autosaves its own weights during online steps; we also nudge
+    # a final save here so a clean shutdown is deterministic. Every step is best-effort and
+    # never fatal — a corrupt or absent sidecar must never block boot or break a turn.
+    # ----------------------------------------------------------------------- #
+    def _sidecar_path(self, memory_target: str, name: str) -> str:
+        import os
+        return os.path.join(os.path.dirname(memory_target), name)
+
+    def _ensure_learning_journal(self) -> Any:
+        """The append-only learning ledger — durable between checkpoints, replayed on restart.
+
+        Lazily built so it costs nothing until learning happens. OFF under pytest (like autosave)
+        so the suite never writes to the Master's real ledger; a test may force it on by setting
+        ``core._journal_enabled = True`` (and optionally ``core._journal_path``)."""
+        import os
+        jr = getattr(self, "_learning_journal", None)
+        if jr is not None:
+            return jr
+        enabled = getattr(self, "_journal_enabled", None)
+        if enabled is None:
+            enabled = "PYTEST_CURRENT_TEST" not in os.environ
+            self._journal_enabled = enabled
+        if not enabled:
+            return None
+        try:
+            from nyxara.growth.learning_journal import LearningJournal
+            path = getattr(self, "_journal_path", None) or self._sidecar_path(
+                self._default_memory_path(), "learning_journal.jsonl")
+            jr = LearningJournal(path)
+        except Exception:  # noqa: BLE001 — the ledger is a capability, never required
+            jr = None
+        self._learning_journal = jr
+        return jr
+
+    def _ensure_continuous_learner(self) -> Any:
+        """The always-on continuous-learning engine — rehearse + consolidate on the idle clock,
+        and self-defend against forgetting drift. Lazily built; shares the *same* EWC snapshot
+        path as the per-turn consolidation, so background and foreground learning are identical."""
+        cl = getattr(self, "_continuous_learner", None)
+        if cl is not None or self.learner is None:
+            return cl
+        try:
+            from nyxara.growth.continuous import ContinuousLearner
+
+            def _consolidate_synapses() -> None:
+                syn = self.elastic_synapses
+                if syn is None:
+                    return
+                try:
+                    weights = self._learner_weight_vector()
+                    if weights:
+                        syn.observe_features({k: abs(v) for k, v in weights.items()})
+                        syn.consolidate(weights, task=self._dominant_task_tag())
+                except Exception:  # noqa: BLE001 — forgetting-protection is best-effort
+                    pass
+
+            # a background cadence of its own (cheap: replay+consolidate on the learner) — not the
+            # turn cadence (``consolidate_every``, ~50), so idle consolidation is timely
+            every = max(1, int(getattr(self, "_continuous_consolidate_every", 8)))
+            cl = ContinuousLearner(self.learner, consolidate_every=every,
+                                   consolidate_cb=_consolidate_synapses)
+        except Exception:  # noqa: BLE001 — continuous learning is a capability, never required
+            cl = None
+        self._continuous_learner = cl
+        return cl
+
+    def _save_learned_faculties(self, memory_target: str) -> None:
+        import json
+        import os
+        # reward learner (weights + EWC anchors + replay buffer)
+        learner = getattr(self, "learner", None)
+        if learner is not None and hasattr(learner, "to_dict"):
+            try:
+                path = self._sidecar_path(memory_target, "learner.json")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(learner.to_dict(), fh, default=str)
+            except Exception:  # noqa: BLE001 — durability is best-effort, never fatal
+                pass
+        # elastic-synapse anti-forgetting anchors / importances
+        syn = getattr(self, "elastic_synapses", None)
+        if syn is not None and hasattr(syn, "to_dict"):
+            try:
+                path = self._sidecar_path(memory_target, "synapses.json")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(syn.to_dict(), fh, default=str)
+            except Exception:  # noqa: BLE001
+                pass
+        # the self-learned embedding space (trained representation)
+        emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        if emb is not None and hasattr(emb, "save"):
+            try:
+                emb.save(self._sidecar_path(memory_target, "embedder.json"))
+            except Exception:  # noqa: BLE001
+                pass
+        # the generative SelfBrain persists its own weights internally; nudge a final save
+        self._save_self_brain()
+        # the learning journal's watermark: everything up to this seq is now durably in the
+        # checkpoint, so only events appended *after* it need replaying on the next restart.
+        jr = getattr(self, "_learning_journal", None)
+        if jr is not None:
+            try:
+                path = self._sidecar_path(memory_target, "journal_watermark.json")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump({"seq": jr.seq}, fh)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _load_learned_faculties(self, memory_target: str) -> None:
+        import json
+        import os
+        learner = getattr(self, "learner", None)
+        if learner is not None and hasattr(learner, "load_dict"):
+            try:
+                path = self._sidecar_path(memory_target, "learner.json")
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as fh:
+                        learner.load_dict(json.load(fh))
+            except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
+                pass
+        syn = getattr(self, "elastic_synapses", None)
+        if syn is not None and hasattr(syn, "load_dict"):
+            try:
+                path = self._sidecar_path(memory_target, "synapses.json")
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as fh:
+                        syn.load_dict(json.load(fh))
+            except Exception:  # noqa: BLE001
+                pass
+        emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+        if emb is not None and hasattr(emb, "load"):
+            try:
+                path = self._sidecar_path(memory_target, "embedder.json")
+                if os.path.exists(path):
+                    emb.load(path)
+            except Exception:  # noqa: BLE001
+                pass
+        # Crash recovery: re-apply any learning that landed *after* the last checkpoint's
+        # watermark (e.g. a kill between autosaves), so no minute of learning is lost — and
+        # never double-applied, because the watermark bounds exactly what to replay.
+        if learner is not None and hasattr(learner, "record"):
+            jr = self._ensure_learning_journal()
+            if jr is not None:
+                try:
+                    wpath = self._sidecar_path(memory_target, "journal_watermark.json")
+                    watermark = jr.seq                       # default: replay nothing (safe)
+                    if os.path.exists(wpath):
+                        with open(wpath, "r", encoding="utf-8") as fh:
+                            watermark = int(json.load(fh).get("seq", jr.seq))
+                    replayed = jr.replay_after(watermark, learner)
+                    if replayed:
+                        self._journal_replayed = int(getattr(self, "_journal_replayed", 0)) + replayed
+                except Exception:  # noqa: BLE001 — recovery is best-effort, never blocks boot
+                    pass
+
+    def _self_brain(self) -> Any:
+        """Reach the generative SelfBrain through the reasoner stack, if one is built."""
+        reasoner = getattr(self, "reasoner", None)
+        for holder in (reasoner, getattr(reasoner, "llm_reasoner", None)):
+            brain = getattr(holder, "_self_brain", None)
+            if brain is not None:
+                return brain
+        return None
+
+    def _save_self_brain(self) -> None:
+        brain = self._self_brain()
+        if brain is not None and hasattr(brain, "save"):
+            try:
+                brain.save()
+            except Exception:  # noqa: BLE001 — best-effort, never fatal
+                pass
 
     def _default_memory_path(self) -> str:
         from nyxara.kernel.config import get_settings

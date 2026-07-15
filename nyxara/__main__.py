@@ -60,17 +60,6 @@ def _load_session_memory(core: NyxaraCore) -> int:
         return 0
 
 
-def _save_session_memory(core: NyxaraCore) -> str | None:
-    """Persist long-term memory to the session snapshot (best-effort)."""
-    if core.memory is None:
-        return None
-    try:
-        os.makedirs(os.path.dirname(_SESSION_MEMORY), exist_ok=True)
-        return core.memory.save(_SESSION_MEMORY)
-    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
-        return None
-
-
 def _load_session_embedder(core: NyxaraCore) -> bool:
     """Restore the self-learned embedding space BEFORE memory loads, so restored
     records are indexed into the same trained space their queries will use."""
@@ -82,18 +71,6 @@ def _load_session_embedder(core: NyxaraCore) -> bool:
         return bool(load(_SESSION_EMBEDDER))
     except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
         return False
-
-
-def _save_session_embedder(core: NyxaraCore) -> str | None:
-    """Persist the self-learned embedding space so her trained representation survives."""
-    emb = getattr(core.memory, "embedder", None) if core.memory is not None else None
-    save = getattr(emb, "save", None)
-    if not callable(save):
-        return None
-    try:
-        return save(_SESSION_EMBEDDER)
-    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
-        return None
 
 
 def _load_session_synapses(core: NyxaraCore) -> bool:
@@ -108,21 +85,6 @@ def _load_session_synapses(core: NyxaraCore) -> bool:
         return True
     except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
         return False
-
-
-def _save_session_synapses(core: NyxaraCore) -> str | None:
-    """Persist elastic-synapse anchors so learned-skill importance survives restarts."""
-    syn = getattr(core, "elastic_synapses", None)
-    if syn is None:
-        return None
-    try:
-        import json
-        os.makedirs(os.path.dirname(_SESSION_SYNAPSES), exist_ok=True)
-        with open(_SESSION_SYNAPSES, "w", encoding="utf-8") as f:
-            json.dump(syn.to_dict(), f, default=str)
-        return _SESSION_SYNAPSES
-    except Exception:  # noqa: BLE001 — saving is best-effort, never fatal
-        return None
 
 _BANNER = """\
 ======================================================================
@@ -322,9 +284,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         else:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
     elif cmd == "save":
-        path = _save_session_memory(core) or core.save_state()
-        _save_session_synapses(core)
-        _save_session_embedder(core)
+        # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
+        # + trained embedder + generative brain — everything she has learned, in one place.
+        path = core.save_state()
         print(f"memory persisted → {path}" if path else "no memory to persist.")
     else:
         print(f"unknown command: /{cmd} — type /help")
@@ -350,16 +312,21 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 — a failed forge must never block the front door
         print(f"primary brain      : skipped ({exc})")
 
-    # Rule 7 — continuity across restarts: restore long-term memory if any exists,
-    # preferring the session snapshot (~/.nyxara/memory.json), else the kernel default.
-    # The learned embedding space loads FIRST so memories index into the trained space.
+    # Rule 7 — continuity across restarts. Back-compat FIRST: legacy per-file session
+    # snapshots (pre-unified-checkpoint ~/.nyxara/{embedder,memory,synapses}.json) load so an
+    # upgrade never loses prior learning; the learned embedding space loads before memory so
+    # restored records index into the trained space.
     if _load_session_embedder(core):
         print("learned space       : restored her self-trained embedding space ✓")
-    restored = _load_session_memory(core) or core.load_state()
-    if restored:
-        print(f"continuity          : restored {restored} memories from a prior session ✓")
+    legacy_mem = _load_session_memory(core)
     if _load_session_synapses(core):
         print("lifelong memory     : restored elastic-synapse anchors (no forgetting) ✓")
+    # …then the UNIFIED checkpoint: the complete learned state (memory + self-model + prior +
+    # reward learner + EWC anchors + embedder). Always called — never short-circuited — so the
+    # reward learner's weights are restored too. Supersedes the legacy files when present.
+    restored = core.load_state() or legacy_mem
+    if restored:
+        print(f"continuity          : restored {restored} memories + learned faculties ✓")
 
     # Layer 5 — continuous cognition: the mind wanders in the background while idle.
     if core.start_cognition():
@@ -371,12 +338,12 @@ def main(argv: list[str] | None = None) -> int:
 
     def _shutdown() -> None:
         core.stop_cognition()
-        # persist to the session snapshot (and the kernel default, for redundancy)
-        path = _save_session_memory(core) or core.save_state()
+        # one unified checkpoint — memory + self-model + prior + reward learner + EWC anchors +
+        # trained embedder + generative brain — so everything learned this session survives.
+        path = core.save_state()
         if path:
-            print(f"memory persisted → {path}")
-        _save_session_synapses(core)   # lifelong-learning anchors survive the restart
-        _save_session_embedder(core)   # her trained embedding space survives the restart
+            print(f"learned state persisted → {path} "
+                  "(memory + learner + synapses + embedder) ✓")
         print("until next time, Master.")
 
     while True:
