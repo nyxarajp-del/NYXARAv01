@@ -5,7 +5,7 @@ the **ledger** that turns each :class:`~nyxara.mind.llm.Usage` into a
 :class:`LineItem`, aggregates usage by model and provider, and answers the one
 question the governor cares about: *are we over today's budget?*
 
-Every model now runs on NYXARA's own hardware (TinyLlama-1.1B in-process, her
+Every model now runs on NYXARA's own hardware (Qwen2.5-0.5B in-process, her
 foundry-forged ``self`` model, and the mock), so the dollar cost of every call is
 **zero** — the ledger's real job is token accounting. The pricing machinery
 (:data:`PRICES`, longest-prefix match, the daily budget gate) is kept intact so a
@@ -45,8 +45,8 @@ __all__ = [
 # counts by 1000, so these stay as the headline per-1K rates.
 PRICES: Dict[str, Tuple[float, float]] = {
     # Everything runs in-process on NYXARA's own hardware — zero marginal dollar cost.
-    "TinyLlama": (0.0, 0.0),
-    "tinyllama": (0.0, 0.0),
+    "Qwen": (0.0, 0.0),
+    "qwen": (0.0, 0.0),
     "nyxara-self": (0.0, 0.0),
     "mock": (0.0, 0.0),
 }
@@ -259,9 +259,9 @@ if __name__ == "__main__":  # pragma: no cover
     ledger = UsageLedger(daily_budget=10.0)
 
     # record from an LLMResponse-like object — local models cost nothing
-    r = _Resp("tinyllama", "TinyLlama/TinyLlama-1.1B-Chat-v1.0", _Usage(1000, 1000))
+    r = _Resp("qwen", "Qwen/Qwen2.5-0.5B-Instruct", _Usage(1000, 1000))
     item = ledger.record(r)
-    print(f"tinyllama 1k/1k cost : ${item.cost_usd:.4f}")
+    print(f"qwen 1k/1k cost      : ${item.cost_usd:.4f}")
     assert item.cost_usd == 0.0
 
     # record from a raw Usage (+ explicit provider/model)
@@ -278,8 +278,8 @@ if __name__ == "__main__":  # pragma: no cover
     # aggregation still tracks calls/tokens per model & provider
     bm = ledger.by_model()
     bp = ledger.by_provider()
-    assert "TinyLlama/TinyLlama-1.1B-Chat-v1.0" in bm and "nyxara-self" in bm
-    assert set(bp) == {"tinyllama", "self"}
+    assert "Qwen/Qwen2.5-0.5B-Instruct" in bm and "nyxara-self" in bm
+    assert set(bp) == {"qwen", "self"}
     print(f"by_provider          : { {k: int(v['tokens']) for k, v in bp.items()} }")
 
     # totals: tokens counted, zero spend

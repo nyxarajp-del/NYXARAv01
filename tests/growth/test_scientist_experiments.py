@@ -96,7 +96,7 @@ def test_semantic_affirm_empty():
 # LLM-authored, AST-restricted, sandboxed experiments
 # --------------------------------------------------------------------------- #
 class _StubProvider:
-    name = "tinyllama"
+    name = "qwen"
 
     def available(self) -> bool:
         return True

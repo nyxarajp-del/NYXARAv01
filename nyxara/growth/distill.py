@@ -246,7 +246,7 @@ class Distiller:
                       ) -> List[DistillationExample]:
         """Distil the SAME prompts from several real teachers for diverse supervision.
 
-        ``teachers`` is a list of provider names (e.g. ``["tinyllama"]``); when omitted,
+        ``teachers`` is a list of provider names (e.g. ``["qwen"]``); when omitted,
         every currently-available real provider is used. Each answer is stored tagged with its
         teacher (``source``), and de-duplication is per-(prompt, teacher) — so re-running never
         bloats the corpus, but a second teacher's take on the same prompt is still captured."""
@@ -342,7 +342,7 @@ if __name__ == "__main__":  # pragma: no cover
 
         def chosen_provider(self):
             class _P:
-                name = "tinyllama"
+                name = "qwen"
             return _P()
 
     with tempfile.TemporaryDirectory() as d:
@@ -379,10 +379,10 @@ if __name__ == "__main__":  # pragma: no cover
 
     # MULTI-TEACHER: the same prompt is captured once per teacher (diverse supervision)
     class _MultiFacade:
-        answers = {"tinyllama": "TinyLlama's take."}
+        answers = {"qwen": "Qwen's take."}
 
         def available_providers(self):
-            return ["mock", "tinyllama", "self"]
+            return ["mock", "qwen", "self"]
 
         def complete_with(self, name, req):
             ans = self.answers[name]
@@ -396,7 +396,7 @@ if __name__ == "__main__":  # pragma: no cover
         exs = dm.distill_multi(["Who is your Master?"])
         sources = {e.source for e in exs}
         print(f"\nmulti-teacher        : {len(exs)} examples from {sorted(sources)}")
-        assert sources == {"tinyllama"}              # mock/self excluded; the real teacher used
+        assert sources == {"qwen"}              # mock/self excluded; the real teacher used
         assert dm.distill_multi(["Who is your Master?"]) == []   # dedup per (prompt, teacher)
 
     print("\nALL SELF-TESTS PASSED ✓")

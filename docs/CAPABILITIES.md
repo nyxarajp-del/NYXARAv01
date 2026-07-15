@@ -90,7 +90,7 @@ applied to the documentation itself).
 | 68 | Independent Problem Solving | `nyxara.growth.open_world` + `nyxara.mind.transfer` | UPGRADED |
 | 69 | Oracle-based Verification | `nyxara.growth.prover` | REAL+WIRED |
 | 70 | Honest Failure Recognition | `nyxara.observe.honesty` | UPGRADED |
-| 71 | Own-Model Ownership (Qwythos-9B foundry + GGUF serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
+| 71 | Own-Model Ownership (Qwen2.5-0.5B LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
 
 ## What changed in this pass (the genuinely-weak items)
 

@@ -77,7 +77,7 @@ Confirmed by the Master:
 
 - **GPU available** (cloud or local) → LoRA-on-a-strong-open-base is on the table (the real
   "genuine capability" path), not just CPU-bound n-gram / nano-GPT.
-- **Local teacher available** (the in-process TinyLlama-1.1B base) → distillation can use a real
+- **Local teacher available** (the in-process Qwen2.5-0.5B base) → distillation can use a real
   teacher to bootstrap NYXARA's own voice and competence.
 
 ---
@@ -111,7 +111,7 @@ GPU-tuned. This is where the 0% → 80% handoff transition actually happens.*
   **Reuse:** `eval/benchmark.py`, `growth/foundry_models.py:load_active_model`.
 
 - **A1 · Distillation — turn the teacher into a teacher (the bridge).**
-  Set `NYXARA_FOUNDRY__BACKEND=lora`, `NYXARA_FOUNDRY__BASE_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0`. The base
+  Set `NYXARA_FOUNDRY__BACKEND=lora`, `NYXARA_FOUNDRY__BASE_MODEL=Qwen/Qwen2.5-0.5B-Instruct`. The base
   already speaks the language; we learn a small low-rank adapter for NYXARA's **voice + lived memory +
   teacher answers**. For each real turn (and synthetic prompts) record
   `(prompt, teacher_answer, reasoning_trace)` → SFT pairs. Extend
@@ -139,7 +139,7 @@ GPU-tuned. This is where the 0% → 80% handoff transition actually happens.*
   means "actually better," not merely "lower perplexity." **Reuse:** `growth/foundry.py`, `eval/`.
 
 - **A4 · Base-model ladder + retrieval-augmented own-model.**
-  Climb as compute allows: TinyLlama-1.1B LoRA (today's base) (`FoundryConfig` already has profiles +
+  Climb as compute allows: Qwen2.5-0.5B LoRA (today's base) (`FoundryConfig` already has profiles +
   `estimated_params()`). Recommendation: **LoRA-on-a-strong-open-base** is the realistic "own brain" —
   from-scratch GPT-2 pretraining has poor ROI. Pair it with a larger RAG over her own knowledge base
   (`knowledge/`, `mind/rag.py`) so a smaller own-model punches above its size.
@@ -351,7 +351,7 @@ logic 2/4 — syllogism + comparison solved; the algebra-trick and semantic odd-
 confidently-wrong "exact" answers. Further capability now comes from Pillar A (the trained self-model),
 which needs GPU/torch + a teacher key — to be run on the Master's GPU box, not this CI container.
 
-**Next frontier:** A1 (distillation corpus → `foundry.collect_corpus()`) + LoRA-on-TinyLlama config + a
+**Next frontier:** A1 (distillation corpus → `foundry.collect_corpus()`) + LoRA-on-Qwen config + a
 "train" entry point — scaffolded as code + tests here, executed on GPU by the Master.
 
 ### 2026-06 — `nyxara-grow`: the flywheel as one command + verified end to end
@@ -536,7 +536,7 @@ and put an honest live meter on it. All torch-free (runs in CI, on any box), ins
   is attached — fixed fusion weights unchanged), so no pinned behaviour regresses.
 
 **The honest ceiling (unchanged, stated plainly).** No single person/repo can train a model that
-beats frontier Claude/GPT, and this box has no GPU/torch — so the neural LoRA-on-TinyLlama brain remains
+beats frontier Claude/GPT, and this box has no GPU/torch — so the neural LoRA-on-Qwen brain remains
 **scaffolded, not run here** (`python -m nyxara.growth --distill --backend lora --base-model
 --bench` on the Master's GPU box). We deliberately wrote **no** "beats everyone /
 most powerful AI" claim into code or docs; we pushed every *real, achievable* capability to its max on
@@ -556,5 +556,5 @@ independent verifier, learns which memories actually help, imagines dynamics wit
 takes on tool-pack roles, and delegates to gated sub-agents she models as minds. **Pillars A (partial,
 GPU-bound remainder), B, C, D complete; E1 + E2 done, E3 GPU-bound.** Every addition stays inside the
 sovereign loop's gates and never edits her character. The one capability that genuinely needs the
-Master's GPU — the LoRA-on-TinyLlama self-model that lifts the *handoff rate* — is scaffolded and one command
-away (`python -m nyxara.growth --tinyllama --distill --bench`).
+Master's GPU — the LoRA-on-Qwen self-model that lifts the *handoff rate* — is scaffolded and one command
+away (`python -m nyxara.growth --qwen --distill --bench`).

@@ -6,9 +6,9 @@
 #             nyxara
 #
 # Out of the box NYXARA answers through her deterministic reasoner. The LLM stack is fully
-# local (TinyLlama-1.1B via HuggingFace — no API keys); the heavy ML extras (llm/foundry/
+# local (Qwen2.5-0.5B-Instruct via HuggingFace — no API keys); the heavy ML extras (llm/foundry/
 # senses) are intentionally omitted to keep the image lean — add them by extending this file
-# (pip install -e ".[llm,foundry]") for in-container TinyLlama inference and LoRA tuning.
+# (pip install -e ".[llm,foundry]") for in-container Qwen inference and LoRA tuning.
 
 FROM python:3.11-slim AS base
 

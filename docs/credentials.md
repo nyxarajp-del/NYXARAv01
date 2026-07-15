@@ -56,7 +56,7 @@ header **inside the kernel** — the secret never appears in the tool result or 
   `guard.vault.resolve_api_key("<service>")` resolves a vault record named
   `<service>_api_key` (e.g. `brave_api_key`) as a fallback when neither config nor env
   supplies a key. Config/env still win. (The LLM itself is fully local —
-  TinyLlama-1.1B in-process — and needs no key at all.)
+  Qwen2.5-0.5B in-process — and needs no key at all.)
 
 ## Direct (Master, Python) API
 

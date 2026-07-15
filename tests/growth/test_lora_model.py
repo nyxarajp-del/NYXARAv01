@@ -60,7 +60,7 @@ def test_build_model_lora_never_raises_for_missing_deps():
 # QLoRA (4-bit) — pure decision/config logic, no GPU or deps needed
 # --------------------------------------------------------------------------- #
 def test_spec_roundtrips_qlora_fields():
-    spec = ModelSpec(kind="lora", base_model="TinyLlama/TinyLlama-1.1B-Chat-v1.0", load_in_4bit=True,
+    spec = ModelSpec(kind="lora", base_model="Qwen/Qwen2.5-0.5B-Instruct", load_in_4bit=True,
                      bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16",
                      bnb_4bit_use_double_quant=False, gradient_checkpointing=False)
     again = ModelSpec.from_dict(spec.to_dict())

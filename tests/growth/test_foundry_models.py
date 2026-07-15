@@ -301,8 +301,8 @@ def test_modelspec_lora_r_auto_round_trip():
 
 
 def test_modelspec_trust_remote_code_round_trip():
-    # needed for the Qwythos/Qwen3.5 custom arch; must survive spec.json persistence
-    spec = ModelSpec(kind="lora", base_model="qwythos", trust_remote_code=True)
+    # needed for an exotic base that ships custom modeling code; must survive spec.json persistence
+    spec = ModelSpec(kind="lora", base_model="exotic/custom-arch", trust_remote_code=True)
     assert spec.to_dict()["trust_remote_code"] is True
     assert ModelSpec.from_dict(spec.to_dict()).trust_remote_code is True
     assert ModelSpec().trust_remote_code is False                   # default off for a stock base

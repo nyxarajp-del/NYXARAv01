@@ -128,7 +128,7 @@ def test_no_parseable_decision_raises():
 # --------------------------------------------------------------------------- #
 def _dev_settings(passes=2, samples=1):
     s = NyxaraSettings.for_profile(Profile.DEV)
-    s.llm.provider = LLMProvider.TINYLLAMA
+    s.llm.provider = LLMProvider.QWEN
     s.llm.reasoning_passes = passes
     s.llm.reasoning_samples = samples
     # These tests exercise the deliberate (think→decide→critique) path in isolation; MCTS deep

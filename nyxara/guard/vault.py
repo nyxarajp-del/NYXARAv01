@@ -706,7 +706,7 @@ def resolve_api_key(provider: str) -> Optional[str]:
 
     Trusted in-process faculties (e.g. web search) may call this *only* as a fallback
     when neither config nor env supplies a key. (The LLM itself is fully local —
-    TinyLlama-1.1B — and needs no key.) It never runs unless
+    Qwen2.5-0.5B — and needs no key.) It never runs unless
     ``VaultConfig.provider_key_fallback`` is on, and only reads pre-existing records — it does
     not create a vault where one is not warranted. The plaintext is used to construct the API
     client inside the kernel; it is never returned to the model.
