@@ -1859,10 +1859,47 @@ class CausalConfig(BaseModel):
     max_vars: int = Field(default=512, ge=8)
     max_events: int = Field(default=20000, ge=64)
     persist: bool = True                               # carry the learned graph across restarts
+    # DYNAMIC causal learning during conversation (not only every discover_every-th turn):
+    # refresh the causal links touching this turn's labels incrementally, every turn.
+    incremental_discovery: bool = True
+    # learn about the WORLD she talks about, not only her own pipeline: emit topic:<keyphrase>
+    # events from the stimulus so runtime causal structure covers conversation content too.
+    observe_stimulus_topics: bool = True
+    max_stimulus_topics: int = Field(default=2, ge=0)  # topic events per turn (0 = off)
     # learned FUNCTIONAL mechanisms: for causal edges with valued events, fit value_B≈f(value_A)
     # (online ridge) so counterfactuals carry real effect sizes, not bare probability lifts
     functional_mechanisms: bool = True
     min_pairs_fit: int = Field(default=8, ge=2)        # valued samples needed before fitting f
+
+
+class NativeReasoningConfig(BaseModel):
+    """NYXARA's own native chain-of-thought engine (mind/native_reasoner.py).
+
+    The reasoning trace is authored by HER algorithms — causal graph, knowledge graph,
+    verifiable faculties, compute-and-verify, analogy — composed on a multi-hop blackboard.
+    The LLM never writes the thinking; it is demoted to last-resort surface text. Every rung
+    either produces a machine-checkable artifact or abstains honestly (never fabricates).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)  # abstention floor
+    trace_in_answer: bool = True        # show her step-by-step derivation in the reply
+    causal_queries: bool = True         # why / what-if / does-X-cause-Y / counterfactual
+    graph_answers: bool = True          # factual answers from the knowledge graph
+    analogy: bool = True                # structure-mapping "X is like Y" answers
+    calibration: bool = True            # persist + apply the confidence Calibrator
+    max_steps: int = Field(default=24, ge=1)  # trace budget (multi-hop blackboard included)
+    # -- max-level upgrades --
+    multi_hop: bool = True              # blackboard composition of sub-engines
+    bandit: bool = True                 # UCB1 per-intent dispatch: she learns HOW to reason
+    promote_knowledge: bool = True      # verified conclusions compound into the graph
+    max_promotions_per_turn: int = Field(default=3, ge=0)
+    intervention_planning: bool = True  # "how do I achieve/prevent X?" from the causal graph
+    # she measures, mutates, PROVES better on replayed turns, then applies her own tuning
+    self_improve: bool = True
+    replay_log_cap: int = Field(default=2000, ge=100)
 
 
 class GuardConfig(BaseModel):
@@ -2444,6 +2481,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)
+    native_reasoning: NativeReasoningConfig = Field(default_factory=NativeReasoningConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     self_optimization: SelfOptimizationConfig = Field(default_factory=SelfOptimizationConfig)
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)

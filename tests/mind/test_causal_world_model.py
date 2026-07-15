@@ -262,5 +262,66 @@ def test_confounder_screening_can_be_disabled():
     assert m.is_causal("ice_cream", "drowning").verdict != CONFOUNDED
 
 
+# --------------------------------------------------------------------------- #
+# labels / fuzzy matching / incremental (per-turn) structure learning
+# --------------------------------------------------------------------------- #
+def test_labels_lists_tracked_variables_most_observed_first():
+    m = _chain_model()
+    labs = m.labels()
+    assert set(labs) >= {"rain", "wet_ground", "slippery"}
+    counts = [len(m._by_label[lab]) for lab in labs]
+    assert counts == sorted(counts, reverse=True)
+
+
+def test_match_label_resolves_mentions_and_misses_honestly():
+    m = _chain_model()
+    assert m.match_label("why is the ground wet?") == "wet_ground"
+    assert m.match_label("did the rain do it?") == "rain"
+    assert m.match_label("quantum bananas") is None
+    assert m.match_label("") is None
+
+
+def test_match_label_ignores_pipeline_prefixes():
+    m = CausalWorldModel()
+    for i in range(6):
+        m.observe("topic:weather", at=float(i * 100))
+    assert m.match_label("what about the weather?") == "topic:weather"
+
+
+def test_update_links_for_matches_discover_for_touched_pairs():
+    incremental = _chain_model()
+    # wipe the graph and rebuild ONLY via the per-turn incremental path
+    incremental._links.clear()
+    incremental._mechanisms.clear()
+    n = incremental.update_links_for(["rain", "wet_ground", "slippery",
+                                      "birds_singing"])
+    assert n > 0
+    full = _chain_model()
+    inc_verdicts = {k: v.verdict for k, v in incremental._links.items()}
+    full_verdicts = {k: v.verdict for k, v in full._links.items()}
+    assert inc_verdicts == full_verdicts
+
+
+def test_update_links_for_skips_unknown_and_thin_labels():
+    m = _chain_model()
+    assert m.update_links_for(["nonexistent_label"]) == 0
+    assert m.update_links_for([]) == 0
+
+
+def test_update_links_for_finds_a_new_link_between_full_discoveries():
+    m = CausalWorldModel(window=10.0)
+    rng = random.Random(3)
+    for k in range(200):
+        base = k * 100.0
+        if rng.random() < 0.6:
+            m.observe("switch", at=base)
+            if rng.random() < 0.9:
+                m.observe("light", at=base + 1)
+    # no discover() call — only the incremental per-turn refresh
+    m.update_links_for(["switch"])
+    assert m.is_causal("switch", "light").verdict == CAUSAL
+    assert any(link.cause == "switch" for link in m.why("light"))
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -60,7 +60,8 @@ class NyxaraReasoner:
                  tools: Any = None, llm_reasoner: Any = None, use_council: bool = False,
                  settings: Optional[NyxaraSettings] = None, narrative: Any = None,
                  knowledge: Any = None, metaprompt: Any = None,
-                 generalization_engine: Any = None,
+                 generalization_engine: Any = None, causal_model: Any = None,
+                 knowledge_graph: Any = None,
                  max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
@@ -94,6 +95,13 @@ class NyxaraReasoner:
         self._sample_mind: Any = None  # lazily built few-shot / skill-induction mind
         self._deep: Any = None  # lazily built always-max deep-reasoning controller (Problem #1)
         self._compute: Any = None  # lazily built general reduce→run→verify reasoner (Problem #1)
+        # HER OWN chain of thought (mind/native_reasoner.py): the learned causal graph +
+        # knowledge graph + verifiable faculties composed on a multi-hop blackboard — the
+        # reasoning trace is authored by her algorithms, never by prompting a model.
+        self.causal_model = causal_model
+        self.knowledge_graph = knowledge_graph
+        self._native: Any = None  # lazily built native chain-of-thought orchestrator
+        self.last_native_trace: Optional[List[dict]] = None  # last turn's inspectable steps
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -261,6 +269,15 @@ class NyxaraReasoner:
     # ------------------------------------------------------------------ #
     def _respond_candidate(self, stimulus: str, mems: List[str], outcome: Any) -> Candidate:
         process = self._process_label(outcome)
+        # NATIVE CHAIN OF THOUGHT — HER OWN reasoning, first. The trace is authored by her
+        # algorithms (learned causal graph, knowledge graph, verifiable chains, certified
+        # compute, structure-mapping analogy) composed on a multi-hop blackboard — never by
+        # prompting a model to "think step by step". It subsumes the faculty + compute rungs
+        # below (the native engine runs both) and abstains honestly, so ordinary conversation
+        # falls straight through. The LLM is demoted to the last resort at the ladder's foot.
+        native = self._native_answer(stimulus, mems, process)
+        if native is not None:
+            return native
         # neuro-symbolic short-circuit: an exact, verifiable answer (math / logic) beats any
         # neural guess — so NYXARA computes it herself, with or without an LLM present. This is
         # "verifiable > probabilistic" applied to the *whole loop*, not only the router.
@@ -501,6 +518,61 @@ class NyxaraReasoner:
             except Exception:  # noqa: BLE001 — routing is a capability, never a hard dependency
                 self._router = False  # sentinel: tried and unavailable
         return self._router or None
+
+    # ------------------------------------------------------------------ #
+    # Native chain of thought (mind/native_reasoner.py) — HER reasoning, not the LLM's
+    # ------------------------------------------------------------------ #
+    def _native_reasoner(self) -> Any:
+        """Lazily build the native chain-of-thought orchestrator over her real faculties."""
+        if self._native is None:
+            cfg = getattr(self.settings, "native_reasoning", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                self._native = False  # sentinel: disabled by the Master
+                return None
+            try:
+                from nyxara.mind.native_reasoner import NativeReasoner
+                self._native = NativeReasoner(knowledge_graph=self.knowledge_graph,
+                                              causal_model=self.causal_model,
+                                              memory=self.memory,
+                                              compute=self._compute_engine(),
+                                              settings=self.settings)
+            except Exception:  # noqa: BLE001 — a capability, never a hard dependency
+                self._native = False
+        return self._native or None
+
+    def _native_answer(self, stimulus: str, mems: List[str],
+                       process: str) -> Optional[Candidate]:
+        """A conclusion NYXARA reasoned to herself, with the step trace — or None to defer."""
+        native = self._native_reasoner()
+        if native is None:
+            return None
+        try:
+            conclusion = native.reason(stimulus, mems)
+        except Exception:  # noqa: BLE001 — native reasoning is advisory, never fatal
+            return None
+        if conclusion is None:
+            return None
+        self.last_native_trace = [s.to_dict() for s in conclusion.steps]
+        cfg = getattr(self.settings, "native_reasoning", None)
+        with_trace = bool(getattr(cfg, "trace_in_answer", True))
+        conf = float(conclusion.confidence)
+        return Candidate(
+            text=conclusion.render(with_trace=with_trace), kind="respond",
+            capability=Capability.MESSAGE_SEND, risk=RiskTier.LOW, reversible=True,
+            confidence=conf, belief=conf,
+            rationale=f"{process} via her own native reasoning ({conclusion.source}; "
+                      f"{len(conclusion.steps)} steps, verified={conclusion.verified}); "
+                      f"{len(mems)} memories recalled")
+
+    def record_native_outcome(self, success: bool) -> None:
+        """Feed the turn's lived outcome back into the native reasoner's learning
+        (calibration + bandit + replay log). Safe no-op when native reasoning is off."""
+        if not self._native:
+            return
+        try:
+            self._native.record_outcome(bool(success))
+        except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
+            pass
 
     @staticmethod
     def _faculty_answer(stimulus: str) -> Optional[Tuple[str, float]]:

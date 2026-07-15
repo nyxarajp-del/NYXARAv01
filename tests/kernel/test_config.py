@@ -151,6 +151,22 @@ def test_env_override(monkeypatch):
     assert s.resources.max_concurrent_tasks == 128
 
 
+def test_native_reasoning_defaults_and_env_override(monkeypatch):
+    s = NyxaraSettings()
+    assert s.native_reasoning.enabled is True
+    assert 0.0 <= s.native_reasoning.min_confidence <= 1.0
+    assert s.native_reasoning.multi_hop and s.native_reasoning.self_improve
+    assert s.causal.incremental_discovery is True
+    assert s.causal.observe_stimulus_topics is True
+    monkeypatch.setenv("NYXARA_NATIVE_REASONING__ENABLED", "false")
+    monkeypatch.setenv("NYXARA_NATIVE_REASONING__MIN_CONFIDENCE", "0.6")
+    monkeypatch.setenv("NYXARA_CAUSAL__MAX_STIMULUS_TOPICS", "5")
+    s2 = NyxaraSettings()
+    assert s2.native_reasoning.enabled is False
+    assert s2.native_reasoning.min_confidence == 0.6
+    assert s2.causal.max_stimulus_topics == 5
+
+
 def test_paths_ensure_creates_dirs(tmp_path):
     s = NyxaraSettings()
     s.paths.root = tmp_path / "nyx"

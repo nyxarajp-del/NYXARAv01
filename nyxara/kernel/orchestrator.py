@@ -32,6 +32,7 @@ because it presupposes everything else.
 from __future__ import annotations
 
 import math
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -1039,6 +1040,11 @@ class NyxaraCore:
                                   knowledge=self.knowledge,
                                   metaprompt=getattr(self, "metaprompt", None),
                                   generalization_engine=getattr(self, "generalization_engine", None),
+                                  # her runtime-learned causal graph + knowledge graph, so the
+                                  # native chain-of-thought rung can ANSWER why/what-if/how
+                                  # questions from what she learned living (not training data)
+                                  causal_model=getattr(self, "causal_world_model", None),
+                                  knowledge_graph=getattr(self, "knowledge_graph", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -5473,12 +5479,15 @@ class NyxaraCore:
     def _classify_answer_source(candidate: Candidate) -> Optional[str]:
         """Which mind answered a conversational turn, read from its rationale (Rule 6 transparency).
 
-        Returns one of: ``faculty`` / ``skill`` / ``self`` (own learned brain / promoted model) /
-        ``offline`` (keyless sovereign voice) — all NYXARA answering herself — or ``teacher`` when
-        the external LLM/council produced the words. ``None`` for non-respond turns (acts)."""
+        Returns one of: ``native`` (her own chain of thought) / ``faculty`` / ``skill`` /
+        ``self`` (own learned brain / promoted model) / ``offline`` (keyless sovereign voice) —
+        all NYXARA answering herself — or ``teacher`` when the external LLM/council produced
+        the words. ``None`` for non-respond turns (acts)."""
         if getattr(candidate, "kind", "respond") != "respond":
             return None
         r = str(getattr(candidate, "rationale", "") or "").lower()
+        if "native reasoning" in r:
+            return "native"          # her own chain of thought (mind/native_reasoner.py)
         if "verifiable faculty" in r:
             return "faculty"
         if "learned skill" in r:
@@ -5551,7 +5560,7 @@ class NyxaraCore:
             pass
 
     def _causal_events_for_turn(self, candidate: Any, disp: "Disposition", success: bool,
-                                *, action: str, reward: float
+                                *, action: str, reward: float, stimulus: str = ""
                                 ) -> List[Tuple[float, str, Optional[float], bool]]:
         """The turn as a rich causal event stream: ``(time_offset, label, value, is_do)``.
 
@@ -5579,12 +5588,51 @@ class NyxaraCore:
                                    valence, False))
             except Exception:  # noqa: BLE001 — mood is optional context
                 pass
+        # WORLD content, not only pipeline meta-labels: the stimulus's topics become causal
+        # variables too, so runtime causal discovery learns about what she talks about —
+        # dynamic learning beyond anything in training data.
+        for i, topic in enumerate(self._stimulus_topics(stimulus)):
+            events.append((5e-4 + i * 1e-5, f"topic:{topic}", None, False))
         # ...effects last (what followed)
         outcome = ("outcome:success" if (disp is Disposition.ACT and success)
                    else "outcome:failure")
         events.append((1e-3, outcome, None, False))
         events.append((1.1e-3, "outcome:reward", float(reward), False))
         return events
+
+    _TOPIC_STOPWORDS = frozenset(
+        "the a an and or but if then is are was were be been do does did what why how "
+        "who where which when to of in on for with at by from as it this that these "
+        "those i you we they he she my your our can could should would will".split())
+
+    def _stimulus_topics(self, stimulus: str) -> List[str]:
+        """Up to ``causal.max_stimulus_topics`` content keyphrases of the turn's stimulus.
+
+        Prefers the real NLP keyphrase extractor (senses/nlp.py); degrades to the longest
+        non-stopword tokens on a bare machine — always pure, never fatal."""
+        try:
+            from nyxara.kernel.config import get_settings
+            ccfg = get_settings().causal
+            if not bool(getattr(ccfg, "observe_stimulus_topics", True)):
+                return []
+            top = int(getattr(ccfg, "max_stimulus_topics", 2))
+        except Exception:  # noqa: BLE001
+            top = 2
+        text = (stimulus or "").strip()
+        if not text or top <= 0:
+            return []
+        try:
+            from nyxara.senses.nlp import keyphrases
+            out = [p.strip().lower().replace(" ", "_")
+                   for p, _ in keyphrases(text, top=top) if p.strip()]
+            if out:
+                return out[:top]
+        except Exception:  # noqa: BLE001 — keyphrases are optional; fall through
+            pass
+        words = [w for w in re.findall(r"[a-z0-9]+", text.lower())
+                 if len(w) >= 4 and w not in self._TOPIC_STOPWORDS]
+        words.sort(key=len, reverse=True)
+        return words[:top]
 
     def _imagination_to_causal(self, *, max_actions: int = 3,
                                min_confidence: float = 0.6) -> int:
@@ -5664,17 +5712,37 @@ class NyxaraCore:
             try:
                 import time as _time
                 now = _time.time()
+                turn_labels: List[str] = []
                 for offset, label, value, is_do in self._causal_events_for_turn(
                         candidate, disp, success, action=action,
-                        reward=brain_reward):
+                        reward=brain_reward, stimulus=stimulus):
                     self.causal_world_model.observe(label, at=now + offset,
                                                     intervention=is_do, value=value)
+                    turn_labels.append(label)
                 self._causal_turns += 1
                 from nyxara.kernel.config import get_settings
-                if self._causal_turns % max(1, get_settings().causal.discover_every) == 0:
+                ccfg = get_settings().causal
+                if self._causal_turns % max(1, ccfg.discover_every) == 0:
                     self.causal_world_model.discover()
+                elif bool(getattr(ccfg, "incremental_discovery", True)):
+                    # DYNAMIC causal learning: refresh the links touching this turn's
+                    # labels every turn, so the causal graph updates DURING conversation
+                    # instead of waiting for the every-N-turns full rebuild.
+                    self.causal_world_model.update_links_for(turn_labels)
             except Exception:  # noqa: BLE001 — causal learning is best-effort, never fatal
                 pass
+        # feed the turn's lived outcome to the native reasoner's learning (calibration +
+        # engine bandit + replay log), and let her PROVE-then-apply a better tuning on a
+        # slow cadence — she upgrades her own reasoner; we only bound the envelope.
+        try:
+            record = getattr(self.reasoner, "record_native_outcome", None)
+            if callable(record):
+                record(disp is Disposition.ACT and success)
+            native = getattr(self.reasoner, "_native", None)
+            if native and self._causal_turns and self._causal_turns % 50 == 0:
+                native.self_improve()
+        except Exception:  # noqa: BLE001 — self-tuning is best-effort, never fatal
+            pass
         # world model: the lived turn itself becomes a learnable transition — "in situation
         # <stimulus>, doing <action> produced <reply>, worth <reward>". The GroundedWorldModel
         # encodes the text states through her self-learned embedder, so REAL conversation
@@ -7627,6 +7695,17 @@ class NyxaraCore:
             rep["knowledge_chunks"] = len(self.knowledge)
         # the North Star: how many turns NYXARA answered herself vs deferred to the teacher
         rep["handoff"] = self._handoff_report()
+        # her own chain of thought: the last native trace + her self-tuned parameters
+        try:
+            trace = getattr(self.reasoner, "last_native_trace", None)
+            native = getattr(self.reasoner, "_native", None)
+            if trace is not None or native:
+                rep["native_reasoning"] = {
+                    "last_trace_steps": len(trace or []),
+                    **({"tuning": native.report().get("tuning", {})} if native else {}),
+                }
+        except Exception:  # noqa: BLE001 — reporting is best-effort
+            pass
         if self.thought_gen is not None:
             rep["workspace_broadcasts"] = self.thought_gen.workspace_metrics().get(
                 "broadcasts", 0)

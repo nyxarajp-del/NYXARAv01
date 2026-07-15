@@ -121,6 +121,7 @@ commands:
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
   /solve <p>         solve as the right expert: coding/maths/science/business/medicine/law/…
   /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
+  /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -283,6 +284,12 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /swarm <problem>")
         else:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
+    elif cmd in ("selfimprove", "self-improve", "self_improve"):
+        native = getattr(core.reasoner, "_native_reasoner", lambda: None)()
+        if native is None:
+            print("native reasoning is unavailable (disabled in config).")
+        else:
+            print(json.dumps(native.self_improve(), indent=2, default=str))
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.
