@@ -203,6 +203,16 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     async def _lifespan(app_: Any):
         loop = None
         runtime = None
+        # Lifelong continuity: the always-on daemon MUST resume prior learning on startup —
+        # the whole point of "gets better every minute" is that minute N+1 builds on minute N,
+        # across restarts, not from a blank slate. Load the complete learned state (memory +
+        # self-model + reward learner + EWC anchors + embedder) before the mind starts.
+        try:
+            restored = app_.state.core.load_state()
+            print(f"NYXARA continuity: restored learned state on startup "
+                  f"({restored} memory records + learner/synapses/embedder)")
+        except Exception as lexc:  # noqa: BLE001 — a cold start must never be blocked by restore
+            print(f"NYXARA continuity: startup restore skipped ({lexc})")
         if cfg.autonomic:
             try:
                 from nyxara.kernel.autonomic import AutonomicLoop
@@ -298,6 +308,14 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         try:
             yield
         finally:
+            # Checkpoint everything the daemon learned this run before the process exits, so no
+            # minute of learning is lost on shutdown (the periodic autosave covers crashes; this
+            # covers a clean stop). Best-effort — a failed save must never hang shutdown.
+            try:
+                saved = app_.state.core.save_state()
+                print(f"NYXARA continuity: checkpointed learned state on shutdown ({saved})")
+            except Exception:  # noqa: BLE001 — durability is best-effort, never blocks shutdown
+                pass
             # stop the deep-cognition thread first (it is what start_cognition launched)
             if getattr(app_.state, "deep_cognition", False):
                 try:

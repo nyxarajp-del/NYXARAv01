@@ -143,6 +143,44 @@ def _competence_view(core: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _continuity_view(core: Any) -> Optional[Dict[str, Any]]:
+    """The live continuous-/lifelong-learning state: the reward learner, the EWC anti-forgetting
+    anchors, and the append-only journal — the honest proof that learning is real and *accreting*
+    across restarts (not reset on every reboot). Every field is read from actual in-process state.
+    """
+    if core is None:
+        return None
+    out: Dict[str, Any] = {}
+    learner = getattr(core, "learner", None)
+    if learner is not None and hasattr(learner, "report"):
+        try:
+            out["learner"] = learner.report()
+        except Exception:  # noqa: BLE001
+            pass
+    syn = getattr(core, "elastic_synapses", None)
+    if syn is not None and hasattr(syn, "stats"):
+        try:
+            out["elastic_synapses"] = syn.stats()
+        except Exception:  # noqa: BLE001
+            pass
+    jr = getattr(core, "_learning_journal", None)
+    if jr is not None and hasattr(jr, "stats"):
+        try:
+            out["journal"] = jr.stats()
+            replayed = int(getattr(core, "_journal_replayed", 0))
+            if replayed:
+                out["journal"]["replayed_on_restart"] = replayed
+        except Exception:  # noqa: BLE001
+            pass
+    cl = getattr(core, "_continuous_learner", None)
+    if cl is not None and hasattr(cl, "stats"):
+        try:
+            out["continuous"] = cl.stats()
+        except Exception:  # noqa: BLE001
+            pass
+    return out or None
+
+
 def learning_status(core: Any = None, settings: Any = None) -> Dict[str, Any]:
     """Aggregate NYXARA's real learning state — read-only, honest, never raises.
 
@@ -150,7 +188,9 @@ def learning_status(core: Any = None, settings: Any = None) -> Dict[str, Any]:
     ``foundry`` (trained generations + perplexity trend from the manifest), ``flywheel``
     (collected experience + corrections), ``autoforge`` (training-cycle log), ``serving``
     (the LIVE provider + loaded self-version), ``last_promotion`` (the most recent
-    in-process weight adoption), ``competence`` (measured Beta-posterior capability)."""
+    in-process weight adoption), ``competence`` (measured Beta-posterior capability),
+    ``continuity`` (the live reward learner + EWC anchors + append-only journal — proof that
+    continuous/lifelong learning is real and accreting across restarts)."""
     if settings is None:
         try:
             settings = getattr(core, "settings", None)
@@ -165,6 +205,7 @@ def learning_status(core: Any = None, settings: Any = None) -> Dict[str, Any]:
         "autoforge": _autoforge_view(core),
         "serving": _serving_view(core),
         "competence": _competence_view(core),
+        "continuity": _continuity_view(core),
     }
     last = getattr(core, "_last_promotion", None) if core is not None else None
     if last is not None:

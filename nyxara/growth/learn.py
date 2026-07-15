@@ -44,6 +44,30 @@ Features = Dict[str, float]
 
 
 # --------------------------------------------------------------------------- #
+# Serialization helpers (lifelong persistence — the learned weights must survive
+# a restart, or every reboot is catastrophic forgetting by another name).
+# --------------------------------------------------------------------------- #
+def _nested_to_plain(d: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    """Flatten a nested weight/importance map to plain JSON-able dicts (drop empties)."""
+    out: Dict[str, Dict[str, float]] = {}
+    for action, inner in d.items():
+        row = {f: float(v) for f, v in inner.items()}
+        if row:
+            out[action] = row
+    return out
+
+
+def _plain_to_nested(d: Optional[Dict[str, Dict[str, float]]]) -> Dict[str, Dict[str, float]]:
+    """Rebuild a ``defaultdict(lambda: defaultdict(float))`` from a plain dict."""
+    out: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for action, inner in (d or {}).items():
+        row = out[action]
+        for f, v in inner.items():
+            row[f] = float(v)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Experience & replay buffer
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -61,6 +85,23 @@ class Experience:
                 "context": self.context, "features": dict(self.features),
                 "task": self.task,
                 "logit": (round(self.logit, 4) if self.logit is not None else None)}
+
+    def state(self) -> Dict[str, Any]:
+        """Full-precision, lossless serialization for persistence (round-trips ``from_dict``)."""
+        return {"action": self.action, "features": dict(self.features),
+                "reward": self.reward, "context": self.context, "task": self.task,
+                "logit": self.logit, "at": self.at}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Experience":
+        """Rebuild an experience from :meth:`state` (or the rounded :meth:`to_dict`)."""
+        feats = {str(k): float(v) for k, v in (d.get("features") or {}).items()}
+        logit = d.get("logit")
+        return cls(action=str(d.get("action", "")), features=feats,
+                   reward=float(d.get("reward", 0.0)), context=str(d.get("context", "")),
+                   task=str(d.get("task", "")),
+                   logit=(float(logit) if logit is not None else None),
+                   at=float(d.get("at", time.time())))
 
 
 class ReplayBuffer:
@@ -122,6 +163,56 @@ class ReplayBuffer:
                     out[task] = out.get(task, 0) + 1
                     seen.add(id(exp))
         return out
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the buffer + per-task reservoirs so rehearsal survives a restart.
+
+        Reservoir entries that are *also* live in the recency deque are stored as an index into
+        it (``{"idx": i}``) rather than a copy, so the identity-sharing the live buffer relies on
+        (``counts_by_task`` dedupes by object id) is faithfully rebuilt on load. Reservoir-only
+        entries (aged out of the deque) are stored in full (``{"exp": ...}``)."""
+        buf_list = list(self._buf)
+        id_to_idx = {id(e): i for i, e in enumerate(buf_list)}
+        reserve: Dict[str, List[Dict[str, Any]]] = {}
+        for task, pool in self._reserve.items():
+            entries: List[Dict[str, Any]] = []
+            for e in pool:
+                idx = id_to_idx.get(id(e))
+                entries.append({"idx": idx} if idx is not None else {"exp": e.state()})
+            reserve[task] = entries
+        return {
+            "capacity": self.capacity,
+            "task_reserve": self.task_reserve,
+            "buf": [e.state() for e in buf_list],
+            "reserve": reserve,
+            "reserve_seen": {t: int(n) for t, n in self._reserve_seen.items()},
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        """Restore buffer + reservoirs from :meth:`to_dict`, preserving deque/reservoir identity
+        sharing. Returns True on success."""
+        if not isinstance(data, dict):
+            return False
+        self.capacity = int(data.get("capacity", self.capacity))
+        self.task_reserve = int(data.get("task_reserve", self.task_reserve))
+        buf_objs = [Experience.from_dict(d) for d in (data.get("buf") or [])]
+        self._buf = deque(buf_objs, maxlen=self.capacity)
+        self._reserve = {}
+        for task, entries in (data.get("reserve") or {}).items():
+            pool: List[Experience] = []
+            for ent in (entries or []):
+                if isinstance(ent, dict) and "idx" in ent and ent["idx"] is not None:
+                    i = int(ent["idx"])
+                    if 0 <= i < len(buf_objs):
+                        pool.append(buf_objs[i])       # shared identity with the deque
+                elif isinstance(ent, dict) and "exp" in ent:
+                    pool.append(Experience.from_dict(ent["exp"]))
+                else:                                  # tolerate the flat legacy form
+                    pool.append(Experience.from_dict(ent))
+            self._reserve[str(task)] = pool
+        self._reserve_seen = {
+            str(t): int(n) for t, n in (data.get("reserve_seen") or {}).items()}
+        return True
 
     @staticmethod
     def _draw_one(items: List[Experience], rng: random.Random,
@@ -271,6 +362,37 @@ class LinearValueModel:
     def importance(self, action: str, feature: str) -> float:
         n = self._n[action][feature]
         return self._F[action][feature] / n if n > 0 else 0.0
+
+    # ---- persistence (learned weights + frozen EWC anchors must survive a restart) ---- #
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the full learned state. The invented ``update_rule`` (if any) is *not*
+        persisted here — it is a transient, re-installable object that changes only *how* a
+        weight moves; the incumbent SGD+EWC delta is the durable default on reload."""
+        return {
+            "ewc_lambda": float(self.ewc_lambda),
+            "w": _nested_to_plain(self._w),
+            "w_star": _nested_to_plain(self._w_star),
+            "F": _nested_to_plain(self._F),
+            "n": _nested_to_plain(self._n),
+            "anchor": _nested_to_plain(self._anchor),
+            "m": _nested_to_plain(self._m),
+            "v": _nested_to_plain(self._v),
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        """Restore learned weights + frozen anchors/importances from :meth:`to_dict`."""
+        if not isinstance(data, dict):
+            return False
+        if "ewc_lambda" in data:
+            self.ewc_lambda = float(data["ewc_lambda"])
+        self._w = _plain_to_nested(data.get("w"))
+        self._w_star = _plain_to_nested(data.get("w_star"))
+        self._F = _plain_to_nested(data.get("F"))
+        self._n = _plain_to_nested(data.get("n"))
+        self._anchor = _plain_to_nested(data.get("anchor"))
+        self._m = _plain_to_nested(data.get("m"))
+        self._v = _plain_to_nested(data.get("v"))
+        return True
 
 
 # --------------------------------------------------------------------------- #
@@ -432,6 +554,45 @@ class Learner:
                 "synapses": self.synapses is not None,
                 "update_rule": ("sgd_ewc" if rule is None else str(getattr(rule, "expr", rule)))}
 
+    # ---- persistence: the whole learner (weights + anchors + replay) round-trips ---- #
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the complete learner so lifelong skill-learning survives a restart.
+
+        The attached :class:`ElasticSynapses` engine is persisted *separately* by the
+        orchestrator (it is shared state); here we save only what the learner owns."""
+        return {
+            "base_lr": float(self.base_lr),
+            "lr_decay": float(self.lr_decay),
+            "replay_lr": float(self.replay_lr),
+            "der_alpha": float(self.der_alpha),
+            "frozen_lr_scale": float(self.frozen_lr_scale),
+            "steps": int(self._steps),
+            "protected": sorted(self.protected),
+            "model": self.model.to_dict(),
+            "buffer": self.buffer.to_dict(),
+        }
+
+    def load_dict(self, data: Dict[str, Any]) -> bool:
+        """Restore the learner from :meth:`to_dict`. Fail-closed on the loyalty core: the
+        protected set can only *grow* toward :data:`IMMUTABLE_VALUES`, never shrink below it,
+        so a tampered checkpoint can never unprotect a character value."""
+        if not isinstance(data, dict):
+            return False
+        self.base_lr = float(data.get("base_lr", self.base_lr))
+        self.lr_decay = float(data.get("lr_decay", self.lr_decay))
+        self.replay_lr = float(data.get("replay_lr", self.replay_lr))
+        self.der_alpha = max(0.0, float(data.get("der_alpha", self.der_alpha)))
+        self.frozen_lr_scale = float(data.get("frozen_lr_scale", self.frozen_lr_scale))
+        self._steps = int(data.get("steps", self._steps))
+        loaded_protected = data.get("protected")
+        if loaded_protected:
+            self.protected = set(loaded_protected) | set(IMMUTABLE_VALUES)
+        if isinstance(data.get("model"), dict):
+            self.model.load_dict(data["model"])
+        if isinstance(data.get("buffer"), dict):
+            self.buffer.load_dict(data["buffer"])
+        return True
+
 
 # --------------------------------------------------------------------------- #
 # Self-test / demo
@@ -465,6 +626,28 @@ if __name__ == "__main__":  # pragma: no cover
         blocked = True
     assert blocked
     print("\nprotected core      : refused to learn over 'loyalty_to_master' ✓")
+
+    # ---- lifelong persistence: the learned state round-trips losslessly ---- #
+    L.consolidate()
+    blob = L.to_dict()
+    import json as _json
+    blob = _json.loads(_json.dumps(blob))          # prove it is JSON-safe
+    L2 = Learner(base_lr=0.9, seed=99)             # deliberately different config
+    assert L2.load_dict(blob)
+    for act, feats in (("greet_warmly", {"with_master": 1.0}),
+                       ("be_terse", {"task_urgent": 1.0}),
+                       ("be_verbose", {"task_urgent": 1.0})):
+        assert abs(L.value(act, feats) - L2.value(act, feats)) < 1e-9
+    assert L2._steps == L._steps and len(L2.buffer) == len(L.buffer)
+    assert L2.base_lr == L.base_lr                 # config restored from the checkpoint
+    # frozen EWC importances survive too
+    assert abs(L2.model.importance("greet_warmly", "with_master")
+               - L.model.importance("greet_warmly", "with_master")) < 1e-9
+    # a tampered checkpoint can never unprotect a character value (fail-closed)
+    tampered = L.to_dict(); tampered["protected"] = []
+    L3 = Learner(seed=7); L3.load_dict(tampered)
+    assert set(IMMUTABLE_VALUES).issubset(L3.protected)
+    print("lifelong persistence: learner state round-trips losslessly, core stays protected ✓")
 
     # ---- CATASTROPHIC FORGETTING: a shared feature lets new data overwrite old ---- #
     def train(learner, feats, reward, steps):
