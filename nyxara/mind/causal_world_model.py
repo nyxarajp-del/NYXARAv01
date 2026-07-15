@@ -582,6 +582,42 @@ class CausalWorldModel:
     # ------------------------------------------------------------------ #
     # discovery: build the whole graph
     # ------------------------------------------------------------------ #
+    def _evaluate_pair(self, a: str, b: str) -> Optional[CausalLink]:
+        """Run the full convergent criteria on one ordered pair and return the link the
+        model should now hold for it (``None`` ⇒ no link: unsupported or coincidental).
+        Shared by :meth:`discover` (full rebuild) and :meth:`update_links_for`
+        (incremental per-turn refresh) so both always agree."""
+        fwd, support, _ = self._followed_ratio(self._times(a), b)
+        if support < self.min_support or fwd <= 0.0:
+            return None
+        v = self.is_causal(a, b)
+        if v.verdict == COINCIDENTAL:
+            return None
+        strength = v.evidence.get("interventional_lift")
+        if strength is None:
+            strength = v.evidence.get("delta_p", 0.0)
+        link = CausalLink(cause=a, effect=b, strength=float(strength),
+                          confidence=v.confidence, verdict=v.verdict,
+                          lag=float(v.evidence.get("lag", 0.0)), evidence=v.evidence)
+        if link.is_causal and self.functional_mechanisms:
+            mech = self._fit_mechanism(a, b)
+            if mech is not None:
+                self._mechanisms[(a, b)] = mech
+                link.evidence["mechanism"] = mech.to_dict()
+        return link
+
+    def _set_pair(self, a: str, b: str) -> Optional[CausalLink]:
+        """Evaluate one pair and write the result into the live graph (or clear it)."""
+        link = self._evaluate_pair(a, b)
+        if link is None:
+            self._links.pop((a, b), None)
+            self._mechanisms.pop((a, b), None)
+        else:
+            self._links[(a, b)] = link
+            if not link.is_causal:
+                self._mechanisms.pop((a, b), None)
+        return link
+
     def discover(self) -> List[CausalLink]:
         """Scan every well-supported ordered pair, run the full criteria, and (re)build the
         graph. Returns the links it now believes are *causal*, strongest first."""
@@ -592,24 +628,9 @@ class CausalWorldModel:
             for b in labels:
                 if a == b:
                     continue
-                fwd, support, _ = self._followed_ratio(self._times(a), b)
-                if support < self.min_support or fwd <= 0.0:
-                    continue
-                v = self.is_causal(a, b)
-                if v.verdict == COINCIDENTAL:
-                    continue
-                strength = v.evidence.get("interventional_lift")
-                if strength is None:
-                    strength = v.evidence.get("delta_p", 0.0)
-                link = CausalLink(cause=a, effect=b, strength=float(strength),
-                                  confidence=v.confidence, verdict=v.verdict,
-                                  lag=float(v.evidence.get("lag", 0.0)), evidence=v.evidence)
-                if link.is_causal and self.functional_mechanisms:
-                    mech = self._fit_mechanism(a, b)
-                    if mech is not None:
-                        self._mechanisms[(a, b)] = mech
-                        link.evidence["mechanism"] = mech.to_dict()
-                self._links[(a, b)] = link
+                link = self._evaluate_pair(a, b)
+                if link is not None:
+                    self._links[(a, b)] = link
         if self.persist_path:
             try:
                 self.save()
@@ -644,6 +665,77 @@ class CausalWorldModel:
     def mechanism(self, cause: str, effect: str) -> Optional[FunctionalCausalMechanism]:
         """The learned functional relation for a discovered edge, if one was fitted."""
         return self._mechanisms.get((str(cause), str(effect)))
+
+    # ------------------------------------------------------------------ #
+    # incremental (per-turn) structure learning — DYNAMIC causal discovery
+    # ------------------------------------------------------------------ #
+    def update_links_for(self, labels: Iterable[str]) -> int:
+        """Refresh the causal links for every well-supported pair that touches any of the
+        given ``labels`` — the cheap, per-turn slice of :meth:`discover`, so the graph
+        updates DURING the conversation instead of only every N-th turn. Returns the number
+        of ordered pairs re-evaluated. Unknown / thin labels are skipped silently."""
+        touched = {str(l) for l in labels
+                   if len(self._by_label.get(str(l), ())) >= self.min_support}
+        if not touched:
+            return 0
+        others = [l for l, ts in self._by_label.items() if len(ts) >= self.min_support]
+        seen: set = set()
+        for a in touched:
+            for b in others:
+                if a == b:
+                    continue
+                for pair in ((a, b), (b, a)):
+                    if pair not in seen:
+                        seen.add(pair)
+                        self._set_pair(*pair)
+        return len(seen)
+
+    # ------------------------------------------------------------------ #
+    # label lookup — map a natural-language mention onto a tracked variable
+    # ------------------------------------------------------------------ #
+    def labels(self) -> List[str]:
+        """Every variable label the model currently tracks, most-observed first."""
+        return [l for l, _ in sorted(self._by_label.items(),
+                                     key=lambda kv: len(kv[1]), reverse=True)]
+
+    @staticmethod
+    def _label_tokens(text: str) -> List[str]:
+        out: List[str] = []
+        cur: List[str] = []
+        for ch in str(text).lower():
+            if ch.isalnum():
+                cur.append(ch)
+            elif cur:
+                out.append("".join(cur))
+                cur = []
+        if cur:
+            out.append("".join(cur))
+        return out
+
+    def match_label(self, text: str, *, min_overlap: float = 0.6) -> Optional[str]:
+        """Resolve a natural-language mention onto the tracked label it names, if any.
+
+        Pure-stdlib fuzzy match: token overlap between the mention and each label
+        (label prefixes like ``topic:`` are tokenized too, so "the ground being wet"
+        finds ``wet_ground``). Returns ``None`` below the overlap floor — an honest miss,
+        never a guess."""
+        mention = set(self._label_tokens(text))
+        if not mention:
+            return None
+        best: Optional[str] = None
+        best_score = 0.0
+        for lab in self._by_label:
+            toks = self._label_tokens(lab)
+            core = [t for t in toks if t not in ("topic", "act", "tool", "kind", "wm",
+                                                 "do", "outcome", "recall", "mood")]
+            core = core or toks
+            hit = sum(1 for t in core if t in mention)
+            score = hit / len(core)
+            if score >= min_overlap and (score > best_score or
+                                         (score == best_score and best is not None
+                                          and len(core) > len(self._label_tokens(best)))):
+                best, best_score = lab, score
+        return best
 
     # ------------------------------------------------------------------ #
     # queries

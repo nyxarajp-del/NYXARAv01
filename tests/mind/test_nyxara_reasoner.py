@@ -91,13 +91,17 @@ def test_no_promoted_model_still_uses_teacher():
 
 
 def test_verifiable_faculty_still_short_circuits_before_any_model():
-    # math is answered by her own faculty, ahead of own-model and teacher alike (handoff)
+    # math is answered by her own mind, ahead of own-model and teacher alike (handoff).
+    # The native chain-of-thought rung (which runs the same verifiable faculties and adds
+    # the step trace) answers first; with it disabled the bare faculty rung still fires.
     r, _ = _reasoner()
     r._router = _router("a wrong distracting answer")
     cand = r("what is 12 * 12?")
     assert cand.kind == "respond"
-    assert "verifiable faculty" in cand.rationale
+    assert ("native reasoning" in cand.rationale
+            or "verifiable faculty" in cand.rationale)
     assert "144" in cand.text
+    assert "teacher" not in cand.rationale
 
 
 # --------------------------------------------------------------------------- #
