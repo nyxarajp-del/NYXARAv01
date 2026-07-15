@@ -122,6 +122,7 @@ commands:
   /solve <p>         solve as the right expert: coding/maths/science/business/medicine/law/…
   /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
   /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
+  /selfimprove N     run the codebase RSI loop N cycles (add 'enact' to apply real source edits)
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -285,11 +286,35 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         else:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
     elif cmd in ("selfimprove", "self-improve", "self_improve"):
-        native = getattr(core.reasoner, "_native_reasoner", lambda: None)()
-        if native is None:
-            print("native reasoning is unavailable (disabled in config).")
+        tokens = arg.split()
+        # /selfimprove [N] [enact] → drive the codebase-level RSI loop N times (observable).
+        # She reviews her own source, finds weaknesses, and (with `enact`) applies gauntleted,
+        # provably-better edits herself — no LLM — while the intelligence index is threaded across
+        # cycles. Bare /selfimprove keeps the per-turn reasoning self-improvement.
+        if tokens and (tokens[0].isdigit() or tokens[0] in ("enact", "code", "loop")):
+            cycles = int(tokens[0]) if tokens[0].isdigit() else 1
+            do_enact = "enact" in tokens
+            from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
+            rsi = RecursiveSelfImprovement.from_core(core)
+
+            def _show(i: int, rep: object) -> None:
+                idx = getattr(rep, "intelligence_index", None)
+                print(f"  cycle {i}: index={idx if idx is None else round(idx, 4)} "
+                      f"kept={getattr(rep, 'kept', 0)} "
+                      f"rolled_back={getattr(rep, 'rolled_back', 0)} "
+                      f"lessons={getattr(rep, 'lessons_stored', 0)}")
+
+            print(f"recursive self-improvement — {cycles} cycle(s), "
+                  f"{'ENACTING real source edits' if do_enact else 'dry-run (observe only)'}:")
+            summary = rsi.run_continuous(cycles, enact=do_enact, on_cycle=_show)
+            print(json.dumps({k: v for k, v in summary.items() if k != "reports"},
+                             indent=2, default=str))
         else:
-            print(json.dumps(native.self_improve(), indent=2, default=str))
+            native = getattr(core.reasoner, "_native_reasoner", lambda: None)()
+            if native is None:
+                print("native reasoning is unavailable (disabled in config).")
+            else:
+                print(json.dumps(native.self_improve(), indent=2, default=str))
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.

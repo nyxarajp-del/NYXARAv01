@@ -38,15 +38,55 @@ _TODO_RE = re.compile(r"\b(TODO|FIXME|XXX|HACK)\b")
 _SEVERITY: Dict[str, float] = {
     "bare_except": 0.7,
     "high_complexity": 0.6,
+    "mutable_default_arg": 0.6,     # a real bug: the default is shared across every call
     "long_function": 0.45,
     "too_many_args": 0.4,
     "eq_none": 0.35,
+    "redundant_else_return": 0.33,
     "not_in": 0.32,
     "is_not_cmp": 0.32,
+    "not_eq_cmp": 0.32,
     "unused_import": 0.3,
+    "double_negation": 0.3,
+    "empty_collection_call": 0.28,
+    "redundant_pass": 0.28,
     "missing_docstring": 0.25,
     "todo": 0.2,
 }
+
+# the literal each empty builtin-collection call collapses to (C408)
+_EMPTY_COLLECTION_LITERAL = {"list": "[]", "dict": "{}", "tuple": "()"}
+
+
+def _ends_in_terminator(body: List["ast.stmt"]) -> bool:
+    """True if a statement block's last statement unconditionally leaves the block.
+
+    ``return``/``raise``/``break``/``continue`` all mean the following ``else:`` can never be
+    reached via fall-through, so it is redundant and may be de-indented (RET505)."""
+    return bool(body) and isinstance(body[-1], (ast.Return, ast.Raise, ast.Break, ast.Continue))
+
+
+def _has_mutable_default(node: "ast.AST") -> bool:
+    """True if a def has a mutable literal (or ``list()``/``dict()``/``set()``) as a default arg.
+
+    A mutable default is created once and shared across every call — a classic latent bug (B006).
+    Immutable defaults (``()``, ``tuple()``, constants) are never flagged."""
+    args = getattr(node, "args", None)
+    if args is None:
+        return False
+    candidates = list(getattr(args, "defaults", []) or []) + [
+        d for d in (getattr(args, "kw_defaults", []) or []) if d is not None]
+    return any(_is_mutable_default(d) for d in candidates)
+
+
+def _is_mutable_default(default: "ast.AST") -> bool:
+    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+        return True
+    if (isinstance(default, ast.Call) and isinstance(default.func, ast.Name)
+            and default.func.id in ("list", "dict", "set")
+            and not default.args and not default.keywords):
+        return True
+    return False
 
 
 def _compares_to_none(node: "ast.Compare") -> bool:
@@ -199,6 +239,33 @@ class SelfReviewer:
                     rel, node.lineno, "<compare>", kind, _SEVERITY[kind],
                     f"negated membership/identity test should use the '{op}' operator "
                     f"(PEP 8 / {'E713' if is_in else 'E714'})"))
+            elif (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+                  and isinstance(node.operand, ast.Compare)
+                  and len(node.operand.ops) == 1
+                  and isinstance(node.operand.ops[0], (ast.Eq, ast.NotEq))
+                  and not _compares_to_none(node.operand)):
+                findings.append(CodeFinding(
+                    rel, node.lineno, "<compare>", "not_eq_cmp", _SEVERITY["not_eq_cmp"],
+                    "negated equality should use the '!='/'==' operator directly "
+                    "(SIM201/SIM202)"))
+            elif (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+                  and isinstance(node.operand, ast.UnaryOp)
+                  and isinstance(node.operand.op, ast.Not)):
+                findings.append(CodeFinding(
+                    rel, node.lineno, "<not>", "double_negation",
+                    _SEVERITY["double_negation"],
+                    "double negation 'not not x' should be 'bool(x)' (SIM208)"))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and node.func.id in _EMPTY_COLLECTION_LITERAL
+                  and not node.args and not node.keywords):
+                lit = _EMPTY_COLLECTION_LITERAL[node.func.id]
+                findings.append(CodeFinding(
+                    rel, node.lineno, node.func.id, "empty_collection_call",
+                    _SEVERITY["empty_collection_call"],
+                    f"empty '{node.func.id}()' call should be the literal '{lit}' (C408)"))
+
+        # block-structure findings that need the enclosing statement list (not a bare node walk)
+        findings.extend(self._block_findings(rel, tree))
 
         # unused imports — module-level imports whose bound name is never referenced
         findings.extend(self._unused_imports(rel, tree, src, path))
@@ -253,6 +320,36 @@ class SelfReviewer:
                             f"import '{bound}' is never used"))
         return out
 
+    def _block_findings(self, rel: str, tree: ast.AST) -> List[CodeFinding]:
+        """Findings that depend on a statement's *block* context (redundant pass / else-return).
+
+        A bare :func:`ast.walk` sees nodes but not which block they belong to, so these two checks
+        inspect each node's ``body``/``orelse``/``finalbody`` statement lists directly."""
+        out: List[CodeFinding] = []
+        for node in ast.walk(tree):
+            # a `pass` that shares a block with other statements is dead weight (PIE790)
+            for block_field in ("body", "orelse", "finalbody"):
+                block = getattr(node, block_field, None)
+                if isinstance(block, list) and len(block) > 1:
+                    for stmt in block:
+                        if isinstance(stmt, ast.Pass):
+                            out.append(CodeFinding(
+                                rel, stmt.lineno, "<pass>", "redundant_pass",
+                                _SEVERITY["redundant_pass"],
+                                "redundant 'pass' — the block has other statements (PIE790)"))
+            # an `else:` after an `if` branch that always returns/raises/breaks/continues (RET505)
+            if isinstance(node, ast.If) and node.orelse and _ends_in_terminator(node.body):
+                # an `elif` is an If sitting in `orelse` at the SAME column — never flag it
+                if (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If)
+                        and node.orelse[0].col_offset == node.col_offset):
+                    continue
+                out.append(CodeFinding(
+                    rel, node.orelse[0].lineno, "<else>", "redundant_else_return",
+                    _SEVERITY["redundant_else_return"],
+                    "the 'if' branch ends in return/raise/break/continue — the 'else' is "
+                    "redundant and can be de-indented (RET505)"))
+        return out
+
     def _review_function(self, rel: str, node: ast.AST) -> List[CodeFinding]:
         out: List[CodeFinding] = []
         name = getattr(node, "name", "<fn>")
@@ -262,6 +359,13 @@ class SelfReviewer:
             out.append(CodeFinding(rel, node.lineno, name, "missing_docstring",
                                    _SEVERITY["missing_docstring"],
                                    "public function has no docstring"))
+
+        # mutable default argument — created once, shared across every call (a real bug, B006)
+        if _has_mutable_default(node):
+            out.append(CodeFinding(rel, node.lineno, name, "mutable_default_arg",
+                                   _SEVERITY["mutable_default_arg"],
+                                   "mutable default argument is shared across calls — use a "
+                                   "None sentinel (B006)"))
 
         # physical length
         end = getattr(node, "end_lineno", None) or node.lineno

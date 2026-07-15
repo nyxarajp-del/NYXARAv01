@@ -164,7 +164,9 @@ class WeaknessSynthesizer:
         # source-editable kinds the optimizer can fix with a deterministic, AST-validated
         # transform (instant, offline, zero LLM/network dependence)
         deterministic = {"bare_except", "missing_docstring", "eq_none", "unused_import",
-                         "not_in", "is_not_cmp"}
+                         "not_in", "is_not_cmp", "not_eq_cmp", "double_negation",
+                         "empty_collection_call", "redundant_pass", "redundant_else_return",
+                         "mutable_default_arg"}
         # kinds that are genuine source fixes but need real authoring (a whole-file rewrite the
         # LLM proposes); they only fire when the LLM edit path is enabled + a provider exists,
         # and every such edit still clears the same reversible gauntlet
@@ -204,6 +206,15 @@ def _code_remediation(kind: str) -> str:
         "unused_import": "remove the unused import so the dependency surface stays honest",
         "not_in": "use the 'not in' membership operator instead of 'not ... in ...' (E713)",
         "is_not_cmp": "use the 'is not' operator instead of 'not ... is ...' (E714)",
+        "not_eq_cmp": "use '!='/'==' directly instead of negating an equality (SIM201/SIM202)",
+        "double_negation": "replace 'not not x' with 'bool(x)' (SIM208)",
+        "empty_collection_call": "use the literal '[]'/'{}'/'()' instead of list()/dict()/tuple() "
+                                 "(C408)",
+        "redundant_pass": "remove the redundant 'pass'; the block already has statements (PIE790)",
+        "redundant_else_return": "de-indent the 'else' block; the 'if' branch already returns/"
+                                 "raises/breaks/continues (RET505)",
+        "mutable_default_arg": "replace the mutable default with a None sentinel initialised inside "
+                               "the body (B006)",
         "todo": "resolve or file the TODO; remove the stale marker",
     }.get(kind, "review and refactor")
 

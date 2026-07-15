@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 __all__ = ["SelfImprovementReport", "RecursiveSelfImprovement"]
 
@@ -727,6 +727,55 @@ class RecursiveSelfImprovement:
         self._observe(category=category)
         weaknesses = self.detect_weaknesses()
         return self.optimize(weaknesses, enact=enact)
+
+    # ---- the continuous, observable loop (bounded — honest, never a literal ∞) ---- #
+    def run_continuous(self, cycles: int = 5, *, enact: Optional[bool] = None,
+                       category: Optional[str] = None,
+                       on_cycle: Optional[Callable[[int, "SelfImprovementReport"], None]] = None,
+                       oversight: Any = None) -> Dict[str, Any]:
+        """Run the full RSI cycle ``cycles`` times, threading the persisted intelligence index.
+
+        This is the *self-driven* loop made visible: each pass reviews her own code, detects
+        weaknesses, and (when ``enact``) applies gauntleted, provably-better source edits herself —
+        no LLM required — while the intelligence index carries her measured capability from one
+        cycle to the next. It is deliberately **bounded**: ``cycles`` is a hard cap, not a claim of
+        infinite speed. Before every cycle it honours the oversight gate, so ``/scram`` (a closed
+        gate) halts it cleanly mid-loop. Returns the index trajectory plus cumulative kept /
+        rolled-back / lessons tallies so the Master can watch her improve herself over time.
+        """
+        cycles = max(1, int(cycles))
+        gate = oversight if oversight is not None else getattr(self.core, "oversight", None)
+        trajectory: List[Optional[float]] = []
+        reports: List[Dict[str, Any]] = []
+        kept = rolled_back = lessons = ran = 0
+        stopped: Optional[str] = None
+        for i in range(cycles):
+            if gate is not None:
+                try:
+                    if not gate.gate():
+                        stopped = "oversight gate closed (paused / scrammed) — halted cleanly"
+                        break
+                except Exception:  # noqa: BLE001 — a gate probe glitch never forces the loop on
+                    pass
+            report = self.run(enact=enact, category=category)
+            ran += 1
+            kept += int(report.kept)
+            rolled_back += int(report.rolled_back)
+            lessons += int(report.lessons_stored)
+            trajectory.append(report.intelligence_index)
+            reports.append(report.to_dict())
+            if on_cycle is not None:
+                try:
+                    on_cycle(i + 1, report)
+                except Exception:  # noqa: BLE001 — an observer callback is never allowed to break the loop
+                    pass
+        first = next((t for t in trajectory if t is not None), None)
+        last = next((t for t in reversed(trajectory) if t is not None), None)
+        gain = (round(last - first, 6) if first is not None and last is not None else None)
+        return {"cycles_requested": cycles, "cycles_ran": ran,
+                "index_trajectory": trajectory, "index_start": first, "index_end": last,
+                "index_gain": gain, "kept": kept, "rolled_back": rolled_back,
+                "lessons_stored": lessons, "stopped_early": stopped, "reports": reports}
 
     def _observe(self, *, category: Optional[str]) -> None:
         """Run the three independent observation steps (review / architecture / benchmark).
