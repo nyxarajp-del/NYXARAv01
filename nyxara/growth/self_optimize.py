@@ -134,6 +134,18 @@ class EditGenerator:
             after = _remove_unused_import(before, lineno, getattr(weakness, "symbol", "") or "")
         elif kind in ("not_in", "is_not_cmp"):
             after = _fix_negated_compare(before, lineno)
+        elif kind == "not_eq_cmp":
+            after = _fix_not_eq_compare(before, lineno)
+        elif kind == "double_negation":
+            after = _fix_double_negation(before, lineno)
+        elif kind == "empty_collection_call":
+            after = _fix_empty_collection_call(before, lineno)
+        elif kind == "redundant_pass":
+            after = _remove_redundant_pass(before, lineno)
+        elif kind == "redundant_else_return":
+            after = _dedent_redundant_else(before, lineno)
+        elif kind == "mutable_default_arg":
+            after = _fix_mutable_default_arg(before, lineno)
 
         if after is None or after == before:
             return None
@@ -146,7 +158,9 @@ class EditGenerator:
         wid = getattr(weakness, "id", "")
         # order matters: match the most specific id fragment first
         for k in ("bare_except", "missing_docstring", "unused_import", "eq_none",
-                  "is_not_cmp", "not_in"):
+                  "is_not_cmp", "not_eq_cmp", "not_in", "double_negation",
+                  "empty_collection_call", "redundant_pass", "redundant_else_return",
+                  "mutable_default_arg"):
             if k in wid:
                 return k
         return ""
@@ -880,6 +894,278 @@ def _replace_node_span(src: str, node: ast.AST, replacement: str) -> Optional[st
     return "".join(lines[:lineno - 1] + [prefix + replacement + suffix] + lines[end_lineno:])
 
 
+def _find_node(tree: ast.AST, pred: Callable[[ast.AST], bool],
+               lineno: int) -> Optional[ast.AST]:
+    """The node matching ``pred`` on the flagged ``lineno`` (preferred), else the first match."""
+    for node in ast.walk(tree):
+        if pred(node) and getattr(node, "lineno", None) == lineno:
+            return node
+    for node in ast.walk(tree):
+        if pred(node):
+            return node
+    return None
+
+
+def _fix_not_eq_compare(src: str, lineno: int) -> Optional[str]:
+    """Rewrite ``not (a == b)`` → ``a != b`` and ``not (a != b)`` → ``a == b`` (SIM201/SIM202).
+
+    Rebuilds only the flagged ``not (<x> ==/!= <y>)`` span from the operands' verbatim source, so
+    every other byte is preserved. Behaviour-preserving: for well-behaved objects ``!=`` is the
+    negation of ``==``, and the reversible gauntlet contains any pathological ``__ne__``."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+
+    def _is_target(n: Any) -> bool:
+        return (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not)
+                and isinstance(n.operand, ast.Compare)
+                and len(n.operand.ops) == 1
+                and isinstance(n.operand.ops[0], (ast.Eq, ast.NotEq)))
+
+    target = _find_node(tree, _is_target, lineno)
+    if target is None:
+        return None
+    cmp = target.operand
+    # a comparison to None belongs to the eq_none transform — never emit ``a != None`` here
+    if any(isinstance(o, ast.Constant) and o.value is None
+           for o in [cmp.left, *cmp.comparators]):
+        return None
+    left = ast.get_source_segment(src, cmp.left)
+    right = ast.get_source_segment(src, cmp.comparators[0])
+    if left is None or right is None:
+        return None
+    op = "!=" if isinstance(cmp.ops[0], ast.Eq) else "=="
+    out = _replace_node_span(src, target, f"{left} {op} {right}")
+    if out is None or out == src or not _parses(out):
+        return None
+    return out
+
+
+def _fix_double_negation(src: str, lineno: int) -> Optional[str]:
+    """Rewrite ``not not x`` → ``bool(x)`` (SIM208). Exact: ``bool(x) == not not x`` for any x."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+
+    def _is_target(n: Any) -> bool:
+        return (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not)
+                and isinstance(n.operand, ast.UnaryOp) and isinstance(n.operand.op, ast.Not))
+
+    target = _find_node(tree, _is_target, lineno)
+    if target is None:
+        return None
+    inner = target.operand.operand           # the ``x`` in ``not not x``
+    seg = ast.get_source_segment(src, inner)
+    if seg is None:
+        return None
+    out = _replace_node_span(src, target, f"bool({seg})")
+    if out is None or out == src or not _parses(out):
+        return None
+    return out
+
+
+_EMPTY_CALL_LITERAL = {"list": "[]", "dict": "{}", "tuple": "()"}
+
+
+def _fix_empty_collection_call(src: str, lineno: int) -> Optional[str]:
+    """Rewrite an empty ``list()``/``dict()``/``tuple()`` builtin call to its literal (C408)."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+
+    def _is_target(n: Any) -> bool:
+        return (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in _EMPTY_CALL_LITERAL and not n.args and not n.keywords)
+
+    target = _find_node(tree, _is_target, lineno)
+    if target is None:
+        return None
+    out = _replace_node_span(src, target, _EMPTY_CALL_LITERAL[target.func.id])
+    if out is None or out == src or not _parses(out):
+        return None
+    return out
+
+
+def _remove_redundant_pass(src: str, lineno: int) -> Optional[str]:
+    """Delete a ``pass`` that merely pads a block already holding other statements (PIE790).
+
+    Conservative: only a line whose stripped text is exactly ``pass`` is removed (never a
+    ``pass  # note`` that carries a comment), and only after ``ast`` confirms the ``pass`` shares
+    its block with at least one other statement."""
+    lines = src.splitlines(keepends=True)
+    if not (1 <= lineno <= len(lines)):
+        return None
+    if lines[lineno - 1].strip() != "pass":
+        return None
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    redundant = False
+    for node in ast.walk(tree):
+        for block_field in ("body", "orelse", "finalbody"):
+            block = getattr(node, block_field, None)
+            if isinstance(block, list) and len(block) > 1:
+                if any(isinstance(s, ast.Pass) and s.lineno == lineno for s in block):
+                    redundant = True
+    if not redundant:
+        return None
+    del lines[lineno - 1]
+    out = "".join(lines)
+    if out == src or not _parses(out):
+        return None
+    return out
+
+
+def _dedent_redundant_else(src: str, lineno: int) -> Optional[str]:
+    """De-indent an ``else:`` block whose ``if`` branch always returns/raises/breaks/continues.
+
+    ``lineno`` is the first else-body statement's line (as flagged by the reviewer). The ``else:``
+    header is dropped and its body de-indented one level. Guards keep it exact: an ``elif`` is
+    refused, tab-indented or space-mismatched bodies are refused (the dedent would not be clean),
+    and a body containing a multi-line string is refused (dedenting it would corrupt the string)."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    target = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.If) and node.orelse
+                and _stmts_end_in_terminator(node.body)
+                and node.orelse[0].lineno == lineno):
+            if (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If)
+                    and node.orelse[0].col_offset == node.col_offset):
+                continue                          # an elif — never touch it
+            target = node
+            break
+    if target is None:
+        return None
+    if _stmts_span_multiline_string(target.orelse):
+        return None
+    lines = src.splitlines(keepends=True)
+    first, last = target.orelse[0], target.orelse[-1]
+    start = first.lineno
+    end = getattr(last, "end_lineno", last.lineno)
+    if not (1 <= start <= end <= len(lines)):
+        return None
+    dedent = first.col_offset - target.col_offset
+    if dedent <= 0:
+        return None
+    # locate the literal ``else:`` header between the if line and the first else-body line
+    else_idx = None
+    for i in range(start - 2, target.lineno - 2, -1):
+        if 0 <= i < len(lines) and lines[i].strip() == "else:":
+            else_idx = i
+            break
+    if else_idx is None:
+        return None
+    new_lines = list(lines)
+    for i in range(start - 1, end):
+        ln = new_lines[i]
+        lead = len(ln) - len(ln.lstrip(" "))
+        if ln.strip() == "":
+            continue                              # leave blank lines untouched
+        if lead < dedent:
+            return None                           # not a clean space dedent — refuse
+        new_lines[i] = ln[dedent:]
+    del new_lines[else_idx]
+    out = "".join(new_lines)
+    if out == src or not _parses(out):
+        return None
+    return out
+
+
+def _fix_mutable_default_arg(src: str, lineno: int) -> Optional[str]:
+    """Rewrite the first mutable default of the def at ``lineno`` to the None-sentinel idiom (B006).
+
+    ``def f(x=[])`` → ``def f(x=None): ...`` with ``if x is None: x = []`` prepended to the body
+    (after any docstring). Fixes a real shared-mutable-default bug. Conservative: only single-line
+    defaults are rewritten (so signature line numbers stay stable for the body insert)."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    target = None
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.lineno == lineno):
+            target = node
+            break
+    if target is None:
+        return None
+    arg_name, default_node = _first_mutable_default(target)
+    if arg_name is None or default_node is None or not target.body:
+        return None
+    if default_node.lineno != getattr(default_node, "end_lineno", default_node.lineno):
+        return None                               # multi-line default — leave it alone
+    orig_default = ast.get_source_segment(src, default_node)
+    if orig_default is None:
+        return None
+    replaced = _replace_node_span(src, default_node, "None")   # single-line ⇒ line count stable
+    if replaced is None:
+        return None
+    lines = replaced.splitlines(keepends=True)
+    first = target.body[0]
+    is_doc = (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+              and isinstance(first.value.value, str))
+    insert_at = getattr(first, "end_lineno", first.lineno) if is_doc else (first.lineno - 1)
+    if not (0 <= insert_at <= len(lines)):
+        return None
+    indent = " " * int(getattr(first, "col_offset", 4))
+    guard = (f"{indent}if {arg_name} is None:\n"
+             f"{indent}    {arg_name} = {orig_default}\n")
+    lines.insert(insert_at, guard)
+    out = "".join(lines)
+    if out == src or not _parses(out):
+        return None
+    return out
+
+
+def _first_mutable_default(func: ast.AST) -> tuple:
+    """Return ``(arg_name, default_node)`` of the first mutable default, else ``(None, None)``."""
+    a = getattr(func, "args", None)
+    if a is None:
+        return None, None
+    positional = list(a.posonlyargs) + list(a.args)
+    defaults = list(a.defaults)
+    offset = len(positional) - len(defaults)
+    for i, d in enumerate(defaults):
+        if _is_mutable_literal_default(d):
+            return positional[offset + i].arg, d
+    for arg, d in zip(a.kwonlyargs, a.kw_defaults):
+        if d is not None and _is_mutable_literal_default(d):
+            return arg.arg, d
+    return None, None
+
+
+def _is_mutable_literal_default(default: Any) -> bool:
+    """True for a mutable literal default (``[]``/``{}``/set/list()/dict()/set()); tuple is exempt."""
+    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+        return True
+    return (isinstance(default, ast.Call) and isinstance(default.func, ast.Name)
+            and default.func.id in ("list", "dict", "set")
+            and not default.args and not default.keywords)
+
+
+def _stmts_end_in_terminator(body: Any) -> bool:
+    """True if a block's last statement is return/raise/break/continue (fall-through impossible)."""
+    return bool(body) and isinstance(body[-1], (ast.Return, ast.Raise, ast.Break, ast.Continue))
+
+
+def _stmts_span_multiline_string(stmts: Any) -> bool:
+    """True if any statement contains a multi-line string / f-string (unsafe to de-indent)."""
+    for stmt in stmts:
+        for n in ast.walk(stmt):
+            if isinstance(n, ast.JoinedStr) or (isinstance(n, ast.Constant)
+                                                and isinstance(n.value, str)):
+                if getattr(n, "end_lineno", None) and n.end_lineno != n.lineno:
+                    return True
+    return False
+
+
 def _author_provider_name(llm: Any, *, self_authored_only: bool = True) -> Optional[str]:
     """Name of the provider that may author a self-edit, or None.
 
@@ -1018,6 +1304,23 @@ if __name__ == "__main__":  # pragma: no cover
     docd = _insert_docstring("def f():\n    return 1\n", 1, "does a thing")
     assert docd and '"""' in docd and _parses(docd)
     print("transforms          : bare-except + docstring insertion OK")
+
+    # new deterministic self-refactor library (all AST-validated, behaviour-preserving)
+    neq = _fix_not_eq_compare("x = not (a == b)\n", 1)
+    assert neq == "x = a != b\n", neq
+    dn = _fix_double_negation("y = not not flag\n", 1)
+    assert dn == "y = bool(flag)\n", dn
+    ec = _fix_empty_collection_call("z = list()\n", 1)
+    assert ec == "z = []\n", ec
+    rp = _remove_redundant_pass("if a:\n    pass\n    do()\n", 2)
+    assert rp == "if a:\n    do()\n", rp
+    ret = _dedent_redundant_else(
+        "def f(a):\n    if a:\n        return 1\n    else:\n        return 2\n", 5)
+    assert ret and "else:" not in ret and _parses(ret), ret
+    mut = _fix_mutable_default_arg("def g(x=[]):\n    return x\n", 1)
+    assert mut and "x=None" in mut and "if x is None:" in mut and _parses(mut), mut
+    print("transforms          : not-eq / double-neg / empty-call / pass / else-return / "
+          "mutable-default OK")
 
     # 2) apply with a STUBBED failing gauntlet rolls back byte-for-byte
     import tempfile as _tf

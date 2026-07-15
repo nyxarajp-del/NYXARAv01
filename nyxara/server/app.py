@@ -9,6 +9,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/agent``             — a multi-step gated goal: ``{goal, max_steps?}``.
 * ``POST /v1/self_correct``      — a goal pursued with self-correction & epistemic uncertainty:
                                    detect wrong/stuck, experiment to fill the gap, abstain honestly.
+* ``POST /v1/self_improve``      — the codebase RSI loop, observable: ``{cycles?, enact?}`` → the
+                                   intelligence-index trajectory + kept/rolled-back edit tallies.
 * ``POST /v1/research``          — one autonomous research pass: ``{topic}``.
 * ``POST /v1/investigate``       — the scientist loop: ``{question}`` → hypothesis/conclusion.
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
@@ -61,6 +63,13 @@ class SelfCorrectRequest(BaseModel):
     # No upper bound here — the server clamps to ``server.max_agent_steps``.
     max_steps: Optional[int] = Field(default=None, ge=1)
     authority: str = "owner"
+
+
+class SelfImproveRequest(BaseModel):
+    # How many codebase-level RSI cycles to run (bounded — never a literal infinite loop).
+    cycles: int = Field(default=1, ge=1, le=50)
+    # Apply real, gauntleted source edits (True) or observe the loop read-only (default).
+    enact: bool = False
 
 
 class DelegateRequest(BaseModel):
@@ -399,6 +408,18 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         # a knowledge gap instead of spinning — abstaining or escalating honestly when unsure.
         steps = min(req.max_steps or cfg.max_agent_steps, cfg.max_agent_steps)
         return core.self_correct(req.goal, authority=_authority(req.authority), max_steps=steps)
+
+    @app.post("/v1/self_improve", dependencies=auth)
+    def self_improve(req: SelfImproveRequest) -> dict:
+        # The codebase-level recursive self-improvement loop, made observable: NYXARA reviews her
+        # own source, detects weaknesses, and (when ``enact``) applies gauntleted, provably-better
+        # edits herself — no LLM — while the intelligence index is threaded across cycles. Bounded
+        # by ``cycles`` and halted cleanly by a closed oversight gate; the reports block is dropped
+        # to keep the response small (the trajectory + tallies are the signal the Master watches).
+        from nyxara.growth.recursive_improvement import RecursiveSelfImprovement
+        summary = RecursiveSelfImprovement.from_core(core).run_continuous(
+            int(req.cycles), enact=bool(req.enact))
+        return {k: v for k, v in summary.items() if k != "reports"}
 
     @app.post("/v1/delegate", dependencies=auth)
     def delegate(req: DelegateRequest) -> dict:

@@ -198,6 +198,27 @@ four capabilities — each backed by a test:
   rolled back byte-for-byte, exactly like a failing one. Honest scope: Rice's theorem forbids a
   general "better program" decider, so the guarantee is *improvement under a decidable ordering*,
   not omniscience. Gated by `self_improvement.require_provable_improvement` (default on).
+- **#12 / #13 Widened LLM-free self-refactor library — she redesigns herself, no model required.**
+  The deterministic (zero-LLM, zero-network) transform set NYXARA applies to her own source
+  (`growth.self_review` detector → `growth.weakness` → `growth.self_optimize` transform →
+  `growth.improvement_proof` certificate) now spans, beyond the original bare-except / docstring /
+  dead-import / eq-None / negated-membership fixes: negated-equality normalisation (`not (a == b)`
+  → `a != b`), double-negation (`not not x` → `bool(x)`), empty-collection literals
+  (`list()`/`dict()`/`tuple()` → `[]`/`{}`/`()`), redundant-`pass` removal, redundant-`else`
+  de-indentation, and a genuine **correctness fix** — the mutable-default-argument repair
+  (`def f(x=[])` → None sentinel, B006). Each is AST-validated and behaviour-preserving (or, for the
+  mutable-default fix, behaviour-improving), certified as a `defect-elimination`, and still clears
+  the same reversible gauntlet — so on a bare machine (own model not yet trained) she still performs
+  real, provably-better self-repair herself. Honest scope: these are hygiene/correctness-class edits,
+  not capability leaps; the big gains still come from the index-driven tuning, the foundry, and her
+  own trained model.
+- **#12 Continuous, observable RSI loop.** `RecursiveSelfImprovement.run_continuous(cycles, enact=…)`
+  runs the full self-improvement cycle repeatedly, threading the persisted intelligence index across
+  cycles and returning the index trajectory plus cumulative kept / rolled-back / lessons tallies —
+  so the self-driven loop is watchable, not just background noise. It is deliberately **bounded**
+  (`cycles` is a hard cap, never a literal infinite loop) and honours the oversight gate before every
+  cycle, so `/scram` halts it cleanly. Surfaced on the console (`/selfimprove N [enact]`) and the API
+  (`POST /v1/self_improve`).
 - **Constitutional lock — rules / loyalty / Master are structurally out of reach.** The self-editor
   and auto-debugger now refuse (fail-closed) to write any sealed core file — `kernel/rules.py`,
   `kernel/invariants.py`, `kernel/config.py` (the frozen `OWNER`), `identity/values.py`,

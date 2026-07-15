@@ -19,11 +19,14 @@ methods, each machine-checkable and journalled:
   conditions are **proved logically equivalent** (truth-table, via :class:`ProofCarrier`) *and*
   the static cost (AST node + branch count) strictly drops. Same behaviour, provably simpler ⇒
   provably better.
-* **C · defect-elimination** — a named, deterministic transform (``bare_except`` → ``except
-  Exception``, ``== None`` → ``is None``, dead-import removal, docstring insertion, negated-compare
-  normalisation) whose anti-pattern is a **decidable predicate**: it is proved the specific defect
-  strictly decreased. Combined with the gauntlet's non-regression proof, the edit provably removes
-  a defect without making anything worse.
+* **C · defect-elimination** — a named, deterministic transform whose anti-pattern is a
+  **decidable predicate**: it is proved the specific defect strictly decreased. The family covers
+  ``bare_except`` → ``except Exception``, ``== None`` → ``is None``, dead-import removal, docstring
+  insertion, negated membership/identity/equality normalisation (``not a in b`` → ``a not in b``,
+  ``not (a == b)`` → ``a != b``), ``not not x`` → ``bool(x)``, empty ``list()``/``dict()``/
+  ``tuple()`` → literal, redundant-``pass`` removal, redundant-``else`` de-indentation, and the
+  mutable-default-argument fix (``def f(x=[])`` → None sentinel). Combined with the gauntlet's
+  non-regression proof, the edit provably removes a defect without making anything worse.
 * **D · frontier-advancement** — the **non-saturating** licence that answers the "intelligence
   explosion architecturally impossible" gap. Method A can only ever fire while the *fixed* benchmark
   battery still has failing tasks — once NYXARA masters it, its task count is a ceiling and no
@@ -268,7 +271,123 @@ def _defect_eliminated(before: str, after: str, kind: str) -> bool:
         return _docstring_count(after) > _docstring_count(before)
     if k in ("not_in", "is_not_cmp"):
         return _negated_membership_count(after) < _negated_membership_count(before)
+    if k == "not_eq_cmp":
+        return _count_dropped(before, after, _negated_equality_count)
+    if k == "double_negation":
+        return _count_dropped(before, after, _double_negation_count)
+    if k == "empty_collection_call":
+        return _count_dropped(before, after, _empty_collection_count)
+    if k == "redundant_pass":
+        return _count_dropped(before, after, _redundant_pass_count)
+    if k == "redundant_else_return":
+        return _count_dropped(before, after, _redundant_else_count)
+    if k == "mutable_default_arg":
+        return _count_dropped(before, after, _mutable_default_count)
     return False
+
+
+def _count_dropped(before: str, after: str, counter: Any) -> bool:
+    """True iff a decidable anti-pattern counter strictly fell — and both sources parsed.
+
+    Guards against a false positive: an unparseable ``after`` yields ``None`` (not a spurious
+    zero), so a broken edit can never be certified as "the defect shrank"."""
+    cb, ca = counter(before), counter(after)
+    return cb is not None and ca is not None and ca < cb
+
+
+def _safe_tree(src: str) -> Optional[ast.AST]:
+    try:
+        return ast.parse(src)
+    except SyntaxError:
+        return None
+
+
+def _negated_equality_count(src: str) -> Optional[int]:
+    """Count ``not (<x> ==/!= <y>)`` — the SIM201/SIM202 anti-pattern."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    return sum(1 for n in ast.walk(tree)
+               if (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not)
+                   and isinstance(n.operand, ast.Compare) and len(n.operand.ops) == 1
+                   and isinstance(n.operand.ops[0], (ast.Eq, ast.NotEq))))
+
+
+def _double_negation_count(src: str) -> Optional[int]:
+    """Count ``not not x`` — the SIM208 anti-pattern."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    return sum(1 for n in ast.walk(tree)
+               if (isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not)
+                   and isinstance(n.operand, ast.UnaryOp)
+                   and isinstance(n.operand.op, ast.Not)))
+
+
+def _empty_collection_count(src: str) -> Optional[int]:
+    """Count empty ``list()``/``dict()``/``tuple()`` builtin calls — the C408 anti-pattern."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    return sum(1 for n in ast.walk(tree)
+               if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                   and n.func.id in ("list", "dict", "tuple")
+                   and not n.args and not n.keywords))
+
+
+def _redundant_pass_count(src: str) -> Optional[int]:
+    """Count each ``pass`` sharing a block with other statements — the PIE790 anti-pattern."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    n = 0
+    for node in ast.walk(tree):
+        for block_field in ("body", "orelse", "finalbody"):
+            block = getattr(node, block_field, None)
+            if isinstance(block, list) and len(block) > 1:
+                n += sum(1 for s in block if isinstance(s, ast.Pass))
+    return n
+
+
+def _redundant_else_count(src: str) -> Optional[int]:
+    """Count each ``else`` after an if-branch that always returns/raises/breaks/continues (RET505)."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    n = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and node.orelse and _body_terminates(node.body):
+            if (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If)
+                    and node.orelse[0].col_offset == node.col_offset):
+                continue                          # an elif — not the anti-pattern
+            n += 1
+    return n
+
+
+def _mutable_default_count(src: str) -> Optional[int]:
+    """Count function default args that are mutable literals — the B006 anti-pattern."""
+    tree = _safe_tree(src)
+    if tree is None:
+        return None
+    n = 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            cands = list(node.args.defaults) + [
+                d for d in node.args.kw_defaults if d is not None]
+            n += sum(1 for d in cands if _is_mutable_literal(d))
+    return n
+
+
+def _is_mutable_literal(default: Any) -> bool:
+    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+        return True
+    return (isinstance(default, ast.Call) and isinstance(default.func, ast.Name)
+            and default.func.id in ("list", "dict", "set")
+            and not default.args and not default.keywords)
+
+
+def _body_terminates(body: Any) -> bool:
+    return bool(body) and isinstance(body[-1], (ast.Return, ast.Raise, ast.Break, ast.Continue))
 
 
 def _import_count(src: str) -> int:
@@ -340,6 +459,22 @@ if __name__ == "__main__":  # pragma: no cover
     cert = prover.prove(before_src=b, after_src=a, edit_kind="bare_except")
     assert cert.better and cert.method == "defect-elimination", cert.to_dict()
     print("defect-elimination : bare-except fix proved better ✓")
+
+    # C · the widened deterministic transform library — each proves its own defect strictly shrank
+    for kind, bsrc, asrc in [
+        ("not_eq_cmp", "x = not (a == b)\n", "x = a != b\n"),
+        ("double_negation", "y = not not f\n", "y = bool(f)\n"),
+        ("empty_collection_call", "z = list()\n", "z = []\n"),
+        ("redundant_pass", "if a:\n    pass\n    go()\n", "if a:\n    go()\n"),
+        ("redundant_else_return",
+         "def f(a):\n    if a:\n        return 1\n    else:\n        return 2\n",
+         "def f(a):\n    if a:\n        return 1\n    return 2\n"),
+        ("mutable_default_arg", "def g(x=[]):\n    return x\n",
+         "def g(x=None):\n    if x is None:\n        x = []\n    return x\n"),
+    ]:
+        c = prover.prove(before_src=bsrc, after_src=asrc, edit_kind=kind)
+        assert c.better and c.method == "defect-elimination", (kind, c.to_dict())
+    print("defect-elimination : not-eq / double-neg / empty-call / pass / else / mutable OK ✓")
 
     # B · a proven-equivalent, strictly-cheaper negated-compare rewrite
     b2 = "def f(a, b):\n    return not a in b\n"
