@@ -95,6 +95,7 @@ applied to the documentation itself).
 | 73 | Non-Algorithmic Intuition / Creative Leap (guess a candidate *before* proof, on puzzles with no training data — a portfolio of self-contained leap generators, fused + self-verified, **no LLM**) | `nyxara.mind.intuition` | UPGRADED |
 | 74 | Engineering Foundry (use invented laws + real physics sims to DESIGN, multi-objectively optimise, and iteratively UPGRADE real device concepts — a portfolio optimiser over a coupled multi-physics evaluator, **no LLM**) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
 | 75 | First-Principles Feasibility Gate (prove physically-impossible "magic" targets — over-unity/zero-point energy, anti-gravity, time reversal — INFEASIBLE with the conservation law they break, and log them; never fake them) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
+| 76 | Structural Cognitive Self-Modification (rewire her OWN cognitive architecture: **invent new composite reasoning operators** over a typed SEQ/VOTE/VERIFY grammar — the "trans-logic" — reorder/prune/re-weight which operator handles which task, a bounded recursive meta-policy, continuous plasticity, and antifragile self-healing; adopt only what STRICTLY beats a held-out fold with the character core untouched, **no LLM**) | `nyxara.growth.cognitive_architect` | REAL+WIRED |
 
 ## Engineering Foundry — invent a formula, then DESIGN the machine (#74, #75)
 
@@ -242,6 +243,20 @@ four capabilities — each backed by a test:
   reflects genuine concurrence.
 - **#21 / #22 Self-Evaluation** — the post-turn quality score is anchored to measured outcomes
   rather than self-asserted.
+- **#12 / #13 / #76 Structural cognitive self-modification — she rewires *how she thinks*, not just
+  her code.** The self-optimiser edits her *source* and `mind_evolution` tunes her reasoning
+  *parameters*; `growth.cognitive_architect.CognitiveArchitect` closes the gap the Master named — it
+  treats her *way of thinking* as a mutable operator graph and **invents genuinely new composite
+  reasoning operators** (a typed `SEQ`/`VOTE`/`VERIFY` grammar — the "trans-logic"), reorders /
+  prunes / re-weights which operator handles which task, tunes a bounded recursive **meta-policy**
+  over its own search, adapts continuously via a fast Hebbian **plastic** layer, and self-heals
+  **antifragilely** around a faulted operator (quarantine → re-route → synthesise a backup →
+  remember the failure). Fitness is the *real graded score* of an architecture-configured solver;
+  a candidate is adopted only when it **strictly** beats the incumbent on a **held-out** fold it
+  never optimised against (proof-carrying, anti-overfit), and the immutable character operators
+  (loyalty/safety/oversight/corrigibility) can never be pruned, reordered out, or down-weighted.
+  Self-driven on the idle loop, **no LLM in the loop**, sealed OFF under TEST; `/rewire-mind` and
+  `/cognitive-architecture` on the console, `core.rewire_cognition()` on the API.
 - **#12 / #13 Self-Modification — provably BETTER, not merely "not worse"** — the self-editor
   (`growth.self_optimize.Optimizer`) previously kept any edit whose gauntlet showed no regression.
   It now additionally requires a machine-checkable **improvement certificate**

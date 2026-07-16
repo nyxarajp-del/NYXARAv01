@@ -118,6 +118,8 @@ commands:
   /engineer [x]      DESIGN a real device from her invented laws + physics sims (no LLM); x: archetype name or a target/intent
   /upgrade-device [name] re-optimize an existing device, keep it only if measurably better (compounding power)
   /engineering-report  devices designed, upgrades applied, impossible "magic" targets honestly logged
+  /rewire-mind [n]   rewire her OWN cognitive architecture: invent new composite reasoning operators (trans-logic), keep only what strictly beats a held-out fold (no LLM); n: generations
+  /cognitive-architecture  her thinking as data: operators, how many she invented, accuracy/fitness, resilience, meta-policy, intelligence index
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
   /adapt [systems]   adapt to a new environment (model its systems + re-organize her brain under pressure)
@@ -263,6 +265,16 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.upgrade_device(name), indent=2, default=str))
     elif cmd in ("engineering-report", "engineering", "devices"):
         print(json.dumps(core.engineering_report(), indent=2, default=str))
+    elif cmd in ("rewire-mind", "rewire", "rewire_mind"):
+        # /rewire-mind        -> one generation of cognitive self-rewiring
+        # /rewire-mind 5      -> five generations (she compounds the improvement)
+        try:
+            gens = int(arg) if arg.strip() else 1
+        except ValueError:
+            gens = 1
+        print(json.dumps(core.rewire_cognition(generations=gens), indent=2, default=str))
+    elif cmd in ("cognitive-architecture", "cognitive", "mind-architecture"):
+        print(json.dumps(core.cognitive_architecture_report(), indent=2, default=str))
     elif cmd in ("generalize", "openworld", "open-world"):
         try:
             budget = int(arg) if arg else 48

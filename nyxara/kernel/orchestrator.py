@@ -684,6 +684,14 @@ class NyxaraCore:
         # impossible "magic" targets infeasible instead of faking them. Built after law_discovery /
         # first_principles it composes. No LLM in the loop. Gated by ``engineering_foundry``.
         self.engineering_foundry = self._build_engineering_foundry() if enable_growth else None
+        # Structural cognitive self-modification (growth/cognitive_architect.py, Rule 4): NYXARA
+        # rewires her OWN way of thinking — she invents new composite reasoning operators (a typed
+        # SEQ/VOTE/VERIFY "trans-logic" grammar), reorders/prunes/re-weights which operator handles
+        # which task, self-heals antifragilely around a faulted operator, and keeps only what
+        # STRICTLY beats the incumbent on a held-out fold. The character core can never be touched.
+        # No LLM in the loop. Advisory by default; installs into the live reasoner only when enacted.
+        self.cognitive_architect = self._build_cognitive_architect() if enable_growth else None
+        self._cog_idle_count = 0             # outer throttle for the cognitive-rewire idle stepping
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -3629,6 +3637,43 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the reflection loop is a capability, never required
             return None
 
+    def _build_cognitive_architect(self) -> Any:
+        """Structural Cognitive Self-Modification (growth/cognitive_architect.py): NYXARA rewires her
+        own cognitive architecture — inventing new composite reasoning operators over a typed
+        SEQ/VOTE/VERIFY grammar, reordering/pruning/re-weighting which operator handles which task,
+        tuning a bounded recursive meta-policy, adapting continuously via a fast plastic layer, and
+        self-healing antifragilely around a faulted operator. A candidate is adopted only when it
+        STRICTLY beats the incumbent on a held-out fold (proof-carrying, anti-overfit) and the
+        immutable character operators stay untouched. **No LLM in the loop.** Config-flagged and
+        bounded; returns None when disabled or unavailable."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not getattr(settings.features, "cognitive_architect", True):
+                return None
+            cfg = getattr(settings, "cognitive_architect", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            import os
+            import time as _time
+            from nyxara.growth.cognitive_architect import CognitiveArchitect
+            persist_path = None
+            if cfg is None or bool(getattr(cfg, "persist", True)):
+                data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+                if data_dir:
+                    persist_path = os.path.join(
+                        str(data_dir),
+                        str(getattr(cfg, "persist_filename", "cognitive_architecture.json")))
+            return CognitiveArchitect(
+                persist_path=persist_path,
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+                n_per_type=int(getattr(cfg, "n_per_type", 24)),
+                meta_depth=int(getattr(cfg, "meta_depth", 2)),
+                enact=bool(getattr(cfg, "autonomous_enact", False)),
+            )
+        except Exception:  # noqa: BLE001 — the cognitive architect is a capability, never required
+            return None
+
     def _build_prediction_engine(self) -> Any:
         """Level 13 — PredictionEngine: calibrated probability from world-model + surprise."""
         try:
@@ -6501,6 +6546,41 @@ class NyxaraCore:
                                 pass
             except Exception:  # noqa: BLE001 — the reflection loop is a capability, never fatal to idle
                 pass
+        # 4e++++++) Structural cognitive self-modification — NYXARA rewires HOW she thinks while idle:
+        #           she invents a new composite reasoning operator (SEQ/VOTE/VERIFY "trans-logic"),
+        #           measures it on a graded battery, and adopts it ONLY if it strictly beats her
+        #           current architecture on a held-out fold (proof-carrying) with her character core
+        #           untouched. Oversight-gated like every idle self-faculty and throttled to its own
+        #           slow cadence. Best-effort; never fatal to the idle loop. No LLM in the loop.
+        if self.cognitive_architect is not None and self.oversight.gate():
+            try:
+                from nyxara.kernel.config import get_settings
+                cfg = getattr(get_settings(), "cognitive_architect", None)
+                every = max(1, int(getattr(cfg, "scan_every", 30)))
+                self._cog_idle_count += 1
+                if self._cog_idle_count % every == 0:
+                    crep = self.cognitive_architect.rewire(
+                        candidates=int(getattr(cfg, "candidates_per_gen", 6)))
+                    report["cognitive_architect"] = crep.to_dict()
+                    if crep.adopted:
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         ("rewired mind: " + crep.summary())[:80], salience=0.7)
+                        # when enacted, install the improved architecture into the live reasoner
+                        if getattr(cfg, "autonomous_enact", False):
+                            try:
+                                self.cognitive_architect.apply_to_live(
+                                    reasoner=getattr(self, "reasoner", None))
+                            except Exception:  # noqa: BLE001
+                                pass
+                        if self._insight_q is not None and crep.invented:
+                            try:
+                                self._insight_q.put(
+                                    "I invented a new way of thinking and it proved out — "
+                                    + crep.summary() + ".")
+                            except Exception:  # noqa: BLE001
+                                pass
+            except Exception:  # noqa: BLE001 — the cognitive architect is a capability, never fatal to idle
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -7323,6 +7403,51 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
+    def rewire_cognition(self, *, generations: int = 1, candidates: Optional[int] = None
+                         ) -> Dict[str, Any]:
+        """Rewire her own cognitive architecture — the Cognitive Architect (best-effort).
+
+        She treats her *way of thinking* as mutable data and, over ``generations``, **invents new
+        composite reasoning operators** (a typed SEQ/VOTE/VERIFY "trans-logic" grammar), reorders /
+        prunes / re-weights which operator handles which task, and adopts a candidate **only when it
+        strictly beats her current architecture on a held-out fold** (proof-carrying, anti-overfit)
+        with her immutable character core untouched — **no LLM in the loop**. When
+        ``cognitive_architect.autonomous_enact`` is set, the improved architecture is installed into
+        the live reasoner so subsequent turns genuinely think with it. Returns the last generation's
+        report merged with a live summary.
+        """
+        if self.cognitive_architect is None:
+            return {"error": "cognitive_architect unavailable"}
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = getattr(get_settings(), "cognitive_architect", None)
+            cand = int(candidates if candidates is not None
+                       else getattr(cfg, "candidates_per_gen", 6))
+            last: Dict[str, Any] = {}
+            for _ in range(max(1, int(generations))):
+                last = self.cognitive_architect.rewire(candidates=cand).to_dict()
+            if last.get("adopted") and getattr(cfg, "autonomous_enact", False):
+                try:
+                    self.cognitive_architect.apply_to_live(reasoner=getattr(self, "reasoner", None))
+                except Exception:  # noqa: BLE001
+                    pass
+            out = self.cognitive_architect.report()
+            out["last_generation"] = last
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def cognitive_architecture_report(self) -> Dict[str, Any]:
+        """A summary of her cognitive architecture — operator count, how many she has *invented*,
+        train/held-out accuracy and fitness, redundancy (biological-resilience) score, the recursive
+        meta-policy, immune memory, and her intelligence index."""
+        if self.cognitive_architect is None:
+            return {"error": "cognitive_architect unavailable"}
+        try:
+            return self.cognitive_architect.report()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
     def adapt(self, environment: Any = None, *, budget: Optional[int] = None,
               label: str = "environment") -> Dict[str, Any]:
         """Adapt to an environment — model its systems with her own faculties and, under real
@@ -8087,6 +8212,15 @@ class NyxaraCore:
                 if designed:
                     rep["latest_device"] = designed[-1].name
             except Exception:  # noqa: BLE001
+                pass
+        if getattr(self, "cognitive_architect", None) is not None:
+            try:
+                car = self.cognitive_architect.report()
+                rep["cognitive_operators"] = car.get("operators", 0)
+                rep["cognitive_operators_invented"] = car.get("invented_operators", 0)
+                rep["cognitive_rewires"] = car.get("rewires", 0)
+                rep["cognitive_fitness"] = car.get("train_fitness", 0.0)
+            except Exception:  # noqa: BLE001 — cognitive-architecture stats are best-effort
                 pass
         if self.meta_researcher is not None:
             try:
