@@ -115,6 +115,9 @@ commands:
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
   /intuit <puzzle>   non-algorithmic creative leap (no LLM): guess before proof, then self-verify
   /discover-law [dom] invent a NEW empirical/physical law from data & self-run experiments (no LLM); dom: dynamics|invariant|data
+  /engineer [x]      DESIGN a real device from her invented laws + physics sims (no LLM); x: archetype name or a target/intent
+  /upgrade-device [name] re-optimize an existing device, keep it only if measurably better (compounding power)
+  /engineering-report  devices designed, upgrades applied, impossible "magic" targets honestly logged
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
   /adapt [systems]   adapt to a new environment (model its systems + re-organize her brain under pressure)
@@ -241,6 +244,25 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         if domain not in (None, "dynamics", "invariant", "data"):
             domain = None
         print(json.dumps(core.discover_laws(1, domain), indent=2, default=str))
+    elif cmd in ("engineer", "design", "device"):
+        # /engineer                 -> design a device from her latest invented law
+        # /engineer resonator       -> design a named archetype (rc_filter|resonator|...)
+        # /engineer anti-gravity    -> a "magic" intent, honestly judged for feasibility first
+        a = arg.strip()
+        known_archetypes = {"rc_filter", "resonator", "electrostatic_trap", "pressure_vessel",
+                            "rl_current"}
+        if a in known_archetypes:
+            out = core.engineer_device(archetype=a)
+        elif a:
+            out = core.engineer_device(target=a)
+        else:
+            out = core.engineer_device()
+        print(json.dumps(out, indent=2, default=str))
+    elif cmd in ("upgrade-device", "upgrade_device", "upgrade"):
+        name = arg.strip() or None
+        print(json.dumps(core.upgrade_device(name), indent=2, default=str))
+    elif cmd in ("engineering-report", "engineering", "devices"):
+        print(json.dumps(core.engineering_report(), indent=2, default=str))
     elif cmd in ("generalize", "openworld", "open-world"):
         try:
             budget = int(arg) if arg else 48

@@ -66,17 +66,26 @@ class ElectrostaticWorld:
         motion it undergoes — a genuine kinematic *measurement*, not a formula lookup.
 
         The displacement over a short time gives the acceleration (``d = ½·a·t²``); ``F = m·a``.
-        The interval is kept tiny so ``r`` barely changes during the measurement."""
+        The interval is kept tiny so ``r`` barely changes during the measurement. The motion is
+        integrated with **velocity Verlet** (2nd-order, force re-evaluated at the new position each
+        step) rather than first-order Euler, so the measured displacement — and the force inferred
+        from it — is more faithful to the true Coulomb dynamics."""
         self.sources = []
         self.add_source(q_source, 0.0, 0.0)
         test = Charge(q=q_test, x=r, y=0.0, mass=mass)
         t = 0.0
+        fx, fy = self.force_on(test)
+        ax, ay = fx / mass, fy / mass
         for _ in range(max(1, steps)):
+            # velocity Verlet: advance position with current accel, then correct velocity with the
+            # average of old and new accelerations.
+            test.x += test.vx * dt + 0.5 * ax * dt * dt
+            test.y += test.vy * dt + 0.5 * ay * dt * dt
             fx, fy = self.force_on(test)
-            test.vx += (fx / mass) * dt
-            test.vy += (fy / mass) * dt
-            test.x += test.vx * dt
-            test.y += test.vy * dt
+            ax_new, ay_new = fx / mass, fy / mass
+            test.vx += 0.5 * (ax + ax_new) * dt
+            test.vy += 0.5 * (ay + ay_new) * dt
+            ax, ay = ax_new, ay_new
             t += dt
         displacement = math.hypot(test.x - r, test.y - 0.0)
         if t <= 0.0:

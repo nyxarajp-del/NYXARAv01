@@ -24,6 +24,7 @@ from nyxara.eval import EvalSuite, build_default_suite
 from nyxara.growth.autonomous_scientist import AutonomousScientist, DiscoveryReport
 from nyxara.growth.eureka import BreakthroughReport, EurekaEngine
 from nyxara.growth.law_discovery import Law, LawDiscoveryEngine
+from nyxara.growth.engineering_foundry import DeviceDesign, EngineeringFoundry
 from nyxara.growth.open_world import OpenWorldGeneralizer, UnderstandingReport
 from nyxara.growth.intelligence import IntelligenceIndex, IntelligenceState
 # RSI gap-closers: substrate self-expansion, open-ended curriculum, weight surgery,
@@ -208,6 +209,9 @@ __all__ = [
     # frontier law discovery (invent NEW empirical/physical laws from data & self-run experiments)
     "LawDiscoveryEngine",
     "Law",
+    # engineering foundry (use invented laws + physics sims to DESIGN & upgrade real devices)
+    "EngineeringFoundry",
+    "DeviceDesign",
     # unified eleven-phase self-optimization loop (self-driven) + self-debugging
     "SelfOptimizationLoop",
     "SelfOptimizationReport",
