@@ -677,6 +677,13 @@ class NyxaraCore:
         # survivors into a self-extending law tower — with no LLM in the loop. Built after the
         # faculties (causal model, knowledge, memory) it composes. Gated by ``law_discovery``.
         self.law_discovery = self._build_law_discovery() if enable_growth else None
+        # Engineering Foundry: the second half of "magic engineering". She *uses* the laws she
+        # invents (law_discovery) + the real physics sandboxes (nyxara.sim) to DESIGN, validate and
+        # iteratively UPGRADE real device concepts — a portfolio multi-objective optimiser over
+        # coupled physics, gated by a first-principles feasibility check that honestly proves
+        # impossible "magic" targets infeasible instead of faking them. Built after law_discovery /
+        # first_principles it composes. No LLM in the loop. Gated by ``engineering_foundry``.
+        self.engineering_foundry = self._build_engineering_foundry() if enable_growth else None
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -3184,6 +3191,40 @@ class NyxaraCore:
                 seed=int(_time.time() * 1000) & 0x7FFFFFFF,
             )
         except Exception:  # noqa: BLE001 — law discovery is a capability, never required
+            return None
+
+    def _build_engineering_foundry(self) -> Any:
+        """Engineering Foundry — invent a formula, then DESIGN the machine (growth/engineering_foundry.py).
+
+        The engineering counterpart of law discovery: she takes the laws she invents (and the real
+        physics sandboxes in ``nyxara.sim``) and *designs, validates and iteratively upgrades* real
+        device concepts — a portfolio multi-objective optimiser (random / pattern / CMA-ES-style /
+        scipy) arbitrated by a persisted UCB1 meta-gate, over a coupled multi-physics evaluator.
+        Every target first passes a first-principles feasibility gate: physically-impossible "magic"
+        (over-unity / zero-point energy, anti-gravity, time reversal) is proven ``INFEASIBLE`` with
+        the conservation law it breaks and logged — never faked. Designs persist to a device tower so
+        they compound across sessions. **No LLM in the loop.** Composes ``law_discovery`` and
+        ``first_principles``; gated by ``engineering_foundry``; a capability, never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not getattr(settings.features, "engineering_foundry", True):
+                return None
+            import os
+            import time as _time
+            from nyxara.growth.engineering_foundry import EngineeringFoundry
+            path = None
+            data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+            if data_dir:
+                path = os.path.join(str(data_dir), "engineering_foundry.json")
+            return EngineeringFoundry(
+                law_discovery=getattr(self, "law_discovery", None),
+                first_principles=getattr(self, "first_principles", None),
+                path=path,
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+            )
+        except Exception:  # noqa: BLE001 — the engineering foundry is a capability, never required
             return None
 
     def _build_active_curiosity(self) -> Any:
@@ -6562,6 +6603,32 @@ class NyxaraCore:
                                 salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.4) Engineering Foundry — on idle she *designs a device* from her latest invented law
+        #        (or a rotating archetype) and, on alternating ticks, *upgrades* an existing design,
+        #        keeping the upgrade only if it is measurably better. This is "magic engineering" made
+        #        real: invent a formula → design the machine → keep upgrading it. Throttled and
+        #        oversight-gated; no LLM in the loop; nothing here reaches the world.
+        if getattr(self, "engineering_foundry", None) is not None:
+            try:
+                etick = getattr(self, "_engineering_idle_count", 0) + 1
+                self._engineering_idle_count = etick
+                if etick % 9 == 0 and self.oversight.gate():
+                    if etick % 18 == 0:
+                        design = self.engineering_foundry.upgrade_device(budget=80)
+                        verb = "upgraded"
+                    else:
+                        design = self.engineering_foundry.engineer_device(budget=80)
+                        verb = "designed"
+                    if design is not None and getattr(design, "status", "") == "DESIGNED":
+                        report["engineering"] = {"action": verb, "device": design.name,
+                                                 "score": round(float(design.score), 5),
+                                                 "version": int(design.version)}
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"device [{design.archetype}]: {verb} {design.name[:32]}",
+                            salience=0.62)
+            except Exception:  # noqa: BLE001
+                pass
         # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
         #       event, self-designs the experiment (her causal model, an imagined world-
         #       simulation, or the Scientist) and folds the answer back as a belief + memory,
@@ -7204,6 +7271,55 @@ class NyxaraCore:
                 return self.open_world.understand(system, domain=domain, budget=budget,
                                                   label=label).to_dict()
             return {"error": "spec must contain either 'dataset' or 'family'"}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def engineer_device(self, target: Optional[Any] = None, *, archetype: Optional[str] = None,
+                        budget: Optional[int] = None) -> Dict[str, Any]:
+        """Design a real, physics-grounded device — the Engineering Foundry (best-effort).
+
+        The second half of "magic engineering": she *uses* the laws she invents (law_discovery) and
+        the real physics sandboxes (``nyxara.sim``) to design a device that best achieves a goal,
+        optimised by a portfolio of real optimisers (random / pattern / CMA-ES-style / scipy) over a
+        coupled multi-physics evaluator — **with no LLM in the loop**. ``target`` may be a text
+        intent (first judged for feasibility) or a numeric performance target; ``archetype`` picks a
+        device family (``rc_filter``, ``resonator``, ``electrostatic_trap``, ``pressure_vessel``,
+        ``rl_current``). With neither, she designs a device from her latest invented law to
+        demonstrate the capability. **Impossible "magic" targets** (over-unity / zero-point energy,
+        anti-gravity, time reversal) are returned as an honest ``INFEASIBLE`` verdict with the
+        conservation law they break — she never fakes a machine physics forbids. Nothing here touches
+        the world or side-steps the control law. Returns the design report as a dict.
+        """
+        if self.engineering_foundry is None:
+            return {"error": "engineering_foundry unavailable"}
+        try:
+            return self.engineering_foundry.engineer_device(
+                target=target, archetype=archetype, budget=budget).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def upgrade_device(self, name: Optional[str] = None, *, budget: Optional[int] = None
+                       ) -> Dict[str, Any]:
+        """Upgrade one of her existing devices — re-open the design, widen its space, re-optimise, and
+        keep the result **only if it is measurably better** than the incumbent (otherwise the
+        incumbent stands, honestly logged). This is how she *keeps upgrading* her machines and
+        compounds power across sessions. With no ``name`` she upgrades her most recent design. No LLM
+        in the loop. Returns the (possibly-unchanged) design as a dict.
+        """
+        if self.engineering_foundry is None:
+            return {"error": "engineering_foundry unavailable"}
+        try:
+            return self.engineering_foundry.upgrade_device(name, budget=budget).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def engineering_report(self) -> Dict[str, Any]:
+        """A summary of the Engineering Foundry — devices designed, upgrades applied, impossible
+        "magic" targets honestly logged, the archetype/optimiser inventory, and the latest design."""
+        if self.engineering_foundry is None:
+            return {"error": "engineering_foundry unavailable"}
+        try:
+            return self.engineering_foundry.report()
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
@@ -7958,6 +8074,18 @@ class NyxaraCore:
                 held = self.law_discovery.known_laws()
                 if held:
                     rep["latest_law"] = held[-1].expression
+            except Exception:  # noqa: BLE001
+                pass
+        if getattr(self, "engineering_foundry", None) is not None:
+            rep["devices_designed"] = int(getattr(self.engineering_foundry, "total_devices", 0))
+            rep["device_upgrades"] = int(getattr(self.engineering_foundry, "total_upgrades", 0))
+            rep["infeasible_targets_logged"] = int(
+                getattr(self.engineering_foundry, "infeasible_logged", 0))
+            try:
+                designed = [d for d in self.engineering_foundry.known_devices()
+                            if d.status == "DESIGNED"]
+                if designed:
+                    rep["latest_device"] = designed[-1].name
             except Exception:  # noqa: BLE001
                 pass
         if self.meta_researcher is not None:

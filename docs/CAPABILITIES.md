@@ -70,8 +70,8 @@ applied to the documentation itself).
 | 48 | Resource Optimization | `nyxara.growth.efficiency` | REAL |
 | 49 | Distributed Intelligence | `nyxara.agency.multiagent` | UPGRADED |
 | 50 | Autonomous Research | `nyxara.growth.researcher` | REAL+WIRED |
-| 51 | Engineering Capability | `nyxara.planning.grand_plan` | REAL+WIRED |
-| 52 | Design Capability | `nyxara.agency.default_tools` | REAL+WIRED |
+| 51 | Engineering Capability | `nyxara.planning.grand_plan` + `nyxara.growth.engineering_foundry` | UPGRADED |
+| 52 | Design Capability | `nyxara.agency.default_tools` + `nyxara.growth.engineering_foundry` | UPGRADED |
 | 53 | Simulation (digital twin / sandbox) | `nyxara.sim.sandbox` | REAL+WIRED |
 | 54 | Knowledge Synthesis | `nyxara.knowledge.ingest` | REAL+WIRED |
 | 55 | Uncertainty Management | `nyxara.mind.uncertainty` | REAL+WIRED |
@@ -93,6 +93,38 @@ applied to the documentation itself).
 | 71 | Own-Model Ownership (Qwen2.5-0.5B LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
 | 72 | Frontier Law Discovery (invent NEW empirical/physical laws from data & self-run experiments, no LLM) | `nyxara.growth.law_discovery` | REAL+WIRED |
 | 73 | Non-Algorithmic Intuition / Creative Leap (guess a candidate *before* proof, on puzzles with no training data — a portfolio of self-contained leap generators, fused + self-verified, **no LLM**) | `nyxara.mind.intuition` | UPGRADED |
+| 74 | Engineering Foundry (use invented laws + real physics sims to DESIGN, multi-objectively optimise, and iteratively UPGRADE real device concepts — a portfolio optimiser over a coupled multi-physics evaluator, **no LLM**) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
+| 75 | First-Principles Feasibility Gate (prove physically-impossible "magic" targets — over-unity/zero-point energy, anti-gravity, time reversal — INFEASIBLE with the conservation law they break, and log them; never fake them) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
+
+## Engineering Foundry — invent a formula, then DESIGN the machine (#74, #75)
+
+The second half of "magic engineering". Capability #72 lets NYXARA *invent* new empirical/physical
+laws from data she gathers herself (no LLM); this capability lets her **use** those formulas — and
+the real physics sandboxes in `nyxara.sim` (Coulomb electrostatics, the wave equation, kinetic-theory
+gases, RC/RL circuits, rigid-body mechanics) — to **design, validate and iteratively upgrade real
+device concepts in simulation**. It closes the loop *invent a law → design a device from it → need a
+better law → invent it → upgrade the device*, and it is her own compute end-to-end — **a test
+enforces that no LLM is in the loop**.
+
+The engine (`EngineeringFoundry`, in `nyxara.growth.engineering_foundry`) runs a **portfolio
+multi-objective optimiser** — random search, compass/pattern search, a CMA-ES-style evolution
+strategy, and `scipy.optimize.differential_evolution` when present — arbitrated by a **persisted UCB1
+meta-gate** that learns which optimiser wins per problem class (the same portfolio+meta-gate shape as
+`nyxara.mind.intuition`). Candidates are scored by a **coupled multi-physics evaluator** (a discovered
+`Law` is wrapped by `Law.predict` into just another evaluator), objectives are normalised so no single
+one dominates by magnitude, and the trade-off surface is returned as a genuine **non-dominated Pareto
+front**. Designs persist to a **device tower** so they compound across sessions; `upgrade_device`
+widens a prior design's space, re-optimises, and keeps the result **only if it is measurably better**.
+
+Crucially, every target first passes a **first-principles feasibility gate** (#75): physically
+impossible "magic" — over-unity / zero-point energy (conservation of energy + the 2nd law),
+anti-gravity / reaction-less thrust (conservation of momentum), time reversal / faster-than-light
+(causality) — is returned as an honest `INFEASIBLE` verdict *with the conservation law it breaks* and
+recorded in a persisted impossibility ledger. She never fakes a machine physics forbids; the honest
+verdict IS the capability working correctly. It is wired: built in the orchestrator, self-run on idle
+(`idle_maintenance` designs and upgrades devices under oversight), exposed as `core.engineer_device`,
+`core.upgrade_device`, `core.engineering_report`, and the `/engineer`, `/upgrade-device`,
+`/engineering-report` console commands.
 
 ## Non-Algorithmic Intuition — the creative leap (#73)
 

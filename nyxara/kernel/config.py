@@ -178,6 +178,7 @@ class FeatureFlags(BaseModel):
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
     intuition: bool = True                    # mind/intuition.py — non-algorithmic 'Aha!' leaps before proof, no training data, no LLM (Rule 4)
     law_discovery: bool = True               # growth/law_discovery.py — discover NEW empirical/physical laws from data & self-run experiments, no LLM (Rule 4)
+    engineering_foundry: bool = True         # growth/engineering_foundry.py — use invented laws + physics sims to DESIGN & upgrade real devices; honest feasibility gate; no LLM (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
