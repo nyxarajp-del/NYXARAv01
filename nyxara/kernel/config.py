@@ -179,6 +179,7 @@ class FeatureFlags(BaseModel):
     intuition: bool = True                    # mind/intuition.py — non-algorithmic 'Aha!' leaps before proof, no training data, no LLM (Rule 4)
     law_discovery: bool = True               # growth/law_discovery.py — discover NEW empirical/physical laws from data & self-run experiments, no LLM (Rule 4)
     engineering_foundry: bool = True         # growth/engineering_foundry.py — use invented laws + physics sims to DESIGN & upgrade real devices; honest feasibility gate; no LLM (Rule 4)
+    cognitive_architect: bool = True         # growth/cognitive_architect.py — structurally rewire her own cognitive architecture: invent new composite reasoning operators (trans-logic), antifragile self-heal; verify-or-keep; no LLM (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
@@ -1633,6 +1634,36 @@ class GodelLoopConfig(BaseModel):
     persist_filename: str = "godel_tower.json"
 
 
+class CognitiveArchitectConfig(BaseModel):
+    """Structural cognitive self-modification (growth/cognitive_architect.py) — Rule 4.
+
+    NYXARA treats her *way of thinking* as mutable data — an operator graph over verifiable
+    reasoning primitives — and rewires it *herself, in code* (never via an LLM): she **invents new
+    composite reasoning operators** (a typed ``SEQ``/``VOTE``/``VERIFY`` grammar — the "trans-logic"
+    the Master asked for), reorders/prunes/re-weights which operator handles which task, tunes a
+    bounded recursive meta-policy over her own search, adapts continuously via a fast plastic layer,
+    and self-heals antifragilely around a faulted operator.
+
+    Safety mirrors the rest of growth: fitness is the *real graded score* of an architecture-
+    configured solver, gains are proven on a **held-out** fold the search never optimises against, a
+    candidate is adopted only when it **strictly** beats the incumbent, and the immutable character
+    operators (loyalty/safety/oversight/corrigibility) can never be pruned, reordered out, or
+    down-weighted. Everything is advisory by default; ``autonomous_enact`` (sealed OFF under TEST) is
+    what lets an adopted architecture install into the *live* reasoner. Persists so gains compound.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                              # build + step the engine — safe, on by default
+    scan_every: int = Field(default=30, ge=1)         # idle ticks between rewire generations
+    candidates_per_gen: int = Field(default=6, ge=1, le=32)  # search breadth per generation
+    n_per_type: int = Field(default=24, ge=4, le=256) # battery size per reasoning task type
+    meta_depth: int = Field(default=2, ge=1, le=2)    # bounded recursive meta-architecture depth
+    autonomous_enact: bool = False                    # install the champion into the LIVE reasoner
+    persist: bool = True                              # persist the architecture under paths.data_dir
+    persist_filename: str = "cognitive_architecture.json"
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2491,6 +2522,8 @@ class NyxaraSettings(BaseSettings):
     rule_synthesis: RuleSynthesisConfig = Field(default_factory=RuleSynthesisConfig)
     meta_research: MetaResearchConfig = Field(default_factory=MetaResearchConfig)
     godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
+    cognitive_architect: CognitiveArchitectConfig = Field(
+        default_factory=CognitiveArchitectConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2582,6 +2615,12 @@ class NyxaraSettings(BaseSettings):
             # see tests/growth/test_godel_loop.py).
             self.godel_loop.enabled = False
             self.godel_loop.persist = False
+            # Structural cognitive self-modification may SEARCH (fast, deterministic) under TEST, but
+            # must never persist its evolving architecture to disk nor install it into the live
+            # reasoner in the hermetic suite — keep enact + persistence OFF (a test that wants either
+            # builds its own CognitiveArchitect/settings; see tests/growth/test_cognitive_architect.py).
+            self.cognitive_architect.autonomous_enact = False
+            self.cognitive_architect.persist = False
             # Method D's frontier gate spawns extra `nyxara.eval --frontier` subprocesses per edit
             # cycle — keep it OFF under TEST so the self-optimise suite stays hermetic, deterministic
             # and subprocess-free (a test that wants Method D drives ImprovementProver directly, or
