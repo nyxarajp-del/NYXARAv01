@@ -266,3 +266,138 @@ def test_core_discover_laws_is_wired():
     # the status report surfaces the live counter
     rep = core.report()
     assert "laws_discovered" in rep
+
+
+# --------------------------------------------------------------------------- #
+# self-run experiments across FOUR sciences — she designs & runs each herself
+# --------------------------------------------------------------------------- #
+def _run_experiment(name):
+    eng = _eng()
+    data = getattr(eng, name)()
+    assert data is not None, f"{name} produced no data"
+    rep = eng.discover_from_data(
+        data["X"], data["y"], var_names=data["var_names"], target_name=data["target"],
+        dims=data.get("dims"), target_dim=data.get("target_dim"), source="physics")
+    best = rep.best()
+    assert best is not None, f"{name} abstained: {rep.reason}"
+    assert best.evidence.verdict == "corroborated"
+    assert best.evidence.extrapolation_r2 > 0.98
+    return best.law
+
+
+def _is_ratio(expr: str) -> bool:
+    """A discovered inverse relationship renders as either ``a / b`` (GP) or ``a·b^-1`` (sparse)."""
+    return "/" in expr or "^-" in expr
+
+
+def test_selfrun_pendulum_period_law():
+    """She swings a pendulum and discovers T² = 4π²·L/g (period² ∝ L/g)."""
+    law = _run_experiment("_exp_pendulum")
+    assert "L" in law.expression and "g" in law.expression and _is_ratio(law.expression)
+    coeff = next((c for _t, c in law.terms), None)
+    assert coeff is not None and abs(coeff - 4 * 3.141592653589793 ** 2) < 1.0   # ≈ 39.48
+
+
+def test_selfrun_spring_period_law():
+    """She sets a mass on a Hooke spring in the sandbox and discovers T² = 4π²·m/k."""
+    law = _run_experiment("_exp_spring")
+    assert "m" in law.expression and "k" in law.expression and _is_ratio(law.expression)
+
+
+def test_selfrun_projectile_range_law():
+    """She launches a projectile at 45° and discovers R = v²/g."""
+    law = _run_experiment("_exp_projectile")
+    assert "v" in law.expression and "g" in law.expression and _is_ratio(law.expression)
+
+
+def test_selfrun_terminal_velocity_law():
+    """She drops a body through quadratic drag and discovers v² = m·g/k."""
+    law = _run_experiment("_exp_terminal_velocity")
+    e = law.expression
+    assert "m" in e and "g" in e and "k" in e and _is_ratio(e)
+
+
+def test_selfrun_coulomb_inverse_square_law():
+    """Electromagnetism lab: she measures the force between charges and discovers F ∝ q₁·q₂/r²."""
+    law = _run_experiment("_exp_coulomb")
+    e = law.expression
+    assert "q1" in e and "q2" in e and "r" in e
+    assert "r^-2" in e or "r^2)" in e or "/ (r · r)" in e or "r · r" in e   # inverse-square in r
+
+
+def test_selfrun_ideal_gas_law():
+    """Thermodynamics lab: emergent pressure gives the ideal-gas law P ∝ N·T."""
+    law = _run_experiment("_exp_ideal_gas")
+    assert "N" in law.expression and "T" in law.expression
+
+
+def test_selfrun_wave_speed_law():
+    """Optics/acoustics lab: a plucked string gives the wave law v² = T/μ."""
+    law = _run_experiment("_exp_wave_speed")
+    assert "Tension" in law.expression and "mu" in law.expression
+
+
+def test_selfrun_rc_time_constant_law():
+    """Circuits lab: a discharging capacitor gives τ = R·C."""
+    law = _run_experiment("_exp_rc_decay")
+    assert "R" in law.expression and "C" in law.expression
+
+
+# --------------------------------------------------------------------------- #
+# Buckingham-π dimensional reduction generates the exact power-law monomial
+# --------------------------------------------------------------------------- #
+def test_pi_augment_generates_dimensional_monomial():
+    from nyxara.growth.law_discovery import _DIM_A, _DIM_T, _DIM_L, _build_library
+    eng = _eng()
+    feats = _build_library(2)
+    aug = eng._pi_augment(list(feats), [_DIM_A, _DIM_T], _DIM_L)   # g,t → distance ⇒ g·t²
+    sigs = {f.signature() for f in aug}
+    # a monomial with g^1·t^2 must have been injected by the π-solver
+    assert any(f.kind == "monomial" and f.exps.get(0) == 1.0 and f.exps.get(1) == 2.0 for f in aug)
+    assert len(sigs) >= len(feats)
+
+
+# --------------------------------------------------------------------------- #
+# the closed scientific-method loop — hypothesise → predict → falsify
+# --------------------------------------------------------------------------- #
+def test_discover_cycle_corroborates_and_falsifies_rival(tmp_path):
+    eng = _eng(path=str(tmp_path / "laws.json"))
+    result = eng.discover_cycle()          # first experiment = free-fall
+    assert result["verdict"] == "corroborated"
+    assert result["law"] and "t^2" in result["law"]
+    assert result.get("rival_falsified") is True     # the wrong-exponent theory is ruled out
+
+
+def test_discover_cycle_is_noise_robust(tmp_path):
+    """With measurement noise injected she STILL recovers the law and falsifies the rival."""
+    eng = _eng(path=str(tmp_path / "laws.json"))
+    result = eng.discover_cycle(noise=0.05)
+    assert result["verdict"] == "corroborated"       # the true law survives noisy data
+    assert result.get("rival_falsified") is True      # the wrong-exponent rival is still ruled out
+
+
+# --------------------------------------------------------------------------- #
+# meta-law unification — compounding discoveries into deeper theory
+# --------------------------------------------------------------------------- #
+def test_unify_laws_merges_shared_structure(tmp_path):
+    eng = _eng(path=str(tmp_path / "laws.json"))
+    # discover both the pendulum (T² ∝ L/g) and the spring (T² ∝ m/k) — same ratio shape
+    for _ in range(3):
+        eng.discover_cycle()               # cycles free-fall, pendulum, spring, ...
+    unis = eng.unify_laws()
+    ratio = [u for u in unis if u["shape"] == [-1.0, 1.0]]
+    assert ratio, f"pendulum + spring should unify into a ratio law; got {unis}"
+    assert len(ratio[0]["members"]) >= 2
+
+
+# --------------------------------------------------------------------------- #
+# the lab notebook — auditable, append-only record of her science
+# --------------------------------------------------------------------------- #
+def test_lab_notebook_records_discoveries(tmp_path):
+    import json, os
+    eng = _eng(path=str(tmp_path / "laws.json"))
+    eng.discover_cycle()
+    nb = str(tmp_path / "law_notebook.jsonl")
+    assert os.path.exists(nb)
+    entries = [json.loads(ln) for ln in open(nb, encoding="utf-8").read().splitlines()]
+    assert any(e["event"] in ("discovery", "cycle") for e in entries)

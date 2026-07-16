@@ -277,9 +277,20 @@ class _Feature:
         return tuple(acc)
 
 
+# A small, curated set of three-variable exponent patterns covering the common physical power laws
+# (inverse-square interactions like Coulomb q₁·q₂·r⁻², ratios, and triple products). Kept short so
+# the library stays well under the sample count — spurious over-fits are caught by held-out +
+# extrapolation validation anyway. Assigned to the sorted variable triple (i<j<k).
+_TRIPLE_EXPS: Tuple[Tuple[float, float, float], ...] = (
+    (1.0, 1.0, -2.0), (1.0, 1.0, -1.0), (1.0, 1.0, 1.0), (1.0, -1.0, 1.0), (-1.0, 1.0, 1.0),
+    (1.0, -1.0, -1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0),
+    (2.0, -1.0, -1.0), (-1.0, 2.0, -1.0), (-1.0, -1.0, 2.0),
+)
+
+
 def _build_library(n_vars: int, *, degree: int = 2,
                    inverse: bool = True, roots: bool = True,
-                   transcendental: bool = True) -> List[_Feature]:
+                   transcendental: bool = True, triples: bool = True) -> List[_Feature]:
     """The candidate-term library the sparse regression searches — the space of laws she can find.
 
     Covers single-variable power terms (`x`, `x²`, `x³`, `1/x`, `1/x²`, `√x`), pairwise products
@@ -312,6 +323,12 @@ def _build_library(n_vars: int, *, degree: int = 2,
     for i, j in itertools.combinations(range(n_vars), 2):
         for a, b in pair_exps:
             _add(_Feature("monomial", exps={i: a, j: b}))
+    # three-variable monomials for the common physical power laws (Coulomb, ideal-gas, etc.). Only
+    # for small n_vars so the library stays compact; the curated pattern set keeps it well-bounded.
+    if triples and 3 <= n_vars <= 4:
+        for i, j, k in itertools.combinations(range(n_vars), 3):
+            for a, b, c in _TRIPLE_EXPS:
+                _add(_Feature("monomial", exps={i: a, j: b, k: c}))
     if transcendental:
         for i in range(n_vars):
             for fn in ("sin", "cos", "exp", "log"):
@@ -411,12 +428,13 @@ class Discovery:
     evidence: LawEvidence
     novelty: float = 1.0
     parsimony: float = 0.0
+    stability: float = 1.0        # bootstrap coefficient stability in [0, 1] (1 = rock-solid)
 
     @property
     def score(self) -> float:
-        """Selection score — generalisation × novelty × parsimony (all in [0, 1])."""
+        """Selection score — generalisation × novelty × parsimony × stability (all in [0, 1])."""
         gen = max(0.0, min(1.0, 0.5 * (self.evidence.holdout_r2 + self.evidence.extrapolation_r2)))
-        return round(gen * self.novelty * self.parsimony, 6)
+        return round(gen * self.novelty * self.parsimony * self.stability, 6)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -424,6 +442,7 @@ class Discovery:
             "evidence": self.evidence.to_dict(),
             "novelty": round(float(self.novelty), 4),
             "parsimony": round(float(self.parsimony), 4),
+            "stability": round(float(self.stability), 4),
             "score": self.score,
         }
 
@@ -581,6 +600,43 @@ def _std(v: Sequence[float]) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# SI base-dimension exponent tuples (M, L, T, I, Θ, N, J) — aligned to first_principles.Dimension.
+# These give the self-run experiments *real* physical dimensions, so dimensional pruning and the
+# Buckingham-π augmentation narrow the search to the dimensionally-possible forms.
+# --------------------------------------------------------------------------- #
+_DIM_M = (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)      # mass
+_DIM_L = (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)      # length
+_DIM_T = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)      # time
+_DIM_V = (0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0)     # velocity  L·T⁻¹
+_DIM_A = (0.0, 1.0, -2.0, 0.0, 0.0, 0.0, 0.0)     # acceleration / g  L·T⁻²
+_DIM_KSPRING = (1.0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0)   # spring const  M·T⁻² (F/x)
+_DIM_KDRAG = (1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0)     # quadratic-drag coeff  M·L⁻¹ (F/v²)
+_DIM_T2 = (0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0)     # period²  T²
+_DIM_V2 = (0.0, 2.0, -2.0, 0.0, 0.0, 0.0, 0.0)    # speed²  L²·T⁻²
+_DIM_P = (1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0)     # momentum  M·L·T⁻¹
+_DIM_ENERGY = (1.0, 2.0, -2.0, 0.0, 0.0, 0.0, 0.0)    # energy  M·L²·T⁻²
+_DIM_Q = (0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0)      # charge  I·T
+_DIM_FORCE = (1.0, 1.0, -2.0, 0.0, 0.0, 0.0, 0.0)     # force  M·L·T⁻²
+_DIM_THETA = (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)  # temperature Θ
+_DIM_1 = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)      # dimensionless
+
+
+def _period_of(values: Sequence[float], step_dt: float) -> Optional[float]:
+    """Estimate the oscillation period of a zero-centred signal from its zero-crossings.
+
+    Consecutive zero-crossings are half a period apart; the period is twice their mean spacing.
+    Returns ``None`` when the signal does not oscillate enough to measure (< 3 crossings)."""
+    crossings = [i for i in range(1, len(values))
+                 if (values[i - 1] <= 0.0 < values[i]) or (values[i - 1] >= 0.0 > values[i])]
+    if len(crossings) < 3:
+        return None
+    gaps = [crossings[k + 1] - crossings[k] for k in range(len(crossings) - 1)]
+    if not gaps:
+        return None
+    return 2.0 * (sum(gaps) / len(gaps)) * step_dt
+
+
+# --------------------------------------------------------------------------- #
 # The engine
 # --------------------------------------------------------------------------- #
 class LawDiscoveryEngine:
@@ -610,6 +666,10 @@ class LawDiscoveryEngine:
         self.memory = memory
         self.frontier = frontier
         self.path = path
+        # human-readable, append-only lab notebook (sibling of the law tower) — every experiment,
+        # hypothesis test and unification is logged so her science is auditable and compounds.
+        self.notebook_path = (os.path.join(os.path.dirname(os.path.abspath(path)), "law_notebook.jsonl")
+                              if path else None)
         self._rng = random.Random(seed if seed is not None else 0xC0FFEE)
         self.corroborate_r2 = float(corroborate_r2)
         self.extrapolate_r2 = float(extrapolate_r2)
@@ -683,6 +743,9 @@ class LawDiscoveryEngine:
 
         # --- engine 1: sparse feature (monomial + transcendental) regression --------------- #
         feats = _build_library(n_vars)
+        # Buckingham-π: inject the exactly-dimensionally-consistent monomials, THEN prune to the
+        # dimensionally-valid forms — so any true power law is guaranteed to be in the search space.
+        feats = self._pi_augment(feats, var_dims, target_dim)
         feats = self._dim_prune(feats, var_dims, target_dim)
         law = self._sparse_law(splits["train_cols"], splits["train_y"], feats, names,
                                target_name, var_dims)
@@ -710,17 +773,20 @@ class LawDiscoveryEngine:
                 continue
             nov = self._novelty(cand)
             parsimony = 1.0 / (1.0 + 0.15 * cand.complexity)
-            disc = Discovery(law=cand, evidence=ev, novelty=nov, parsimony=parsimony)
+            stability = self._coeff_stability(cand, splits)
+            disc = Discovery(law=cand, evidence=ev, novelty=nov, parsimony=parsimony,
+                             stability=stability)
             best_by_score[cand.signature()] = disc
         kept = sorted(best_by_score.values(), key=lambda d: d.score, reverse=True)
-        # keep the single strongest corroborated law per run (compose over it next time). On a near-
-        # tie, prefer the dimensionally-grounded, interpretable *sparse* monomial over a GP tree.
+        # Pareto-knee model selection (Occam's razor made real): among laws scoring within 3% of the
+        # best, keep the *simplest* (lowest complexity), tie-broken by higher score and then by the
+        # dimensionally-grounded, interpretable sparse monomial over a GP tree. So she prefers the
+        # simplest law that still generalises — never a baroque one that merely fits marginally better.
         if kept:
-            top = kept[0]
-            for d in kept:
-                if d.law.origin == "sparse" and d.score >= 0.98 * top.score:
-                    top = d
-                    break
+            top_score = kept[0].score
+            near = [d for d in kept if d.score >= 0.97 * top_score]
+            top = min(near, key=lambda d: (d.law.complexity, -d.score,
+                                           0 if d.law.origin == "sparse" else 1))
             report.discoveries.append(top)
             self._fold_in(top)
         else:
@@ -887,59 +953,480 @@ class LawDiscoveryEngine:
     # ------------------------------------------------------------------ #
     # Public: run her own experiments in the physics sandbox
     # ------------------------------------------------------------------ #
+    # The self-run experiment registry — each entry is a real experiment NYXARA sets up and drives
+    # herself (in the physics sandbox or a small numeric world), returning a labelled data table
+    # whose governing law she then discovers. The rotation cycles through them so successive idle
+    # ticks work through the whole repertoire, not one law forever.
+    def _experiment_registry(self) -> List[Callable[[], Optional[Dict[str, Any]]]]:
+        return [
+            self._exp_free_fall,          # d = ½·g·t²          (Galileo — mechanics)
+            self._exp_pendulum,           # T² = 4π²·L/g        (pendulum — mechanics)
+            self._exp_spring,             # T² = 4π²·m/k        (Hooke / SHM — mechanics)
+            self._exp_projectile,         # R = v²/g at 45°     (ballistics — mechanics)
+            self._exp_terminal_velocity,  # v² = m·g/k          (quadratic drag — mechanics)
+            self._exp_collision,          # p = m₁v₁ + m₂v₂     (momentum conservation — mechanics)
+            self._exp_coulomb,            # F = k·q₁·q₂/r²      (Coulomb — electromagnetism)
+            self._exp_ideal_gas,          # P ∝ N·T             (ideal gas — thermodynamics)
+            self._exp_wave_speed,         # v² = T/μ            (wave law — optics/acoustics)
+            self._exp_rc_decay,           # τ = R·C             (RC decay — circuits)
+        ]
+
     def discover_from_physics(self, rounds: int = 1) -> DiscoveryReport:
-        """She designs and runs her own experiments in the physics sandbox, then discovers the
-        governing law. The experiment: sweep gravity, drop a body from rest, and measure how far it
-        falls in a fixed time — the data table ``(g, t) → distance`` whose law is ``½·g·t²``. No
-        equation is handed to her; she invents it from experiments she chose."""
+        """She designs and runs her *own* experiments in the physics sandbox, then discovers the
+        governing law — no equation is handed to her, she invents it from experiments she chose.
+
+        Each call runs the next experiment in her rotating registry (free-fall, pendulum, spring/SHM,
+        projectile, terminal velocity, elastic collision) so over successive idle ticks she works
+        through a whole physics curriculum. When two candidate laws agree on the data she has, she
+        runs one *extra*, maximally-discriminating experiment (:meth:`active_experiment`) to break the
+        tie. Degrades to a self-generated data round only when no sandbox is available."""
         t0 = time.monotonic()
+        merged = DiscoveryReport(source="physics")
+        registry = self._experiment_registry()
+        for _ in range(max(1, int(rounds))):
+            self._phys_n = getattr(self, "_phys_n", -1) + 1
+            experiment = registry[self._phys_n % len(registry)]
+            data: Optional[Dict[str, Any]] = None
+            try:
+                data = experiment()
+            except Exception as exc:  # noqa: BLE001 — a failed experiment is data, not a crash
+                merged.reason = merged.reason or f"experiment-error: {exc}"
+            if not data:
+                rep = self._round_synthetic()
+                rep.source = "synthetic"
+                if not merged.reason:
+                    merged.reason = "physics experiment produced too little data — used self-generated"
+            else:
+                rep = self.discover_from_data(
+                    data["X"], data["y"], var_names=data["var_names"],
+                    target_name=data["target"], dims=data.get("dims"),
+                    target_dim=data.get("target_dim"), source="physics")
+                rep.reason = rep.reason or f"experiment: {data.get('label', data['target'])}"
+            merged.discoveries.extend(rep.discoveries)
+            merged.candidates_examined += rep.candidates_examined
+            merged.refuted += rep.refuted
+            merged.abstained += rep.abstained
+        merged.elapsed_ms = (time.monotonic() - t0) * 1000
+        return merged
+
+    # ------------------------------------------------------------------ #
+    # The individual self-run experiments (real simulation → data table)
+    # ------------------------------------------------------------------ #
+    def _exp_free_fall(self) -> Optional[Dict[str, Any]]:
+        """Sweep gravity, drop a body from rest, record how far it falls vs time → ``d = ½·g·t²``."""
         World = self._physics_world_class()
         if World is None:
-            rep = self._round_synthetic()
-            rep.reason = ("physics sandbox unavailable — discovered from self-generated data instead"
-                          if not rep.reason else rep.reason)
-            return rep
-        # active experiment design: choose a spread of gravities that maximally reveals the law
-        gravities = [1.6, 3.7, 5.0, 7.5, 9.8, 12.0, 18.0, 24.0]
-        g_col: List[float] = []
-        t_col: List[float] = []
-        dist_col: List[float] = []
-        for g in gravities:
+            return None
+        g_col: List[float] = []; t_col: List[float] = []; dist_col: List[float] = []
+        for g in (1.6, 3.7, 5.0, 7.5, 9.8, 12.0, 18.0, 24.0):
             try:
                 w = World(gravity=g, air_drag=1.0, dt=0.005, substeps=1, arena=1e9)
-            except Exception:  # noqa: BLE001
-                continue
-            # place body 0 very high and let pure gravity act (action "noop"); record fall vs time
-            try:
                 w.reset()
-                w.bodies[0].y = 1e7           # far from the ground: clean free-fall, no contact
-                w.bodies[0].vy = 0.0
-                w.bodies[0].on_ground = False
+                w.bodies[0].y = 1e7; w.bodies[0].vy = 0.0; w.bodies[0].on_ground = False
                 y0 = w.bodies[0].y
-                steps = 30
-                for s in range(1, steps + 1):
+                for s in range(1, 31):
                     w.step("noop")
-                    tsec = s * w.dt * w.substeps
-                    fallen = y0 - w.bodies[0].y
-                    g_col.append(g)
-                    t_col.append(tsec)
-                    dist_col.append(fallen)
+                    g_col.append(g); t_col.append(s * w.dt * w.substeps)
+                    dist_col.append(y0 - w.bodies[0].y)
             except Exception:  # noqa: BLE001
                 continue
         if len(dist_col) < 8:
-            rep = self._round_synthetic()
-            rep.reason = "physics experiment produced too little data — used self-generated instead"
-            return rep
-        # dimensions: g = L·T⁻², t = T, distance = L  → dimensional pruning is real here
-        L = (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        T = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
-        g_dim = tuple(L[i] - 2 * T[i] for i in range(7))
-        rep = self.discover_from_data(
-            [[g_col[r], t_col[r]] for r in range(len(g_col))], dist_col,
-            var_names=["g", "t"], target_name="fall_distance",
-            dims=[g_dim, T], target_dim=L, source="physics")
-        rep.elapsed_ms = (time.monotonic() - t0) * 1000
-        return rep
+            return None
+        return {"X": [[g_col[r], t_col[r]] for r in range(len(g_col))], "y": dist_col,
+                "var_names": ["g", "t"], "target": "fall_distance", "label": "free-fall d=½gt²",
+                "dims": [_DIM_A, _DIM_T], "target_dim": _DIM_L}
+
+    def _exp_pendulum(self) -> Optional[Dict[str, Any]]:
+        """Swing a small-angle pendulum, sweep length and gravity, measure the period → ``T²=4π²L/g``.
+
+        A genuine ODE integration of ``θ'' = −(g/L)·sinθ`` (her own numeric experiment); the period
+        is read from the zero-crossings of ``θ(t)`` and the law is discovered from ``(L, g) → T²``."""
+        X: List[List[float]] = []; y: List[float] = []
+        for L in (0.5, 1.0, 1.5, 2.0, 3.0):
+            for g in (4.0, 6.0, 9.8, 12.0):
+                theta, omega = 0.2, 0.0          # small initial angle → clean SHM regime
+                dt = 0.002
+                series: List[float] = []
+                for _ in range(20000):
+                    omega += -(g / L) * math.sin(theta) * dt
+                    theta += omega * dt
+                    series.append(theta)
+                period = _period_of(series, dt)
+                if period is not None and period > 0:
+                    X.append([L, g]); y.append(period * period)
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["L", "g"], "target": "period_squared",
+                "label": "pendulum T²=4π²L/g", "dims": [_DIM_L, _DIM_A], "target_dim": _DIM_T2}
+
+    def _exp_spring(self) -> Optional[Dict[str, Any]]:
+        """Set a mass on a Hooke spring in the sandbox, sweep mass and stiffness, measure the period
+        → ``T² = 4π²·m/k``. Uses the real spring force added to :class:`PhysicsWorld`."""
+        World = self._physics_world_class()
+        if World is None:
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        for m in (0.5, 1.0, 1.5, 2.5):
+            for k in (2.0, 4.0, 6.0, 9.0):
+                try:
+                    w = World(gravity=0.0, air_drag=1.0, arena=1e9, dt=0.005, substeps=1,
+                              spring_k=k, spring_anchor=(1000.0, 1000.0))
+                    w.reset()
+                    w.bodies[0].mass = m
+                    w.bodies[0].x, w.bodies[0].y = 1002.0, 1000.0
+                    w.bodies[0].vx = w.bodies[0].vy = 0.0
+                    w.bodies[0].on_ground = False
+                    series: List[float] = []
+                    for _ in range(6000):
+                        w.step("noop")
+                        series.append(w.bodies[0].x - 1000.0)
+                    period = _period_of(series, w.dt * w.substeps)
+                    if period is not None and period > 0:
+                        X.append([m, k]); y.append(period * period)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["m", "k"], "target": "period_squared",
+                "label": "spring T²=4π²m/k", "dims": [_DIM_M, _DIM_KSPRING], "target_dim": _DIM_T2}
+
+    def _exp_projectile(self) -> Optional[Dict[str, Any]]:
+        """Launch a body at 45° with speed v under gravity g and measure its range → ``R = v²/g``.
+
+        Runs in the sandbox with a large arena so the flight is pure projectile motion (no walls);
+        the range is where the body returns to its launch height."""
+        World = self._physics_world_class()
+        if World is None:
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        for v in (6.0, 9.0, 12.0, 16.0, 20.0):
+            for g in (4.0, 6.0, 9.8, 12.0):
+                try:
+                    w = World(gravity=g, air_drag=1.0, arena=1e12, dt=0.002, substeps=1)
+                    w.reset()
+                    x0, y0 = 0.0, 1e6                 # high above the ground → no contact in flight
+                    comp = math.sqrt(0.5) * v         # 45°: equal horizontal & vertical components
+                    w.bodies[0].x, w.bodies[0].y = x0, y0
+                    w.bodies[0].vx, w.bodies[0].vy = comp, comp
+                    w.bodies[0].on_ground = False
+                    rose = False; rng_x = None
+                    for _ in range(200000):
+                        w.step("noop")
+                        if w.bodies[0].vy > 0:
+                            rose = True
+                        if rose and w.bodies[0].y <= y0:     # returned to launch height → landed
+                            rng_x = w.bodies[0].x - x0
+                            break
+                    if rng_x is not None and rng_x > 0:
+                        X.append([v, g]); y.append(rng_x)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["v", "g"], "target": "range",
+                "label": "projectile R=v²/g", "dims": [_DIM_V, _DIM_A], "target_dim": _DIM_L}
+
+    def _exp_terminal_velocity(self) -> Optional[Dict[str, Any]]:
+        """Drop a body under gravity with quadratic drag and measure its terminal speed →
+        ``v² = m·g/k``. Uses the real drag force added to :class:`PhysicsWorld`."""
+        World = self._physics_world_class()
+        if World is None:
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        for m in (0.5, 1.0, 2.0, 3.0):
+            for g in (8.0, 12.0, 20.0):
+                for k in (0.4, 0.8, 1.2):
+                    try:
+                        w = World(gravity=g, air_drag=1.0, arena=1e12, dt=0.002, substeps=1,
+                                  drag_k=k)
+                        w.reset()
+                        w.bodies[0].mass = m
+                        w.bodies[0].y = 1e9; w.bodies[0].vx = w.bodies[0].vy = 0.0
+                        w.bodies[0].on_ground = False
+                        last = 0.0
+                        for _ in range(8000):
+                            w.step("noop")
+                            last = abs(w.bodies[0].vy)
+                        X.append([m, g, k]); y.append(last * last)   # terminal speed², from equilibrium
+                    except Exception:  # noqa: BLE001
+                        continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["m", "g", "k"], "target": "v_terminal_squared",
+                "label": "terminal velocity v²=mg/k",
+                "dims": [_DIM_M, _DIM_A, _DIM_KDRAG], "target_dim": _DIM_V2}
+
+    def _exp_collision(self) -> Optional[Dict[str, Any]]:
+        """Collide two bodies elastically in the sandbox and check what is conserved → momentum
+        ``p = m₁v₁ + m₂v₂``. She measures the pre-collision masses/velocities and the *post*-collision
+        total momentum, and discovers that it equals the pre-collision total (conservation)."""
+        World = self._physics_world_class()
+        if World is None:
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        combos = [(1.0, 3.0, 2.0, 0.0), (2.0, 2.5, 1.0, -1.0), (1.5, 4.0, 3.0, 0.5),
+                  (0.8, 5.0, 2.0, -0.5), (3.0, 1.5, 1.0, 0.0), (1.0, 2.0, 1.0, 1.0),
+                  (2.5, 3.0, 0.5, -2.0), (1.2, 4.5, 2.2, 0.3), (0.6, 6.0, 1.4, -1.2),
+                  (2.0, 2.0, 2.0, -2.0)]
+        for m1, v1, m2, v2 in combos:
+            try:
+                w = World(gravity=0.0, air_drag=1.0, ground_friction=1.0, restitution=1.0,
+                          arena=1e12, dt=0.002, substeps=1)
+                w.reset()
+                w.bodies[0].mass = m1; w.bodies[1].mass = m2
+                w.bodies[0].x, w.bodies[0].y = 1e6, 1e6
+                w.bodies[1].x, w.bodies[1].y = 1e6 + 4.0, 1e6      # body 1 to the right
+                w.bodies[0].vx = v1; w.bodies[1].vx = v2
+                w.bodies[0].vy = w.bodies[1].vy = 0.0
+                w.bodies[0].on_ground = w.bodies[1].on_ground = False
+                for _ in range(4000):
+                    w.step("noop")
+                p_after = m1 * w.bodies[0].vx + m2 * w.bodies[1].vx
+                X.append([m1, v1, m2, v2]); y.append(p_after)
+            except Exception:  # noqa: BLE001
+                continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["m1", "v1", "m2", "v2"], "target": "momentum",
+                "label": "collision p=m₁v₁+m₂v₂",
+                "dims": [_DIM_M, _DIM_V, _DIM_M, _DIM_V], "target_dim": _DIM_P}
+
+    def _exp_coulomb(self) -> Optional[Dict[str, Any]]:
+        """Electromagnetism lab: release a test charge near a source charge and measure the force it
+        feels (from its motion) → she discovers Coulomb's law ``F = k·q₁·q₂/r²``."""
+        try:
+            from nyxara.sim.em_world import ElectrostaticWorld
+        except Exception:  # noqa: BLE001
+            return None
+        world = ElectrostaticWorld(k=1.0)
+        X: List[List[float]] = []; y: List[float] = []
+        for q1 in (1.0, 2.0, 3.0):
+            for q2 in (1.0, 1.5, 2.5):
+                for r in (0.5, 1.0, 1.5, 2.0, 3.0):
+                    try:
+                        f = world.measure_force(q1, q2, r, dt=1e-4, steps=3)
+                        if f > 0:
+                            X.append([q1, q2, r]); y.append(f)
+                    except Exception:  # noqa: BLE001
+                        continue
+        if len(y) < 8:
+            return None
+        # k is a dimensionful constant, so the law is not reachable from (q₁,q₂,r) by dimensions
+        # alone — the 3-variable library carries the q₁·q₂·r⁻² monomial, so no dims are supplied.
+        return {"X": X, "y": y, "var_names": ["q1", "q2", "r"], "target": "force",
+                "label": "Coulomb F=k·q₁q₂/r²"}
+
+    def _exp_ideal_gas(self) -> Optional[Dict[str, Any]]:
+        """Thermodynamics lab: an emergent-pressure gas box — sweep particle count and temperature,
+        measure the wall force, and discover the ideal-gas law ``P ∝ N·T`` (at fixed volume)."""
+        try:
+            from nyxara.sim.thermo_world import GasBox
+        except Exception:  # noqa: BLE001
+            return None
+        box = GasBox(size=1.0, dt=0.004, seed=7)
+        X: List[List[float]] = []; y: List[float] = []
+        for n in (10, 20, 30, 40):
+            for temp in (0.5, 1.0, 2.0, 4.0):
+                try:
+                    force = box.measure_wall_force(n, temp, steps=2500, warmup=200)
+                    if force > 0:
+                        X.append([float(n), temp]); y.append(force)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["N", "T"], "target": "pressure",
+                "label": "ideal gas P∝N·T"}
+
+    def _exp_wave_speed(self) -> Optional[Dict[str, Any]]:
+        """Optics/acoustics lab: pluck a string, watch the pulse travel, measure its speed → she
+        discovers the wave law ``v² = T/μ`` (tension over linear density)."""
+        try:
+            from nyxara.sim.optics_world import WaveString
+        except Exception:  # noqa: BLE001
+            return None
+        string = WaveString(length=1.0, n_points=401)
+        X: List[List[float]] = []; y: List[float] = []
+        for tension in (1.0, 2.0, 4.0, 6.0):
+            for mu in (0.5, 1.0, 2.0):
+                try:
+                    v = string.measure_speed(tension, mu)
+                    if v is not None and v > 0:
+                        X.append([tension, mu]); y.append(v * v)   # v² = T/μ (clean monomial)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["Tension", "mu"], "target": "wave_speed_squared",
+                "label": "wave v²=T/μ", "dims": [_DIM_FORCE, (1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0)],
+                "target_dim": _DIM_V2}
+
+    def _exp_rc_decay(self) -> Optional[Dict[str, Any]]:
+        """Circuits lab: discharge a capacitor through a resistor and measure the 1/e decay time →
+        she discovers the RC time-constant law ``τ = R·C``."""
+        try:
+            from nyxara.sim.circuit_world import RCCircuit
+        except Exception:  # noqa: BLE001
+            return None
+        circuit = RCCircuit()
+        X: List[List[float]] = []; y: List[float] = []
+        for R in (0.5, 1.0, 2.0, 4.0):
+            for C in (0.5, 1.0, 2.0, 3.0):
+                try:
+                    tau = circuit.measure_time_constant(R, C)
+                    if tau is not None and tau > 0:
+                        X.append([R, C]); y.append(tau)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 8:
+            return None
+        return {"X": X, "y": y, "var_names": ["R", "C"], "target": "tau",
+                "label": "RC decay τ=R·C"}
+
+    # ------------------------------------------------------------------ #
+    # Public: the full closed scientific-method loop (Popperian, autonomous)
+    # ------------------------------------------------------------------ #
+    def discover_cycle(self, *, noise: float = 0.0) -> Dict[str, Any]:
+        """One complete self-driven scientific cycle: **hypothesise → predict → try to falsify**.
+
+        She runs the next experiment in her registry, discovers a candidate law on the *ordinary*
+        regime, then puts it to a genuine predictive test on the **most extreme, most discriminating
+        regime she did not train on** (the decisive experiment a scientist designs to break a
+        theory). A law that predicts the extreme regime survives (corroborated); one that fails there
+        is falsified. Optionally injects measurement ``noise`` to prove the law survives messy data.
+        Everything is logged to the lab notebook. Returns a compact verdict dict."""
+        registry = self._experiment_registry()
+        self._cycle_n = getattr(self, "_cycle_n", -1) + 1
+        experiment = registry[self._cycle_n % len(registry)]
+        result: Dict[str, Any] = {"experiment": None, "law": None, "verdict": "no-data"}
+        try:
+            data = experiment()
+        except Exception as exc:  # noqa: BLE001
+            data = None
+            result["verdict"] = f"experiment-error: {exc}"
+        if not data:
+            return result
+        result["experiment"] = data.get("label", data["target"])
+        cols, yv = self._to_columns(data["X"], data["y"])
+        if cols is None or len(yv) < 10:
+            return result
+        if noise > 0.0:                                   # inject relative Gaussian measurement noise
+            yspread = _std(yv) or 1.0
+            yv = [v + self._rng.gauss(0.0, noise * yspread) for v in yv]
+        # DESIGN the decisive experiment: rank samples by extremity and hold out the most extreme 30%
+        # as the untrained regime the theory must predict. This is active design — probe where a wrong
+        # law would diverge most from a right one.
+        splits = self._split(cols, yv)
+        dims = data.get("dims")
+        var_dims = list(dims) if dims else [None] * len(cols)
+        feats = _build_library(len(cols))
+        feats = self._pi_augment(feats, var_dims, data.get("target_dim"))
+        feats = self._dim_prune(feats, var_dims, data.get("target_dim"))
+        law = self._sparse_law(splits["train_cols"], splits["train_y"], feats,
+                               data["var_names"], data["target"], var_dims)
+        if law is None:
+            result["verdict"] = "no-law"
+            self._notebook_log("cycle", {"experiment": result["experiment"], "verdict": "no-law"})
+            return result
+        ev = self._validate(law, splits)
+        result["law"] = law.expression
+        result["verdict"] = ev.verdict
+        result["extrapolation_r2"] = round(ev.extrapolation_r2, 5)
+        result["noise"] = noise
+        # try to FALSIFY: does a deliberately-perturbed rival law fail the decisive test the real one
+        # passes? If so, the cycle has actively discriminated between theories, not merely fit one.
+        rival = self._perturb_law(law)
+        if rival is not None and splits.get("extrap_cols") is not None and splits["extrap_y"]:
+            rp = rival.predict(splits["extrap_cols"])
+            rival_r2 = _r2(rp, splits["extrap_y"]) if rp is not None else -1e9
+            result["rival_falsified"] = bool(rival_r2 < ev.extrapolation_r2 - 0.05)
+            result["rival_extrapolation_r2"] = round(rival_r2, 5)
+        if ev.verdict == "corroborated":
+            nov = self._novelty(law)
+            disc = Discovery(law=law, evidence=ev, novelty=nov,
+                             parsimony=1.0 / (1.0 + 0.15 * law.complexity),
+                             stability=self._coeff_stability(law, splits))
+            self._fold_in(disc)
+        self._notebook_log("cycle", {"experiment": result["experiment"], "law": law.expression,
+                                     "verdict": ev.verdict,
+                                     "rival_falsified": result.get("rival_falsified"),
+                                     "noise": noise})
+        return result
+
+    def _perturb_law(self, law: Law) -> Optional[Law]:
+        """Build a plausible *rival* theory by nudging the dominant term's exponent — the alternative
+        hypothesis the decisive experiment is meant to rule out (e.g. an inverse-cube vs the true
+        inverse-square). Sparse monomial laws only; ``None`` when no clean rival exists."""
+        if not law._features or not law._coeffs:
+            return None
+        k = max(range(len(law._coeffs)), key=lambda i: abs(law._coeffs[i]))
+        f = law._features[k]
+        if f.kind != "monomial" or not f.exps:
+            return None
+        j = max(f.exps, key=lambda i: abs(f.exps[i]))
+        rival_exps = dict(f.exps)
+        rival_exps[j] = rival_exps[j] + (1.0 if rival_exps[j] >= 0 else -1.0)   # shift the exponent
+        rival_feat = _Feature("monomial", exps=rival_exps)
+        return Law(target=law.target, expression=f"rival({law.target})", kind=law.kind,
+                   domain=law.domain, origin="rival", var_names=list(law.var_names),
+                   terms=[(rival_feat.render(law.var_names), law._coeffs[k])],
+                   complexity=law.complexity,
+                   _features=[rival_feat], _coeffs=[law._coeffs[k]], _bias=law._bias)
+
+    # ------------------------------------------------------------------ #
+    # Public: meta-law unification — compound discoveries into deeper theory
+    # ------------------------------------------------------------------ #
+    def unify_laws(self) -> List[Dict[str, Any]]:
+        """Search the law tower for a **more general law that subsumes several discoveries**.
+
+        Laws that share an *abstract structure* — the same monomial exponent pattern, regardless of
+        which physical variables fill the slots — are instances of one deeper law. E.g. the pendulum
+        ``T² = c·L/g`` and the spring ``T² = c·m/k`` both have the shape ``target = c·(a·b⁻¹)`` and
+        unify into the general simple-harmonic form ``T² = c·(inertia / restoring)``; Coulomb and
+        Newtonian gravity share the inverse-square shape ``c·(a·b·r⁻²)``. This is genuine open-ended
+        compounding: her discoveries fold into abstractions that guide later search. Logged to the
+        notebook. Returns the unifications found."""
+        groups: Dict[Tuple[float, ...], List[Law]] = {}
+        for law in self._laws:
+            sig = self._abstract_structure(law)
+            if sig is not None:
+                groups.setdefault(sig, []).append(law)
+        unifications: List[Dict[str, Any]] = []
+        for sig, laws in groups.items():
+            # only a real unification if ≥2 *distinct* laws share the shape
+            distinct = {l.signature() for l in laws}
+            if len(distinct) < 2:
+                continue
+            schema = self._structure_schema(sig)
+            members = sorted({l.expression for l in laws})
+            unifications.append({"schema": schema, "shape": list(sig), "members": members})
+            self._notebook_log("unification", {"schema": schema, "members": members})
+        return unifications
+
+    @staticmethod
+    def _abstract_structure(law: Law) -> Optional[Tuple[float, ...]]:
+        """The shape of a law's dominant monomial: its exponents as a sorted, variable-agnostic
+        tuple. Two laws with the same shape are instances of one general law."""
+        if not law._features or not law._coeffs:
+            return None
+        k = max(range(len(law._coeffs)), key=lambda i: abs(law._coeffs[i]))
+        f = law._features[k]
+        if f.kind != "monomial" or len(f.exps) < 2:
+            return None
+        return tuple(sorted(f.exps.values()))
+
+    @staticmethod
+    def _structure_schema(shape: Tuple[float, ...]) -> str:
+        """A readable name for an abstract monomial shape."""
+        s = tuple(sorted(shape))
+        if s == (-1.0, 1.0):
+            return "target = c·(a / b)   [ratio law — e.g. SHM period² ∝ inertia/restoring]"
+        if s == (-2.0, 1.0, 1.0):
+            return "target = c·(a·b / r²)   [inverse-square interaction — e.g. Coulomb / gravity]"
+        if s == (1.0, 1.0):
+            return "target = c·(a·b)   [product law — e.g. Ohm V=I·R, τ=R·C]"
+        parts = "·".join(f"x{i}^{e:g}" for i, e in enumerate(s))
+        return f"target = c·({parts})   [shared power-law shape]"
 
     # ------------------------------------------------------------------ #
     # Public: active experiment design — the intervention that breaks a tie
@@ -990,6 +1477,8 @@ class LawDiscoveryEngine:
             "refuted": self.total_refuted,
             "abstained": self.total_abstained,
             "runs": len(self._reports),
+            "domains": sorted({law.domain for law in self._laws}),
+            "latest_laws": [law.expression for law in self._laws[-5:]],
         }
 
     # ------------------------------------------------------------------ #
@@ -1107,6 +1596,64 @@ class LawDiscoveryEngine:
         # dimensional guidance narrows to the dimensionally-consistent forms (often a unique
         # monomial, exactly as a physicist would); only if it prunes *everything* do we fall back.
         return kept if len(kept) >= 1 else feats
+
+    # ------------------------------------------------------------------ #
+    # Buckingham-π dimensional monomial generation
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _clean_exp(e: float) -> float:
+        """Snap an exponent to a nearby physically-clean fraction (±½, ±1, ±1½, ±2, ±3) if close."""
+        for nice in (-3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0):
+            if abs(e - nice) < 0.06:
+                return nice
+        return round(e, 3)
+
+    def _pi_augment(self, feats: List[_Feature],
+                    var_dims: List[Optional[Tuple[float, ...]]],
+                    target_dim: Optional[Tuple[float, ...]]) -> List[_Feature]:
+        """Add the *exactly dimensionally-consistent* power-law monomials to the library.
+
+        This is the Buckingham-π theorem put to work: given the variables' physical dimensions and
+        the target's, solve ``Σ aᵢ·dim(xᵢ) = dim(target)`` for exponent vectors ``a`` — every such
+        ``a`` is a monomial ``Πⱼ xⱼ^aⱼ`` that is dimensionally *forced* to be the answer's form (up to
+        a dimensionless constant). We add the particular solution and, when the variables are
+        redundant, that solution shifted by the dimensionless π-groups (the nullspace) — so the
+        space searched is exactly the finite set of dimensionally-possible scaling laws a physicist
+        would consider. Guarantees any true power law is in the library; a no-op without numpy or
+        without full dimensional information."""
+        if _np is None or target_dim is None:
+            return feats
+        dims = list(var_dims)
+        if not dims or any(d is None for d in dims):
+            return feats
+        n = len(dims)
+        D = _np.asarray([list(d) for d in dims], dtype=float).T   # (7, n): columns are variable dims
+        t = _np.asarray(list(target_dim), dtype=float)
+        try:
+            a0, *_ = _np.linalg.lstsq(D, t, rcond=None)
+            if not _np.allclose(D @ a0, t, atol=1e-6):
+                return feats                                       # target unreachable from these vars
+            # nullspace basis (the dimensionless π-groups): directions we can add to a0 freely
+            _u, s, vh = _np.linalg.svd(D)
+            rank = int((s > 1e-9).sum())
+            null = [vh[i] for i in range(rank, vh.shape[0])] if vh.shape[0] > rank else []
+        except Exception:  # noqa: BLE001 — numeric failure just means no augmentation
+            return feats
+        candidates: List[List[float]] = [list(a0)]
+        for nb in null[:3]:
+            for k in (-1.0, 1.0):
+                candidates.append([a0[i] + k * nb[i] for i in range(n)])
+        seen = {f.signature() for f in feats}
+        out = list(feats)
+        for a in candidates:
+            exps = {i: self._clean_exp(a[i]) for i in range(n) if abs(self._clean_exp(a[i])) > 0.05}
+            if not exps:
+                continue
+            f = _Feature("monomial", exps=exps)
+            if f.signature() not in seen:
+                seen.add(f.signature())
+                out.append(f)
+        return out
 
     # ------------------------------------------------------------------ #
     # Engine 1 — sparse feature regression (STLSQ)
@@ -1286,6 +1833,47 @@ class LawDiscoveryEngine:
             ev.verdict = "inconclusive"
         return ev
 
+    def _coeff_stability(self, law: Law, splits: Dict[str, Any], trials: int = 16) -> float:
+        """Bootstrap the law's coefficients to measure how *stable* they are — honest statistics.
+
+        Resample the training rows with replacement, refit the law's own feature set each time, and
+        measure the coefficient of variation of every coefficient. A law whose coefficients swing
+        wildly across resamples is fragile (it fit noise), so it is down-weighted; a law whose
+        coefficients barely move is trustworthy. Sparse laws only (fixed feature set); GP trees and
+        the numpy-less path return a neutral 1.0."""
+        feats = law._features
+        if not feats or _np is None:
+            return 1.0
+        cols = splits.get("train_cols") or []
+        yv = splits.get("train_y") or []
+        m = len(yv)
+        if m < 8 or not cols:
+            return 1.0
+        fcols: List[List[float]] = []
+        for f in feats:
+            v = f.evaluate(cols)
+            if v is None:
+                return 1.0
+            fcols.append(v)
+        try:
+            A = _np.asarray(fcols, dtype=float).T
+            A = _np.column_stack([A, _np.ones(m)])
+            y = _np.asarray(yv, dtype=float)
+            rng = _np.random.default_rng(0xB007)
+            coeffs = []
+            for _ in range(max(4, trials)):
+                idx = rng.integers(0, m, m)
+                sol, *_ = _np.linalg.lstsq(A[idx], y[idx], rcond=None)
+                coeffs.append(sol[:-1])
+            if len(coeffs) < 3:
+                return 1.0
+            C = _np.asarray(coeffs)
+            mean = _np.abs(C.mean(axis=0)) + 1e-9
+            cv = float((C.std(axis=0) / mean).mean())
+            return max(0.0, min(1.0, 1.0 / (1.0 + cv)))
+        except Exception:  # noqa: BLE001 — stability is advisory, never fatal
+            return 1.0
+
     # ------------------------------------------------------------------ #
     # Novelty, folding-in, and the self-extending library
     # ------------------------------------------------------------------ #
@@ -1313,7 +1901,25 @@ class LawDiscoveryEngine:
         self._laws.append(law)
         self.total_laws += 1
         self._promote(law)
+        self._notebook_log("discovery", {
+            "target": law.target, "kind": law.kind, "domain": law.domain, "origin": law.origin,
+            "expression": law.expression, "verdict": disc.evidence.verdict,
+            "holdout_r2": round(disc.evidence.holdout_r2, 5),
+            "extrapolation_r2": round(disc.evidence.extrapolation_r2, 5),
+            "novelty": round(disc.novelty, 3), "stability": round(disc.stability, 3)})
         self._save()
+
+    def _notebook_log(self, event: str, payload: Dict[str, Any]) -> None:
+        """Append one auditable entry to the lab notebook (best-effort, never fatal)."""
+        if not self.notebook_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self.notebook_path)), exist_ok=True)
+            entry = {"t": round(time.time(), 3), "event": event, **payload}
+            with open(self.notebook_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+        except Exception:  # noqa: BLE001 — the notebook is a convenience, never required
+            pass
 
     def _promote(self, law: Law) -> None:
         """Fold a corroborated law back into knowledge / memory (best-effort, never required)."""

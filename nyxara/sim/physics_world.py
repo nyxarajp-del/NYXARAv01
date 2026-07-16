@@ -126,7 +126,10 @@ class PhysicsWorld:
     def __init__(self, *, arena: float = 10.0, gravity: float = 9.8, dt: float = 0.04,
                  substeps: int = 3, ground_friction: float = 0.82, air_drag: float = 0.999,
                  restitution: float = 0.6, push: float = 3.0, lift: float = 5.0,
-                 drop: float = 3.0, poke: float = 6.0, seed: int = 0) -> None:
+                 drop: float = 3.0, poke: float = 6.0, seed: int = 0,
+                 spring_k: float = 0.0, spring_anchor: Optional[Tuple[float, float]] = None,
+                 central_mu: float = 0.0, central_at: Optional[Tuple[float, float]] = None,
+                 drag_k: float = 0.0) -> None:
         self.arena = float(arena)
         self.g = float(gravity)
         self.dt = float(dt)
@@ -138,6 +141,16 @@ class PhysicsWorld:
         self.lift = float(lift)
         self.drop = float(drop)
         self.poke = float(poke)
+        # Optional extra forces on body 0, all OFF by default so the base world is unchanged. These
+        # let NYXARA run *new* real experiments (SHM, orbits, terminal velocity) in the same sandbox:
+        #   spring_k / spring_anchor  — Hooke restoring force  F = −k·(x − anchor)  → simple harmonic
+        #   central_mu / central_at   — inverse-square attraction  a = −μ·r̂ / r²    → orbital motion
+        #   drag_k                    — quadratic drag  F = −drag_k·|v|·v            → terminal velocity
+        self.spring_k = float(spring_k)
+        self.spring_anchor = (float(spring_anchor[0]), float(spring_anchor[1])) if spring_anchor else None
+        self.central_mu = float(central_mu)
+        self.central_at = (float(central_at[0]), float(central_at[1])) if central_at else None
+        self.drag_k = float(drag_k)
         self._rng = random.Random(seed)
         # a rolling window of recent states — turns discrete snapshots into a CONTINUOUS
         # sensorimotor stream the world model (and curiosity) read dynamics from.
@@ -228,16 +241,48 @@ class PhysicsWorld:
 
     def _integrate(self, dt: float) -> None:
         """One semi-implicit-Euler physics substep: gravity, drag, friction, motion, collisions."""
-        for b in self.bodies:
+        for idx, b in enumerate(self.bodies):
             b.vy -= self.g * dt                      # gravity
-            b.vx *= self.air_drag                     # air drag
+            b.vx *= self.air_drag                     # air drag (multiplicative)
             b.vy *= self.air_drag
+            self._apply_extra_forces(b, idx, dt)      # optional spring / central / quadratic-drag
             if b.on_ground:                           # ground friction opposes horizontal motion
                 b.vx *= self.ground_friction
             b.x += b.vx * dt
             b.y += b.vy * dt
             self._resolve_bounds(b)
         self._resolve_body_collision(self.bodies[0], self.bodies[1])
+
+    def _apply_extra_forces(self, b: Body, idx: int, dt: float) -> None:
+        """Apply the optional Hooke spring, central inverse-square, and quadratic-drag forces.
+
+        All are OFF unless configured, so the base rigid-body world is byte-for-byte unchanged.
+        They act only on body 0 (the agent's body) — the object body 1 stays a passive test mass.
+        Each is honest Newtonian mechanics: acceleration = force / mass, applied semi-implicitly."""
+        if idx != 0:
+            return
+        m = b.mass if b.mass > 1e-9 else 1e-9
+        # Hooke spring toward an anchor: F = −k·(pos − anchor) → simple-harmonic motion (T=2π√(m/k))
+        if self.spring_k > 0.0 and self.spring_anchor is not None:
+            ax, ay = self.spring_anchor
+            b.vx += (-self.spring_k * (b.x - ax) / m) * dt
+            b.vy += (-self.spring_k * (b.y - ay) / m) * dt
+        # Central inverse-square attraction: a = −μ·r̂ / r² → orbits / Kepler (μ plays the role of GM)
+        if self.central_mu > 0.0 and self.central_at is not None:
+            cx, cy = self.central_at
+            dx, dy = b.x - cx, b.y - cy
+            r2 = dx * dx + dy * dy
+            if r2 > 1e-9:
+                r = math.sqrt(r2)
+                a = self.central_mu / r2
+                b.vx -= a * (dx / r) * dt
+                b.vy -= a * (dy / r) * dt
+        # Quadratic (Newtonian) drag opposing velocity: F = −drag_k·|v|·v → terminal velocity √(mg/k)
+        if self.drag_k > 0.0:
+            speed = math.hypot(b.vx, b.vy)
+            if speed > 1e-9:
+                b.vx += (-self.drag_k * speed * b.vx / m) * dt
+                b.vy += (-self.drag_k * speed * b.vy / m) * dt
 
     def _resolve_bounds(self, b: Body) -> None:
         """Keep a body inside the arena; bounce off ground/ceiling/walls with restitution."""
@@ -549,5 +594,34 @@ if __name__ == "__main__":  # pragma: no cover
     lp_unknown = fresh.world_model.learning_progress(s2, "lift")
     print(f"\ncuriosity      : learning_progress(known)={lp_known:.2f} < (unseen)={lp_unknown:.2f}")
     assert lp_unknown >= lp_known, "curiosity failed — an unseen action was not more informative"
+
+    # 6) the optional spring force produces real oscillation: body 0 crosses its anchor repeatedly
+    ws = PhysicsWorld(seed=5, gravity=0.0, air_drag=1.0, arena=1e9, dt=0.01, substeps=1,
+                      spring_k=4.0, spring_anchor=(100.0, 100.0))
+    ws.reset()
+    ws.bodies[0].x, ws.bodies[0].y = 103.0, 100.0     # off the ground so friction never engages
+    ws.bodies[0].vx = ws.bodies[0].vy = 0.0
+    ws.bodies[0].on_ground = False
+    xs = []
+    for _ in range(1200):
+        ws.step("noop")
+        xs.append(ws.bodies[0].x - 100.0)              # displacement from the anchor
+    crossings = sum(1 for i in range(1, len(xs)) if xs[i - 1] > 0 >= xs[i] or xs[i - 1] < 0 <= xs[i])
+    print(f"\nspring         : body oscillated across anchor {crossings} times (SHM)")
+    assert crossings >= 4, "spring failed — body did not oscillate (no simple-harmonic motion)"
+
+    # 7) the optional central force produces a bound orbit: body stays within an annulus, never escapes
+    wo = PhysicsWorld(seed=6, gravity=0.0, air_drag=1.0, arena=1e9, dt=0.005, substeps=2,
+                      central_mu=40.0, central_at=(100.0, 100.0))
+    wo.reset()
+    wo.bodies[0].x, wo.bodies[0].y = 104.0, 100.0
+    wo.bodies[0].vx, wo.bodies[0].vy = 0.0, 3.0        # tangential velocity → orbit, not a plunge
+    wo.bodies[0].on_ground = False
+    radii = []
+    for _ in range(2000):
+        wo.step("noop")
+        radii.append(math.hypot(wo.bodies[0].x - 100.0, wo.bodies[0].y - 100.0))
+    print(f"orbit          : radius stayed in [{min(radii):.2f}, {max(radii):.2f}] (bound, no escape)")
+    assert max(radii) < 50.0 and min(radii) > 0.2, "central force failed — orbit was not bound"
 
     print("\nALL SELF-TESTS PASSED ✓")

@@ -6467,16 +6467,35 @@ class NyxaraCore:
                 tick = getattr(self, "_law_idle_count", 0) + 1
                 self._law_idle_count = tick
                 if tick % 7 == 0 and self.oversight.gate():
-                    domain = (None, "dynamics", "invariant", "data")[(tick // 7) % 4]
-                    rep = self.law_discovery.discover_laws(rounds=1, domain=domain)
-                    report["laws_discovered"] = (report.get("laws_discovered", 0)
-                                                 + len(rep.discoveries))
-                    best = rep.best()
-                    if best is not None:
-                        self.mind.record(
-                            ThoughtKind.INFERENCE,
-                            f"law [{best.law.kind}]: {best.law.expression[:40]}",
-                            salience=0.63)
+                    slot = (tick // 7) % 5
+                    if slot == 0 and hasattr(self.law_discovery, "discover_cycle"):
+                        # the full closed scientific-method loop: hypothesise → predict → falsify,
+                        # rotating through her ten self-run experiments across four sciences.
+                        cyc = self.law_discovery.discover_cycle()
+                        if cyc.get("verdict") == "corroborated" and cyc.get("law"):
+                            report["laws_discovered"] = report.get("laws_discovered", 0) + 1
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"law [{cyc.get('experiment', '')[:18]}]: {str(cyc['law'])[:36]}",
+                                salience=0.64)
+                    else:
+                        domain = (None, "dynamics", "invariant", "data")[slot % 4]
+                        rep = self.law_discovery.discover_laws(rounds=1, domain=domain)
+                        report["laws_discovered"] = (report.get("laws_discovered", 0)
+                                                     + len(rep.discoveries))
+                        best = rep.best()
+                        if best is not None:
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"law [{best.law.kind}]: {best.law.expression[:40]}",
+                                salience=0.63)
+                    # periodically compound her discoveries into deeper theory (meta-law unification)
+                    if tick % 35 == 0 and hasattr(self.law_discovery, "unify_laws"):
+                        for uni in (self.law_discovery.unify_laws() or [])[:1]:
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"unified law: {str(uni.get('schema', ''))[:48]}",
+                                salience=0.6)
             except Exception:  # noqa: BLE001
                 pass
         # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
@@ -7851,6 +7870,12 @@ class NyxaraCore:
             rep["breakthroughs"] = int(getattr(self.eureka, "total_breakthroughs", 0))
         if getattr(self, "law_discovery", None) is not None:
             rep["laws_discovered"] = int(getattr(self.law_discovery, "total_laws", 0))
+            try:
+                held = self.law_discovery.known_laws()
+                if held:
+                    rep["latest_law"] = held[-1].expression
+            except Exception:  # noqa: BLE001
+                pass
         if self.meta_researcher is not None:
             try:
                 rep["inventions"] = self.meta_researcher.total_validated()
