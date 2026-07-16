@@ -160,3 +160,66 @@ def test_stream_never_raises_and_is_bounded():
     stream = agent.run(steps=10)
     assert 1 <= len(stream) <= 10
     assert all(len(t.next_state) == STATE_DIM for t in stream)
+
+
+# --------------------------------------------------------------------------- #
+# The optional forces (spring / central / drag) — real, and OFF by default
+# --------------------------------------------------------------------------- #
+def test_extra_forces_are_off_by_default():
+    """A default world is byte-for-byte the old rigid-body world: no spring, central, or drag."""
+    w = PhysicsWorld(seed=0)
+    assert w.spring_k == 0.0 and w.central_mu == 0.0 and w.drag_k == 0.0
+    assert w.spring_anchor is None and w.central_at is None
+
+
+def test_spring_force_produces_oscillation():
+    """A Hooke spring makes body 0 oscillate across its anchor (simple-harmonic motion)."""
+    import math
+    w = PhysicsWorld(seed=1, gravity=0.0, air_drag=1.0, arena=1e9, dt=0.01, substeps=1,
+                     spring_k=4.0, spring_anchor=(100.0, 100.0))
+    w.reset()
+    w.bodies[0].x, w.bodies[0].y = 103.0, 100.0
+    w.bodies[0].vx = w.bodies[0].vy = 0.0
+    w.bodies[0].on_ground = False
+    xs = []
+    for _ in range(1200):
+        w.step("noop")
+        xs.append(w.bodies[0].x - 100.0)
+    crossings = sum(1 for i in range(1, len(xs))
+                    if xs[i - 1] > 0 >= xs[i] or xs[i - 1] < 0 <= xs[i])
+    assert crossings >= 4
+    # measured period ≈ 2π√(m/k) = 2π√(1/4) = π
+    from nyxara.growth.law_discovery import _period_of
+    period = _period_of(xs, 0.01)
+    assert period is not None and abs(period - math.pi) < 0.4
+
+
+def test_central_force_makes_a_bound_orbit():
+    """A central inverse-square force with tangential velocity yields a bound (non-escaping) orbit."""
+    import math
+    w = PhysicsWorld(seed=2, gravity=0.0, air_drag=1.0, arena=1e9, dt=0.005, substeps=2,
+                     central_mu=40.0, central_at=(100.0, 100.0))
+    w.reset()
+    w.bodies[0].x, w.bodies[0].y = 104.0, 100.0
+    w.bodies[0].vx, w.bodies[0].vy = 0.0, 3.0
+    w.bodies[0].on_ground = False
+    radii = []
+    for _ in range(2000):
+        w.step("noop")
+        radii.append(math.hypot(w.bodies[0].x - 100.0, w.bodies[0].y - 100.0))
+    assert max(radii) < 50.0 and min(radii) > 0.2      # stays in an annulus — it orbits, never escapes
+
+
+def test_quadratic_drag_gives_terminal_velocity():
+    """Under gravity + quadratic drag a falling body approaches a finite terminal speed √(mg/k)."""
+    import math
+    w = PhysicsWorld(seed=3, gravity=20.0, air_drag=1.0, arena=1e12, dt=0.002, substeps=1, drag_k=0.5)
+    w.reset()
+    w.bodies[0].mass = 1.0
+    w.bodies[0].y = 1e9
+    w.bodies[0].vx = w.bodies[0].vy = 0.0
+    w.bodies[0].on_ground = False
+    for _ in range(8000):
+        w.step("noop")
+    v_term = abs(w.bodies[0].vy)
+    assert abs(v_term - math.sqrt(1.0 * 20.0 / 0.5)) < 0.5    # √(mg/k) = √40 ≈ 6.32
