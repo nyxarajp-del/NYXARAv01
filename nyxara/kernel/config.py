@@ -176,6 +176,7 @@ class FeatureFlags(BaseModel):
     synthetic_self_curation: bool = True     # growth/synthesis.py — AlphaGo-Zero synthetic data (Rule 4)
     dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
     novel_discovery: bool = True             # growth/eureka.py — self-generated, prover-certified novel discovery (Rule 4)
+    law_discovery: bool = True               # growth/law_discovery.py — discover NEW empirical/physical laws from data & self-run experiments, no LLM (Rule 4)
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)

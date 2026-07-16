@@ -16,6 +16,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/discover``          — the autonomous discovery loop: ``{cycles?}`` → belief updates.
 * ``POST /v1/breakthrough``      — truly novel problem solving: ``{generations?, population?}``
   → invent → prove → keep novel + interesting.
+* ``POST /v1/discover-law``      — Frontier Law Discovery: ``{rounds?, domain?}`` → invent a NEW
+  empirical/physical law from data & self-run experiments (no LLM); corroborated or honest abstain.
 * ``POST /v1/generalize``        — open-world generalization: ``{budget?}`` → crack a hidden,
   never-before-seen alien machine from first principles (observe→hypothesize→test→model).
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
@@ -124,6 +126,13 @@ class BreakthroughRequest(BaseModel):
     # Open-ended novel-discovery generations and per-generation population; both kept bounded.
     generations: int = Field(default=4, ge=1, le=50)
     population: int = Field(default=24, ge=5, le=200)
+
+
+class DiscoverLawRequest(BaseModel):
+    # How many law-discovery rounds to run (bounded), and an optional domain to steer the search:
+    # "dynamics" (SINDy), "invariant" (Noether), "data" (self-generated), or omitted (physics sandbox).
+    rounds: int = Field(default=1, ge=1, le=20)
+    domain: Optional[str] = Field(default=None)
 
 
 class MetaDiscoverRequest(BaseModel):
@@ -473,6 +482,13 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/breakthrough", dependencies=auth)
     def breakthrough(req: BreakthroughRequest) -> dict:
         return core.breakthrough(req.generations, req.population)
+
+    @app.post("/v1/discover-law", dependencies=auth)
+    def discover_law(req: DiscoverLawRequest = DiscoverLawRequest()) -> dict:
+        # She invents a NEW empirical/physical law — by symbolic regression, SINDy, invariant
+        # discovery, or experiments she runs herself in the physics sandbox — with no LLM in the
+        # loop. Corroborated on held-out + extrapolation data, or an honest abstention.
+        return core.discover_laws(req.rounds, req.domain)
 
     @app.post("/v1/meta_discover", dependencies=auth)
     def meta_discover(req: MetaDiscoverRequest) -> dict:

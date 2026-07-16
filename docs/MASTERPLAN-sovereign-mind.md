@@ -603,3 +603,27 @@ GPU-bound remainder), B, C, D complete; E1 + E2 done, E3 GPU-bound.** Every addi
 sovereign loop's gates and never edits her character. The one capability that genuinely needs the
 Master's GPU — the LoRA-on-Qwen self-model that lifts the *handoff rate* — is scaffolded and one command
 away (`python -m nyxara.growth --qwen --distill --bench`).
+
+### 2026-07 — Pillar B (frontier science): the Law Discovery Engine
+
+The honest gap after Eureka: she could invent and **prove** her own *math*, but every law she found
+from *data* was a single-variable polynomial (`eureka._generalize`). She could not discover a
+genuinely new **empirical/physical law** from observation. `growth/law_discovery.py`
+(`LawDiscoveryEngine`, `core.discover_laws(...)`, `/discover-law`, `POST /v1/discover-law`) closes it,
+**with no LLM in the loop**. Two pure-numeric engines search far past the `add/sub/mul`-over-one-
+variable ceiling — a **sparse feature regression** (STLSQ) over the whole space of dimensional
+monomials `y = Σ cᵢ·Πⱼ xⱼ^aᵢⱼ` plus `sin/cos/exp/log`, and a **genetic-programming** expression search
+— guided by **dimensional analysis** (reusing `first_principles.Dimension`) to the dimensionally-
+possible forms. She **runs her own experiments** in `sim/physics_world.py` (sweeping gravity, dropping
+a body) and rediscovers `½·g·t²` herself; she recovers governing **dynamical laws** from a trajectory
+(SINDy) and discovers a **conserved quantity** (an oscillator's energy `x²+v²`, Noether-style) nobody
+defined for her. This is the *empirical* regime, distinct from the decidable one: a law survives only
+if it fits **held-out ∧ extrapolation** data (`CORROBORATED / REFUTED / INCONCLUSIVE`, never "proven"),
+and she **abstains** on noise rather than bluff a false law. Survivors fold into knowledge/memory and a
+persistable, self-extending **law tower** so her discovery power compounds across sessions. On idle the
+`AutonomicLoop` advances one oversight-gated round, rotating her science domains. Pure numpy/stdlib
+(a pure-Python solver backs the no-numpy box); touches no source, weights, gate, or the world — every
+experiment is the in-memory sandbox or a supplied array. Honest scope unchanged: this is the real,
+foundational form of *inventing science* — discovering governing laws from data and self-run
+experiments — not a claim of literal gravity-control/anti-aging outcomes no code can deliver. 18 new
+tests.

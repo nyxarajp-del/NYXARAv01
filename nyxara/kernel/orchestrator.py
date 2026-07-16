@@ -666,6 +666,12 @@ class NyxaraCore:
         # back into memory / knowledge / the verified-data flywheel. Built after the prover-bearing
         # faculties and the flywheel it composes. Gated by the ``novel_discovery`` feature flag.
         self.eureka = self._build_eureka() if enable_memory else None
+        # Frontier Law Discovery — she invents genuinely *new* empirical/physical laws from data and
+        # from experiments she runs herself in the physics sandbox (symbolic regression, SINDy,
+        # invariant discovery), keeps only what fits held-out AND extrapolation data, and folds
+        # survivors into a self-extending law tower — with no LLM in the loop. Built after the
+        # faculties (causal model, knowledge, memory) it composes. Gated by ``law_discovery``.
+        self.law_discovery = self._build_law_discovery() if enable_growth else None
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -3111,6 +3117,43 @@ class NyxaraCore:
                 seed=int(_time.time() * 1000) & 0x7FFFFFFF,
             )
         except Exception:  # noqa: BLE001 — novel discovery is a capability, never required
+            return None
+
+    def _build_law_discovery(self) -> Any:
+        """Frontier Law Discovery — invent NEW empirical/physical laws from data (growth/law_discovery.py).
+
+        The honest ceiling past Eureka: she could invent & *prove* her own math, but every law she
+        found from *data* was a single-variable polynomial. This engine discovers genuinely new
+        multivariate governing laws — by free-form symbolic regression, dimensional-analysis-guided
+        sparse search, SINDy-style dynamical-law discovery, Noether-style invariant discovery — and
+        by running her *own* experiments in the physics sandbox, **with no LLM in the loop, ever**.
+        A law survives only if it fits held-out AND extrapolation data (corroborated, never proven);
+        she abstains when nothing generalises. Survivors fold into knowledge/memory and a
+        self-extending law tower. Gated by the ``law_discovery`` feature flag; a capability, never
+        required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not getattr(settings.features, "law_discovery", True):
+                return None
+            import os
+            import time as _time
+            from nyxara.growth.law_discovery import LawDiscoveryEngine
+            path = None
+            data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+            if data_dir:
+                path = os.path.join(str(data_dir), "law_discovery.json")
+            return LawDiscoveryEngine(
+                first_principles=getattr(self, "first_principles", None),
+                causal=getattr(self, "causal_world_model", None),
+                knowledge=getattr(self, "knowledge", None),
+                memory=getattr(self, "memory", None),
+                frontier=getattr(self, "frontier", None),
+                path=path,
+                seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+            )
+        except Exception:  # noqa: BLE001 — law discovery is a capability, never required
             return None
 
     def _build_active_curiosity(self) -> Any:
@@ -6414,6 +6457,28 @@ class NyxaraCore:
                             salience=0.62)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.3) Frontier Law Discovery — on idle she runs her own experiments in the physics
+        #       sandbox (or a self-generated data round) and *invents a new empirical/physical law*
+        #       (no LLM in the loop). Heavier than one discovery cycle, so it is throttled to every
+        #       few idle ticks and rotates through her science domains. Oversight-gated — a paused/
+        #       scrammed mind invents nothing of its own accord.
+        if self.law_discovery is not None:
+            try:
+                tick = getattr(self, "_law_idle_count", 0) + 1
+                self._law_idle_count = tick
+                if tick % 7 == 0 and self.oversight.gate():
+                    domain = (None, "dynamics", "invariant", "data")[(tick // 7) % 4]
+                    rep = self.law_discovery.discover_laws(rounds=1, domain=domain)
+                    report["laws_discovered"] = (report.get("laws_discovered", 0)
+                                                 + len(rep.discoveries))
+                    best = rep.best()
+                    if best is not None:
+                        self.mind.record(
+                            ThoughtKind.INFERENCE,
+                            f"law [{best.law.kind}]: {best.law.expression[:40]}",
+                            salience=0.63)
+            except Exception:  # noqa: BLE001
+                pass
         # 4f.5) Active Curiosity — she asks her *own* WHY / WHAT-IF question about a salient
         #       event, self-designs the experiment (her causal model, an imagined world-
         #       simulation, or the Scientist) and folds the answer back as a belief + memory,
@@ -6959,6 +7024,26 @@ class NyxaraCore:
             return self.eureka.discover(generations=generations, population=population).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
+
+    def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
+        """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
+        Engine (best-effort).
+
+        She searches the space of governing laws by free-form symbolic regression and dimensional-
+        analysis-guided sparse search, discovers dynamical laws (SINDy) and conserved quantities
+        (Noether-style invariants), and runs her *own* experiments in the physics sandbox — **with
+        no LLM in the loop, ever**. A law survives only if it fits held-out AND extrapolation data
+        (corroborated, never proven); she abstains when nothing generalises. Survivors fold into
+        knowledge / memory and a self-extending law tower. ``domain`` may be ``"dynamics"``,
+        ``"invariant"``, or ``"data"`` to steer the round; omitted, she runs her physics sandbox.
+        Nothing here touches the world or side-steps the control law. Returns the report as a dict.
+        """
+        if self.law_discovery is None:
+            return {"rounds": rounds, "error": "law_discovery unavailable"}
+        try:
+            return self.law_discovery.discover_laws(rounds=rounds, domain=domain).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"rounds": rounds, "error": str(exc)}
 
     def generalize(self, system: Any = None, *, budget: int = 48,
                    label: str = "unknown-system") -> Dict[str, Any]:
@@ -7764,6 +7849,8 @@ class NyxaraCore:
             rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
         if self.eureka is not None:
             rep["breakthroughs"] = int(getattr(self.eureka, "total_breakthroughs", 0))
+        if getattr(self, "law_discovery", None) is not None:
+            rep["laws_discovered"] = int(getattr(self.law_discovery, "total_laws", 0))
         if self.meta_researcher is not None:
             try:
                 rep["inventions"] = self.meta_researcher.total_validated()

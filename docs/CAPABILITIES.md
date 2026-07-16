@@ -28,7 +28,7 @@ applied to the documentation itself).
 | 6 | Long-Horizon Planning | `nyxara.planning.grand_plan` | UPGRADED |
 | 7 | Autonomous Goal Pursuit | `nyxara.agency.mission` | REAL+WIRED |
 | 8 | Active Curiosity | `nyxara.growth.active_curiosity` | REAL+WIRED |
-| 9 | Scientific Discovery | `nyxara.growth.autonomous_scientist` | REAL+WIRED |
+| 9 | Scientific Discovery | `nyxara.growth.autonomous_scientist` + `nyxara.growth.law_discovery` | UPGRADED |
 | 10 | Invent New Algorithms | `nyxara.growth.eureka` | UPGRADED |
 | 11 | Invent New Learning Methods | `nyxara.growth.genesis` | UPGRADED |
 | 12 | Recursive Self-Improvement | `nyxara.growth.recursive_improvement` | UPGRADED |
@@ -91,6 +91,7 @@ applied to the documentation itself).
 | 69 | Oracle-based Verification | `nyxara.growth.prover` | REAL+WIRED |
 | 70 | Honest Failure Recognition | `nyxara.observe.honesty` | UPGRADED |
 | 71 | Own-Model Ownership (Qwen2.5-0.5B LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
+| 72 | Frontier Law Discovery (invent NEW empirical/physical laws from data & self-run experiments, no LLM) | `nyxara.growth.law_discovery` | REAL+WIRED |
 
 ## What changed in this pass (the genuinely-weak items)
 
@@ -349,3 +350,42 @@ the *space she searches is no longer bounded by what a human wrote down*:
 
 No safety gate is bypassed or re-implemented: invention only ever *proposes*; verification (the
 `Prover`) and promotion (the gauntlet + `nyxara.growth.improvement_proof`) still *dispose*.
+
+## Change set: frontier law discovery (caps #9, #72)
+
+The honest gap that remained after Eureka: NYXARA could invent and **prove** her own *math*, but
+every law she found from *data* was a single-variable polynomial in a decidable domain
+(`eureka._generalize`). She could not discover a genuinely new **empirical / physical law** — a
+multivariate relationship governing observations — the way real machine science does. This change
+set closes that gap, **with no LLM in the loop, ever** — `nyxara.growth.law_discovery`
+(`LawDiscoveryEngine`, `core.discover_laws(...)`, `/discover-law`, `POST /v1/discover-law`).
+
+- **Free-form symbolic regression.** Two pure-numeric engines search far past Eureka's
+  `add/sub/mul`-over-one-variable palette: a **sparse feature regression** (STLSQ) over a rich
+  library of power-law and transcendental terms in *many* variables — the whole space of dimensional
+  monomials `y = Σ cᵢ·Πⱼ xⱼ^aᵢⱼ` plus `sin/cos/exp/log` — and a **genetic-programming** search over
+  expression trees whose functional form is discovered and whose scale is fit by least squares.
+- **Dimensional-analysis guidance.** When the variables' physical dimensions are known she prunes
+  dimensionally-inconsistent candidates (reusing the `Dimension` type from
+  `nyxara.mind.first_principles`), narrowing an infinite search to the few dimensionally-possible
+  forms — exactly how a physicist works.
+- **She runs her own experiments.** She designs and runs interventions in the `PhysicsWorld` sandbox
+  (`nyxara.sim.physics_world`) — sweeping gravity, dropping a body — collects the data, and
+  **rediscovers `½·g·t²` herself** — no equation handed to her. This also wires the physics sandbox,
+  previously a curiosity-only stream, into a genuine hypothesis testbed.
+- **Dynamical laws (SINDy) and conserved quantities (Noether).** From a trajectory she recovers the
+  governing `dx/dt = f(x)` by sparse regression on numerical derivatives, and discovers a *conserved
+  quantity* (e.g. an oscillator's energy `x²+v²`) as the minimum-variance direction of the feature
+  covariance — an invariant nobody defined for her.
+- **Honest empirical validation.** This is the *empirical* regime, distinct from Eureka's decidable
+  one: a law survives only if it fits **held-out** *and* **extrapolation** data (`CORROBORATED /
+  REFUTED / INCONCLUSIVE` — "falsifiable, not yet refuted", never "proven"), and she **abstains** on
+  noise rather than inventing a false law. Survivors fold into knowledge / memory and a
+  self-extending, persistable **law tower**, so her discovery power compounds across sessions.
+
+Honest scope: this is the real, foundational form of "inventing science" — discovering governing
+laws from data and self-run experiments — not a claim of literal gravity-control or anti-aging
+outcomes, which no software can deliver. Pure numpy/stdlib (a pure-Python solver backs the no-numpy
+box); touches no source, no weights, no gate, and no external world (every experiment is the
+in-memory sandbox or a supplied array). On idle ticks the `AutonomicLoop` advances one
+oversight-gated round, rotating through her science domains. 18 new tests.
