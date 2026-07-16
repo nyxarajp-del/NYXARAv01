@@ -113,6 +113,7 @@ commands:
   /selfcorrect <goal> pursue a goal with self-correction: detect wrong/stuck → experiment to fill the gap → abstain honestly
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
+  /discover-law [dom] invent a NEW empirical/physical law from data & self-run experiments (no LLM); dom: dynamics|invariant|data
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
   /adapt [systems]   adapt to a new environment (model its systems + re-organize her brain under pressure)
@@ -229,6 +230,13 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 4
         print(json.dumps(core.breakthrough(n), indent=2, default=str))
+    elif cmd in ("discover-law", "discover_law", "law", "laws"):
+        # /discover-law            -> run her physics-sandbox experiment round
+        # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)
+        domain = arg.strip() or None
+        if domain not in (None, "dynamics", "invariant", "data"):
+            domain = None
+        print(json.dumps(core.discover_laws(1, domain), indent=2, default=str))
     elif cmd in ("generalize", "openworld", "open-world"):
         try:
             budget = int(arg) if arg else 48
