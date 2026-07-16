@@ -1073,6 +1073,12 @@ class NyxaraCore:
                                   causal_model=getattr(self, "causal_world_model", None),
                                   knowledge_graph=getattr(self, "knowledge_graph", None),
                                   intuition=getattr(self, "intuition", None),
+                                  # the laws she discovered herself + her settled beliefs, so her
+                                  # own chain of thought answers from what her autonomous science
+                                  # actually learned (the discovery→reasoning feedback loop).
+                                  law_discovery=getattr(self, "law_discovery", None),
+                                  belief_model=getattr(
+                                      getattr(self, "autonomous_scientist", None), "model", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -3121,16 +3127,71 @@ class NyxaraCore:
         loop runs with no external prompting, creating information rather than only learning it.
         """
         try:
+            import os as _os
+            from nyxara.kernel.config import get_settings as _get_settings
             from nyxara.growth.autonomous_scientist import AutonomousScientist
+            _settings = (self.settings if getattr(self, "settings", None) is not None
+                         else _get_settings())
+            _data_dir = getattr(getattr(_settings, "paths", None), "data_dir", None)
+            _belief_path = (_os.path.join(str(_data_dir), "beliefs.json")
+                            if _data_dir else None)
             return AutonomousScientist(
                 scientist=getattr(self, "scientist", None),
                 world_model=getattr(self, "world_model", None),
                 memory=getattr(self, "memory", None),
                 knowledge=getattr(self, "knowledge", None),
                 gap_source=self.known_unknowns,
+                # persist her settled beliefs so her science compounds across restarts (lifelong)
+                path=_belief_path,
+                # She poses her OWN novel questions from her curiosity engine (built later in
+                # __init__, so bound lazily) and weights them by measured learning progress from
+                # the competence ledger — self-directed, no template list, no LLM.
+                curiosity_source=self._latest_curiosity_question,
+                competence=self._ensure_competence_ledger(),
                 meta_researcher=getattr(self, "meta_researcher", None),
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
+            return None
+
+    def _latest_curiosity_question(self) -> Any:
+        """The most recent question her curiosity engine chose — reused (not re-run) as the
+        Autonomous Scientist's self-posed inquiry, so the two faculties share one act of wondering
+        instead of duplicating it. Returns a ``Question`` (with VOI/novelty) or ``None``."""
+        ac = getattr(self, "active_curiosity", None)
+        if ac is None:
+            return None
+        try:
+            for cp in reversed(ac.all_passes()):
+                chosen = getattr(cp, "chosen", None)
+                if chosen is not None and getattr(chosen, "text", ""):
+                    return chosen
+        except Exception:  # noqa: BLE001 — a curiosity feed is a booster, never required
+            return None
+        return None
+
+    def _mint_skill_from_law(self, law: Any) -> Optional[str]:
+        """Turn a law she just discovered into a reusable skill in her skill tree, so a discovery
+        becomes a new *ability* (not only a fact) that later work can compose over. Best-effort:
+        returns the skill name if minted/practised, else None. No LLM; nothing reaches the world."""
+        tree = getattr(self, "skilltree", None)
+        if tree is None or law is None:
+            return None
+        try:
+            target = str(getattr(law, "target", "") or "law").strip() or "law"
+            name = f"apply_law::{target}"[:80]
+            if tree.get(name) is None:
+                complexity = float(getattr(law, "complexity", 1) or 1)
+                tree.add_skill(
+                    name,
+                    category="discovered_law",
+                    difficulty=max(0.1, min(0.9, complexity / 10.0)),
+                    value=0.7,
+                    description=str(getattr(law, "expression", ""))[:160])
+            # practising the freshly-minted (prerequisite-free, already-unlocked) skill earns her
+            # initial proficiency in USING what she discovered.
+            tree.practice(name, quality=0.8)
+            return name
+        except Exception:  # noqa: BLE001 — skill minting is a capability, never fatal
             return None
 
     def _build_eureka(self) -> Any:
@@ -6674,6 +6735,16 @@ class NyxaraCore:
                                 ThoughtKind.INFERENCE,
                                 f"law [{best.law.kind}]: {best.law.expression[:40]}",
                                 salience=0.63)
+                    # a fresh discovery becomes a reusable SKILL — knowing → being able (capability
+                    # growth, not just knowledge growth). Mint from the newest law in her tower.
+                    if report.get("laws_discovered"):
+                        try:
+                            laws = self.law_discovery.known_laws()
+                            minted = self._mint_skill_from_law(laws[-1]) if laws else None
+                            if minted:
+                                report["skill_minted"] = minted
+                        except Exception:  # noqa: BLE001
+                            pass
                     # periodically compound her discoveries into deeper theory (meta-law unification)
                     if tick % 35 == 0 and hasattr(self.law_discovery, "unify_laws"):
                         for uni in (self.law_discovery.unify_laws() or [])[:1]:

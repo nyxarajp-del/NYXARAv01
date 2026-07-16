@@ -111,17 +111,21 @@ def classify_intent(text: str) -> str:
     return "chat"
 
 
-# which sub-engines may answer which intent (bandit re-orders within the list)
+# which sub-engines may answer which intent (bandit re-orders within the list).
+# "law" is offered first on quantitative/factual intents: if she has discovered a governing law
+# that fits the question it grounds the answer; otherwise it abstains and the others take over.
 _INTENT_ENGINES: Dict[str, List[str]] = {
-    "causal_why": ["causal"],
-    "causal_whatif": ["causal"],
+    "causal_why": ["law", "causal"],
+    "causal_whatif": ["law", "causal"],
     "causal_pair": ["causal"],
     "counterfactual": ["causal"],
-    "intervention": ["intervention"],
-    "computational": ["chain", "compute"],
-    "factual": ["graph"],
+    "intervention": ["law", "intervention"],
+    "computational": ["law", "chain", "compute"],
+    "factual": ["law", "graph"],
     "analogy": ["analogy", "graph"],
-    "chat": [],
+    # "law" is offered on the catch-all too so a yes/no proposition she has settled ("does X …?")
+    # can be answered from her own belief; it abstains on ordinary chat, so nothing else changes.
+    "chat": ["law"],
 }
 
 
@@ -296,6 +300,7 @@ class NativeReasoner:
 
     def __init__(self, *, knowledge_graph: Any = None, causal_model: Any = None,
                  memory: Any = None, compute: Any = None,
+                 law_discovery: Any = None, belief_model: Any = None,
                  settings: Any = None, data_dir: Any = None) -> None:
         if settings is None:
             from nyxara.kernel.config import get_settings
@@ -306,6 +311,11 @@ class NativeReasoner:
         self.causal = causal_model
         self.memory = memory
         self.compute = compute
+        # the empirical/physical laws she DISCOVERED herself (law_discovery) and her settled
+        # BeliefModel — so self-learning actually grounds her answers instead of only living on
+        # disk. Both optional; the rung abstains cleanly when neither applies. No LLM.
+        self.law_discovery = law_discovery
+        self.belief_model = belief_model
 
         base = data_dir
         if base is None:
@@ -530,6 +540,7 @@ class NativeReasoner:
                        f"engine order for {intent!r} (learned): {', '.join(engines)}")
         table: Dict[str, Callable[[str, str, List[ReasoningStep]],
                                   Optional[Tuple[str, float, bool, str]]]] = {
+            "law": self._law_answer,
             "causal": self._causal_answer,
             "intervention": self._intervention_answer,
             "chain": self._chain_answer,
@@ -549,6 +560,109 @@ class NativeReasoner:
                 answer, conf, verified, cert = hit
                 return answer, conf, engine, verified, cert
         return None
+
+    # ------------------------------------------------------------------ #
+    # engine: the laws SHE discovered — self-learning that grounds an answer
+    # ------------------------------------------------------------------ #
+    def _law_answer(self, part: str, intent: str, steps: List[ReasoningStep]
+                    ) -> Optional[Tuple[str, float, bool, str]]:
+        """Answer from a law NYXARA discovered herself (``law_discovery``) or a belief she settled
+        (``belief_model``). This is the closed feedback loop: what her autonomous science learned
+        actually changes what she says. Abstains (``None``) when nothing she discovered applies, so
+        the other engines take over cleanly. No LLM — she evaluates her OWN corroborated law."""
+        eng = self.law_discovery
+        if eng is not None:
+            try:
+                var_values = self._extract_var_values(part)
+                # 1) quantitative: plug the given inputs into the best-fitting discovered law
+                if var_values:
+                    res = eng.apply(var_values, query=part)
+                    if res is not None:
+                        target = str(res.get("target", "the result"))
+                        value = float(res.get("value"))
+                        expr = str(res.get("expression", ""))
+                        inputs = ", ".join(f"{k}={v:g}" for k, v in
+                                           (res.get("inputs") or {}).items())
+                        self._step(steps, StepKind.REASON,
+                                   f"applied a law I discovered myself: {expr}",
+                                   detail=f"with {inputs}", confidence=0.9,
+                                   evidence=[expr])
+                        answer = (f"{target} = {value:.6g} — from the law I discovered "
+                                  f"myself: {expr} (with {inputs}).")
+                        return answer, 0.9, True, \
+                            f"evaluated my own corroborated law {expr}"
+                # 2) qualitative: name the governing law she found for this topic
+                law = eng.recall(part)
+                if law is not None:
+                    self._step(steps, StepKind.REASON,
+                               "recalled a governing law from my own discovery tower",
+                               detail=law.expression, confidence=0.8,
+                               evidence=[law.expression])
+                    answer = (f"From my own experiments I discovered the law "
+                              f"{law.expression}.")
+                    return answer, 0.8, True, \
+                        f"corroborated law {law.signature()} from my discovery tower"
+            except Exception:  # noqa: BLE001 — a discovery engine hiccup defers, never crashes
+                pass
+        # 3) a settled belief answers a yes/no proposition she has investigated
+        belief_hit = self._belief_answer(part, steps)
+        if belief_hit is not None:
+            return belief_hit
+        return None
+
+    _RE_VAR_ASSIGN = re.compile(
+        r"([A-Za-z_]\w*)\s*(?:=|:|\bis\b|\bof\b|\bequals?\b|\bequal to\b)\s*"
+        r"(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
+
+    def _extract_var_values(self, text: str) -> Dict[str, float]:
+        """Pull ``name = number`` style assignments out of a question (``m=3``, ``g of 9.8``,
+        ``t is 2``). The keys are matched against a discovered law's variables in ``apply``."""
+        out: Dict[str, float] = {}
+        for name, num in self._RE_VAR_ASSIGN.findall(text or ""):
+            try:
+                out[name.lower()] = float(num)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _belief_answer(self, part: str, steps: List[ReasoningStep]
+                       ) -> Optional[Tuple[str, float, bool, str]]:
+        """Answer a proposition from a belief she settled through her own investigations. Matches
+        conservatively (the belief's statement must overlap the question strongly) so she never
+        launders an unrelated belief into an answer."""
+        bm = self.belief_model
+        beliefs = getattr(bm, "beliefs", None)
+        if not beliefs:
+            return None
+        ql = (part or "").lower()
+        q_tokens = {w.strip("?.,!:;\"'()") for w in ql.split() if len(w) > 3}
+        if not q_tokens:
+            return None
+        best = None
+        best_overlap = 0.0
+        for belief in beliefs.values():
+            stmt = (getattr(belief, "statement", "") or "").lower()
+            s_tokens = {w.strip("?.,!:;\"'()") for w in stmt.split() if len(w) > 3}
+            if not s_tokens:
+                continue
+            overlap = len(q_tokens & s_tokens) / max(1, len(s_tokens))
+            if overlap > best_overlap:
+                best_overlap, best = overlap, belief
+        # require a strong match and a belief that is actually settled (not still at 0.5)
+        if best is None or best_overlap < 0.6 or getattr(best, "verdict", "") == "inconclusive":
+            return None
+        verdict = getattr(best, "verdict", "inconclusive")
+        conf = float(getattr(best, "confidence", 0.5) or 0.5)
+        self._step(steps, StepKind.REASON,
+                   f"recalled a belief I settled through my own investigation: "
+                   f"{verdict!r}", detail=getattr(best, "statement", "")[:100],
+                   confidence=conf, evidence=[getattr(best, "last_reasoning", "")[:80]])
+        yn = {"supported": "Yes", "refuted": "No"}.get(verdict, "Uncertain")
+        answer = (f"{yn} — from my own investigation of "
+                  f"{getattr(best, 'statement', 'this')!r}: {verdict} "
+                  f"(confidence {conf:.0%}).")
+        return answer, _clamp(max(conf, 0.4)), True, \
+            f"settled belief {verdict} from {getattr(best, 'evidence_count', 1)} investigations"
 
     # ------------------------------------------------------------------ #
     # engine: the learned causal graph — why / what-if / pair / counterfactual
