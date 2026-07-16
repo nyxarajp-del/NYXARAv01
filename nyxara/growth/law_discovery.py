@@ -79,6 +79,16 @@ def _is_finite(x: float) -> bool:
     return isinstance(x, (int, float)) and math.isfinite(x)
 
 
+def _is_number(x: Any) -> bool:
+    """True when ``x`` is a real, finite number (bools excluded — they are not measurements)."""
+    if isinstance(x, bool):
+        return False
+    try:
+        return math.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
 def _solve_lstsq(rows: List[List[float]], target: List[float],
                  ridge: float = 1e-9) -> Optional[List[float]]:
     """Least-squares ``min‖A·c − b‖`` for a design matrix ``rows`` (m×n) and ``target`` b (m).
@@ -1466,6 +1476,90 @@ class LawDiscoveryEngine:
     # ------------------------------------------------------------------ #
     def known_laws(self) -> List[Law]:
         return list(self._laws)
+
+    # ------------------------------------------------------------------ #
+    # Public: USE what she discovered — the bridge back into her reasoning
+    # ------------------------------------------------------------------ #
+    def recall(self, query: Any) -> Optional[Law]:
+        """Return the discovered law most relevant to ``query`` (a natural-language string or an
+        iterable of variable names), or ``None`` when nothing she has discovered applies.
+
+        This is the missing link that lets a self-discovered law actually *ground an answer*: her
+        reasoner asks ``recall("how far does it fall in time t under gravity g?")`` and gets back
+        the ``fall_distance = ½·g·t²`` she invented herself from her own experiments. No LLM — a
+        keyword/variable match over her corroborated law tower, ranked by coverage then parsimony."""
+        if not self._laws:
+            return None
+        try:
+            if isinstance(query, str):
+                tokens = {w.strip("?.,!:;\"'()").lower() for w in query.split()}
+            else:
+                tokens = {str(w).strip().lower() for w in query}
+        except Exception:  # noqa: BLE001
+            return None
+        tokens.discard("")
+        if not tokens:
+            return None
+        best: Optional[Law] = None
+        best_key: Tuple[float, float, int] = (-1.0, 0.0, 0)
+        for law in self._laws:
+            target = str(law.target).lower()
+            names = [str(v).lower() for v in law.var_names]
+            score = 0.0
+            if target and (target in tokens or any(target in t or t in target for t in tokens)):
+                score += 2.0
+            matched_vars = sum(1 for v in names if v and v in tokens)
+            score += float(matched_vars)
+            if score <= 0.0:
+                continue
+            # rank: total relevance, then variable coverage, then simpler laws (lower complexity)
+            key = (score, matched_vars / max(1, len(names)), -int(law.complexity))
+            if key > best_key:
+                best_key, best = key, law
+        return best
+
+    def apply(self, var_values: Dict[str, float],
+              *, query: Any = None) -> Optional[Dict[str, Any]]:
+        """Evaluate a discovered law at concrete inputs and return its prediction.
+
+        ``var_values`` maps variable names to numbers. Picks the corroborated law whose variables
+        are all supplied (most-covering, then simplest); when ``query`` is given it is used to break
+        ties toward the most relevant law. Returns ``{"target","value","law","expression",...}`` or
+        ``None`` if no discovered law fits the supplied variables. Deterministic, no LLM."""
+        if not self._laws or not isinstance(var_values, dict) or not var_values:
+            return None
+        keys = {str(k).lower(): float(v) for k, v in var_values.items()
+                if _is_number(v)}
+        if not keys:
+            return None
+        preferred = self.recall(query) if query is not None else None
+        best: Optional[Law] = None
+        best_key: Tuple[int, int, int] = (-1, 0, 0)
+        for law in self._laws:
+            names = [str(v).lower() for v in law.var_names]
+            if not names or any(n not in keys for n in names):
+                continue                                   # need every input the law consumes
+            cover = len(names)
+            prefer = 1 if (preferred is not None and law is preferred) else 0
+            key = (prefer, cover, -int(law.complexity))
+            if key > best_key:
+                best_key, best = key, law
+        if best is None:
+            return None
+        try:
+            cols = [[keys[str(v).lower()]] for v in best.var_names]
+            out = best.predict(cols)
+            if not out:
+                return None
+            return {
+                "target": best.target,
+                "value": float(out[0]),
+                "expression": best.expression,
+                "law": best.to_dict(),
+                "inputs": {str(v): keys[str(v).lower()] for v in best.var_names},
+            }
+        except Exception:  # noqa: BLE001 — evaluation is best-effort, never fatal
+            return None
 
     def all_reports(self) -> List[DiscoveryReport]:
         return list(self._reports)

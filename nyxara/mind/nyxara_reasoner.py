@@ -62,6 +62,7 @@ class NyxaraReasoner:
                  knowledge: Any = None, metaprompt: Any = None,
                  generalization_engine: Any = None, causal_model: Any = None,
                  knowledge_graph: Any = None, intuition: Any = None,
+                 law_discovery: Any = None, belief_model: Any = None,
                  max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
@@ -102,6 +103,11 @@ class NyxaraReasoner:
         # reasoning trace is authored by her algorithms, never by prompting a model.
         self.causal_model = causal_model
         self.knowledge_graph = knowledge_graph
+        # her SELF-DISCOVERED empirical laws + settled beliefs — so the native chain of thought
+        # can answer from what her autonomous science actually learned (closes the loop from
+        # discovery back into reasoning; no LLM).
+        self.law_discovery = law_discovery
+        self.belief_model = belief_model
         self._native: Any = None  # lazily built native chain-of-thought orchestrator
         self.last_native_trace: Optional[List[dict]] = None  # last turn's inspectable steps
 
@@ -548,6 +554,8 @@ class NyxaraReasoner:
                                               causal_model=self.causal_model,
                                               memory=self.memory,
                                               compute=self._compute_engine(),
+                                              law_discovery=self.law_discovery,
+                                              belief_model=self.belief_model,
                                               settings=self.settings)
             except Exception:  # noqa: BLE001 — a capability, never a hard dependency
                 self._native = False

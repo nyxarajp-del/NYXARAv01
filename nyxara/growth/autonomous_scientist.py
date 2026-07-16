@@ -30,6 +30,8 @@ every experiment is sandboxed, exactly as the Scientist already guarantees.
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -55,6 +57,8 @@ class QuestionOrigin(str, Enum):
     GAP = "gap"               # a known-unknown surfaced from self-knowledge
     SEED = "seed"             # self-generated, genuinely testable proposition
     INVENTION = "invention"   # a theory/optimization she invented via meta-research
+    CURIOSITY = "curiosity"   # chosen by her curiosity engine (VOI × novelty × learning-progress)
+    REVISIT = "revisit"       # her own most-uncertain belief, re-examined to sharpen it
 
 
 # --------------------------------------------------------------------------- #
@@ -251,17 +255,33 @@ class AutonomousScientist:
     knowledge:    KnowledgeBase — passed to an on-demand Scientist (optional).
     gap_source:   a zero-arg callable returning a mapping/iterable of known-unknowns to mine for
                   questions during Observe (optional; e.g. ``core.known_unknowns``).
+    curiosity_source: a zero-arg callable returning her next self-posed question — a string, a
+                  :class:`~nyxara.growth.active_curiosity.Question`, or a ``CuriosityPass`` whose
+                  ``chosen`` question is used. Its value-of-information / novelty becomes the base
+                  score. This is what makes her genuinely self-directed: questions come from what
+                  she is *most curious about and least competent at*, not a fixed template list.
+    competence:   a :class:`~nyxara.memory.competence.CompetenceLedger` (optional). Read to weight
+                  each candidate by *learning progress* (favour where she is weakest) and written
+                  back after every cycle so a topic she has mastered stops being chosen — the
+                  automatic-curriculum signal, no teacher required.
     """
 
     def __init__(self, *, scientist: Any = None, world_model: Any = None,
                  memory: Any = None, knowledge: Any = None,
                  gap_source: Optional[Callable[[], Any]] = None,
+                 curiosity_source: Optional[Callable[[], Any]] = None,
+                 competence: Any = None, path: Optional[str] = None,
+                 save_every: int = 8,
                  meta_researcher: Any = None, max_frontier: int = 64) -> None:
         self.scientist = scientist
         self.world_model = world_model
         self.memory = memory
         self.knowledge = knowledge
         self.gap_source = gap_source
+        self.curiosity_source = curiosity_source
+        self.competence = competence
+        self.path = path                  # persist the belief model so learning compounds lifelong
+        self.save_every = max(1, int(save_every))
         self.meta_researcher = meta_researcher
         self.model = BeliefModel()
         self._frontier: Deque[tuple] = deque(maxlen=max(8, int(max_frontier)))
@@ -269,6 +289,8 @@ class AutonomousScientist:
         self._seed_n = 0                  # advances the self-generated proposition stream
         self._cycles: List[DiscoveryCycle] = []
         self._cycle_count = 0
+        self._since_save = 0
+        self._load()                      # reload beliefs settled in a previous life, if any
 
     # ---------------------------------------------------------------------- #
     # Public API
@@ -307,10 +329,14 @@ class AutonomousScientist:
             cycle.belief_delta = self.model.update(report)
             cycle.created_information = bool(cycle.belief_delta.get("new"))
             cycle.world_transition_added = self._update_world_model(report, prior)
+            self._record_progress(cycle)      # competence rises → mastered topics stop being chosen
             self._enqueue_follow_up(report)
         except Exception as exc:  # noqa: BLE001 — a failed cycle is data, not a crash
             cycle.belief_delta = {"changed": False, "error": str(exc)}
         self._cycles.append(cycle)
+        self._since_save += 1
+        if self.path and self._since_save >= self.save_every:
+            self.save()
         return cycle
 
     def all_cycles(self) -> List[DiscoveryCycle]:
@@ -365,8 +391,11 @@ class AutonomousScientist:
     # Stage 1 — Observe: choose the next question (create the inquiry)
     # ---------------------------------------------------------------------- #
     def _observe(self) -> tuple:
-        """Pick the next question: a pending follow-up, then a self-knowledge gap, then a fresh
-        self-generated proposition. Never returns nothing — there is always something to test."""
+        """Pick the next question by *learning progress*: a pending follow-up first (compounding),
+        then — when her curiosity/competence faculties are wired — the candidate she is most
+        curious about and least competent at (curiosity engine, her most-uncertain belief, or a
+        self-knowledge gap), and only failing all of that a fresh self-generated proposition.
+        Never returns nothing — there is always something to test."""
         # 1) drain the frontier (follow-ups + gaps already queued), skipping seen questions
         while self._frontier:
             question, origin = self._frontier.popleft()
@@ -374,16 +403,152 @@ class AutonomousScientist:
                 self._seen.add(question)
                 return question, origin
 
-        # 2) mine a fresh gap from self-knowledge, if a source is wired
-        gap = self._next_gap()
-        if gap is not None and gap not in self._seen:
-            self._seen.add(gap)
-            return gap, QuestionOrigin.GAP
+        # 2) intrinsic-directed inquiry — engages only when a real source is wired, so the bare
+        #    offline path (below) stays deterministic. She poses her OWN novel question here.
+        directed = self._choose_directed()
+        if directed is not None:
+            question, origin = directed
+            self._seen.add(question)
+            return question, origin
 
         # 3) generate a new, genuinely testable proposition (works with zero external input)
         seed = self._next_seed()
         self._seen.add(seed)
         return seed, QuestionOrigin.SEED
+
+    # ---------------------------------------------------------------------- #
+    # Intrinsic-drive question selection — maximise expected learning progress
+    # ---------------------------------------------------------------------- #
+    def _choose_directed(self) -> Optional[tuple]:
+        """Score candidate questions from her wired faculties by ``base × learning-gain`` and
+        return the best not-yet-seen one, or ``None`` when no faculty is wired (offline fallback).
+
+        Learning progress = value-of-information/novelty × (1 − competence): she is pulled toward
+        what is both *informative* and *not yet mastered*. No LLM anywhere — every score is her own
+        measured signal."""
+        if (self.curiosity_source is None and self.gap_source is None
+                and self.competence is None):
+            return None
+        candidates: List[tuple] = []   # (score, question, origin)
+        # a) her curiosity engine — a genuinely novel, VOI-ranked question (not a template)
+        cq = self._curiosity_question()
+        if cq is not None:
+            text, base = cq
+            if text and text not in self._seen:
+                candidates.append((base * self._learn_gain(text), text, QuestionOrigin.CURIOSITY))
+        # b) her own most-uncertain belief — re-examined to reduce uncertainty (revising, not dup)
+        bq = self._uncertain_belief_question()
+        if bq is not None:
+            text, base = bq
+            if text:  # REVISIT deliberately bypasses _seen: gathering more evidence is the point
+                candidates.append((base * self._learn_gain(text), text, QuestionOrigin.REVISIT))
+        # c) a self-knowledge gap (the pre-existing known-unknowns source)
+        gq = self._next_gap()
+        if gq is not None and gq not in self._seen:
+            candidates.append((0.5 * self._learn_gain(gq), gq, QuestionOrigin.GAP))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        _, question, origin = candidates[0]
+        return question, origin
+
+    def _curiosity_question(self) -> Optional[tuple]:
+        """Pull the next question from the curiosity engine as ``(text, base_score)``. Accepts a
+        plain string, a ``Question``-like object (``.text``/``.value``/``.novelty``), or a
+        ``CuriosityPass``-like object (``.chosen``). Best-effort — never raises."""
+        if self.curiosity_source is None:
+            return None
+        try:
+            res = self.curiosity_source()
+        except Exception:  # noqa: BLE001 — a curiosity feed is a booster, never required
+            return None
+        if res is None:
+            return None
+        text: Optional[str] = None
+        base = 1.0
+        if isinstance(res, str):
+            text = res
+        else:
+            obj = getattr(res, "chosen", None) if hasattr(res, "chosen") else res
+            if obj is not None:
+                text = getattr(obj, "text", None)
+                base = float(getattr(obj, "value", 0.0) or 0.0) or float(
+                    getattr(obj, "novelty", 1.0) or 1.0)
+        if not text:
+            return None
+        base = base if base > 0.0 else 1.0
+        return str(text)[:200], max(0.05, min(2.0, base))
+
+    def _uncertain_belief_question(self) -> Optional[tuple]:
+        """Her most-uncertain belief, re-posed as its own statement so investigating *revises* the
+        same belief. Attractiveness = posterior uncertainty decayed by evidence already gathered,
+        so she stops re-asking once a belief has sharpened. Returns ``(statement, base)`` or None."""
+        if not self.model.beliefs:
+            return None
+        best: Optional[Belief] = None
+        best_u = -1.0
+        for b in self.model.beliefs.values():
+            uncertainty = 1.0 - abs(b.support_prob - 0.5) * 2.0        # 1 at 0.5, 0 when settled
+            attractiveness = uncertainty / (1.0 + 0.35 * max(0, b.evidence_count - 1))
+            if attractiveness > best_u:
+                best_u, best = attractiveness, b
+        if best is None or best_u < 0.2 or not best.statement:
+            return None
+        return best.statement, 0.4 + 0.6 * best_u
+
+    def _learn_gain(self, question: str) -> float:
+        """Learning-progress multiplier for a question: high where she is least competent."""
+        if self.competence is None:
+            return 1.0
+        try:
+            return max(0.1, 1.0 - self._competence_level(question))
+        except Exception:  # noqa: BLE001 — competence is advisory, never fatal
+            return 1.0
+
+    def _competence_level(self, question: str) -> float:
+        """Her measured competence on a question, read from the ledger by keyword match. Neutral
+        0.5 when nothing matches, so an unknown topic is treated as half-learned (real signal, no
+        false confidence)."""
+        ledger = self.competence
+        try:
+            names = list(ledger.names())
+        except Exception:  # noqa: BLE001
+            return 0.5
+        ql = question.lower()
+        levels: List[float] = []
+        for name in names:
+            key = str(name).lower()
+            if key and key in ql:
+                st = ledger.stat(name)
+                if st is not None:
+                    levels.append(float(getattr(st, "level", 0.5)))
+        return max(levels) if levels else 0.5
+
+    def _topic_key(self, question: str) -> str:
+        """A stable, coarse competence key for a question — its most informative word."""
+        words = [w.strip("?.,!:;\"'()").lower() for w in question.split()]
+        skip = {"is", "the", "a", "an", "of", "to", "do", "does", "what", "why", "how",
+                "are", "if", "in", "on", "and", "or", "with", "for", "known", "about", "i"}
+        cand = [w for w in words if len(w) > 3 and w not in skip and not w.isdigit()]
+        return cand[0] if cand else "inquiry"
+
+    def _record_progress(self, cycle: "DiscoveryCycle") -> None:
+        """Fold a completed cycle's outcome into the competence ledger so mastered topics stop
+        being chosen — the automatic curriculum. A high-confidence SUPPORTED verdict is success,
+        REFUTED/low-confidence is a miss she should keep working. Best-effort, never fatal."""
+        if self.competence is None or cycle.report is None:
+            return
+        try:
+            conclusion = getattr(cycle.report, "conclusion", None)
+            verdict = getattr(getattr(conclusion, "verdict", None), "value",
+                              str(getattr(conclusion, "verdict", "inconclusive")))
+            confidence = float(getattr(conclusion, "confidence", 0.0) or 0.0)
+            # settling a question (either way, confidently) IS competence gained on that topic;
+            # an inconclusive/low-confidence result is a partial signal she keeps chasing.
+            score = confidence if verdict in ("supported", "refuted") else 0.5 * confidence
+            self.competence.record(self._topic_key(cycle.question), score)
+        except Exception:  # noqa: BLE001 — measurement is advisory, never fatal
+            pass
 
     def _next_gap(self) -> Optional[str]:
         if self.gap_source is None:
@@ -480,6 +645,62 @@ class AutonomousScientist:
             from nyxara.growth.scientist import Scientist
             self.scientist = Scientist(knowledge=self.knowledge, memory=self.memory)
         return self.scientist
+
+    # ---------------------------------------------------------------------- #
+    # Lifelong persistence — her settled beliefs survive a restart so her science compounds
+    # ---------------------------------------------------------------------- #
+    def save(self) -> bool:
+        """Persist the belief model + the self-generated stream position atomically. Best-effort."""
+        if not self.path:
+            return False
+        try:
+            payload = {
+                "version": 1,
+                "seed_n": self._seed_n,
+                "beliefs": [b.to_dict() for b in self.model.beliefs.values()],
+            }
+            os.makedirs(os.path.dirname(os.path.abspath(self.path)) or ".", exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, self.path)
+            self._since_save = 0
+            return True
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            return False
+
+    def _load(self) -> None:
+        """Reload beliefs settled in a previous life, so she does not restart from zero each boot."""
+        if not self.path or not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:  # noqa: BLE001 — a corrupt file never bricks the mind
+            return
+        try:
+            self._seed_n = int(payload.get("seed_n", 0))
+            for d in payload.get("beliefs", []):
+                variable = str(d.get("variable", ""))[:120]
+                if not variable:
+                    continue
+                belief = Belief(
+                    variable=variable,
+                    statement=str(d.get("statement", "")),
+                    verdict=str(d.get("verdict", "inconclusive")),
+                    confidence=float(d.get("confidence", 0.5) or 0.5),
+                    evidence_count=int(d.get("evidence_count", 1) or 1),
+                    revisions=int(d.get("revisions", 0) or 0),
+                    last_reasoning=str(d.get("last_reasoning", "")),
+                    alpha=float(d.get("alpha", 1.0) or 1.0),
+                    beta=float(d.get("beta", 1.0) or 1.0),
+                )
+                self.model.beliefs[variable] = belief
+                # re-establishing a settled proposition means she should not re-pose it as brand new
+                if belief.statement:
+                    self._seen.add(belief.statement)
+        except Exception:  # noqa: BLE001 — a partial payload never breaks the loop
+            return
 
 
 # --------------------------------------------------------------------------- #
