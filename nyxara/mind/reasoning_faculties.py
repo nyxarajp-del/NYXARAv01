@@ -991,8 +991,14 @@ class DateFaculty(Faculty):
 # --------------------------------------------------------------------------- #
 # Default registry + the router entry point
 # --------------------------------------------------------------------------- #
-def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, FacultySelector]:
-    """A registry of the real verifiable engines (+ the LLM generalist when given)."""
+def build_default_faculties(llm: object = None,
+                            intuition: object = None) -> Tuple[FacultyRegistry, FacultySelector]:
+    """A registry of the real verifiable engines (+ the LLM generalist when given).
+
+    When an :class:`~nyxara.mind.intuition.IntuitionCore` is supplied, its non-algorithmic
+    leap faculty is registered too — a *probabilistic* engine (so the verifiable bonus keeps
+    exact engines ahead of it), giving the selector a real 'Aha!' fallback for sequence /
+    analogy / reasoning tasks the exact engines cannot crack."""
     reg = FacultyRegistry()
     reg.register(MathFaculty())
     reg.register(WordProblemFaculty())
@@ -1007,6 +1013,9 @@ def build_default_faculties(llm: object = None) -> Tuple[FacultyRegistry, Facult
     reg.register(ComparativeFaculty())
     from nyxara.mind.first_principles import FirstPrinciplesFaculty
     reg.register(FirstPrinciplesFaculty())
+    if intuition is not None:
+        from nyxara.mind.intuition import IntuitionFaculty
+        reg.register(IntuitionFaculty(intuition))
     if llm is not None:
         from nyxara.mind.faculties import LLMFaculty
         reg.register(LLMFaculty(llm))

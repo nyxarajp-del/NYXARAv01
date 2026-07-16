@@ -92,6 +92,27 @@ applied to the documentation itself).
 | 70 | Honest Failure Recognition | `nyxara.observe.honesty` | UPGRADED |
 | 71 | Own-Model Ownership (Qwen2.5-0.5B LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
 | 72 | Frontier Law Discovery (invent NEW empirical/physical laws from data & self-run experiments, no LLM) | `nyxara.growth.law_discovery` | REAL+WIRED |
+| 73 | Non-Algorithmic Intuition / Creative Leap (guess a candidate *before* proof, on puzzles with no training data — a portfolio of self-contained leap generators, fused + self-verified, **no LLM**) | `nyxara.mind.intuition` | UPGRADED |
+
+## Non-Algorithmic Intuition — the creative leap (#73)
+
+NYXARA reasons forward from math, symbolic regression and probability. This capability adds the
+opposite move — the **leap**: a fast, unproven "Aha!" reached *before* a proof, on puzzles that
+have **no training data**, produced by her **own** code (no LLM, a test enforces it).
+
+The `IntuitionCore` (in `nyxara.mind.intuition`) runs a portfolio of self-contained *leap generators* in
+parallel — **gestalt** pattern-completion (finite differences, exact rational recurrence fitting,
+ratios, famous integer sequences), **analogical transfer** over a 10,000-D HDC space
+(`nyxara.cognition.hyper_dimensional_vectors`), **superposed contradiction**
+(`nyxara.quantum.superposition_states`), **dark-data / absence** (`nyxara.void.dark_data_mining`)
+and **first-principles** (`nyxara.mind.first_principles`). Their hunches are fused by
+confidence-weighted consensus, gated by a persisted UCB1 **meta-gate** (intuition about its own
+intuition), and each leap carries a cheap `verify()` so the leap is *checkable*, never merely
+asserted. It is genuinely wired: it fills System 1 in `nyxara.mind.dual_process`, is
+**load-bearing** in the orchestrator's `_arbitrate` (a machine-verified leap on a reversible,
+low-stakes turn raises the candidate's confidence — gates untouched), seeds the Eureka
+prove-loop (`EurekaEngine(seed_source=…)`), and is exposed as `core.intuit(...)` / the `/intuit`
+console command. Every generator degrades gracefully, so the Core runs on a bare machine.
 
 ## What changed in this pass (the genuinely-weak items)
 

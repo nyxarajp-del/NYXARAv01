@@ -455,8 +455,13 @@ class NyxaraCore:
         # sensory prediction — predicts each live percept's features/modality; surprise
         # sharpens attention (salience) and novelty colours affect over the real stream
         self.sensory_predictor = self._build_sensory_predictor() if enable_growth else None
+        # non-algorithmic intuition — the Intuition Core: a portfolio of self-contained leap
+        # generators (gestalt / analogy / superposition / dark-data / first-principles) that
+        # PROPOSE a fast candidate answer *before* proof, on puzzles with no training data.
+        # Built before dual-process so System 1 draws its real hunches from it. No LLM.
+        self.intuition = self._build_intuition() if enable_growth else None
         # dual-process reasoning — fast intuition (System 1) arbitrated against deliberation
-        # (System 2). It *colours* the reason step (metacognition); it never gates.
+        # (System 2). System 1's snap now comes from the real Intuition Core above.
         self.dual_process = self._build_dual_process() if enable_growth else None
         # meta-learning — learns which reasoning process pays off for which kind of turn
         self.meta = self._build_meta() if enable_growth else None
@@ -699,6 +704,7 @@ class NyxaraCore:
         self.parallel_hypotheses = max(1, int(parallel_hypotheses))
         # the last dual-process arbitration (which process ran, and why) — read by growth
         self._last_arbitration: Any = None
+        self._last_intuition: Any = None      # the most recent machine-verified intuitive leap
         # short-term conversation buffer (Layer 7): verbatim recent turns the reasoner
         # reads for multi-turn coherence, complementing semantic memory recall.
         from collections import deque
@@ -1051,6 +1057,7 @@ class NyxaraCore:
                                   # questions from what she learned living (not training data)
                                   causal_model=getattr(self, "causal_world_model", None),
                                   knowledge_graph=getattr(self, "knowledge_graph", None),
+                                  intuition=getattr(self, "intuition", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -1652,18 +1659,37 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — sensory prediction is a capability, never required
             return None
 
+    def _build_intuition(self) -> Any:
+        """The Intuition Core (mind/intuition.py): NYXARA's own non-algorithmic 'Aha!'. A
+        portfolio of self-contained leap generators that guess a candidate answer *before* a
+        proof — cracking sequence/analogy puzzles that have no training data at all — then
+        self-verify the leap. No LLM anywhere. Persists its learned per-shape trust under
+        paths.data_dir. A capability, never required."""
+        try:
+            from nyxara.kernel.config import get_settings
+            if not getattr(get_settings().features, "intuition", True):
+                return None
+            from nyxara.mind.intuition import IntuitionCore
+            return IntuitionCore(settings=get_settings())
+        except Exception:  # noqa: BLE001 — intuition is a capability, never required
+            return None
+
     def _build_dual_process(self) -> Any:
-        """Kahneman's two minds: a fast intuition (System 1) whose confidence mirrors
-        the reasoner's, arbitrated against deliberation (System 2). Phase-1 wiring uses
-        the arbitrator as a metacognitive *advisor* over the existing reasoner; the
-        symbolic System-2 faculties are filled in later."""
+        """Kahneman's two minds: a fast intuition (System 1) arbitrated against deliberation
+        (System 2). System 1's snap is drawn from the real Intuition Core when present (a
+        genuine hunch + calibrated confidence), otherwise it falls back to the reasoner's own
+        confidence so behaviour is unchanged where intuition cannot help."""
         try:
             from nyxara.mind.dual_process import DualProcess, System1, System2
             from nyxara.mind.proposal import Proposal, ProposalKind
 
-            def _intuition(task: Any):
-                # the fast snap's confidence is the reasoner's own (passed via features)
-                return (task.description, float(task.features.get("confidence", 0.3)))
+            if getattr(self, "intuition", None) is not None:
+                from nyxara.mind.intuition import make_intuition_callable
+                _intuition = make_intuition_callable(self.intuition)
+            else:
+                def _intuition(task: Any):
+                    # no Core -> the fast snap's confidence is the reasoner's own (via features)
+                    return (task.description, float(task.features.get("confidence", 0.3)))
 
             def _deliberate(task: Any):
                 # System 2 is constructed but not dispatched in the hot path yet; a trivial
@@ -3110,11 +3136,15 @@ class NyxaraCore:
             from nyxara.growth.eureka import EurekaEngine
             # A fresh seed each process so she explores *new* ground every session; the persisted
             # frontier archive (long-term memory) still prevents re-discovering what she already has.
+            # the Intuition Core feeds bold, self-verified leaps in as conjecture seeds; the
+            # Prover still decides, so an intuited guess is only kept once certified.
+            intu = getattr(self, "intuition", None)
             return EurekaEngine(
                 memory=getattr(self, "memory", None),
                 knowledge=getattr(self, "knowledge", None),
                 flywheel=getattr(self, "flywheel", None),
                 seed=int(_time.time() * 1000) & 0x7FFFFFFF,
+                seed_source=(intu.eureka_seeds if intu is not None else None),
             )
         except Exception:  # noqa: BLE001 — novel discovery is a capability, never required
             return None
@@ -4559,7 +4589,7 @@ class NyxaraCore:
         # Self-model facet #4 — if this query lands in a hallucination-prone domain,
         # lower confidence so the HonestyGuard hedges instead of bluffing.
         candidate = self._apply_hallucination_caution(stimulus, candidate)
-        self._arbitrate(stimulus, candidate, enriched)
+        candidate = self._arbitrate(stimulus, candidate, enriched)
         return candidate
 
     def _run_thought_workspace(self, stimulus: str, focus: Optional[Percept],
@@ -4982,21 +5012,29 @@ class NyxaraCore:
                 f"hypothesis[{name}] {mark} conf={c.confidence:.2f}: {(c.text or '')[:32]}"[:80],
                 salience=0.45, confidence=c.confidence)
 
-    def _arbitrate(self, stimulus: str, candidate: Candidate, memories: List[Any]) -> None:
-        """Metacognition: decide fast-vs-deliberate for this turn and record it. Colour
-        only — it annotates the audit trail, never changes the candidate or the gates."""
+    def _arbitrate(self, stimulus: str, candidate: Candidate, memories: List[Any]) -> Candidate:
+        """Metacognition + a *bounded, load-bearing* intuitive leap.
+
+        Records the fast-vs-deliberate decision (as before), and — when the Intuition Core
+        produces a **self-verified** hunch for this stimulus on a **reversible, low-stakes**
+        turn — lets that leap raise the candidate's confidence and enrich its rationale. It
+        never touches the gates: the candidate still flows through the full disposition
+        pipeline (shield→corrigibility→honesty→permissions→guardian→oversight) unchanged, so
+        safety/corrigibility are intact. High-stakes or irreversible turns get colour only."""
+        self._last_intuition = None
         if self.dual_process is None:
-            return
+            return candidate
         try:
             from nyxara.mind.faculties import Task, TaskType
             familiarity = _clamp01(len(memories) / 5.0) if memories else 0.0
+            reversible = bool(getattr(candidate, "reversible", True))
             # an irreversible proposal is treated as higher-stakes / verifiable
-            stakes = 0.3 if getattr(candidate, "reversible", True) else 0.7
+            stakes = 0.3 if reversible else 0.7
             features = {"confidence": float(candidate.confidence), "stakes": stakes,
                         "familiarity": familiarity, "novelty": _clamp01(1.0 - familiarity)}
             task = Task(type=TaskType.REASONING, description=stimulus[:120],
                         features=features,
-                        requires_verifiable=not getattr(candidate, "reversible", True))
+                        requires_verifiable=not reversible)
             fast = self.dual_process.system1.respond(task)
             decision = self.dual_process.arbitrator.decide(
                 task, fast, stakes=stakes, energy=self._energy())
@@ -5004,8 +5042,34 @@ class NyxaraCore:
             self.mind.record(ThoughtKind.DECISION,
                              f"arbitration: {decision.process.value} — {decision.reason}",
                              salience=0.4, confidence=fast.confidence)
+
+            # --- the load-bearing part: a machine-verified leap on a safe turn ---
+            if self.intuition is not None and reversible and stakes < 0.5:
+                hunch = self.intuition.leap(stimulus, features=features)
+                if hunch is not None and hunch.verified() is True:
+                    self._last_intuition = hunch
+                    old = float(candidate.confidence)
+                    # only ever *raise* confidence, and never past the verified leap's own
+                    candidate.confidence = _clamp01(max(old, 0.5 * old + 0.5 * hunch.confidence))
+                    leap_note = (f" [intuition: {hunch.mechanism} leap → {hunch.answer} "
+                                 f"({hunch.rule}), self-verified]")
+                    candidate.rationale = (candidate.rationale or "") + leap_note
+                    self.mind.record(ThoughtKind.INSIGHT,
+                                     f"intuitive leap: {hunch.answer} — {hunch.rule}"[:80],
+                                     salience=0.7, confidence=hunch.confidence)
+                    self._offer_insight(f"Aha! {hunch.answer} — {hunch.rule}")
         except Exception:  # noqa: BLE001 — metacognition is best-effort, never fatal
             self._last_arbitration = None
+        return candidate
+
+    def _offer_insight(self, text: str) -> None:
+        """Best-effort push of a genuine leap onto the surfaced-insight queue."""
+        try:
+            q = getattr(self, "_insight_q", None)
+            if q is not None:
+                q.put_nowait(text[:160])
+        except Exception:  # noqa: BLE001 — surfacing is best-effort
+            pass
 
     def _energy(self) -> float:
         """A cheap cognitive-energy proxy: high affective pressure tires the mind."""
@@ -7043,6 +7107,26 @@ class NyxaraCore:
             return self.eureka.discover(generations=generations, population=population).to_dict()
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
+
+    def intuit(self, puzzle: Any) -> Dict[str, Any]:
+        """A non-algorithmic **creative leap** at ``puzzle`` — a fast, unproven 'Aha!' from
+        NYXARA's own Intuition Core (gestalt / analogy / superposition / dark-data / first-
+        principles), reached *before* any proof and needing no training data, then self-verified.
+        **No LLM in the loop.** Returns the hunch as a dict (``{"leap": None}`` when she has no
+        honest hunch). Nothing here touches the world or side-steps the control law."""
+        if self.intuition is None:
+            return {"leap": None, "error": "intuition unavailable"}
+        try:
+            hunch = self.intuition.leap(puzzle)
+            if hunch is None:
+                return {"leap": None, "reason": "no honest hunch"}
+            out = hunch.to_dict()
+            out["self_verified"] = hunch.verified()
+            if hunch.verified() is True:
+                self._offer_insight(f"Aha! {hunch.answer} — {hunch.rule}")
+            return {"leap": out}
+        except Exception as exc:  # noqa: BLE001
+            return {"leap": None, "error": str(exc)}
 
     def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
         """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
