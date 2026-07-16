@@ -518,11 +518,16 @@ class EurekaEngine:
     def __init__(self, *, prover: Any = None, frontier: Any = None, memory: Any = None,
                  knowledge: Any = None, flywheel: Any = None, settings: Any = None,
                  seed: int = 1337, novelty_floor: float = 0.06,
-                 interest_floor: float = 0.30) -> None:
+                 interest_floor: float = 0.30,
+                 seed_source: Any = None) -> None:
         self.prover = prover or Prover(seed=seed)
         self.memory = memory
         self.knowledge = knowledge
         self.flywheel = flywheel
+        # an optional callable () -> Iterable[Conjecture]: bold conjectures proposed from
+        # OUTSIDE the evolutionary search (e.g. the Intuition Core's leaps), folded into every
+        # generation's batch so an intuited guess is put to the same machine-checkable Prover.
+        self._seed_source = seed_source
         self.rng = Random(seed)
         self.novelty_floor = float(novelty_floor)
         self.interest_floor = float(interest_floor)
@@ -563,6 +568,7 @@ class EurekaEngine:
             for domain in DOMAINS:
                 batch.extend(self._propose(domain, per_domain))
             batch.extend(self._generalizations(max(2, per_domain // 2)))
+            batch.extend(self._external_seeds())
             for conj in batch:
                 report.generated += 1
                 if conj.key() in self._seen:
@@ -630,6 +636,24 @@ class EurekaEngine:
             gen = self._generalize()
             if gen is not None:
                 out.append(gen)
+        return out
+
+    def _external_seeds(self, cap: int = 8) -> List[Conjecture]:
+        """Fold in conjectures proposed from outside the search (the Intuition Core). Each is
+        put to the same Prover as any home-grown candidate — a leap is only kept if certified.
+        Fully guarded: a misbehaving source never breaks a discovery run."""
+        if self._seed_source is None:
+            return []
+        out: List[Conjecture] = []
+        try:
+            for item in (self._seed_source() or []):
+                conj = item if isinstance(item, Conjecture) else None
+                if conj is not None and conj.statement:
+                    out.append(conj)
+                if len(out) >= cap:
+                    break
+        except Exception:  # noqa: BLE001 — an external seed source is advisory, never fatal
+            return out
         return out
 
     def _seed(self, domain: str) -> Optional[Conjecture]:

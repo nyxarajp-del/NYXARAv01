@@ -113,6 +113,7 @@ commands:
   /selfcorrect <goal> pursue a goal with self-correction: detect wrong/stuck → experiment to fill the gap → abstain honestly
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
+  /intuit <puzzle>   non-algorithmic creative leap (no LLM): guess before proof, then self-verify
   /discover-law [dom] invent a NEW empirical/physical law from data & self-run experiments (no LLM); dom: dynamics|invariant|data
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
@@ -230,6 +231,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 4
         print(json.dumps(core.breakthrough(n), indent=2, default=str))
+    elif cmd == "intuit":
+        # /intuit 1, 4, 9, 16, 25   -> a non-algorithmic creative leap (no LLM), then self-verify
+        print(json.dumps(core.intuit(arg), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

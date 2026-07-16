@@ -61,7 +61,7 @@ class NyxaraReasoner:
                  settings: Optional[NyxaraSettings] = None, narrative: Any = None,
                  knowledge: Any = None, metaprompt: Any = None,
                  generalization_engine: Any = None, causal_model: Any = None,
-                 knowledge_graph: Any = None,
+                 knowledge_graph: Any = None, intuition: Any = None,
                  max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
@@ -88,6 +88,8 @@ class NyxaraReasoner:
         self.metaprompt = metaprompt
         self.use_council = use_council
         self.max_memory_context = max_memory_context
+        # the Intuition Core (mind/intuition.py) — real non-algorithmic hunches for System 1.
+        self.intuition = intuition
         self._dual: Any = None  # lazily built dual-process facade
         self._offline: Any = None  # lazily built sovereign offline mind (keyless machine)
         self._router: Any = None  # lazily built own-model-first confidence router (handoff)
@@ -218,9 +220,20 @@ class NyxaraReasoner:
             from nyxara.mind.dual_process import (Arbitrator, DualProcess, System1,
                                                   System2)
 
-            def _intuition(task: Any) -> Tuple[Any, float]:
-                conf = float(task.features.get("_gut_conf", 0.7))
-                return (task.description, conf)
+            if self.intuition is not None:
+                from nyxara.mind.intuition import make_intuition_callable
+                _base_intuition = make_intuition_callable(self.intuition)
+
+                def _intuition(task: Any) -> Tuple[Any, float]:
+                    ans, conf = _base_intuition(task)
+                    # keep the reasoner's own gut floor when the Core abstains on this stimulus
+                    if ans == task.description:
+                        conf = float(task.features.get("_gut_conf", conf))
+                    return (ans, conf)
+            else:
+                def _intuition(task: Any) -> Tuple[Any, float]:
+                    conf = float(task.features.get("_gut_conf", 0.7))
+                    return (task.description, conf)
 
             def _deliberate(task: Any) -> Any:
                 from nyxara.mind.proposal import Proposal, ProposalKind
