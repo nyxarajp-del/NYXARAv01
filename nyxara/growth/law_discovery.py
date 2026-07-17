@@ -329,7 +329,10 @@ def _build_library(n_vars: int, *, degree: int = 2,
     # pairwise products (exponent combinations kept small to bound the library)
     pair_exps = [(1.0, 1.0), (1.0, 2.0), (2.0, 1.0)]
     if inverse:
-        pair_exps += [(1.0, -1.0), (-1.0, 1.0), (1.0, -2.0), (-2.0, 1.0)]
+        pair_exps += [(1.0, -1.0), (-1.0, 1.0), (1.0, -2.0), (-2.0, 1.0),
+                      # square-over-linear ratios: centripetal a = v²/r, and inverse-square ratios —
+                      # common physical forms the earlier palette could not express.
+                      (2.0, -1.0), (-1.0, 2.0), (2.0, -2.0), (-2.0, 2.0)]
     for i, j in itertools.combinations(range(n_vars), 2):
         for a, b in pair_exps:
             _add(_Feature("monomial", exps={i: a, j: b}))

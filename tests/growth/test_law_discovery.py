@@ -401,3 +401,22 @@ def test_lab_notebook_records_discoveries(tmp_path):
     assert os.path.exists(nb)
     entries = [json.loads(ln) for ln in open(nb, encoding="utf-8").read().splitlines()]
     assert any(e["event"] in ("discovery", "cycle") for e in entries)
+
+
+def test_expanded_library_recovers_new_ratio_law():
+    """The enlarged pairwise library can now express square-over-linear ratios (a = v²/r),
+    a common physical form the earlier palette could not discover."""
+    import random
+
+    rng = random.Random(3)
+    X, y = [], []
+    for _ in range(60):
+        v = rng.uniform(2.0, 12.0)
+        r = rng.uniform(1.0, 8.0)
+        X.append([v, r])
+        y.append(v * v / r)
+    rep = _eng().discover_from_data(X, y, var_names=["v", "r"], target_name="a")
+    best = rep.best()
+    assert best is not None, "engine should recover a = v²/r, not abstain"
+    assert best.evidence.verdict == "corroborated"
+    assert best.evidence.holdout_r2 > 0.999

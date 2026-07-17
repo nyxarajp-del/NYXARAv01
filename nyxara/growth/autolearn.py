@@ -670,7 +670,11 @@ class GrowthEngine:
     def _meta_obj(self):
         if self._meta_researcher is None:
             from nyxara.growth.meta_research import MetaResearcher
-            self._meta_researcher = MetaResearcher(memory=self.memory, settings=self.settings)
+            # wire the live LawDiscoveryEngine (if the core built one) so a continuous meta-research
+            # pass does real symbolic law discovery too, not only code invention.
+            self._meta_researcher = MetaResearcher(
+                memory=self.memory, settings=self.settings,
+                law_discovery=getattr(self.core, "law_discovery", None))
         return self._meta_researcher
 
     def meta_research(self, topic: Optional[str] = None) -> Optional[Dict[str, Any]]:

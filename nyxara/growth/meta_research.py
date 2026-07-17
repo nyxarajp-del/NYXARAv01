@@ -67,6 +67,7 @@ class MetaResearchReport:
     candidates: List[CandidateTheory] = field(default_factory=list)
     validated: int = 0
     integrated: int = 0
+    laws_discovered: int = 0                       # symbolic laws corroborated this pass (empirical science)
     elapsed_ms: float = 0.0
     meta_meta: Optional[Dict[str, Any]] = None    # the recursive tower over this engine's SEARCH
 
@@ -75,6 +76,7 @@ class MetaResearchReport:
                 "open_questions": self.open_questions,
                 "candidates": [c.to_dict() for c in self.candidates],
                 "validated": self.validated, "integrated": self.integrated,
+                "laws_discovered": self.laws_discovered,
                 "elapsed_ms": round(self.elapsed_ms, 1), "meta_meta": self.meta_meta}
 
 
@@ -98,7 +100,7 @@ class MetaResearcher:
 
     def __init__(self, *, researcher: Any = None, llm: Any = None, sandbox: Any = None,
                  memory: Any = None, knowledge: Any = None, settings: Any = None,
-                 journal: Any = None, permissions: Any = None) -> None:
+                 journal: Any = None, permissions: Any = None, law_discovery: Any = None) -> None:
         from nyxara.kernel.config import get_settings
         self.settings = settings or get_settings()
         self.researcher = researcher
@@ -108,6 +110,9 @@ class MetaResearcher:
         self.knowledge = knowledge
         self.journal = journal
         self.permissions = permissions
+        # optional empirical-science collaborator: a LawDiscoveryEngine so a continuous meta-research
+        # pass also does real symbolic law discovery, not only code invention (best-effort, offline).
+        self.law_discovery = law_discovery
         self._reports: List[MetaResearchReport] = []
         # the recursive meta tower over THIS engine's own search (built once, lazily)
         self._meta: Any = None
@@ -174,6 +179,15 @@ class MetaResearcher:
                 report.candidates.append(cand)
         except Exception as exc:  # noqa: BLE001 — a failed run is data, not a crash
             report.open_questions.append(f"meta-research error: {exc}")
+        # Empirical science: if a LawDiscoveryEngine is wired, run one round of real symbolic law
+        # discovery in the SAME continuous pass — so NYXARA's autonomous loop invents both code AND
+        # laws. Fully offline (pure-Python fallback) and best-effort; a failure never breaks the pass.
+        if self.law_discovery is not None:
+            try:
+                law_report = self.law_discovery.discover_laws(rounds=1)
+                report.laws_discovered = len(getattr(law_report, "discoveries", []) or [])
+            except Exception:  # noqa: BLE001 — law discovery is a capability, never required
+                report.laws_discovered = 0
         report.elapsed_ms = (time.monotonic() - t0) * 1000
         # META-META: score the active invention breadth by the real validated-theory yield this pass
         # (new verified knowledge created), then evolve the whole recursive tower.
