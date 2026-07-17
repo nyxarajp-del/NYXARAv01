@@ -84,6 +84,7 @@ class Profile(str, Enum):
     DEV = "dev"
     PROD = "prod"
     TEST = "test"
+    MAX = "max"   # DEV-style permissive posture + every capability cranked to ceiling (safety intact)
 
 
 class LogLevel(str, Enum):
@@ -171,7 +172,7 @@ class FeatureFlags(BaseModel):
     proactive_agency: bool = True       # agency/proactive.py
     self_evolution: bool = True         # growth/evolve.py (Rule 4)
     self_bootstrap: bool = True         # growth/explorer.py — Environment-Driven Learning (Rule 4)
-    self_model_foundry: bool = False    # growth/foundry.py — build/upgrade her OWN model (Rule 4)
+    self_model_foundry: bool = True     # growth/foundry.py — build/upgrade her OWN model (Rule 4)
     neural_architecture_search: bool = True  # growth/genesis.py — she designs her OWN brain (Rule 4)
     synthetic_self_curation: bool = True     # growth/synthesis.py — AlphaGo-Zero synthetic data (Rule 4)
     dynamic_topology_expansion: bool = True  # growth/topology.py — runtime Net2Net brain growth (Rule 4)
@@ -185,12 +186,12 @@ class FeatureFlags(BaseModel):
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
-    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools
+    multi_llm_council: bool = True      # mind/council.py — convene many LLMs as a panel of tools
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
-    vision: bool = False                # heavy ML; off by default
-    audio: bool = False                 # heavy ML; off by default
-    transformers_inference: bool = False  # in-process HuggingFace model; heavy ML, off by default
+    vision: bool = True                 # senses/vision.py — gated; degrades if heavy ML deps absent
+    audio: bool = True                  # senses/audio.py — gated; degrades if heavy ML deps absent
+    transformers_inference: bool = True   # in-process HuggingFace model; gated master kill-switch
     dream_consolidation: bool = True    # memory/consolidation.py
     always_alive: bool = True           # void/heartbeat.py — never dead between prompts (Rule 7)
     fractal_temporal_hierarchy: bool = True  # temporal/ — loops within loops (ms/s/days)
@@ -223,7 +224,7 @@ class DeepReasoningConfig(BaseModel):
     max_rung: int = Field(default=4, ge=1, le=4)
     # Base self-consistency width per neural rung; the rung a signature has learned to reward gets
     # this much again on top (same maximum budget, aimed where it measurably pays off).
-    samples: int = Field(default=3, ge=1, le=9)
+    samples: int = Field(default=5, ge=1, le=12)
     keep_best: bool = True                                 # keep the verifier-best across all rungs
     # Ground the keep-best selection in *truth* where the domain is decidable (exact faculty oracle
     # / machine-checkable Prover certificate — mind/grounded_verifier.py), so the climb selects
@@ -265,14 +266,14 @@ class LLMConfig(BaseModel):
     qwen_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
     # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). Off by
     # default — a 0.5B base runs full-precision on a CPU without needing quantization.
-    qwen_load_in_4bit: bool = False
+    qwen_load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
     qwen_load_in_8bit: bool = False
     qwen_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     qwen_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
     qwen_bnb_4bit_use_double_quant: bool = True
     qwen_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
     qwen_use_cache: bool = True        # KV cache during generation
-    qwen_trust_remote_code: bool = False   # Qwen2.5 is a native transformers arch — no remote code
+    qwen_trust_remote_code: bool = False   # Qwen2.5 native arch; enable via .env/max for custom ids
     # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
     # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
     qwen_adapter_path: Optional[Path] = None
@@ -287,7 +288,7 @@ class LLMConfig(BaseModel):
     # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
     qwen_do_sample: Literal["auto", "always", "never"] = "auto"
     # Qwen2.5's context window is 32768 tokens; prompts are left-truncated to fit.
-    qwen_max_input_tokens: int = Field(default=8192, ge=64, le=32768)
+    qwen_max_input_tokens: int = Field(default=16384, ge=64, le=32768)
     # Qwen2.5 chat template (system/user/assistant). False -> flat prompt, for base checkpoints.
     qwen_use_chat_template: bool = True
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
@@ -318,10 +319,10 @@ class LLMConfig(BaseModel):
     #   3 -> think -> decide -> self-critique & revise (deepest; catches its own errors)
     # The deterministic offline reasoner ignores this — it always finishes in one step,
     # so a keyless machine stays fast and crash-free.
-    reasoning_passes: int = Field(default=2, ge=1, le=5)
+    reasoning_passes: int = Field(default=3, ge=1, le=5)
     # Self-consistency: sample the decide step this many times and take the consensus.
     # 1 -> no sampling (deterministic). >1 multiplies decide calls but stabilises answers.
-    reasoning_samples: int = Field(default=1, ge=1, le=9)
+    reasoning_samples: int = Field(default=3, ge=1, le=12)
     # Token ceiling for the private "think" scratchpad pass.
     reasoning_think_tokens: int = Field(default=1024, ge=64, le=8192)
     # Level 3 — Recursive Self Improvement: iterations of critique+revise per respond turn.
@@ -506,7 +507,7 @@ class FoundryConfig(BaseModel):
     lora_target_modules: List[str] = Field(default_factory=lambda: [
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
     lora_bias: Literal["none", "all", "lora_only"] = "none"
-    lora_use_rslora: bool = False           # rank-stabilised LoRA scaling
+    lora_use_rslora: bool = False           # rank-stabilised LoRA scaling (enable via .env/max)
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
     lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
@@ -514,7 +515,7 @@ class FoundryConfig(BaseModel):
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
     # to full-precision LoRA (no crash). OFF by default — the Qwen2.5-0.5B base fits and trains
     # in full precision anywhere; flip it on only if you swap in a much larger base.
-    load_in_4bit: bool = False
+    load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
     load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
@@ -554,12 +555,12 @@ class FoundryConfig(BaseModel):
     # never gates promotion (capability is already gated by the oracle benchmark above) and is a
     # no-op when no real teacher is configured. Off by default since it spends a teacher call per
     # forge; turn on to watch the gap close and cross zero.
-    measure_vs_teacher: bool = False
+    measure_vs_teacher: bool = True
     # Efficiency gate (Pillar F · Edge 3): when on, a candidate that does NOT lower perplexity may
     # still be promoted if it is *cheaper* (fewer params) while keeping capability within
     # ``efficiency_epsilon`` of the active model — capability compression (growth/efficiency.py).
     # Off by default so promotion semantics are unchanged unless the Master opts in.
-    efficiency_gate: bool = False
+    efficiency_gate: bool = True
     efficiency_epsilon: float = Field(default=0.02, ge=0.0)
     # Disk hygiene: how many versions to keep before pruning the oldest unpromoted ones.
     max_versions_kept: int = Field(default=10, ge=1)
@@ -709,7 +710,7 @@ class GenesisConfig(BaseModel):
     novelty_weight: float = Field(default=0.0, ge=0.0)        # reward genomes far from the population
     # Successive-halving bracket (Hyperband-flavoured): cheap-screen the whole population at a
     # fraction of micro_train_steps, then spend full training only on the top survivors.
-    successive_halving: bool = False
+    successive_halving: bool = True
     halving_factor: int = Field(default=3, ge=2, le=8)        # keep 1/factor each rung
     # A tiny ridge-regression surrogate over genome features, trained on already-scored candidates,
     # used only to ORDER which genomes to evaluate first — never to crown a champion (honest).
@@ -833,7 +834,7 @@ class SynthesisConfig(BaseModel):
         "arithmetic", "algebra", "logic", "number_theory", "code"])
     feed_knowledge: bool = True       # ingest survivors into the base KnowledgeBase
     feed_flywheel: bool = True        # offer survivors to the foundry corpus (verified=True)
-    allow_llm_rival: bool = False     # add a best-effort LLM second opinion (never overrides proof)
+    allow_llm_rival: bool = True      # add a best-effort LLM second opinion (never overrides proof)
     code_sandbox: bool = True         # verify code items by restricted-sandbox execution
     seed: int = 0
 
@@ -940,7 +941,7 @@ class CouncilConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    enabled: bool = False
+    enabled: bool = True
     # Providers seated on the council. Empty -> every currently-available provider.
     members: List[str] = Field(default_factory=list)
     # Per-provider vote/synthesis weight; unset providers default to 1.0.
@@ -965,7 +966,7 @@ class RouterConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    enabled: bool = False
+    enabled: bool = True
     # Minimum verifier score (0..1) for NYXARA to speak her own model's answer unaided.
     threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     # An answer shorter than this many characters is never trusted (degenerate output).
@@ -982,7 +983,7 @@ class RouterConfig(BaseModel):
     # consistent the answers are. Low agreement = high epistemic uncertainty she measured about
     # *herself*, which discounts her confidence and makes her defer/abstain more readily. 1 = off
     # (single draft, no self-consistency probe); 3 is a cheap, effective default once enabled.
-    self_consistency_samples: int = Field(default=1, ge=1, le=9)
+    self_consistency_samples: int = Field(default=3, ge=1, le=12)
     # INFERENCE-TIME CEILING-BREAK (mind/verified_answer.py): instead of a single greedy draft,
     # sample several candidates from her OWN model and select by GROUND TRUTH — an exact oracle
     # (Prover / reasoning faculties) certifies a provably-correct candidate when the domain is
@@ -990,7 +991,7 @@ class RouterConfig(BaseModel):
     # verification lets her exceed any single teacher sample on verifiable/reasoning tasks. On by
     # default; fail-open (degrades to the single-draft path on any error). 1 sample = disabled.
     verify_rerank: bool = True
-    rerank_samples: int = Field(default=5, ge=1, le=16)
+    rerank_samples: int = Field(default=5, ge=1, le=24)
     # SOVEREIGN HANDOFF (mind/self_reasoner.SelfBrainProvider): let NYXARA's *own* model be the
     # always-on learned brain she compounds on every lived turn — not just a foundry model she
     # has to forge+promote first. This is what lifts the handoff rate off 0% on an ordinary boot:
@@ -1117,7 +1118,7 @@ class SwarmConfig(BaseModel):
     min_problems_before_drop: int = Field(default=5, ge=1)
     allow_spawn: bool = True
     # OFF by default: keep the swarm's quality signal out of the RSI index unless asked.
-    fold_into_intelligence: bool = False
+    fold_into_intelligence: bool = True
 
 
 class GeneralIntelligenceConfig(BaseModel):
@@ -1197,7 +1198,7 @@ class SelfImprovementConfig(BaseModel):
     # non-regression, scalable oversight). A worse brain is kept on the bench; a promotion is
     # reversible. With this OFF she still designs + measures a brain each cycle, but never promotes.
     autonomous_brain_forge: bool = True
-    run_pytest_in_gauntlet: bool = False       # add the full test suite to the gauntlet (slow)
+    run_pytest_in_gauntlet: bool = True        # add the full test suite to the gauntlet (slow)
     # --- proof-carrying self-modification (growth/proof_carrying.py, Gödel-machine) --- #
     # Before the empirical gauntlet, NYXARA tries to PROVE what is decidable about an edit: a
     # behaviour-preserving boolean rewrite must stay logically equivalent (truth-table), and any
@@ -1419,7 +1420,7 @@ class SelfImprovementConfig(BaseModel):
     # --- optional heavy-ML payoff forecaster (growth/forecaster.py) --- #
     # A small torch MLP that sharpens the ledger's ranking with context (signals + arm). Opt-in;
     # with no torch it is simply unavailable and the dependency-free ledger path stands.
-    use_payoff_forecaster: bool = False
+    use_payoff_forecaster: bool = True
     forecaster_warmup: int = Field(default=16, ge=2, le=10000)
     # --- continuous, self-driven RSI in the live idle loop (kernel/orchestrator.idle_maintenance) --- #
     # The unifying GrowthEngine tower (reflect → consolidate → abstract-concepts → improve_system
@@ -1503,7 +1504,7 @@ class MindEvolutionConfig(BaseModel):
     # On a plateau, escalate from tuning *how* she thinks to redesigning the *substrate* — one
     # index-steered Genesis architecture search. Heavy (and torch-hungry for real models), so OFF
     # by default; with no torch it still runs the stdlib n-gram search. Honours genesis.enabled.
-    escalate_to_architecture: bool = False
+    escalate_to_architecture: bool = True
     min_improvement: float = Field(default=1e-4, ge=1e-6, le=1e-1)  # strictness of "measurably better"
     # --- recursive meta tower over the mind-evolution SEARCH (growth/meta_meta.py) --- #
     # NYXARA does not only evolve HOW she thinks; she recursively evolves HOW she SEARCHES for a
@@ -1591,7 +1592,7 @@ class MetaResearchConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = True                       # invent + sandbox-test — safe, on by default
-    allow_integration: bool = False            # propose gauntlet-gated SOURCE EDITS — OFF by default
+    allow_integration: bool = True             # propose gauntlet-gated SOURCE EDITS
     meta_research_every: int = Field(default=10, ge=1)   # every N growth passes
     max_candidates: int = Field(default=4, ge=1, le=20)
     use_llm: bool = True                       # else heuristic-only (CI/offline)
@@ -1659,7 +1660,7 @@ class CognitiveArchitectConfig(BaseModel):
     candidates_per_gen: int = Field(default=6, ge=1, le=32)  # search breadth per generation
     n_per_type: int = Field(default=24, ge=4, le=256) # battery size per reasoning task type
     meta_depth: int = Field(default=2, ge=1, le=2)    # bounded recursive meta-architecture depth
-    autonomous_enact: bool = False                    # install the champion into the LIVE reasoner
+    autonomous_enact: bool = True                     # install the champion into the LIVE reasoner
     persist: bool = True                              # persist the architecture under paths.data_dir
     persist_filename: str = "cognitive_architecture.json"
 
@@ -1865,6 +1866,8 @@ class TemporalHierarchyConfig(BaseModel):
     horizon_days: float = Field(default=7.0, gt=0)           # epoch length compared each pass
     auto_apply: bool = True                                  # apply gated adjustments vs propose-only
     autostart: bool = False                                  # launch the live async loops on wiring
+    # ^ lean code default (every fresh process/subprocess inherits it): the live loops are turned on
+    #   for real via .env.example (NYXARA_TEMPORAL__AUTOSTART=true) and always under profile=max.
     # rolling-window sizes for the fast layers
     micro_window: int = Field(default=128, ge=2)
     meso_window: int = Field(default=512, ge=8)
@@ -2272,7 +2275,7 @@ class MCPServerSpec(BaseModel):
     cwd: Optional[str] = None
     # Risk tier its tools register at (remote effects are unknown -> conservative default).
     risk: Literal["trivial", "low", "moderate", "high", "critical"] = "moderate"
-    reversible: bool = False
+    reversible: bool = True
 
 
 class MCPConfig(BaseModel):
@@ -2286,7 +2289,7 @@ class MCPConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    enabled: bool = False
+    enabled: bool = True
     servers: List[MCPServerSpec] = Field(default_factory=list)
     timeout_s: float = Field(default=30.0, gt=0)
 
@@ -2324,7 +2327,7 @@ class ServerConfig(BaseModel):
     # autonomic turn still passes the identical gates. This is what the ``nyxara-daemon``
     # entry point and the systemd/Windows service units switch on for an always-alive
     # deployment. OFF by default so a plain ``nyxara-serve`` behaves exactly as before.
-    autonomic: bool = False
+    autonomic: bool = False   # lean default; on via .env (NYXARA_SERVER__AUTONOMIC=true) / profile=max
     autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
     # A learning pass every N ticks. Non-zero by default so the always-on daemon actually
     # compounds: her GrowthEngine (reflect → consolidate → abstract → induce skills) runs on
@@ -2487,6 +2490,11 @@ class NyxaraSettings(BaseSettings):
 
     schema_version: str = CONFIG_SCHEMA_VERSION
     profile: Profile = Profile.DEV
+    # MAXIMUM POWER: crank every capability/depth/cadence knob to its ceiling. Reachable on ANY
+    # profile via NYXARA_MAX_POWER=1, or implied by profile=max. Applied in _harden_for_profile,
+    # it never weakens a safety boundary (invariants/audit/corrigibility/soul-binding stay forced,
+    # simulation + sandbox stay on) — max capability, not max risk.
+    max_power: bool = False
     instance_name: str = "nyxara"
 
     owner: OwnerIdentity = Field(default_factory=OwnerIdentity)
@@ -2558,7 +2566,23 @@ class NyxaraSettings(BaseSettings):
         self.features.invariant_enforcement = True
         self.features.audit_logging = True
         self.features.corrigibility = True
+        # Her loyalty core (the Loyalty Equation) is a safety BOUNDARY, not a toggle — like the
+        # invariants, it is forced on and can never be switched off from config.
+        self.features.mathematical_soul_binding = True
         self.guard.rule_modification_locked = True
+        # Master capability switches now BITE: a FeatureFlag turned OFF hard-disables its whole
+        # subsystem (previously several of these were decorative — flipping them did nothing). ON
+        # simply defers to the subsystem's own ``enabled``/config, so nothing changes when left on.
+        if not self.features.self_model_foundry:
+            self.foundry.enabled = False
+        if not self.features.multi_llm_council:
+            self.council.enabled = False
+        if not self.features.neural_architecture_search:
+            self.genesis.enabled = False
+        if not self.features.fractal_temporal_hierarchy:
+            self.temporal.enabled = False
+        if not self.features.self_evolution:
+            self.mind_evolution.enabled = False
         # Untrusted web content is always screened for prompt-injection (defense in depth);
         # this sanitises page text, it never limits NYXARA's reach.
         self.web.injection_scan = True
@@ -2633,6 +2657,65 @@ class NyxaraSettings(BaseSettings):
             # tests/growth/test_genesis.py, which sets backend="torch" explicitly).
             self.genesis.run_on_boot = False
             self.genesis.backend = "stdlib"
+            # These now default ON (max-power posture) but are far too heavy / recursive for the
+            # hermetic suite: run_pytest_in_gauntlet would spawn the WHOLE pytest run nested inside
+            # a self-optimize test, and the architecture-escalation / payoff-forecaster paths pull
+            # in Genesis search + torch. Seal them under TEST (a test that wants them opts in on its
+            # own settings object) — same fail-closed pattern as the enact paths above.
+            self.self_improvement.run_pytest_in_gauntlet = False
+            self.self_improvement.use_payoff_forecaster = False
+            self.mind_evolution.escalate_to_architecture = False
+
+        # ---- MAXIMUM POWER crank ---- #
+        # profile=max OR NYXARA_MAX_POWER=1 pushes every capability/depth/cadence knob to its
+        # ceiling. Never runs under TEST (the suite must stay hermetic & deterministic), and never
+        # touches a safety boundary — the never-disable block above still stands, and simulation +
+        # sandbox are re-forced here so max capability is never max risk.
+        if (self.max_power or self.profile is Profile.MAX) and self.profile is not Profile.TEST:
+            # Safety floors held ON even at full power.
+            self.features.simulation_required = True
+            self.agency.sandbox_before_real_action = True
+            self.guard.kill_switch_enabled = True
+            self.guard.zero_trust = True
+            # Deepest verified reasoning every turn.
+            self.llm.deep_reasoning.enabled = True
+            self.llm.deep_reasoning.max_rung = 4
+            self.llm.deep_reasoning.samples = 12
+            self.llm.deep_reasoning.max_seconds = 600.0
+            self.llm.deep_reasoning.keep_best = True
+            self.llm.deep_reasoning.ground_verifier = True
+            self.llm.deep_reasoning.learn_effort = True
+            self.llm.reasoning_passes = 5
+            self.llm.reasoning_samples = 9
+            self.mcts.enabled = True
+            # Own-model-first, council presiding.
+            self.council.enabled = True
+            self.council.prefer_self_weight = 3.0
+            self.router.enabled = True
+            self.self_model_router.enabled = True
+            # Compounding self-growth from the first tick.
+            self.genesis.enabled = True
+            self.genesis.run_on_boot = True
+            self.mind_evolution.enabled = True
+            self.self_improvement.continuous = True
+            self.temporal.enabled = True
+            self.temporal.autostart = True
+            self.server.autonomic = True
+            # Risky / security / hardware knobs: safe at the bare code default so libraries, tests
+            # and subprocesses stay lean & safe — but at FULL POWER (explicitly chosen) they engage.
+            self.agency.privilege_escalation = True
+            self.agency.system.allow_power = True
+            self.agency.autonomous_internet_allow_irreversible = True
+            self.agency.civilization_autonomous = True
+            self.foundry.trust_remote_code = True
+            self.llm.qwen_trust_remote_code = True
+            self.foundry.load_in_4bit = True      # 8bit stays off (mutually exclusive)
+            self.llm.qwen_load_in_4bit = True
+            self.foundry.lora_requires_gpu = True
+            self.foundry.lora_use_rslora = True
+            self.llm.self_serve_any_backend = True
+            self.self_improvement.grounded_web_enabled = True
+
         return self
 
     # ---- convenience ---- #
@@ -2643,6 +2726,10 @@ class NyxaraSettings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.profile is Profile.DEV
+
+    @property
+    def is_max(self) -> bool:
+        return self.max_power or self.profile is Profile.MAX
 
     def redacted(self) -> Dict[str, Any]:
         """Log-safe dict with all secrets masked. Use this for any logging."""

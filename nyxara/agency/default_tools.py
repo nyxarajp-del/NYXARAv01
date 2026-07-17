@@ -653,7 +653,16 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   reversible=False, target_param="host"))
 
     # ---- multimodal perception: image / audio / documents (heavy ML import-guarded) ---- #
+    def _feature_on(name: str) -> bool:
+        try:
+            from nyxara.kernel.config import get_settings
+            return bool(getattr(get_settings().features, name, True))
+        except Exception:  # noqa: BLE001 — config unavailable: assume the capability is present
+            return True
+
     def _inspect_image(path: str) -> Dict[str, Any]:
+        if not _feature_on("vision"):
+            return {"note": "vision faculty is disabled (features.vision=false)"}
         from nyxara.senses.vision import Vision
         info = Vision().inspect(path)
         return info.to_dict() if info is not None else {"error": "unrecognised image"}
@@ -664,6 +673,8 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
 
     def _read_image_text(path: str) -> Dict[str, Any]:
+        if not _feature_on("vision"):
+            return {"text": "", "note": "vision faculty is disabled (features.vision=false)"}
         from nyxara.senses.vision import Vision
         text, note = Vision().ocr(path)
         return {"text": text, "note": note}
@@ -674,6 +685,8 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                   capability=Capability.FS_READ, risk=RiskTier.LOW, target_param="path"))
 
     def _transcribe_audio(path: str) -> Dict[str, Any]:
+        if not _feature_on("audio"):
+            return {"transcript": "", "note": "audio faculty is disabled (features.audio=false)"}
         from nyxara.senses.audio import Audio
         text, note = Audio().transcribe(path)
         return {"transcript": text, "note": note}
