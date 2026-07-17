@@ -289,6 +289,10 @@ class QwenProvider(LLMProviderBase):
         self._torch: Any = None
 
     def available(self) -> bool:
+        # Master kill-switch: the in-process HuggingFace path is a heavy-ML capability, so it only
+        # serves when ``features.transformers_inference`` is on (the ladder degrades to self/mock).
+        if not bool(getattr(self.settings.features, "transformers_inference", True)):
+            return False
         try:
             import torch  # noqa: F401
             import transformers  # noqa: F401

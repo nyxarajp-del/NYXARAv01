@@ -2179,7 +2179,19 @@ class NyxaraCore:
         try:
             from nyxara.growth.skill_factory import SkillFactory
             sandbox = getattr(self, "sandbox_runner", None)
-            return SkillFactory(skill_memory=self.skills, toolsmith=None,
+            # Toolsmithing (Rule 4): when the flag is on, give the factory a real Toolsmith over
+            # the live registry so it composes & installs genuinely new tools (not just skills);
+            # off -> the previous behaviour (no toolsmith). Best-effort: never fail the build.
+            toolsmith = None
+            try:
+                from nyxara.kernel.config import get_settings
+                if (bool(getattr(get_settings().features, "toolsmithing", True))
+                        and self.tools is not None):
+                    from nyxara.agency.toolsmith import Toolsmith
+                    toolsmith = Toolsmith(self.tools)
+            except Exception:  # noqa: BLE001 — toolsmith is optional, degrade to None
+                toolsmith = None
+            return SkillFactory(skill_memory=self.skills, toolsmith=toolsmith,
                                 sandbox=sandbox, threshold=3)
         except Exception:  # noqa: BLE001 — skill factory is a capability, never required
             return None
@@ -5451,12 +5463,23 @@ class NyxaraCore:
             return Percept.from_document(item["document"])
         return None
 
+    def _feature_on(self, name: str, default: bool = True) -> bool:
+        """True if the named FeatureFlag is enabled (fail-open to ``default`` if config is off)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return bool(getattr(get_settings().features, name, default))
+        except Exception:  # noqa: BLE001 — config unavailable: assume the capability is present
+            return default
+
     def _image_percept(self, image: Any, source: str) -> Any:
         """An image percept from a ready ImageAnalysis, else by analysing a file path via
         the vision sense (optional heavy deps), degrading to a note if unavailable."""
         from nyxara.senses.binding import Percept
         if hasattr(image, "perceptual_hash") or hasattr(image, "average_hash"):
             return Percept.from_image(image, source=source)
+        if not self._feature_on("vision"):
+            return Percept.from_text(f"[image: {source}]", source=source,
+                                     tags=["image", "vision-off"])
         try:
             from nyxara.senses.vision import Vision
             return Percept.from_image(Vision().analyze(str(image), ocr=True), source=source)
@@ -5470,6 +5493,9 @@ class NyxaraCore:
         from nyxara.senses.binding import Percept
         if hasattr(audio, "fingerprint") or hasattr(audio, "silence_ratio"):
             return Percept.from_audio(audio, source=source)
+        if not self._feature_on("audio"):
+            return Percept.from_text(f"[audio: {source}]", source=source,
+                                     tags=["audio", "audio-off"])
         try:
             from nyxara.senses.audio import Audio
             return Percept.from_audio(Audio().analyze(str(audio), transcribe=True),
@@ -8424,6 +8450,50 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             rep["reasoner"] = "unknown"
         return rep
+
+    def power_report(self) -> Dict[str, Any]:
+        """A single at-a-glance map of which faculties are LIVE — the 'power surface'.
+
+        Each entry is True only when the subsystem was actually wired on this core (not merely
+        enabled in config), so it honestly reflects what NYXARA can do right now. Exposed over the
+        API as ``GET /status`` (nyxara/server/app.py)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            s = get_settings()
+            feats, is_max = s.features, s.is_max
+        except Exception:  # noqa: BLE001 — config unavailable: report faculties only
+            feats, is_max = None, False
+
+        def _live(attr: str) -> bool:
+            return getattr(self, attr, None) is not None
+
+        faculties = {
+            "reasoner": _live("reasoner"),
+            "council": _live("role_council"),
+            "foundry": _live("autoforge"),        # the autonomous forge loop drives the foundry
+            "autoforge": _live("autoforge"),
+            "genesis": _live("genesis"),
+            "mind_evolution": _live("mind_evolution"),
+            "toolsmith": bool(getattr(getattr(self, "skill_factory", None), "toolsmith", None)),
+            "vision": self._feature_on("vision"),
+            "audio": self._feature_on("audio"),
+            "web": self._feature_on("web_access"),
+            "mcp": bool(feats and getattr(get_settings().mcp, "enabled", False)) if feats else False,
+            "temporal": _live("temporal"),
+            "civilization": _live("civilization"),
+            "proactive": _live("proactive"),
+            "heartbeat": _live("heartbeat"),
+        }
+        out: Dict[str, Any] = {
+            "max_power": is_max,
+            "control": self.oversight.state.value,
+            "faculties": faculties,
+            "live_count": sum(1 for v in faculties.values() if v),
+            "tools": (len(self.tools.names()) if self.tools is not None else 0),
+        }
+        if feats is not None:
+            out["flags"] = {k: bool(v) for k, v in feats.model_dump().items()}
+        return out
 
     # ---- cross-session continuity (Rule 7) ---- #
     def save_state(self, path: Optional[str] = None) -> Optional[str]:

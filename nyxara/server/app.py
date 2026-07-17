@@ -389,6 +389,11 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     def report() -> dict:
         return core.report()
 
+    @app.get("/status", dependencies=auth)
+    def power_status() -> dict:
+        """The power surface: which faculties are LIVE right now, plus every feature flag."""
+        return core.power_report()
+
     @app.get("/v1/learning", dependencies=auth)
     def learning() -> dict:
         """Truthful learning state: trained generations, corpus growth, live serving."""
