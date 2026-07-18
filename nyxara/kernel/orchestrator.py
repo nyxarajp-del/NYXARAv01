@@ -1909,6 +1909,25 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — rehearsal is a capability, never required
             pass
 
+    def _grow_program_library(self) -> None:
+        """One sleep-abstraction pass over the skill-induction corpus: mine any program shape
+        that now recurs across independently-solved tasks and compile it into a permanent,
+        reusable library primitive (nyxara.cognition.program_library — DreamCoder-style
+        library learning). Best-effort, never raises."""
+        try:
+            lib = getattr(getattr(self, "sample_efficient", None), "program_library", None)
+            if lib is None:
+                return
+            report = lib.consolidate()
+            if report.new_macros and self.mind is not None:
+                self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"program library grew {len(report.new_macros)} new macro(s): "
+                    f"{', '.join(report.new_macros)}"[:120],
+                    salience=0.65, confidence=0.85)
+        except Exception:  # noqa: BLE001 — library growth is a capability, never required
+            pass
+
     def _build_temporal(self) -> Any:
         """A sense of time: order, precedence/lag, and rhythm over remembered events."""
         try:
@@ -6448,6 +6467,9 @@ class NyxaraCore:
             # restore any that regressed — a learned skill can be broken for at most one
             # consolidation interval before it is repaired.
             self._rehearse_skills()
+            # Program library: compress the skill corpus's recurring shapes into permanent,
+            # reusable primitives on the same cadence (DreamCoder-style library learning).
+            self._grow_program_library()
         # periodic meta-learning: on the same cadence, decide how to learn/reason/remember/
         # predict *better* and softly apply those bounded tunings to the live subsystems.
         if (self.meta_learning_engine is not None

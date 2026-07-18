@@ -118,6 +118,25 @@ class Operation:
         if self.name == "template":
             return _apply_template(text, str(self.params.get("inp", "")),
                                    str(self.params.get("out", "")))
+        if self.name == "macro":
+            # a library-learned composite primitive (see nyxara.cognition.program_library) —
+            # replay whatever permanent, compressed sub-program it was compiled from against
+            # _MACRO_REGISTRY. An unknown/unregistered macro name is inert (never raises).
+            macro = _MACRO_REGISTRY.get(str(self.params.get("macro", "")))
+            if macro is None:
+                return text
+            out = text
+            for op_name in macro.atom_prefix:
+                atom = _ATOMS.get(op_name)
+                if atom is None:
+                    return text
+                out = atom(out)
+            if not macro.param_keys:
+                atom = _ATOMS.get(macro.closing_op_name)
+                return atom(out) if atom is not None else out
+            closing_params = {k: self.params.get(k, macro.fixed_params.get(k))
+                              for k in macro.param_keys}
+            return Operation(macro.closing_op_name, closing_params).apply(out)
         return text                                     # unknown op → inert (never raises)
 
     @property
@@ -306,15 +325,47 @@ _PARAM_INDUCERS: Tuple[Callable[[Sequence[str], Sequence[str]], Optional[Operati
     _induce_arith, _induce_affix, _induce_strip_affix, _induce_replace, _induce_template,
 )
 
+# name -> inducer, keyed for reuse by a library-learning pass (see
+# nyxara.cognition.program_library.ProgramLibrary): a mined macro replays the SAME base
+# inducer restricted to its permanently-fixed parameters rather than duplicating the logic.
+_INDUCERS_BY_OP: Dict[str, Callable[[Sequence[str], Sequence[str]], Optional[Operation]]] = {
+    "arith": _induce_arith, "affix": _induce_affix, "strip_affix": _induce_strip_affix,
+    "replace": _induce_replace, "template": _induce_template,
+}
 
-def _induce_closing_op(xs: Sequence[str], ys: Sequence[str]) -> Optional[Operation]:
-    """A single op that maps every ``x`` to its ``y`` exactly, or None. Simplest first."""
+# process-wide registry a library-learned "macro" Operation resolves against at apply() time
+# (populated by nyxara.cognition.program_library.ProgramLibrary.promote/_hydrate). Deliberately
+# lives here rather than in program_library.py itself: that module's own __main__ self-test runs
+# it as a *second*, distinct module object, which would otherwise see an empty registry copy.
+_MACRO_REGISTRY: Dict[str, Any] = {}
+
+
+def _induce_closing_op(
+        xs: Sequence[str], ys: Sequence[str], *,
+        extra_inducers: Sequence[Callable[[Sequence[str], Sequence[str]], Optional[Operation]]] = (),
+        bias: Optional[Callable[[str], float]] = None) -> Optional[Operation]:
+    """A single op that maps every ``x`` to its ``y`` exactly, or None. Simplest first.
+
+    ``extra_inducers`` lets a :class:`~nyxara.cognition.program_library.ProgramLibrary` offer
+    its permanently-learned macros as additional candidate closing ops, tried alongside the
+    base vocabulary — this is the seam through which the library *empowers* future search.
+    ``bias`` (a learned name -> preference score) reorders candidates within their tier so
+    primitives with a track record of working are tried first: real search guidance, not a
+    fixed textbook order.
+    """
     # parameter-free atoms (identity, case, reversal, sort, …) — cheapest description length
-    for name in _ATOMS:
+    names = list(_ATOMS)
+    if bias is not None:
+        names.sort(key=bias, reverse=True)
+    for name in names:
         op = Operation(name)
         if all(op.apply(x) == y for x, y in zip(xs, ys)):
             return op
-    for inducer in _PARAM_INDUCERS:
+    inducers = list(_PARAM_INDUCERS) + list(extra_inducers)
+    if bias is not None:
+        inducers.sort(key=lambda fn: bias(getattr(fn, "macro_name", getattr(fn, "__name__", ""))),
+                      reverse=True)
+    for inducer in inducers:
         try:
             op = inducer(xs, ys)
         except Exception:  # noqa: BLE001 — a broken inducer just declines
@@ -383,7 +434,9 @@ class SkillInductionEngine:
     def __init__(self, embedder: Any = None, *, store: Any = None,
                  max_depth: int = 3, beam_width: int = 16,
                  min_demos: int = 2, apply_confidence: float = 0.55,
-                 match_threshold: float = 0.5) -> None:
+                 match_threshold: float = 0.5,
+                 extra_inducers: Sequence[Callable[[Sequence[str], Sequence[str]],
+                                                   Optional[Operation]]] = ()) -> None:
         self.embedder = embedder if (embedder is not None and hasattr(embedder, "embed")) else None
         self.store = store
         self.max_depth = max(0, int(max_depth))
@@ -393,6 +446,22 @@ class SkillInductionEngine:
         self.match_threshold = float(match_threshold)
         self._skills: Dict[str, InductiveSkill] = {}
         self._hydrated = False
+        # library-learning seam: additional closing-op candidates and a learned priority over
+        # them, installed by a nyxara.cognition.program_library.ProgramLibrary (see there).
+        # Empty/None by default, so behaviour is identical for every caller that doesn't wire one.
+        self._extra_inducers: List[Callable[[Sequence[str], Sequence[str]],
+                                            Optional[Operation]]] = list(extra_inducers)
+        self._bias: Optional[Callable[[str], float]] = None
+
+    def add_inducer(self, fn: Callable[[Sequence[str], Sequence[str]],
+                                       Optional[Operation]]) -> None:
+        """Register one more candidate closing-op inducer — typically a library-learned macro,
+        so the *next* ``induce`` call already searches over the grown vocabulary."""
+        self._extra_inducers.append(fn)
+
+    def set_bias(self, fn: Optional[Callable[[str], float]]) -> None:
+        """Install a learned name -> preference score used to order search candidates."""
+        self._bias = fn
 
     # ---- induction (breadth-first program search, verified against all demos) ---- #
     def _search(self, pairs: Sequence[Tuple[str, str]]) -> Optional[List[Operation]]:
@@ -404,7 +473,8 @@ class SkillInductionEngine:
         for _depth in range(self.max_depth + 1):
             # 1. try to CLOSE every frontier node with one induced op (shortest programs win)
             for prog, states in frontier:
-                op = _induce_closing_op(states, outputs)
+                op = _induce_closing_op(states, outputs, extra_inducers=self._extra_inducers,
+                                        bias=self._bias)
                 if op is not None:
                     full = prog + [op]
                     if all(self._run(full, x) == y for x, y in zip(inputs, outputs)):

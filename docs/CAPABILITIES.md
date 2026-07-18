@@ -54,7 +54,7 @@ applied to the documentation itself).
 | 32 | Bayesian Updating | `nyxara.quantum.superposition_states` | REAL |
 | 33 | Abstraction | `nyxara.cognition.concept_formation` | REAL |
 | 34 | Analogy (structure mapping) | `nyxara.mind.analogy` | REAL |
-| 35 | Compositional Intelligence | `nyxara.cognition.composition` | REAL |
+| 35 | Compositional Intelligence | `nyxara.cognition.composition` + `nyxara.cognition.program_library` | UPGRADED |
 | 36 | Creativity | `nyxara.mind.creative` | REAL |
 | 37 | Common Sense | `nyxara.knowledge.base` | REAL+WIRED |
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
@@ -295,6 +295,23 @@ four capabilities — each backed by a test:
   gauntlet re-verifies every seal in a fresh subprocess. The full `invariants.boot_verify()` seal
   check is now wired into the live `NyxaraCore` boot (Rule 8): capability may evolve, character and
   allegiance to the Master may not.
+- **#35 Discrete program library — DreamCoder-style wake/sleep, not just interpretation.**
+  `nyxara.cognition.composition` gave her a fixed, hand-taught lexicon; her verified program
+  synthesis (`nyxara.cognition.skill_induction`) searched a fixed primitive DSL and cached every
+  solved task under its own name — neither ever grew a *reusable* vocabulary from what she solved.
+  The new `ProgramLibrary` (`nyxara.cognition.program_library`) closes that loop: **wake** — her
+  breadth-first search is now guided by a small learned `PrimitiveScorer` and empowered by every
+  macro she has compiled so far; **sleep-abstraction** — periodically mines the skill corpus for
+  programs that recur, in the same shape, across independently-solved tasks, and anti-unifies
+  their parameters (`nyxara.mind.lot` + `anti_unify` from `nyxara.cognition.abstraction`) to find what is
+  permanently fixed vs. still a hole; **sleep-compression** — promotes the result into a permanent,
+  nameable `Macro`, persisted through `MemoryStore` so it survives restarts and is reused across
+  her whole lifetime. Wired into `SampleEfficientMind` (every taught skill routes through it) and
+  into the orchestrator's consolidation cadence (`NyxaraCore._grow_program_library`, alongside
+  skill rehearsal). The acid test: a depth-0 (single-step-only) search cannot invent a genuine
+  two-step program on its own — but once the library carries the compressed macro, it closes in
+  one step, including across a fresh process. Compositional generalization now comes from that
+  growing, reused library, not from search budget.
 
 ## Full operational control (on by default)
 

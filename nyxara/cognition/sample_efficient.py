@@ -46,17 +46,22 @@ class ConsolidationReport:
     skills_induced: int = 0
     skills: List[str] = None  # type: ignore[assignment]
     templates: Dict[str, str] = None  # type: ignore[assignment]
+    macros_learned: int = 0
+    macros: List[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.templates is None:
             self.templates = {}
         if self.skills is None:
             self.skills = []
+        if self.macros is None:
+            self.macros = []
 
     def to_dict(self) -> Dict[str, Any]:
         return {"concepts_seen": self.concepts_seen, "schemas_formed": self.schemas_formed,
                 "skills_induced": self.skills_induced, "skills": list(self.skills),
-                "templates": dict(self.templates)}
+                "templates": dict(self.templates), "macros_learned": self.macros_learned,
+                "macros": list(self.macros)}
 
 
 class SampleEfficientMind:
@@ -74,6 +79,17 @@ class SampleEfficientMind:
         self._few_shot: Optional[FewShotLearner] = None
         self._episodic: Optional[OneShotEpisodicMemory] = None
         self.skills = self._build_skill_engine()
+        # the discrete program library (DreamCoder-style wake/sleep): every skill induced below
+        # goes through it, so solved tasks feed a compression pass that permanently grows the
+        # engine's own primitive vocabulary rather than merely being cached under a task name.
+        self.program_library = self._build_program_library()
+
+    def _build_program_library(self) -> Any:
+        try:
+            from nyxara.cognition.program_library import ProgramLibrary
+            return ProgramLibrary(engine=self.skills, store=self.store)
+        except Exception:  # noqa: BLE001 — the library is a capability, never a hard dependency
+            return None
 
     def _build_skill_engine(self) -> SkillInductionEngine:
         """The few-shot skill-induction engine, tuned by the foundry settings when present."""
@@ -145,14 +161,17 @@ class SampleEfficientMind:
         raise ValueError(f"unknown teach kind {kind!r} (use concept|episodic|lexeme|skill)")
 
     def learn_skill(self, name: str, pairs: Any) -> Optional[InductiveSkill]:
-        """Induce a verified, reusable transformation from ``(input, output)`` demonstrations."""
+        """Induce a verified, reusable transformation from ``(input, output)`` demonstrations.
+
+        Routed through the program library when available, so the search is empowered by
+        whatever it has compressed so far and its outcome feeds back into that library."""
         if not getattr(self, "_skills_enabled", True):
             return None
         try:
             demos = [(str(a), str(b)) for a, b in pairs]
         except Exception:  # noqa: BLE001 — malformed demos simply teach nothing
             return None
-        return self.skills.induce(name, demos)
+        return (self.program_library or self.skills).induce(name, demos)
 
     def solve(self, stimulus: str):
         """Apply the best-matching learned skill to ``stimulus`` → ``(answer, conf)`` or None.
@@ -254,6 +273,15 @@ class SampleEfficientMind:
         # single verified transformation explains them all, she has genuinely learned a task from
         # examples (not just memorised the pairs). Verification means garbage never sticks.
         self._induce_skills_from_episodic(report)
+        # sleep-abstraction: mine the skill corpus for recurring program shapes and permanently
+        # compile them into new library primitives — the DreamCoder-style compression step.
+        if self.program_library is not None:
+            try:
+                lib_report = self.program_library.consolidate()
+                report.macros_learned = len(lib_report.new_macros)
+                report.macros = list(lib_report.new_macros)
+            except Exception:  # noqa: BLE001 — library growth is best-effort, never fatal
+                pass
         return report
 
     def _induce_skills_from_episodic(self, report: "ConsolidationReport") -> None:
@@ -268,7 +296,7 @@ class SampleEfficientMind:
         if len(pairs) < self.skills.min_demos:
             return
         try:
-            skill = self.skills.induce("episodic_transform", pairs)
+            skill = (self.program_library or self.skills).induce("episodic_transform", pairs)
         except Exception:  # noqa: BLE001 — mining is best-effort, never fatal
             skill = None
         if skill is not None:
@@ -292,7 +320,8 @@ class SampleEfficientMind:
         return {"concepts": len(fs) if fs is not None else 0,
                 "episodic_pairs": len(epi) if epi is not None else 0,
                 "lexemes": len(self.composer),
-                "skills": len(self.skills)}
+                "skills": len(self.skills),
+                "macros": len(self.program_library) if self.program_library is not None else 0}
 
 
 # --------------------------------------------------------------------------- #
@@ -356,5 +385,19 @@ if __name__ == "__main__":  # pragma: no cover
     assert solved is not None and solved[0] == "hello nyxara !"   # real generalization
     assert mind.solve("what time is it") is None                  # never hijacks an unrelated turn
     print("skill generalizes   : greet nyxara -> 'hello nyxara !' ✓")
+
+    # discrete program library: teach 3 tasks that share a 2-step (reorder + wrap) shape;
+    # consolidation compresses them into one permanent, reusable primitive.
+    mind.teach("shout", [("hello world", "SAY: world hello!"), ("go now", "SAY: now go!")],
+              kind="skill")
+    mind.teach("ask", [("foo bar", "SAY: bar foo?"), ("up down", "SAY: down up?")], kind="skill")
+    mind.teach("state", [("cat dog", "SAY: dog cat."), ("red blue", "SAY: blue red.")],
+              kind="skill")
+    lib_report = mind.consolidate()
+    print(f"library consolidate : {lib_report.to_dict()}")
+    assert lib_report.macros_learned >= 1, "3 independently-taught same-shape tasks -> a macro"
+    print(f"stats               : {mind.stats()}")
+    assert mind.stats()["macros"] >= 1
+    print("program library     : compressed a recurring pattern into a permanent primitive ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

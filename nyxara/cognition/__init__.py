@@ -38,6 +38,12 @@ from nyxara.cognition.concept_formation import (
     Instance,
 )
 from nyxara.cognition.composition import CompositionalGrammar, Interpretation
+from nyxara.cognition.program_library import (
+    LibraryReport,
+    Macro,
+    PrimitiveScorer,
+    ProgramLibrary,
+)
 from nyxara.cognition.sample_efficient import ConsolidationReport, SampleEfficientMind
 from nyxara.cognition.grounded_understanding import (
     DESCRIPTOR_ONTOLOGY,
@@ -75,6 +81,12 @@ __all__ = [
     "Instance",
     "CompositionalGrammar",
     "Interpretation",
+    # discrete program library — DreamCoder-style wake/sleep (search, then compress into a
+    # permanent, reusable primitive vocabulary)
+    "ProgramLibrary",
+    "Macro",
+    "LibraryReport",
+    "PrimitiveScorer",
     "SampleEfficientMind",
     "ConsolidationReport",
     # grounded understanding — perceptual symbol grounding (word → multimodal meaning)
