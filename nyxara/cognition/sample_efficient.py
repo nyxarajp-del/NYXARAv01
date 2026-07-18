@@ -65,7 +65,7 @@ class SampleEfficientMind:
     SCHEMA_TAG = "schema"
 
     def __init__(self, embedder: Any = None, *, store: Any = None,
-                 settings: Any = None) -> None:
+                 settings: Any = None, program_library: Any = None) -> None:
         self.store = store
         self.settings = settings
         self.embedder = embedder or self._resolve_embedder(store)
@@ -73,6 +73,10 @@ class SampleEfficientMind:
         self.composer = CompositionalGrammar(store=store)
         self._few_shot: Optional[FewShotLearner] = None
         self._episodic: Optional[OneShotEpisodicMemory] = None
+        # the unified discrete program library (cognition/program_library.py): every skill this
+        # mind's induction engine verifies is also compiled there, so the kernel's Reason stage
+        # can reuse it directly and compose it with programs from other producers.
+        self.program_library = program_library
         self.skills = self._build_skill_engine()
 
     def _build_skill_engine(self) -> SkillInductionEngine:
@@ -84,7 +88,8 @@ class SampleEfficientMind:
             max_depth=int(getattr(cfg, "skill_max_program_depth", 3)),
             beam_width=int(getattr(cfg, "skill_beam_width", 16)),
             min_demos=int(getattr(cfg, "skill_min_demos", 2)),
-            apply_confidence=float(getattr(cfg, "skill_apply_confidence", 0.55)))
+            apply_confidence=float(getattr(cfg, "skill_apply_confidence", 0.55)),
+            program_library=self.program_library)
 
     @staticmethod
     def _resolve_embedder(store: Any) -> Any:

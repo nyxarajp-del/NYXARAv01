@@ -634,8 +634,12 @@ class CognitiveArchitect:
     def __init__(self, *, persist_path: Optional[str] = None, seed: int = 0,
                  lib: Optional[Dict[str, Primitive]] = None,
                  n_per_type: int = 24, meta_depth: int = MAX_META_DEPTH,
-                 enact: bool = False) -> None:
+                 enact: bool = False, program_library: Any = None) -> None:
         self.lib = lib if lib is not None else _default_primitives()
+        # the unified discrete program library (cognition/program_library.py): a newly-invented
+        # operator that strictly beats the incumbent on train AND held-out is proposed there too,
+        # once, as a REASONING_OPERATOR program. Best-effort, never required.
+        self.program_library = program_library
         self.rng = random.Random(seed)
         self.persist_path = persist_path
         self.enact = bool(enact)
@@ -852,10 +856,31 @@ class CognitiveArchitect:
         rep.certificate = certificate
         if best_new is not None:
             rep.invented = best_new
+            self._propose_to_library(best_new, best_child.operators[best_new])
         self.history.append(rep)
         if self.persist_path:
             self._save()
         return rep
+
+    def _propose_to_library(self, op_id: str, expr: Any) -> None:
+        """Compile a newly-invented, held-out-proven operator into the unified program library.
+
+        Verification already happened above (strict train AND held-out improvement, recorded
+        in the adoption certificate), so this is proposed ``already_verified=True`` — no
+        serializable test cases are needed since ``ReasoningQuery``/``Task`` are runtime
+        objects, not JSON payloads; retrieval still works whenever a caller supplies a live
+        query. Best-effort, never blocks adoption."""
+        if self.program_library is None:
+            return
+        try:
+            from nyxara.cognition.program_library import ProgramDomain
+            ttypes = sorted(t.value for t in _expr_ttypes(expr, self.lib))
+            self.program_library.propose(
+                name=op_id, domain=ProgramDomain.REASONING_OPERATOR,
+                body={"expr": expr}, signature=f"reasoning:{'_'.join(ttypes)}",
+                source="cognitive_architect", already_verified=True)
+        except Exception:  # noqa: BLE001 — library proposal is a capability, never fatal
+            pass
 
     # -- continuous plasticity (fast layer), driven per live outcome ------------------------ #
     def tick_plasticity(self, query: ReasoningQuery, correct: bool) -> Optional[str]:

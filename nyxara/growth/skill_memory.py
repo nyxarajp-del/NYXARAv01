@@ -62,10 +62,14 @@ class SkillMemory:
 
     TAG = "skill"
 
-    def __init__(self, store: Any = None, *, min_steps: int = 1) -> None:
+    def __init__(self, store: Any = None, *, min_steps: int = 1, program_library: Any = None) -> None:
         self.store = store
         self.min_steps = max(1, min_steps)
         self._local: List[Skill] = []          # used only when no store is provided
+        # the unified discrete program library (cognition/program_library.py): a freshly-distilled
+        # skill is also proposed there (as an advisory PROCEDURE program) so it is stored, dedup'd
+        # and reported alongside every other producer's compiled programs. Best-effort, never fatal.
+        self.program_library = program_library
 
     # ---- capture ---- #
     def capture(self, run: Any) -> Optional[Skill]:
@@ -95,6 +99,7 @@ class SkillMemory:
         skill = Skill(goal=goal, tools=tools, procedure=procedure)
         skill.reinforce()
         self._persist(skill, update=False)
+        self._propose_to_library(skill)
         return skill
 
     def learn(self, goal: str, procedure: str, tools: Optional[List[str]] = None) -> Skill:
@@ -108,7 +113,21 @@ class SkillMemory:
         skill = Skill(goal=goal.strip(), tools=list(tools or []), procedure=procedure)
         skill.reinforce()
         self._persist(skill, update=False)
+        self._propose_to_library(skill)
         return skill
+
+    def _propose_to_library(self, skill: Skill) -> None:
+        if self.program_library is None:
+            return
+        try:
+            from nyxara.cognition.program_library import ProgramDomain
+            sig = "procedure:" + "_".join(sorted(_tokens(skill.goal))) if skill.goal else "procedure:_"
+            self.program_library.propose(
+                name=(skill.goal[:40] or skill.skill_id), domain=ProgramDomain.PROCEDURE,
+                body=skill.to_dict(), signature=sig,
+                source="skill_memory", already_verified=True)
+        except Exception:  # noqa: BLE001 — library proposal is a capability, never fatal
+            pass
 
     def _distil(self, steps: List[Any], final_answer: str) -> str:
         parts = []

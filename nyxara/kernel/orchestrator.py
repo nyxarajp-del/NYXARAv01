@@ -359,6 +359,11 @@ class NyxaraCore:
         self.vault = self._build_vault() if enable_tools else None
         # the governed, executable toolset shares the kernel's policy + governor
         self.tools = tools if tools is not None else (self._build_tools() if enable_tools else None)
+        # the unified discrete program library (cognition/program_library.py): a DreamCoder-style
+        # symbolic spine every skill/program producer below compiles into once, and that the
+        # Reason stage tries before any full search/synthesis. Built BEFORE the producers so it
+        # can be threaded into each of them.
+        self.program_library = self._build_program_library() if enable_skills else None
         # learned procedural skills (experiential learning) — persisted via memory
         self.skills = skills if skills is not None else (
             self._build_skills() if enable_skills else None)
@@ -1022,10 +1027,45 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — MCP is a capability, never a hard dependency
             self._mcp_clients = []
 
+    def _build_program_library(self) -> Any:
+        """The unified DiscreteProgramLibrary (cognition/program_library.py): every verified
+        program from skill induction, genesis, cognitive architect, and skill memory lands
+        here once; the Reason stage tries it before any full search/synthesis. Persists
+        entirely through ``self.memory`` (survives save_state/load_state); migrates the
+        pre-existing fragmented stores in once, idempotently, on first build."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "program_library", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.cognition.program_library import DiscreteProgramLibrary
+            from nyxara.cognition.composition import CompositionalGrammar
+            lib = DiscreteProgramLibrary(
+                store=self.memory, composer=CompositionalGrammar(store=self.memory),
+                capacity=int(getattr(cfg, "capacity", 256)),
+                decay_rate=float(getattr(cfg, "decay_rate", 0.02)),
+                promote_min_uses=int(getattr(cfg, "promote_min_uses", 3)),
+                promote_min_success_rate=float(getattr(cfg, "promote_min_success_rate", 0.8)),
+                composition_max_pairs=int(getattr(cfg, "composition_max_pairs", 6)),
+                compression_enabled=bool(getattr(cfg, "compression_enabled", True)),
+                compression_min_frequency=int(getattr(cfg, "compression_min_frequency", 3)),
+                compression_trigger_growth=int(getattr(cfg, "compression_trigger_growth", 32)),
+                search_enabled=bool(getattr(cfg, "search_enabled", True)),
+                search_max_rollouts=int(getattr(cfg, "search_max_rollouts", 32)),
+                search_max_depth=int(getattr(cfg, "search_max_depth", 4)),
+                # migration is intentionally lazy (fires on first real hydration, never at
+                # construction) so it never races ahead of load_state() restoring memory —
+                # see DiscreteProgramLibrary._hydrate's docstring note.
+                migrate_legacy_on_boot=bool(getattr(cfg, "migrate_legacy_on_boot", True)))
+            return lib
+        except Exception:  # noqa: BLE001 — the program library is a capability, never required
+            return None
+
     def _build_skills(self) -> Any:
         try:
             from nyxara.growth.skill_memory import SkillMemory
-            return SkillMemory(store=self.memory)
+            return SkillMemory(store=self.memory, program_library=getattr(self, "program_library", None))
         except Exception:  # noqa: BLE001 — skills are a capability, never a hard dependency
             return None
 
@@ -1034,7 +1074,8 @@ class NyxaraCore:
             from nyxara.cognition.sample_efficient import SampleEfficientMind
             embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
             return SampleEfficientMind(embedder, store=self.memory,
-                                       settings=getattr(self, "settings", None))
+                                       settings=getattr(self, "settings", None),
+                                       program_library=getattr(self, "program_library", None))
         except Exception:  # noqa: BLE001 — a capability, never a hard dependency
             return None
 
@@ -3827,6 +3868,7 @@ class NyxaraCore:
                 n_per_type=int(getattr(cfg, "n_per_type", 24)),
                 meta_depth=int(getattr(cfg, "meta_depth", 2)),
                 enact=bool(getattr(cfg, "autonomous_enact", False)),
+                program_library=getattr(self, "program_library", None),
             )
         except Exception:  # noqa: BLE001 — the cognitive architect is a capability, never required
             return None
@@ -3943,7 +3985,8 @@ class NyxaraCore:
                     flywheel = DataFlywheel.from_settings()
                 except Exception:  # noqa: BLE001 — counting is best-effort
                     flywheel = None
-            return NeuralArchitectureSearch(foundry=Foundry(), flywheel=flywheel, cfg=cfg)
+            return NeuralArchitectureSearch(foundry=Foundry(), flywheel=flywheel, cfg=cfg,
+                                            program_library=getattr(self, "program_library", None))
         except Exception:  # noqa: BLE001 — genesis is a capability, never required
             return None
 
@@ -4213,7 +4256,15 @@ class NyxaraCore:
 
         # 3. REASON — the probabilistic proposal, grounded in associative recall
         recalled = self._recall_for(safe_text)
-        candidate = self._invoke_reasoner(safe_text, focus, recalled)
+        # 3a. DISCRETE PROGRAM LIBRARY — DreamCoder-style fast path: try a program NYXARA has
+        #     already verified and compiled (directly, then by composing two of them, then by a
+        #     bounded search over her own library) BEFORE re-deriving an answer from scratch.
+        #     Conservative by construction (same posture as skill_induction.solve()'s anchored-
+        #     match floor): it only ever proposes a 'respond' candidate, so the unchanged Gate
+        #     stage still runs on it — no safety boundary is bypassed either way.
+        candidate = self._maybe_library_fastpath(safe_text, focus)
+        if candidate is None:
+            candidate = self._invoke_reasoner(safe_text, focus, recalled)
         # 3b. ENVIRONMENT-DRIVEN LEARNING — if she doesn't know this (abstains / low
         #     confidence on a solvable task), don't stop: self-bootstrap a solution, learn it
         #     permanently, and re-reason now that the new skill/knowledge is recalled.
@@ -4661,6 +4712,52 @@ class NyxaraCore:
                           f"and re-dispatched it this turn")
         except Exception:  # noqa: BLE001 — forging must never crash the cognitive cycle
             return candidate
+
+    def _maybe_library_fastpath(self, stimulus: str, focus: Optional[Percept]) -> Optional[Candidate]:
+        """Try the unified discrete program library before any full reasoning runs.
+
+        Direct reuse first (``try_apply``), then compositional reuse of two existing
+        programs (``try_compose`` — real β-reduction / verified pipeline chaining), then a
+        bounded search over the library's own programs (``search_for_solution``). Returns
+        ``None`` on any miss/error so the caller falls through to the ordinary reasoner —
+        this path never blocks or degrades a turn, it only ever short-circuits one."""
+        lib = getattr(self, "program_library", None)
+        if lib is None:
+            return None
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = getattr(get_settings(), "program_library", None)
+            if cfg is not None and not (bool(getattr(cfg, "enabled", True))
+                                        and bool(getattr(cfg, "fastpath_enabled", True))):
+                return None
+            min_conf = float(getattr(cfg, "min_apply_confidence", 0.6)) if cfg is not None else 0.6
+            from nyxara.cognition.program_library import compute_task_signature
+            sig = compute_task_signature(stimulus)
+            hit = lib.try_apply({"text": stimulus}, task_signature=sig)
+            confidence = 0.0
+            program = None
+            if hit is not None:
+                output, program, confidence = hit
+            else:
+                composed = lib.try_compose({"text": stimulus}, sig)
+                if composed is not None:
+                    output, program = composed
+                    confidence = 0.75
+                else:
+                    searched = lib.search_for_solution({"text": stimulus}, sig)
+                    if searched is None:
+                        return None
+                    output, program = searched
+                    confidence = 0.65
+            if confidence < min_conf or not str(output).strip():
+                return None
+            return Candidate(
+                text=str(output), kind="respond", capability=Capability.MESSAGE_SEND,
+                risk=RiskTier.LOW, confidence=confidence, belief=confidence,
+                rationale=f"answered via compiled library program {program.name!r} "
+                          f"(reused, not re-derived)")
+        except Exception:  # noqa: BLE001 — the fast path is advisory, never fatal
+            return None
 
     def _maybe_bootstrap(self, stimulus: str, focus: Optional[Percept],
                          candidate: Candidate, authority: Authority) -> Candidate:
@@ -6535,6 +6632,20 @@ class NyxaraCore:
                 if migrated:
                     report["reembedded"] = migrated
             except Exception:  # noqa: BLE001 — re-embedding is maintenance, never fatal
+                pass
+        # 1a2) discrete program library upkeep — decay unused compiled programs, compress
+        # recurring sub-patterns into new reusable primitives once the library has grown
+        # enough, prune back to capacity, and promote any program that has earned its keep
+        # (enough uses, high success rate) into a real callable tool.
+        if self.program_library is not None:
+            try:
+                self.program_library.decay_tick()
+                if self.tools is not None:
+                    for pid in self.program_library.promotion_candidates():
+                        self.program_library.promote_to_tool(pid, self.tools)
+                report["program_library"] = self.program_library.report()
+                self.mind.snapshot("program_library", report["program_library"])
+            except Exception:  # noqa: BLE001 — library upkeep is maintenance, never fatal
                 pass
         # 1c) CLS sleep — the fast→slow consolidation bridge. When the reward learner is a
         # Complementary Learning System, idle time is when she *sleeps*: prolonged idleness enters a
@@ -8497,6 +8608,11 @@ class NyxaraCore:
             try:
                 rep["skilltree"] = self.skilltree.report()
             except Exception:  # noqa: BLE001 — skill-tree stats are best-effort
+                pass
+        if self.program_library is not None:
+            try:
+                rep["program_library"] = self.program_library.report()
+            except Exception:  # noqa: BLE001 — program-library stats are best-effort
                 pass
         if self.proactive is not None:
             try:

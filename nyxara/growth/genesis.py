@@ -61,7 +61,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.growth.foundry_models import (BaseLanguageModel, ModelSpec, TrainStats,
                                           WordKNGramLM, _HAS_TORCH, _VOCAB)
@@ -285,13 +285,17 @@ class MixerProgram:
 class PrimitiveLibrary:
     """A growing, deduplicated set of learned token-mixer primitives NYXARA has herself crowned."""
 
-    def __init__(self, path: Optional[Path] = None, *, capacity: int = 48) -> None:
+    def __init__(self, path: Optional[Path] = None, *, capacity: int = 48,
+                 on_add: Optional[Callable[[str, "MixerProgram"], None]] = None) -> None:
         self.path = Path(path) if path else None
         self.capacity = max(1, int(capacity))
         self.entries: List[Dict[str, Any]] = []          # [{name, steps}]
         self._fps: set = set()
         self._counter = 0
         self.added_this_session = 0
+        # best-effort hook into the unified discrete program library (cognition/program_library.py):
+        # fired only when a gauntlet-crowned mixer is genuinely distilled into a new primitive here.
+        self._on_add = on_add
         self._load()
 
     def __len__(self) -> int:
@@ -336,6 +340,11 @@ class PrimitiveLibrary:
             drop = self.entries.pop(0)
             self._fps.discard("+".join(drop.get("steps", [])))
         self._save()
+        if self._on_add is not None:
+            try:
+                self._on_add(name, prog)
+            except Exception:  # noqa: BLE001 — the hook is best-effort, never blocks distillation
+                pass
         return name
 
     def add_from_genome(self, genome: Any) -> int:
@@ -2451,7 +2460,8 @@ class NeuralArchitectureSearch:
     through the Foundry's gauntlet so it becomes NYXARA's live brain — fail-closed."""
 
     def __init__(self, *, settings: Any = None, foundry: Any = None, flywheel: Any = None,
-                 seed_corpus: Optional[Sequence[str]] = None, cfg: Any = None) -> None:
+                 seed_corpus: Optional[Sequence[str]] = None, cfg: Any = None,
+                 program_library: Any = None) -> None:
         if settings is None:
             try:
                 from nyxara.kernel.config import get_settings
@@ -2477,11 +2487,13 @@ class NeuralArchitectureSearch:
         self._ops: Tuple[str, ...] = _OPS if self._search_ops else tuple(o for o in _OPS if o != "synth")
         # the self-extending primitive library: crowned synth mixers become reusable building blocks
         # the search composes over. Only active when operator synthesis is on (nothing to grow otherwise).
+        self.program_library = program_library
         self._library: Optional[PrimitiveLibrary] = None
         if self._search_ops and bool(getattr(self.cfg, "primitive_library", True)):
             self._library = PrimitiveLibrary(
                 self._primlib_path(),
-                capacity=int(getattr(self.cfg, "primitive_library_size", 48)))
+                capacity=int(getattr(self.cfg, "primitive_library_size", 48)),
+                on_add=self._propose_to_program_library if program_library is not None else None)
         self._champion: Optional[Candidate] = None
         self._last_report: Optional[GenesisReport] = None
         self._reports: List[GenesisReport] = []
@@ -2515,6 +2527,24 @@ class NeuralArchitectureSearch:
             return Path(data_dir) / "genesis" / "hall_of_fame.json"
         except Exception:  # noqa: BLE001 — no settings/paths: keep memory in-process only
             return None
+
+    def _propose_to_program_library(self, name: str, prog: "MixerProgram") -> None:
+        """Fired only when a gauntlet-crowned mixer is distilled into a NEW named primitive
+        (see ``PrimitiveLibrary.add``, called only from the promoted branch of
+        ``promote_champion``). Compiles it into the unified discrete program library too,
+        as bookkeeping/dedup/reuse-as-search-seed (NN-mixer steps configure a neural net —
+        they are not a callable input/output transform, so this is never retrieved by
+        ``try_apply``)."""
+        if self.program_library is None:
+            return
+        try:
+            from nyxara.cognition.program_library import ProgramDomain
+            self.program_library.propose(
+                name=name, domain=ProgramDomain.NN_MIXER,
+                body={"steps": list(prog.steps)}, signature=f"nn_mixer:{len(prog.steps)}",
+                source="genesis", already_verified=True)
+        except Exception:  # noqa: BLE001 — library proposal is a capability, never fatal
+            pass
 
     def _primlib_path(self) -> Optional[Path]:
         """Where the self-extending primitive library lives — beside the Hall of Fame under the data

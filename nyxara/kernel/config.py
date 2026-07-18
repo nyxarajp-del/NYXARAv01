@@ -194,6 +194,7 @@ class FeatureFlags(BaseModel):
     law_discovery: bool = True               # growth/law_discovery.py — discover NEW empirical/physical laws from data & self-run experiments, no LLM (Rule 4)
     engineering_foundry: bool = True         # growth/engineering_foundry.py — use invented laws + physics sims to DESIGN & upgrade real devices; honest feasibility gate; no LLM (Rule 4)
     cognitive_architect: bool = True         # growth/cognitive_architect.py — structurally rewire her own cognitive architecture: invent new composite reasoning operators (trans-logic), antifragile self-heal; verify-or-keep; no LLM (Rule 4)
+    program_library: bool = True             # cognition/program_library.py — unified DreamCoder-style compiled-program library: skill_induction/genesis/cognitive_architect/skill_memory all propose into it; the Reason stage tries it before any search/synthesis; no LLM
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
@@ -1678,6 +1679,33 @@ class CognitiveArchitectConfig(BaseModel):
     persist_filename: str = "cognitive_architecture.json"
 
 
+class ProgramLibraryConfig(BaseModel):
+    """The unified Discrete Program Library (cognition/program_library.py) — DreamCoder-style
+    compile step. Every verified program from skill induction, genesis, cognitive architect and
+    skill memory is proposed HERE once; the kernel's Reason stage tries a compiled program before
+    falling back to full search/synthesis, and compositional generalization comes from reusing
+    and combining what is already proven — never from scale or repeated inference calls.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    fastpath_enabled: bool = True         # try the library before the reasoner in process()
+    min_apply_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    capacity: int = Field(default=256, ge=8, le=4096)
+    decay_rate: float = Field(default=0.02, ge=0.0, le=1.0)     # mirrors SkillTree.decay_rate
+    promote_min_uses: int = Field(default=3, ge=1)
+    promote_min_success_rate: float = Field(default=0.8, ge=0.0, le=1.0)
+    composition_max_pairs: int = Field(default=6, ge=1, le=64)  # bounded try_compose search budget
+    compression_enabled: bool = True
+    compression_min_frequency: int = Field(default=3, ge=2, le=64)
+    compression_trigger_growth: int = Field(default=32, ge=1, le=4096)
+    search_enabled: bool = True
+    search_max_rollouts: int = Field(default=32, ge=0, le=2048)
+    search_max_depth: int = Field(default=4, ge=1, le=16)
+    migrate_legacy_on_boot: bool = True
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2628,6 +2656,7 @@ class NyxaraSettings(BaseSettings):
     godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
     cognitive_architect: CognitiveArchitectConfig = Field(
         default_factory=CognitiveArchitectConfig)
+    program_library: ProgramLibraryConfig = Field(default_factory=ProgramLibraryConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2679,6 +2708,8 @@ class NyxaraSettings(BaseSettings):
             self.temporal.enabled = False
         if not self.features.self_evolution:
             self.mind_evolution.enabled = False
+        if not self.features.program_library:
+            self.program_library.enabled = False
         # Untrusted web content is always screened for prompt-injection (defense in depth);
         # this sanitises page text, it never limits NYXARA's reach.
         self.web.injection_scan = True

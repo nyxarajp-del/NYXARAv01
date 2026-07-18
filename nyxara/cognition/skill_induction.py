@@ -383,7 +383,7 @@ class SkillInductionEngine:
     def __init__(self, embedder: Any = None, *, store: Any = None,
                  max_depth: int = 3, beam_width: int = 16,
                  min_demos: int = 2, apply_confidence: float = 0.55,
-                 match_threshold: float = 0.5) -> None:
+                 match_threshold: float = 0.5, program_library: Any = None) -> None:
         self.embedder = embedder if (embedder is not None and hasattr(embedder, "embed")) else None
         self.store = store
         self.max_depth = max(0, int(max_depth))
@@ -391,6 +391,11 @@ class SkillInductionEngine:
         self.min_demos = max(1, int(min_demos))
         self.apply_confidence = float(apply_confidence)
         self.match_threshold = float(match_threshold)
+        # the unified discrete program library (cognition/program_library.py): every skill this
+        # engine verifies is proposed there too, once, so the kernel's Reason stage can reuse it
+        # directly instead of re-deriving it, and so it can be composed with programs from other
+        # producers (genesis, cognitive_architect, skill_memory). Best-effort, never required.
+        self.program_library = program_library
         self._skills: Dict[str, InductiveSkill] = {}
         self._hydrated = False
 
@@ -456,7 +461,23 @@ class SkillInductionEngine:
         if prev is None or skill.confidence >= prev.confidence or len(clean) > len(prev.demos):
             self._skills[skill.name] = skill
             self._persist(skill)
+            self._propose_to_library(skill)
         return self._skills[skill.name]
+
+    def _propose_to_library(self, skill: InductiveSkill) -> None:
+        """Compile a freshly-verified skill into the unified program library (best-effort)."""
+        if self.program_library is None:
+            return
+        try:
+            from nyxara.cognition.program_library import ProgramDomain, ProgramTestCase
+            tcs = [ProgramTestCase(inputs={"text": a}, expected=b) for a, b in skill.demos]
+            self.program_library.propose(
+                name=skill.name, domain=ProgramDomain.STRING_PROGRAM,
+                body={"program": [op.to_dict() for op in skill.program]},
+                signature=f"string:{skill.input_template or skill.name}",
+                source="skill_induction", test_cases=tcs, already_verified=True)
+        except Exception:  # noqa: BLE001 — library proposal is a capability, never fatal
+            pass
 
     def _holdout_generalizes(self, clean: Sequence[Tuple[str, str]]) -> bool:
         """Induce on all-but-one demo and check it predicts the held-out one (true transfer)."""
