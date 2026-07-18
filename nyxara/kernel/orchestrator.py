@@ -1373,6 +1373,33 @@ class NyxaraCore:
             from nyxara.growth.learn import Learner
             from nyxara.kernel.config import get_settings
             mcfg = get_settings().memory
+            # Complementary Learning Systems (fast hippocampus + slow cortex + a sleep bridge) is a
+            # drop-in *superset* of the single Learner — record/value/replay/consolidate/model/buffer
+            # all behave as the rest of the orchestrator expects — so enabling it upgrades reward
+            # learning into a real two-system continual learner with no other change. It falls back to
+            # the bare Learner if disabled or unavailable, so behaviour is fully reversible.
+            if getattr(mcfg, "cls_enabled", True):
+                try:
+                    from nyxara.growth.cls import ComplementaryLearningSystem
+                    return ComplementaryLearningSystem(
+                        fast_lr=getattr(mcfg, "cls_fast_lr", 0.5),
+                        slow_lr=getattr(mcfg, "cls_slow_lr", 0.05),
+                        ewc_lambda=getattr(mcfg, "ewc_lambda", 3.0),
+                        der_alpha=getattr(mcfg, "ewc_der_alpha", 0.5),
+                        task_reserve=getattr(mcfg, "ewc_task_reserve", 64),
+                        frozen_lr_scale=getattr(mcfg, "ewc_frozen_lr_scale", 0.2),
+                        replay_batch=getattr(mcfg, "cls_replay_batch", 32),
+                        hippocampal_decay=getattr(mcfg, "cls_hippocampal_decay", 0.15),
+                        blend_sharpness=getattr(mcfg, "cls_blend_sharpness", 4.0),
+                        pattern_sep_dim=getattr(mcfg, "cls_pattern_sep_dim", 256),
+                        pattern_sep_k=getattr(mcfg, "cls_pattern_sep_k", 16),
+                        rem_pseudo_batch=getattr(mcfg, "cls_rem_pseudo_batch", 16),
+                        homeostatic_scale=getattr(mcfg, "cls_homeostatic_scale", 0.98),
+                        schema_congruence_gain=getattr(mcfg, "cls_schema_congruence_gain", 2.0),
+                        adaptive_sleep=getattr(mcfg, "cls_adaptive_sleep", True),
+                    )
+                except Exception:  # noqa: BLE001 — fall back to the single-system learner
+                    pass
             return Learner(
                 der_alpha=getattr(mcfg, "ewc_der_alpha", 0.0),
                 frozen_lr_scale=getattr(mcfg, "ewc_frozen_lr_scale", 1.0),
@@ -6230,8 +6257,13 @@ class NyxaraCore:
         if self.learner is not None:
             err = None
             try:
-                err = self.learner.record(action, features, reward, context=candidate.rationale,
-                                    task=action)
+                # a Complementary Learning System encodes with plasticity gated by the live
+                # free-energy surprise (novel/surprising turns are written harder into the fast
+                # hippocampal store); the single-system Learner takes no surprise argument.
+                rec_kwargs: Dict[str, Any] = {"context": candidate.rationale, "task": action}
+                if hasattr(self.learner, "hippocampus") and self._last_fe_surprise is not None:
+                    rec_kwargs["surprise"] = min(1.0, abs(float(self._last_fe_surprise)))
+                err = self.learner.record(action, features, reward, **rec_kwargs)
             except Exception:  # noqa: BLE001 — protected-core clashes are simply skipped
                 err = None
             # append to the append-only learning ledger the instant it happens: durable between
@@ -6503,6 +6535,27 @@ class NyxaraCore:
                 if migrated:
                     report["reembedded"] = migrated
             except Exception:  # noqa: BLE001 — re-embedding is maintenance, never fatal
+                pass
+        # 1c) CLS sleep — the fast→slow consolidation bridge. When the reward learner is a
+        # Complementary Learning System, idle time is when she *sleeps*: prolonged idleness enters a
+        # deep sleep (NREM replay + REM generative pseudo-rehearsal + synaptic homeostasis +
+        # hippocampal turnover), otherwise a light NREM pass. This is the mechanism that consolidates
+        # one-shot hippocampal experience into the durable cortex without catastrophic forgetting.
+        if self.learner is not None and hasattr(self.learner, "sleep"):
+            try:
+                now = time.time()
+                from nyxara.kernel.config import get_settings
+                idle_s = float(getattr(get_settings().memory, "dream_state_idle_s", 900.0))
+                deep = (now - self._last_interaction) >= idle_s
+                sleep_rep = self.learner.sleep(deep=deep)
+                report["cls_sleep"] = {
+                    "deep": sleep_rep.deep,
+                    "replayed_to_cortex": sleep_rep.replayed_to_cortex,
+                    "pseudo_rehearsed": sleep_rep.pseudo_rehearsed,
+                    "schemas": sleep_rep.schemas,
+                    "forgetting": round(sleep_rep.forgetting, 4),
+                }
+            except Exception:  # noqa: BLE001 — sleeping is best-effort, never breaks the idle loop
                 pass
         # 1d) continuous reward learning — she keeps getting better BETWEEN turns, not only when
         # spoken to: rehearse across every task tag, consolidate on cadence, and self-defend if

@@ -1848,6 +1848,32 @@ class MemoryConfig(BaseModel):
     ewc_frozen_lr_scale: float = Field(default=0.2, ge=0.0, le=1.0)
     ewc_der_alpha: float = Field(default=0.5, ge=0.0)
     ewc_task_reserve: int = Field(default=64, ge=0)
+    # --- Complementary Learning Systems (growth/cls.py): fast + slow, the McClelland/O'Reilly
+    # architecture that turns a frozen artifact into an agent. When ``cls_enabled``, the reward
+    # learner becomes a two-system CLS: a highly-plastic *hippocampus* (``cls_fast_lr``) that encodes
+    # each experience one-shot, with dentate-gyrus pattern separation (``cls_pattern_sep_dim`` random
+    # projection, ``cls_pattern_sep_k`` winners) and CA3 recall; and a slow, EWC-anchored *neocortex*
+    # (``cls_slow_lr``) that learns only through replay. The bridge is *sleep*: NREM replays
+    # ``cls_replay_batch`` prioritised episodes into the cortex; deep (REM) sleep additionally runs
+    # ``cls_rem_pseudo_batch`` generative pseudo-rehearsals (so a skill survives even after its
+    # episodes are evicted), synaptically downscales the cortex by ``cls_homeostatic_scale`` (SHY),
+    # and turns the hippocampus over by ``cls_hippocampal_decay``. Schema-congruent experiences
+    # consolidate up to ``cls_schema_congruence_gain``× faster (Tse et al.); inference blends the two
+    # systems by recall confidence with logistic sharpness ``cls_blend_sharpness``; and with
+    # ``cls_adaptive_sleep`` a rising forgetting probe promotes a light sleep to a deep one. A
+    # drop-in superset of the single Learner: disabling it restores the exact prior behaviour.
+    cls_enabled: bool = True
+    cls_fast_lr: float = Field(default=0.5, gt=0.0, le=2.0)
+    cls_slow_lr: float = Field(default=0.05, gt=0.0, le=1.0)
+    cls_replay_batch: int = Field(default=32, ge=1)
+    cls_hippocampal_decay: float = Field(default=0.15, ge=0.0, le=1.0)
+    cls_blend_sharpness: float = Field(default=4.0, ge=0.0)
+    cls_pattern_sep_dim: int = Field(default=256, ge=16)
+    cls_pattern_sep_k: int = Field(default=16, ge=1)
+    cls_rem_pseudo_batch: int = Field(default=16, ge=0)
+    cls_homeostatic_scale: float = Field(default=0.98, ge=0.0, le=1.0)
+    cls_schema_congruence_gain: float = Field(default=2.0, ge=1.0)
+    cls_adaptive_sleep: bool = True
     # --- Skill rehearsal (growth/skill_rehearsal.py): never forget a learned skill --- #
     # On the same cadence, re-run the stored demos of induced skills through the live engine;
     # a skill that regressed is restored from its known-good snapshot immediately.

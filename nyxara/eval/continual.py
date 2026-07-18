@@ -37,6 +37,7 @@ __all__ = [
     "run_sequential",
     "matrix_metrics",
     "evaluate_continual",
+    "evaluate_cls",
 ]
 
 Features = Dict[str, float]
@@ -261,6 +262,53 @@ def evaluate_continual(*, n_tasks: int = 4, n_train: int = 60,
 
 
 # --------------------------------------------------------------------------- #
+# The Complementary Learning Systems arm — fast + slow vs a single online learner
+# --------------------------------------------------------------------------- #
+def evaluate_cls(*, n_tasks: int = 4, n_train: int = 60, seed: int = 7,
+                 evict: bool = False) -> ContinualReport:
+    """Run the interfering suite through a real CLS (fast hippocampus + slow cortex + sleep) and
+    compare its forgetting against a single unprotected online learner on the *same* tasks/seed.
+
+    Each experience is encoded one-shot into the hippocampus; between and after tasks she **sleeps**
+    (NREM replay into the cortex + REM generative pseudo-rehearsal + synaptic homeostasis). With
+    ``evict=True`` the hippocampal store is wiped after every task, so old tasks can *only* be
+    retained by REM's self-generated rehearsal — proof that the cortex holds the skill even once the
+    episodes that taught it are gone. The only difference from the baseline is the architecture.
+    """
+    from nyxara.growth.cls import ComplementaryLearningSystem
+
+    tasks = make_task_suite(n_tasks, n_train, seed=seed)
+    untrained = [_accuracy(Learner(seed=seed), t) for t in tasks]
+
+    # ---- baseline: plain online SGD, single system, no protection ---- #
+    base_matrix, _ = run_sequential(lambda: Learner(base_lr=0.1, seed=seed), tasks)
+
+    # ---- CLS: two systems bridged by sleep ---- #
+    def cls_factory() -> Any:
+        return ComplementaryLearningSystem(
+            fast_lr=0.5, slow_lr=0.1, ewc_lambda=4.0, der_alpha=0.5, task_reserve=32,
+            replay_batch=16, rem_pseudo_batch=24, schema_congruence_gain=2.0, seed=seed)
+
+    def sleep_and_consolidate(learner: Any, task: ContinualTask) -> None:
+        for _ in range(8):
+            learner.sleep(deep=True)          # NREM replay + REM pseudo-rehearsal + homeostasis
+        learner.consolidate()                 # freeze the cortex's EWC anchors for this skill
+        if evict:                             # wipe the fast store — only the cortex may remember now
+            learner.hippocampus._traces.clear()
+            learner.hippocampus.learner.buffer._buf.clear()
+            learner.hippocampus.learner.buffer._reserve.clear()
+
+    cls_matrix, _ = run_sequential(cls_factory, tasks, rehearse_every=10, rehearse_n=16,
+                                   balanced=True, on_task_end=sleep_and_consolidate)
+
+    return ContinualReport(
+        baseline=matrix_metrics(base_matrix, untrained),
+        protected=matrix_metrics(cls_matrix, untrained),
+        n_tasks=len(tasks), seed=seed,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Self-test / demo
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
@@ -292,3 +340,26 @@ if __name__ == "__main__":  # pragma: no cover
     json.dumps(report.to_dict())   # must be serialisable
 
     print("\nALL SELF-TESTS PASSED ✓ — protection beats its own ablation, measurably")
+
+    # ---- Complementary Learning Systems: fast + slow, bridged by sleep ---- #
+    print("\n" + "=" * 70)
+    print("NYXARA CLS benchmark (fast hippocampus + slow cortex + sleep)")
+    print("=" * 70)
+    cls_report = evaluate_cls()
+    show("baseline (single online learner)", cls_report.baseline)
+    show("CLS (hippocampus + cortex + NREM/REM sleep)", cls_report.protected)
+    print(f"\nforgetting reduction : {cls_report.forgetting_reduction:+.3f}")
+    print(f"accuracy gain        : {cls_report.accuracy_gain:+.3f}")
+    assert cls_report.protected.forgetting < cls_report.baseline.forgetting, \
+        "the CLS must forget less than a single online learner"
+
+    # ---- generative rehearsal: retention holds even when the fast store is wiped each task ---- #
+    evicted = evaluate_cls(evict=True)
+    print(f"\nevicted-episodes CLS : forgetting {evicted.protected.forgetting:.3f} "
+          f"vs baseline {evicted.baseline.forgetting:.3f} "
+          f"(reduction {evicted.forgetting_reduction:+.3f})")
+    assert evicted.protected.forgetting < evicted.baseline.forgetting, \
+        "REM pseudo-rehearsal must protect old tasks even after their episodes are evicted"
+    json.dumps(cls_report.to_dict()); json.dumps(evicted.to_dict())
+
+    print("\nALL CLS SELF-TESTS PASSED ✓ — two systems forget less than one, even under eviction")
