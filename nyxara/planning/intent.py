@@ -87,7 +87,8 @@ class IntentSystem:
     def __init__(self, affect: Any, *, motivation: Any = None,
                  goal_system: Optional[GoalSystem] = None,
                  pressure_threshold: float = 0.05, epistemic_weight: float = 0.3,
-                 pragmatic_weight: float = 1.0) -> None:
+                 pragmatic_weight: float = 1.0,
+                 world_model: Any = None, free_energy: Any = None) -> None:
         self.affect = affect
         self.motivation = motivation
         # NB: GoalSystem defines __len__, so an empty one is falsy — must check `is None`
@@ -95,6 +96,32 @@ class IntentSystem:
         self.pressure_threshold = pressure_threshold
         self.epistemic_weight = epistemic_weight
         self.pragmatic_weight = pragmatic_weight
+        # the shared free-energy objective: when wired, a goal's epistemic value is
+        # COMPUTED from the world model's real uncertainty, not a template constant
+        self.world_model = world_model
+        self.free_energy = free_energy
+
+    def _epistemic_for(self, drive: str, description: str, template: float) -> float:
+        """Computed expected information gain for pursuing this goal, from the shared
+        free-energy engine (averaged over known actions at the goal's encoded state).
+        Falls back to the drive-template constant when no world model is wired or it
+        has no experience yet — the template is a floor, never the ceiling."""
+        eng = self.free_energy
+        wm = self.world_model if self.world_model is not None else (
+            getattr(eng, "world_model", None) if eng is not None else None)
+        if eng is None or wm is None:
+            return template
+        try:
+            actions = list(wm.actions())[:5]
+            if not actions:
+                return template
+            state = (wm.encode_state(description) if hasattr(wm, "encode_state")
+                     else (float(len(description) % 11),))
+            computed = sum(float(eng.epistemic_value(state, a)) for a in actions) \
+                / len(actions)
+            return max(0.25 * template, _clamp(computed))
+        except Exception:  # noqa: BLE001 — templates are the honest fallback
+            return template
 
     # ---- candidate generation ---- #
     def generate_candidates(self) -> List[DriveGoal]:
@@ -116,7 +143,7 @@ class IntentSystem:
             urgency = _clamp(drive.pressure() / 2.0)
             pragmatic = self.pragmatic_weight * (0.5 * _clamp(owner_align, 0.0, 1.0)
                                                  + 0.5 * urgency)
-            epistemic = epi
+            epistemic = self._epistemic_for(name, desc, epi)
             if self.motivation is not None and name == "novelty":
                 epistemic = max(epistemic, 0.5)
             value = pragmatic + self.epistemic_weight * epistemic

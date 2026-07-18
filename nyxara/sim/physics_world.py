@@ -387,19 +387,38 @@ class PhysicsAgent:
         self.reward_weight = reward_weight
         self.steps_taken = 0
         self._novelty_ewma = 0.0
+        # the single objective: decisions minimise expected free energy (posterior
+        # sampling over softmax(−γ·EFE) explores for free); the old blend is only a
+        # fallback when the engine cannot be built
+        try:
+            from nyxara.mind.free_energy import FreeEnergyEngine, PreferenceModel
+            self.engine: Any = FreeEnergyEngine(
+                world_model=self.world_model,
+                preferences=PreferenceModel(reward_weight=self.reward_weight),
+                epistemic_weight=self.explore_weight)
+        except Exception:  # noqa: BLE001 — the engine is a capability, never required
+            self.engine = None
 
     # ------------------------------------------------------------------ #
     # Decide — curiosity + world model + motivation choose the action
     # ------------------------------------------------------------------ #
     def decide(self, state: State) -> str:
+        """Choose by minimising expected free energy: the world model's learned reward
+        folds into the preference prior C, the epistemic term IS the curiosity, and the
+        motivation impulse enters as extra log-preference per action — one objective,
+        no bolted-on blend. Selection samples the policy posterior softmax(−γ·EFE), so
+        an ignorant model explores for free."""
         options = self.world.safe_actions() or ["noop"]
         if self._rng.random() < self.epsilon:         # ε-exploration keeps the physics fresh
             return self._rng.choice(options)
+        if self.engine is not None:
+            chosen = self._decide_efe(state, options)
+            if chosen is not None:
+                return chosen
+        # legacy fallback (engine unavailable): the old additive blend
         best, best_score = options[0], float("-inf")
         for a in options:
             pred = self.world_model.predict(state, a)
-            # ONE shared, honest curiosity signal (also used by the filesystem embodied loop):
-            # how much taking this action here would teach the model.
             info_gain = self.world_model.learning_progress(state, a)
             conf = max(0.0, min(1.0, pred.confidence))
             opt = Option(name=a, signature=a, info_gain=info_gain, competence_gain=conf,
@@ -411,6 +430,31 @@ class PhysicsAgent:
             if score > best_score:
                 best, best_score = a, score
         return best
+
+    def _decide_efe(self, state: State, options: List[str]) -> Optional[str]:
+        """One-step active inference over the safe actions. Never raises."""
+        try:
+            evals = self.engine.evaluate_policies(state, [[a] for a in options], horizon=1)
+            for e in evals:
+                a = str(e.policy[0])
+                opt = Option(name=a, signature=a,
+                             info_gain=max(0.0, min(1.0, e.epistemic)),
+                             competence_gain=max(0.0, min(1.0, e.model_confidence)),
+                             predicted_options=self._empowerment_hint(a),
+                             owner_relevance=0.0)
+                # the drives' impulse is extra log-preference: it lowers this action's
+                # EFE rather than forming a second objective
+                e.expected_free_energy -= self.motivation.impulse(opt).total
+            evals = self.engine.policy_posterior(evals)
+            r = self._rng.random()
+            acc = 0.0
+            for e in evals:
+                acc += e.posterior
+                if r <= acc:
+                    return str(e.policy[0])
+            return str(evals[-1].policy[0])
+        except Exception:  # noqa: BLE001 — fall back to the legacy blend
+            return None
 
     @staticmethod
     def _empowerment_hint(action: str) -> int:

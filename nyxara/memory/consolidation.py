@@ -167,7 +167,15 @@ class Consolidator:
         emo = rec.metadata.get("emotion")
         if emo:
             emotional = math.sqrt(emo.get("valence", 0.0) ** 2 + emo.get("arousal", 0.0) ** 2)
-        return rec.activation(now) * (1.0 + 0.5 * emotional)
+        # free-energy-prioritised replay: an experience that surprised the predictive
+        # spine (high prediction error when lived) is rehearsed first — dreaming works
+        # hardest on exactly what the generative model failed to predict. Absent the
+        # stamp, the priority is unchanged.
+        try:
+            surprise = float(rec.metadata.get("fe_surprise", 0.0) or 0.0)
+        except Exception:  # noqa: BLE001 — a malformed stamp never blocks replay
+            surprise = 0.0
+        return rec.activation(now) * (1.0 + 0.5 * emotional + 0.5 * max(0.0, min(1.0, surprise)))
 
     def dream_replay(self, *, now: Optional[float] = None,
                      top_k: Optional[int] = None) -> List[str]:

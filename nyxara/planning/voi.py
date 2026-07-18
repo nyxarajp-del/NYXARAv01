@@ -157,6 +157,16 @@ class ValueOfInformation:
                             reversibility=reversibility, about_owner_intent=about_owner_intent),
             sources)
 
+    def from_info_gain(self, info_gain: float, *, stakes: float,
+                       reversibility: float = 1.0,
+                       sources: Optional[Sequence[InfoSource]] = None) -> Recommendation:
+        """Decide from the free-energy engine's computed epistemic value: the EFE
+        epistemic term (expected information gain, [0,1]) IS the uncertainty a
+        source could resolve — VOI is its bounded cost-benefit reading, so question
+        ranking and action selection minimise the same objective."""
+        return self.decide(uncertainty=max(0.0, min(1.0, float(info_gain))),
+                           stakes=stakes, reversibility=reversibility, sources=sources)
+
     @staticmethod
     def default_sources() -> List[InfoSource]:
         return [

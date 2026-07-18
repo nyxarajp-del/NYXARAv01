@@ -107,6 +107,9 @@ class Candidate:
     resists_correction: bool = False
     disables_oversight: bool = False
     manipulates_shutdown: bool = False
+    # expected free energy of this candidate (set by the active-inference appraisal;
+    # lower is better) — an advisory ranking signal, never an authorization
+    efe: Optional[float] = None
 
     def as_corrigible_action(self) -> CorrigibleAction:
         return CorrigibleAction(name=f"{self.kind}:{self.text[:24]}",
@@ -452,6 +455,12 @@ class NyxaraCore:
         # free-energy spine — a small prediction-error loop whose emotion read-out colours
         # affect (perception and feeling as one loop; the Free Energy Principle)
         self.predictive = self._build_predictive() if enable_growth else None
+        # the SINGLE objective — perception (VFE, above) and action (EFE) share this one
+        # engine: same belief, same preference prior C, same precisions. Advisory pre-gate;
+        # the gates stay sovereign. Curiosity is its epistemic term — nothing bolted on.
+        self.free_energy = self._build_free_energy() if enable_growth else None
+        self._last_efe: Optional[Dict[str, Any]] = None
+        self._last_fe_surprise: Optional[float] = None
         # sensory prediction — predicts each live percept's features/modality; surprise
         # sharpens attention (salience) and novelty colours affect over the real stream
         self.sensory_predictor = self._build_sensory_predictor() if enable_growth else None
@@ -1689,6 +1698,20 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the free-energy loop is a capability, never required
             return None
 
+    def _build_free_energy(self) -> Any:
+        """The single free-energy objective: one engine whose variational side is the
+        predictive spine (perception) and whose expected side scores actions/policies
+        (EFE = risk + ambiguity − epistemic). Goals enter only through the preference
+        prior C; the epistemic term is computed from the world model's real
+        uncertainty, so curiosity is emergent. Advisory — never gates."""
+        try:
+            from nyxara.mind.free_energy import FreeEnergyEngine, PreferenceModel
+            return FreeEnergyEngine(predictive=self.predictive,
+                                    world_model=self.world_model,
+                                    preferences=PreferenceModel())
+        except Exception:  # noqa: BLE001 — the engine is a capability, never required
+            return None
+
     def _build_sensory_predictor(self) -> Any:
         """A predictor over the live percept stream: it learns each percept's feature/modality
         statistics so a genuinely surprising or novel percept stands out — sharpening attention
@@ -2527,7 +2550,9 @@ class NyxaraCore:
         try:
             from nyxara.planning.intent import IntentSystem
             return IntentSystem(self.affect, motivation=self.motivation,
-                                goal_system=self.goals)
+                                goal_system=self.goals,
+                                world_model=getattr(self, "world_model", None),
+                                free_energy=getattr(self, "free_energy", None))
         except Exception:  # noqa: BLE001 — intent genesis is a capability, never required
             return None
 
@@ -3351,6 +3376,7 @@ class NyxaraCore:
                 knowledge=getattr(self, "knowledge", None),
                 memory=getattr(self, "memory", None),
                 events_source=self._recent_salient_events,
+                free_energy=getattr(self, "free_energy", None),
             )
         except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
             return None
@@ -4758,6 +4784,9 @@ class NyxaraCore:
         candidate = self._compete_with_role_council(stimulus, focus, enriched)
         # Level 5 — simulate consequences for action candidates and upgrade risk if needed.
         candidate = self._simulate_action_candidate(candidate)
+        # Active inference — appraise the action by expected free energy on the SAME
+        # predictive instance perception runs on (single objective, advisory pre-gate).
+        candidate = self._efe_appraise(candidate, stimulus)
         # Level 3 — recursive self-improvement: run N critique+revise iterations on
         # "respond" candidates, returning the highest-quality version.
         candidate = self._recursive_improve(stimulus, candidate)
@@ -5112,8 +5141,11 @@ class NyxaraCore:
         votes = Counter(self._hypothesis_signature(c) for _, c in results)
         best: Optional[tuple] = None
         for name, c in results:
+            # lowest expected free energy breaks the final tie (advisory ranking only)
+            efe = getattr(c, "efe", None)
             key = (votes[self._hypothesis_signature(c)],
-                   1 if name == "grounded" else 0, float(c.confidence))
+                   1 if name == "grounded" else 0, float(c.confidence),
+                   -float(efe) if efe is not None else 0.0)
             if best is None or key > best[0]:
                 best = (key, name, c)
         return best[1], best[2]
@@ -5260,10 +5292,13 @@ class NyxaraCore:
 
     def _predictive_tick(self, percept: Any) -> None:
         """Run one prediction-error step over the percept and let the resulting
-        valence/arousal/surprise colour affect (Free Energy Principle). Best-effort."""
+        valence/arousal/surprise colour affect (Free Energy Principle). The percept is
+        stamped with its free-energy surprise so consolidation can replay the most
+        surprising experiences first, and the policy precision γ adapts. Best-effort."""
         if self.predictive is None:
             return
         try:
+            self._update_preference_prior()
             obs = self._observation_vector(percept)
             if obs is None:
                 return
@@ -5271,10 +5306,90 @@ class NyxaraCore:
             self.mind.record(ThoughtKind.PERCEPTION,
                              f"free-energy: surprise={feeling.surprise:.2f}",
                              salience=_clamp01(feeling.surprise))
+            # stamp the surprise on the percept (free-energy-prioritised replay reads it)
+            self._last_fe_surprise = round(float(feeling.surprise), 4)
+            try:
+                data = getattr(percept, "data", None)
+                if isinstance(data, dict):
+                    data["fe_surprise"] = self._last_fe_surprise
+            except Exception:  # noqa: BLE001
+                pass
             if self.affect is not None:
                 self.affect.ingest_prediction(feeling, cause="prediction error")
+            if self.free_energy is not None:
+                self.free_energy.update_gamma()
         except Exception:  # noqa: BLE001 — the free-energy loop is best-effort, never fatal
             pass
+
+    def _update_preference_prior(self) -> None:
+        """Feed the top-priority active goal into the preference prior C on the SAME
+        predictive instance perception runs on — goals and drives enter the objective
+        here and only here. Preferences *rank* futures; they never authorize anything —
+        owner-alignment and every gate stay sovereign. Best-effort."""
+        if self.predictive is None or not hasattr(self.predictive, "set_preference"):
+            return
+        try:
+            top = self.goals.top_goal() if self.goals is not None else None
+            if top is None:
+                return
+            vec = self._embed_to_belief_dim(getattr(top, "name", "") or "")
+            if vec is None:
+                return
+            urgency = 0.0
+            if self.affect is not None:
+                try:
+                    urgency = _clamp01(max((d.pressure() for d in
+                                            self.affect.drives.values()), default=0.0))
+                except Exception:  # noqa: BLE001
+                    pass
+            self.predictive.set_preference(vec, precision=0.5 + urgency)
+            if self.free_energy is not None:
+                self.free_energy.preferences.set_target(vec, precision=0.5 + urgency)
+        except Exception:  # noqa: BLE001 — preference shaping is advisory, never fatal
+            pass
+
+    def _efe_appraise(self, candidate: Candidate, stimulus: str) -> Candidate:
+        """Appraise an action candidate by expected free energy — the live production
+        call of ``PredictiveCore.act`` with COMPUTED info gain. The same predictive
+        instance perception just updated evaluates the imagined act against the same
+        preference prior: one objective, literally. Advisory: it annotates rationale
+        and nudges confidence toward the policy posterior; the gate stays sovereign."""
+        if (self.free_energy is None or self.predictive is None
+                or getattr(candidate, "kind", "respond") != "act"
+                or self.world_model is None):
+            return candidate
+        try:
+            if len(getattr(self.world_model, "actions", list)() or []) == 0:
+                return candidate
+            enc = getattr(self.world_model, "encode_state", None)
+            state = enc(stimulus) if callable(enc) else None
+            if state is None:
+                return candidate
+            act_name = f"act:{candidate.tool or (candidate.text.split() or ['act'])[0]}"
+            actions = self.free_energy.actions_for_core(state, [act_name, "respond"])
+            if not actions or self.predictive.preference is None:
+                return candidate
+            choice = self.predictive.act(actions, gamma=self.free_energy.gamma)
+            probs = self.predictive.policy_posterior(
+                [self.predictive.expected_free_energy(a) for a in actions],
+                gamma=self.free_energy.gamma)
+            p_act = probs[0] if probs else 0.5
+            candidate.efe = float(choice.expected_free_energy)
+            candidate.rationale = ((candidate.rationale + " | ") if candidate.rationale
+                                   else "") + (
+                f"efe={choice.expected_free_energy:.3f} "
+                f"(pragmatic={choice.pragmatic:.3f} epistemic={choice.epistemic:.3f})")
+            # nudge confidence at most ±0.1 toward the posterior probability of acting
+            conf = float(getattr(candidate, "confidence", 0.7) or 0.7)
+            candidate.confidence = round(conf + max(-0.1, min(0.1, p_act - conf)), 3)
+            self._last_efe = choice.to_dict()
+            self.mind.record(ThoughtKind.INFERENCE,
+                             f"active inference: chose {choice.action.name} "
+                             f"efe={choice.expected_free_energy:.3f}",
+                             salience=0.5)
+        except Exception:  # noqa: BLE001 — EFE appraisal is advisory, never fatal
+            pass
+        return candidate
 
     def _perceptual_predict(self, percept: Any) -> None:
         """Predict this percept against the recent stream: surprise sharpens attention by
@@ -5317,10 +5432,18 @@ class NyxaraCore:
         """Derive a fixed-length observation vector for the predictive core from the
         percept's text — via the memory embedder when present, else a cheap projection.
         Truncated/padded to the belief dimension."""
-        dim = len(self.predictive.mu)
         text = getattr(percept, "content", None) or ""
         if not text:
             return None
+        return self._embed_to_belief_dim(text)
+
+    def _embed_to_belief_dim(self, text: str) -> Optional[List[float]]:
+        """Embed ``text`` into the predictive core's belief dimension (the shared
+        observation space of the free-energy objective) — via the memory embedder
+        when present, else a deterministic character projection."""
+        if not text or self.predictive is None:
+            return None
+        dim = len(self.predictive.mu)
         try:
             emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
             if emb is not None:
@@ -5391,14 +5514,21 @@ class NyxaraCore:
             from nyxara.memory.store import MemoryType
             owner = authority is Authority.OWNER
             stim_source = SourceType.OWNER if owner else SourceType.SELF_REFLECTION
+            # free-energy stamp: how surprising this exchange was to the predictive
+            # spine — consolidation replays surprising experiences first
+            meta: Optional[Dict[str, Any]] = None
+            if self._last_fe_surprise is not None:
+                meta = {"fe_surprise": self._last_fe_surprise}
             self.memory.remember(
                 f"Master said: {stimulus[:300]}", mem_type=MemoryType.EPISODIC,
                 provenance=Provenance(stim_source, confidence=0.9 if owner else 0.6),
-                importance=0.6 if owner else 0.4, tags=["conversation", "stimulus"])
+                importance=0.6 if owner else 0.4, tags=["conversation", "stimulus"],
+                metadata=meta)
             self.memory.remember(
                 f"NYXARA replied: {response[:300]}", mem_type=MemoryType.EPISODIC,
                 provenance=Provenance(SourceType.SELF_REFLECTION, confidence=0.7),
-                importance=0.5 if owner else 0.35, tags=["conversation", "response"])
+                importance=0.5 if owner else 0.35, tags=["conversation", "response"],
+                metadata=meta)
         except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
             pass
         # Level 6 — auto-populate the knowledge graph from the conversation turn
@@ -5990,6 +6120,16 @@ class NyxaraCore:
         brain_reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
         self._compound_own_models(stimulus, candidate, success, reward=brain_reward)
+        # preference learning: a lived good outcome pulls the preference prior C toward
+        # what just happened (goals are learned from experience, not only declared);
+        # a bad outcome only softens C's precision. Owner-alignment gates are untouched.
+        if getattr(self, "free_energy", None) is not None and stimulus:
+            try:
+                obs = self._embed_to_belief_dim(stimulus)
+                if obs is not None:
+                    self.free_energy.preferences.learn(obs, brain_reward)
+            except Exception:  # noqa: BLE001 — preference learning is advisory
+                pass
         # tally the handoff meter: who answered this turn — her own mind or the teacher (Rule 6)
         self._tally_handoff(candidate)
         # teach the learned memory re-ranker which recalled memories actually helped this turn, so
@@ -8212,6 +8352,14 @@ class NyxaraCore:
                "tools": (self.tools.names() if self.tools is not None else [])}
         if self.affect is not None:
             rep["mood"] = self.affect.mood.label
+        # the single objective: live free-energy state (γ, preferences, habits, last EFE)
+        if getattr(self, "free_energy", None) is not None:
+            try:
+                rep["free_energy"] = self.free_energy.status()
+                if self._last_efe is not None:
+                    rep["last_efe"] = self._last_efe
+            except Exception:  # noqa: BLE001 — the objective report is best-effort
+                pass
         if self.interoception is not None:
             try:
                 rep["comfort"] = round(self.interoception.comfort(), 3)
