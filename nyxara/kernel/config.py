@@ -1920,6 +1920,25 @@ class CausalConfig(BaseModel):
     # (online ridge) so counterfactuals carry real effect sizes, not bare probability lifts
     functional_mechanisms: bool = True
     min_pairs_fit: int = Field(default=8, ge=2)        # valued samples needed before fitting f
+    # genuine per-instance (Rung 3) structural counterfactuals: abduct THIS episode's
+    # realized exogenous noise from a fitted mechanism, then do() + re-predict, instead
+    # of only the population-average (Rung 2) interventional contrast
+    structural_counterfactuals: bool = True
+    # Pearl's Probability of Necessity/Sufficiency (PN/PS/PNS) via Monte Carlo over the
+    # fitted residual distribution — "did A really matter for B?", not a bare confidence
+    necessity_sufficiency: bool = True
+    # how many candidate confounders may be jointly conditioned on (a fork on more than
+    # one hidden common cause that no single candidate alone screens off)
+    confounder_set_size: int = Field(default=2, ge=1)
+    # significance level for the permutation test that confirms a confounder collapse
+    # isn't just a small-sample fluke (see mind.causal_world_model._find_confounder)
+    confounder_significance: float = Field(default=0.05, ge=0.0, le=1.0)
+    confounder_permutations: int = Field(default=300, ge=20)
+    # front-door identification through a clean mediator when the backdoor is blocked
+    # by a confounder (do-calculus doesn't have to give up at "confounded")
+    front_door_adjustment: bool = True
+    # a valid SCM is a DAG: greedily demote the weakest edge in any discovered cycle
+    enforce_acyclicity: bool = True
 
 
 class WorldModelConfig(BaseModel):

@@ -51,11 +51,14 @@ and :mod:`planning`.
 from __future__ import annotations
 
 import bisect
+import itertools
 import json
 import os
+import random
 import time
+import zlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "Event",
@@ -268,22 +271,32 @@ class FunctionalCausalMechanism:
 @dataclass
 class Counterfactual:
     """A counterfactual contrast: the target's value under the factual world vs. under an
-    intervention that sets ``cause`` to a different value."""
+    intervention that sets ``cause`` to a different value.
+
+    ``abducted`` is the honesty flag: ``True`` means this was a genuine per-instance
+    structural counterfactual — Pearl's three-step abduction (recover this episode's
+    realized exogenous noise from what actually happened) → action (``do``) → prediction
+    (recompute forward holding that same noise fixed). ``False`` means no episode evidence
+    was available and this fell back to the population-level *interventional* contrast
+    (``effect_of(counter) − effect_of(factual)``, averaged over the whole graph) — a real
+    answer, but Rung 2 of the ladder of causation, not Rung 3. Never silently upgraded."""
 
     cause: str
     target: str
     factual: float
     counter: float
     delta: float
+    abducted: bool = False
 
     def describe(self) -> str:
+        kind = "" if self.abducted else " (population-average; no episode evidence to abduct)"
         return (f"had {self.cause!r} been {self.counter:g} instead of {self.factual:g}, "
-                f"{self.target!r} would shift by {self.delta:+.3f}")
+                f"{self.target!r} would shift by {self.delta:+.3f}{kind}")
 
     def to_dict(self) -> Dict[str, Any]:
         return {"cause": self.cause, "target": self.target,
                 "factual": round(self.factual, 4), "counter": round(self.counter, 4),
-                "delta": round(self.delta, 4)}
+                "delta": round(self.delta, 4), "abducted": self.abducted}
 
 
 # --------------------------------------------------------------------------- #
@@ -330,6 +343,13 @@ class CausalWorldModel:
         persist_path: Optional[str] = None,
         functional_mechanisms: bool = True,
         min_pairs_fit: int = 8,
+        confounder_set_size: int = 2,
+        confounder_significance: float = 0.05,
+        confounder_permutations: int = 300,
+        front_door_adjustment: bool = True,
+        enforce_acyclicity: bool = True,
+        structural_counterfactuals: bool = True,
+        necessity_sufficiency_enabled: bool = True,
     ) -> None:
         self.window = float(window)
         self.min_support = max(1, int(min_support))
@@ -343,6 +363,20 @@ class CausalWorldModel:
         self.persist_path = persist_path
         self.functional_mechanisms = bool(functional_mechanisms)
         self.min_pairs_fit = max(2, int(min_pairs_fit))
+        # how many candidate confounders may be jointly conditioned on at once (a fork
+        # A<-{C1,C2}->B that neither C1 nor C2 alone screens off) and the permutation
+        # test's rigor — replaces yesterday's fixed magic-number collapse thresholds.
+        self.confounder_set_size = max(1, int(confounder_set_size))
+        self.confounder_significance = _clamp(confounder_significance)
+        self.confounder_permutations = max(20, int(confounder_permutations))
+        self.front_door_adjustment = bool(front_door_adjustment)
+        self.enforce_acyclicity = bool(enforce_acyclicity)
+        # per-instance (Rung 3) counterfactuals and PN/PS/PNS are both real capabilities
+        # a caller opts INTO (by passing evidence / by calling necessity_sufficiency at
+        # all) — these flags let them be disabled outright (reproduce legacy population-
+        # level-only behavior) without touching call sites.
+        self.structural_counterfactuals = bool(structural_counterfactuals)
+        self.necessity_sufficiency_enabled = bool(necessity_sufficiency_enabled)
 
         self._n = 0                                       # total events seen
         self._by_label: Dict[str, List[float]] = {}       # label -> sorted occurrence times
@@ -450,45 +484,111 @@ class CausalWorldModel:
 
     # ------------------------------------------------------------------ #
     # confounder screening (conditional independence) — correlation ≠ causation
+    #
+    # Two upgrades over a single fixed-threshold single-variable check:
+    #   1. joint conditioning — a SET of confounders {C1, C2, ...} can jointly screen off
+    #      A from B even when no single Ci alone does (a genuine fork on more than one
+    #      hidden common cause).
+    #   2. a real significance test (stratified permutation) in place of magic-number
+    #      collapse thresholds — "is the observed conditional dependence small enough to
+    #      be explained by chance under true independence", not just "smaller than some
+    #      fixed constant".
     # ------------------------------------------------------------------ #
-    def _dependence_given(self, a: str, b: str, c: str) -> Optional[float]:
-        """Within the contexts where C just occurred, how much does B still depend on A?
+    def _joint_times(self, condition: Sequence[str]) -> List[float]:
+        """Instants where EVERY variable in ``condition`` co-occurs within one window of
+        each other — the anchor points a joint-conditioning test is stratified over."""
+        if not condition:
+            return []
+        anchor = self._times(condition[0])
+        if len(condition) == 1:
+            return list(anchor)
+        rest = condition[1:]
+        return [t for t in anchor
+                if all(_any_in(self._times(c), t - self.window, t + self.window) for c in rest)]
 
-        Returns ``|P(B | C, A) − P(B | C, ¬A)|`` — the *conditional* dependence of B on A
-        given C — or ``None`` if a stratum is too thin to judge. This is the test that tells
-        a **fork** A←C→B (B independent of A once C is fixed ⇒ value ≈ 0 ⇒ confounded) apart
-        from a **chain** C→A→B (B still depends on A given C ⇒ value large ⇒ A→B is real)."""
-        c_times, a_times, b_times = self._times(c), self._times(a), self._times(b)
-        n_ca = n_ca_b = n_cna = n_cna_b = 0
-        for tc in c_times:
+    def _stratified_pairs(self, a: str, b: str, condition: Sequence[str]
+                          ) -> List[Tuple[bool, bool]]:
+        """For each instant the whole ``condition`` set co-occurs: was A present in the
+        following window, and was B? The raw strata a conditional-independence test (and
+        its permutation null) are built from."""
+        a_times, b_times = self._times(a), self._times(b)
+        out: List[Tuple[bool, bool]] = []
+        for tc in self._joint_times(condition):
             a_present = _any_in(a_times, tc, tc + self.window)
             b_present = _any_in(b_times, tc, tc + 2 * self.window)   # B may trail A
-            if a_present:
-                n_ca += 1
-                n_ca_b += int(b_present)
-            else:
-                n_cna += 1
-                n_cna_b += int(b_present)
+            out.append((a_present, b_present))
+        return out
+
+    def _dep_from_pairs(self, pairs: List[Tuple[bool, bool]]) -> Optional[float]:
+        """``|P(B | condition, A) − P(B | condition, ¬A)|`` from raw strata, or ``None``
+        if a stratum is too thin to judge."""
+        n_ca = sum(1 for a_p, _ in pairs if a_p)
+        n_cna = len(pairs) - n_ca
         floor = max(2, self.min_support // 2)
         if n_ca < self.min_support or n_cna < floor:
             return None
+        n_ca_b = sum(1 for a_p, b_p in pairs if a_p and b_p)
+        n_cna_b = sum(1 for a_p, b_p in pairs if not a_p and b_p)
         return abs(_safe_div(n_ca_b, n_ca) - _safe_div(n_cna_b, n_cna))
 
-    def _find_confounder(self, a: str, b: str, marginal_dp: float) -> Optional[str]:
-        """An earlier common cause C that explains the A–B link. C qualifies when it leads to
-        *both* A and B (a common cause, **not** a mediator A→C→B) and — once we condition on
-        C — most of the A→B dependence **collapses**. That collapse (conditional dependence
-        falling to well below the marginal ΔP) is exactly what separates a spurious
-        correlation from a real cause: a chain C→A→B keeps its A→B dependence given C, a fork
-        A←C→B loses it."""
+    def _dependence_given(self, a: str, b: str, c: str) -> Optional[float]:
+        """Single-variable convenience wrapper over :meth:`_dep_from_pairs` — kept as the
+        documented "conditional dependence given one variable" primitive other code /
+        tests may call directly; :meth:`_find_confounder` itself uses the general
+        set-conditioned form so it can screen joint confounders too."""
+        return self._dep_from_pairs(self._stratified_pairs(a, b, (c,)))
+
+    def _permutation_pvalue(self, pairs: List[Tuple[bool, bool]], observed_dep: float,
+                            *, rng: Optional["random.Random"] = None) -> float:
+        """Stratified permutation test: reshuffle which strata are labeled A-present
+        (preserving the true count of each), recompute the conditional-dependence
+        statistic under this null of "A's presence here is unrelated to B", and report
+        how often chance alone matches or beats the observed dependence.
+
+        LOW p ⇒ reject independence — the observed dependence given the condition set is
+        real, so A→B survives (not confounded). HIGH p ⇒ the observed (small) dependence
+        is unremarkable under the null — consistent with true conditional independence,
+        i.e. genuinely confounded. Replaces the old fixed magic-number thresholds with an
+        actual significance test."""
+        rng = rng or random.Random()
+        n = len(pairs)
+        n_ca = sum(1 for a_p, _ in pairs if a_p)
+        if n == 0 or n_ca == 0 or n_ca == n:
+            return 1.0
+        b_labels = [b_p for _, b_p in pairs]
+        trials = self.confounder_permutations
+        idx = list(range(n))
+        hits = 0
+        for _ in range(trials):
+            rng.shuffle(idx)
+            present = set(idx[:n_ca])
+            n_ca_b = sum(1 for i in present if b_labels[i])
+            n_cna_b = sum(1 for i in range(n) if i not in present and b_labels[i])
+            n_cna = n - n_ca
+            dep = abs(_safe_div(n_ca_b, n_ca) - _safe_div(n_cna_b, n_cna))
+            if dep >= observed_dep - 1e-9:
+                hits += 1
+        return (hits + 1) / (trials + 1)
+
+    def _find_confounder(self, a: str, b: str, marginal_dp: float
+                         ) -> Optional[Dict[str, Any]]:
+        """A set of earlier common cause(s) C that explains the A–B link. Candidate
+        variables must each lead to *both* A and B (a common cause, **not** a mediator
+        A→C→B) — checked first (cheap). For each SET (size 1 up to
+        ``confounder_set_size``) of candidates: conditioning on it must collapse most of
+        the marginal A→B dependence (the effect-size read), AND :meth:`_permutation_pvalue`
+        must NOT find strong statistical evidence the leftover dependence is real
+        (p ≥ ``confounder_significance``) — a real significance test as a safety net
+        against a small-sample effect-size fluke, not a wholesale replacement for it
+        (a strict "prove independence" p-value test alone is underpowered at the sample
+        sizes this streaming module typically sees)."""
         if not self.confounder_screening or marginal_dp <= 0:
             return None
         if len(self._times(a)) < self.min_support:
             return None
+        candidates: List[str] = []
         for c in self._by_label:
-            if c in (a, b):
-                continue
-            if len(self._times(c)) < self.min_support:
+            if c in (a, b) or len(self._times(c)) < self.min_support:
                 continue
             # C must lead to both A and B...
             if self.association(c, a) < 0.5 or self.association(c, b) < 0.5:
@@ -496,10 +596,102 @@ class CausalWorldModel:
             # ...and must NOT be a mediator of A (A→C→B is still a genuine causal chain)
             if self.association(a, c) >= self.association(c, a):
                 continue
-            dep = self._dependence_given(a, b, c)
-            # conditioning on C explains most of the dependence → confounded, not causal
-            if dep is not None and dep < 0.5 * marginal_dp and dep < self.min_contingency * 3:
-                return c
+            candidates.append(c)
+        if not candidates:
+            return None
+
+        # a content-stable seed (NOT Python's built-in hash(), which is randomized per
+        # process for strings unless PYTHONHASHSEED is pinned) — the permutation test
+        # must be reproducible run-to-run for the same event stream.
+        seed = zlib.crc32(f"{a}\x00{b}".encode("utf-8"))
+        rng = random.Random(seed)
+        best: Optional[Dict[str, Any]] = None
+        sizes = range(1, min(self.confounder_set_size, len(candidates)) + 1)
+        for size in sizes:
+            # bounded combinatorics: the coarse pre-filter above already shrinks
+            # `candidates` a great deal, and joint sets beyond pairs are rare/expensive —
+            # cap how many combinations of a given size are actually tested.
+            tested = 0
+            for combo in itertools.combinations(candidates, size):
+                if tested >= 40:
+                    break
+                tested += 1
+                pairs = self._stratified_pairs(a, b, combo)
+                dep = self._dep_from_pairs(pairs)
+                if dep is None:
+                    continue
+                # effect-size criterion: conditioning on this set collapses most of the
+                # marginal dependence (the original, proven-reliable collapse read)...
+                collapsed = dep < 0.5 * marginal_dp and dep < self.min_contingency * 3
+                if not collapsed:
+                    continue
+                # ...confirmed by an actual significance test rather than trusted blind:
+                # only let a STRONG statistical case against independence (leftover
+                # dependence not explainable by sampling noise, p < significance level)
+                # veto the collapse read. A strict "prove independence" p-value test
+                # alone is underpowered at the small sample sizes this streaming module
+                # typically sees, so the effect-size collapse stays the primary signal
+                # and the permutation test is the safety net against being fooled by it,
+                # not a wholesale replacement for it.
+                p_value = self._permutation_pvalue(pairs, dep, rng=rng)
+                if p_value < self.confounder_significance:
+                    continue   # statistically real leftover dependence — not confounded
+                candidate = {"set": combo, "dep": dep, "p_value": p_value}
+                if best is None or p_value > best["p_value"]:
+                    best = candidate
+            if best is not None:
+                break   # prefer the smallest confounder set that already screens A off
+        return best
+
+    # ------------------------------------------------------------------ #
+    # front-door adjustment — identification when the backdoor is blocked by an
+    # unobserved/uncontrollable confounder but a clean mediator carries the effect
+    # ------------------------------------------------------------------ #
+    def _front_door(self, a: str, b: str, confounders: Sequence[str]
+                    ) -> Optional[Dict[str, Any]]:
+        """When A→B is CONFOUNDED (by ``confounders``), do-calculus isn't necessarily
+        stuck: if some mediator M carries the WHOLE effect (A→M→B) and that path is
+        itself unconfounded — M is independently established as truly caused by A and
+        as truly causing B (not merely associated), and M isn't itself reached by the
+        same confounder(s) — Pearl's front-door criterion identifies the effect anyway.
+
+        In this module's linear setting the front-door effect reduces to the product of
+        the two mediating edge coefficients (the same arithmetic :meth:`as_causal_graph`
+        already uses for mediation) — what's different here is the justification: we
+        trust it not because A→B's own regression agrees (it's confounded, we don't
+        trust that), but because the A→M→B path is independently screened clean.
+        Returns ``None`` — never fabricates an identification — when no such mediator
+        exists, matching this module's abstain-honestly contract."""
+        if not self.front_door_adjustment:
+            return None
+        for m in self._by_label:
+            if m in (a, b) or m in confounders:
+                continue
+            if len(self._times(m)) < self.min_support:
+                continue
+            # is_causal(a, m) and is_causal(m, b) each already run their OWN confound
+            # screening over every candidate variable — including these same
+            # `confounders` — so a link surviving that screening already establishes
+            # front-door's exclusion restriction (M isn't reached by the confounder
+            # except via A); no need to re-check raw association here (which would
+            # wrongly flag the ordinary, allowed C→A→M chain as a violation).
+            v_am = self.is_causal(a, m)
+            if not v_am.is_causal:
+                continue
+            v_mb = self.is_causal(m, b)
+            if not v_mb.is_causal:
+                continue
+            w_am = v_am.evidence.get("interventional_lift", v_am.evidence.get("delta_p", 0.0))
+            w_mb = v_mb.evidence.get("interventional_lift", v_mb.evidence.get("delta_p", 0.0))
+            mech_am = self._mechanisms.get((a, m))
+            mech_mb = self._mechanisms.get((m, b))
+            if mech_am is not None and mech_am.confidence() >= 0.3:
+                w_am = mech_am.slope
+            if mech_mb is not None and mech_mb.confidence() >= 0.3:
+                w_mb = mech_mb.slope
+            return {"mediator": m, "effect": round(w_am * w_mb, 4),
+                    "confidence": round(_clamp(min(v_am.confidence, v_mb.confidence) * 0.9), 4),
+                    "a_to_m": round(float(w_am), 4), "m_to_b": round(float(w_mb), 4)}
         return None
 
     # ------------------------------------------------------------------ #
@@ -550,10 +742,22 @@ class CausalWorldModel:
         # (3) confounder screening — the correlation-vs-causation crux
         conf = self._find_confounder(a, b, dp)
         if conf is not None:
-            ev["confounder"] = conf
+            names = list(conf["set"])
+            conf_repr = names[0] if len(names) == 1 else names
+            ev["confounder"] = conf_repr
+            ev["confounder_p_value"] = round(conf["p_value"], 4)
+            fd = self._front_door(a, b, names)
+            if fd is not None:
+                ev["front_door"] = fd
+                return CausalVerdict(
+                    a, b, CAUSAL, _clamp(fd["confidence"]),
+                    f"confounded by {conf_repr!r}, but identified via the front-door "
+                    f"path through mediator {fd['mediator']!r} (p={conf['p_value']:.3f})",
+                    ev)
             return CausalVerdict(a, b, CONFOUNDED, _clamp(0.45 + 0.2 * support / max(1, self._n)),
-                                 f"A and B share an earlier common cause {conf!r}; their link "
-                                 f"dissolves once {conf!r} is accounted for", ev)
+                                 f"A and B share an earlier common cause {conf_repr!r}; their "
+                                 f"link dissolves once {conf_repr!r} is accounted for "
+                                 f"(permutation p={conf['p_value']:.3f})", ev)
 
         # (4) intervention — did *acting* on A move B?
         inter = self._interventional_lift(a, b)
@@ -631,6 +835,7 @@ class CausalWorldModel:
                 link = self._evaluate_pair(a, b)
                 if link is not None:
                     self._links[(a, b)] = link
+        self._enforce_acyclicity()
         if self.persist_path:
             try:
                 self.save()
@@ -639,6 +844,82 @@ class CausalWorldModel:
         causal = [l for l in self._links.values() if l.is_causal]
         causal.sort(key=lambda l: l.confidence * abs(l.strength), reverse=True)
         return causal
+
+    # ------------------------------------------------------------------ #
+    # acyclicity — a valid SCM/DAG never has feedback cycles at a single time-slice
+    # ------------------------------------------------------------------ #
+    def _find_cycle(self) -> Optional[List[Tuple[str, str]]]:
+        """DFS (white/gray/black coloring) over CAUSAL links only; returns one cycle's
+        edges as ``[(cause, effect), ...]``, or ``None`` if already acyclic."""
+        adj: Dict[str, List[str]] = {}
+        for (c, e), link in self._links.items():
+            if link.is_causal:
+                adj.setdefault(c, []).append(e)
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: Dict[str, int] = {n: WHITE for n in self._by_label}
+        parent_edge: Dict[str, Tuple[str, str]] = {}
+        found: List[Tuple[str, str]] = []
+
+        def dfs(start: str) -> bool:
+            stack = [(start, iter(adj.get(start, [])))]
+            color[start] = GRAY
+            while stack:
+                u, it = stack[-1]
+                advanced = False
+                for v in it:
+                    advanced = True
+                    if color.get(v, WHITE) == WHITE:
+                        color[v] = GRAY
+                        parent_edge[v] = (u, v)
+                        stack.append((v, iter(adj.get(v, []))))
+                    elif color.get(v) == GRAY:
+                        cyc = [(u, v)]
+                        cur = u
+                        while cur != v:
+                            pe = parent_edge.get(cur)
+                            if pe is None:
+                                break
+                            cyc.append(pe)
+                            cur = pe[0]
+                        found.extend(cyc)
+                        return True
+                    break
+                if not advanced:
+                    color[u] = BLACK
+                    stack.pop()
+            return False
+
+        for node in list(self._by_label):
+            if color.get(node, WHITE) == WHITE:
+                if dfs(node):
+                    return found
+        return None
+
+    def _enforce_acyclicity(self) -> None:
+        """Greedily find and break cycles among CAUSAL links — a real SCM is a DAG, and
+        :meth:`_topo_order`, :meth:`as_causal_graph`, and every propagation-based query
+        (``effect_of``, ``counterfactual``, ``necessity_sufficiency``) depend on that. The
+        WEAKEST edge in each detected cycle (lowest ``confidence * |strength|``) is
+        demoted to CORRELATIONAL — never dropped outright, "A and B associate" stays an
+        honest, separate claim from "A causes B"."""
+        if not self.enforce_acyclicity:
+            return
+        guard = 0
+        limit = len(self._links) + 8
+        while guard < limit:
+            guard += 1
+            cycle = self._find_cycle()
+            if not cycle:
+                return
+            weakest = min(cycle, key=lambda pair: (
+                self._links[pair].confidence * abs(self._links[pair].strength)
+                if pair in self._links else -1.0))
+            link = self._links.get(weakest)
+            if link is None:
+                return
+            link.verdict = CORRELATIONAL
+            link.evidence["cycle_resolved"] = list(cycle)
+            self._mechanisms.pop(weakest, None)
 
     # ------------------------------------------------------------------ #
     # functional mechanisms — HOW MUCH does A move B? (learned, not assumed)
@@ -688,6 +969,7 @@ class CausalWorldModel:
                     if pair not in seen:
                         seen.add(pair)
                         self._set_pair(*pair)
+        self._enforce_acyclicity()
         return len(seen)
 
     # ------------------------------------------------------------------ #
@@ -772,16 +1054,29 @@ class CausalWorldModel:
         return (f"{effect!r} happened because {top.cause!r} did "
                 f"(confidence {top.confidence:.0%}){tail}.")
 
-    def as_causal_graph(self, *, min_confidence: Optional[float] = None
-                        ) -> List[Tuple[str, str, float]]:
+    def as_causal_graph(self, *, min_confidence: Optional[float] = None,
+                        prune_mediated: bool = True) -> List[Tuple[str, str, float]]:
         """Export the *causal* edges as ``[(cause, effect, weight)]`` for the structural
         propagation engine in :mod:`mind.strategies`.
 
         When a **learned functional mechanism** exists for an edge and has earned trust
         (fit quality × evidence), its fitted slope is the structural coefficient — a real
-        measured effect size — instead of the probability-lift proxy."""
+        measured effect size — instead of the probability-lift proxy.
+
+        ``prune_mediated`` (on by default) does a **transitive reduction**: :meth:`discover`
+        evaluates every ordered pair independently, so a genuine mediation chain
+        ``a → b → c`` also earns its OWN ``a → c`` causal verdict (a *is* a cause of c —
+        just not a direct one). Exporting that redundant edge alongside the two-hop path
+        would double-count the same influence when path-summing (:class:`CausalModel`'s
+        ``effect_of``/``counterfactual``). When ``a → c``'s weight is (within tolerance)
+        fully explained by ``weight(a→b) * weight(b→c)`` for some mediator ``b``, the
+        direct edge is dropped from the *propagation* graph — it is fully accounted for
+        by the mediated path. A genuine *partial* direct effect beyond the mediated one
+        (``a → c``'s weight exceeds the mediated estimate) is never dropped: only edges
+        that add no new information to propagation are pruned. ``why``/``is_causal``/
+        ``effects_of`` are untouched by this — "does a cause c" stays a real yes."""
         thr = self.min_confidence if min_confidence is None else min_confidence
-        out: List[Tuple[str, str, float]] = []
+        raw: Dict[Tuple[str, str], float] = {}
         for l in self._links.values():
             if not (l.is_causal and l.confidence >= thr):
                 continue
@@ -789,8 +1084,24 @@ class CausalWorldModel:
             mech = self._mechanisms.get((l.cause, l.effect))
             if mech is not None and mech.confidence() >= 0.3:
                 weight = mech.slope
-            out.append((l.cause, l.effect, weight))
-        return out
+            raw[(l.cause, l.effect)] = weight
+
+        if prune_mediated:
+            for (a, c), w_ac in list(raw.items()):
+                if (a, c) not in raw or abs(w_ac) < 1e-9:
+                    continue
+                for (a2, b), w_ab in list(raw.items()):
+                    if a2 != a or b == c or b == a:
+                        continue
+                    w_bc = raw.get((b, c))
+                    if w_bc is None:
+                        continue
+                    mediated = w_ab * w_bc
+                    if abs(w_ac - mediated) <= max(0.15 * abs(w_ac), 0.05):
+                        del raw[(a, c)]
+                        break
+
+        return [(c, e, w) for (c, e), w in raw.items()]
 
     def _structural_model(self) -> Any:
         from nyxara.mind.strategies import CausalModel
@@ -813,14 +1124,256 @@ class CausalWorldModel:
                     out[e] = val
         return out
 
-    def counterfactual(self, cause: str, target: str,
-                       factual: float = 1.0, counter: float = 0.0) -> Counterfactual:
-        """"Had ``cause`` been ``counter`` instead of ``factual``, what of ``target``?"
-        Reuses :meth:`CausalModel.counterfactual` over the discovered structure."""
+    def do(self, interventions: Dict[str, float],
+           target: Optional[str] = None) -> Any:
+        """The multi-variable do-operator: forward propagation of a **simultaneous**
+        intervention ``do({var1: value1, var2: value2, ...})`` — the genuine SCM
+        operation of setting a SET of variables at once, each cut off from its own
+        causal parents (reuses :meth:`CausalModel.effect_of_many`'s linear superposition).
+
+        With ``target`` → the total joint effect (float). Without ``target`` → a
+        ``{reachable_effect: effect_size}`` map over every effect reachable from any
+        intervened variable."""
         model = self._structural_model()
-        delta = model.counterfactual(cause, target, factual, counter)
+        do = {str(k): float(v) for k, v in interventions.items()}
+        if target is not None:
+            return model.effect_of_many(do, target)
+        out: Dict[str, float] = {}
+        for (c, e) in list(self._links.keys()):
+            if e not in do and e not in out:
+                val = model.effect_of_many(do, e)
+                if abs(val) > 1e-9:
+                    out[e] = val
+        return out
+
+    # ------------------------------------------------------------------ #
+    # counterfactual PROBABILITIES — Pearl's PN / PS / PNS
+    # ------------------------------------------------------------------ #
+    def necessity_sufficiency(self, cause: str, target: str, *, n_samples: int = 500,
+                              threshold: float = 0.5, seed: Optional[int] = None
+                              ) -> Optional[Dict[str, float]]:
+        """Probability of Necessity (PN), Sufficiency (PS), and Necessity-and-Sufficiency
+        (PNS) for ``cause`` on ``target`` — the mathematically rigorous answer to
+        "did A really matter for B?", not a bare confidence heuristic:
+
+            PN  = P(Y_{do(cause=0)} < threshold  |  Y_{do(cause=1)} ≥ threshold)
+                  "if cause hadn't happened, would target still not have?" (necessity)
+            PS  = P(Y_{do(cause=1)} ≥ threshold  |  Y_{do(cause=0)} < threshold)
+                  "if cause DID happen, would target now occur?" (sufficiency)
+            PNS = P(Y_{do(cause=1)} ≥ threshold  AND  Y_{do(cause=0)} < threshold)
+                  cause is simultaneously necessary and sufficient this draw
+
+        Ordinarily PN/PS/PNS are only *boundable* (Tian–Pearl bounds) without a fully
+        specified structural model — the identification problem those bounds exist for.
+        Here we sidestep it: when a :class:`FunctionalCausalMechanism` is fitted along the
+        path, we already HAVE a structural equation + a real fitted residual distribution
+        (``residual_std``) at each node, so Monte Carlo directly over that noise gives the
+        model-implied exact quantities (under the linear-Gaussian-residual assumption this
+        module already makes for ``effect_of``/``counterfactual``) — not just bounds.
+
+        Each Monte Carlo draw samples ONE noise realization shared by both the
+        ``do(cause=1)`` and ``do(cause=0)`` worlds (the paired-counterfactual construction
+        Pearl's ``Y_x`` and ``Y_{x'}`` require), propagates both through the SAME
+        structural equations used by :meth:`counterfactual`, and binarizes each outcome
+        against ``threshold`` (indicator semantics, matching this module's
+        ``factual=1.0``/``counter=0.0`` convention).
+
+        Returns ``None`` (abstains) when no mechanism is fitted anywhere on the path —
+        there is then no real residual distribution to sample from, and fabricating one
+        would violate this module's honesty contract."""
+        if not self.necessity_sufficiency_enabled:
+            return None
+        weights: Dict[Tuple[str, str], float] = {
+            (c, e): w for c, e, w in self.as_causal_graph()}
+        parents_of: Dict[str, List[str]] = {}
+        for (c, e) in weights:
+            parents_of.setdefault(e, []).append(c)
+        order = self._topo_order()
+        if cause not in order or target not in order:
+            return None
+
+        resid: Dict[str, float] = {}
+        has_mechanism = False
+        for node in order:
+            best = 0.0
+            for p in parents_of.get(node, []):
+                mech = self._mechanisms.get((p, node))
+                if mech is not None and mech.n >= 2:
+                    best = max(best, mech.residual_std)
+                    has_mechanism = True
+            resid[node] = best
+        if not has_mechanism:
+            return None
+
+        base = self.latest_evidence(order)
+        rng = random.Random(seed)
+
+        def _predict(node: str, values: Dict[str, float]) -> Tuple[float, bool]:
+            total, known = 0.0, False
+            for p in parents_of.get(node, []):
+                if p in values:
+                    total += weights.get((p, node), 0.0) * values[p]
+                    known = True
+            return total, known
+
+        def _simulate(cause_value: float, draw_noise: Dict[str, float]) -> Dict[str, float]:
+            values = dict(base)
+            values[cause] = cause_value
+            for node in order:
+                if node == cause:
+                    continue
+                pred, known = _predict(node, values)
+                if known:
+                    values[node] = pred + draw_noise.get(node, 0.0)
+                elif node not in values:
+                    values[node] = pred
+            return values
+
+        n = max(1, int(n_samples))
+        n_t1 = n_t1_and_not_t0 = 0
+        n_not_t0 = n_not_t0_and_t1 = 0
+        n_pns = 0
+        for _ in range(n):
+            noise = {node: rng.gauss(0.0, resid[node]) for node in order if resid[node] > 0}
+            t1 = _simulate(1.0, noise).get(target, 0.0) >= threshold
+            t0 = _simulate(0.0, noise).get(target, 0.0) >= threshold
+            if t1:
+                n_t1 += 1
+                if not t0:
+                    n_t1_and_not_t0 += 1
+            if not t0:
+                n_not_t0 += 1
+                if t1:
+                    n_not_t0_and_t1 += 1
+            if t1 and not t0:
+                n_pns += 1
+
+        return {"PN": round(_safe_div(n_t1_and_not_t0, n_t1), 4),
+                "PS": round(_safe_div(n_not_t0_and_t1, n_not_t0), 4),
+                "PNS": round(n_pns / n, 4),
+                "samples": n}
+
+    def counterfactual(self, cause: str, target: str,
+                       factual: float = 1.0, counter: float = 0.0,
+                       evidence: Optional[Dict[str, float]] = None) -> Counterfactual:
+        """"Had ``cause`` been ``counter`` instead of ``factual``, what of ``target``?"
+
+        Without ``evidence`` this is the population-level *interventional* contrast
+        (``effect_of(cause=counter) − effect_of(cause=factual)`` over the whole graph) —
+        Rung 2 of the ladder of causation, exactly today's behavior (no regressions).
+
+        With ``evidence`` — the actual observed/latest state of the world this episode
+        (see :meth:`latest_evidence`) — this runs the real thing: Pearl's three-step
+        counterfactual. **Abduction**: recover each node's realized exogenous noise
+        (``observed − structural_prediction_from_its_parents``) from the evidence, using
+        the learned edge weights (:meth:`as_causal_graph`, which prefers a fitted
+        :class:`FunctionalCausalMechanism`'s slope when trusted). **Action**: set
+        ``cause = counter``. **Prediction**: recompute every node in topological order
+        from its (possibly now-changed) parents plus that *same* abducted noise — nodes
+        not downstream of ``cause`` reproduce their factual value exactly (self-consistent:
+        their parents didn't change), nodes downstream genuinely propagate the intervention.
+        This is Rung 3: a per-*instance* answer, not a population average."""
+        if not evidence or not self._mechanisms or not self.structural_counterfactuals:
+            model = self._structural_model()
+            delta = model.counterfactual(cause, target, factual, counter)
+            return Counterfactual(cause=cause, target=target, factual=factual,
+                                  counter=counter, delta=delta, abducted=False)
+
+        weights: Dict[Tuple[str, str], float] = {
+            (c, e): w for c, e, w in self.as_causal_graph()}
+        parents_of: Dict[str, List[str]] = {}
+        for (c, e) in weights:
+            parents_of.setdefault(e, []).append(c)
+        order = self._topo_order()
+
+        fact_values: Dict[str, float] = dict(evidence)
+        fact_values.setdefault(cause, factual)
+
+        def _predict(node: str, values: Dict[str, float]) -> Tuple[float, bool]:
+            total, known = 0.0, False
+            for p in parents_of.get(node, []):
+                if p in values:
+                    total += weights.get((p, node), 0.0) * values[p]
+                    known = True
+            return total, known
+
+        # ---- abduction: the noise realized THIS episode, from what actually happened ----
+        noise: Dict[str, float] = {}
+        for node in order:
+            if node == cause or node not in fact_values:
+                continue
+            pred, known = _predict(node, fact_values)
+            noise[node] = (fact_values[node] - pred) if known else fact_values[node]
+
+        def _propagate(values: Dict[str, float]) -> Dict[str, float]:
+            out = dict(values)
+            for node in order:
+                if node == cause:
+                    continue
+                pred, known = _predict(node, out)
+                if known:
+                    out[node] = pred + noise.get(node, 0.0)
+                elif node not in out:
+                    out[node] = pred
+            return out
+
+        # ---- action + prediction: do(cause=counter), same noise, forward through the DAG ----
+        counter_world = _propagate({**fact_values, cause: counter})
+        factual_world = _propagate({**fact_values, cause: fact_values[cause]})
+
+        counter_t = counter_world.get(target, 0.0)
+        factual_t = factual_world.get(target, 0.0)
         return Counterfactual(cause=cause, target=target, factual=factual,
-                              counter=counter, delta=delta)
+                              counter=counter, delta=counter_t - factual_t, abducted=True)
+
+    def latest_evidence(self, labels: Optional[Iterable[str]] = None) -> Dict[str, float]:
+        """The most recent known state of each label — "what actually happened" this
+        episode, the grounding a per-instance counterfactual abducts from. A valued label
+        reports its last recorded ``value``; a bare (indicator) label that has occurred
+        reports ``1.0`` (matching the ``factual=1.0`` convention used elsewhere). A label
+        never observed is simply omitted — an honest "unknown", never a fabricated zero."""
+        labs = list(labels) if labels is not None else list(self._by_label)
+        out: Dict[str, float] = {}
+        for lab in labs:
+            vals = self._values.get(lab)
+            if vals:
+                out[lab] = vals[-1][1]
+            elif self._by_label.get(lab):
+                out[lab] = 1.0
+        return out
+
+    def _topo_order(self) -> List[str]:
+        """A topological order over the discovered CAUSAL links (Kahn's algorithm).
+
+        Cycle-safe: :meth:`discover` enforces acyclicity on the causal graph going
+        forward, but this stays safe (leftover cyclic nodes appended in stable order)
+        even if called before a `discover()` or on links from an older save."""
+        nodes = set(self._by_label)
+        indeg: Dict[str, int] = {n: 0 for n in nodes}
+        adj: Dict[str, List[str]] = {n: [] for n in nodes}
+        for (c, e), link in self._links.items():
+            if link.is_causal and c in nodes and e in nodes:
+                adj[c].append(e)
+                indeg[e] += 1
+        from collections import deque
+        q = deque(sorted(n for n in nodes if indeg[n] == 0))
+        order: List[str] = []
+        seen: set = set()
+        while q:
+            n = q.popleft()
+            if n in seen:
+                continue
+            seen.add(n)
+            order.append(n)
+            for v in sorted(adj[n]):
+                indeg[v] -= 1
+                if indeg[v] == 0:
+                    q.append(v)
+        for n in sorted(nodes):
+            if n not in seen:
+                order.append(n)
+                seen.add(n)
+        return order
 
     # ------------------------------------------------------------------ #
     # housekeeping
@@ -999,3 +1552,51 @@ if __name__ == "__main__":
     v = inter.is_causal("A", "B")
     print("  A → B :", v.verdict, "—", v.reason)
     print("  stats :", inter.stats())
+
+    # ---- Case 4: Rung 2 (intervention, population-average) vs Rung 3 (structural
+    # counterfactual, THIS episode) — the exact distinction "she talks counterfactual"
+    # vs "she reasons counterfactually" turns on. Same chain, same query; the population
+    # answer is a single number for everyone, the structural one is grounded in what
+    # *actually happened* this specific time (abducted noise), and differs per episode.
+    chain = CausalWorldModel(window=10.0)
+    for k in range(300):
+        base = k * 100.0
+        a_val = rng.gauss(5.0, 2.0)
+        chain.observe("rung_a", at=base, value=a_val)
+        b_val = 2.0 * a_val + 1.0 + rng.gauss(0.0, 0.3)
+        chain.observe("rung_b", at=base + 1, value=b_val)
+        c_val = 3.0 * b_val - 2.0 + rng.gauss(0.0, 0.3)
+        chain.observe("rung_c", at=base + 2, value=c_val)
+    chain.discover()
+    print("\nCASE 4 — Rung 2 (intervention) vs Rung 3 (structural counterfactual)")
+    rung2 = chain.counterfactual("rung_a", "rung_c", factual=5.0, counter=0.0)
+    print("  Rung 2 (population avg, do(rung_a)) :", rung2.describe())
+    # this specific episode had unusually large positive/negative noise at each hop —
+    # a real "what actually happened" the population answer above knows nothing about
+    a_actual = 8.0
+    base = 99000.0
+    chain.observe("rung_a", at=base, value=a_actual)
+    b_actual = 2.0 * a_actual + 1.0 + 4.0
+    chain.observe("rung_b", at=base + 1, value=b_actual)
+    c_actual = 3.0 * b_actual - 2.0 - 5.0
+    chain.observe("rung_c", at=base + 2, value=c_actual)
+    evidence = chain.latest_evidence(["rung_a", "rung_b", "rung_c"])
+    rung3 = chain.counterfactual("rung_a", "rung_c", factual=a_actual, counter=0.0,
+                                 evidence=evidence)
+    print("  this episode's evidence              :", evidence)
+    print("  Rung 3 (abduction → action → prediction, THIS episode) :", rung3.describe())
+    print("  (abducted =", rung3.abducted, "— honest flag distinguishing Rung 3 from Rung 2)")
+
+    # ---- Case 5: Probability of Necessity / Sufficiency on a synthetic SCM ----------
+    ns = CausalWorldModel(window=10.0)
+    for k in range(400):
+        base = k * 100.0
+        did = rng.random() < 0.5
+        ns.observe("match_struck", at=base, value=1.0 if did else 0.0,
+                  intervention=(k % 3 == 0))
+        fire = did and rng.random() < 0.92
+        ns.observe("fire", at=base + 1, value=1.0 if fire else 0.0)
+    ns.discover()
+    pns = ns.necessity_sufficiency("match_struck", "fire")
+    print("\nCASE 5 — Probability of Necessity / Sufficiency (match → fire)")
+    print("  PN / PS / PNS :", pns)

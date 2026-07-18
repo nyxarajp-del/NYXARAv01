@@ -23,8 +23,8 @@ applied to the documentation itself).
 | 1 | Universal General Intelligence | `nyxara.mind.general_intelligence` | REAL+WIRED |
 | 2 | Open-world Generalization | `nyxara.growth.open_world` + `nyxara.mind.transfer` + `nyxara.mind.domain_genesis` | UPGRADED |
 | 3 | First-Principles Reasoning | `nyxara.mind.first_principles` + `nyxara.mind.generalization` | REAL+WIRED |
-| 4 | Causal Reasoning | `nyxara.mind.causal_world_model` | REAL+WIRED |
-| 5 | Counterfactual Thinking | `nyxara.mind.world_model` | REAL+WIRED |
+| 4 | Causal Reasoning | `nyxara.mind.causal_world_model` | UPGRADED |
+| 5 | Counterfactual Thinking | `nyxara.mind.causal_world_model` + `nyxara.mind.world_model` | UPGRADED |
 | 6 | Long-Horizon Planning | `nyxara.planning.grand_plan` | UPGRADED |
 | 7 | Autonomous Goal Pursuit | `nyxara.agency.mission` | REAL+WIRED |
 | 8 | Active Curiosity | `nyxara.growth.active_curiosity` | REAL+WIRED |
@@ -418,6 +418,60 @@ the *space she searches is no longer bounded by what a human wrote down*:
 
 No safety gate is bypassed or re-implemented: invention only ever *proposes*; verification (the
 `Prover`) and promotion (the gauntlet + `nyxara.growth.improvement_proof`) still *dispose*.
+
+## Change set: genuine counterfactual reasoning — Rung 3, not just Rung 2 (caps #4, #5)
+
+`nyxara.mind.causal_world_model` already learned real causal structure from lived
+interventions (temporal precedence, contingency, confounder screening, the do-operator)
+— that part was real. What it computed as a "counterfactual" was the population-level
+*interventional* contrast (`effect_of(do=counter) − effect_of(do=factual)`, averaged over
+the whole graph) — Judea Pearl's Rung 2, not Rung 3. This change set closes that gap:
+
+- **Structural (per-instance) counterfactuals — `CausalWorldModel.counterfactual(...,
+  evidence=...)`.** Genuine Pearl three-step reasoning: **abduction** (recover THIS
+  episode's realized exogenous noise from what actually happened, via each edge's fitted
+  `FunctionalCausalMechanism` residual), **action** (`do()`), **prediction** (recompute
+  forward through the DAG holding that same noise fixed). A node not downstream of the
+  intervention reproduces its factual value exactly (self-consistent); a downstream node
+  genuinely propagates the change. The `Counterfactual.abducted` flag honestly reports
+  which happened — with no episode evidence or no fitted mechanism, it degrades to the
+  original Rung-2 population contrast, never silently overclaiming.
+- **Probability of Necessity / Sufficiency — `CausalWorldModel.necessity_sufficiency`.**
+  "Did A really matter for B?" answered as Pearl's PN/PS/PNS via Monte Carlo over each
+  fitted mechanism's own residual distribution — the exact model-implied quantities
+  (sidestepping the usual Tian–Pearl *bounds*, needed only when no structural model is
+  available) rather than a bare confidence heuristic. Abstains (returns `None`) with no
+  fitted mechanism on the path.
+- **Multi-variable `do()`** — `CausalModel.effect_of_many` / `CausalStrategy` /
+  `CausalWorldModel.do()` support a genuine simultaneous intervention on a SET of
+  variables (`do(A=a, B=b)`), fixing a real crash on more than one key.
+- **Statistically-tested, joint confounder screening.** `_find_confounder` now
+  jointly conditions on SETS of candidates (not just one at a time) and confirms an
+  effect-size collapse with a real permutation significance test (content-seeded, so it's
+  reproducible run-to-run) instead of trusting fixed magic-number thresholds alone.
+- **Front-door adjustment.** When a link is confounded, a clean mediator path
+  (independently screened causal on both hops) recovers the effect instead of the
+  reasoning simply stopping at "confounded, unknown magnitude."
+- **Acyclicity.** `discover()` now detects and greedily breaks cycles among causal links
+  (demoting the weakest edge to correlational) so the exported graph is always a genuine
+  DAG/SCM, not an edge soup.
+- **Transitive-reduction pruning (`as_causal_graph`).** A mediation chain `a → b → c`
+  used to also earn its own redundant `a → c` edge (still a true "a causes c", just not a
+  *direct* one), double-counting the same influence when path-summing effects. Fully
+  mediated edges are now pruned from the propagation graph (kept in `why`/`is_causal`).
+- **Wired into decisions, not just Q&A — `nyxara.planning.decide` (`Decider`).** A `Decider`
+  built with `causal_model`/`causal_goal`/`causal_weight` blends each option's PN/PS
+  toward the goal into its ranking, so an option that is genuinely necessary/sufficient
+  for the goal can outrank one that only correlated with past success — off by default
+  (`causal_weight=0.0`), matching the existing `affective_weight` pattern.
+- **`nyxara.mind.native_reasoner`** grounds its `"counterfactual"` answers in the live
+  episode's latest observed state (`CausalWorldModel.latest_evidence`) and adds a
+  `"causal_necessity"` intent ("was X necessary/sufficient for Y?") answered from PN/PS/PNS.
+
+Known, separate, honestly-scoped limitation: `FunctionalCausalMechanism` fits a
+single-predictor (bivariate) regression per edge, so two correlated co-parents of the
+same node can bias each other's fitted slope (classic omitted-variable bias) — a
+multivariate per-node fit is future work, not claimed here.
 
 ## Change set: frontier law discovery (caps #9, #72)
 

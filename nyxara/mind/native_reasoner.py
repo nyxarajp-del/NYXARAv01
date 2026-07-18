@@ -69,6 +69,10 @@ _RE_COUNTERFACTUAL = re.compile(
     r"|\bhad\s+.+\s+not\s+(happened|occurred)\b", re.I)
 _RE_CAUSAL_PAIR = re.compile(
     r"\b(?:does|did|do|can|could|will)\s+(.+?)\s+cause[sd]?\s+(.+?)\s*[?.]*\s*$", re.I)
+_RE_NECESSITY = re.compile(
+    r"\b(?:did|was|is|were)\s+(.+?)\s+(?:really\s+)?"
+    r"(?:matter(?:ed)?|necessary|essential|required|sufficient)\s+"
+    r"(?:for|to)\s+(.+?)\s*[?.]*\s*$", re.I)
 _RE_WHY = re.compile(r"^\s*why\b", re.I)
 _RE_WHATIF = re.compile(
     r"\bwhat\s+(?:happens|happened|will\s+happen|would\s+happen)\s+(?:if|when)\b"
@@ -92,6 +96,8 @@ def classify_intent(text: str) -> str:
         return "chat"
     if _RE_COUNTERFACTUAL.search(t):
         return "counterfactual"
+    if _RE_NECESSITY.search(t):
+        return "causal_necessity"
     if _RE_CAUSAL_PAIR.search(t):
         return "causal_pair"
     if _RE_WHY.search(t):
@@ -118,6 +124,7 @@ _INTENT_ENGINES: Dict[str, List[str]] = {
     "causal_why": ["law", "causal"],
     "causal_whatif": ["law", "causal"],
     "causal_pair": ["causal"],
+    "causal_necessity": ["causal"],
     "counterfactual": ["causal"],
     "intervention": ["law", "intervention"],
     "computational": ["law", "chain", "compute"],
@@ -692,6 +699,34 @@ class NativeReasoner:
             return answer, _clamp(max(v.confidence, 0.4)), True, \
                 f"causal verdict {v.verdict} from {v.evidence.get('events', 0)} lived events"
 
+        if intent == "causal_necessity":
+            m = _RE_NECESSITY.search(part)
+            if not m:
+                return None
+            a = cwm.match_label(m.group(1))
+            b = cwm.match_label(m.group(2))
+            if a is None or b is None:
+                return None
+            result = cwm.necessity_sufficiency(a, b)
+            if result is None:
+                self._step(steps, StepKind.REASON,
+                           f"no fitted structural mechanism between {a!r} and {b!r} yet")
+                return (f"I don't have enough learned structure between {a!r} and "
+                        f"{b!r} yet to say honestly whether it was necessary or "
+                        f"sufficient."), 0.4, True, \
+                    "honest abstention — no fitted mechanism to sample counterfactual noise from"
+            pn, ps, pns = result["PN"], result["PS"], result["PNS"]
+            self._step(steps, StepKind.SIMULATE,
+                       f"ran {result['samples']} Monte Carlo structural counterfactuals "
+                       f"(abduction over fitted noise) for {a!r} -> {b!r}",
+                       evidence=[f"PN={pn:.2f}", f"PS={ps:.2f}", f"PNS={pns:.2f}"])
+            answer = (f"Necessity {pn:.0%} (without {a!r}, {b!r} likely would not have "
+                      f"happened), sufficiency {ps:.0%} (with {a!r}, {b!r} likely would "
+                      f"have) — necessary-and-sufficient in {pns:.0%} of the simulated "
+                      f"instances.")
+            return answer, _clamp(max(pn, ps, 0.4)), True, \
+                f"Pearl PN/PS/PNS from {result['samples']} structural Monte Carlo draws"
+
         topic = self._topic_segment(part, intent)
         label = cwm.match_label(topic)
         if label is None:
@@ -741,12 +776,27 @@ class NativeReasoner:
             target = self._counterfactual_target(part, label)
             if target is None:
                 return None
-            cf = cwm.counterfactual(label, target, factual=1.0, counter=0.0)
-            self._step(steps, StepKind.SIMULATE,
-                       f"ran the counterfactual do({label}=absent) on {target!r}",
-                       detail=cf.describe(), confidence=0.7)
-            return (f"Counterfactual: {cf.describe()}."), 0.7, True, \
-                f"structural counterfactual over the discovered graph (Δ={cf.delta:+.3f})"
+            # ground it in what actually happened, not just the population average:
+            # abduction (recover THIS episode's realized noise) -> action -> prediction.
+            evidence = cwm.latest_evidence(cwm.labels())
+            cf = cwm.counterfactual(label, target, factual=1.0, counter=0.0,
+                                    evidence=evidence)
+            if cf.abducted:
+                self._step(steps, StepKind.SIMULATE,
+                           f"ran a STRUCTURAL counterfactual for {label!r} on {target!r}: "
+                           f"abducted this episode's realized state, then do({label}=absent), "
+                           f"then re-predicted forward — not a population average",
+                           detail=cf.describe(), confidence=0.75)
+            else:
+                self._step(steps, StepKind.SIMULATE,
+                           f"ran the counterfactual do({label}=absent) on {target!r} "
+                           f"(population-average — no fitted mechanism to abduct from yet)",
+                           detail=cf.describe(), confidence=0.6)
+            source = ("structural counterfactual (abduction → action → prediction) over "
+                      "this episode's own state" if cf.abducted else
+                      "population-average interventional contrast over the discovered graph")
+            return (f"Counterfactual: {cf.describe()}."), (0.75 if cf.abducted else 0.6), True, \
+                f"{source} (Δ={cf.delta:+.3f})"
         return None
 
     def _causal_chain_to(self, effect: str, *, max_depth: int = 4) -> List[str]:
@@ -792,28 +842,71 @@ class NativeReasoner:
             return None
         verb = m.group(1).lower()
         prevent = verb in ("prevent", "stop", "avoid", "reduce")
-        goal = self.causal.match_label(part[m.end():])
-        if goal is None:
-            return None
-        paths = self._causal_ancestor_paths(goal)
-        if not paths:
+        rest = part[m.end():]
+
+        # a multi-goal ask ("how do I achieve X and Y") — try each conjunct as its own
+        # goal label before falling back to matching the whole remainder as one label.
+        segments = [s for s in re.split(r"\band\b|,", rest) if s.strip()]
+        goals: List[str] = []
+        for seg in (segments if len(segments) > 1 else []):
+            g = self.causal.match_label(seg)
+            if g is not None and g not in goals:
+                goals.append(g)
+        if len(goals) < 2:
+            goal = self.causal.match_label(rest)
+            if goal is None:
+                return None
+            goals = [goal]
+
+        per_goal: List[Tuple[str, str, float, List[str]]] = []   # (goal, lever, strength, chain)
+        for goal in goals:
+            paths = self._causal_ancestor_paths(goal)
+            if not paths:
+                continue
+            paths.sort(key=lambda p: p[1], reverse=True)
+            lever, strength, chain = paths[0]
+            per_goal.append((goal, lever, strength, chain))
+
+        if not per_goal:
             self._step(steps, StepKind.REASON,
-                       f"no known causal lever for {goal!r} in my graph")
+                       f"no known causal lever for {' / '.join(goals)} in my graph")
             return (f"I know of no established cause I could act on to "
-                    f"{'prevent' if prevent else 'bring about'} {goal!r} yet."), \
-                0.5, True, "honest no-lever verdict from the causal graph"
-        paths.sort(key=lambda p: p[1], reverse=True)
-        lever, strength, chain = paths[0]
-        self._step(steps, StepKind.REASON,
-                   f"searched my causal graph backward from {goal!r}: best lever "
-                   f"is {lever!r}", detail=" → ".join(chain),
-                   confidence=_clamp(strength))
-        action = ("suppress" if prevent else "bring about")
-        answer = (f"To {'prevent' if prevent else 'achieve'} {goal!r}, {action} "
-                  f"{lever!r} — my causal model shows {' → '.join(chain)} "
-                  f"(path confidence {strength:.0%}).")
-        return answer, _clamp(max(strength, 0.45)), True, \
-            f"interventional plan over discovered causal path {' → '.join(chain)}"
+                    f"{'prevent' if prevent else 'bring about'} {' and '.join(goals)} "
+                    f"yet."), 0.5, True, "honest no-lever verdict from the causal graph"
+
+        if len(per_goal) == 1 or len({lever for _, lever, _, _ in per_goal}) == 1:
+            goal, lever, strength, chain = per_goal[0]
+            self._step(steps, StepKind.REASON,
+                       f"searched my causal graph backward from {goal!r}: best lever "
+                       f"is {lever!r}", detail=" → ".join(chain),
+                       confidence=_clamp(strength))
+            action = ("suppress" if prevent else "bring about")
+            answer = (f"To {'prevent' if prevent else 'achieve'} {goal!r}, {action} "
+                      f"{lever!r} — my causal model shows {' → '.join(chain)} "
+                      f"(path confidence {strength:.0%}).")
+            return answer, _clamp(max(strength, 0.45)), True, \
+                f"interventional plan over discovered causal path {' → '.join(chain)}"
+
+        # genuinely distinct levers for distinct goals — check for interaction (do they
+        # reinforce or conflict when pulled TOGETHER?) via the multi-variable do-operator,
+        # rather than just reporting two independent single-lever plans.
+        interventions = {lever: 1.0 for _, lever, _, _ in per_goal}
+        lines = []
+        for goal, lever, strength, chain in per_goal:
+            joint = self.causal.do(interventions, target=goal)
+            solo = self.causal.predict_effects(lever, target=goal)
+            note = ("reinforcing" if abs(joint) > abs(solo) + 1e-9 else
+                    "no extra conflict" if abs(joint - solo) < 1e-9 else "some conflict")
+            lines.append(f"{goal!r} via {lever!r} (path {' → '.join(chain)}, "
+                         f"joint effect {joint:+.2f} vs. acting alone {solo:+.2f}: {note})")
+        self._step(steps, StepKind.SIMULATE,
+                   f"joint do({', '.join(interventions)}) checked for cross-goal interaction",
+                   evidence=lines[:4])
+        avg_strength = sum(s for _, _, s, _ in per_goal) / len(per_goal)
+        answer = ("To " + ("prevent" if prevent else "achieve") + " both: " +
+                  "; ".join(lines) + ".")
+        return answer, _clamp(max(avg_strength, 0.45)), True, \
+            f"multi-variable do-operator interaction check over {len(per_goal)} goals"
 
     def _causal_ancestor_paths(self, goal: str, *, max_depth: int = 4
                                ) -> List[Tuple[str, float, List[str]]]:

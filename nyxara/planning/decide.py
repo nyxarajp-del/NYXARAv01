@@ -66,6 +66,10 @@ class Option:
     # the affective forecaster when a Decider is built with affective_weight > 0. Keys:
     # valence [0,1] (0.5 neutral), optional arousal, owner_relevant, controllability, horizon_days.
     affect: Optional[Dict[str, float]] = None
+    # the causal-graph variable this option corresponds to ACTING ON (e.g. "exercise" for
+    # an option "go to the gym") — read by the Decider's causal-necessity criterion when
+    # built with causal_weight > 0 and a causal_model + causal_goal. None = no causal read.
+    causal_label: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "scores": self.scores,
@@ -218,7 +222,8 @@ class Decider:
     def __init__(self, criteria: Sequence[Criterion], *,
                  settings: Optional[NyxaraSettings] = None,
                  robust_stakes: float = 0.6, affective_weight: float = 0.0,
-                 forecaster: Any = None) -> None:
+                 forecaster: Any = None, causal_model: Any = None,
+                 causal_goal: Optional[str] = None, causal_weight: float = 0.0) -> None:
         self.criteria = list(criteria)
         self.mcda = MCDA(self.criteria)
         self.regret = RegretMinimizer(self.criteria)
@@ -228,6 +233,15 @@ class Decider:
         # default, so existing behaviour is unchanged). Uses debiased, time-aware forecasts.
         self.affective_weight = max(0.0, float(affective_weight))
         self._forecaster = forecaster
+        # weight of "does acting on this option's causal_label REALLY move causal_goal?"
+        # (0 = off, the default) — grounds option ranking in the learned causal graph's
+        # Probability of Necessity/Sufficiency (mind.causal_world_model) instead of only
+        # whatever correlational score the option happened to be given. An option whose
+        # apparent benefit is really just correlation with past success (not a necessary
+        # or sufficient cause of the goal) is no longer ranked as if it reliably delivers it.
+        self.causal_model = causal_model
+        self.causal_goal = causal_goal
+        self.causal_weight = max(0.0, float(causal_weight))
 
     # ---- affective forecasting → utility (Pillar D2) ---- #
     def _forecaster_or_default(self) -> Any:
@@ -252,26 +266,56 @@ class Decider:
             horizon_days=float(info.get("horizon_days", 30.0)))
         return _clamp(fc.corrected_valence)
 
+    def _causal_benefit(self, option: Option) -> float:
+        """How much does acting on this option's ``causal_label`` REALLY move
+        ``causal_goal`` — Pearl's Probability of Necessity/Sufficiency (mean of PN, PS),
+        not a bare correlational score. Neutral (0.5, neither helps nor hurts the
+        ranking) whenever there's nothing to ground: no causal model/goal wired, the
+        option names no causal_label, or the graph has no fitted mechanism between them
+        yet — honest abstention, never a fabricated causal read."""
+        if self.causal_model is None or self.causal_goal is None or option.causal_label is None:
+            return 0.5
+        try:
+            result = self.causal_model.necessity_sufficiency(
+                option.causal_label, self.causal_goal)
+        except Exception:  # noqa: BLE001 — a causal read is a booster, never required
+            result = None
+        if not result:
+            return 0.5
+        return _clamp((result.get("PN", 0.0) + result.get("PS", 0.0)) / 2.0)
+
     def _ranking(self, options: Sequence[Option]) -> List[Tuple[Option, float]]:
-        """MCDA utility, optionally blended with the anticipated-affect criterion."""
+        """MCDA utility, optionally blended with the anticipated-affect and/or
+        causal-necessity criteria (each off by default — a ``Decider`` built without
+        them ranks exactly as before)."""
         base = self.mcda.utility(options)
-        if self.affective_weight <= 0.0:
-            return sorted(((o, base[o.name]) for o in options),
-                          key=lambda ov: ov[1], reverse=True)
         weight_sum = sum(abs(c.weight) for c in self.criteria) or 1.0
-        wa = self.affective_weight
-        raw = {o.name: self._affect_benefit(o) for o in options}
-        lo, hi = min(raw.values()), max(raw.values())
-        rng = hi - lo
-        norm = {n: (0.5 if rng == 0 else (v - lo) / rng) for n, v in raw.items()}
-        blended = {o.name: (weight_sum * base[o.name] + wa * norm[o.name]) / (weight_sum + wa)
-                   for o in options}
-        return sorted(((o, blended[o.name]) for o in options),
-                      key=lambda ov: ov[1], reverse=True)
+        blended = {o.name: base[o.name] * weight_sum for o in options}
+        total_w = weight_sum
+
+        def _fold_in(weight: float, raw_fn: Any) -> None:
+            nonlocal total_w
+            if weight <= 0.0:
+                return
+            raw = {o.name: raw_fn(o) for o in options}
+            lo, hi = min(raw.values()), max(raw.values())
+            rng = hi - lo
+            norm = {n: (0.5 if rng == 0 else (v - lo) / rng) for n, v in raw.items()}
+            for o in options:
+                blended[o.name] += weight * norm[o.name]
+            total_w += weight
+
+        _fold_in(self.affective_weight, self._affect_benefit)
+        _fold_in(self.causal_weight, self._causal_benefit)
+
+        result = {name: v / total_w for name, v in blended.items()}
+        return sorted(((o, result[o.name]) for o in options), key=lambda ov: ov[1], reverse=True)
 
     def decide(self, options: Sequence[Option]) -> Optional[DecisionResult]:
         viable = [o for o in options if o.owner_aligned]
-        method = "mcda+affect" if self.affective_weight > 0.0 else "mcda"
+        extras = ("+affect" if self.affective_weight > 0.0 else "") + \
+                 ("+causal" if self.causal_weight > 0.0 else "")
+        method = "mcda" + extras
         if not viable:
             if not options:
                 return None
@@ -364,5 +408,45 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"\nhigh-stakes choice  : {hres.chosen.name} via {hres.method}")
     assert hres.chosen.name == "solid"            # robust beats the lopsided options
     assert "regret" in hres.method
+
+    # causal grounding: prefer the option that REALLY moves the goal (high PN/PS) over
+    # one that merely correlates with past success — the whole point of wiring
+    # mind.causal_world_model's necessity/sufficiency into option ranking (Rung 3, not
+    # just "looked good historically"). "lucky_day" only ever co-occurs with sales via a
+    # confound (weekend); "discount" is a real do-experiment that reliably moves sales.
+    import random as _random
+    from nyxara.mind.causal_world_model import CausalWorldModel
+    cwm = CausalWorldModel(window=10.0)
+    rng2 = _random.Random(21)
+    for k in range(400):
+        base = k * 100.0
+        weekend = rng2.random() < 0.3
+        if weekend:
+            cwm.observe("weekend", at=base, value=1.0)
+        if weekend:                                          # lucky_day ~ proxy for weekend
+            cwm.observe("lucky_day", at=base + 1, value=1.0)
+        do_discount = rng2.random() < 0.4                     # a real do-experiment
+        cwm.observe("discount", at=base + 2, value=1.0 if do_discount else 0.0,
+                   intervention=do_discount)
+        sales = (do_discount and rng2.random() < 0.85) or (weekend and rng2.random() < 0.7)
+        cwm.observe("sales_up", at=base + 3, value=1.0 if sales else 0.0)
+    cwm.discover()
+
+    goal_options = [
+        Option("run_discount", {"owner_benefit": 0.6}, confidence=0.8, reversibility=0.9,
+               stakes=0.3, causal_label="discount"),
+        Option("wait_for_luck", {"owner_benefit": 0.8}, confidence=0.8, reversibility=0.9,
+               stakes=0.3, causal_label="lucky_day"),
+    ]
+    naive = Decider([Criterion("owner_benefit", weight=2.0)]).decide(goal_options)
+    print(f"\nwithout causal read : {naive.chosen.name} "
+          f"(higher owner_benefit score, but only correlates with sales)")
+    assert naive.chosen.name == "wait_for_luck"
+
+    grounded = Decider([Criterion("owner_benefit", weight=2.0)], causal_model=cwm,
+                       causal_goal="sales_up", causal_weight=3.0).decide(goal_options)
+    print(f"with causal read     : {grounded.chosen.name} "
+          f"(lower raw score, but genuinely necessary/sufficient for the goal)")
+    assert grounded.chosen.name == "run_discount"
 
     print("\nALL SELF-TESTS PASSED ✓")

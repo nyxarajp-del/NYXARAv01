@@ -132,6 +132,15 @@ class CausalModel:
             total += prod
         return total * value
 
+    def effect_of_many(self, do: Dict[str, float], target: str) -> float:
+        """Total linear effect on ``target`` of a **simultaneous** multi-variable
+        intervention ``do({var: value, ...})`` — a real SCM's ``do`` operator acts on a
+        SET of variables at once, not just one. Linear superposition: each intervened
+        variable's path-traced effect (:meth:`effect_of`) is independent under a linear
+        SCM, so the joint effect is their sum (each variable simultaneously cut off from
+        its own causal parents, exactly as a single-variable ``do`` already is)."""
+        return sum(self.effect_of(var, val, target) for var, val in do.items())
+
     def counterfactual(self, do_var: str, target: str, factual: float,
                        counter: float) -> float:
         return self.effect_of(do_var, counter, target) - self.effect_of(do_var, factual, target)
@@ -141,8 +150,11 @@ class CausalStrategy(ReasoningStrategy):
     """Causal queries over a :class:`CausalModel`.
 
     payload = {"graph": [(cause, effect, weight), ...],
-               "effect_of": {"do": {var: value}, "on": target}}   # -> numeric effect
-            or {"graph": ..., "causes_of": var}                    # -> ranked causes
+               "effect_of": {"do": {var: value, ...}, "on": target}}   # -> numeric effect
+            or {"graph": ..., "causes_of": var}                        # -> ranked causes
+
+    ``do`` may name one variable or several — a genuine SCM intervention acts on a SET
+    of variables simultaneously (:meth:`CausalModel.effect_of_many`), not just one.
     """
 
     name = "causal"
@@ -163,14 +175,14 @@ class CausalStrategy(ReasoningStrategy):
                 rationale=f"direct causes of {p['causes_of']}: {causes}",
                 strategy=self.name, support={"causes": causes})
         spec = p["effect_of"]
-        do = spec["do"]
+        do = {k: float(v) for k, v in spec["do"].items()}
         target = spec["on"]
-        (var, value), = do.items()
-        effect = model.effect_of(var, float(value), target)
+        effect = model.effect_of_many(do, target)
         confidence = _clamp(0.5 + 0.5 * min(1.0, abs(effect)))
+        do_desc = ", ".join(f"{var}={value}" for var, value in do.items())
         return Conclusion(
             answer=effect, confidence=confidence if effect != 0 else 0.2,
-            rationale=f"do({var}={value}) -> {target} = {effect:.3f}",
+            rationale=f"do({do_desc}) -> {target} = {effect:.3f}",
             strategy=self.name, support={"effect": effect})
 
 
@@ -341,6 +353,19 @@ if __name__ == "__main__":  # pragma: no cover
     causes = causal.reason(ReasoningQuery(payload={"graph": graph, "causes_of": "wet"}))
     print(f"causes of wet       : {causes.answer}")
     assert set(causes.answer) == {"rain", "sprinkler"}
+
+    # 2b) Causal — simultaneous multi-variable do() on a diamond graph
+    diamond = [("A", "B", 2.0), ("A", "C", 3.0), ("B", "D", 1.5), ("C", "D", 0.5)]
+    multi = causal.reason(ReasoningQuery(payload={
+        "graph": diamond, "effect_of": {"do": {"A": 1.0, "C": 1.0}, "on": "D"}}))
+    print(f"causal do(A=1,C=1)  : D effect = {multi.answer:.3f}")
+    # do(A=1) -> D via A->B->D (2*1.5=3.0) + A->C->D (3*0.5=1.5) = 4.5
+    # do(C=1) -> D via C->D (0.5) directly, C held exogenous so no A->C path double-counts
+    # simultaneous do(A=1, C=1) = sum of each var's OWN effect_of (superposition) = 4.5 + 0.5
+    assert abs(multi.answer - 5.0) < 1e-6
+    model = CausalModel(diamond)
+    assert abs(model.effect_of_many({"A": 1.0, "C": 1.0}, "D")
+              - (model.effect_of("A", 1.0, "D") + model.effect_of("C", 1.0, "D"))) < 1e-9
 
     # 3) Abductive — best explanation of symptoms
     abd = AbductiveStrategy()
