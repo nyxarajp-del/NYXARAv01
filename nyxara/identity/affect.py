@@ -171,9 +171,19 @@ class AffectSystem:
         return ev
 
     def ingest_prediction(self, readout: Any, *, cause: str = "prediction") -> EmotionEvent:
-        """Fold a predictive_core EmotionReadout into affect (surprise → arousal)."""
+        """Fold a predictive_core EmotionReadout into affect (surprise → arousal).
+
+        The deep free-energy channels are additive and default to 0 (older
+        readouts are untouched): **mood** (slow ΔF trend) tempers the momentary
+        valence, **relief** (anxiety falling) lifts it, and **anxiety** (expected
+        free energy of the best future) keeps arousal from fully settling."""
         v = getattr(readout, "valence", 0.0)
         a = max(getattr(readout, "arousal", 0.0), getattr(readout, "surprise", 0.0))
+        mood = getattr(readout, "mood", 0.0)
+        relief = getattr(readout, "relief", 0.0)
+        anxiety = getattr(readout, "anxiety", 0.0)
+        v = max(-1.0, min(1.0, v + 0.3 * mood + 0.3 * relief))
+        a = max(a, 0.5 * anxiety)
         return self.feel(v, a, cause=cause)
 
     @property

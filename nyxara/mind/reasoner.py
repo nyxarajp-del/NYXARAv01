@@ -143,47 +143,88 @@ class _PolicyScore:
     expected_free_energy: float
     total_reward: float
     pragmatic: float
-    epistemic: float
+    epistemic: float                  # COMPUTED expected information gain (not confidence)
     final_state: Optional[State]
+    model_confidence: float = 0.0     # the model's coverage — reporting only
 
 
 class ModelBasedReasoner(ReasoningStrategy):
-    """Score candidate policies by expected free energy via the world model."""
+    """Score candidate policies by expected free energy via the world model.
+
+    The objective is the **single** active-inference quantity from
+    :class:`~nyxara.mind.free_energy.FreeEnergyEngine`:
+
+        EFE(π) = risk + ambiguity − epistemic       (score = −EFE)
+
+    There is no separate reward term: ``query.reward_fn`` (and the model's learned
+    rewards) are absorbed into the preference prior C as log-preference, so goals
+    and rewards *rank* futures through one channel. ``epistemic`` is the world
+    model's computed expected information gain — an unknown region ATTRACTS the
+    agent (curiosity is emergent), where the old confidence-based term repelled it.
+
+    Backward compat: ``reward_weight`` scales reward's contribution to ln C and
+    ``preference_weight`` is the C precision — the ctor signature is unchanged.
+    """
 
     name = "model_based"
 
-    def __init__(self, world_model: WorldModel, *, reward_weight: float = 1.0,
-                 preference_weight: float = 1.0, epistemic_weight: float = 0.3) -> None:
+    def __init__(self, world_model: WorldModel, *, engine: Any = None,
+                 reward_weight: float = 1.0, preference_weight: float = 1.0,
+                 epistemic_weight: float = 0.3) -> None:
+        from nyxara.mind.free_energy import FreeEnergyEngine
         self.wm = world_model
         self.reward_weight = reward_weight
         self.preference_weight = preference_weight
         self.epistemic_weight = epistemic_weight
+        self.engine = engine if engine is not None else FreeEnergyEngine(
+            world_model=world_model, epistemic_weight=epistemic_weight)
 
     def applicability(self, query: ReasoningQuery) -> float:
         if query.start is not None and query.candidates:
             return 0.9
+        if query.start is not None and query.candidates is None \
+                and self.wm is not None and len(getattr(self.wm, "actions", list)() or []) > 0:
+            return 0.6      # no candidates handed in — the engine can grow its own
         return 0.0
 
+    def _preferences(self, query: ReasoningQuery) -> Any:
+        from nyxara.mind.free_energy import PreferenceModel
+        return PreferenceModel(
+            target=list(query.preference) if query.preference is not None else None,
+            precision=self.preference_weight,
+            reward_fn=query.reward_fn, reward_weight=self.reward_weight)
+
     def _score(self, query: ReasoningQuery, policy: Policy) -> _PolicyScore:
-        traj = self.wm.rollout(query.start, policy, steps=query.horizon,
-                               reward_fn=query.reward_fn)
-        total_reward = traj.total_reward
-        pragmatic = 0.0
-        if query.preference is not None and traj.final_state is not None:
-            from nyxara.mind.world_model import _dist
-            pragmatic = -_dist(traj.final_state, query.preference)
-        epistemic = traj.mean_confidence
-        score = (self.reward_weight * total_reward
-                 + self.preference_weight * pragmatic
-                 + self.epistemic_weight * epistemic)
-        return _PolicyScore(policy=policy, score=score, expected_free_energy=-score,
-                            total_reward=total_reward, pragmatic=pragmatic,
-                            epistemic=epistemic, final_state=traj.final_state)
+        ev = self.engine.evaluate_policy(query.start, policy, horizon=query.horizon,
+                                         preferences=self._preferences(query))
+        return _PolicyScore(policy=policy, score=-ev.expected_free_energy,
+                            expected_free_energy=ev.expected_free_energy,
+                            total_reward=ev.total_reward, pragmatic=-ev.risk,
+                            epistemic=ev.epistemic, final_state=ev.final_state,
+                            model_confidence=ev.model_confidence)
+
+    def _candidates(self, query: ReasoningQuery) -> List[Policy]:
+        if query.candidates is not None:
+            return list(query.candidates)
+        # sophisticated planning: grow policies by EFE-pruned tree search
+        try:
+            evals = self.engine.plan(query.start, depth=min(3, max(1, query.horizon)),
+                                     preferences=self._preferences(query))
+            return [list(e.policy) for e in evals]
+        except Exception:  # noqa: BLE001
+            return []
 
     def evaluate(self, query: ReasoningQuery) -> List[_PolicyScore]:
-        scores = [self._score(query, p) for p in (query.candidates or [])]
+        scores = [self._score(query, p) for p in self._candidates(query)]
         scores.sort(key=lambda s: s.score, reverse=True)
         return scores
+
+    def posterior(self, query: ReasoningQuery) -> List[Tuple[Policy, float]]:
+        """q(π) = softmax(−γ·EFE) over the candidate policies."""
+        evals = self.engine.evaluate_policies(
+            query.start, self._candidates(query), horizon=query.horizon,
+            preferences=self._preferences(query))
+        return [(e.policy, e.posterior) for e in evals]
 
     def reason(self, query: ReasoningQuery) -> Conclusion:
         scores = self.evaluate(query)
@@ -195,7 +236,7 @@ class ModelBasedReasoner(ReasoningStrategy):
         if len(scores) > 1:
             spread = abs(best.score - scores[-1].score) + 1e-9
             margin = _clamp((best.score - scores[1].score) / spread + 0.5)
-        confidence = _clamp(best.epistemic * (0.5 + 0.5 * margin))
+        confidence = _clamp(best.model_confidence * (0.5 + 0.5 * margin))
         return Conclusion(
             answer=best.policy, confidence=confidence,
             rationale=f"min expected free energy {best.expected_free_energy:.3f} "

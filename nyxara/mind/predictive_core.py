@@ -34,6 +34,7 @@ __all__ = [
     "Action",
     "ActionChoice",
     "PredictiveCore",
+    "HierarchicalPredictiveCore",
 ]
 
 Vec = List[float]
@@ -95,15 +96,28 @@ def _jt_vec(J: List[Vec], e: Vec) -> Vec:
 # --------------------------------------------------------------------------- #
 @dataclass
 class EmotionReadout:
-    """Affect as a function of prediction-error dynamics."""
+    """Affect as a function of prediction-error dynamics.
+
+    Beyond the instantaneous triple, the deep read-outs track *slow* free-energy
+    dynamics: **mood** is a slow EMA of valence (the trend of ΔF), **anxiety** is
+    the level of *expected* free energy of the best available policy (how much
+    surprise the future is predicted to hold), **relief** is anxiety falling, and
+    **confidence_feeling** is the current precision over policies (γ), normalised.
+    """
 
     valence: float    # [-1, 1] — free energy falling (good) vs rising (bad)
     arousal: float    # [0, 1]  — precision-weighted error magnitude
     surprise: float   # [0, 1]  — current free-energy level
+    mood: float = 0.0                # [-1, 1] — slow EMA of valence
+    anxiety: float = 0.0             # [0, 1]  — expected future free energy (best policy)
+    relief: float = 0.0              # [0, 1]  — anxiety dropping
+    confidence_feeling: float = 0.0  # [0, 1]  — policy precision γ, normalised
 
     def to_dict(self) -> Dict[str, float]:
         return {"valence": round(self.valence, 4), "arousal": round(self.arousal, 4),
-                "surprise": round(self.surprise, 4)}
+                "surprise": round(self.surprise, 4), "mood": round(self.mood, 4),
+                "anxiety": round(self.anxiety, 4), "relief": round(self.relief, 4),
+                "confidence_feeling": round(self.confidence_feeling, 4)}
 
 
 @dataclass
@@ -186,6 +200,19 @@ class PredictiveCore:
         self.epistemic_weight = epistemic_weight
         self._F_history: Deque[float] = deque(maxlen=history)
         self._last_error_mag: float = 0.0
+        # per-dimension precision (diagonal Π): None → the scalar path, bit-identical
+        self.precision_vec: Optional[Vec] = None
+        # Welford per-dim error statistics + volatility (variance-of-variance EMA)
+        self._err_n: int = 0
+        self._err_mean: Vec = []
+        self._err_m2: Vec = []
+        self._volatility: float = 0.0
+        self._prev_var: Optional[Vec] = None
+        # deep affect state (slow F dynamics)
+        self._mood: float = 0.0
+        self._anxiety: float = 0.0
+        self._relief: float = 0.0
+        self._confidence_feeling: float = 0.0
 
     # ---- prediction ---- #
     def predict(self) -> Vec:
@@ -194,7 +221,11 @@ class PredictiveCore:
     # ---- free energy ---- #
     def free_energy(self, observation: Sequence[float]) -> float:
         pred = self.predict()
-        accuracy = 0.5 * self.sensory_precision * _dist2(observation, pred)
+        if self.precision_vec is not None:
+            accuracy = 0.5 * sum(p * (o - q) ** 2 for p, o, q in
+                                 zip(self.precision_vec, observation, pred))
+        else:
+            accuracy = 0.5 * self.sensory_precision * _dist2(observation, pred)
         complexity = 0.5 * self.prior_precision * _dist2(self.mu, self.prior)
         return accuracy + complexity
 
@@ -206,7 +237,11 @@ class PredictiveCore:
             pred = self.predict()
             error = _sub(obs, pred)                       # obs-dim
             J = _jacobian(self.g, self.mu)
-            accuracy_grad = _scale(_jt_vec(J, error), self.sensory_precision)  # ∝ -dF/dμ
+            if self.precision_vec is not None:            # diagonal Π: weight per dim
+                weighted = [p * e for p, e in zip(self.precision_vec, error)]
+                accuracy_grad = _jt_vec(J, weighted)      # ∝ -dF/dμ
+            else:
+                accuracy_grad = _scale(_jt_vec(J, error), self.sensory_precision)
             complexity_grad = _scale(_sub(self.mu, self.prior), self.prior_precision)
             step = _sub(accuracy_grad, complexity_grad)   # ascent on -F == descent on F
             self.mu = _add(self.mu, _scale(step, self.lr))
@@ -215,8 +250,12 @@ class PredictiveCore:
         pred = self.predict()
         error = _sub(obs, pred)
         F = self.free_energy(obs)
+        F_prev = self._F_history[-1] if self._F_history else F
         self._F_history.append(F)
         self._last_error_mag = math.sqrt(_norm2(error))
+        self._track_error_stats(error)
+        # mood: slow EMA of instantaneous valence (the trend of ΔF)
+        self._mood = 0.95 * self._mood + 0.05 * math.tanh(F_prev - F)
         return PerceptionResult(belief=list(self.mu), prediction=pred, error=error,
                                 free_energy=F, iterations=iters_done)
 
@@ -231,13 +270,48 @@ class PredictiveCore:
         return ActionChoice(action=action, expected_free_energy=efe,
                             pragmatic=pragmatic, epistemic=epistemic)
 
-    def act(self, actions: Sequence[Action]) -> ActionChoice:
-        """Active inference: pick the action with the lowest expected free energy."""
+    def policy_posterior(self, choices: Sequence[ActionChoice], *,
+                         gamma: float = 4.0) -> List[float]:
+        """q(a) = softmax(−γ·EFE) — the posterior over actions (stable, sums to 1)."""
+        if not choices:
+            return []
+        logits = [-gamma * c.expected_free_energy for c in choices]
+        m = max(logits)
+        exps = [math.exp(x - m) for x in logits]
+        total = sum(exps) or 1.0
+        return [x / total for x in exps]
+
+    def act(self, actions: Sequence[Action], *, gamma: Optional[float] = None,
+            sample: bool = False, rng: Optional[object] = None) -> ActionChoice:
+        """Active inference: pick the action with the lowest expected free energy.
+
+        Default behaviour (no ``gamma``/``sample``) is the exact argmin. With
+        ``gamma`` set, the posterior softmax(−γ·EFE) is recorded on each choice;
+        ``sample=True`` draws from that posterior instead of taking the argmin —
+        low γ (an uncertain agent) then explores for free."""
         if not actions:
             raise ValueError("no actions to choose from")
         choices = [self.expected_free_energy(a) for a in actions]
         choices.sort(key=lambda c: c.expected_free_energy)
-        return choices[0]
+        best = choices[0]
+        if gamma is not None:
+            probs = self.policy_posterior(choices, gamma=gamma)
+            if sample:
+                import random as _random
+                r = (rng or _random).random()
+                acc = 0.0
+                for c, p in zip(choices, probs):
+                    acc += p
+                    if r <= acc:
+                        best = c
+                        break
+        # anxiety: the expected free energy of the best available future
+        prev_anx = self._anxiety
+        self._anxiety = _clamp(math.tanh(max(0.0, best.expected_free_energy)))
+        self._relief = _clamp(prev_anx - self._anxiety)
+        if gamma is not None:
+            self._confidence_feeling = _clamp(gamma / 16.0)
+        return best
 
     # ---- emotion: read out the error dynamics ---- #
     def emotion(self, *, scale: float = 1.0) -> EmotionReadout:
@@ -251,7 +325,10 @@ class PredictiveCore:
         # surprise: current free-energy level, squashed to [0,1]
         surprise = _clamp(math.tanh(F_now / max(1e-6, scale)))
         return EmotionReadout(valence=_clamp(valence, -1.0, 1.0), arousal=arousal,
-                              surprise=surprise)
+                              surprise=surprise,
+                              mood=_clamp(self._mood, -1.0, 1.0),
+                              anxiety=self._anxiety, relief=self._relief,
+                              confidence_feeling=self._confidence_feeling)
 
     # ---- combined step ---- #
     def step(self, observation: Sequence[float], *, iterations: int = 8,
@@ -260,12 +337,62 @@ class PredictiveCore:
         feeling = self.emotion(scale=scale)
         return perception, feeling
 
+    # ---- preferences: the C target lives on the SAME instance perception runs on ---- #
+    def set_preference(self, preference: Optional[Sequence[float]], *,
+                       precision: Optional[float] = None) -> None:
+        """Move the preferred observation (the C prior) — the one place goals enter."""
+        self.preference = list(preference) if preference is not None else None
+        if precision is not None:
+            self.preference_precision = max(0.0, float(precision))
+
     # ---- precision learning (attention) ---- #
     def update_precision(self, *, floor: float = 0.05, ceil: float = 100.0) -> float:
         """Adapt sensory precision toward the inverse of recent error variance."""
         var = self._last_error_mag ** 2
         self.sensory_precision = _clamp(1.0 / (var + 1e-3), floor, ceil)
         return self.sensory_precision
+
+    def _track_error_stats(self, error: Sequence[float]) -> None:
+        """Welford per-dimension error statistics + a volatility EMA (how fast the
+        error variance itself is drifting). Pure bookkeeping — outputs unchanged
+        until :meth:`update_precision_vec` is called."""
+        n = len(error)
+        if len(self._err_mean) != n:
+            self._err_mean = [0.0] * n
+            self._err_m2 = [0.0] * n
+            self._err_n = 0
+            self._prev_var = None
+        self._err_n += 1
+        for i, e in enumerate(error):
+            d = e - self._err_mean[i]
+            self._err_mean[i] += d / self._err_n
+            self._err_m2[i] += d * (e - self._err_mean[i])
+        if self._err_n >= 2:
+            var = [m2 / (self._err_n - 1) for m2 in self._err_m2]
+            if self._prev_var is not None:
+                drift = sum(abs(a - b) for a, b in zip(var, self._prev_var)) / n
+                self._volatility = 0.9 * self._volatility + 0.1 * drift
+            self._prev_var = var
+
+    def update_precision_vec(self, *, floor: float = 0.05, ceil: float = 100.0) -> Optional[Vec]:
+        """Per-dimension precision (diagonal Π): each dim's precision tracks the inverse
+        of ITS error variance — noisy channels are trusted less, stable ones more (the
+        real mechanism of attention). Volatility (a fast-drifting world) lowers all
+        precisions: when the rules keep changing, hold beliefs more loosely."""
+        if self._err_n < 2:
+            return self.precision_vec
+        damp = 1.0 / (1.0 + self._volatility)
+        self.precision_vec = [
+            _clamp(damp / (m2 / (self._err_n - 1) + 1e-3), floor, ceil)
+            for m2 in self._err_m2]
+        return self.precision_vec
+
+    @property
+    def volatility(self) -> float:
+        return self._volatility
+
+    def last_free_energy(self) -> Optional[float]:
+        return self._F_history[-1] if self._F_history else None
 
     # ---- introspection ---- #
     def status(self) -> Dict[str, object]:
@@ -274,6 +401,105 @@ class PredictiveCore:
                 "free_energy": round(self._F_history[-1], 6) if self._F_history else None,
                 "sensory_precision": round(self.sensory_precision, 4),
                 "emotion": self.emotion().to_dict()}
+
+
+# --------------------------------------------------------------------------- #
+# Hierarchical predictive core — empirical priors flow down, errors flow up
+# --------------------------------------------------------------------------- #
+class HierarchicalPredictiveCore:
+    """Two-level hierarchical predictive coding over ONE free-energy objective.
+
+    * The **lower** (fast, sensory) level perceives every observation exactly like
+      a flat :class:`PredictiveCore`.
+    * The **upper** (slow, conceptual) level perceives the lower level's *belief*
+      every ``slow_every`` steps with a small learning rate — it extracts the slow
+      regularities the fast level rides on.
+    * The upper level's prediction becomes the lower level's **empirical prior**
+      (canonical hierarchical predictive coding: priors flow down, prediction
+      errors flow up), so transient noise is resisted while real change passes.
+
+    The public surface mirrors :class:`PredictiveCore` (``mu``, ``perceive``,
+    ``step``, ``free_energy``, ``act``, ``set_preference``, ``emotion``,
+    ``status``…) so it is a drop-in for the orchestrator's predictive spine.
+    """
+
+    def __init__(self, *, belief: Vec, slow_every: int = 4, slow_lr: float = 0.05,
+                 slow_prior_precision: float = 0.02, prior_coupling: float = 0.3,
+                 **lower_kw: object) -> None:
+        self.lower = PredictiveCore(belief=list(belief), **lower_kw)  # type: ignore[arg-type]
+        self.upper = PredictiveCore(belief=list(belief), learning_rate=slow_lr,
+                                    prior_precision=slow_prior_precision)
+        self.slow_every = max(1, int(slow_every))
+        self.prior_coupling = _clamp(prior_coupling)
+        self._ticks = 0
+
+    # ---- the shared belief surface (delegates to the fast level) ---- #
+    @property
+    def mu(self) -> Vec:
+        return self.lower.mu
+
+    @property
+    def preference(self) -> Optional[Vec]:
+        return self.lower.preference
+
+    def predict(self) -> Vec:
+        return self.lower.predict()
+
+    def free_energy(self, observation: Sequence[float]) -> float:
+        return self.lower.free_energy(observation)
+
+    def last_free_energy(self) -> Optional[float]:
+        return self.lower.last_free_energy()
+
+    # ---- hierarchical perception ---- #
+    def perceive(self, observation: Sequence[float], *, iterations: int = 8
+                 ) -> PerceptionResult:
+        result = self.lower.perceive(observation, iterations=iterations)
+        self._ticks += 1
+        if self._ticks % self.slow_every == 0:
+            # errors flow up: the slow level perceives the fast level's belief
+            self.upper.perceive(self.lower.mu, iterations=max(1, iterations // 2))
+        # priors flow down: the slow prediction becomes the fast empirical prior
+        top_down = self.upper.predict()
+        c = self.prior_coupling
+        self.lower.prior = [(1.0 - c) * p + c * t
+                            for p, t in zip(self.lower.prior, top_down)]
+        return result
+
+    def step(self, observation: Sequence[float], *, iterations: int = 8,
+             scale: float = 1.0) -> Tuple[PerceptionResult, EmotionReadout]:
+        perception = self.perceive(observation, iterations=iterations)
+        return perception, self.emotion(scale=scale)
+
+    # ---- action + affect + precision: delegate to the fast level ---- #
+    def expected_free_energy(self, action: Action) -> ActionChoice:
+        return self.lower.expected_free_energy(action)
+
+    def act(self, actions: Sequence[Action], **kw: object) -> ActionChoice:
+        return self.lower.act(actions, **kw)  # type: ignore[arg-type]
+
+    def policy_posterior(self, choices: Sequence[ActionChoice], *,
+                         gamma: float = 4.0) -> List[float]:
+        return self.lower.policy_posterior(choices, gamma=gamma)
+
+    def set_preference(self, preference: Optional[Sequence[float]], *,
+                       precision: Optional[float] = None) -> None:
+        self.lower.set_preference(preference, precision=precision)
+
+    def emotion(self, *, scale: float = 1.0) -> EmotionReadout:
+        return self.lower.emotion(scale=scale)
+
+    def update_precision(self, **kw: object) -> float:
+        return self.lower.update_precision(**kw)  # type: ignore[arg-type]
+
+    def update_precision_vec(self, **kw: object) -> Optional[Vec]:
+        return self.lower.update_precision_vec(**kw)  # type: ignore[arg-type]
+
+    def status(self) -> Dict[str, object]:
+        s = self.lower.status()
+        s["upper_belief"] = [round(x, 4) for x in self.upper.mu]
+        s["ticks"] = self._ticks
+        return s
 
 
 # --------------------------------------------------------------------------- #

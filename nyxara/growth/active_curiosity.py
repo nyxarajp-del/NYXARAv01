@@ -178,10 +178,12 @@ class ActiveCuriosity:
                  motivation: Any = None, predictive: Any = None, self_model: Any = None,
                  knowledge: Any = None, memory: Any = None,
                  events_source: Optional[Callable[[], Any]] = None, llm: Any = None,
+                 free_energy: Any = None,
                  max_what_if: int = 2, frontier_size: int = 32) -> None:
         self.causal_model = causal_model
         self.world_simulator = world_simulator
         self.world_model = world_model
+        self.free_energy = free_energy
         self.scientist = scientist
         self.voi = voi
         self.motivation = motivation
@@ -381,7 +383,22 @@ class ActiveCuriosity:
             except Exception:  # noqa: BLE001
                 pass
             return 1.0                                  # an unexplained event is maximally curious
-        # a what-if outcome is genuinely uncertain until simulated
+        # a what-if outcome: ask the SHARED free-energy objective how much information
+        # acting here would gain (the same epistemic term action selection minimises) —
+        # curiosity and action chase one signal, not two bolted-on ones
+        if self.free_energy is not None:
+            try:
+                wm = getattr(self.free_energy, "world_model", None) or self.world_model
+                if wm is not None:
+                    state = (wm.encode_state(q.subject) if hasattr(wm, "encode_state")
+                             else (float(len(q.subject) % 7),))
+                    action = f"act:{(q.subject.split() or ['wonder'])[0]}"
+                    epi = float(self.free_energy.epistemic_value(state, action))
+                    if epi > 0.0:
+                        return _clamp01(epi)
+            except Exception:  # noqa: BLE001 — the engine is advisory, never required
+                pass
+        # honest fallback when no engine/world model is wired
         return 0.7
 
 
