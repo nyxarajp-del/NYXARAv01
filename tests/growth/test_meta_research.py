@@ -151,3 +151,43 @@ def test_core_meta_discover_is_wired():
     out = core.meta_discover("algorithm optimization")
     assert "error" not in out
     assert out["validated"] >= 1
+
+
+# --------------------------------------------------------------------------- #
+# empirical science in the meta-research pass: a wired LawDiscoveryEngine runs
+# real symbolic law discovery alongside code invention (continuous-loop upgrade)
+# --------------------------------------------------------------------------- #
+class _StubLawEngine:
+    """A minimal stand-in that reports two corroborated laws — the wiring seam under test."""
+
+    def __init__(self, kept: int = 2) -> None:
+        self._kept = kept
+
+    def discover_laws(self, rounds: int = 1):
+        class _Report:
+            discoveries = list(range(self._kept))
+        r = _Report()
+        r.discoveries = list(range(self._kept))
+        return r
+
+
+def test_meta_research_runs_law_discovery_when_wired():
+    report = _mr(law_discovery=_StubLawEngine(kept=2)).run("algorithm optimization")
+    assert report.laws_discovered == 2
+    assert report.to_dict()["laws_discovered"] == 2
+
+
+def test_meta_research_offline_without_law_discovery_is_unchanged():
+    report = _mr().run("algorithm optimization")
+    assert report.laws_discovered == 0          # default: no science collaborator, no regression
+    assert report.validated >= 1                # code invention still works exactly as before
+
+
+def test_meta_research_survives_a_failing_law_engine():
+    class _Boom:
+        def discover_laws(self, rounds: int = 1):
+            raise RuntimeError("law engine unavailable")
+
+    report = _mr(law_discovery=_Boom()).run("algorithm optimization")
+    assert report.laws_discovered == 0          # best-effort: a failure never breaks the pass
+    assert report.validated >= 1

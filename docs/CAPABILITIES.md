@@ -457,3 +457,44 @@ outcomes, which no software can deliver. Pure numpy/stdlib (a pure-Python solver
 box); touches no source, no weights, no gate, and no external world (every experiment is the
 in-memory sandbox or a supplied array). On idle ticks the `AutonomicLoop` advances one
 oversight-gated round, rotating through her science domains. 18 new tests.
+
+---
+
+## Self-drive proof — `nyxara-prove` (offline, no external LLM)
+
+A single command that *demonstrates*, end to end and fully offline, that the three headline
+self-driven faculties genuinely run and are honest — not theatrical:
+
+```
+python -m nyxara.growth.prove_main            # run all three, print a report (exit 0 on success)
+python -m nyxara.growth.prove_main --json out.json
+python -m nyxara.growth.prove_main --full-gauntlet   # section A also runs the real eval-gated pipeline
+```
+
+- **A · Recursive self-improvement** — a real, reversible source edit put through the `Optimizer`
+  gauntlet in `nyxara.growth.self_optimize` on a **scratch copy** in a temp dir: a failing gauntlet
+  rolls the edit back **byte-for-byte**, and a proven-better edit is kept via *defect-elimination*.
+  NYXARA's own source is never touched (enforced by a test).
+- **B · Scientific invention** — the `LawDiscoveryEngine` in `nyxara.growth.law_discovery` recovers
+  the known law `E = ½·m·v²` from generated data by symbolic regression, earning a **corroborated**
+  verdict on held-out *and* extrapolation splits.
+- **C · Long-horizon autonomy** — the `GrandPlanner` in `nyxara.planning.grand_plan` decomposes a
+  broad goal into a connected ~200-leaf acyclic plan, the `MissionExecutive` in `nyxara.agency.mission`
+  advances a gated milestone to completion, and the oversight gate is shown *deferring* a high-risk
+  build step for approval rather than charging ahead.
+
+Runs with **no external LLM, no API key, no torch/transformers** (`used_llm: false`, `offline: true`
+in the report). Each section makes an *honest assertion*: a faculty that cannot really do the thing
+makes the command exit non-zero rather than print a fake pass.
+
+**Continuous self-drive.** The `nyxara-daemon` process forces `NYXARA_SERVER__AUTONOMIC=true`, so the
+`AutonomicLoop` drives a `GrowthEngine` pass every `autonomic_growth_every` (default 20) ticks — RSI,
+mind-evolution, rule-synthesis, and meta-research — all through the sovereign gates. The
+meta-research pass now also runs real symbolic **law discovery** when the core's `LawDiscoveryEngine`
+is wired (`MetaResearcher(law_discovery=…)`), so the continuous loop invents both code *and* laws;
+the deep-cognition `idle_maintenance` path advances the autonomous scientist on idle ticks.
+
+**Honest bounds.** This proves three *bounded, verifiable, offline* capabilities. It is **not** a
+claim of surpassing all other AI, inventing unknown physics, or unbounded self-improvement — no
+codebase delivers that. The point of the proof is that NYXARA abstains or rolls back instead of
+faking success.

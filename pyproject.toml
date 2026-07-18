@@ -23,6 +23,7 @@ nyxara-grow = "nyxara.growth.__main__:main"
 nyxara-improve = "nyxara.growth.improve_main:main"
 nyxara-genesis = "nyxara.growth.genesis_main:main"
 nyxara-self-optimize = "nyxara.growth.self_optimize_main:main"
+nyxara-prove = "nyxara.growth.prove_main:main"
 
 [project.optional-dependencies]
 # Reasoning / math / data
