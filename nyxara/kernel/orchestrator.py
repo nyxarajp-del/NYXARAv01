@@ -1913,7 +1913,19 @@ class NyxaraCore:
                           use_interventions=cfg.use_interventions, max_vars=cfg.max_vars,
                           max_events=cfg.max_events,
                           functional_mechanisms=getattr(cfg, "functional_mechanisms", True),
-                          min_pairs_fit=getattr(cfg, "min_pairs_fit", 8))
+                          min_pairs_fit=getattr(cfg, "min_pairs_fit", 8),
+                          # Rung-3 structural counterfactuals, PN/PS/PNS, statistically-tested
+                          # confounder screening, front-door identification, and acyclicity —
+                          # each independently gated, defaulting on (docs/CAPABILITIES.md).
+                          structural_counterfactuals=getattr(
+                              cfg, "structural_counterfactuals", True),
+                          necessity_sufficiency_enabled=getattr(
+                              cfg, "necessity_sufficiency", True),
+                          confounder_set_size=getattr(cfg, "confounder_set_size", 2),
+                          confounder_significance=getattr(cfg, "confounder_significance", 0.05),
+                          confounder_permutations=getattr(cfg, "confounder_permutations", 300),
+                          front_door_adjustment=getattr(cfg, "front_door_adjustment", True),
+                          enforce_acyclicity=getattr(cfg, "enforce_acyclicity", True))
             if path:
                 return CausalWorldModel.load(path, **kwargs)
             return CausalWorldModel(**kwargs)
