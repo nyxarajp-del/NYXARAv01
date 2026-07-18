@@ -1382,19 +1382,38 @@ class NyxaraCore:
     def _build_world_model(self) -> Any:
         try:
             import os
+            from nyxara.kernel.config import get_settings
             from nyxara.mind.world_model import (GroundedWorldModel, build_world_model,
                                                  load_world_model)
-            # "auto" → a numpy deep-ensemble (real learned dynamics + epistemic uncertainty)
-            # when numpy is present, gracefully falling back to the pure-stdlib learners.
-            # Wrapped in GroundedWorldModel: her REAL turns (text states) become learnable
-            # numeric transitions via the shared self-learned memory embedder, and the causal
-            # graph (attached after it is built) acts as a structural prior on predictions.
-            inner = build_world_model("auto")
+            # Config-driven backend; "auto" → the hierarchical JEPA (her own latent-space
+            # world model: EMA target encoder, energy scoring, multi-scale horizons,
+            # latent planning) when numpy is present, gracefully falling back to the
+            # pure-stdlib learners. Wrapped in GroundedWorldModel: her REAL turns (text
+            # states) become learnable numeric transitions via the shared self-learned
+            # memory embedder, and the causal graph (attached after it is built) acts as
+            # a structural prior on predictions.
+            wcfg = get_settings().world_model
+            if not wcfg.enabled:
+                return None
+            backend = wcfg.backend.value
+            if backend == "auto":
+                backend = "jepa"
+            inner = build_world_model(
+                backend,
+                latent_dim=wcfg.latent_dim, coarse_dim=wcfg.coarse_dim,
+                n_predictors=wcfg.n_predictors, horizons=tuple(wcfg.horizons),
+                coarse_from_horizon=wcfg.coarse_from_horizon, ema_tau=wcfg.ema_tau,
+                lr=wcfg.lr, batch=wcfg.batch, iters=wcfg.iters,
+                train_every=wcfg.train_every, var_coef=wcfg.var_coef,
+                cov_coef=wcfg.cov_coef, embed_dim=wcfg.embed_dim,
+                experience_full=wcfg.experience_full,
+                max_transitions=wcfg.max_transitions)
             embedder = getattr(self.memory, "embedder", None) if self.memory is not None else None
-            model = GroundedWorldModel(inner, embedder=embedder)
+            model = GroundedWorldModel(inner, embedder=embedder,
+                                       state_latent_dim=wcfg.state_latent_dim)
             # Rule 7 — the learned dynamics survive restarts
             path = os.path.join(self._autonomy_state_dir(), "world_model.json")
-            if os.path.exists(path):
+            if wcfg.persist and os.path.exists(path):
                 load_world_model(model, path)
             return model
         except Exception:  # noqa: BLE001 — imagination is a capability, never a hard dependency
@@ -6448,6 +6467,17 @@ class NyxaraCore:
         # 4a2) CROSS-MODULE BUS — the world model reports its blind spots (high epistemic
         #      uncertainty) so the weights/code channels can target what it cannot yet predict.
         if self.world_model is not None:
+            # JEPA idle consolidation: offline rehearsal over EVERY horizon (fine + the
+            # coarse hierarchy level) while she is not in conversation — dreams that train.
+            try:
+                fn = getattr(self.world_model, "consolidate", None)
+                if callable(fn):
+                    from nyxara.kernel.config import get_settings
+                    ran = int(fn(get_settings().world_model.idle_consolidate_iters))
+                    if ran:
+                        report["world_model_consolidated"] = ran
+            except Exception:  # noqa: BLE001 — rehearsal is a capability, never required
+                pass
             try:
                 gap = None
                 for attr in ("mean_epistemic", "epistemic", "uncertainty"):
@@ -6460,6 +6490,15 @@ class NyxaraCore:
                     get_signal_bus().post("world_model_gap",
                                           "world model prediction uncertainty is high",
                                           source="world_model", weight=min(1.0, gap))
+                # curiosity: where the world most recently surprised her — the growth
+                # loops can spend their budget where the model is provably weakest
+                surprise = float(getattr(self.world_model, "last_surprise", 0.0) or 0.0)
+                if surprise > 0.6:
+                    from nyxara.growth.signal_bus import get_signal_bus
+                    get_signal_bus().post("world_model_surprise",
+                                          "reality diverged from the latent prediction",
+                                          source="world_model",
+                                          weight=min(1.0, surprise))
             except Exception:  # noqa: BLE001 — the world-model signal is advisory
                 pass
         # 4b2) EMERGENT GOALS — curiosity becomes a real objective. Topics NYXARA could not

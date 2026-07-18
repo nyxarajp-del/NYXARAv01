@@ -16,6 +16,7 @@ from nyxara.kernel.config import (
     Profile,
     ResourceLimits,
     VectorBackend,
+    WorldModelBackend,
     get_settings,
     reload_settings,
 )
@@ -195,6 +196,30 @@ def test_reload_settings_with_overrides():
 
 def test_vector_backend_default_is_numpy():
     assert NyxaraSettings().memory.vector_backend is VectorBackend.NUMPY
+
+
+def test_world_model_defaults_are_jepa_max():
+    wm = NyxaraSettings().world_model
+    assert wm.enabled is True
+    assert wm.backend is WorldModelBackend.AUTO      # auto → jepa when numpy present
+    assert wm.latent_dim == 64 and wm.coarse_dim == 16
+    assert wm.n_predictors == 5
+    assert wm.horizons == [1, 2, 4, 8, 16]
+    assert wm.coarse_from_horizon == 8
+    assert wm.persist is True
+
+
+def test_world_model_env_override(monkeypatch):
+    monkeypatch.setenv("NYXARA_WORLD_MODEL__BACKEND", "knn")
+    monkeypatch.setenv("NYXARA_WORLD_MODEL__LATENT_DIM", "32")
+    s = NyxaraSettings()
+    assert s.world_model.backend is WorldModelBackend.KNN
+    assert s.world_model.latent_dim == 32
+
+
+def test_world_model_backend_enum_members():
+    assert {b.value for b in WorldModelBackend} == {
+        "auto", "jepa", "transfer", "ensemble", "neural", "knn"}
 
 
 def test_web_config_defaults_are_max_and_unrestricted():

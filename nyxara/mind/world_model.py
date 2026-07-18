@@ -34,6 +34,11 @@ Three learners share one surface (``observe`` then ``predict``), so all of them 
   **seeds a new action's embedding near its concept-mates** — so knowledge transfers across actions
   and even across domains, while confidence stays honest. The default (``backend="auto"``) when
   numpy is present.
+* :class:`~nyxara.mind.jepa_world_model.JEPAWorldModel` (``backend="jepa"``, its own module) —
+  the strongest learner and the kernel's default: a **hierarchical JEPA** that predicts the
+  **abstract latent state** instead of raw observations (energy-based, non-generative,
+  multi-scale horizons, EMA target encoder, VICReg anti-collapse, latent-space planning and a
+  calibrated surprise/curiosity signal).
 
 Pairs with :mod:`mind.predictive_core` (the per-step prediction-error loop) and feeds
 :mod:`planning`.
@@ -1464,6 +1469,48 @@ class GroundedWorldModel:
     def coverage(self, state: Any, action: Action) -> float:
         return self.inner.coverage(self.encode_state(state), action)
 
+    # ---- JEPA surface, grounded: text hypotheses become scoreable transitions ---- #
+    # (each is explicit — the generic __getattr__ delegation below would forward the
+    # call but NOT encode the states first, silently scoring garbage latents)
+    def energy(self, state: Any, action: Action, next_state: Any, **kw: Any) -> float:
+        fn = getattr(self.inner, "energy", None)
+        if not callable(fn):
+            return float("inf")
+        return float(fn(self.encode_state(state), action,
+                        self.encode_state(next_state), **kw))
+
+    def plausibility(self, state: Any, action: Action, next_state: Any,
+                     **kw: Any) -> float:
+        fn = getattr(self.inner, "plausibility", None)
+        if not callable(fn):
+            return 0.0
+        return float(fn(self.encode_state(state), action,
+                        self.encode_state(next_state), **kw))
+
+    def surprise(self, state: Any, action: Action, next_state: Any) -> float:
+        fn = getattr(self.inner, "surprise", None)
+        if not callable(fn):
+            return 1.0
+        return float(fn(self.encode_state(state), action, self.encode_state(next_state)))
+
+    def predict_horizon(self, state: Any, action: Action, horizon: int = 1) -> Prediction:
+        fn = getattr(self.inner, "predict_horizon", None)
+        if not callable(fn):
+            return self.predict(state, action)
+        pred = fn(self.encode_state(state), action, horizon)
+        return self._apply_causal_prior(pred, action)
+
+    def plan(self, state: Any, *, goal_state: Any = None, **kw: Any) -> Any:
+        fn = getattr(self.inner, "plan", None)
+        if not callable(fn):
+            return None
+        goal = self.encode_state(goal_state) if goal_state is not None else None
+        return fn(self.encode_state(state), goal_state=goal, **kw)
+
+    def consolidate(self, iters: int = 12) -> int:
+        fn = getattr(self.inner, "consolidate", None)
+        return int(fn(iters)) if callable(fn) else 0
+
     def actions(self) -> List[Action]:
         return self.inner.actions()
 
@@ -1545,6 +1592,10 @@ def load_world_model(model: Any, path: str) -> bool:
 def build_world_model(backend: str = "auto", **kwargs: Any) -> WorldModel:
     """Build the best world model available. ``backend``:
 
+    * ``"jepa"`` → :class:`~nyxara.mind.jepa_world_model.JEPAWorldModel` (hierarchical
+      JEPA: latent-space prediction with an EMA target encoder, energy scoring,
+      multi-scale horizons, latent planning) when numpy is present, else the stdlib
+      learners — the strongest backend, the kernel's default;
     * ``"auto"`` / ``"transfer"`` → :class:`TransferWorldModel` (one shared encoder + concept
       hierarchy ⇒ cross-domain transfer) when numpy is present, else the pure-Python
       :class:`NeuralWorldModel` (and the kNN :class:`WorldModel` as the final floor);
@@ -1566,6 +1617,14 @@ def build_world_model(backend: str = "auto", **kwargs: Any) -> WorldModel:
         except Exception:  # noqa: BLE001
             return WorldModel(**_filtered(WorldModel))
 
+    if backend == "jepa":
+        if _HAS_NUMPY:
+            try:
+                from nyxara.mind.jepa_world_model import JEPAWorldModel
+                return JEPAWorldModel(**_filtered(JEPAWorldModel))
+            except Exception:  # noqa: BLE001 — fall through to the stdlib learners
+                pass
+        return _stdlib_floor()
     if backend in ("auto", "transfer"):
         if _HAS_NUMPY:
             try:
