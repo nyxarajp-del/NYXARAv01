@@ -55,6 +55,8 @@ __all__ = [
     "GeneralIntelligenceConfig",
     "MemoryConfig",
     "CausalConfig",
+    "WorldModelBackend",
+    "WorldModelConfig",
     "SelfImprovementConfig",
     "MetaResearchConfig",
     "GuardConfig",
@@ -109,6 +111,17 @@ class VectorBackend(str, Enum):
     FAISS = "faiss"
     NUMPY = "numpy"  # pure-python/numpy fallback, always available
     QDRANT = "qdrant"  # managed/embedded Qdrant vector DB (scales beyond one process)
+
+
+class WorldModelBackend(str, Enum):
+    """Selectable learner for the imagination faculty (mind/world_model.py)."""
+
+    AUTO = "auto"          # jepa when numpy is present, degrading to the stdlib learners
+    JEPA = "jepa"          # hierarchical JEPA — latent prediction, energy, planning
+    TRANSFER = "transfer"  # shared ensemble + concept hierarchy (cross-domain transfer)
+    ENSEMBLE = "ensemble"  # per-action deep ensembles
+    NEURAL = "neural"      # pure-Python per-action MLP
+    KNN = "knn"            # exact-memory kNN floor (stdlib, always available)
 
 
 # --------------------------------------------------------------------------- #
@@ -1909,6 +1922,43 @@ class CausalConfig(BaseModel):
     min_pairs_fit: int = Field(default=8, ge=2)        # valued samples needed before fitting f
 
 
+class WorldModelConfig(BaseModel):
+    """The imagination faculty (mind/world_model.py + mind/jepa_world_model.py).
+
+    Default backend is the hierarchical JEPA: NYXARA's own numpy-trained latent-space
+    world model. It predicts the **abstract latent state** ("the glass will fall"),
+    never raw tokens/pixels — energy-based, non-generative, multi-scale — and the LLM
+    is nowhere in this loop. Uncertainty stays honest: epistemic = predictor
+    disagreement, confidence collapses out of distribution, and unknown actions score
+    zero. Without numpy the factory degrades to the pure-stdlib learners.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    backend: WorldModelBackend = WorldModelBackend.AUTO
+    state_latent_dim: int = Field(default=32, ge=2, le=256)   # grounded obs latent width
+    latent_dim: int = Field(default=64, ge=4, le=512)         # JEPA fine latent width
+    coarse_dim: int = Field(default=16, ge=2, le=128)         # H-JEPA abstract latent width
+    n_predictors: int = Field(default=5, ge=1, le=8)          # epistemic = their disagreement
+    horizons: List[int] = Field(default_factory=lambda: [1, 2, 4, 8, 16])
+    coarse_from_horizon: int = Field(default=8, ge=2)         # long horizons go abstract
+    ema_tau: float = Field(default=0.996, ge=0.5, lt=1.0)     # target-encoder momentum
+    lr: float = Field(default=1e-3, gt=0)
+    batch: int = Field(default=64, ge=4, le=512)
+    iters: int = Field(default=6, ge=1, le=64)                # minibatches per train call
+    train_every: int = Field(default=1, ge=1)                 # learn from EVERY real turn
+    var_coef: float = Field(default=1.0, ge=0.0)              # VICReg variance (anti-collapse)
+    cov_coef: float = Field(default=0.05, ge=0.0)             # VICReg covariance (decorrelate)
+    embed_dim: int = Field(default=12, ge=1, le=64)           # learned action embedding width
+    experience_full: int = Field(default=64, ge=1)            # samples until full confidence
+    max_transitions: int = Field(default=100_000, ge=64)
+    idle_consolidate_iters: int = Field(default=12, ge=0, le=256)  # offline rehearsal per idle tick
+    plan_samples: int = Field(default=64, ge=8, le=1024)      # CEM candidates per iteration
+    plan_horizon: int = Field(default=8, ge=1, le=64)
+    persist: bool = True                                      # learned dynamics survive restarts
+
+
 class NativeReasoningConfig(BaseModel):
     """NYXARA's own native chain-of-thought engine (mind/native_reasoner.py).
 
@@ -2523,6 +2573,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)
+    world_model: WorldModelConfig = Field(default_factory=WorldModelConfig)
     native_reasoning: NativeReasoningConfig = Field(default_factory=NativeReasoningConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     self_optimization: SelfOptimizationConfig = Field(default_factory=SelfOptimizationConfig)

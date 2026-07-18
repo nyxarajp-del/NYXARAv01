@@ -854,14 +854,31 @@ class NyxaraReasoner:
         return self._offline
 
     def _rollout_eval(self, stimulus: str) -> str:
-        """Evaluate the proposed action by rolling it forward in the world model."""
+        """Evaluate the proposed action by imagining it forward in the world model.
+
+        Prefers the JEPA latent-space planner when the backend has one (a cross-entropy
+        search over action sequences, scored by predicted reward and the predictors' own
+        disagreement — HER model shapes the decision before the LLM phrases anything);
+        falls back to a plain repeated-action rollout on every other backend."""
         if self.world_model is None:
             return "no world model available"
         try:
             if len(self.world_model) == 0:
                 return "no world-model experience yet (acting on policy directly)"
             action = self._action_token(stimulus)
-            traj = self.world_model.rollout((0.0,), [action] * 3, steps=3)
+            plan_fn = getattr(self.world_model, "plan", None)
+            if callable(plan_fn):
+                try:
+                    plan = plan_fn(stimulus, horizon=3)
+                    if plan is not None and getattr(plan, "actions", None):
+                        seq = ",".join(str(a) for a in plan.actions[:3])
+                        return (f"world-model latent plan [{seq}]: "
+                                f"E[reward]={plan.expected_reward:.2f} "
+                                f"conf={plan.confidence:.2f}")
+                except Exception:  # noqa: BLE001 — planning is advisory; roll out instead
+                    pass
+            start = stimulus if hasattr(self.world_model, "encode_state") else (0.0,)
+            traj = self.world_model.rollout(start, [action] * 3, steps=3)
             return (f"world-model rollout of {action!r}: "
                     f"E[reward]={traj.total_reward:.2f} conf={traj.mean_confidence:.2f}")
         except Exception:  # noqa: BLE001

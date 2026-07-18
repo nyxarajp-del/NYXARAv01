@@ -201,12 +201,32 @@ class PredictionEngine:
         if self.world_model is not None and len(self.world_model) > 0:
             try:
                 action = query[:20].lower().replace(" ", "_")
-                pred = self.world_model.predict((0.0,), action)
+                # a grounded model encodes the REAL query text through the shared
+                # embedder, so the confidence is about the actual situation — the
+                # bare (0.0,) probe survives only as the raw-backend fallback
+                if hasattr(self.world_model, "encode_state"):
+                    pred = self.world_model.predict(query, action)
+                else:
+                    pred = self.world_model.predict((0.0,), action)
                 wm_conf = float(getattr(pred, "confidence", 0.5))
                 wm_reward = float(getattr(pred, "expected_reward", 0.5))
                 signals.append(wm_conf)
                 reasoning_chain.append(
                     f"world-model: conf={wm_conf:.2f} reward={wm_reward:.2f}")
+            except Exception:  # noqa: BLE001
+                pass
+
+        # --- Signal 1b: JEPA latent-space energy — how plausible is the queried
+        #     outcome as the NEXT abstract state of the current context? ---
+        if self.world_model is not None and context:
+            try:
+                fn = getattr(self.world_model, "plausibility", None)
+                if callable(fn):
+                    action = query[:20].lower().replace(" ", "_")
+                    p_e = float(fn(context, action, query))
+                    if p_e > 0.0:                      # 0.0 = the model honestly abstains
+                        signals.append(p_e)
+                        reasoning_chain.append(f"jepa-energy plausibility={p_e:.2f}")
             except Exception:  # noqa: BLE001
                 pass
 
