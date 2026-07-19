@@ -388,6 +388,7 @@ class CausalWorldModel:
         self.structure_learning = bool(structure_learning)
         self.structure_min_samples = max(4, int(structure_min_samples))
         self._structure: Any = None                       # DifferentiableCausalStructure, lazily fit
+        self._last_struct_n = 0                            # events seen at the last structure fit
 
         self._n = 0                                       # total events seen
         self._by_label: Dict[str, List[float]] = {}       # label -> sorted occurrence times
@@ -1000,10 +1001,11 @@ class CausalWorldModel:
                 X[k, j] += vals.get(ts, 1.0)
         return X
 
-    def learn_structure(self) -> Optional[Any]:
+    def learn_structure(self, *, max_vars: Optional[int] = None) -> Optional[Any]:
         """Learn the weighted causal adjacency over the tracked variables **by gradient descent**
         (NOTEARS). A *second, gradient-derived opinion* — surfaced in :meth:`stats`/:meth:`to_dict`
-        and used to cross-check (never override) the symbolic verdicts. None without numpy / too
+        and used to cross-check (never override) the symbolic verdicts. ``max_vars`` caps the graph to
+        the most-active labels (keeps the continuous idle-time fit cheap). None without numpy / too
         little data. Best-effort: never raises."""
         if not self.structure_learning:
             return None
@@ -1014,13 +1016,29 @@ class CausalWorldModel:
             labels = [l for l, ts in self._by_label.items() if len(ts) >= self.min_support]
             if len(labels) < 2:
                 return None
+            if max_vars is not None and len(labels) > max_vars:      # keep the biggest movers
+                labels.sort(key=lambda l: len(self._by_label.get(l, ())), reverse=True)
+                labels = labels[:max_vars]
             X = self._evidence_matrix(labels)
             if X.shape[0] < self.structure_min_samples:
                 return None
             self._structure = DifferentiableCausalStructure(labels).fit(X)
+            self._last_struct_n = self._n
             return self._structure
         except Exception:  # noqa: BLE001 — structure learning is a capability, never required
             return None
+
+    def online_learn(self, *, min_new: int = 8, max_vars: int = 24) -> Optional[Any]:
+        """Continuous, idle-time causal learning: fold accumulated evidence into the gradient-learned
+        structure NOW, bounded and self-throttled (runs only once ``min_new`` fresh events have
+        arrived, over at most ``max_vars`` labels). Wired into the autonomic tick so the causal core
+        keeps learning **by gradient descent** even when idle — exactly like the generative core.
+        Returns the refreshed structure, or None when it was a no-op. Best-effort: never raises."""
+        if not self.structure_learning:
+            return None
+        if (self._n - self._last_struct_n) < max(1, int(min_new)):
+            return None
+        return self.learn_structure(max_vars=max_vars)
 
     def learned_structure(self) -> Optional[Any]:
         """The last :class:`DifferentiableCausalStructure` learned by gradient descent, if any."""

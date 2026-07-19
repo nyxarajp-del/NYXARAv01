@@ -162,6 +162,25 @@ def test_causal_world_model_learns_structure_by_gradient_descent():
 
 
 @needs_numpy
+def test_online_learn_is_continuous_but_self_throttled():
+    # The autonomic idle tick calls online_learn() every beat; it must fold NEW evidence into the
+    # gradient-learned structure yet no-op cheaply when nothing new arrived (so idle ticks stay light).
+    import random
+    rng = random.Random(1)
+    cwm = CausalWorldModel(window=10.0, structure_min_samples=8)
+    for base in range(0, 5000, 100):
+        r = rng.uniform(1.0, 5.0)
+        cwm.observe("a", at=base, value=r)
+        cwm.observe("b", at=base + 1, value=2.0 * r)
+    first = cwm.online_learn(min_new=8)
+    assert first is not None and first.fitted          # enough new evidence → it learns now
+    assert cwm.online_learn(min_new=8) is None          # immediately again → throttled no-op
+    for base in range(6000, 7000, 100):                 # >8 fresh events
+        cwm.observe("a", at=base, value=rng.uniform(1.0, 5.0))
+    assert cwm.online_learn(min_new=8) is not None      # new evidence → it learns again
+
+
+@needs_numpy
 def test_causal_world_model_persists_neural_state():
     cwm = _valued_chain()
     blob = json.loads(json.dumps(cwm.to_dict()))       # JSON-safe end to end

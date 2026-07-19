@@ -190,6 +190,15 @@ class AutonomicLoop:
                                       source="autonomic", weight=1.0)
             except Exception:  # noqa: BLE001 — telemetry is best-effort
                 pass
+        # …and keep the CAUSAL core learning by gradient descent continuously too: fold accumulated
+        # evidence into the NOTEARS structure now (bounded + self-throttled, so idle ticks stay cheap).
+        cwm = getattr(self.core, "causal_world_model", None)
+        step = getattr(cwm, "online_learn", None)
+        if callable(step):
+            try:
+                step()
+            except Exception:  # noqa: BLE001 — continuous causal learning is best-effort, never fatal
+                pass
 
     def _advance_mission(self) -> None:
         """Advance the highest-priority standing mission by one gated milestone.
