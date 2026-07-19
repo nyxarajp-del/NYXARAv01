@@ -1959,7 +1959,10 @@ class NyxaraCore:
                           confounder_significance=getattr(cfg, "confounder_significance", 0.05),
                           confounder_permutations=getattr(cfg, "confounder_permutations", 300),
                           front_door_adjustment=getattr(cfg, "front_door_adjustment", True),
-                          enforce_acyclicity=getattr(cfg, "enforce_acyclicity", True))
+                          enforce_acyclicity=getattr(cfg, "enforce_acyclicity", True),
+                          neural_mechanisms=getattr(cfg, "neural_mechanisms", True),
+                          structure_learning=getattr(cfg, "structure_learning", True),
+                          structure_min_samples=getattr(cfg, "structure_min_samples", 30))
             if path:
                 return CausalWorldModel.load(path, **kwargs)
             return CausalWorldModel(**kwargs)

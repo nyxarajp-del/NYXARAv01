@@ -126,13 +126,29 @@ class Discovery:
 class NoveltyArchive:
     """Keep the best-quality discovery per niche, and score the novelty of new behaviours."""
 
-    def __init__(self, *, resolution: int = 8, k: int = 5, ndims: int = 3) -> None:
+    def __init__(self, *, resolution: int = 8, k: int = 5, ndims: int = 3,
+                 learned_novelty: bool = True) -> None:
         self.resolution = max(1, int(resolution))
         self.k = max(1, int(k))
         self.ndims = max(1, int(ndims))
         self._grid: Dict[Tuple[int, ...], Discovery] = {}
         self._behaviors: List[Tuple[float, ...]] = []   # every behaviour seen — for kNN novelty
         self.total_seen: int = 0
+        # a learned (Random Network Distillation) novelty signal, trained by gradient descent, that
+        # blends with the kNN distance floor. None without numpy ⇒ pure kNN, exactly as before.
+        self.learned_novelty = bool(learned_novelty)
+        self._rnd: Any = None
+        if self.learned_novelty:
+            self._rnd = self._build_rnd()
+
+    def _build_rnd(self) -> Any:
+        try:
+            from nyxara.growth.curiosity_nets import RNDNovelty, has_numpy
+            if has_numpy():
+                return RNDNovelty(self.ndims)
+        except Exception:  # noqa: BLE001 — a missing learner never blocks the kNN floor
+            pass
+        return None
 
     # ---- the core operation: place a discovery, report novelty + whether it advanced ---- #
     def add(self, discovery: Discovery) -> Dict[str, Any]:
@@ -147,17 +163,35 @@ class NoveltyArchive:
             self._grid[cell] = discovery
         self._behaviors.append(tuple(desc.dims))
         self.total_seen += 1
+        if self._rnd is not None:                        # one real gradient step toward the RND target
+            try:
+                self._rnd.update(desc.dims)
+            except Exception:  # noqa: BLE001 — a flaky learner never blocks placement
+                pass
         return {"novel": bool(is_novel), "improved": bool(improved),
                 "novelty": round(novelty, 6), "cell": cell,
                 "coverage": self.coverage()}
 
-    def novelty(self, descriptor: BehaviorDescriptor) -> float:
+    def _knn_novelty(self, descriptor: BehaviorDescriptor) -> float:
         """Mean distance to the ``k`` nearest behaviours already seen (``1.0`` on an empty archive)."""
         if not self._behaviors:
             return 1.0
         dists = sorted(descriptor.distance(BehaviorDescriptor(dims=b)) for b in self._behaviors)
         nearest = dists[: self.k]
         return sum(nearest) / len(nearest)
+
+    def novelty(self, descriptor: BehaviorDescriptor) -> float:
+        """How novel is this behaviour? A blend of the kNN distance floor and the **learned** RND
+        novelty (gradient-descent-trained) when numpy is present; pure kNN otherwise. ``1.0`` on an
+        empty archive."""
+        if not self._behaviors:                          # cold archive → maximally novel (invariant)
+            return 1.0
+        knn = self._knn_novelty(descriptor)
+        if self._rnd is not None:
+            rnd = self._rnd.score(descriptor.dims)
+            if rnd is not None:
+                return 0.5 * knn + 0.5 * float(rnd)
+        return knn
 
     def coverage(self) -> int:
         """How many distinct niches have been reached (filled cells of the grid)."""
@@ -182,18 +216,25 @@ class NoveltyArchive:
 
     # ---- persistence helpers (the engine rides these onto long-term memory) ---- #
     def to_dict(self) -> Dict[str, Any]:
-        return {"resolution": self.resolution, "k": self.k, "ndims": self.ndims,
-                "total_seen": self.total_seen,
-                "grid": {",".join(map(str, cell)): disc.to_dict()
-                         for cell, disc in self._grid.items()},
-                "behaviors": [list(b) for b in self._behaviors]}
+        d = {"resolution": self.resolution, "k": self.k, "ndims": self.ndims,
+             "total_seen": self.total_seen,
+             "grid": {",".join(map(str, cell)): disc.to_dict()
+                      for cell, disc in self._grid.items()},
+             "behaviors": [list(b) for b in self._behaviors]}
+        if self._rnd is not None:
+            try:
+                d["rnd"] = self._rnd.to_dict()
+            except Exception:  # noqa: BLE001 — a flaky learner never blocks persistence
+                pass
+        return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "NoveltyArchive":
+    def from_dict(cls, d: Dict[str, Any], *, learned_novelty: bool = True) -> "NoveltyArchive":
         if not isinstance(d, dict):
-            return cls()
+            return cls(learned_novelty=learned_novelty)
         arc = cls(resolution=int(d.get("resolution", 8) or 8),
-                  k=int(d.get("k", 5) or 5), ndims=int(d.get("ndims", 3) or 3))
+                  k=int(d.get("k", 5) or 5), ndims=int(d.get("ndims", 3) or 3),
+                  learned_novelty=learned_novelty)
         arc.total_seen = int(d.get("total_seen", 0) or 0)
         for key, disc in (d.get("grid", {}) or {}).items():
             try:
@@ -202,6 +243,13 @@ class NoveltyArchive:
                 continue
             arc._grid[cell] = Discovery.from_dict(disc)
         arc._behaviors = [tuple(float(x) for x in b) for b in (d.get("behaviors", []) or [])]
+        rd = d.get("rnd")
+        if rd and arc._rnd is not None:
+            try:
+                from nyxara.growth.curiosity_nets import RNDNovelty
+                arc._rnd = RNDNovelty.from_dict(rd)
+            except Exception:  # noqa: BLE001 — a bad learner never blocks a restore
+                pass
         return arc
 
 
@@ -319,10 +367,13 @@ class FrontierEngine:
     # Persistence — one protected SEMANTIC record (mirrors IntelligenceIndex).
     # ------------------------------------------------------------------ #
     def _load(self) -> NoveltyArchive:
+        learned = bool(getattr(getattr(self.settings, "explorer", None),
+                               "frontier_learned_novelty", True))
         rec = self._find_record()
         if rec is not None:
-            return NoveltyArchive.from_dict(rec.metadata.get("archive", {}))
-        return NoveltyArchive(resolution=self.resolution, k=self.k)
+            return NoveltyArchive.from_dict(rec.metadata.get("archive", {}),
+                                            learned_novelty=learned)
+        return NoveltyArchive(resolution=self.resolution, k=self.k, learned_novelty=learned)
 
     def save(self) -> bool:
         if self.memory is None or self._archive is None:

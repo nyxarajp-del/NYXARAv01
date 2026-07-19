@@ -1633,6 +1633,10 @@ class ExplorerConfig(BaseModel):
     step_timeout_s: float = Field(default=8.0, gt=0.0, le=120.0)  # wall-clock per sandbox run
     autonomous_install: bool = True            # auto pip-install a named dependency when online
     confidence_floor: float = Field(default=0.45, ge=0.0, le=1.0)  # below → auto self-bootstrap
+    # open-ended frontier (growth/frontier.py): blend a LEARNED Random-Network-Distillation novelty
+    # (a predictor net trained by gradient descent) with the kNN distance floor. numpy-guarded —
+    # degrades to pure kNN when absent.
+    frontier_learned_novelty: bool = True
 
 
 class MetaResearchConfig(BaseModel):
@@ -2010,6 +2014,14 @@ class CausalConfig(BaseModel):
     front_door_adjustment: bool = True
     # a valid SCM is a DAG: greedily demote the weakest edge in any discovered cycle
     enforce_acyclicity: bool = True
+    # NEURAL causal core — learned by real gradient descent (numpy; degrades to the linear/counting
+    # floor when absent). `neural_mechanisms`: each edge's value_B≈f(value_A) is a nonlinear net
+    # trained by Adam back-prop (interventional samples up-weighted), not a closed-form line.
+    # `structure_learning`: the DAG itself is learned by NOTEARS gradient descent as a second,
+    # gradient-derived opinion that cross-checks (never overrides) the symbolic discovery.
+    neural_mechanisms: bool = True
+    structure_learning: bool = True
+    structure_min_samples: int = Field(default=30, ge=4)  # time-bins needed before NOTEARS runs
 
 
 class WorldModelConfig(BaseModel):
