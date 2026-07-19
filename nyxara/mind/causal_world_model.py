@@ -350,6 +350,9 @@ class CausalWorldModel:
         enforce_acyclicity: bool = True,
         structural_counterfactuals: bool = True,
         necessity_sufficiency_enabled: bool = True,
+        neural_mechanisms: bool = True,
+        structure_learning: bool = True,
+        structure_min_samples: int = 30,
     ) -> None:
         self.window = float(window)
         self.min_support = max(1, int(min_support))
@@ -377,6 +380,15 @@ class CausalWorldModel:
         # level-only behavior) without touching call sites.
         self.structural_counterfactuals = bool(structural_counterfactuals)
         self.necessity_sufficiency_enabled = bool(necessity_sufficiency_enabled)
+        # gradient-descent learners (numpy-guarded; degrade to the linear/counting floor):
+        #   · neural_mechanisms  — each edge's f(cause)→effect learned by back-prop, not closed-form
+        #   · structure_learning — the DAG itself learned by NOTEARS gradient descent, as a
+        #     second opinion that cross-checks (never overrides) the symbolic discovery.
+        self.neural_mechanisms = bool(neural_mechanisms)
+        self.structure_learning = bool(structure_learning)
+        self.structure_min_samples = max(4, int(structure_min_samples))
+        self._structure: Any = None                       # DifferentiableCausalStructure, lazily fit
+        self._last_struct_n = 0                            # events seen at the last structure fit
 
         self._n = 0                                       # total events seen
         self._by_label: Dict[str, List[float]] = {}       # label -> sorted occurrence times
@@ -836,6 +848,8 @@ class CausalWorldModel:
                 if link is not None:
                     self._links[(a, b)] = link
         self._enforce_acyclicity()
+        if self.structure_learning:
+            self.learn_structure()          # a gradient-descent second opinion (numpy; best-effort)
         if self.persist_path:
             try:
                 self.save()
@@ -926,26 +940,109 @@ class CausalWorldModel:
     # ------------------------------------------------------------------ #
     def _fit_mechanism(self, a: str, b: str) -> Optional[FunctionalCausalMechanism]:
         """Fit ``value_B ≈ f(value_A)`` from the (A-value, first-following-B-value) samples
-        inside the causal window. None when either side lacks enough valued events."""
+        inside the causal window. When numpy is present and ``neural_mechanisms`` is on, ``f`` is a
+        **nonlinear net trained by back-prop** (interventional samples up-weighted); otherwise the
+        closed-form linear ridge. None when either side lacks enough valued events."""
         va = self._values.get(a)
         vb = self._values.get(b)
         if not va or not vb:
             return None
         b_times = [t for t, _ in vb]
-        pairs: List[Tuple[float, float]] = []
+        int_a = set(self._int_by_label.get(a, ()))         # A-times NYXARA brought about herself
+        pairs: List[Tuple[float, float, float]] = []       # (x, y, weight)
         for t, x in va:
             i = bisect.bisect_right(b_times, t)
             if i < len(b_times) and b_times[i] <= t + self.window:
-                pairs.append((x, vb[i][1]))
+                w = 3.0 if t in int_a else 1.0             # do-samples are the gold standard
+                pairs.append((x, vb[i][1], w))
         if len(pairs) < self.min_pairs_fit:
             return None
-        mech = FunctionalCausalMechanism()
-        mech.add_many(pairs)
+        mech = self._new_mechanism()
+        if isinstance(mech, FunctionalCausalMechanism):    # linear floor ignores weights
+            mech.add_many([(x, y) for x, y, _ in pairs])
+        else:
+            for x, y, w in pairs:
+                mech.add(x, y, weight=w)
         return mech
+
+    def _new_mechanism(self) -> Any:
+        """A learned functional mechanism: the nonlinear neural one when available, else the ridge."""
+        if self.neural_mechanisms:
+            try:
+                from nyxara.mind.neural_causal import NeuralCausalMechanism, has_numpy
+                if has_numpy():
+                    return NeuralCausalMechanism()
+            except Exception:  # noqa: BLE001 — a missing/broken learner never blocks the floor
+                pass
+        return FunctionalCausalMechanism()
 
     def mechanism(self, cause: str, effect: str) -> Optional[FunctionalCausalMechanism]:
         """The learned functional relation for a discovered edge, if one was fitted."""
         return self._mechanisms.get((str(cause), str(effect)))
+
+    # ------------------------------------------------------------------ #
+    # structure learning — the DAG itself, learned by gradient descent (NOTEARS)
+    # ------------------------------------------------------------------ #
+    def _evidence_matrix(self, labels: Sequence[str]) -> Any:
+        """Build a (time-bin × variable) matrix from the event stream: each variable's value in a
+        bin is its magnitude when it fired there (else 0), so downstream effects accumulate variance
+        — the natural scale NOTEARS reads to orient arrows. Falls back to presence indicators."""
+        import numpy as _np
+        span = self._span() or 1.0
+        n_bins = max(8, min(400, int(span / max(self.window, 1e-6)) + 1))
+        t0 = min((ts[0] for ts in self._by_label.values() if ts), default=0.0)
+        width = span / n_bins if n_bins else self.window
+        X = _np.zeros((n_bins, len(labels)))
+        for j, lab in enumerate(labels):
+            vals = dict(self._values.get(lab, ()))         # at -> value
+            for ts in self._by_label.get(lab, ()):
+                k = int((ts - t0) / width) if width > 0 else 0
+                k = max(0, min(n_bins - 1, k))
+                X[k, j] += vals.get(ts, 1.0)
+        return X
+
+    def learn_structure(self, *, max_vars: Optional[int] = None) -> Optional[Any]:
+        """Learn the weighted causal adjacency over the tracked variables **by gradient descent**
+        (NOTEARS). A *second, gradient-derived opinion* — surfaced in :meth:`stats`/:meth:`to_dict`
+        and used to cross-check (never override) the symbolic verdicts. ``max_vars`` caps the graph to
+        the most-active labels (keeps the continuous idle-time fit cheap). None without numpy / too
+        little data. Best-effort: never raises."""
+        if not self.structure_learning:
+            return None
+        try:
+            from nyxara.mind.neural_causal import DifferentiableCausalStructure, has_numpy
+            if not has_numpy():
+                return None
+            labels = [l for l, ts in self._by_label.items() if len(ts) >= self.min_support]
+            if len(labels) < 2:
+                return None
+            if max_vars is not None and len(labels) > max_vars:      # keep the biggest movers
+                labels.sort(key=lambda l: len(self._by_label.get(l, ())), reverse=True)
+                labels = labels[:max_vars]
+            X = self._evidence_matrix(labels)
+            if X.shape[0] < self.structure_min_samples:
+                return None
+            self._structure = DifferentiableCausalStructure(labels).fit(X)
+            self._last_struct_n = self._n
+            return self._structure
+        except Exception:  # noqa: BLE001 — structure learning is a capability, never required
+            return None
+
+    def online_learn(self, *, min_new: int = 8, max_vars: int = 24) -> Optional[Any]:
+        """Continuous, idle-time causal learning: fold accumulated evidence into the gradient-learned
+        structure NOW, bounded and self-throttled (runs only once ``min_new`` fresh events have
+        arrived, over at most ``max_vars`` labels). Wired into the autonomic tick so the causal core
+        keeps learning **by gradient descent** even when idle — exactly like the generative core.
+        Returns the refreshed structure, or None when it was a no-op. Best-effort: never raises."""
+        if not self.structure_learning:
+            return None
+        if (self._n - self._last_struct_n) < max(1, int(min_new)):
+            return None
+        return self.learn_structure(max_vars=max_vars)
+
+    def learned_structure(self) -> Optional[Any]:
+        """The last :class:`DifferentiableCausalStructure` learned by gradient descent, if any."""
+        return self._structure
 
     # ------------------------------------------------------------------ #
     # incremental (per-turn) structure learning — DYNAMIC causal discovery
@@ -1404,20 +1501,30 @@ class CausalWorldModel:
         self._values = {v: t for v, t in self._values.items() if v in keep}
 
     def stats(self) -> Dict[str, Any]:
-        return {"events": self._n, "variables": len(self._by_label),
-                "interventions": sum(len(t) for t in self._int_by_label.values()),
-                "valued_labels": len(self._values),
-                "links": len(self._links),
-                "causal_links": sum(1 for l in self._links.values() if l.is_causal),
-                "mechanisms": len(self._mechanisms)}
+        s = {"events": self._n, "variables": len(self._by_label),
+             "interventions": sum(len(t) for t in self._int_by_label.values()),
+             "valued_labels": len(self._values),
+             "links": len(self._links),
+             "causal_links": sum(1 for l in self._links.values() if l.is_causal),
+             "mechanisms": len(self._mechanisms),
+             "neural_mechanisms": sum(
+                 1 for m in self._mechanisms.values() if getattr(m, "KIND", "") == "neural")}
+        if self._structure is not None and getattr(self._structure, "fitted", False):
+            s["learned_structure"] = {
+                "edges": len(self._structure.edges()),
+                "acyclicity": round(float(getattr(self._structure, "h_final", 0.0)), 6)}
+        return s
 
     # ------------------------------------------------------------------ #
     # persistence
     # ------------------------------------------------------------------ #
     def to_dict(self) -> Dict[str, Any]:
-        return {"window": self.window,
-                "stream": [e.to_dict() for e in self._stream],
-                "links": [l.to_dict() for l in self._links.values()]}
+        d = {"window": self.window,
+             "stream": [e.to_dict() for e in self._stream],
+             "links": [l.to_dict() for l in self._links.values()]}
+        if self._structure is not None and getattr(self._structure, "fitted", False):
+            d["structure"] = self._structure.to_dict()
+        return d
 
     def load_dict(self, d: Dict[str, Any]) -> None:
         self.window = float(d.get("window", self.window))
@@ -1449,10 +1556,22 @@ class CausalWorldModel:
             md = link.evidence.get("mechanism")
             if md:                       # the learned functional relation rides the link
                 try:
-                    self._mechanisms[(link.cause, link.effect)] = \
-                        FunctionalCausalMechanism.from_dict(md)
+                    if md.get("kind") == "neural":
+                        from nyxara.mind.neural_causal import NeuralCausalMechanism
+                        self._mechanisms[(link.cause, link.effect)] = \
+                            NeuralCausalMechanism.from_dict(md)
+                    else:
+                        self._mechanisms[(link.cause, link.effect)] = \
+                            FunctionalCausalMechanism.from_dict(md)
                 except Exception:  # noqa: BLE001 — a bad mechanism never blocks a restore
                     pass
+        sd = d.get("structure")
+        if sd:
+            try:
+                from nyxara.mind.neural_causal import DifferentiableCausalStructure
+                self._structure = DifferentiableCausalStructure.from_dict(sd)
+            except Exception:  # noqa: BLE001 — a bad structure never blocks a restore
+                self._structure = None
 
     def save(self, path: Optional[str] = None) -> None:
         target = path or self.persist_path
