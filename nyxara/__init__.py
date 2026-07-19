@@ -146,6 +146,12 @@ from nyxara.cognition.hyper_dimensional_vectors import (
     PatternReport,
     RandomProjector,
 )
+from nyxara.mind.metacontrol import (
+    ComputeBudget,
+    DifficultyEstimate,
+    DifficultySignals,
+    MetacognitiveController,
+)
 
 __version__ = "0.1.0"
 
@@ -285,6 +291,11 @@ __all__ = [
     "ItemMemory",
     "RandomProjector",
     "PatternReport",
+    # First-class metacognition — calibrated uncertainty drives per-turn compute allocation
+    "MetacognitiveController",
+    "ComputeBudget",
+    "DifficultyEstimate",
+    "DifficultySignals",
     "NoveltyResult",
     # grounded knowledge + self-evaluation
     "KnowledgeBase",

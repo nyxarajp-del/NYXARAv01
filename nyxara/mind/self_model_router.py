@@ -210,8 +210,22 @@ class PrimarySelfModelRouter:
             return False
 
     # ---- the triage ---- #
-    def plan(self, prompt: str, *, candidate: Any = None) -> RoutingPlan:
-        """Decide, before any generation, which mind should handle ``prompt``."""
+    def plan(self, prompt: str, *, candidate: Any = None,
+             difficulty: Optional[float] = None) -> RoutingPlan:
+        """Decide, before any generation, which mind should handle ``prompt``.
+
+        ``difficulty`` is the turn's calibrated metacognitive estimate
+        (:mod:`~nyxara.mind.metacontrol`), when the kernel computed one. A harder turn
+        deterministically tightens the SELF gate — higher competence bar, and the estimate
+        discounts effective confidence as internal uncertainty — so one shared judgment
+        drives routing and compute alike.
+        """
+        comp_threshold = self.cfg.competence_threshold
+        internal_uncertainty = 0.0
+        if difficulty is not None:
+            d = max(0.0, min(1.0, float(difficulty)))
+            comp_threshold = min(1.0, comp_threshold + 0.15 * d)
+            internal_uncertainty = 0.5 * d
         try:
             # 1) a verifiable faculty (exact math / logic) beats any neural guess
             if self.cfg.use_faculties and self._faculty_fits(prompt):
@@ -247,7 +261,7 @@ class PrimarySelfModelRouter:
 
             # 4) weak / unknown / hallucination-prone here — this is the *new-domain* case.
             if (risk >= self.cfg.hallucination_ceiling
-                    or competence < self.cfg.competence_threshold
+                    or competence < comp_threshold
                     or self._knowledge_heavy(prompt)):
                 # 4a) FIRST try to generalize it herself by relational structure transfer — map
                 #     the new domain onto one she already understands (Route.TRANSFER). The
@@ -296,7 +310,8 @@ class PrimarySelfModelRouter:
                                        domains=list(domains))
                 # no teacher: best-effort own answer or an honest abstention
                 verdict = self.meta.assess(prompt, own_answer="x", own_conf=competence,
-                                           teacher_available=False)
+                                           teacher_available=False,
+                                           internal_uncertainty=internal_uncertainty)
                 if verdict.decision is MetaDecision.ABSTAIN:
                     return RoutingPlan(Route.ABSTAIN, competence,
                                        "nothing trustworthy to say and no one to consult",
@@ -403,9 +418,10 @@ class PrimarySelfModelRouter:
             generalization=res)
 
     # ---- dispatch a conversational reply ---- #
-    def route_respond(self, prompt: str, *, system: Optional[str] = None) -> RouterResult:
+    def route_respond(self, prompt: str, *, system: Optional[str] = None,
+                      difficulty: Optional[float] = None) -> RouterResult:
         """Triage, then draft a reply via the reused reactive router (or abstain honestly)."""
-        plan = self.plan(prompt)
+        plan = self.plan(prompt, difficulty=difficulty)
         if plan.route is Route.ABSTAIN:
             return RouterResult(HONEST_ABSTENTION, "abstain", plan.confidence, handed_off=False)
         # GENERALIZE: answer from NYXARA's OWN unified generalizers (skill-induction from the

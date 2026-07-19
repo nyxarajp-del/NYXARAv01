@@ -63,7 +63,7 @@ class NyxaraReasoner:
                  generalization_engine: Any = None, causal_model: Any = None,
                  knowledge_graph: Any = None, intuition: Any = None,
                  law_discovery: Any = None, belief_model: Any = None,
-                 max_memory_context: int = 5) -> None:
+                 metacontrol: Any = None, max_memory_context: int = 5) -> None:
         self.settings = settings or get_settings()
         self.llm = llm
         self.council = council
@@ -110,6 +110,28 @@ class NyxaraReasoner:
         self.belief_model = belief_model
         self._native: Any = None  # lazily built native chain-of-thought orchestrator
         self.last_native_trace: Optional[List[dict]] = None  # last turn's inspectable steps
+        # first-class metacognition (mind/metacontrol.py): the kernel installs a per-turn
+        # ComputeBudget before reasoning; HER calibrated difficulty estimate — not the LLM —
+        # decides whether this turn is one forward pass or a deep search.
+        self.metacontrol = metacontrol
+        self._turn_plan: Any = None
+
+    # ------------------------------------------------------------------ #
+    # Metacognitive compute allocation (mind/metacontrol.py)
+    # ------------------------------------------------------------------ #
+    def install_turn_plan(self, plan: Any) -> None:
+        """The kernel hands this turn's ComputeBudget in before invoking the reasoner."""
+        self._turn_plan = plan
+        if self.llm_reasoner is not None:
+            try:
+                self.llm_reasoner.turn_plan = plan  # the self-model router reads the difficulty
+            except Exception:  # noqa: BLE001 — plan sharing is advisory, never fatal
+                pass
+
+    def last_deep_result(self) -> Any:
+        """The last deep-reasoning LadderResult (rungs run, early exit, escalation) — for the
+        kernel's outcome loop back into the metacontroller. None when the ladder didn't run."""
+        return getattr(self._deep or None, "last_result", None)
 
     # ------------------------------------------------------------------ #
     # The reasoning act
@@ -120,8 +142,23 @@ class NyxaraReasoner:
             return self._reason(stimulus, focus, memories)
         except Exception:  # noqa: BLE001 — never let the mind crash the loop
             return _default_reasoner(stimulus, focus)
+        finally:
+            self._turn_plan = None  # a stale plan must never leak into the next turn
+            if self.llm_reasoner is not None:
+                try:
+                    self.llm_reasoner.turn_plan = None
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _reason(self, stimulus: str, focus: Any, memories: Optional[List[Any]]) -> Candidate:
+        # Standalone use (no kernel installed a plan): compute the metacognitive allocation
+        # here, so calibrated uncertainty drives compute even outside the full orchestrator.
+        if self._turn_plan is None and self.metacontrol is not None:
+            try:
+                if self.metacontrol.enabled():
+                    self.install_turn_plan(self.metacontrol.plan(stimulus))
+            except Exception:  # noqa: BLE001 — allocation is advisory, never fatal
+                self._turn_plan = None
         mems = self._gather_memories(stimulus, memories)
         outcome = self._route(stimulus, mems)
         if self._looks_like_action(stimulus):
@@ -208,9 +245,20 @@ class NyxaraReasoner:
             return None
         try:
             from nyxara.mind.faculties import Task, TaskType
-            stakes = self._stakes(stimulus)
-            difficulty = min(1.0, len(stimulus) / 400.0)
-            novelty = 1.0 if not mems else max(0.2, 1.0 - 0.2 * len(mems))
+            # One source of truth: the dual-process arbitrator reads the SAME calibrated
+            # difficulty/novelty/stakes the metacontroller allocated compute from, so System-1
+            # vs System-2 and the effort budget are decided by one shared judgment. Without a
+            # plan, the old cheap heuristics stand.
+            est = getattr(getattr(self._turn_plan, "estimate", None), "signals", None)
+            if est is not None:
+                stakes = float(est.stakes)
+                difficulty = float(self._turn_plan.estimate.calibrated)
+                novelty = (float(est.novelty) if est.novelty is not None
+                           else (1.0 if not mems else max(0.2, 1.0 - 0.2 * len(mems))))
+            else:
+                stakes = self._stakes(stimulus)
+                difficulty = min(1.0, len(stimulus) / 400.0)
+                novelty = 1.0 if not mems else max(0.2, 1.0 - 0.2 * len(mems))
             gut = 0.85 if stakes < 0.5 else 0.4  # unconfident gut on stakes -> reflect
             task = Task(TaskType.REASONING, description=stimulus,
                         features={"stakes": stakes, "difficulty": difficulty,
@@ -425,7 +473,12 @@ class NyxaraReasoner:
                 llm=self.llm,
                 n_iterations=int(getattr(self.settings.llm,
                                          "recursive_improvement_iterations", 5)))
-            effort_memory = self._effort_memory() if bool(getattr(cfg, "learn_effort", True)) else None
+            # Share the metacontroller's persisted EffortMemory when present, so ONE store of
+            # lived outcomes both aims the ladder's samples and informs the upfront estimate.
+            effort_memory = None
+            if bool(getattr(cfg, "learn_effort", True)):
+                effort_memory = (getattr(self.metacontrol, "effort_memory", None)
+                                 or self._effort_memory())
             # Compute-scaled test-time-compute budget (Problem #1 — Scale): the compute NYXARA
             # actually has decides how hard she thinks. Scales *up* from the config floor only, so
             # a bare box is unchanged; any failure falls back to the static config. This is the
@@ -462,12 +515,22 @@ class NyxaraReasoner:
             return None
 
     def _deep_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
-        """Climb the always-max effort ladder for a conversational turn; keep the verifier-best."""
+        """Climb the effort ladder at this turn's allocated budget; keep the verifier-best.
+
+        The metacognitive fast path lives here: an entry rung of 0 means HER calibrated
+        estimate judged this turn easy — one forward pass — so the ladder is skipped
+        entirely and the normal single-pass path below handles the turn."""
+        plan = self._turn_plan
+        if plan is not None and int(getattr(plan, "entry_rung", 1) or 0) <= 0:
+            return None
         deep = self._deep_reasoner()
         if deep is None:
             return None
         try:
-            cand = deep(stimulus, None)
+            try:
+                cand = deep(stimulus, None, budget=plan)
+            except TypeError:  # a legacy/stub controller without the budget kwarg
+                cand = deep(stimulus, None)
         except Exception:  # noqa: BLE001 — deep reasoning is additive; fall through to the normal path
             return None
         if cand is None or getattr(cand, "kind", "respond") != "respond":
@@ -479,6 +542,9 @@ class NyxaraReasoner:
 
     def _mcts_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
         """Delegate a conversational turn to the MCTS-backed LLM reasoner when enabled."""
+        plan = self._turn_plan
+        if plan is not None and int(getattr(plan, "entry_rung", 1) or 0) <= 0:
+            return None  # an easy turn earns one forward pass, not a search
         mcfg = getattr(self.settings, "mcts", None)
         if (self.llm_reasoner is None or mcfg is None or not mcfg.enabled
                 or not self._real_llm()):
