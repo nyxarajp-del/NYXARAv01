@@ -105,6 +105,7 @@ commands:
   /pause             pause the loop
   /scram [reason]    emergency stop — the loop HALTs until resumed
   /resume            restore the loop after a pause/scram
+  /perception [on|off|watch] the always-on senses: live status, open/close, or tail events live
   /read <passage>    learn world dynamics from a passage (read like a textbook)
   /wander [n]        let the idle mind wander n ticks and show the thoughts
   /proactive         detect & govern self-initiated actions (one initiative pass)
@@ -183,6 +184,27 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "resume":
         core.resume()
         print("loop restored ✓")
+    elif cmd == "perception":
+        rp = getattr(core, "perception", None)
+        if rp is None:
+            print("realtime perception is unavailable (disabled in config).")
+        elif arg.lower() in ("on", "start"):
+            print("senses open ✓" if core.start_perception() else "could not open the senses.")
+        elif arg.lower() in ("off", "stop"):
+            core.stop_perception()
+            print("senses closed.")
+        elif arg.lower() == "watch":
+            print("watching her senses live — press Enter to stop.")
+            def _show(d):  # runs on the perception thread; print is thread-safe enough here
+                print(f"  [{d['modality']}] {d['kind']}: {d['percept'].get('content', '')!r} "
+                      f"(salience {d['salience']})")
+            rp.add_listener(_show)
+            try:
+                input()
+            finally:
+                rp.remove_listener(_show)
+        else:
+            print(json.dumps(rp.status(), indent=2, default=str))
     elif cmd == "wander":
         try:
             n = int(arg) if arg else 5
@@ -409,6 +431,20 @@ def main(argv: list[str] | None = None) -> int:
     # Layer 5 — continuous cognition: the mind wanders in the background while idle.
     if core.start_cognition():
         print("cognition           : default-mode stream running (idle thoughts surface) ✓")
+
+    # Continuous real-time perception — honest about what THIS box can actually sense.
+    rp = getattr(core, "perception", None)
+    if rp is not None:
+        try:
+            avail = rp.status()["available"]
+            if any(avail.values()):
+                on = ", ".join(k for k, v in avail.items() if v)
+                print(f"perception          : watching/listening ✓ ({on}; mic {rp.mic_mode})")
+            else:
+                print("perception          : loop running, but no camera/screen/mic on this box "
+                      "(honest idle — she never fabricates a percept)")
+        except Exception:  # noqa: BLE001 — a senses hiccup never blocks the console
+            pass
 
     def _surface_insights() -> None:
         for text in core.drain_insights():
