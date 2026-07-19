@@ -56,6 +56,15 @@ _RUNG_NAMES = {1: "self-consistency", 2: "deliberation", 3: "mcts-search", 4: "v
 
 
 @dataclass
+class _Ceiling:
+    """The compute-scaled ceiling the allocator sizes its per-turn spend against."""
+
+    max_rung: int
+    samples: int
+    max_seconds: float
+
+
+@dataclass
 class LadderResult:
     """The best candidate found and an auditable trace of the climb (for /explain)."""
 
@@ -65,15 +74,24 @@ class LadderResult:
     rungs_run: List[int] = field(default_factory=list)
     scores: List[Tuple[int, float]] = field(default_factory=list)
     samples: int = 0                       # self-consistency width the compute bought this climb
+    budget_reason: str = ""                # why metacognition allotted exactly this much (if adaptive)
+    stopped_early: bool = False            # the climb halted before the ceiling (target met / low value)
+    escalated: bool = False                # a predicted-easy turn was escalated mid-climb
 
     def trace(self) -> str:
         ran = ", ".join(_RUNG_NAMES.get(r, str(r)) for r in self.rungs_run) or "none"
         # report the effective scale the climb bought — the test-time compute NYXARA spent to
         # reach past a single forward pass (Problem #1, the ceiling; see growth/effective_scale.py).
         width = f" at up to {self.samples} samples/rung" if self.samples else ""
-        return (f"deep reasoning climbed [{ran}]{width} and kept the "
+        head = (f"{self.budget_reason}; " if self.budget_reason else "")
+        tail = ""
+        if self.escalated:
+            tail = " [escalated mid-climb: measured harder than predicted]"
+        elif self.stopped_early:
+            tail = " [stopped early: enough was enough]"
+        return (f"{head}deep reasoning climbed [{ran}]{width} and kept the "
                 f"{_RUNG_NAMES.get(self.winning_rung, self.winning_rung)} answer "
-                f"(verified {self.best_score:.2f})")
+                f"(verified {self.best_score:.2f}){tail}")
 
 
 class DeepReasoner:
@@ -81,7 +99,8 @@ class DeepReasoner:
 
     def __init__(self, reasoner: Any, *, settings: Optional[NyxaraSettings] = None,
                  verifier: Any = None, improver: Any = None,
-                 effort_memory: Any = None, budget: Any = None) -> None:
+                 effort_memory: Any = None, budget: Any = None,
+                 allocator: Any = None) -> None:
         # ``reasoner`` is the LLMReasoner — it owns the LLM, the grounding context, and the
         # decision->Candidate conversion; we only orchestrate its public rung accessors.
         self.reasoner = reasoner
@@ -110,6 +129,10 @@ class DeepReasoner:
         self.verifier = verifier
         self.improver = improver              # RecursiveImprover (rung 4); optional
         self.effort_memory = effort_memory    # EffortMemory; optional (enables compounding)
+        # First-class metacognition (mind/metacognitive_allocator.py): when supplied, calibrated
+        # uncertainty decides how much of the ladder this turn actually spends — easy → 1 pass,
+        # hard → the full 10-minute search. None ⇒ the exact always-max behaviour, unchanged.
+        self.allocator = allocator
 
     # ------------------------------------------------------------------ #
     # capability probe
@@ -137,16 +160,32 @@ class DeepReasoner:
         return result.candidate if result is not None else None
 
     def deliberate(self, stimulus: str) -> Optional[LadderResult]:
-        """Run the ladder and return the full :class:`LadderResult` (candidate + trace)."""
+        """Run the ladder and return the full :class:`LadderResult` (candidate + trace).
+
+        The compute-scaled ``self.budget`` (machine capacity) is the *ceiling*. When an allocator is
+        wired, first-class metacognition sizes this turn's actual spend inside that ceiling from her
+        own calibrated difficulty read — an easy problem climbs one rung and stops; a hard one climbs
+        the whole ladder to the ten-minute wall — and can early-stop (target met / marginal value
+        collapsed) or escalate mid-climb (predicted easy, measured hard). None ⇒ always-max, as before.
+        """
         b = self.budget
-        max_seconds = float(getattr(b, "max_seconds", None) if b is not None
-                            else getattr(self.cfg, "max_seconds", 60.0))
-        deadline = time.monotonic() + max_seconds
-        max_rung = int(getattr(b, "max_rung", None) if b is not None
-                       else getattr(self.cfg, "max_rung", RUNG_REFINE))
         keep_best = bool(getattr(self.cfg, "keep_best", True))
-        base_samples = max(1, int(getattr(b, "samples", None) if b is not None
+        ceil_seconds = float(getattr(b, "max_seconds", None) if b is not None
+                             else getattr(self.cfg, "max_seconds", 60.0))
+        ceil_rung = int(getattr(b, "max_rung", None) if b is not None
+                        else getattr(self.cfg, "max_rung", RUNG_REFINE))
+        ceil_samples = max(1, int(getattr(b, "samples", None) if b is not None
                                   else getattr(self.cfg, "samples", 3)))
+
+        # --- metacognitive per-turn budget (inside the ceiling), or the always-max ceiling --- #
+        turn_budget = self._turn_budget(stimulus, ceil_rung, ceil_samples, ceil_seconds)
+        max_rung = turn_budget["max_rung"]
+        base_samples = turn_budget["samples"]
+        target_score = turn_budget["target_score"]
+        budget_obj = turn_budget["budget_obj"]
+
+        start = time.monotonic()
+        deadline = start + turn_budget["max_seconds"]
 
         sig = self._signature(stimulus)
         favoured = self._favoured_rung(sig)
@@ -156,6 +195,9 @@ class DeepReasoner:
         best_rung = 0
         rungs_run: List[int] = []
         scores: List[Tuple[int, float]] = []
+        rung_seconds: dict = {}
+        stopped_early = False
+        escalated = False
 
         # --- generation rungs: self-consistency → deliberation → MCTS --- #
         gen_rungs = [
@@ -164,12 +206,33 @@ class DeepReasoner:
             (RUNG_MCTS, None),  # None marker: use the MCTS strategy
         ]
         for rung, kw in gen_rungs:
-            if rung > max_rung or time.monotonic() >= deadline:
+            if time.monotonic() >= deadline:
+                break
+            # metareasoning between rungs — run this BEFORE the rung ceiling so a predicted-easy
+            # turn can *escalate* its own ceiling when the first pass measures weak. Also stops on
+            # a met target or collapsed marginal value. (Adaptive only; None-allocator no-ops.)
+            if rung != RUNG_CONSISTENCY and best_cand is not None:
+                decision = self._should_continue(budget_obj, rung, best_score,
+                                                 time.monotonic() - start)
+                if decision is not None:
+                    if decision.escalate:
+                        budget_obj = self.allocator.escalate(budget_obj, ceiling=b)
+                        max_rung = min(RUNG_REFINE, int(budget_obj.max_rung))
+                        base_samples = max(base_samples, int(budget_obj.samples))
+                        deadline = start + float(budget_obj.max_seconds)
+                        target_score = float(budget_obj.target_score)
+                        escalated = True
+                    elif decision.stop:
+                        stopped_early = True
+                        break
+            if rung > max_rung:   # the (possibly just-escalated) per-turn rung ceiling
                 break
             # spend the extra self-consistency width on the rung this signature has learned to
             # reward (same maximum budget, aimed where it measurably pays off).
             samples = base_samples + (base_samples if rung == favoured else 0)
+            rung_start = time.monotonic()
             cand = self._run_generation_rung(stimulus, rung, kw, samples)
+            rung_seconds[rung] = time.monotonic() - rung_start
             rungs_run.append(rung)
             if cand is None:
                 continue
@@ -177,24 +240,34 @@ class DeepReasoner:
             # searching for a prettier conversational reply (exact/decisive beats search).
             if getattr(cand, "kind", "respond") == "act" and getattr(cand, "tool", ""):
                 self._learn(sig, rung, 1.0)
+                self._record_alloc(stimulus, budget_obj, scores + [(rung, 1.0)], rung,
+                                   rung_seconds, getattr(cand, "confidence", None))
                 return LadderResult(candidate=cand, winning_rung=rung, best_score=1.0,
-                                    rungs_run=rungs_run, scores=scores + [(rung, 1.0)])
+                                    rungs_run=rungs_run, scores=scores + [(rung, 1.0)],
+                                    budget_reason=turn_budget["reason"])
             score = self._score(stimulus, cand)
             scores.append((rung, score))
             if score > best_score or best_cand is None:
                 best_cand, best_score, best_rung = cand, score, rung
             if not keep_best:
                 best_cand, best_score, best_rung = cand, score, rung
+            # early stop the instant the target is cleared — this is what makes "easy = 1 pass" real.
+            if budget_obj is not None and best_score >= target_score:
+                stopped_early = True
+                break
 
         if best_cand is None:
             return None
 
         # --- refinement rung: N verified critique-improve cycles over the current best --- #
         if (RUNG_REFINE <= max_rung and self.improver is not None
-                and time.monotonic() < deadline
+                and not stopped_early and time.monotonic() < deadline
+                and best_score < target_score
                 and getattr(best_cand, "kind", "respond") == "respond"):
+            rung_start = time.monotonic()
             refined = self._refine(stimulus, best_cand)
             if refined is not None:
+                rung_seconds[RUNG_REFINE] = time.monotonic() - rung_start
                 rungs_run.append(RUNG_REFINE)
                 rscore = self._score(stimulus, refined)
                 scores.append((RUNG_REFINE, rscore))
@@ -202,10 +275,66 @@ class DeepReasoner:
                     best_cand, best_score, best_rung = refined, rscore, RUNG_REFINE
 
         self._learn(sig, best_rung, best_score)
+        self._record_alloc(stimulus, budget_obj, scores, best_rung, rung_seconds,
+                           getattr(best_cand, "confidence", None))
         result = LadderResult(best_cand, best_rung, best_score, rungs_run, scores,
-                              samples=base_samples)
+                              samples=base_samples, budget_reason=turn_budget["reason"],
+                              stopped_early=stopped_early, escalated=escalated)
         self._annotate(best_cand, result)
         return result
+
+    # ------------------------------------------------------------------ #
+    # metacognitive budget helpers (adaptive only; None-allocator is a no-op)
+    # ------------------------------------------------------------------ #
+    def _turn_budget(self, stimulus: str, ceil_rung: int, ceil_samples: int,
+                     ceil_seconds: float) -> dict:
+        """The per-turn spend inside the compute ceiling — from calibrated uncertainty, or always-max."""
+        default = {
+            "max_rung": ceil_rung, "samples": ceil_samples, "max_seconds": ceil_seconds,
+            "target_score": float(getattr(self.cfg, "early_stop_score", 1.01)),
+            "budget_obj": None, "reason": "",
+        }
+        if self.allocator is None or not bool(getattr(self.cfg, "adaptive_compute", False)):
+            # no allocator ⇒ never early-stop on target (>1 bar), preserving always-max behaviour.
+            default["target_score"] = 1.01
+            return default
+        try:
+            ceiling = _Ceiling(ceil_rung, ceil_samples, ceil_seconds)
+            tb = self.allocator.allocate(stimulus, ceiling=ceiling)
+            return {
+                "max_rung": min(RUNG_REFINE, int(tb.max_rung)),
+                "samples": max(1, int(tb.samples)),
+                "max_seconds": float(tb.max_seconds),
+                "target_score": float(tb.target_score),
+                "budget_obj": tb, "reason": tb.reason,
+            }
+        except Exception:  # noqa: BLE001 — allocation is additive; fall back to always-max
+            default["target_score"] = 1.01
+            return default
+
+    def _should_continue(self, budget_obj: Any, next_rung: int, best_score: float,
+                         elapsed: float) -> Any:
+        if self.allocator is None or budget_obj is None:
+            return None
+        try:
+            return self.allocator.should_continue(
+                budget=budget_obj, next_rung=next_rung, best_score=best_score,
+                elapsed=elapsed, ceiling=self.budget)
+        except Exception:  # noqa: BLE001 — metareasoning is advisory; keep climbing on failure
+            return None
+
+    def _record_alloc(self, stimulus: str, budget_obj: Any, scores: List[Tuple[int, float]],
+                      winning_rung: int, rung_seconds: dict, stated_conf: Any) -> None:
+        if self.allocator is None or budget_obj is None:
+            return
+        try:
+            self.allocator.record(
+                stimulus, predicted_uncertainty=float(budget_obj.predicted_uncertainty),
+                target_score=float(budget_obj.target_score), scores=list(scores),
+                winning_rung=int(winning_rung), rung_seconds=dict(rung_seconds),
+                stated_confidence=(None if stated_conf is None else float(stated_conf)))
+        except Exception:  # noqa: BLE001 — the closed loop is best-effort, never fatal
+            pass
 
     # ------------------------------------------------------------------ #
     # rung runners (each reuses the LLMReasoner's real machinery)

@@ -53,7 +53,7 @@ class MetaCognition:
         """Recalibrate raw confidence against measured accuracy when a calibrator is given."""
         if self.calibrator is None:
             return confidence
-        for attr in ("calibrate", "adjust", "apply"):
+        for attr in ("calibrate", "recalibrate", "adjust", "apply"):
             fn = getattr(self.calibrator, attr, None)
             if callable(fn):
                 try:

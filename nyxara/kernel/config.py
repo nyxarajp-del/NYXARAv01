@@ -251,6 +251,20 @@ class DeepReasoningConfig(BaseModel):
     effort_min_observations: float = Field(default=3.0, ge=0.0)  # evidence before a suggestion sticks
     effort_success_floor: float = Field(default=0.5, ge=0.0, le=1.0)
 
+    # ---- first-class metacognition: calibrated uncertainty DRIVES compute (mind/metacognitive_allocator.py) ----
+    # The always-max ladder above is the *ceiling*; this allocator decides how much of it a turn
+    # actually spends, from NYXARA's own calibrated difficulty estimate. An easy problem gets one
+    # forward pass; a hard one gets the full ladder, up to ``hard_max_seconds`` of search. Learned
+    # from lived outcomes (never by asking the LLM) and persisted, so allocation sharpens with use.
+    adaptive_compute: bool = True                          # master switch for the allocator
+    easy_uncertainty: float = Field(default=0.25, ge=0.0, le=1.0)   # at/below → a single forward pass
+    hard_uncertainty: float = Field(default=0.70, ge=0.0, le=1.0)   # at/above → the full ladder
+    hard_max_seconds: float = Field(default=600.0, ge=1.0, le=600.0)  # the 10-minute hard-problem search
+    early_stop_score: float = Field(default=0.80, ge=0.0, le=1.0)   # target the score must clear to stop
+    voc_stopping: bool = True                              # value-of-computation optimal stopping
+    live_escalation: bool = True                           # escalate mid-climb when measured harder
+    belief_decay: float = Field(default=0.99, ge=0.5, le=1.0)  # recency weighting on learned beliefs
+
 
 class LLMConfig(BaseModel):
     """Stateless, fully local LLM faculty settings (mind/llm.py).

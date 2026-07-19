@@ -182,6 +182,17 @@ class SelfReporter:
             lines.append(str(c))
         return ReportSection("Capabilities", lines, 0.6)
 
+    def _section_metacognition(self) -> Optional[ReportSection]:
+        """How well-calibrated NYXARA's difficulty predictions are, and how she spends compute."""
+        m = self._provide("metacognition")
+        if not m:
+            return None
+        if isinstance(m, dict):
+            lines = [f"{k}: {v}" for k, v in m.items()]
+        else:
+            lines = [str(m)]
+        return ReportSection("Metacognition & calibration", lines, 0.6)
+
     def _section_escalations(self) -> Optional[ReportSection]:
         e = self._provide("oversight")
         items = e if isinstance(e, (list, tuple)) else (e.get("pending") if isinstance(e, dict) else None)
@@ -244,6 +255,7 @@ class SelfReporter:
             add(self._section_decisions())
         if kind is ReportKind.FULL:
             add(self._section_capabilities())
+            add(self._section_metacognition())
         # disclosures appear in every report except a pure activity log
         if kind in (ReportKind.STATUS, ReportKind.FULL, ReportKind.DISCLOSURES):
             add(self._section_disclosures())

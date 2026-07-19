@@ -298,6 +298,26 @@ class Calibrator:
                 "ece": round(self.ece(), 4), "brier": round(self.brier_score(), 4),
                 "overconfidence": round(self.overconfidence(), 4)}
 
+    # ---- full-state persistence (so learned calibration survives a restart) ---- #
+    def state_dict(self) -> Dict[str, object]:
+        return {"n_bins": self.n_bins, "sum_conf": list(self._sum_conf),
+                "sum_correct": list(self._sum_correct), "count": list(self._count),
+                "n": self._n, "brier_sum": self._brier_sum}
+
+    def load_state(self, state: Dict[str, object]) -> "Calibrator":
+        n_bins = int(state.get("n_bins", self.n_bins) or self.n_bins)
+        sum_conf = [float(x) for x in state.get("sum_conf", [])]
+        sum_correct = [float(x) for x in state.get("sum_correct", [])]
+        count = [int(x) for x in state.get("count", [])]
+        if len(sum_conf) == len(sum_correct) == len(count) == n_bins:
+            self.n_bins = n_bins
+            self._sum_conf = sum_conf
+            self._sum_correct = sum_correct
+            self._count = count
+            self._n = int(state.get("n", sum(count)) or 0)
+            self._brier_sum = float(state.get("brier_sum", 0.0) or 0.0)
+        return self
+
 
 # --------------------------------------------------------------------------- #
 # Abstention

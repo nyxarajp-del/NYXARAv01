@@ -101,6 +101,14 @@ def test_teacher_route_when_weak_capability():
     assert _psr().plan("How do I improve my cooking?").route is Route.TEACHER
 
 
+def test_self_model_router_shares_the_metacognitive_answer_calibrator():
+    """The upfront who-answers gate reads the SAME learned answer-calibration as routing and
+    the how-much-compute allocator — first-class metacognition, one calibration source."""
+    from nyxara.mind.metacognitive_allocator import get_allocator
+    psr = _psr()
+    assert psr.meta.calibrator is get_allocator(psr.settings).answer_calibrator
+
+
 def test_teacher_route_on_high_hallucination_risk():
     plan = _psr().plan("what year did the network protocol ship?")
     assert plan.route is Route.TEACHER

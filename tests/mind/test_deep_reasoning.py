@@ -139,3 +139,133 @@ def test_compounds_learned_effort_across_turns():
         dr.deliberate(q)
     # it recorded outcomes and learned a paying-off rung for this signature
     assert em.suggest(signature(q)) is not None
+
+
+# --------------------------------------------------------------------------- #
+# First-class metacognition: calibrated uncertainty drives the ladder's spend
+# --------------------------------------------------------------------------- #
+def _allocator(**kw):
+    from nyxara.mind.metacognitive_allocator import MetacognitiveAllocator
+    return MetacognitiveAllocator(**kw)
+
+
+def test_allocator_none_is_byte_identical_always_max():
+    """No allocator ⇒ the exact pre-existing always-max behaviour (zero regression)."""
+    s = _settings()
+    dr = DeepReasoner(_FakeReasoner(), settings=s, improver=_Improver(), allocator=None)
+    res = dr.deliberate("why is the sky blue?")
+    assert RUNG_CONSISTENCY in res.rungs_run and RUNG_MCTS in res.rungs_run
+    assert RUNG_REFINE in res.rungs_run  # the full ladder still runs
+    assert not res.stopped_early and not res.escalated
+
+
+class _GoodL1Reasoner(_FakeReasoner):
+    """A scripted reasoner whose FIRST pass is already a strong answer (a genuinely easy turn)."""
+
+    def deliberate_decision(self, stimulus, *, passes=1, samples=1, temperature=None):
+        self.rungs_called.append(("deliberate", passes, samples))
+        return {"text": "Rayleigh scattering: short blue wavelengths scatter far more strongly "
+                        "off atmospheric molecules than long red ones, so the sky reads blue.",
+                "kind": "respond", "confidence": 0.9}
+
+
+def test_learned_easy_signature_gets_one_pass():
+    """An easy signature whose first pass is strong climbs exactly one rung and stops."""
+    s = _settings()
+    alloc = _allocator(easy_uncertainty=0.25, hard_uncertainty=0.70)
+    q = "why is the sky blue?"
+    for _ in range(12):
+        alloc.record(q, predicted_uncertainty=0.8, target_score=0.8,
+                     scores=[(1, 0.9)], winning_rung=1)
+    dr = DeepReasoner(_GoodL1Reasoner(), settings=s, improver=_Improver(), allocator=alloc)
+    res = dr.deliberate(q)
+    assert res.rungs_run == [RUNG_CONSISTENCY], res.rungs_run
+    assert res.budget_reason and "1 pass" in res.budget_reason
+    assert not res.escalated  # a strong first pass never needed escalation
+
+
+def test_unknown_signature_climbs_past_one_pass():
+    """An unknown/hard problem is NOT assumed cheap — epistemic humility spends compute."""
+    s = _settings()
+    alloc = _allocator(easy_uncertainty=0.25, hard_uncertainty=0.70)
+    dr = DeepReasoner(_FakeReasoner(), settings=s, improver=_Improver(), allocator=alloc)
+    res = dr.deliberate("prove sum_{k=1}^n k**3 == (n*(n+1)//2)**2 for all positive integers n")
+    assert len(res.rungs_run) > 1
+
+
+def test_target_met_early_stops_the_climb():
+    """Once the verifier clears the target, the climb halts even with budget to spare."""
+    class _StrongReasoner(_FakeReasoner):
+        def deliberate_decision(self, stimulus, *, passes=1, samples=1, temperature=None):
+            # a strong answer even at the shallow rung → target met immediately
+            return {"text": "Rayleigh scattering: short blue wavelengths scatter far more "
+                            "strongly off atmospheric molecules than long red ones.",
+                    "kind": "respond", "confidence": 0.9}
+
+    s = _settings()
+    alloc = _allocator(easy_uncertainty=0.25, hard_uncertainty=0.70, base_target=0.5)
+    # make this signature predict mid/hard so max_rung > 1 (proves the STOP is on target, not ceiling)
+    q = "explain, in careful detail, the physical cause of the daytime sky colour please"
+    for _ in range(10):
+        alloc.record(q, predicted_uncertainty=0.3, target_score=0.5,
+                     scores=[(1, 0.3), (2, 0.55)], winning_rung=2)
+    dr = DeepReasoner(_StrongReasoner(), settings=s, improver=_Improver(), allocator=alloc)
+    res = dr.deliberate(q)
+    assert res.stopped_early
+    assert RUNG_MCTS not in res.rungs_run  # never needed the deeper rungs
+
+
+def test_live_escalation_when_measured_harder_than_predicted():
+    """Predicted easy but the first pass scores weak → escalate the budget mid-climb."""
+    class _WeakThenStrong(_FakeReasoner):
+        def deliberate_decision(self, stimulus, *, passes=1, samples=1, temperature=None):
+            if passes >= 3:
+                return {"text": "Rayleigh scattering: short blue wavelengths scatter far more "
+                                "strongly off atmospheric molecules than long red ones.",
+                        "kind": "respond", "confidence": 0.85}
+            return {"text": "blah blah blah blah", "kind": "respond",
+                    "confidence": 0.2}  # degenerate first pass (verifier scores it ~0)
+
+    s = _settings()
+    alloc = _allocator(easy_uncertainty=0.25, hard_uncertainty=0.70,
+                       base_target=0.8, live_escalation=True)
+    q = "why is the sky blue?"
+    for _ in range(12):   # teach it this signature is easy
+        alloc.record(q, predicted_uncertainty=0.8, target_score=0.8,
+                     scores=[(1, 0.9)], winning_rung=1)
+    dr = DeepReasoner(_WeakThenStrong(), settings=s, improver=_Improver(), allocator=alloc)
+    res = dr.deliberate(q)
+    # predicted easy (1 rung) but the weak first pass forced a mid-climb escalation past it
+    assert res.escalated
+    assert len(res.rungs_run) > 1
+
+
+def test_allocator_record_is_called_with_real_outcomes():
+    """The closed loop actually fires — the allocator learns from each lived turn."""
+    s = _settings()
+
+    class _Spy:
+        def __init__(self):
+            self.recorded = []
+            from nyxara.mind.metacognitive_allocator import MetacognitiveAllocator
+            self._inner = MetacognitiveAllocator()
+
+        def allocate(self, stimulus, *, ceiling=None, mems_count=0):
+            return self._inner.allocate(stimulus, ceiling=ceiling, mems_count=mems_count)
+
+        def should_continue(self, **kw):
+            return self._inner.should_continue(**kw)
+
+        def escalate(self, budget, *, ceiling=None):
+            return self._inner.escalate(budget, ceiling=ceiling)
+
+        def record(self, stimulus, **kw):
+            self.recorded.append((stimulus, kw))
+
+    spy = _Spy()
+    dr = DeepReasoner(_FakeReasoner(), settings=s, improver=_Improver(), allocator=spy)
+    dr.deliberate("why is the sky blue?")
+    assert spy.recorded, "record must be called once per turn"
+    _, kw = spy.recorded[-1]
+    assert kw["scores"] and kw["winning_rung"] >= 1
+    assert "predicted_uncertainty" in kw and "rung_seconds" in kw

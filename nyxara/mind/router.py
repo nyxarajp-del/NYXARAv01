@@ -29,6 +29,17 @@ Verifier = Callable[[str, str], float]
 _WORD = re.compile(r"[A-Za-z0-9']+")
 
 
+def _shared_answer_calibrator(settings: Any) -> Any:
+    """The metacognitive allocator's answer-calibrator — so the who-answers gate and the
+    how-much-compute allocator discount a bluffing model against ONE learned calibration. Returns
+    None (an uncalibrated gate, exactly as before) on any failure — never a hard dependency."""
+    try:
+        from nyxara.mind.metacognitive_allocator import get_allocator
+        return get_allocator(settings).answer_calibrator
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _tokens(text: str) -> list:
     return _WORD.findall((text or "").lower())
 
@@ -115,7 +126,8 @@ class Router:
             self_provider = SelfProvider(self.settings)
         self._self = self_provider
         self.meta = MetaCognition(answer_threshold=self.cfg.threshold,
-                                  abstain_below=self.cfg.abstain_below)
+                                  abstain_below=self.cfg.abstain_below,
+                                  calibrator=_shared_answer_calibrator(self.settings))
 
     # ---- availability ---- #
     def self_available(self) -> bool:

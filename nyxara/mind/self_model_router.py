@@ -130,8 +130,10 @@ class PrimarySelfModelRouter:
         self._generalization = generalization_engine
         self.verifier = verifier or _grounded_or_default()
         abstain_below = getattr(self.settings.router, "abstain_below", 0.15)
+        from nyxara.mind.router import _shared_answer_calibrator
         self.meta = MetaCognition(answer_threshold=self.cfg.competence_threshold,
-                                  abstain_below=abstain_below)
+                                  abstain_below=abstain_below,
+                                  calibrator=_shared_answer_calibrator(self.settings))
 
     # ---- the reused reactive router (lazy) ---- #
     def _ensure_router(self) -> Any:

@@ -4127,6 +4127,26 @@ class NyxaraCore:
                                                   "control": self.oversight.state.value})
         self.reporter.register("oversight",
                                lambda: [p.description for p in self.oversight.pending()])
+        # first-class metacognition made visible (Rule 6): how well-calibrated her difficulty
+        # predictions are, and how she has been allocating compute — inspectable on demand.
+        self.reporter.register("metacognition", self._metacognition_report)
+
+    def _metacognition_report(self) -> Any:
+        """A compact, honest read of the metacognitive allocator's calibration and allocation."""
+        try:
+            from nyxara.mind.metacognitive_allocator import get_allocator
+            settings = self.settings if getattr(self, "settings", None) is not None else None
+            rep = get_allocator(settings).report()
+            cal = rep.get("calibration", {})
+            return {
+                "turns_allocated": rep.get("turns", 0),
+                "difficulty_calibration_ece": cal.get("ece"),
+                "difficulty_calibration_samples": cal.get("samples"),
+                "answer_calibration": rep.get("answer_calibration", {}).get("ece"),
+                "signatures_learned": len(rep.get("difficulty", {})),
+            }
+        except Exception as exc:  # noqa: BLE001 — a broken read is itself disclosed, not hidden
+            return {"_error": f"{type(exc).__name__}: {exc}"}
 
     # ---- the cognitive cycle ---- #
     def process(self, stimulus: str, *, authority: Authority = Authority.OWNER,

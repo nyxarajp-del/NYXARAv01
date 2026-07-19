@@ -97,6 +97,7 @@ class NyxaraReasoner:
         self._self_brain: Any = None  # lazily built own LEARNED brain (compounds with experience)
         self._sample_mind: Any = None  # lazily built few-shot / skill-induction mind
         self._deep: Any = None  # lazily built always-max deep-reasoning controller (Problem #1)
+        self._alloc: Any = None  # lazily built metacognitive allocator (calibrated uncertainty)
         self._compute: Any = None  # lazily built general reduce→run→verify reasoner (Problem #1)
         # HER OWN chain of thought (mind/native_reasoner.py): the learned causal graph +
         # knowledge graph + verifiable faculties composed on a multi-hop blackboard — the
@@ -209,7 +210,10 @@ class NyxaraReasoner:
         try:
             from nyxara.mind.faculties import Task, TaskType
             stakes = self._stakes(stimulus)
-            difficulty = min(1.0, len(stimulus) / 400.0)
+            # calibrated difficulty from her own metacognition (learned from lived outcomes),
+            # not a crude length proxy — so System-1/System-2 arbitration escalates on problems
+            # that are genuinely hard for her, not merely long. Falls back to the length proxy.
+            difficulty = self._difficulty(stimulus, len(mems))
             novelty = 1.0 if not mems else max(0.2, 1.0 - 0.2 * len(mems))
             gut = 0.85 if stakes < 0.5 else 0.4  # unconfident gut on stakes -> reflect
             task = Task(TaskType.REASONING, description=stimulus,
@@ -252,6 +256,18 @@ class NyxaraReasoner:
         except Exception:  # noqa: BLE001
             self._dual = None
         return self._dual
+
+    def _difficulty(self, stimulus: str, mems_count: int) -> float:
+        """Her calibrated difficulty read for this turn, or the length proxy when unavailable."""
+        if bool(getattr(getattr(self.settings.llm, "deep_reasoning", None),
+                        "adaptive_compute", True)):
+            alloc = self._allocator()
+            if alloc is not None:
+                try:
+                    return float(alloc.assess(stimulus, mems_count=mems_count).uncertainty)
+                except Exception:  # noqa: BLE001 — advisory; fall back to the proxy
+                    pass
+        return min(1.0, len(stimulus) / 400.0)
 
     @staticmethod
     def _looks_like_action(stimulus: str) -> bool:
@@ -437,9 +453,14 @@ class NyxaraReasoner:
                 budget = scaled_budget(compute_report(), cfg)
             except Exception:  # noqa: BLE001 — budget scaling is additive; never a hard dependency
                 budget = None
+            # FIRST-CLASS METACOGNITION (Problem #1): calibrated uncertainty decides how much of
+            # the ladder this turn spends — easy → 1 forward pass, hard → the full 10-minute
+            # search. Her own measured signal, learned from lived outcomes and persisted, never
+            # the LLM's self-assessment. None (switch off / failure) ⇒ the always-max ladder.
+            allocator = self._allocator() if bool(getattr(cfg, "adaptive_compute", True)) else None
             self._deep = DeepReasoner(self.llm_reasoner, settings=self.settings,
                                       improver=improver, effort_memory=effort_memory,
-                                      budget=budget)
+                                      budget=budget, allocator=allocator)
         except Exception:  # noqa: BLE001 — deep reasoning is additive, never a hard dependency
             self._deep = False
         return self._deep or None
@@ -460,6 +481,20 @@ class NyxaraReasoner:
                 path=path)
         except Exception:  # noqa: BLE001 — compounding is best-effort
             return None
+
+    def _allocator(self) -> Any:
+        """The process-wide metacognitive allocator — the ONE calibrated uncertainty source.
+
+        Shared (per data-dir) so the how-much-compute decision here and the who-answers gates in
+        the routers read the same calibrated beliefs. Persisted next to ``effort_memory.json``."""
+        if self._alloc is not None:
+            return self._alloc or None
+        try:
+            from nyxara.mind.metacognitive_allocator import get_allocator
+            self._alloc = get_allocator(self.settings)
+        except Exception:  # noqa: BLE001 — metacognition is additive, never a hard dependency
+            self._alloc = False
+        return self._alloc or None
 
     def _deep_respond(self, stimulus: str, mems: List[str], process: str) -> Optional[Candidate]:
         """Climb the always-max effort ladder for a conversational turn; keep the verifier-best."""

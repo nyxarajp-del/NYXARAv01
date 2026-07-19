@@ -115,6 +115,14 @@ def test_no_teacher_keeps_a_confident_own_answer():
     assert res.source == "self" and res.handed_off is True
 
 
+def test_router_shares_the_metacognitive_answer_calibrator():
+    """The who-answers gate is wired to the allocator's answer-calibrator — ONE calibration
+    source across metacognition (routing) and the how-much-compute allocator."""
+    from nyxara.mind.metacognitive_allocator import get_allocator
+    r = Router(_Teacher(), settings=_settings(), self_provider=_Own("Paris, Master."))
+    assert r.meta.calibrator is get_allocator(r.settings).answer_calibrator
+
+
 # --------------------------------------------------------------------------- #
 # draft_self — own-model-only handoff (no teacher fallback)
 # --------------------------------------------------------------------------- #

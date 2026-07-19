@@ -150,3 +150,40 @@ def test_deep_reasoning_defers_on_mock_provider():
     s.llm.deep_reasoning.enabled = True
     r = NyxaraReasoner(llm=None, settings=s)  # no real llm, no llm_reasoner
     assert r._deep_respond("why is the sky blue?", [], "system_2") is None
+
+
+# --------------------------------------------------------------------------- #
+# First-class metacognition: allocator wired in, and driving System-1/2 routing
+# --------------------------------------------------------------------------- #
+def test_allocator_is_wired_into_deep_reasoner_when_adaptive_on():
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.llm.deep_reasoning.enabled = True
+    s.llm.deep_reasoning.adaptive_compute = True
+    r = NyxaraReasoner(llm=_FakeLLM(s), llm_reasoner=_DeepFakeReasoner(), settings=s)
+    deep = r._deep_reasoner()
+    assert deep is not None and deep.allocator is not None
+
+
+def test_allocator_not_wired_when_adaptive_off():
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    s.llm.deep_reasoning.enabled = True
+    s.llm.deep_reasoning.adaptive_compute = False
+    r = NyxaraReasoner(llm=_FakeLLM(s), llm_reasoner=_DeepFakeReasoner(), settings=s)
+    deep = r._deep_reasoner()
+    assert deep is not None and deep.allocator is None
+
+
+def test_route_uses_calibrated_difficulty_signal():
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    r = NyxaraReasoner(llm=_FakeLLM(s), settings=s)
+    # a short prompt whose signature history is HARD should read as difficult even though the
+    # crude length proxy (len/400) would call it trivially easy — proving the signal is calibrated.
+    hard_q = "prove it"
+    alloc = r._allocator()
+    from nyxara.mind.effort_memory import signature
+    for _ in range(12):
+        alloc.record(hard_q, predicted_uncertainty=0.3, target_score=0.8,
+                     scores=[(1, 0.2), (2, 0.4), (3, 0.85)], winning_rung=3)
+    difficulty = r._difficulty(hard_q, mems_count=0)
+    assert difficulty > len(hard_q) / 400.0   # calibrated signal beats the naive length proxy
+    assert difficulty > 0.5
