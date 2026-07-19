@@ -197,6 +197,7 @@ class FeatureFlags(BaseModel):
     open_world_generalization: bool = True   # growth/open_world.py — crack never-before-seen systems from first principles (Rule 4)
     environment_adaptation: bool = True      # growth/adaptation.py — structurally re-organize herself in a brand-new environment (Rule 4)
     self_correction: bool = True             # growth/self_correction.py — detect when she's wrong/stuck & experiment to fill the gap (Rules 4 & 6)
+    metacognitive_control: bool = True       # mind/metacontrol.py — calibrated uncertainty drives per-turn compute allocation: easy = 1 pass, hard = deep search; her own code decides, never the LLM (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
     multi_llm_council: bool = True      # mind/council.py — convene many LLMs as a panel of tools
@@ -250,6 +251,50 @@ class DeepReasoningConfig(BaseModel):
     learn_effort: bool = True
     effort_min_observations: float = Field(default=3.0, ge=0.0)  # evidence before a suggestion sticks
     effort_success_floor: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class MetaControlConfig(BaseModel):
+    """First-class metacognitive compute allocation (mind/metacontrol.py) — Rules 4 & 6.
+
+    Calibrated uncertainty drives how hard NYXARA thinks each turn: her OWN deterministic code
+    estimates the turn's difficulty from signals she measures herself (novelty, recall strength,
+    self-model competence, learned effort history, stakes), corrects that estimate against her
+    lived outcomes (a real Calibrator — ECE, over-confidence), and allocates a compute budget
+    spanning **one forward pass** (an easy turn skips the whole ladder) to the **full deep
+    search** (a hard turn earns the 600-second climb). The deep-reasoning ladder starts at the
+    allocated entry rung and stops the moment the verifier clears the calibrated confidence
+    target, escalating only when needed. The LLM is never asked how hard to try.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # Difficulty bands (strictly increasing): below easy_below (and low stakes) → 1 forward pass;
+    # then moderate / hard / extreme ladder budgets.
+    easy_below: float = Field(default=0.30, ge=0.0, le=1.0)
+    moderate_below: float = Field(default=0.55, ge=0.0, le=1.0)
+    hard_below: float = Field(default=0.80, ge=0.0, le=1.0)
+    # A risky turn never takes the 1-pass fast path, however easy it reads.
+    fast_path_max_stakes: float = Field(default=0.5, ge=0.0, le=1.0)
+    # The ladder stops early once the verifier clears this; measured over-confidence raises it.
+    confidence_target: float = Field(default=0.75, ge=0.0, le=1.0)
+    escalation: bool = True                # may climb past the entry rung when below target
+    max_seconds_ceiling: float = Field(default=600.0, ge=1.0, le=600.0)
+    # Calibration correction only engages once this many outcomes have been observed.
+    min_calibration_samples: int = Field(default=20, ge=0)
+    # A verified score at/above this floor counts the allocation as "sufficient".
+    success_floor: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Optional cheap self-consistency probe before allocating (costs model samples) — opt-in.
+    probe_self_consistency: bool = False
+    persist: bool = True                   # JSON under paths.data_dir, like effort_memory
+    persist_every: int = Field(default=5, ge=1)
+
+    @model_validator(mode="after")
+    def _bands_increase(self) -> "MetaControlConfig":
+        if not (self.easy_below < self.moderate_below < self.hard_below):
+            raise ValueError("difficulty bands must strictly increase: "
+                             "easy_below < moderate_below < hard_below")
+        return self
 
 
 class LLMConfig(BaseModel):
@@ -2620,6 +2665,7 @@ class NyxaraSettings(BaseSettings):
     causal: CausalConfig = Field(default_factory=CausalConfig)
     world_model: WorldModelConfig = Field(default_factory=WorldModelConfig)
     native_reasoning: NativeReasoningConfig = Field(default_factory=NativeReasoningConfig)
+    metacontrol: MetaControlConfig = Field(default_factory=MetaControlConfig)
     self_improvement: SelfImprovementConfig = Field(default_factory=SelfImprovementConfig)
     self_optimization: SelfOptimizationConfig = Field(default_factory=SelfOptimizationConfig)
     mind_evolution: MindEvolutionConfig = Field(default_factory=MindEvolutionConfig)
@@ -2679,6 +2725,8 @@ class NyxaraSettings(BaseSettings):
             self.temporal.enabled = False
         if not self.features.self_evolution:
             self.mind_evolution.enabled = False
+        if not self.features.metacognitive_control:
+            self.metacontrol.enabled = False
         # Untrusted web content is always screened for prompt-injection (defense in depth);
         # this sanitises page text, it never limits NYXARA's reach.
         self.web.injection_scan = True
@@ -2781,6 +2829,14 @@ class NyxaraSettings(BaseSettings):
             self.llm.deep_reasoning.keep_best = True
             self.llm.deep_reasoning.ground_verifier = True
             self.llm.deep_reasoning.learn_effort = True
+            # Metacognitive allocation at full power raises the *ceiling* (the full 600s search is
+            # reachable, plus the self-consistency probe as extra evidence) — the controller still
+            # allocates per turn, so an easy prompt remains one forward pass. That per-turn choice
+            # IS the max-power feature, not a weakening of it.
+            self.metacontrol.enabled = True
+            self.metacontrol.max_seconds_ceiling = 600.0
+            self.metacontrol.escalation = True
+            self.metacontrol.probe_self_consistency = True
             self.llm.reasoning_passes = 5
             self.llm.reasoning_samples = 9
             self.mcts.enabled = True

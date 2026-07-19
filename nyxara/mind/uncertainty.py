@@ -298,6 +298,33 @@ class Calibrator:
                 "ece": round(self.ece(), 4), "brier": round(self.brier_score(), 4),
                 "overconfidence": round(self.overconfidence(), 4)}
 
+    # ---- state persistence (so calibration survives a restart) ---- #
+    def state_dict(self) -> Dict[str, object]:
+        """Full internal state (unlike :meth:`to_dict`, which is a summary)."""
+        return {"n_bins": self.n_bins, "sum_conf": list(self._sum_conf),
+                "sum_correct": list(self._sum_correct), "count": list(self._count),
+                "n": self._n, "brier_sum": self._brier_sum}
+
+    @classmethod
+    def from_state(cls, data: Dict[str, object]) -> "Calibrator":
+        """Rebuild from :meth:`state_dict` output; a fresh Calibrator on any malformed input."""
+        try:
+            n_bins = int(data["n_bins"])
+            sum_conf = [float(x) for x in data["sum_conf"]]
+            sum_correct = [float(x) for x in data["sum_correct"]]
+            count = [int(x) for x in data["count"]]
+            if n_bins <= 0 or not (len(sum_conf) == len(sum_correct) == len(count) == n_bins):
+                return cls()
+            cal = cls(n_bins=n_bins)
+            cal._sum_conf = sum_conf
+            cal._sum_correct = sum_correct
+            cal._count = count
+            cal._n = int(data["n"])
+            cal._brier_sum = float(data["brier_sum"])
+            return cal
+        except Exception:  # noqa: BLE001 — a corrupt file must never break reasoning
+            return cls()
+
 
 # --------------------------------------------------------------------------- #
 # Abstention

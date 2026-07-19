@@ -722,6 +722,12 @@ class NyxaraCore:
         self.self_correction = self._build_self_correction() if enable_growth else None
         self.consolidate_every = max(1, consolidate_every)
         self._turns = 0
+        # First-class metacognition (mind/metacontrol.py): calibrated uncertainty drives the
+        # turn's compute allocation — easy = 1 forward pass, hard = the full deep search. Her
+        # own deterministic code decides, never the LLM. Built before the reasoner (its consumer).
+        self.metacontrol = self._build_metacontrol()
+        self._last_compute_plan: Any = None   # this turn's ComputeBudget (for the outcome loop)
+        self._last_latent_novelty: Any = None  # hyperdimensional novelty stashed for the estimate
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
         # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
         # threads whose winner still passes the one gate (the control law is preserved).
@@ -1088,6 +1094,7 @@ class NyxaraCore:
                                   law_discovery=getattr(self, "law_discovery", None),
                                   belief_model=getattr(
                                       getattr(self, "autonomous_scientist", None), "model", None),
+                                  metacontrol=getattr(self, "metacontrol", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             return base
@@ -3463,6 +3470,35 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — self-correction is a capability, never required
             return None
 
+    def _build_metacontrol(self) -> Any:
+        """First-class metacognitive compute allocation (mind/metacontrol.py), Rules 4 & 6.
+
+        The controller that makes calibrated uncertainty drive how hard NYXARA thinks each
+        turn: her OWN deterministic code estimates the turn's difficulty from signals she
+        measures herself, corrects it against lived outcomes, and allocates the compute —
+        one forward pass for an easy turn, the full deep search for a hard one. The LLM is
+        never asked how hard to try. Gated by the ``metacognitive_control`` feature flag;
+        a capability, never required.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not getattr(settings.features, "metacognitive_control", True):
+                return None
+            cfg = getattr(settings, "metacontrol", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from pathlib import Path
+            from nyxara.mind.metacontrol import MetacognitiveController
+            path = None
+            if cfg is None or bool(getattr(cfg, "persist", True)):
+                data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+                if data_dir is not None:
+                    path = Path(data_dir) / "metacontrol.json"
+            return MetacognitiveController(settings=settings, path=path)
+        except Exception:  # noqa: BLE001 — metacognitive control is a capability, never required
+            return None
+
     def _build_open_world_generalizer(self) -> Any:
         """Open-world generalization — crack a never-before-seen system from first principles.
 
@@ -4127,6 +4163,9 @@ class NyxaraCore:
                                                   "control": self.oversight.state.value})
         self.reporter.register("oversight",
                                lambda: [p.description for p in self.oversight.pending()])
+        self.reporter.register("metacontrol",
+                               lambda: (self.metacontrol.report()
+                                        if getattr(self, "metacontrol", None) is not None else {}))
 
     # ---- the cognitive cycle ---- #
     def process(self, stimulus: str, *, authority: Authority = Authority.OWNER,
@@ -4142,6 +4181,8 @@ class NyxaraCore:
         self._turn_stimulus = stimulus
         self._turn_authority = authority
         self._last_social = {}   # fresh social read per turn (no stale carry-over on early exits)
+        self._last_latent_novelty = None   # fresh hyperdimensional novelty per turn
+        self._last_compute_plan = None     # fresh metacognitive allocation per turn
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
         if not self.oversight.gate():
@@ -4213,6 +4254,12 @@ class NyxaraCore:
 
         # 3. REASON — the probabilistic proposal, grounded in associative recall
         recalled = self._recall_for(safe_text)
+        # 3a. METACOGNITION FIRST — before a single generation step, HER OWN deterministic code
+        #     estimates this turn's difficulty (novelty, recall strength, competence, learned
+        #     effort history, stakes), corrects it against her lived calibration, and allocates
+        #     the compute: an easy turn earns one forward pass, a hard one the full deep search.
+        #     The LLM is never asked how hard to try.
+        self._plan_compute(safe_text, recalled)
         candidate = self._invoke_reasoner(safe_text, focus, recalled)
         # 3b. ENVIRONMENT-DRIVEN LEARNING — if she doesn't know this (abstains / low
         #     confidence on a solvable task), don't stop: self-bootstrap a solution, learn it
@@ -4715,6 +4762,67 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return 0.45
 
+    def _plan_compute(self, stimulus: str, recalled: List[Any]) -> Any:
+        """Metacognition first: allocate this turn's compute from HER OWN measured signals.
+
+        Gathers the internal evidence the perception stages already produced — the
+        hyperdimensional novelty of the input, how strongly memory recalled it, what her
+        self-model says about her competence here — and asks the metacontroller for a
+        calibrated :class:`~nyxara.mind.metacontrol.ComputeBudget`, which is installed into
+        the reasoner for the turn. Deterministic, no LLM. Best-effort: on any failure the
+        reasoner simply runs with its prior defaults."""
+        mc = getattr(self, "metacontrol", None)
+        if mc is None:
+            return None
+        try:
+            if not mc.enabled():
+                return None
+            # recall strength: the best semantic hit, mildly reinforced by hit count
+            # (only this turn's recall counts — a stale query's hits are no evidence here)
+            recall_strength = None
+            results = (getattr(self, "_last_recall_results", None) or []
+                       if getattr(self, "_last_recall_query", None) == str(stimulus or "")
+                       else [])
+            try:
+                sems = [float(getattr(r, "signals", {}).get("semantic", 0.0)) for r in results]
+                if sems:
+                    recall_strength = min(1.0, max(sems) * (0.5 + 0.1 * len(sems)))
+            except Exception:  # noqa: BLE001
+                recall_strength = None
+            # self-model competence for this prompt (same fail-open read the router uses)
+            competence = None
+            sm = getattr(self, "self_model", None)
+            if sm is not None:
+                try:
+                    text = (stimulus or "").lower()
+                    scored = []
+                    for cap_name in getattr(sm, "capabilities", {}):
+                        if cap_name.lower() in text:
+                            cap = sm.capability(cap_name)
+                            if cap is not None:
+                                scored.append(cap.level * (0.5 + 0.5 * cap.confidence))
+                    if scored:
+                        competence = max(scored)
+                except Exception:  # noqa: BLE001
+                    competence = None
+            plan = mc.plan(stimulus, novelty=self._last_latent_novelty,
+                           recall_strength=recall_strength, competence=competence)
+            self._last_compute_plan = plan
+            install = getattr(self.reasoner, "install_turn_plan", None)
+            if callable(install):
+                install(plan)
+            est = plan.estimate
+            self.mind.record(
+                ThoughtKind.DECISION,
+                f"metacontrol: difficulty {est.calibrated:.2f} -> rung "
+                f"{plan.entry_rung}..{plan.max_rung}, {plan.samples} samples, "
+                f"{plan.max_seconds:.0f}s",
+                salience=0.45)
+            return plan
+        except Exception:  # noqa: BLE001 — allocation is advisory, never fatal
+            self._last_compute_plan = None
+            return None
+
     def _recall_for(self, stimulus: str) -> List[Any]:
         """Associative recall cued by the stimulus. Level 6: combines vector retrieval
         with knowledge-graph traversal so multi-hop structured facts complement
@@ -5147,6 +5255,11 @@ class NyxaraCore:
             return candidate
         if getattr(candidate, "kind", "respond") != "respond":
             return candidate
+        # Metacognitive fast path: one forward pass means one forward pass — an easy turn's
+        # allocation covers every compute sink, not only the deep ladder.
+        plan = getattr(self, "_last_compute_plan", None)
+        if plan is not None and int(getattr(plan, "entry_rung", 1) or 0) <= 0:
+            return candidate
         try:
             improved = self.recursive_improver.improve(stimulus, candidate)
             if improved is not None:
@@ -5455,6 +5568,8 @@ class NyxaraCore:
             return
         try:
             nov = self.hyperdimensional.novelty(text)
+            # stash the score for the metacontroller's upfront difficulty estimate this turn
+            self._last_latent_novelty = float(getattr(nov, "score", 0.0))
             tag = " novel" if nov.is_novel else ""
             self.mind.record(ThoughtKind.PERCEPTION,
                              f"latent: novelty={nov.score:.2f} "
@@ -6221,6 +6336,26 @@ class NyxaraCore:
                 native.self_improve()
         except Exception:  # noqa: BLE001 — self-tuning is best-effort, never fatal
             pass
+        # close the metacognitive loop (mind/metacontrol.py): the turn's REAL outcome — did
+        # the allocation suffice, did the ladder have to escalate past its entry rung — trains
+        # the difficulty calibrator, so her compute allocation measurably improves with life.
+        mc = getattr(self, "metacontrol", None)
+        plan = getattr(self, "_last_compute_plan", None)
+        if mc is not None and plan is not None:
+            try:
+                deep = getattr(self.reasoner, "last_deep_result", None)
+                res = deep() if callable(deep) else None
+                verified = (float(res.best_score) if res is not None
+                            else float(getattr(candidate, "confidence", 0.0) or 0.0))
+                mc.record_outcome(
+                    plan, success=(disp is Disposition.ACT and success),
+                    verified_score=verified,
+                    rung_used=(int(res.winning_rung) if res is not None else None),
+                    escalated=bool(getattr(res, "escalated", False)),
+                    early_exit=bool(getattr(res, "early_exit", False)))
+            except Exception:  # noqa: BLE001 — calibration learning is best-effort, never fatal
+                pass
+            self._last_compute_plan = None
         # world model: the lived turn itself becomes a learnable transition — "in situation
         # <stimulus>, doing <action> produced <reply>, worth <reward>". The GroundedWorldModel
         # encodes the text states through her self-learned embedder, so REAL conversation

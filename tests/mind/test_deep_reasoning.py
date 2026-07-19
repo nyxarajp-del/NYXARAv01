@@ -139,3 +139,70 @@ def test_compounds_learned_effort_across_turns():
         dr.deliberate(q)
     # it recorded outcomes and learned a paying-off rung for this signature
     assert em.suggest(signature(q)) is not None
+
+
+# ------------------- per-turn metacognitive budgets (mind/metacontrol.py) ------------------- #
+def _budget(**kwargs):
+    from nyxara.mind.metacontrol import ComputeBudget
+    kwargs.setdefault("max_rung", RUNG_REFINE)
+    kwargs.setdefault("samples", 3)
+    kwargs.setdefault("max_seconds", 60.0)
+    return ComputeBudget(**kwargs)
+
+
+def test_budget_entry_rung_skips_lower_rungs():
+    fake = _FakeReasoner()
+    dr = DeepReasoner(fake, settings=_settings())
+    res = dr.deliberate("why is the sky blue?", _budget(entry_rung=RUNG_MCTS))
+    assert res.rungs_run[0] == RUNG_MCTS
+    assert RUNG_CONSISTENCY not in res.rungs_run and RUNG_DELIBERATE not in res.rungs_run
+    assert res.entry_rung == RUNG_MCTS
+
+
+def test_early_exit_on_confidence_target():
+    fake = _FakeReasoner()
+    # a deterministic verifier that scores every answer strong, so rung 1 clears the target
+    dr = DeepReasoner(fake, settings=_settings(), improver=_Improver(),
+                      verifier=lambda stim, text: 0.9)
+    res = dr.deliberate("why is the sky blue?", _budget(entry_rung=1, confidence_target=0.7))
+    assert res.rungs_run == [RUNG_CONSISTENCY]
+    assert res.early_exit and not res.escalated
+    assert not any(r[0] == "mcts" for r in fake.rungs_called)
+    assert "[refined]" not in res.candidate.rationale  # the refine rung was skipped too
+
+
+def test_no_escalation_budget_stays_at_entry():
+    fake = _FakeReasoner()
+    dr = DeepReasoner(fake, settings=_settings(), improver=_Improver())
+    res = dr.deliberate("why is the sky blue?",
+                        _budget(entry_rung=1, confidence_target=0.99, allow_escalation=False))
+    assert res.rungs_run == [RUNG_CONSISTENCY]
+    assert not res.escalated
+
+
+def test_escalation_past_entry_is_reported():
+    fake = _FakeReasoner()
+    dr = DeepReasoner(fake, settings=_settings())
+    # an unreachable target forces the climb through every rung — and reports the escalation
+    res = dr.deliberate("why is the sky blue?", _budget(entry_rung=1, confidence_target=0.99))
+    assert res.escalated and not res.early_exit
+    assert RUNG_MCTS in res.rungs_run
+
+
+def test_legacy_budget_still_full_climb():
+    from nyxara.growth.effective_scale import ReasoningBudget
+    fake = _FakeReasoner()
+    dr = DeepReasoner(fake, settings=_settings(), improver=_Improver())
+    legacy = ReasoningBudget(max_rung=RUNG_REFINE, samples=3, max_seconds=60.0, capacity=0.0)
+    res = dr.deliberate("why is the sky blue?", legacy)
+    # no entry rung / no confidence target -> the exact prior behaviour: every rung runs
+    assert RUNG_CONSISTENCY in res.rungs_run and RUNG_MCTS in res.rungs_run
+    assert not res.early_exit
+
+
+def test_last_result_exposed_for_outcome_loop():
+    fake = _FakeReasoner()
+    dr = DeepReasoner(fake, settings=_settings())
+    assert dr.last_result is None
+    res = dr.deliberate("why is the sky blue?")
+    assert dr.last_result is res

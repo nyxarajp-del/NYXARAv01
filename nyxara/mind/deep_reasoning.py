@@ -65,15 +65,20 @@ class LadderResult:
     rungs_run: List[int] = field(default_factory=list)
     scores: List[Tuple[int, float]] = field(default_factory=list)
     samples: int = 0                       # self-consistency width the compute bought this climb
+    entry_rung: int = 1                    # where the metacognitive allocation started the climb
+    early_exit: bool = False               # stopped because the confidence target was cleared
+    escalated: bool = False                # climbed past the entry rung (allocation was too lean)
+    seconds_spent: float = 0.0             # wall-clock the climb actually consumed
 
     def trace(self) -> str:
         ran = ", ".join(_RUNG_NAMES.get(r, str(r)) for r in self.rungs_run) or "none"
         # report the effective scale the climb bought — the test-time compute NYXARA spent to
         # reach past a single forward pass (Problem #1, the ceiling; see growth/effective_scale.py).
         width = f" at up to {self.samples} samples/rung" if self.samples else ""
+        exit_note = "; stopped early at the calibrated confidence target" if self.early_exit else ""
         return (f"deep reasoning climbed [{ran}]{width} and kept the "
                 f"{_RUNG_NAMES.get(self.winning_rung, self.winning_rung)} answer "
-                f"(verified {self.best_score:.2f})")
+                f"(verified {self.best_score:.2f}){exit_note}")
 
 
 class DeepReasoner:
@@ -110,6 +115,7 @@ class DeepReasoner:
         self.verifier = verifier
         self.improver = improver              # RecursiveImprover (rung 4); optional
         self.effort_memory = effort_memory    # EffortMemory; optional (enables compounding)
+        self.last_result: Optional[LadderResult] = None  # last climb, for outcome reporting
 
     # ------------------------------------------------------------------ #
     # capability probe
@@ -126,27 +132,42 @@ class DeepReasoner:
     # ------------------------------------------------------------------ #
     # the climb
     # ------------------------------------------------------------------ #
-    def __call__(self, stimulus: str, focus: Any = None) -> Optional[Any]:
-        """Return the verifier-best Candidate from the full ladder, or None to defer to the caller."""
+    def __call__(self, stimulus: str, focus: Any = None, budget: Any = None) -> Optional[Any]:
+        """Return the verifier-best Candidate from the ladder, or None to defer to the caller."""
         if not self.enabled():
             return None
         try:
-            result = self.deliberate(stimulus)
+            result = self.deliberate(stimulus, budget)
         except Exception:  # noqa: BLE001 — deep reasoning is additive; never crash the turn
             return None
         return result.candidate if result is not None else None
 
-    def deliberate(self, stimulus: str) -> Optional[LadderResult]:
-        """Run the ladder and return the full :class:`LadderResult` (candidate + trace)."""
-        b = self.budget
+    def deliberate(self, stimulus: str, budget: Any = None) -> Optional[LadderResult]:
+        """Run the ladder and return the full :class:`LadderResult` (candidate + trace).
+
+        ``budget`` is the per-turn metacognitive allocation (a
+        :class:`~nyxara.mind.metacontrol.ComputeBudget`); it wins over the boot-time
+        compute-scaled ``self.budget``. Either may also be a plain ``ReasoningBudget``
+        (no entry rung / confidence target) — then the climb behaves exactly as before:
+        every rung, full ceiling.
+        """
+        self.last_result = None
+        start = time.monotonic()
+        b = budget if budget is not None else self.budget
         max_seconds = float(getattr(b, "max_seconds", None) if b is not None
                             else getattr(self.cfg, "max_seconds", 60.0))
-        deadline = time.monotonic() + max_seconds
+        deadline = start + max_seconds
         max_rung = int(getattr(b, "max_rung", None) if b is not None
                        else getattr(self.cfg, "max_rung", RUNG_REFINE))
         keep_best = bool(getattr(self.cfg, "keep_best", True))
         base_samples = max(1, int(getattr(b, "samples", None) if b is not None
                                   else getattr(self.cfg, "samples", 3)))
+        # Metacognitive allocation (absent on a legacy budget → the exact prior full climb).
+        # Rung 0 (the single-pass fast path) is the *caller's* to take — the ladder always
+        # generates at least one real rung, so entry is clamped to the generation rungs.
+        entry = max(RUNG_CONSISTENCY, min(RUNG_MCTS, int(getattr(b, "entry_rung", 1) or 1)))
+        target = getattr(b, "confidence_target", None)
+        allow_escalation = bool(getattr(b, "allow_escalation", True))
 
         sig = self._signature(stimulus)
         favoured = self._favoured_rung(sig)
@@ -156,6 +177,7 @@ class DeepReasoner:
         best_rung = 0
         rungs_run: List[int] = []
         scores: List[Tuple[int, float]] = []
+        early_exit = False
 
         # --- generation rungs: self-consistency → deliberation → MCTS --- #
         gen_rungs = [
@@ -163,34 +185,52 @@ class DeepReasoner:
             (RUNG_DELIBERATE, dict(passes=3)),
             (RUNG_MCTS, None),  # None marker: use the MCTS strategy
         ]
-        for rung, kw in gen_rungs:
-            if rung > max_rung or time.monotonic() >= deadline:
+        candidates = [(r, kw) for r, kw in gen_rungs if entry <= r <= max_rung]
+        if not candidates:  # allocation narrower than the ceiling — keep one real rung
+            usable = [(r, kw) for r, kw in gen_rungs if r <= max_rung] or [gen_rungs[0]]
+            candidates = [usable[-1]]
+        for rung, kw in candidates:
+            if time.monotonic() >= deadline:
                 break
             # spend the extra self-consistency width on the rung this signature has learned to
             # reward (same maximum budget, aimed where it measurably pays off).
             samples = base_samples + (base_samples if rung == favoured else 0)
             cand = self._run_generation_rung(stimulus, rung, kw, samples)
             rungs_run.append(rung)
-            if cand is None:
-                continue
-            # a decisive tool need trumps chattier answers — respect it immediately, don't keep
-            # searching for a prettier conversational reply (exact/decisive beats search).
-            if getattr(cand, "kind", "respond") == "act" and getattr(cand, "tool", ""):
-                self._learn(sig, rung, 1.0)
-                return LadderResult(candidate=cand, winning_rung=rung, best_score=1.0,
-                                    rungs_run=rungs_run, scores=scores + [(rung, 1.0)])
-            score = self._score(stimulus, cand)
-            scores.append((rung, score))
-            if score > best_score or best_cand is None:
-                best_cand, best_score, best_rung = cand, score, rung
-            if not keep_best:
-                best_cand, best_score, best_rung = cand, score, rung
+            if cand is not None:
+                # a decisive tool need trumps chattier answers — respect it immediately, don't
+                # keep searching for a prettier conversational reply (exact/decisive beats search).
+                if getattr(cand, "kind", "respond") == "act" and getattr(cand, "tool", ""):
+                    self._learn(sig, rung, 1.0)
+                    result = LadderResult(candidate=cand, winning_rung=rung, best_score=1.0,
+                                          rungs_run=rungs_run, scores=scores + [(rung, 1.0)],
+                                          samples=base_samples, entry_rung=entry,
+                                          escalated=any(r > entry for r in rungs_run),
+                                          seconds_spent=time.monotonic() - start)
+                    self.last_result = result
+                    return result
+                score = self._score(stimulus, cand)
+                scores.append((rung, score))
+                if score > best_score or best_cand is None:
+                    best_cand, best_score, best_rung = cand, score, rung
+                if not keep_best:
+                    best_cand, best_score, best_rung = cand, score, rung
+                # EARLY EXIT — the metacognitive contract that makes an easy problem cheap:
+                # the verifier already cleared this turn's calibrated confidence target, so
+                # any further climbing would be spend without expected gain.
+                if target is not None and best_score >= float(target):
+                    early_exit = True
+                    break
+            if not allow_escalation:
+                break  # the allocation forbids climbing past the entry rung
 
         if best_cand is None:
             return None
 
         # --- refinement rung: N verified critique-improve cycles over the current best --- #
+        # Skipped when the target was already cleared (early exit) or escalation is forbidden.
         if (RUNG_REFINE <= max_rung and self.improver is not None
+                and not early_exit and allow_escalation
                 and time.monotonic() < deadline
                 and getattr(best_cand, "kind", "respond") == "respond"):
             refined = self._refine(stimulus, best_cand)
@@ -203,8 +243,11 @@ class DeepReasoner:
 
         self._learn(sig, best_rung, best_score)
         result = LadderResult(best_cand, best_rung, best_score, rungs_run, scores,
-                              samples=base_samples)
+                              samples=base_samples, entry_rung=entry, early_exit=early_exit,
+                              escalated=any(r > entry for r in rungs_run),
+                              seconds_spent=time.monotonic() - start)
         self._annotate(best_cand, result)
+        self.last_result = result
         return result
 
     # ------------------------------------------------------------------ #

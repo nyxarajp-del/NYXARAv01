@@ -119,6 +119,9 @@ class LLMReasoner:
         self.system = system or self._default_system()
         self._router = None      # Phase 2: lazily built when the confidence router is enabled
         self._smrouter = None    # Phase 2+: the primary self-model router (upfront triage)
+        # the turn's metacognitive ComputeBudget (mind/metacontrol.py), installed by the kernel
+        # each turn — its calibrated difficulty tightens the self-model router's SELF gate.
+        self.turn_plan: Any = None
         # NYXARA's OWN always-on learned brain — the real (not template) fallback when no external
         # LLM is configured. Lazily trained from her persona + grounding; compounds as it learns.
         self._self_brain: Optional[SelfBrain] = None
@@ -348,8 +351,10 @@ class LLMReasoner:
             return None
         try:
             if primary:
+                est = getattr(getattr(self, "turn_plan", None), "estimate", None)
+                difficulty = float(est.calibrated) if est is not None else None
                 res = self._ensure_smrouter().route_respond(
-                    stimulus, system=self._effective_system())
+                    stimulus, system=self._effective_system(), difficulty=difficulty)
             else:
                 if self._router is None:
                     from nyxara.mind.router import Router
