@@ -56,7 +56,12 @@ def test_consolidation_runs_over_memory():
 
 
 def test_foundry_off_by_default():
-    engine = GrowthEngine.from_core(_core_with_experience())
+    # The foundry forges real model dirs/manifests to disk, so it is sealed OFF under the hermetic
+    # TEST profile (config._harden_for_profile sets foundry.enabled=False). The forge gate lives on
+    # the growth engine (enable_foundry ← settings.foundry.enabled), so thread TEST settings into the
+    # engine — otherwise it silently falls back to the global (DEV) settings, where the foundry is on.
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    engine = GrowthEngine.from_core(_core_with_experience(), settings=settings)
     rep = engine.run()
     assert rep.foundry == []
 
