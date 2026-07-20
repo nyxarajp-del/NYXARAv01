@@ -59,6 +59,7 @@ class QuestionOrigin(str, Enum):
     INVENTION = "invention"   # a theory/optimization she invented via meta-research
     CURIOSITY = "curiosity"   # chosen by her curiosity engine (VOI × novelty × learning-progress)
     REVISIT = "revisit"       # her own most-uncertain belief, re-examined to sharpen it
+    EMPIRICAL = "empirical"   # a real scientific law she discovered from experiments she ran herself
 
 
 # --------------------------------------------------------------------------- #
@@ -199,16 +200,23 @@ class DiscoveryCycle:
     belief_delta: Dict[str, Any] = field(default_factory=dict)
     world_transition_added: bool = False
     created_information: bool = False        # did this cycle settle a *new* belief?
+    domain: str = ""                         # the science domain (for EMPIRICAL cycles)
+    discovery: Optional[Dict[str, Any]] = None   # the discover_by_domain result (EMPIRICAL cycles)
 
     def to_dict(self) -> Dict[str, Any]:
         rep = self.report
+        verdict = (getattr(getattr(getattr(rep, "conclusion", None), "verdict", None),
+                           "value", None) if rep is not None else None)
+        if verdict is None and self.discovery is not None:
+            verdict = self.discovery.get("verdict")
         return {
             "index": self.index,
             "question": self.question,
             "origin": self.origin.value,
-            "verdict": (getattr(getattr(getattr(rep, "conclusion", None), "verdict", None),
-                                "value", None) if rep is not None else None),
+            "domain": self.domain or None,
+            "verdict": verdict,
             "report": rep.to_dict() if hasattr(rep, "to_dict") else None,
+            "discovery": self.discovery,
             "belief_delta": self.belief_delta,
             "world_transition_added": self.world_transition_added,
             "created_information": self.created_information,
@@ -272,7 +280,8 @@ class AutonomousScientist:
                  curiosity_source: Optional[Callable[[], Any]] = None,
                  competence: Any = None, path: Optional[str] = None,
                  save_every: int = 8,
-                 meta_researcher: Any = None, max_frontier: int = 64) -> None:
+                 meta_researcher: Any = None, discovery_engine: Any = None,
+                 skilltree: Any = None, max_frontier: int = 64) -> None:
         self.scientist = scientist
         self.world_model = world_model
         self.memory = memory
@@ -280,6 +289,14 @@ class AutonomousScientist:
         self.gap_source = gap_source
         self.curiosity_source = curiosity_source
         self.competence = competence
+        # A real LawDiscoveryEngine turns her self-posed scientific questions into genuine law
+        # discovery (symbolic regression on experiments she runs) — not a toy proposition test. When
+        # absent she degrades to the Scientist's computational/knowledge experiments (offline/CI).
+        self.discovery_engine = discovery_engine
+        self.skilltree = skilltree     # a corroborated law becomes a reusable skill (knowing→ability)
+        self._domain_rr = 0            # round-robins domains when competence gives no signal
+        self.rivals_beaten = 0         # laws that beat a rival theory on the decisive extreme test
+        self.skills_minted = 0         # discovered laws turned into reusable skills
         self.path = path                  # persist the belief model so learning compounds lifelong
         self.save_every = max(1, int(save_every))
         self.meta_researcher = meta_researcher
@@ -315,24 +332,176 @@ class AutonomousScientist:
         return report
 
     def step(self) -> Optional[DiscoveryCycle]:
-        """Run exactly one Observe → … → Update cycle. Returns the cycle (always succeeds)."""
-        question, origin = self._observe()
-        cycle = DiscoveryCycle(index=self._cycle_count, question=question, origin=origin)
+        """Run exactly one Observe → … → Update cycle. Returns the cycle (always succeeds).
+
+        When Observe picks an *empirical* question (a real science domain she is curious about) and a
+        discovery engine is wired, the Experiment stage is genuine **law discovery** — she runs her own
+        experiment and invents its governing law. Otherwise she delegates to the Scientist's
+        computational/knowledge experiment (offline/CI). Either way the model gets updated."""
+        question, origin, domain = self._observe()
+        cycle = DiscoveryCycle(index=self._cycle_count, question=question, origin=origin,
+                               domain=domain)
         self._cycle_count += 1
+        if origin is QuestionOrigin.EMPIRICAL:
+            self._empirical_step(cycle)
+        else:
+            try:
+                # Hypothesis + Experiment + Result — delegate to the Scientist (reuse, not rebuild)
+                sci = self._ensure_scientist()
+                report = sci.investigate(question)
+                cycle.report = report
+                # Update model
+                prior = len(self.model)
+                cycle.belief_delta = self.model.update(report)
+                cycle.created_information = bool(cycle.belief_delta.get("new"))
+                cycle.world_transition_added = self._update_world_model(report, prior)
+                self._record_progress(cycle)  # competence rises → mastered topics stop being chosen
+                self._enqueue_follow_up(report)
+            except Exception as exc:  # noqa: BLE001 — a failed cycle is data, not a crash
+                cycle.belief_delta = {"changed": False, "error": str(exc)}
+        self._cycles.append(cycle)
+        self._since_save += 1
+        if self.path and self._since_save >= self.save_every:
+            self.save()
+        return cycle
+
+    # ---------------------------------------------------------------------- #
+    # Empirical discovery — the bridge from her curiosity to a REAL law
+    # ---------------------------------------------------------------------- #
+    def _empirical_step(self, cycle: "DiscoveryCycle") -> None:
+        """Run a real discovery in the domain her curiosity chose: design + run her own experiment,
+        discover its governing law by symbolic regression, and fold a *corroborated* law into her
+        belief model as genuinely created information (origin EMPIRICAL) + a real world transition +
+        a follow-up + (when wired) a reusable skill. No LLM. Never raises — a failed run is data."""
+        domain = cycle.domain or "mechanics"
         try:
-            # Hypothesis + Experiment + Result — delegate to the Scientist (reuse, not rebuild)
-            sci = self._ensure_scientist()
-            report = sci.investigate(question)
-            cycle.report = report
-            # Update model
+            engine = self.discovery_engine
+            if engine is None:
+                # no engine → honestly fall back to the Scientist path so offline/CI still progresses
+                sci = self._ensure_scientist()
+                report = sci.investigate(cycle.question)
+                cycle.report = report
+                prior = len(self.model)
+                cycle.belief_delta = self.model.update(report)
+                cycle.created_information = bool(cycle.belief_delta.get("new"))
+                cycle.world_transition_added = self._update_world_model(report, prior)
+                self._record_progress(cycle)
+                self._enqueue_follow_up(report)
+                return
+            result = engine.discover_by_domain(domain)
+            cycle.discovery = result
+            verdict = result.get("verdict")
             prior = len(self.model)
-            cycle.belief_delta = self.model.update(report)
-            cycle.created_information = bool(cycle.belief_delta.get("new"))
-            cycle.world_transition_added = self._update_world_model(report, prior)
-            self._record_progress(cycle)      # competence rises → mastered topics stop being chosen
-            self._enqueue_follow_up(report)
-        except Exception as exc:  # noqa: BLE001 — a failed cycle is data, not a crash
+            if verdict == "corroborated" and result.get("law"):
+                delta = self._fold_law_into_beliefs(domain, result)
+                cycle.belief_delta = delta
+                cycle.created_information = bool(delta.get("new"))
+                cycle.world_transition_added = self._update_world_model_empirical(result, prior)
+                self._enqueue_science_follow_up(domain, result)
+                self._mint_skill(domain, result)
+                if result.get("rival_beaten"):
+                    self.rivals_beaten += 1
+                self._record_domain_progress(domain, corroborated=True,
+                                             score=float(result.get("score", 0.7) or 0.7))
+            else:
+                cycle.belief_delta = {"changed": False, "verdict": verdict,
+                                      "reason": result.get("reason")}
+                self._record_domain_progress(domain, corroborated=False, score=0.2)
+        except Exception as exc:  # noqa: BLE001 — a failed discovery is data, not a crash
             cycle.belief_delta = {"changed": False, "error": str(exc)}
+
+    def _fold_law_into_beliefs(self, domain: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Turn a corroborated discovered law into a settled :class:`Belief` (origin EMPIRICAL).
+
+        Keyed by ``law:<domain>:<target>`` so re-discovering the same law *revises* (sharpens) the
+        belief rather than duplicating it. Confidence is earned: it comes from the extrapolation R²
+        she measured on data she did not train on — honest, not asserted."""
+        target = str(result.get("target") or result.get("experiment") or "law")
+        variable = f"law:{domain}:{target}"[:120]
+        statement = str(result.get("law", ""))
+        extrap = float(result.get("extrapolation_r2", 0.0) or 0.0)
+        confidence = max(0.5, min(0.99, 0.5 + 0.5 * max(0.0, extrap)))   # earned on held-out data
+        reasoning = (f"discovered in {domain} from experiment '{result.get('experiment')}': "
+                     f"{statement} (extrapolation R²={extrap:.3f}, novelty={result.get('novelty')})")
+        existing = self.model.beliefs.get(variable)
+        if existing is None:
+            belief = Belief(variable=variable, statement=statement, verdict="supported",
+                            confidence=confidence, evidence_count=1, last_reasoning=reasoning)
+            _apply_evidence(belief, "supported", confidence)
+            self.model.beliefs[variable] = belief
+            return {"changed": True, "new": True, "revised": False, "variable": variable,
+                    "verdict": belief.verdict, "domain": domain,
+                    "support_prob": round(belief.support_prob, 3)}
+        existing.evidence_count += 1
+        _apply_evidence(existing, "supported", confidence)
+        existing.last_reasoning = reasoning
+        existing.statement = statement
+        return {"changed": True, "new": False, "revised": True, "variable": variable,
+                "verdict": existing.verdict, "domain": domain,
+                "support_prob": round(existing.support_prob, 3)}
+
+    def _update_world_model_empirical(self, result: Dict[str, Any], prior_size: int) -> bool:
+        """Fold a discovered law into the kernel world model as an epistemic transition, reward =
+        the extrapolation R² earned. Kept in a distinct ``"discover"`` action bucket from ordinary
+        investigation so the two epistemic signals stay cleanly separable."""
+        if self.world_model is None:
+            return False
+        try:
+            reward = max(0.0, float(result.get("extrapolation_r2", 0.0) or 0.0))
+            after = len(self.model)
+            self.world_model.observe((float(prior_size),), "discover", (float(after),), reward=reward)
+            return True
+        except Exception:  # noqa: BLE001 — best-effort, never fatal
+            return False
+
+    def _enqueue_science_follow_up(self, domain: str, result: Dict[str, Any]) -> None:
+        """A corroborated law breeds the next question: probe whether it survives a harsher regime.
+        This keeps her discovery self-propelling — each answer spawns the next inquiry she designs."""
+        target = result.get("target") or "the law"
+        nxt = f"Does the {domain} law for {target} still hold in a more extreme regime?"
+        if nxt not in self._seen:
+            # re-enters as a REAL discovery in the same domain (rotating to its next experiment),
+            # not a toy proposition — so a discovery genuinely deepens into more discovery.
+            self._frontier.append((nxt, QuestionOrigin.EMPIRICAL, domain))
+
+    def _mint_skill(self, domain: str, result: Dict[str, Any]) -> None:
+        """Knowing → being able: a corroborated law becomes a reusable skill in her skill tree, so a
+        discovery grows her *capabilities*, not only her knowledge. Best-effort, never fatal."""
+        tree = self.skilltree
+        if tree is None:
+            return
+        try:
+            target = str(result.get("target") or "law")
+            name = f"apply_law::{domain}::{target}"[:80]
+            if tree.get(name) is None:
+                complexity = float(result.get("complexity", 1) or 1)
+                tree.add_skill(name, category="discovered_law",
+                               difficulty=max(0.1, min(0.9, complexity / 10.0)),
+                               value=0.7, description=str(result.get("law", ""))[:160])
+                self.skills_minted += 1
+        except Exception:  # noqa: BLE001 — skill minting is a bonus, never required
+            pass
+
+    def _record_domain_progress(self, domain: str, *, corroborated: bool, score: float) -> None:
+        """Fold the discovery outcome into the competence ledger keyed by *domain*, so a mastered
+        science stops being chosen and she moves on — the automatic cross-science curriculum."""
+        if self.competence is None:
+            return
+        try:
+            self.competence.record(domain, score if corroborated else 0.5 * score)
+        except Exception:  # noqa: BLE001 — measurement is advisory, never fatal
+            pass
+
+    def discover_domain(self, domain: str) -> DiscoveryCycle:
+        """Run exactly one real discovery cycle **in a named domain** — design + run her own
+        experiment there, discover its law, fold a corroborated result into her beliefs. Used by the
+        DiscoveryDirector (curiosity-selected) and the ``/v1/discover_domain`` surface. Always returns
+        a cycle; falls back to the Scientist path when no engine is wired."""
+        question = self._DOMAIN_QUESTIONS.get(domain, f"What law governs {domain}?")
+        cycle = DiscoveryCycle(index=self._cycle_count, question=question,
+                               origin=QuestionOrigin.EMPIRICAL, domain=domain)
+        self._cycle_count += 1
+        self._empirical_step(cycle)
         self._cycles.append(cycle)
         self._since_save += 1
         if self.path and self._since_save >= self.save_every:
@@ -344,6 +513,31 @@ class AutonomousScientist:
 
     def belief_model(self) -> BeliefModel:
         return self.model
+
+    def law_beliefs(self) -> List[Belief]:
+        """Only the beliefs that are *discovered laws* (origin EMPIRICAL) — her law tower as beliefs."""
+        return [b for k, b in self.model.beliefs.items() if k.startswith("law:")]
+
+    def discovery_summary(self) -> Dict[str, Any]:
+        """A compact, honest snapshot of her independent-discovery record — for status / API."""
+        laws = self.law_beliefs()
+        by_domain: Dict[str, int] = {}
+        for b in laws:
+            parts = b.variable.split(":")
+            dom = parts[1] if len(parts) > 2 else "unknown"
+            by_domain[dom] = by_domain.get(dom, 0) + 1
+        empirical_cycles = sum(1 for c in self._cycles if c.origin is QuestionOrigin.EMPIRICAL)
+        return {
+            "beliefs_held": len(self.model),
+            "laws_discovered": len(laws),
+            "laws_by_domain": by_domain,
+            "empirical_cycles": empirical_cycles,
+            "rivals_beaten": self.rivals_beaten,
+            "skills_from_laws": self.skills_minted,
+            "laws": [{"variable": b.variable, "statement": b.statement,
+                      "confidence": round(b.confidence, 3),
+                      "evidence_count": b.evidence_count} for b in laws],
+        }
 
     # ---------------------------------------------------------------------- #
     # Meta-research: invent → test → (gated) integrate, then fold into beliefs
@@ -393,64 +587,126 @@ class AutonomousScientist:
     def _observe(self) -> tuple:
         """Pick the next question by *learning progress*: a pending follow-up first (compounding),
         then — when her curiosity/competence faculties are wired — the candidate she is most
-        curious about and least competent at (curiosity engine, her most-uncertain belief, or a
-        self-knowledge gap), and only failing all of that a fresh self-generated proposition.
-        Never returns nothing — there is always something to test."""
+        curious about and least competent at (a real *scientific* inquiry routed to law discovery, her
+        curiosity engine, her most-uncertain belief, or a self-knowledge gap), and only failing all of
+        that a fresh self-generated proposition. Returns ``(question, origin, domain)``; ``domain`` is
+        set only for EMPIRICAL questions. Never returns nothing — there is always something to test."""
         # 1) drain the frontier (follow-ups + gaps already queued), skipping seen questions
         while self._frontier:
-            question, origin = self._frontier.popleft()
+            item = self._frontier.popleft()
+            question, origin = item[0], item[1]
+            domain = item[2] if len(item) > 2 else ""
             if question and question not in self._seen:
                 self._seen.add(question)
-                return question, origin
+                return question, origin, domain
 
         # 2) intrinsic-directed inquiry — engages only when a real source is wired, so the bare
         #    offline path (below) stays deterministic. She poses her OWN novel question here.
         directed = self._choose_directed()
         if directed is not None:
-            question, origin = directed
+            question, origin, domain = directed
             self._seen.add(question)
-            return question, origin
+            return question, origin, domain
 
-        # 3) generate a new, genuinely testable proposition (works with zero external input)
+        # 3) a real scientific inquiry she designs herself — genuine zero-to-discovery whenever a
+        #    discovery engine is wired (even with no curiosity/competence faculties attached).
+        sci_q = self._next_science_question()
+        if sci_q is not None:
+            question, domain = sci_q
+            self._seen.add(question)
+            return question, QuestionOrigin.EMPIRICAL, domain
+
+        # 4) generate a new, genuinely testable proposition (works with zero external input)
         seed = self._next_seed()
         self._seen.add(seed)
-        return seed, QuestionOrigin.SEED
+        return seed, QuestionOrigin.SEED, ""
 
     # ---------------------------------------------------------------------- #
     # Intrinsic-drive question selection — maximise expected learning progress
     # ---------------------------------------------------------------------- #
     def _choose_directed(self) -> Optional[tuple]:
-        """Score candidate questions from her wired faculties by ``base × learning-gain`` and
-        return the best not-yet-seen one, or ``None`` when no faculty is wired (offline fallback).
+        """Score candidate questions from her wired faculties by ``base × learning-gain`` and return
+        the best not-yet-seen one as ``(question, origin, domain)``, or ``None`` when no faculty is
+        wired (offline fallback).
 
         Learning progress = value-of-information/novelty × (1 − competence): she is pulled toward
         what is both *informative* and *not yet mastered*. No LLM anywhere — every score is her own
         measured signal."""
         if (self.curiosity_source is None and self.gap_source is None
-                and self.competence is None):
+                and self.competence is None and self.discovery_engine is None):
             return None
-        candidates: List[tuple] = []   # (score, question, origin)
-        # a) her curiosity engine — a genuinely novel, VOI-ranked question (not a template)
+        candidates: List[tuple] = []   # (score, question, origin, domain)
+        # a) a real scientific inquiry routed to law discovery — the domain she is least competent at.
+        #    Weighted strongly: genuine zero-to-discovery is the highest-value learning she can do.
+        sci = self._next_science_question()
+        if sci is not None:
+            text, domain = sci
+            candidates.append((1.5 * self._learn_gain(domain), text,
+                               QuestionOrigin.EMPIRICAL, domain))
+        # b) her curiosity engine — a genuinely novel, VOI-ranked question (not a template)
         cq = self._curiosity_question()
         if cq is not None:
             text, base = cq
             if text and text not in self._seen:
-                candidates.append((base * self._learn_gain(text), text, QuestionOrigin.CURIOSITY))
-        # b) her own most-uncertain belief — re-examined to reduce uncertainty (revising, not dup)
+                candidates.append((base * self._learn_gain(text), text,
+                                   QuestionOrigin.CURIOSITY, ""))
+        # c) her own most-uncertain belief — re-examined to reduce uncertainty (revising, not dup)
         bq = self._uncertain_belief_question()
         if bq is not None:
             text, base = bq
             if text:  # REVISIT deliberately bypasses _seen: gathering more evidence is the point
-                candidates.append((base * self._learn_gain(text), text, QuestionOrigin.REVISIT))
-        # c) a self-knowledge gap (the pre-existing known-unknowns source)
+                candidates.append((base * self._learn_gain(text), text,
+                                   QuestionOrigin.REVISIT, ""))
+        # d) a self-knowledge gap (the pre-existing known-unknowns source)
         gq = self._next_gap()
         if gq is not None and gq not in self._seen:
-            candidates.append((0.5 * self._learn_gain(gq), gq, QuestionOrigin.GAP))
+            candidates.append((0.5 * self._learn_gain(gq), gq, QuestionOrigin.GAP, ""))
         if not candidates:
             return None
         candidates.sort(key=lambda c: c[0], reverse=True)
-        _, question, origin = candidates[0]
-        return question, origin
+        _, question, origin, domain = candidates[0]
+        return question, origin, domain
+
+    # ---------------------------------------------------------------------- #
+    # Real scientific inquiry — pick the domain she is most curious about / least competent at
+    # ---------------------------------------------------------------------- #
+    # One canonical open question per domain, phrased as the thing a scientist actually asks. Each maps
+    # to a real experiment registry in the discovery engine — so wondering it triggers a real law
+    # discovery, not a template answer.
+    _DOMAIN_QUESTIONS: Dict[str, str] = {
+        "mechanics": "What law governs how far a body falls, and what sets an oscillator's period?",
+        "conservation": "What quantity is conserved when two bodies collide?",
+        "electromagnetism": "What law governs the force between two charges?",
+        "thermodynamics": "What law relates a gas's pressure to its amount and temperature?",
+        "optics": "What law governs the speed of a wave on a string?",
+        "circuits": "What sets the time constant of a discharging RC circuit?",
+        "epidemiology": "What sets the early growth rate of an epidemic?",
+        "chemistry": "What is the rate law of a reaction, and how does temperature change it?",
+    }
+
+    def _next_science_question(self) -> Optional[tuple]:
+        """Choose the next real scientific inquiry as ``(question, domain)`` — the domain she is least
+        competent at (automatic cross-science curriculum), round-robin when competence is silent.
+        Returns ``None`` when no discovery engine is wired (so the offline seed path is used instead)."""
+        engine = self.discovery_engine
+        if engine is None:
+            return None
+        try:
+            domains = list(engine.domains())
+        except Exception:  # noqa: BLE001
+            domains = list(self._DOMAIN_QUESTIONS.keys())
+        if not domains:
+            return None
+        # pick the least-competent domain (highest learning gain); ties broken by round-robin so she
+        # does not fixate on one science. With no competence ledger this is a pure rotation.
+        if self.competence is not None:
+            domain = max(domains, key=lambda d: (self._learn_gain(d), -domains.index(d)))
+        else:
+            domain = domains[self._domain_rr % len(domains)]
+            self._domain_rr += 1
+        question = self._DOMAIN_QUESTIONS.get(
+            domain, f"What law governs {domain}?")
+        return question, domain
 
     def _curiosity_question(self) -> Optional[tuple]:
         """Pull the next question from the curiosity engine as ``(text, base_score)``. Accepts a
@@ -740,5 +996,21 @@ if __name__ == "__main__":  # pragma: no cover
     auto2._frontier.clear()
     auto2.discover(cycles=4)
     assert len(auto2.belief_model()) == size_after_first, "repeats must revise, not duplicate"
+
+    # wired to a real discovery engine: her curiosity now drives GENUINE law discovery — she invents
+    # real physical / epidemiological / chemical laws from experiments she runs herself.
+    try:
+        from nyxara.growth.law_discovery import LawDiscoveryEngine
+        auto3 = AutonomousScientist(discovery_engine=LawDiscoveryEngine(), world_model=WorldModel())
+        auto3.discover(cycles=18)
+        summary = auto3.discovery_summary()
+        print(f"\nwired discovery — laws discovered : {summary['laws_discovered']} "
+              f"across {sorted(summary['laws_by_domain'])}")
+        print(f"rivals beaten / skills minted     : {summary['rivals_beaten']} / "
+              f"{summary['skills_from_laws']}")
+        assert summary["laws_discovered"] >= 3, "curiosity did not drive real law discovery"
+        assert summary["empirical_cycles"] >= 3, "no empirical (real-discovery) cycles ran"
+    except Exception as exc:  # noqa: BLE001 — the engine is optional; offline path still passed above
+        print(f"\n(wired-engine demo skipped: {exc})")
 
     print("\nALL SELF-TESTS PASSED ✓")

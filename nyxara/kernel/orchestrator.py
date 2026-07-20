@@ -686,6 +686,22 @@ class NyxaraCore:
         # survivors into a self-extending law tower — with no LLM in the loop. Built after the
         # faculties (causal model, knowledge, memory) it composes. Gated by ``law_discovery``.
         self.law_discovery = self._build_law_discovery() if enable_growth else None
+        # Wire the Autonomous Scientist to the real discovery engine now that it exists (it is built
+        # earlier so idle stepping can use it): her *own* curiosity-chosen scientific questions now
+        # route to genuine law discovery (symbolic regression on experiments she runs) instead of toy
+        # propositions — zero-to-discovery, no LLM. Best-effort back-fill.
+        if self.autonomous_scientist is not None and self.law_discovery is not None:
+            try:
+                self.autonomous_scientist.discovery_engine = self.law_discovery
+                if getattr(self.autonomous_scientist, "skilltree", None) is None:
+                    self.autonomous_scientist.skilltree = getattr(self, "skilltree", None)
+            except Exception:  # noqa: BLE001 — wiring is best-effort, never fatal to boot
+                pass
+        # Level 10f — the Discovery Director: on every idle beat it decides which act of discovery is
+        # worth the most right now (experiment in her least-mastered science, recover dynamics,
+        # discover an invariant, unify held laws, or invent via meta-research) and does that one —
+        # replacing the fixed experiment rotation with one principled, self-directed scheduler. No LLM.
+        self.discovery_director = self._build_discovery_director() if enable_growth else None
         # Engineering Foundry: the second half of "magic engineering". She *uses* the laws she
         # invents (law_discovery) + the real physics sandboxes (nyxara.sim) to DESIGN, validate and
         # iteratively UPGRADE real device concepts — a portfolio multi-objective optimiser over
@@ -3254,8 +3270,32 @@ class NyxaraCore:
                 curiosity_source=self._latest_curiosity_question,
                 competence=self._ensure_competence_ledger(),
                 meta_researcher=getattr(self, "meta_researcher", None),
+                # a corroborated law becomes a reusable skill (knowing → being able). The discovery
+                # engine is back-filled after law_discovery is built (it is constructed later).
+                skilltree=getattr(self, "skilltree", None),
             )
         except Exception:  # noqa: BLE001 — autonomous discovery is a capability, never required
+            return None
+
+    def _build_discovery_director(self) -> Any:
+        """Level 10f — DiscoveryDirector: the curiosity-driven scheduler over her discovery acts.
+
+        Built after ``law_discovery`` (required) and the autonomous scientist (routed through so a
+        discovery updates her beliefs / world model / skills). Oversight-gated at step time so a
+        paused / scrammed mind discovers nothing of its own accord."""
+        engine = getattr(self, "law_discovery", None)
+        if engine is None:
+            return None
+        try:
+            from nyxara.growth.discovery_director import DiscoveryDirector
+            return DiscoveryDirector(
+                engine=engine,
+                scientist=getattr(self, "autonomous_scientist", None),
+                competence=self._ensure_competence_ledger(),
+                meta_researcher=getattr(self, "meta_researcher", None),
+                oversight=getattr(self, "oversight", None),
+            )
+        except Exception:  # noqa: BLE001 — the director is a capability, never required
             return None
 
     def _latest_curiosity_question(self) -> Any:
@@ -7111,12 +7151,41 @@ class NyxaraCore:
                             salience=0.62)
             except Exception:  # noqa: BLE001
                 pass
-        # 4f.3) Frontier Law Discovery — on idle she runs her own experiments in the physics
-        #       sandbox (or a self-generated data round) and *invents a new empirical/physical law*
-        #       (no LLM in the loop). Heavier than one discovery cycle, so it is throttled to every
-        #       few idle ticks and rotates through her science domains. Oversight-gated — a paused/
-        #       scrammed mind invents nothing of its own accord.
-        if self.law_discovery is not None:
+        # 4f.3) Frontier Law Discovery — on idle she runs her own experiments and *invents new
+        #       laws* (no LLM in the loop). When the Discovery Director is wired she DECIDES which act
+        #       of discovery is worth most this beat (experiment in her least-mastered science, recover
+        #       dynamics, discover an invariant, unify held laws, or invent via meta-research) —
+        #       curiosity-selected, not a fixed rotation. Throttled and oversight-gated (inside step()).
+        if getattr(self, "discovery_director", None) is not None:
+            try:
+                tick = getattr(self, "_law_idle_count", 0) + 1
+                self._law_idle_count = tick
+                if tick % 7 == 0:
+                    beat = self.discovery_director.step()   # oversight-gated within the director
+                    if beat is not None:
+                        out = beat.outcome or {}
+                        act = beat.action.value
+                        if act == "experiment" and out.get("verdict") == "corroborated":
+                            report["laws_discovered"] = report.get("laws_discovered", 0) + 1
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"law [{str(out.get('domain', ''))[:12]}]: "
+                                f"{str(out.get('law', ''))[:36]}", salience=0.64)
+                        elif act in ("dynamics", "invariant") and out.get("discovered"):
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"{act} discovered ×{out.get('discovered')}", salience=0.63)
+                        elif act == "unify" and out.get("unifications"):
+                            self.mind.record(
+                                ThoughtKind.INFERENCE,
+                                f"unified {out.get('unifications')} laws", salience=0.6)
+                        s = self.discovery_director.summary()
+                        report["discovery_beats"] = s.get("beats_run", 0)
+                        report["laws_held"] = s.get("laws_held", 0)
+                        report["rivals_beaten"] = s.get("rivals_beaten", 0)
+            except Exception:  # noqa: BLE001
+                pass
+        elif self.law_discovery is not None:
             try:
                 tick = getattr(self, "_law_idle_count", 0) + 1
                 self._law_idle_count = tick
@@ -7970,6 +8039,43 @@ class NyxaraCore:
                 return {"topic": topic, "error": str(exc)}
         return {"topic": topic, "error": "meta_researcher unavailable"}
 
+    def discoveries(self) -> Dict[str, Any]:
+        """Her independent-discovery record (best-effort): the law tower she built from her own
+        curiosity — laws by domain, rivals beaten on decisive tests, skills minted from laws, and the
+        Discovery Director's cumulative tallies. Pure read; touches nothing."""
+        out: Dict[str, Any] = {}
+        if self.autonomous_scientist is not None:
+            try:
+                out.update(self.autonomous_scientist.discovery_summary())
+            except Exception as exc:  # noqa: BLE001
+                out["error"] = str(exc)
+        if getattr(self, "discovery_director", None) is not None:
+            try:
+                out["director"] = self.discovery_director.summary()
+            except Exception:  # noqa: BLE001
+                pass
+        if getattr(self, "law_discovery", None) is not None:
+            try:
+                out["law_tower"] = [law.expression for law in self.law_discovery.known_laws()[-12:]]
+            except Exception:  # noqa: BLE001
+                pass
+        if not out:
+            out["error"] = "autonomous discovery unavailable"
+        return out
+
+    def discover_domain(self, domain: str) -> Dict[str, Any]:
+        """Run one real discovery in a named science she is pointed at: she poses the question, runs
+        her own experiment, and invents the governing law (best-effort). Zero-to-discovery, no LLM."""
+        if self.autonomous_scientist is None:
+            return {"domain": domain, "error": "autonomous_scientist unavailable"}
+        if getattr(self.autonomous_scientist, "discovery_engine", None) is None:
+            return {"domain": domain, "error": "discovery engine unavailable"}
+        try:
+            cycle = self.autonomous_scientist.discover_domain(domain)
+            return cycle.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"domain": domain, "error": str(exc)}
+
     def strategize(self, problem: str) -> Dict[str, Any]:
         """Analyse ``problem`` as a strategist (best-effort).
 
@@ -8678,6 +8784,19 @@ class NyxaraCore:
         if self.autonomous_scientist is not None:
             rep["discoveries"] = len(self.autonomous_scientist.all_cycles())
             rep["beliefs_held"] = len(self.autonomous_scientist.belief_model())
+            try:
+                ds = self.autonomous_scientist.discovery_summary()
+                rep["laws_by_domain"] = ds.get("laws_by_domain", {})
+                rep["laws_from_curiosity"] = ds.get("laws_discovered", 0)
+                rep["rivals_beaten"] = ds.get("rivals_beaten", 0)
+                rep["skills_from_laws"] = ds.get("skills_from_laws", 0)
+            except Exception:  # noqa: BLE001
+                pass
+        if getattr(self, "discovery_director", None) is not None:
+            try:
+                rep["discovery_director"] = self.discovery_director.summary()
+            except Exception:  # noqa: BLE001
+                pass
         if self.eureka is not None:
             rep["breakthroughs"] = int(getattr(self.eureka, "total_breakthroughs", 0))
         if getattr(self, "law_discovery", None) is not None:
