@@ -112,6 +112,8 @@ commands:
   /investigate <q>   reason like a scientist: hypothesis → experiment → conclusion
   /selfcorrect <goal> pursue a goal with self-correction: detect wrong/stuck → experiment to fill the gap → abstain honestly
   /discover [n]      autonomous discovery: n self-driven observe→…→update-model cycles
+  /discoveries       her independent-discovery record: laws by domain, rivals beaten, skills minted
+  /discover-domain <d> run her own experiment in a science and invent its law (epidemiology|chemistry|…)
   /eureka [n]        truly novel problem solving: invent → prove → keep novel+interesting (n gens)
   /intuit <puzzle>   non-algorithmic creative leap (no LLM): guess before proof, then self-verify
   /discover-law [dom] invent a NEW empirical/physical law from data & self-run experiments (no LLM); dom: dynamics|invariant|data
@@ -230,6 +232,17 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 3
         print(json.dumps(core.discover(n), indent=2, default=str))
+    elif cmd in ("discoveries", "law-tower", "discovery-record"):
+        # /discoveries             -> her independent-discovery record: laws by domain, rivals beaten
+        print(json.dumps(core.discoveries(), indent=2, default=str))
+    elif cmd in ("discover-domain", "discover_domain"):
+        # /discover-domain epidemiology  -> run her own experiment in a science and invent its law
+        if not arg:
+            print("usage: /discover-domain <domain>  "
+                  "(mechanics|conservation|electromagnetism|thermodynamics|optics|circuits|"
+                  "epidemiology|chemistry)")
+        else:
+            print(json.dumps(core.discover_domain(arg.strip()), indent=2, default=str))
     elif cmd == "eureka":
         try:
             n = int(arg) if arg else 4

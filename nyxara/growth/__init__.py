@@ -23,6 +23,11 @@ from nyxara.growth.autonomous_scientist import (
     DiscoveryReport,
     QuestionOrigin,
 )
+from nyxara.growth.discovery_director import (
+    DiscoveryAction,
+    DiscoveryDirector,
+    DirectorBeat,
+)
 from nyxara.growth.meta_engine import (
     MetaDimension,
     MetaImprovement,
@@ -211,6 +216,9 @@ from nyxara.growth.self_correction import (
 )
 
 __all__ = [
+    "DiscoveryDirector",
+    "DiscoveryAction",
+    "DirectorBeat",
     "AutonomousResearcher",
     "ResearchReport",
     "InfiniteExplorer",

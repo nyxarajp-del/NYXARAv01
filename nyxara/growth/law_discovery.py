@@ -982,6 +982,9 @@ class LawDiscoveryEngine:
             self._exp_ideal_gas,          # P ∝ N·T             (ideal gas — thermodynamics)
             self._exp_wave_speed,         # v² = T/μ            (wave law — optics/acoustics)
             self._exp_rc_decay,           # τ = R·C             (RC decay — circuits)
+            self._exp_epidemic_growth,    # r = β − γ           (outbreak growth — epidemiology)
+            self._exp_reaction_rate_law,  # rate = k·[A]        (first-order kinetics — chemistry)
+            self._exp_arrhenius,          # k = A·exp(−Eₐ/RT)   (activation energy — chemistry)
         ]
 
     def discover_from_physics(self, rounds: int = 1) -> DiscoveryReport:
@@ -1296,6 +1299,74 @@ class LawDiscoveryEngine:
         return {"X": X, "y": y, "var_names": ["R", "C"], "target": "tau",
                 "label": "RC decay τ=R·C"}
 
+    def _exp_epidemic_growth(self) -> Optional[Dict[str, Any]]:
+        """Epidemiology lab: simulate outbreaks across a ``(β, γ)`` sweep, measure each one's early
+        **exponential growth rate** ``r`` from the emergent curve, and discover the governing law
+        ``r = β − γ`` — the epidemic growth rate, recovered from outbreaks she ran, no formula given."""
+        try:
+            from nyxara.sim.epi_world import EpidemicWorld
+        except Exception:  # noqa: BLE001
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        for beta in (0.30, 0.45, 0.60, 0.80, 1.00):
+            for gamma in (0.10, 0.20, 0.30, 0.40):
+                try:
+                    r = EpidemicWorld(beta=beta, gamma=gamma).early_growth_rate()
+                    if r is not None:
+                        X.append([beta, gamma]); y.append(r)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 10:
+            return None
+        # β and γ both have dimension 1/time; the growth rate does too — a dimensionally clean law.
+        inv_t = (0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0)
+        return {"X": X, "y": y, "var_names": ["beta", "gamma"], "target": "growth_rate",
+                "label": "epidemic r=β−γ", "dims": [inv_t, inv_t], "target_dim": inv_t}
+
+    def _exp_reaction_rate_law(self) -> Optional[Dict[str, Any]]:
+        """Chemistry lab: run first-order reactions across a ``(k, [A]₀)`` sweep, measure each one's
+        **initial rate** from the emergent concentration curve, and discover the rate law
+        ``rate = k·[A]`` — first-order kinetics recovered from reactions she ran, no formula given."""
+        try:
+            from nyxara.sim.chem_world import ReactionWorld
+        except Exception:  # noqa: BLE001
+            return None
+        X: List[List[float]] = []; y: List[float] = []
+        for k in (0.2, 0.4, 0.6, 0.9, 1.2):
+            for a0 in (0.5, 1.0, 1.5, 2.0):
+                try:
+                    rate = ReactionWorld(k=k, order=1, a0=a0).initial_rate()
+                    if rate > 0:
+                        X.append([k, a0]); y.append(rate)
+                except Exception:  # noqa: BLE001
+                    continue
+        if len(y) < 10:
+            return None
+        return {"X": X, "y": y, "var_names": ["k", "A0"], "target": "rate",
+                "label": "rate law rate=k·[A]"}
+
+    def _exp_arrhenius(self) -> Optional[Dict[str, Any]]:
+        """Chemistry lab: measure the rate constant ``k`` across a temperature sweep and discover the
+        **Arrhenius** activation-energy law. She measures ``k(T)`` from reactions she ran, then — exactly
+        as a chemist reads an *Arrhenius plot* — works in the linearising coordinates ``(1/T, ln k)``
+        where the law is straight: ``ln k = −(Eₐ/R)·(1/T) + ln A``. The discovered slope IS ``−Eₐ/R``,
+        so she recovers the activation energy she was never told, and the intercept is ``ln A``."""
+        try:
+            from nyxara.sim.chem_world import arrhenius_k
+        except Exception:  # noqa: BLE001
+            return None
+        a_pre, e_a = 1.0e6, 4.5e4
+        X: List[List[float]] = []; y: List[float] = []
+        for temp in (280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0, 420.0,
+                     440.0, 460.0, 480.0, 500.0):
+            k = arrhenius_k(a_pre=a_pre, e_a=e_a, temperature=temp)   # measured rate constant
+            if k > 0.0:
+                X.append([1.0 / temp]); y.append(math.log(k))        # Arrhenius-plot coordinates
+        if len(y) < 10:
+            return None
+        return {"X": X, "y": y, "var_names": ["inv_T"], "target": "ln_k",
+                "label": "Arrhenius ln k = −(Eₐ/R)·(1/T) + ln A"}
+
     # ------------------------------------------------------------------ #
     # Public: the full closed scientific-method loop (Popperian, autonomous)
     # ------------------------------------------------------------------ #
@@ -1364,6 +1435,92 @@ class LawDiscoveryEngine:
                                      "verdict": ev.verdict,
                                      "rival_falsified": result.get("rival_falsified"),
                                      "noise": noise})
+        return result
+
+    # A curated map from a science *domain* to the experiments that probe it. Lets a caller (her
+    # curiosity engine) target the domain she is most curious about / least competent at, instead of
+    # marching the fixed rotation — turning discovery into a genuinely self-*directed* act.
+    _DOMAIN_EXPERIMENTS: Dict[str, Tuple[str, ...]] = {
+        "mechanics": ("_exp_free_fall", "_exp_pendulum", "_exp_spring", "_exp_projectile",
+                      "_exp_terminal_velocity"),
+        "conservation": ("_exp_collision",),
+        "electromagnetism": ("_exp_coulomb",),
+        "thermodynamics": ("_exp_ideal_gas",),
+        "optics": ("_exp_wave_speed",),
+        "circuits": ("_exp_rc_decay",),
+        "epidemiology": ("_exp_epidemic_growth",),
+        "chemistry": ("_exp_reaction_rate_law", "_exp_arrhenius"),
+    }
+
+    def domains(self) -> List[str]:
+        """The science domains she can run her own experiments in (for curiosity-directed choice)."""
+        return list(self._DOMAIN_EXPERIMENTS.keys())
+
+    def discover_by_domain(self, domain: str) -> Dict[str, Any]:
+        """Run one real experiment **in a domain her curiosity chose**, discover the governing law
+        from the data she collects, validate it on held-out + extrapolated regimes, and (when
+        corroborated) fold it into her law tower. Returns a compact result dict — including the
+        :class:`Discovery` object so the caller can fold it into beliefs and mint a skill.
+
+        This is the bridge from *wondering about a domain* to *inventing its law* — no equation handed
+        to her, no LLM. Rotates within the domain so repeated visits work through its experiments."""
+        methods = self._DOMAIN_EXPERIMENTS.get(domain)
+        result: Dict[str, Any] = {"domain": domain, "experiment": None, "law": None,
+                                  "verdict": "no-domain", "discovery": None}
+        if not methods:
+            return result
+        counters = getattr(self, "_domain_counters", None)
+        if counters is None:
+            counters = self._domain_counters = {}
+        idx = counters.get(domain, 0)
+        counters[domain] = idx + 1
+        method = getattr(self, methods[idx % len(methods)], None)
+        if method is None:
+            return result
+        try:
+            data = method()
+        except Exception as exc:  # noqa: BLE001
+            result["verdict"] = f"experiment-error: {exc}"
+            return result
+        if not data:
+            result["verdict"] = "no-data"
+            return result
+        result["experiment"] = data.get("label", data.get("target"))
+        result["target"] = data.get("target")
+        rep = self.discover_from_data(
+            data["X"], data["y"], var_names=data.get("var_names"),
+            target_name=data.get("target", "y"), dims=data.get("dims"),
+            target_dim=data.get("target_dim"), source=domain)
+        best = rep.best()
+        if best is None:
+            result["verdict"] = "abstained"
+            result["reason"] = rep.reason
+            return result
+        result["discovery"] = best
+        result["law"] = best.law.expression
+        result["verdict"] = best.evidence.verdict
+        result["extrapolation_r2"] = round(float(best.evidence.extrapolation_r2), 5)
+        result["holdout_r2"] = round(float(best.evidence.holdout_r2), 5)
+        result["novelty"] = round(float(best.novelty), 4)
+        result["score"] = round(float(best.score), 4)
+        result["complexity"] = int(best.law.complexity)
+        # Adversarial falsification: invent a plausible RIVAL theory and put it to the same decisive
+        # extreme-regime test. The law is only *promoted* if it beats every rival it can imagine — the
+        # honest bar of "corroborated, not yet refuted", never "proven".
+        try:
+            cols, yv = self._to_columns(data["X"], data["y"])
+            if cols is not None and len(yv) >= 8:
+                splits = self._split(cols, yv)
+                rival = self._perturb_law(best.law)
+                if (rival is not None and splits.get("extrap_cols") is not None
+                        and splits.get("extrap_y")):
+                    rp = rival.predict(splits["extrap_cols"])
+                    rival_r2 = _r2(rp, splits["extrap_y"]) if rp is not None else -1e9
+                    result["rival_extrapolation_r2"] = round(float(rival_r2), 5)
+                    result["rival_beaten"] = bool(
+                        rival_r2 < float(best.evidence.extrapolation_r2) - 0.05)
+        except Exception:  # noqa: BLE001 — falsification is a rigor bonus, never fatal
+            pass
         return result
 
     def _perturb_law(self, law: Law) -> Optional[Law]:

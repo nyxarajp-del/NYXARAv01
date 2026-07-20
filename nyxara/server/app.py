@@ -21,6 +21,10 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/generalize``        — open-world generalization: ``{budget?}`` → crack a hidden,
   never-before-seen alien machine from first principles (observe→hypothesize→test→model).
 * ``POST /v1/meta_discover``     — meta-research: ``{topic}`` → invent → test → (gated) integrate.
+* ``GET  /v1/discoveries``       — her independent-discovery record: the law tower she built from
+  her own curiosity — laws by domain, rivals beaten, skills minted, director tallies.
+* ``POST /v1/discover_domain``   — run her own experiment in a named science: ``{domain}`` → she
+  poses the question, runs the experiment, and invents the governing law (zero-to-discovery, no LLM).
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
@@ -137,6 +141,13 @@ class DiscoverLawRequest(BaseModel):
 
 class MetaDiscoverRequest(BaseModel):
     topic: str = Field(..., min_length=1)
+
+
+class DiscoverDomainRequest(BaseModel):
+    # A science domain for her to run her own experiment in and discover its governing law:
+    # "mechanics", "conservation", "electromagnetism", "thermodynamics", "optics", "circuits",
+    # "epidemiology", or "chemistry". She poses the question, runs the experiment, invents the law.
+    domain: str = Field(..., min_length=1)
 
 
 class DreamRequest(BaseModel):
@@ -498,6 +509,18 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/meta_discover", dependencies=auth)
     def meta_discover(req: MetaDiscoverRequest) -> dict:
         return core.meta_discover(req.topic)
+
+    @app.get("/v1/discoveries", dependencies=auth)
+    def discoveries() -> dict:
+        # Her independent-discovery record: the law tower she built from her own curiosity — laws by
+        # domain, rivals beaten on decisive tests, skills minted, and the director's tallies.
+        return core.discoveries()
+
+    @app.post("/v1/discover_domain", dependencies=auth)
+    def discover_domain(req: DiscoverDomainRequest) -> dict:
+        # She runs her own experiment in the named science and discovers its governing law — genuine
+        # zero-to-discovery from a domain she was pointed at, no equation handed to her, no LLM.
+        return core.discover_domain(req.domain)
 
     @app.post("/v1/dream", dependencies=auth)
     def dream(req: DreamRequest = DreamRequest()) -> dict:

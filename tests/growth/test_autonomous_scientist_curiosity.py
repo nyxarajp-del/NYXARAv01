@@ -25,7 +25,7 @@ def test_curiosity_question_is_chosen_over_the_template_battery():
     auto = AutonomousScientist(
         curiosity_source=lambda: _Q("Why does a dropped object accelerate?"),
         competence=CompetenceLedger())
-    question, origin = auto._observe()
+    question, origin, _domain = auto._observe()
     assert origin is QuestionOrigin.CURIOSITY
     assert question == "Why does a dropped object accelerate?"
 
@@ -34,15 +34,15 @@ def test_bare_offline_path_still_falls_back_to_a_seed_deterministically():
     # no curiosity, no gap source, no competence → the deterministic template battery
     a = AutonomousScientist()
     b = AutonomousScientist()
-    qa, oa = a._observe()
-    qb, ob = b._observe()
+    qa, oa, _da = a._observe()
+    qb, ob, _db = b._observe()
     assert oa is QuestionOrigin.SEED and ob is QuestionOrigin.SEED
     assert qa == qb  # deterministic
 
 
 def test_curiosity_source_accepts_a_plain_string():
     auto = AutonomousScientist(curiosity_source=lambda: "Is entropy always increasing?")
-    question, origin = auto._observe()
+    question, origin, _domain = auto._observe()
     assert origin is QuestionOrigin.CURIOSITY
     assert "entropy" in question
 
@@ -52,7 +52,7 @@ def test_curiosity_pass_like_object_uses_its_chosen_question():
         chosen = _Q("What governs orbital period?", value=0.8)
 
     auto = AutonomousScientist(curiosity_source=lambda: _Pass())
-    question, origin = auto._observe()
+    question, origin, _domain = auto._observe()
     assert origin is QuestionOrigin.CURIOSITY
     assert "orbital" in question
 
