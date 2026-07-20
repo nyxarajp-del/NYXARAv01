@@ -2562,9 +2562,12 @@ class PerceptionConfig(BaseModel):
 
     The always-on background loop that keeps NYXARA perceiving the live world between
     prompts: camera frames, screen frames and a continuously-listening microphone, all
-    processed **natively** (energy VAD, perceptual-hash change/motion detection,
-    surprise scoring) — the LLM is never in the perception path. Salient events
-    escalate into real autonomous cognitive cycles, so she reacts unprompted.
+    processed **natively** (energy VAD, sound-event classification, perceptual-hash
+    change/motion detection, face/body detection, surprise scoring) — the LLM is never
+    in the perception path. The same loop carries her interoception: host vitals with
+    rising-edge alerts (senses/system.py), filesystem watching (senses/watch.py),
+    network transitions and open-port diffing, and device hot-plug awareness. Salient
+    events escalate into real autonomous cognitive cycles, so she reacts unprompted.
 
     ON by default (max-power posture). On a headless box every modality degrades
     honestly: the loop keeps running at ``idle_interval_s`` probes, reports "no
@@ -2611,6 +2614,46 @@ class PerceptionConfig(BaseModel):
     surprise_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     min_escalation_interval_s: float = Field(default=20.0, ge=0.0, le=3600.0)
     max_events: int = Field(default=256, ge=8, le=8192)
+
+    # sight extras — faces/bodies (OpenCV Haar cascades when installed), explicit
+    # lights-on/off events, and focused-window tracking (X11 xdotool when present).
+    faces: bool = True
+    bodies: bool = True
+    lights_delta: float = Field(default=60.0, ge=5.0, le=255.0)
+    window_watch: bool = True
+    attention_words: List[str] = Field(
+        default_factory=lambda: ["error", "failed", "warning", "alert"])
+
+    # hearing extras — non-speech sound classes: impulse / alarm-beep / sustained.
+    sound_events: bool = True
+
+    # interoception — host vitals from /proc and /sys with rising-edge alerts.
+    system: bool = True
+    system_interval_s: float = Field(default=10.0, gt=0, le=3600.0)
+    cpu_alert: float = Field(default=0.90, ge=0.1, le=1.0)
+    mem_alert: float = Field(default=0.90, ge=0.1, le=1.0)
+    disk_alert: float = Field(default=0.95, ge=0.1, le=1.0)
+    battery_alert: float = Field(default=0.15, ge=0.0, le=1.0)
+    temp_alert_c: float = Field(default=85.0, ge=30.0, le=120.0)
+    process_watch: bool = True       # genuinely new userland process names are events
+
+    # filesystem watching — passive snapshot-diff over watched roots (stdlib polling).
+    fswatch: bool = True
+    fswatch_interval_s: float = Field(default=5.0, gt=0, le=3600.0)
+    watch_paths: List[str] = Field(default_factory=list)   # empty ⇒ CWD + data dir
+    fswatch_depth: int = Field(default=3, ge=1, le=10)
+    fswatch_max_entries: int = Field(default=2000, ge=16, le=100000)
+
+    # network sensing — offline/online, Wi-Fi, listening-port diff, reachability.
+    network: bool = True
+    network_interval_s: float = Field(default=15.0, gt=0, le=3600.0)
+    reachability: bool = True        # transition-only 1 s TCP probe (1.1.1.1:53)
+    port_watch: bool = True
+
+    # device hot-plug — cameras/sound cards/USB appearing or vanishing become events;
+    # a new /dev/video* node becomes a live camera channel without a restart.
+    devices: bool = True
+    devices_interval_s: float = Field(default=10.0, gt=0, le=3600.0)
 
     # sensory diary — JSONL journal of escalated events, survives restarts.
     journal: bool = True

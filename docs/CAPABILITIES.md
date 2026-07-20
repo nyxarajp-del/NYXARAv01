@@ -96,6 +96,7 @@ applied to the documentation itself).
 | 74 | Engineering Foundry (use invented laws + real physics sims to DESIGN, multi-objectively optimise, and iteratively UPGRADE real device concepts — a portfolio optimiser over a coupled multi-physics evaluator, **no LLM**) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
 | 75 | First-Principles Feasibility Gate (prove physically-impossible "magic" targets — over-unity/zero-point energy, anti-gravity, time reversal — INFEASIBLE with the conservation law they break, and log them; never fake them) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
 | 76 | Structural Cognitive Self-Modification (rewire her OWN cognitive architecture: **invent new composite reasoning operators** over a typed SEQ/VOTE/VERIFY grammar — the "trans-logic" — reorder/prune/re-weight which operator handles which task, a bounded recursive meta-policy, continuous plasticity, and antifragile self-healing; adopt only what STRICTLY beats a held-out fold with the character core untouched, **no LLM**) | `nyxara.growth.cognitive_architect` | REAL+WIRED |
+| 77 | Always-On Max Perception (continuous seeing/hearing between prompts **plus** interoception: energy VAD + wake word + sound classes bang/alarm/hum, face & body detection, motion direction, lights on/off, active-window tracking, host vitals with rising-edge alerts, new-process/file/network/port watching, device hot-plug that grows live camera channels, sensory self-health — **no LLM in the path**) | `nyxara.senses.realtime` + `nyxara.senses.system` + `nyxara.senses.watch` | REAL+WIRED |
 
 ## Engineering Foundry — invent a formula, then DESIGN the machine (#74, #75)
 
@@ -364,6 +365,30 @@ runtime oversight gate, per-modality toggles (`NYXARA_EMBODIED_CAMERA`/`_SCREEN`
 a modality only ever fires when a real device is actually reachable. On a headless box with no
 camera/display/mic it reports an honest "no device" — it **never fabricates a frame or a sample**
 (`pip install mss sounddevice` — opencv/pillow also work).
+
+**Always-on perception at max level — she watches, listens, and *feels her machine* between
+prompts (#77).** `senses/realtime.py` runs a background daemon thread that keeps every sense open
+continuously and detects salient moments **natively — the LLM is never in the perception path**:
+self-calibrating energy VAD with full-utterance endpointing and streaming-mic pre-roll, wake-word
+spotting, non-speech **sound classification** (bang/impulse vs periodic **alarm-beep** vs sustained
+hum — envelope + spectral statistics, `senses/audio.py`), perceptual-hash visual change, region-grid
+motion **with direction of travel**, **face and body detection** (OpenCV Haar cascades,
+import-guarded), explicit **lights-on/off** events, **active-window tracking** (X11), and OCR screen
+reading. The same loop carries her **interoception**: `senses/system.py` reads real host vitals from
+`/proc`/`/sys` (CPU per-core, memory, disk fullness + I/O rates, load, heat, battery, uptime) with
+**rising-edge alerts** (a sustained 97% CPU alerts once, then re-arms after cooling), announces
+genuinely **new userland processes**, watches **network transitions** (offline/online, Wi-Fi SSID,
+new **listening ports**, internet reachability) and **device hot-plug** — a webcam plugged in
+mid-flight becomes a live camera channel without a restart; `senses/watch.py` passively watches
+configured directory trees for created/modified/deleted files (bounded stdlib polling, her own data
+churn filtered out). Channels habituate (quiet doubles the interval), orient (events snap to a burst
+cadence), scale with presence/arousal, and are surprise-gated by real online predictors; salient
+events escalate into full **autonomous cognitive cycles** through the sovereign gates (urgent kinds —
+wake word, alarm, a face appearing — bypass the escalation rate limit), land in episodic memory and
+the `perception.jsonl` journal, and stream over `/v1/perception/ws`. The loop even watches *itself*:
+a sense that keeps failing raises its own `sense_degraded` percept. Everything degrades honestly —
+missing cv2/psutil/xdotool is a note, a headless box produces zero fabricated events — and every knob
+lives in `PerceptionConfig` (`NYXARA_PERCEPTION__*`, ON by default at max-power posture).
 
 ## Privilege escalation (off by default, opt-in)
 
