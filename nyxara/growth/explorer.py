@@ -493,7 +493,7 @@ class InfiniteExplorer:
         if self.llm is None:
             return False
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except AttributeError:
             # an injected scripted/callable LLM with no provider machinery → use it directly
             return hasattr(self.llm, "generate") or callable(self.llm)

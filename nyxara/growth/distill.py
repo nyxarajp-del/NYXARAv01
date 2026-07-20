@@ -198,7 +198,7 @@ class Distiller:
         """True only when a *real* teacher is configured — never distil from the mock/self."""
         try:
             prov = self._teacher().chosen_provider()
-            return getattr(prov, "name", "") not in ("mock", "self")
+            return getattr(prov, "name", "") not in ("native", "self")
         except Exception:  # noqa: BLE001
             return False
 
@@ -253,7 +253,7 @@ class Distiller:
         llm = self._teacher()
         if teachers is None:
             try:
-                teachers = [n for n in llm.available_providers() if n not in ("mock", "self")]
+                teachers = [n for n in llm.available_providers() if n not in ("native", "self")]
             except Exception:  # noqa: BLE001 — facade lacks a provider list → no multi-teacher
                 teachers = []
         try:
@@ -382,7 +382,7 @@ if __name__ == "__main__":  # pragma: no cover
         answers = {"qwen": "Qwen's take."}
 
         def available_providers(self):
-            return ["mock", "qwen", "self"]
+            return ["native", "qwen", "self"]
 
         def complete_with(self, name, req):
             ans = self.answers[name]

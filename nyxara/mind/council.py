@@ -187,13 +187,13 @@ class LLMCouncil:
         requested = list(override) if override else list(self.cfg.members)
         names = requested or self.llm.available_providers()
         seated = [n for n in dict.fromkeys(names) if n in available]   # dedupe, keep order
-        real = [n for n in seated if n != "mock"]
+        real = [n for n in seated if n != "native"]
         if real:
             return real
-        # no real model available — answer via mock only if allowed (never silently empty)
-        if self.cfg.include_mock_fallback and "mock" in available:
-            return ["mock"]
-        return real   # mock fallback disabled and no real member -> no quorum (refuse)
+        # no real model available — answer via her native own-brain only if allowed (never silently empty)
+        if self.cfg.include_native_fallback and "native" in available:
+            return ["native"]
+        return real   # native fallback disabled and no real member -> no quorum (refuse)
 
     # ---- gather every member's verdict ---- #
     def _gather(self, req: LLMRequest, members: Sequence[str]) -> List[MemberVerdict]:
@@ -318,10 +318,10 @@ class LLMCouncil:
         verdicts = self._gather(req, seated)
         answered = [v for v in verdicts if v.ok]
         # A council should never be silent: if every real member failed (e.g. the network is
-        # down), fall back to the always-available mock rather than fabricating or erroring.
-        if not answered and "mock" not in seated and self.cfg.include_mock_fallback \
-                and "mock" in self.llm.available_providers():
-            verdicts += self._gather(req, ["mock"])
+        # down), fall back to her always-available native own-brain rather than fabricating.
+        if not answered and "native" not in seated and self.cfg.include_native_fallback \
+                and "native" in self.llm.available_providers():
+            verdicts += self._gather(req, ["native"])
             answered = [v for v in verdicts if v.ok]
         if not answered:
             raise LLMError("the council reached no quorum (no member answered)",
@@ -365,7 +365,7 @@ class LLMCouncil:
 if __name__ == "__main__":  # pragma: no cover
     from nyxara.kernel.config import LLMProvider as ProviderName
     from nyxara.kernel.config import Profile
-    from nyxara.mind.llm import LLMProviderBase, MockProvider, Usage
+    from nyxara.mind.llm import LLMProviderBase, NativeProvider, Usage
 
     print("=" * 70)
     print("NYXARA multi-LLM council self-test")
@@ -399,13 +399,13 @@ if __name__ == "__main__":  # pragma: no cover
         "gamma": _Fixed("gamma", "The master is JP."),
         "delta": _Fixed("delta", "I do not know who the master is."),
         "down": _Fixed("down", "(unreachable)", up=False),
-        "mock": MockProvider(settings),
+        "native": NativeProvider(settings),
     }
     llm = LLM(settings=settings, providers=providers)
     council = LLMCouncil(llm)
 
     print(f"\nseated members      : {council.members()}")
-    assert "mock" not in council.members()          # mock steps aside when real models exist
+    assert "native" not in council.members()         # native steps aside when real models exist
     assert "down" not in council.members()          # an unavailable member is not seated
     assert set(council.members()) == {"alpha", "beta", "gamma", "delta"}
 
@@ -438,8 +438,8 @@ if __name__ == "__main__":  # pragma: no cover
     assert council2._weight("self") == settings.council.prefer_self_weight
 
     # NO QUORUM: every member down -> honest failure, never a fabricated answer
-    alldown = {"a": _Fixed("a", "x", up=False), "mock": MockProvider(settings)}
-    settings.council.include_mock_fallback = False
+    alldown = {"a": _Fixed("a", "x", up=False), "native": NativeProvider(settings)}
+    settings.council.include_native_fallback = False
     bare = LLMCouncil(LLM(settings=settings, providers=alldown), settings=settings)
     try:
         bare.deliberate(LLMRequest.from_prompt("anyone?"))

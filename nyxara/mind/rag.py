@@ -15,7 +15,7 @@ it honest:
    chain).
 
 The grounding check (:func:`check_grounding`) is deterministic and dependency-light,
-so it is testable on its own and runs even with the offline mock LLM.
+so it is testable on its own and runs even with the offline native own-brain LLM.
 
 Depends on :mod:`mind.llm`, :mod:`mind.proposal`, :mod:`memory.provenance`;
 optionally :mod:`memory.store`.

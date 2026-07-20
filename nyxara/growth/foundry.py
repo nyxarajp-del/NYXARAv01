@@ -417,7 +417,7 @@ class Foundry:
             from nyxara.eval.benchmark import build_default_benchmark, llm_solver
             from nyxara.mind.llm import LLM
             llm = LLM(settings=self.settings)
-            if llm.chosen_provider().name in ("mock", "self"):
+            if llm.chosen_provider().name in ("native", "self"):
                 return {}   # no real teacher to compare against — stay honest, skip
             bench = build_default_benchmark()
             own_acc = bench.run(_model_solver(model)).accuracy

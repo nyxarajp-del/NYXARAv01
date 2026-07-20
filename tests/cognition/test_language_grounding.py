@@ -143,7 +143,7 @@ def test_llm_is_gated_off_under_mock():
     from nyxara.kernel.config import NyxaraSettings, Profile
 
     llm = LLM(settings=NyxaraSettings.for_profile(Profile.TEST))
-    assert llm.chosen_provider().name == "mock"
+    assert llm.chosen_provider().name == "native"
     grounder = LanguageGrounder(llm=llm)
     assert grounder._use_llm() is False
     wm = build_world_model("auto")

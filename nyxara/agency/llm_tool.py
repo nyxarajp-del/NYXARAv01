@@ -186,7 +186,7 @@ if __name__ == "__main__":  # pragma: no cover
     print("NYXARA llm-as-a-tool self-test")
     print("=" * 70)
 
-    settings = NyxaraSettings.for_profile(Profile.TEST)   # mock LLM, hermetic
+    settings = NyxaraSettings.for_profile(Profile.TEST)   # native own-brain, hermetic
     llm = LLM(settings=settings)
     reg = ToolRegistry()
 
@@ -195,8 +195,8 @@ if __name__ == "__main__":  # pragma: no cover
     r = reg.invoke("llm.complete", {"prompt": "who is your master?",
                                     "system": "You are NYXARA."})
     print(f"\nllm.complete        : ok={r.ok} text={r.value['text']!r}")
-    assert r.ok and "who is your master?" in r.value["text"]   # mock echoes the prompt
-    assert r.value["provider"] == "mock"
+    assert r.ok and isinstance(r.value["text"], str) and r.value["text"].strip()
+    assert r.value["provider"] == "native"
     print("governed generation : routed through the tool pipeline & audited ✓")
 
     # the foundry tools — autonomous SELF_MODIFY must escalate to the Master

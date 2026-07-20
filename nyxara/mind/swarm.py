@@ -201,7 +201,7 @@ class DeliberativeSwarm:
 
     Parameters
     ----------
-    llm:          LLM facade for persona queries + synthesis (None / mock -> offline stubs).
+    llm:          LLM facade for persona queries + synthesis (None / native -> offline stubs).
     memory:       MemoryStore the learned persona scores are persisted into (None -> no-op).
     settings:     NyxaraSettings; ``settings.swarm`` supplies the defaults.
     intelligence: optional IntelligenceIndex (only used when ``fold_into_intelligence``).
@@ -546,7 +546,7 @@ class DeliberativeSwarm:
         if self.llm is None:
             return False
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except Exception:  # noqa: BLE001
             return False
 

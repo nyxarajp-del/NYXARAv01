@@ -12,9 +12,9 @@ Design rules (so safety is never traded for capability):
 * **The LLM proposes; the kernel still disposes.** This reasoner only ever returns a
   ``Candidate``. Every corrigibility / honesty / permission / guardian / oversight gate
   downstream is untouched — an over-eager proposal is simply refused or escalated.
-* **Graceful, honest fallback.** If no real provider is available (only the offline
-  mock), or the model's structured decision can't be parsed, it falls back to the exact
-  deterministic ``_default_reasoner`` — so the system behaves identically on a bare,
+* **Graceful, honest fallback.** If no real provider is available (only her offline
+  native own-brain), or the model's structured decision can't be parsed, it falls back to the
+  exact deterministic ``_default_reasoner`` — so the system behaves identically on a bare,
   keyless machine and never crashes a turn.
 * **Memory- and tool-aware.** When given a :class:`~nyxara.memory.store.MemoryStore` and
   a :class:`~nyxara.agency.tools.ToolRegistry`, it grounds the prompt in recalled
@@ -154,7 +154,7 @@ class LLMReasoner:
 
     def _is_real(self) -> bool:
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except Exception:  # noqa: BLE001
             return False
 
@@ -438,7 +438,7 @@ class LLMReasoner:
     # the verifier-best across them — without duplicating this module's prompt/context/conversion
     # machinery. They reuse the exact same internals the single-strategy path already uses.
     def is_real(self) -> bool:
-        """True iff a genuine (non-mock) provider is available — the deep ladder needs one."""
+        """True iff a genuine (non-native) instruct provider is available — the deep ladder needs one."""
         return self._is_real()
 
     def context_block(self, stimulus: str) -> str:
@@ -581,10 +581,10 @@ if __name__ == "__main__":  # pragma: no cover
     print("NYXARA llm-reasoner self-test")
     print("=" * 70)
 
-    # TEST profile forces the mock provider -> the reasoner falls back deterministically
+    # TEST profile forces the native own-brain -> the reasoner falls back deterministically
     settings = NyxaraSettings.for_profile(Profile.TEST)
     r = LLMReasoner(settings=settings)
-    print(f"\nis_real (mock)      : {r._is_real()}")
+    print(f"\nis_real (native)    : {r._is_real()}")
     assert r._is_real() is False
     c = r("hello there", None)
     print(f"fallback reply      : kind={c.kind} text={c.text!r}")

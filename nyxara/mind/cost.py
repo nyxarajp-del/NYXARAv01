@@ -48,7 +48,7 @@ PRICES: Dict[str, Tuple[float, float]] = {
     "Qwen": (0.0, 0.0),
     "qwen": (0.0, 0.0),
     "nyxara-self": (0.0, 0.0),
-    "mock": (0.0, 0.0),
+    "native": (0.0, 0.0),
 }
 
 # Every backend is local now, so an unrecognised model also costs nothing.

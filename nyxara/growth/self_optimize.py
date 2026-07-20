@@ -1189,7 +1189,7 @@ def _author_provider_name(llm: Any, *, self_authored_only: bool = True) -> Optio
     except Exception:  # noqa: BLE001
         return None
     name = getattr(prov, "name", "")
-    if name not in ("mock", "self") and bool(prov.available()):
+    if name not in ("native", "self") and bool(prov.available()):
         return name
     return None
 

@@ -198,7 +198,7 @@ class _MultiFacade:
         self.answers = {"qwen": "Qwen's answer.", "self": "NYXARA's own answer."}
 
     def available_providers(self):
-        return ["mock", "qwen", "self"]
+        return ["native", "qwen", "self"]
 
     def complete_with(self, name, req):
         ans = self.answers[name]

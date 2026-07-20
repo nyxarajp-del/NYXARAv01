@@ -8,7 +8,7 @@ from nyxara.kernel.config import LLMProvider as ProviderName
 from nyxara.kernel.config import NyxaraSettings, Profile
 from nyxara.kernel.errors import LLMError
 from nyxara.mind.council import CouncilResult, DeliberationMode, LLMCouncil
-from nyxara.mind.llm import LLM, LLMProviderBase, MockProvider, Usage
+from nyxara.mind.llm import LLM, LLMProviderBase, NativeProvider, Usage
 
 
 class _Fixed(LLMProviderBase):
@@ -52,7 +52,7 @@ def _panel():
         "gamma": _Fixed("gamma", "The master is JP."),
         "delta": _Fixed("delta", "I am not sure who the master is."),
         "offline": _Fixed("offline", "(unavailable)", up=False),
-        "mock": MockProvider(),
+        "native": NativeProvider(),
     }
 
 
@@ -60,7 +60,7 @@ def _panel():
 def test_real_members_preferred_over_mock():
     c = _council(_panel())
     seated = c.members()
-    assert "mock" not in seated          # the mock steps aside when real models exist
+    assert "native" not in seated          # the mock steps aside when real models exist
     assert set(seated) == {"alpha", "beta", "gamma", "delta"}   # 'offline' is unavailable
 
 
@@ -70,8 +70,8 @@ def test_unavailable_member_not_seated():
 
 
 def test_mock_only_when_no_real_member():
-    c = _council({"mock": MockProvider()})
-    assert c.members() == ["mock"]       # never silently empty
+    c = _council({"native": NativeProvider()})
+    assert c.members() == ["native"]       # never silently empty
 
 
 def test_member_override_filters_to_available():
@@ -153,13 +153,13 @@ def test_vote_weight_overrides_count():
 # -------------------- no quorum -------------------- #
 def test_no_quorum_refuses_to_fabricate():
     providers = {"a": _Fixed("a", "x", up=False)}
-    c = _council(providers, include_mock_fallback=False)
+    c = _council(providers, include_native_fallback=False)
     with pytest.raises(LLMError):
         c.deliberate(_req("anyone?"))
 
 
 def test_no_members_raises():
-    c = _council({"a": _Fixed("a", "x", up=False)}, include_mock_fallback=False)
+    c = _council({"a": _Fixed("a", "x", up=False)}, include_native_fallback=False)
     with pytest.raises(LLMError):
         c.deliberate(_req("hello"), members=["a"])
 

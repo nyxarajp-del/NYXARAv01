@@ -47,8 +47,8 @@ def test_llm_tool_generation_is_governed_and_auditable():
     register_llm_tool(reg, _llm())
     r = reg.invoke("llm.complete", {"prompt": "who is your master?", "system": "You are NYXARA."})
     assert r.ok
-    assert "who is your master?" in r.value["text"]   # mock echoes the prompt
-    assert r.value["provider"] == "mock"
+    assert isinstance(r.value["text"], str) and r.value["text"].strip()  # her own brain drafts, no echo
+    assert r.value["provider"] == "native"
     # auditable: the result serialises with provider/model/usage
     d = r.to_dict()
     assert d["tool"] == "llm.complete" and d["ok"]
@@ -89,7 +89,7 @@ class _Fixed(LLMProviderBase):
 
 def _panel_council() -> LLMCouncil:
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.MOCK   # offline; the council gets explicit providers
+    settings.llm.provider = ProviderName.NATIVE   # offline; the council gets explicit providers
     providers = {"alpha": _Fixed("alpha", "the master is JP"),
                  "beta": _Fixed("beta", "your master is JP")}
     return LLMCouncil(LLM(settings=settings, providers=providers), settings=settings)

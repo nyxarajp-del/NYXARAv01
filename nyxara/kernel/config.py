@@ -101,11 +101,12 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder self→qwen→mock: her own promoted weights serve
+    AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
     #                               the moment they exist (and pass the serve gate) — no manual flip
     QWEN = "qwen"                 # in-process Qwen2.5-0.5B-Instruct, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
-    MOCK = "mock"
+    NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
+    #                               the guaranteed floor of the ladder (replaces the old echo mock)
 
 
 class VectorBackend(str, Enum):
@@ -306,14 +307,15 @@ class LLMConfig(BaseModel):
     defaulting to **Qwen2.5-0.5B-Instruct** — tiny enough to run and LoRA-fine-tune on a
     CPU or a modest GPU. That single base is the only pretrained model NYXARA stands on;
     everything above it is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes that
-    same base on her lived memory, and ``self`` serves the promoted adapter. ``mock`` is
-    the deterministic offline fallback; every backend degrades to ``mock`` when its heavy
-    deps are absent.
+    same base on her lived memory, and ``self`` serves the promoted adapter. ``native`` is
+    her always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity
+    seed corpus); every backend degrades to ``native`` when its heavy deps are absent. There is
+    no echo mock.
 
     The default ``auto`` closes the train→serve loop: it walks the ladder
-    self→qwen→mock, so the moment the foundry promotes her own weights (and they pass the
-    serve gate — see ``self_serve_any_backend``) SHE serves them, with zero manual
-    reconfiguration; until then the Qwen base answers.
+    self→qwen→native, so the moment the foundry promotes her own weights (and they pass the
+    serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
+    reconfiguration; until then the Qwen base answers, and a bare machine her native own-brain.
     """
 
     model_config = {"validate_assignment": True}
@@ -355,8 +357,11 @@ class LLMConfig(BaseModel):
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
     # Serve gate for provider=auto: a promoted LoRA (the served base, improved) auto-serves;
     # a small from-scratch backend replacing a large pretrained model would DEGRADE live
-    # behavior, so it needs this explicit opt-in (or provider=self). Honesty over theatre.
-    self_serve_any_backend: bool = False
+    # behavior, so this opts it in. ON by default (the Master's standing choice): NYXARA's OWN
+    # forged brain — LoRA or the always-on n-gram own-model — serves the moment it exists, so she
+    # runs on HER OWN weights from first boot rather than deferring to the bare base. Set
+    # NYXARA_LLM__SELF_SERVE_ANY_BACKEND=false to restore the conservative LoRA-only serve gate.
+    self_serve_any_backend: bool = True
     # Hot-reload memory policy: drop a RAM/VRAM-heavy old model (LoRA base) BEFORE loading
     # the newly-promoted one, instead of holding two bases at once. Failure restores the
     # previous version from its on-disk dir.
@@ -367,8 +372,6 @@ class LLMConfig(BaseModel):
     max_output_tokens: int = Field(default=4096, ge=1)
     request_timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0, le=10)
-    # When True and no key/network, llm.py falls back to deterministic mock output.
-    allow_mock_fallback: bool = True
 
     # ---- Deliberate (multi-pass) reasoning (mind/deliberate.py) ---- #
     # The kernel reasoner can think before it decides. ``reasoning_passes`` counts the
@@ -401,7 +404,7 @@ class LLMConfig(BaseModel):
             LLMProvider.AUTO: "auto",
             LLMProvider.QWEN: self.qwen_model,
             LLMProvider.SELF: "nyxara-self",
-            LLMProvider.MOCK: "mock",
+            LLMProvider.NATIVE: "nyxara-native",
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
@@ -1009,8 +1012,8 @@ class CouncilConfig(BaseModel):
     prefer_self_weight: float = Field(default=1.5, ge=0.0)
     # Who drafts the consensus prose (falls back to "self", then to a deterministic pick).
     synthesizer: str = "self"
-    # The mock answers only when no real member is available (keeps a council never silent).
-    include_mock_fallback: bool = True
+    # Her native own-brain answers only when no real member is available (council never silent).
+    include_native_fallback: bool = True
 
 
 class RouterConfig(BaseModel):
@@ -1530,7 +1533,7 @@ class SelfOptimizationConfig(BaseModel):
     # be targeted at call time. Bounded by ``max_debug_fixes`` and the verify-or-rollback gauntlet.
     debug_timeout_s: float = Field(default=600.0, gt=0.0)
     debug_test_path: Optional[str] = None       # restrict detection to a pytest path/node id
-    # "khud NYXARA kare": prefer NYXARA's own ``self`` model to author debug fixes, never the mock.
+    # "khud NYXARA kare": prefer NYXARA's own ``self`` model to author debug fixes, never the base.
     self_authored_only: bool = True
 
 
@@ -2860,14 +2863,13 @@ class NyxaraSettings(BaseSettings):
             self.agency.sandbox_before_real_action = True
             self.guard.zero_trust = True
             self.guard.kill_switch_enabled = True
-            self.llm.allow_mock_fallback = False  # prod must use a real provider
             # In production she still self-bootstraps, but never runs autonomous shell
             # package installs — a forged solution stays inside the code sandbox.
             self.explorer.autonomous_install = False
         elif self.profile is Profile.TEST:
-            # Tests run hermetically: never reach the network.
-            self.llm.provider = LLMProvider.MOCK
-            self.llm.allow_mock_fallback = True
+            # Tests run hermetically: never reach the network. Her always-on native own-brain
+            # is the deterministic, dependency-free provider (no echo mock).
+            self.llm.provider = LLMProvider.NATIVE
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
@@ -3096,12 +3098,11 @@ if __name__ == "__main__":  # pragma: no cover
     assert prod.features.invariant_enforcement is True
     assert prod.features.audit_logging is True
     assert prod.guard.rule_modification_locked is True
-    assert prod.llm.allow_mock_fallback is False
-    print("\nprod hardening OK (invariants/audit/corrigibility forced, mock disabled)")
+    print("\nprod hardening OK (invariants/audit/corrigibility forced)")
 
     test = NyxaraSettings.for_profile(Profile.TEST)
-    assert test.llm.provider is LLMProvider.MOCK
-    print("test profile forces MOCK llm OK")
+    assert test.llm.provider is LLMProvider.NATIVE
+    print("test profile forces NATIVE llm OK")
 
     # Secret redaction
     s = NyxaraSettings(profile="dev")

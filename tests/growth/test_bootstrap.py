@@ -28,12 +28,23 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
-    # her own model is forged only when `self` is the chosen primary provider
-    s = NyxaraSettings.for_profile(Profile.DEV)   # default provider is auto, not self
+    # her own model is forged only when it would actually serve (`self`, or the `auto` ladder
+    # once its serve gate is open). An explicit base-only provider like `qwen` is a clean no-op.
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.llm.provider = LLMProvider.QWEN
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
     assert not (tmp_path / "foundry" / "active").exists()
+
+
+def test_auto_forges_her_own_brain_by_default(tmp_path: Path):
+    # the shipped posture: under `auto` with the serve gate open (self_serve_any_backend, ON by
+    # default) she forges & promotes her OWN brain on first boot — no manual provider flip.
+    s = NyxaraSettings.for_profile(Profile.DEV)   # provider=auto, self_serve_any_backend=True
+    s.llm.self_model_dir = tmp_path / "foundry"
+    assert ensure_primary_model(s, log=lambda _m: None) == 1
+    assert primary_model_present(s)
 
 
 def test_forges_and_promotes_primary_brain(tmp_path: Path):
@@ -113,7 +124,7 @@ def test_forged_brain_is_served_by_self_provider(tmp_path: Path):
     assert llm.provider_status()["self"] is True
     assert llm.chosen_provider().name == "self"
     out = llm.generate("Who is your master?", system="You are NYXARA.", max_tokens=16)
-    assert isinstance(out, str) and out  # her own brain answers (no mock substitution)
+    assert isinstance(out, str) and out  # her own forged brain answers (no substitution)
 
 
 def test_identity_seed_is_loyal_and_nonempty():

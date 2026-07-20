@@ -14,7 +14,7 @@ key and no network**. Per public function / class / module it computes:
 * **TODO/FIXME** — ``TODO`` / ``FIXME`` / ``XXX`` / ``HACK`` markers left in the source.
 * **too-many-args** — a signature with more positional parameters than the threshold.
 
-When a real LLM is configured (``provider != "mock"``, the same probe the per-turn
+When a real LLM is configured (``provider != "native"``, the same probe the per-turn
 :class:`~nyxara.mind.recursive_improver.RecursiveImprover` uses) the worst offenders are
 optionally enriched with a one-line critique — strictly additive, never required, and
 wrapped so a provider hiccup degrades to the deterministic findings, never a crash.
@@ -410,7 +410,7 @@ class SelfReviewer:
         if self.llm is None:
             return False
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except Exception:  # noqa: BLE001
             return False
 

@@ -154,7 +154,7 @@ def test_earlier_skill_is_not_catastrophically_forgotten():
 # 7. Khude / no external LLM: learning happens purely in NYXARA's own stdlib engine.
 # --------------------------------------------------------------------------- #
 def test_learning_needs_no_external_llm():
-    # TEST profile serves the deterministic MockProvider — no real model, no key, no GPU.
+    # TEST profile serves the deterministic NativeProvider — no real model, no key, no GPU.
     brain = _kn_brain(settings=NyxaraSettings.for_profile(Profile.TEST))
     assert isinstance(brain._lm, WordKNGramLM)          # her own pure-stdlib brain
 

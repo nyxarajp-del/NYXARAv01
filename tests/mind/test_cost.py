@@ -16,7 +16,7 @@ from nyxara.mind.llm import LLMResponse, Usage
 def test_estimate_cost_local_models_zero():
     assert UsageLedger.estimate_cost("Qwen/Qwen2.5-0.5B-Instruct", 1000, 1000) == 0.0
     assert UsageLedger.estimate_cost("nyxara-self", 5000, 5000) == 0.0
-    assert UsageLedger.estimate_cost("mock", 100, 100) == 0.0
+    assert UsageLedger.estimate_cost("native", 100, 100) == 0.0
 
 
 def test_longest_prefix_matching():

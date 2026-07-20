@@ -359,7 +359,7 @@ class LanguageGrounder:
         if self.llm is None:
             return False
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except Exception:                              # noqa: BLE001
             return False
 
