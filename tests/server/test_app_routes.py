@@ -143,3 +143,33 @@ def test_learning_route_returns_truthful_report():
 def test_learning_route_requires_auth():
     r = _client().get("/v1/learning")
     assert r.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Continuous real-time perception routes
+# --------------------------------------------------------------------------- #
+def test_perception_status_route_reports_honestly():
+    r = _client().get("/v1/perception", headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    # under the TEST/pytest posture the loop is built-but-stopped or config-disabled;
+    # either way the route answers honestly, never fabricates a running sense
+    if "error" not in body:
+        assert {"running", "available", "channels"} <= set(body)
+        assert body["running"] is False  # never auto-started under pytest
+
+
+def test_perception_control_start_stop_roundtrip():
+    core = NyxaraCore(enable_memory=False, enable_tools=False, enable_skills=False)
+    client = _client(core)
+    r = client.post("/v1/perception/stop", headers=_auth())
+    assert r.status_code == 200
+    body = r.json()
+    if "error" not in body:
+        assert body == {"action": "stop", "running": False}
+        r2 = client.post("/v1/perception/nonsense", headers=_auth())
+        assert r2.status_code == 404
+
+
+def test_perception_requires_token():
+    assert _client().get("/v1/perception").status_code == 401

@@ -30,6 +30,9 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
+* ``GET  /v1/perception``        — the always-on senses: live status (devices, channels, events).
+* ``POST /v1/perception/{action}`` — open/close her eyes and ears: start / stop.
+* ``WS   /v1/perception/ws``     — live event feed: every percept streams as it lands.
 * ``POST /v1/memory/save|load``  — persist / restore long-term memory (Rule 7 continuity).
 * ``WS   /v1/ws``                — a streaming chat socket (token via ``?token=``).
 
@@ -242,6 +245,18 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                   f"({restored} memory records + learner/synapses/embedder)")
         except Exception as lexc:  # noqa: BLE001 — a cold start must never be blocked by restore
             print(f"NYXARA continuity: startup restore skipped ({lexc})")
+        # Continuous real-time perception: the core auto-starts it at construction; here we
+        # just report honestly what this box can actually perceive (never fabricated).
+        try:
+            rp = getattr(app_.state.core, "perception", None)
+            if rp is not None:
+                st = rp.status()
+                print(f"NYXARA live perception: running={st['running']} "
+                      f"available={st['available']} mic={st['mic_mode']}")
+            else:
+                print("NYXARA live perception: disabled by config")
+        except Exception:  # noqa: BLE001 — the senses report must never block startup
+            pass
         if cfg.autonomic:
             try:
                 from nyxara.kernel.autonomic import AutonomicLoop
@@ -344,6 +359,11 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 saved = app_.state.core.save_state()
                 print(f"NYXARA continuity: checkpointed learned state on shutdown ({saved})")
             except Exception:  # noqa: BLE001 — durability is best-effort, never blocks shutdown
+                pass
+            # close the senses (idempotent — stop_cognition also closes them)
+            try:
+                app_.state.core.stop_perception()
+            except Exception:  # noqa: BLE001 — best-effort clean shutdown
                 pass
             # stop the deep-cognition thread first (it is what start_cognition launched)
             if getattr(app_.state, "deep_cognition", False):
@@ -550,6 +570,62 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                     detail=f"unknown control action '{action}'")
             return {"action": act, "control": core.oversight.state.value}
+
+    # ---- continuous real-time perception (the always-on senses) ---- #
+    @app.get("/v1/perception", dependencies=auth)
+    def perception_status() -> dict:
+        rp = getattr(core, "perception", None)
+        if rp is None:
+            return {"error": "realtime perception unavailable (disabled by config)"}
+        return rp.status()
+
+    @app.post("/v1/perception/{action}", dependencies=auth)
+    def perception_control(action: str) -> dict:
+        rp = getattr(core, "perception", None)
+        if rp is None:
+            return {"error": "realtime perception unavailable (disabled by config)"}
+        act = action.strip().lower()
+        if act == "start":
+            core.start_perception()
+        elif act == "stop":
+            core.stop_perception()
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"unknown perception action '{action}'")
+        return {"action": act, "running": rp.running}
+
+    @app.websocket("/v1/perception/ws")
+    async def perception_ws(socket: WebSocket) -> None:
+        """A live window into her senses: every PerceptEvent streams here as it lands."""
+        if token is not None and socket.query_params.get("token") != token:
+            await socket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        rp = getattr(core, "perception", None)
+        await socket.accept()
+        if rp is None:
+            await socket.send_json({"error": "realtime perception unavailable"})
+            await socket.close()
+            return
+        import asyncio
+        loop_ = asyncio.get_running_loop()
+        queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=256)
+
+        def _on_event(d: dict) -> None:  # runs on the perception thread
+            try:
+                loop_.call_soon_threadsafe(queue.put_nowait, d)
+            except Exception:  # noqa: BLE001 — a full queue drops, never blocks sensing
+                pass
+
+        rp.add_listener(_on_event)
+        try:
+            await socket.send_json({"hello": "perception feed", "status": rp.status()})
+            while True:
+                ev = await queue.get()
+                await socket.send_json(ev)
+        except WebSocketDisconnect:
+            return
+        finally:
+            rp.remove_listener(_on_event)
 
     # ---- fractal temporal hierarchies (the multi-dimensional mind) ---- #
     @app.get("/v1/temporal/report", dependencies=auth)

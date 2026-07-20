@@ -66,6 +66,7 @@ __all__ = [
     "MCPConfig",
     "ServerConfig",
     "WebConfig",
+    "PerceptionConfig",
     "ObservabilityConfig",
     "PathsConfig",
     "NyxaraSettings",
@@ -2556,6 +2557,65 @@ class WebConfig(BaseModel):
     browser_timeout_s: float = Field(default=45.0, gt=0, le=600.0)
 
 
+class PerceptionConfig(BaseModel):
+    """Continuous real-time perception (senses/realtime.py) — she watches and listens herself.
+
+    The always-on background loop that keeps NYXARA perceiving the live world between
+    prompts: camera frames, screen frames and a continuously-listening microphone, all
+    processed **natively** (energy VAD, perceptual-hash change/motion detection,
+    surprise scoring) — the LLM is never in the perception path. Salient events
+    escalate into real autonomous cognitive cycles, so she reacts unprompted.
+
+    ON by default (max-power posture). On a headless box every modality degrades
+    honestly: the loop keeps running at ``idle_interval_s`` probes, reports "no
+    device", and never fabricates a percept. Forced OFF under the TEST profile so the
+    suite stays hermetic (a test that wants it builds its own loop/settings).
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # per-modality policy (also enforced inside LiveSensor.enabled — belt and braces)
+    camera: bool = True
+    screen: bool = True
+    mic: bool = True
+
+    # cadence — base per-channel tick; habituation doubles toward max; a device-less
+    # channel sits at idle; an escalated event triggers an orienting burst.
+    interval_s: float = Field(default=2.0, gt=0, le=300.0)
+    max_interval_s: float = Field(default=30.0, gt=0, le=3600.0)
+    idle_interval_s: float = Field(default=30.0, gt=0, le=3600.0)
+    burst_interval_s: float = Field(default=0.5, gt=0, le=60.0)
+    burst_duration_s: float = Field(default=10.0, ge=0.0, le=600.0)
+
+    # hearing — self-calibrating energy VAD + full-utterance endpointing.
+    mic_chunk_s: float = Field(default=1.0, gt=0, le=10.0)
+    max_utterance_s: float = Field(default=15.0, gt=0, le=120.0)
+    endpoint_silence_s: float = Field(default=0.8, gt=0, le=10.0)
+    vad_rms: float = Field(default=0.02, ge=0.0, le=1.0)   # absolute floor for voice energy
+    vad_snr: float = Field(default=3.0, ge=1.0, le=100.0)  # threshold = max(vad_rms, floor*snr)
+    sound_spike_snr: float = Field(default=6.0, ge=1.0, le=100.0)  # non-speech transient gate
+    wake_words: List[str] = Field(default_factory=lambda: ["nyxara"])
+    transcribe: bool = True          # Whisper STT when installed; honest note otherwise
+    whisper_model: str = "base"
+
+    # sight — hash-based change, region-grid motion, OCR screen reading, scene keep-alive.
+    change_hamming: int = Field(default=10, ge=1, le=64)
+    motion_regions: int = Field(default=3, ge=1, le=16)
+    scene_interval_s: float = Field(default=60.0, gt=0, le=3600.0)
+    ocr: bool = True                 # pytesseract when installed; honest note otherwise
+    max_cameras: int = Field(default=2, ge=1, le=8)
+
+    # attention / escalation into cognition.
+    comodal_window_s: float = Field(default=2.0, ge=0.0, le=30.0)
+    surprise_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    min_escalation_interval_s: float = Field(default=20.0, ge=0.0, le=3600.0)
+    max_events: int = Field(default=256, ge=8, le=8192)
+
+    # sensory diary — JSONL journal of escalated events, survives restarts.
+    journal: bool = True
+
+
 class ObservabilityConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
@@ -2697,6 +2757,7 @@ class NyxaraSettings(BaseSettings):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     web: WebConfig = Field(default_factory=WebConfig)
+    perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
@@ -2821,6 +2882,11 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.run_pytest_in_gauntlet = False
             self.self_improvement.use_payoff_forecaster = False
             self.mind_evolution.escalate_to_architecture = False
+            # Continuous real-time perception spins a capture thread and (with devices
+            # present) does real camera/screen/mic I/O — sealed off under TEST so the
+            # suite stays hermetic (a test that wants the loop builds its own
+            # RealtimePerception with a stub sensor; see tests/senses/test_realtime.py).
+            self.perception.enabled = False
 
         # ---- MAXIMUM POWER crank ---- #
         # profile=max OR NYXARA_MAX_POWER=1 pushes every capability/depth/cadence knob to its
@@ -2879,6 +2945,11 @@ class NyxaraSettings(BaseSettings):
             self.foundry.lora_use_rslora = True
             self.llm.self_serve_any_backend = True
             self.self_improvement.grounded_web_enabled = True
+            # She never stops watching or listening at full power: faster escalation
+            # cadence and a sharper orienting reflex (still gate-checked per event).
+            self.perception.enabled = True
+            self.perception.min_escalation_interval_s = 10.0
+            self.perception.burst_interval_s = 0.25
 
         return self
 

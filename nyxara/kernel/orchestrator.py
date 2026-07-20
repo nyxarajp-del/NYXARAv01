@@ -868,6 +868,14 @@ class NyxaraCore:
         if self.heartbeat is not None:
             self._restore_continuity_state()   # her lifetime accumulates across restarts
             self._maybe_start_life()           # auto-on in real use; off under pytest
+        # ─────────────────────────────────────────────────────────────────────────────
+        # CONTINUOUS REAL-TIME PERCEPTION (senses/realtime.py) — she does not only exist
+        # between prompts, she PERCEIVES between prompts: an always-on loop watches the
+        # camera/screen and listens on the microphone, detecting speech, her name, visual
+        # change, motion and surprise natively (never the LLM), and escalates what matters
+        # into full sovereign AUTONOMOUS cycles. ON by default; honest on headless boxes.
+        self.perception = self._build_realtime_perception()
+        self._maybe_start_perception()         # auto-on in real use; off under pytest
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -1599,6 +1607,92 @@ class NyxaraCore:
             return bool(self.oversight.gate())
         except Exception:  # noqa: BLE001 — fail closed: no gate, no outward action
             return False
+
+    # ------------------------------------------------------------------ #
+    # Continuous real-time perception (senses/realtime.py) — always-on senses
+    # ------------------------------------------------------------------ #
+    def _build_realtime_perception(self) -> Any:
+        """The always-on perception loop: she continuously watches (camera/screen) and
+        listens (mic), detects salient moments natively (VAD, wake-word, visual change,
+        motion, surprise — never the LLM), and escalates them through
+        :meth:`_perception_escalate` into full sovereign cycles. Governed by
+        ``settings.perception`` (``NYXARA_PERCEPTION__*``); a disabled config or any
+        build failure returns ``None`` — perception is a capability, never required."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().perception
+            if not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.senses.live import LiveSensor
+            from nyxara.senses.realtime import RealtimePerception
+            sensor = LiveSensor(
+                mic_seconds=float(getattr(cfg, "mic_chunk_s", 1.0)),
+                enabled={"camera": bool(cfg.camera), "screen": bool(cfg.screen),
+                         "mic": bool(cfg.mic)})
+            return RealtimePerception(
+                sensor,
+                escalate=self._perception_escalate,
+                presence=self.presence,
+                mind=self.mind,
+                gate=self._embodied_gate,
+                remember=self._perception_remember,
+                settings=cfg)
+        except Exception:  # noqa: BLE001 — live senses are a capability, never a hard dep
+            return None
+
+    def _perception_escalate(self, stimulus: str, media: List[Any]) -> Any:
+        """A salient live percept becomes a real AUTONOMOUS cognitive cycle. Returns
+        ``None`` (the loop requeues) while a foreground turn runs — the world never
+        interrupts the Master mid-sentence. The escalated turn passes every existing
+        gate (shield / permission / oversight) and binds the percept through the same
+        ``media=`` intake as any multimodal stimulus — autonomy buys no extra power."""
+        if getattr(self, "_engaged", False):
+            return None
+        return self.process(stimulus, authority=Authority.AUTONOMOUS, media=media)
+
+    def _perception_remember(self, summary: str, event: Dict[str, Any]) -> None:
+        """Escalated percepts persist — what she saw and heard becomes episodic memory."""
+        if self.memory is None:
+            return
+        try:
+            from nyxara.memory.provenance import Provenance as MemProvenance, SourceType
+            from nyxara.memory.store import MemoryType
+            self.memory.remember(
+                summary, mem_type=MemoryType.EPISODIC,
+                provenance=MemProvenance(SourceType.SENSOR, confidence=0.8),
+                importance=0.5, tags=["perception", event.get("kind", "live")],
+                metadata={"live_percept": {k: event.get(k) for k in
+                                           ("kind", "modality", "salience", "at")}})
+        except Exception:  # noqa: BLE001 — remembering is best-effort, never fatal
+            pass
+
+    def _maybe_start_perception(self) -> None:
+        """Open the senses automatically in real use (console, server, daemon) so she is
+        watching and listening from the first second. Held OFF under pytest (the suite
+        must stay hermetic and thread-free) — a test that wants the loop drives
+        ``tick_once`` on its own instance."""
+        import os
+        if self.perception is None or "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        self.start_perception()
+
+    def start_perception(self) -> bool:
+        """Open her eyes and ears — the continuous perception loop starts (idempotent)."""
+        if self.perception is None:
+            return False
+        try:
+            return bool(self.perception.start())
+        except Exception:  # noqa: BLE001 — never let opening the senses crash the core
+            return False
+
+    def stop_perception(self) -> None:
+        """Close the senses (she can reopen them). Called on shutdown."""
+        if self.perception is None:
+            return
+        try:
+            self.perception.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _build_stream(self) -> Any:
         try:
@@ -8281,6 +8375,7 @@ class NyxaraCore:
         # her continuous life stops with the rest of the background mind (and checkpoints her
         # alive-clock), so a clean shutdown never loses her accumulated lifetime.
         self.stop_life()
+        self.stop_perception()   # eyes and ears close with the rest of the background mind
         if self._cognition_stop is not None:
             self._cognition_stop.set()
         if self._cognition_thread is not None:
@@ -8675,6 +8770,11 @@ class NyxaraCore:
                 rep["body"] = self.interoception.body_report()
             except Exception:  # noqa: BLE001 — self-report is best-effort, never fatal
                 pass
+        if getattr(self, "perception", None) is not None:
+            try:
+                rep["perception"] = self.perception.status()
+            except Exception:  # noqa: BLE001 — the senses report is best-effort
+                pass
         if self.inner_life is not None and self.inner_life.last is not None:
             try:
                 rep["monologue"] = self.inner_life.last.monologue
@@ -8992,6 +9092,10 @@ class NyxaraCore:
             "civilization": _live("civilization"),
             "proactive": _live("proactive"),
             "heartbeat": _live("heartbeat"),
+            "realtime_perception": bool(
+                getattr(self, "perception", None) is not None
+                and (self.perception.running
+                     or any(self.perception.status().get("available", {}).values()))),
         }
         out: Dict[str, Any] = {
             "max_power": is_max,
