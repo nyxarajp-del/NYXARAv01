@@ -449,10 +449,18 @@ def main(argv: list[str] | None = None) -> int:
     rp = getattr(core, "perception", None)
     if rp is not None:
         try:
-            avail = rp.status()["available"]
+            st = rp.status()
+            avail = st["available"]
+            host = sorted({c.kind for c in rp.channels.values()
+                           if c.kind in ("system", "files", "network", "devices")})
             if any(avail.values()):
                 on = ", ".join(k for k, v in avail.items() if v)
-                print(f"perception          : watching/listening ✓ ({on}; mic {rp.mic_mode})")
+                extra = f" + {', '.join(host)}" if host else ""
+                print(f"perception          : watching/listening ✓ ({on}{extra}; "
+                      f"mic {rp.mic_mode})")
+            elif host:
+                print(f"perception          : no camera/screen/mic on this box, but her "
+                      f"inner senses are live ({', '.join(host)}) — honest about the rest")
             else:
                 print("perception          : loop running, but no camera/screen/mic on this box "
                       "(honest idle — she never fabricates a percept)")

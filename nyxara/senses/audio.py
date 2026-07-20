@@ -45,6 +45,8 @@ __all__ = [
     "silence_segments",
     "silence_ratio",
     "audio_fingerprint",
+    "SoundProfile",
+    "classify_sound",
     "Audio",
 ]
 
@@ -286,6 +288,139 @@ def audio_fingerprint(samples: Sequence[float], *, bands: int = 64) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Sound-event classification (impulse / alarm / sustained) — pure signal stats
+# --------------------------------------------------------------------------- #
+@dataclass
+class SoundProfile:
+    """What a non-speech sound *is*, from its envelope and spectrum — never a guess."""
+
+    duration: float                 # clip length (s)
+    peak_to_mean: float             # envelope spikiness (impulses are spiky)
+    attack_s: float                 # time from onset to envelope peak
+    active_s: float                 # time the envelope spends above half-peak
+    zcr: float                      # zero-crossing rate (pitch proxy)
+    beep_hz: Optional[float]        # envelope periodicity (repeating beeps), or None
+    band_low: float                 # fraction of probed energy < ~300 Hz
+    band_mid: float                 # ~300–1500 Hz
+    band_high: float                # > ~1500 Hz
+    label: str = "sound"            # impulse | alarm | sustained | sound
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"label": self.label, "duration": round(self.duration, 2),
+                "peak_to_mean": round(self.peak_to_mean, 2),
+                "attack_s": round(self.attack_s, 3), "active_s": round(self.active_s, 2),
+                "zcr": round(self.zcr, 4),
+                "beep_hz": round(self.beep_hz, 2) if self.beep_hz else None,
+                "bands": [round(self.band_low, 3), round(self.band_mid, 3),
+                          round(self.band_high, 3)]}
+
+
+def _goertzel_power(sig: Sequence[float], rate: int, freq: float) -> float:
+    """Signal power at one frequency (Goertzel) — a single-bin DFT, pure python."""
+    n = len(sig)
+    if n < 8 or rate <= 0 or freq <= 0 or freq >= rate / 2:
+        return 0.0
+    w = 2.0 * math.pi * freq / rate
+    coeff = 2.0 * math.cos(w)
+    s0 = s1 = s2 = 0.0
+    for x in sig:
+        s0 = x + coeff * s1 - s2
+        s2, s1 = s1, s0
+    return max(0.0, s1 * s1 + s2 * s2 - coeff * s1 * s2) / n
+
+
+_BAND_PROBES = ((150.0, 250.0), (500.0, 800.0, 1200.0), (2000.0, 2800.0, 3600.0))
+
+
+def _band_energies(sig: Sequence[float], rate: int) -> Tuple[float, float, float]:
+    """Low/mid/high energy fractions over the loudest ≤1 s window. Uses numpy's FFT
+    when installed; the Goertzel probe bank gives the same verdict without it."""
+    if not sig:
+        return 0.0, 0.0, 0.0
+    # loudest 1-second window (envelope argmax) keeps the pure-python cost bounded
+    win = min(len(sig), max(1, rate))
+    if len(sig) > win:
+        step = max(1, win // 4)
+        best_i, best_e = 0, -1.0
+        for i in range(0, len(sig) - win + 1, step):
+            e = rms(sig[i:i + min(win, 2048)])
+            if e > best_e:
+                best_i, best_e = i, e
+        sig = sig[best_i:best_i + win]
+    try:
+        import numpy as np  # type: ignore
+        x = np.asarray(sig, dtype=np.float32)
+        spec = np.abs(np.fft.rfft(x)) ** 2
+        freqs = np.fft.rfftfreq(len(x), d=1.0 / max(1, rate))
+        low = float(spec[(freqs > 40) & (freqs < 300)].sum())
+        mid = float(spec[(freqs >= 300) & (freqs < 1500)].sum())
+        high = float(spec[(freqs >= 1500) & (freqs < 5000)].sum())
+    except ImportError:
+        probe = sig[::2] if rate >= 16000 else list(sig)
+        pr = rate // 2 if rate >= 16000 else rate
+        low, mid, high = (sum(_goertzel_power(probe, pr, f) for f in band)
+                          for band in _BAND_PROBES)
+    total = low + mid + high
+    if total <= 0:
+        return 0.0, 0.0, 0.0
+    return low / total, mid / total, high / total
+
+
+def classify_sound(sig: Sequence[float], rate: int, *,
+                   frame_s: float = 0.02) -> SoundProfile:
+    """Classify a non-speech sound from real signal statistics.
+
+    * **impulse** — a bang/knock/clap: spiky envelope, fast attack, brief activity.
+    * **alarm** — periodic beeping: the loudness envelope itself repeats (0.5–6 Hz
+      autocorrelation peak), the signature of alarms, ringtones and timers.
+    * **sustained** — a hum/motor/steady noise: long, flat envelope.
+    * **sound** — genuinely none of the above; the honest residual class.
+    """
+    n = len(sig)
+    duration = n / rate if rate else 0.0
+    frame = max(1, int(rate * frame_s))
+    env = [rms(sig[i:i + frame]) for i in range(0, n, frame)]
+    if not env or max(env) <= 0:
+        return SoundProfile(duration, 0.0, 0.0, 0.0, 0.0, None, 0.0, 0.0, 0.0)
+
+    peak_env = max(env)
+    mean_env = sum(env) / len(env)
+    ptm = peak_env / mean_env if mean_env > 0 else 0.0
+    peak_i = env.index(peak_env)
+    onset_i = next((i for i, e in enumerate(env) if e >= 0.1 * peak_env), 0)
+    attack_s = max(0.0, (peak_i - onset_i)) * frame_s
+    active_s = sum(1 for e in env if e >= 0.5 * peak_env) * frame_s
+    z = zero_crossing_rate(sig)
+
+    # envelope periodicity: repeated, evenly spaced onsets. Beeps cross the half-peak
+    # threshold again and again at a steady interval; speech syllables are irregular
+    # and a single burst or steady tone crosses at most once.
+    beep_hz: Optional[float] = None
+    if duration >= 1.0:
+        thr = 0.5 * peak_env
+        edges = [i for i in range(1, len(env)) if env[i] >= thr > env[i - 1]]
+        if len(edges) >= 3:
+            intervals = [b - a for a, b in zip(edges, edges[1:])]
+            mean_iv = sum(intervals) / len(intervals)
+            var = sum((iv - mean_iv) ** 2 for iv in intervals) / len(intervals)
+            regular = mean_iv > 0 and math.sqrt(var) / mean_iv <= 0.35
+            if regular and 0.15 <= mean_iv * frame_s <= 2.0:
+                beep_hz = 1.0 / (mean_iv * frame_s)
+
+    band_low, band_mid, band_high = _band_energies(sig, rate)
+    prof = SoundProfile(duration, ptm, attack_s, active_s, z, beep_hz,
+                        band_low, band_mid, band_high)
+
+    if beep_hz is not None:
+        prof.label = "alarm"
+    elif active_s <= 0.35 and ptm >= 3.0 and attack_s <= 0.15:
+        prof.label = "impulse"
+    elif duration >= 1.0 and ptm <= 2.0:
+        prof.label = "sustained"
+    return prof
+
+
+# --------------------------------------------------------------------------- #
 # Analysis result
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -517,5 +652,30 @@ if __name__ == "__main__":  # pragma: no cover
     aud = Audio()
     assert aud.is_duplicate(a, b)
     print("dedup verdict       : amplitude-scaled clip = duplicate ✓")
+
+    # sound-event classification: a bang, a steady hum and periodic beeping
+    SR = 8000
+
+    def burst() -> List[float]:                       # 1 s clip, 60 ms decaying bang
+        sig = [0.0] * (SR // 4)
+        sig += [0.9 * math.exp(-i / 120) * math.sin(2 * math.pi * 250 * i / SR)
+                for i in range(SR // 16)]
+        return sig + [0.0] * (SR - len(sig))
+
+    def hum() -> List[float]:                         # 2 s steady 440 Hz tone
+        return [0.4 * math.sin(2 * math.pi * 440 * i / SR) for i in range(2 * SR)]
+
+    def beeps() -> List[float]:                       # 3 s of 2 Hz on/off 1 kHz beeps
+        sig: List[float] = []
+        for i in range(3 * SR):
+            on = (i // (SR // 4)) % 2 == 0
+            sig.append(0.6 * math.sin(2 * math.pi * 1000 * i / SR) if on else 0.0)
+        return sig
+
+    for name, s, want in (("bang", burst(), "impulse"), ("hum", hum(), "sustained"),
+                          ("beeps", beeps(), "alarm")):
+        prof = classify_sound(s, SR)
+        print(f"sound class {name:7}: {prof.label} ({prof.to_dict()})")
+        assert prof.label == want, f"{name} must classify as {want}, got {prof.label}"
 
     print("\nALL SELF-TESTS PASSED ✓")
