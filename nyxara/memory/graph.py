@@ -247,6 +247,10 @@ class KnowledgeGraph:
     def match(self, query: GraphQuery, now: Optional[float] = None) -> List[Triple]:
         s = self.resolve(query.subject) if query.subject else None
         o = self.resolve(query.object) if query.object else None
+        # a named endpoint that resolves to no known entity can match nothing —
+        # dropping the filter instead would return unrelated triples
+        if (query.subject and s is None) or (query.object and o is None):
+            return []
         p = _norm(query.predicate) if query.predicate else None
         out: List[Triple] = []
         for t in self._triples.values():
