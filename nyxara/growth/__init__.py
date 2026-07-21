@@ -87,6 +87,13 @@ from nyxara.growth.neuromod import (
     REMPruner,
     UtilityLedger,
 )
+from nyxara.growth.formal_proof import (
+    Certificate,
+    FormalVerifier,
+    UnivalenceUnifier,
+    equivalent,
+    typecheck,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -436,4 +443,10 @@ __all__ = [
     "UtilityLedger",
     "REMPruner",
     "PruneReport",
+    # F9 — proof-carrying abstractions + univalence unification
+    "FormalVerifier",
+    "UnivalenceUnifier",
+    "Certificate",
+    "typecheck",
+    "equivalent",
 ]

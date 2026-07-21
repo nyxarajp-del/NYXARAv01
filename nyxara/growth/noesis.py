@@ -689,6 +689,15 @@ def _rewrite(prog: Prog, name: str, body: Prog, nholes: int) -> Prog:
                 args=tuple(_rewrite(a, name, body, nholes) for a in prog.args))
 
 
+def _rename_app(prog: Prog, old: str, new: str) -> Prog:
+    """Rename an application everywhere in a program (used when F9 unifies equivalent abstractions)."""
+    name = new if (prog.kind == "app" and prog.name == old) else prog.name
+    if not prog.args:
+        return Prog(prog.kind, prog.rtype, name=name, value=prog.value)
+    return Prog(prog.kind, prog.rtype, name=name, value=prog.value,
+                args=tuple(_rename_app(a, old, new) for a in prog.args))
+
+
 def _hole_types(body: Prog) -> Tuple[Type, ...]:
     found: Dict[int, Type] = {}
 
@@ -870,6 +879,8 @@ class NoesisReport:
     corpus_size: int
     red_team_refuted: int = 0
     pruned: int = 0
+    certified: int = 0
+    unified: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -880,6 +891,8 @@ class NoesisReport:
             "abstractions_adopted": self.abstractions_adopted,
             "red_team_refuted": self.red_team_refuted,
             "pruned": self.pruned,
+            "certified": self.certified,
+            "unified": self.unified,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -894,7 +907,8 @@ class NoesisEngine:
     def __init__(self, library: Optional[Library] = None, *, seed: int = 0,
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
-                 ledger: Any = None, prune_every: int = 3, curiosity: Any = None) -> None:
+                 ledger: Any = None, prune_every: int = 3, curiosity: Any = None,
+                 formal: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -914,6 +928,9 @@ class NoesisEngine:
         # F2 — epistemic curiosity (duck-typed: .observe(family, solved) / .weights(families)). When
         # set, DREAM samples task-families toward the ones she understands least.
         self.curiosity = curiosity
+        # F9 — proof-carrying abstractions (duck-typed: .certify / .unify). Certifies each adopted
+        # abstraction and merges provably-equivalent ones (univalence).
+        self.formal = formal
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -963,6 +980,18 @@ class NoesisEngine:
                 family = task.name.rsplit("_", 1)[0]
                 self.curiosity.observe(family, res.solved)
         adopted = self.sleep()
+        # F9: certify each newly-adopted abstraction (well-typed proof) and unify any that are
+        # provably equivalent — the library keeps one representative per behaviour.
+        certified = 0
+        unified = 0
+        if self.formal is not None:
+            for a in adopted:
+                if self.formal.certify(a, self.library).proven:
+                    certified += 1
+            for keep, drop in self.formal.unify(self.library):
+                self.corpus = [_rename_app(p, drop, keep) for p in self.corpus]
+                self._usage_prev.pop(drop, None)
+                unified += 1
         # F1: retune bounded search knobs from the cycle's calibrated evidence
         if self.metacognition is not None:
             self.metacognition.adapt()
@@ -989,6 +1018,8 @@ class NoesisEngine:
             corpus_size=len(self.corpus),
             red_team_refuted=refuted,
             pruned=pruned,
+            certified=certified,
+            unified=unified,
         )
         self.history.append(rep)
         return rep
