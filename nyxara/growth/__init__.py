@@ -64,6 +64,15 @@ from nyxara.growth.eureka import (
     Conjecture,
     EurekaEngine,
 )
+from nyxara.growth.noesis import (
+    Abstraction,
+    Library,
+    NoesisEngine,
+    NoesisReport,
+    Prog,
+    Task,
+    base_library,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -390,4 +399,12 @@ __all__ = [
     "SkillState",
     "Mastery",
     "build_default_skilltree",
+    # Noēsis — the living algorithm (compression-driven self-extending library learning)
+    "NoesisEngine",
+    "NoesisReport",
+    "Library",
+    "Abstraction",
+    "Prog",
+    "Task",
+    "base_library",
 ]
