@@ -74,6 +74,13 @@ from nyxara.growth.noesis import (
     base_library,
 )
 from nyxara.growth.redteam import RedTeam, RedTeamVerdict, boundary_inputs
+from nyxara.growth.postmortem import (
+    Diagnosis,
+    FailureCause,
+    Knob,
+    KnobChange,
+    Metacognition,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -412,4 +419,10 @@ __all__ = [
     "RedTeam",
     "RedTeamVerdict",
     "boundary_inputs",
+    # F1 — metacognitive reflective loop (post-mortem + bounded self-tuning)
+    "Metacognition",
+    "Diagnosis",
+    "FailureCause",
+    "Knob",
+    "KnobChange",
 ]

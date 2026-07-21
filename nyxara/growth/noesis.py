@@ -770,7 +770,7 @@ def _random_list(rnd: random.Random) -> List[int]:
     return [rnd.randint(-5, 9) for _ in range(n)]
 
 
-def synthetic_tasks(rnd: random.Random, n: int) -> List[Task]:
+def synthetic_tasks(rnd: random.Random, n: int, *, min_examples: int = 3) -> List[Task]:
     """Fantasise tasks from a family of hidden programs (list→int / list→list) she must rediscover.
 
     The families deliberately SHARE structure (e.g. ``sum(scale_each(x, k))`` across k) so SLEEP has
@@ -789,15 +789,16 @@ def synthetic_tasks(rnd: random.Random, n: int) -> List[Task]:
         fname, rtype, make = rnd.choice(families)
         k = rnd.choice([2, 3, 4, 5])
         prog = make(k)
+        target_ex = max(3, min_examples)
         examples: List[Tuple[Any, Any]] = []
         tries = 0
-        while len(examples) < 4 and tries < 30:
+        while len(examples) < target_ex and tries < 60:
             tries += 1
             xs = _random_list(rnd)
             out = evaluate(prog, xs, lib)
             if out is not None:
                 examples.append((xs, out))
-        if len(examples) >= 3:
+        if len(examples) >= min(3, target_ex):
             tasks.append(Task(name=f"{fname}_{k}", input_type=INTLIST,
                               ret_type=rtype, examples=tuple(examples), oracle=prog))
     return tasks
@@ -841,7 +842,8 @@ class NoesisEngine:
     """
 
     def __init__(self, library: Optional[Library] = None, *, seed: int = 0,
-                 tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None) -> None:
+                 tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
+                 metacognition: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -849,6 +851,9 @@ class NoesisEngine:
         # F5 — the adversarial critic (duck-typed: any object with .survives(...)). When set, a WAKE
         # solution enters the corpus only if it survives the boundary-condition battery.
         self.red_team = red_team
+        # F1 — the metacognitive reflective loop (duck-typed: .diagnose / .adapt / .geti). When set,
+        # it diagnoses each outcome and retunes her bounded search knobs between cycles.
+        self.metacognition = metacognition
         self.corpus: List[Prog] = []
         self.cycles = 0
         self.history: List[NoesisReport] = []
@@ -865,6 +870,7 @@ class NoesisEngine:
         for task in tasks:
             res = self.wake(task)
             expansions.append(res.expansions)
+            was_refuted = False
             if res.solved and res.program is not None:
                 solved += 1
                 # F5 gate: a solution that merely fit the examples must survive the adversarial
@@ -872,13 +878,20 @@ class NoesisEngine:
                 if self.red_team is not None:
                     verdict = self.red_team.survives(
                         res.program, task.input_type, self.library, oracle=task.oracle)
-                    if not verdict.survived:
-                        refuted += 1
-                        continue
-                sizes.append(res.size)
-                self.corpus.append(res.program)
-                self.library.reinforce(res.program)
+                    was_refuted = not verdict.survived
+                if was_refuted:
+                    refuted += 1
+                else:
+                    sizes.append(res.size)
+                    self.corpus.append(res.program)
+                    self.library.reinforce(res.program)
+            # F1: diagnose this outcome (feeds her calibrated solve/over-fit beliefs)
+            if self.metacognition is not None:
+                self.metacognition.diagnose(solved=res.solved, refuted=was_refuted)
         adopted = self.sleep()
+        # F1: retune bounded search knobs from the cycle's calibrated evidence
+        if self.metacognition is not None:
+            self.metacognition.adapt()
         n = len(tasks)
         rep = NoesisReport(
             cycle=self.cycles, tasks=n, solved=solved,
@@ -894,6 +907,11 @@ class NoesisEngine:
         return rep
 
     def wake(self, task: Task) -> SynthResult:
+        if self.metacognition is not None:
+            return synthesize(task, self.library,
+                              beam=self.metacognition.geti("beam"),
+                              max_rounds=self.metacognition.geti("max_rounds"),
+                              max_expansions=self.metacognition.geti("max_expansions"))
         return synthesize(task, self.library, beam=self.beam)
 
     def sleep(self) -> List[Abstraction]:
@@ -907,7 +925,8 @@ class NoesisEngine:
         return adopted
 
     def dream(self, n: int) -> List[Task]:
-        return synthetic_tasks(self._rnd, n)
+        min_ex = self.metacognition.geti("min_examples") if self.metacognition is not None else 3
+        return synthetic_tasks(self._rnd, n, min_examples=min_ex)
 
     def run(self, cycles: int, tasks: Optional[Sequence[Task]] = None) -> List[NoesisReport]:
         return [self.step(tasks) for _ in range(cycles)]

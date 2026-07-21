@@ -376,15 +376,21 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         except ValueError:
             n = 3
         from nyxara.growth.noesis import NoesisEngine
-        eng = NoesisEngine(seed=0)
+        from nyxara.growth.redteam import RedTeam
+        from nyxara.growth.postmortem import Metacognition
+        mc = Metacognition()
+        eng = NoesisEngine(seed=0, red_team=RedTeam(), metacognition=mc)
         noesis_path = os.path.expanduser("~/.nyxara/noesis.json")
         eng.load(noesis_path)  # compound across sessions
         for rep in eng.run(max(1, n)):
             print(f"  cycle {rep.cycle}: solved {rep.solved}/{rep.tasks} "
                   f"avg_size={rep.avg_solution_size:.2f} "
-                  f"expansions={rep.avg_expansions:.0f} +{rep.abstractions_adopted} abstraction(s)")
+                  f"expansions={rep.avg_expansions:.0f} "
+                  f"refuted={rep.red_team_refuted} +{rep.abstractions_adopted} abstraction(s)")
         eng.save(noesis_path)
-        print(json.dumps(eng.report(), indent=2, default=str))
+        report = eng.report()
+        report["metacognition"] = mc.snapshot()  # F1 introspection: beliefs + knobs + causes
+        print(json.dumps(report, indent=2, default=str))
     elif cmd in ("selfimprove", "self-improve", "self_improve"):
         tokens = arg.split()
         # /selfimprove [N] [enact] → drive the codebase-level RSI loop N times (observable).
