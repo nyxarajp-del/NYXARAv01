@@ -440,12 +440,18 @@ def evaluate(prog: Prog, x: Any, lib: Library) -> Any:
 # --------------------------------------------------------------------------- #
 @dataclass
 class Task:
-    """A specification: solve so that ``prog(input) == output`` on every example."""
+    """A specification: solve so that ``prog(input) == output`` on every example.
+
+    ``oracle`` (optional) is the ground-truth program that generated the examples. It is **never**
+    shown to the search — only the F5 red-team (``growth/redteam.py``) may consult it, to falsify a
+    solution that merely fit the handful of examples but disagrees on adversarial inputs.
+    """
 
     name: str
     input_type: Type
     ret_type: Type
     examples: Tuple[Tuple[Any, Any], ...]
+    oracle: Optional["Prog"] = None
 
     def target(self) -> Tuple[Any, ...]:
         return tuple(out for _, out in self.examples)
@@ -793,7 +799,7 @@ def synthetic_tasks(rnd: random.Random, n: int) -> List[Task]:
                 examples.append((xs, out))
         if len(examples) >= 3:
             tasks.append(Task(name=f"{fname}_{k}", input_type=INTLIST,
-                              ret_type=rtype, examples=tuple(examples)))
+                              ret_type=rtype, examples=tuple(examples), oracle=prog))
     return tasks
 
 
@@ -813,6 +819,7 @@ class NoesisReport:
     abstractions_adopted: int
     library_size: int
     corpus_size: int
+    red_team_refuted: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -821,6 +828,7 @@ class NoesisReport:
             "avg_solution_size": round(self.avg_solution_size, 4),
             "avg_expansions": round(self.avg_expansions, 2),
             "abstractions_adopted": self.abstractions_adopted,
+            "red_team_refuted": self.red_team_refuted,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -833,11 +841,14 @@ class NoesisEngine:
     """
 
     def __init__(self, library: Optional[Library] = None, *, seed: int = 0,
-                 tasks_per_cycle: int = 12, beam: int = 300) -> None:
+                 tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
         self.beam = beam
+        # F5 — the adversarial critic (duck-typed: any object with .survives(...)). When set, a WAKE
+        # solution enters the corpus only if it survives the boundary-condition battery.
+        self.red_team = red_team
         self.corpus: List[Prog] = []
         self.cycles = 0
         self.history: List[NoesisReport] = []
@@ -848,6 +859,7 @@ class NoesisEngine:
         if tasks is None:
             tasks = self.dream(self.tasks_per_cycle)
         solved = 0
+        refuted = 0
         sizes: List[int] = []
         expansions: List[int] = []
         for task in tasks:
@@ -855,6 +867,14 @@ class NoesisEngine:
             expansions.append(res.expansions)
             if res.solved and res.program is not None:
                 solved += 1
+                # F5 gate: a solution that merely fit the examples must survive the adversarial
+                # boundary battery (vs its oracle) before it is trusted into the permanent corpus.
+                if self.red_team is not None:
+                    verdict = self.red_team.survives(
+                        res.program, task.input_type, self.library, oracle=task.oracle)
+                    if not verdict.survived:
+                        refuted += 1
+                        continue
                 sizes.append(res.size)
                 self.corpus.append(res.program)
                 self.library.reinforce(res.program)
@@ -868,6 +888,7 @@ class NoesisEngine:
             abstractions_adopted=len(adopted),
             library_size=len(self.library.primitives) + len(self.library.abstractions),
             corpus_size=len(self.corpus),
+            red_team_refuted=refuted,
         )
         self.history.append(rep)
         return rep

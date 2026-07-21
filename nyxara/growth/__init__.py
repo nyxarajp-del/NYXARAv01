@@ -73,6 +73,7 @@ from nyxara.growth.noesis import (
     Task,
     base_library,
 )
+from nyxara.growth.redteam import RedTeam, RedTeamVerdict, boundary_inputs
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -407,4 +408,8 @@ __all__ = [
     "Prog",
     "Task",
     "base_library",
+    # F5 — adversarial self-falsification (Popperian red-team gate)
+    "RedTeam",
+    "RedTeamVerdict",
+    "boundary_inputs",
 ]
