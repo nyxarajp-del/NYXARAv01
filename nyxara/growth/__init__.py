@@ -81,6 +81,12 @@ from nyxara.growth.postmortem import (
     KnobChange,
     Metacognition,
 )
+from nyxara.growth.neuromod import (
+    Neuromodulators,
+    PruneReport,
+    REMPruner,
+    UtilityLedger,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -425,4 +431,9 @@ __all__ = [
     "FailureCause",
     "Knob",
     "KnobChange",
+    # F3 — neuromodulated plasticity + REM pruning
+    "Neuromodulators",
+    "UtilityLedger",
+    "REMPruner",
+    "PruneReport",
 ]

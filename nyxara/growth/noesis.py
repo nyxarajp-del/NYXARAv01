@@ -317,6 +317,7 @@ class Library:
     primitives: Dict[str, Primitive] = field(default_factory=dict)
     abstractions: Dict[str, Abstraction] = field(default_factory=dict)
     counts: Dict[str, float] = field(default_factory=dict)
+    archived: Dict[str, Abstraction] = field(default_factory=dict)  # pruned, reversibly (F3 REM)
 
     # ---- entry access ---- #
     def entry(self, name: str) -> Optional[Any]:
@@ -351,12 +352,41 @@ class Library:
             return self._leaf_cost()
         return self.node_cost(prog.name) + sum(self.dl(a) for a in prog.args)
 
-    def reinforce(self, prog: Prog) -> None:
-        """Fold a solved program's usage into the prior so future search prefers what worked."""
+    def reinforce(self, prog: Prog, weight: float = 1.0) -> None:
+        """Fold a solved program's usage into the prior so future search prefers what worked.
+
+        ``weight`` is the F3 neuromodulated learning rate: a novel/surprising solve reinforces
+        strongly, a habitual one barely at all (saving memory + compute).
+        """
         if prog.kind == "app":
-            self.counts[prog.name] = self.counts.get(prog.name, 0.0) + 1.0
+            self.counts[prog.name] = self.counts.get(prog.name, 0.0) + weight
         for a in prog.args:
-            self.reinforce(a)
+            self.reinforce(a, weight)
+
+    def uses(self, name: str, prog: Prog) -> int:
+        """How many times ``name`` appears in ``prog`` (usage → utility for F3 pruning)."""
+        c = 1 if (prog.kind == "app" and prog.name == name) else 0
+        return c + sum(self.uses(name, a) for a in prog.args)
+
+    def referenced_by_abstractions(self, name: str) -> bool:
+        """True if any *other* kept abstraction's body uses ``name`` (never prune a dependency)."""
+        return any(self.uses(name, a.body) > 0 for k, a in self.abstractions.items() if k != name)
+
+    def prune_abstraction(self, name: str) -> bool:
+        """Reversibly archive an abstraction (REM pruning). Base primitives are never prunable."""
+        a = self.abstractions.pop(name, None)
+        if a is None:
+            return False
+        self.archived[name] = a
+        return True
+
+    def restore_abstraction(self, name: str) -> bool:
+        """Bring a pruned abstraction back — nothing learned is ever truly lost."""
+        a = self.archived.pop(name, None)
+        if a is None:
+            return False
+        self.abstractions[name] = a
+        return True
 
     # ---- growth ---- #
     def add_abstraction(self, absn: Abstraction) -> None:
@@ -369,6 +399,7 @@ class Library:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "abstractions": [a.to_dict() for a in self.abstractions.values()],
+            "archived": [a.to_dict() for a in self.archived.values()],
             "counts": dict(self.counts),
         }
 
@@ -376,6 +407,9 @@ class Library:
         for ad in d.get("abstractions", ()):
             a = Abstraction.from_dict(ad)
             self.abstractions[a.name] = a
+        for ad in d.get("archived", ()):
+            a = Abstraction.from_dict(ad)
+            self.archived[a.name] = a
         self.counts.update({str(k): float(v) for k, v in d.get("counts", {}).items()})
 
 
@@ -821,6 +855,7 @@ class NoesisReport:
     library_size: int
     corpus_size: int
     red_team_refuted: int = 0
+    pruned: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -830,6 +865,7 @@ class NoesisReport:
             "avg_expansions": round(self.avg_expansions, 2),
             "abstractions_adopted": self.abstractions_adopted,
             "red_team_refuted": self.red_team_refuted,
+            "pruned": self.pruned,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -843,7 +879,8 @@ class NoesisEngine:
 
     def __init__(self, library: Optional[Library] = None, *, seed: int = 0,
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
-                 metacognition: Any = None) -> None:
+                 metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
+                 ledger: Any = None, prune_every: int = 3) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -854,6 +891,14 @@ class NoesisEngine:
         # F1 — the metacognitive reflective loop (duck-typed: .diagnose / .adapt / .geti). When set,
         # it diagnoses each outcome and retunes her bounded search knobs between cycles.
         self.metacognition = metacognition
+        # F3 — neuromodulated plasticity (.weight(...)) + REM pruning (.prune(...)) over a utility
+        # ledger (.record_cycle / .is_stale). All duck-typed and optional.
+        self.neuromod = neuromod
+        self.pruner = pruner
+        self.ledger = ledger
+        self.prune_every = max(1, prune_every)
+        self._seen: set = set()
+        self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
         self.cycles = 0
         self.history: List[NoesisReport] = []
@@ -884,7 +929,15 @@ class NoesisEngine:
                 else:
                     sizes.append(res.size)
                     self.corpus.append(res.program)
-                    self.library.reinforce(res.program)
+                    # F3 neuromodulation: novel + hard-won solves are written in fast; habitual
+                    # ones barely nudge the prior (saving memory + compute).
+                    weight = 1.0
+                    if self.neuromod is not None:
+                        key = res.program.pretty()
+                        novelty = 0.0 if key in self._seen else 1.0
+                        self._seen.add(key)
+                        weight = self.neuromod.weight(novelty=novelty, expansions=res.expansions)
+                    self.library.reinforce(res.program, weight)
             # F1: diagnose this outcome (feeds her calibrated solve/over-fit beliefs)
             if self.metacognition is not None:
                 self.metacognition.diagnose(solved=res.solved, refuted=was_refuted)
@@ -892,6 +945,18 @@ class NoesisEngine:
         # F1: retune bounded search knobs from the cycle's calibrated evidence
         if self.metacognition is not None:
             self.metacognition.adapt()
+        # F3 REM pruning: fold this cycle's fresh abstraction-usage into the utility ledger, then
+        # (periodically) prune concepts that stopped earning their keep — archived, reversibly.
+        pruned = 0
+        if self.pruner is not None and self.ledger is not None:
+            usage_now = {name: sum(self.library.uses(name, p) for p in self.corpus)
+                         for name in self.library.abstractions}
+            delta = {n: max(0, usage_now.get(n, 0) - self._usage_prev.get(n, 0))
+                     for n in usage_now}
+            self._usage_prev = usage_now
+            self.ledger.record_cycle(delta)
+            if self.cycles % self.prune_every == 0:
+                pruned = len(self.pruner.prune(self.library, self.ledger).pruned)
         n = len(tasks)
         rep = NoesisReport(
             cycle=self.cycles, tasks=n, solved=solved,
@@ -902,6 +967,7 @@ class NoesisEngine:
             library_size=len(self.library.primitives) + len(self.library.abstractions),
             corpus_size=len(self.corpus),
             red_team_refuted=refuted,
+            pruned=pruned,
         )
         self.history.append(rep)
         return rep
