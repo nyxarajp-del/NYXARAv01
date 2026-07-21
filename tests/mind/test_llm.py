@@ -15,14 +15,14 @@ from nyxara.mind.llm import (
     LLMRequest,
     LLMResponse,
     Message,
-    MockProvider,
+    NativeProvider,
     Role,
     Usage,
     estimate_tokens,
 )
 
 
-def _mock_llm():
+def _native_llm():
     return LLM(settings=NyxaraSettings.for_profile(Profile.TEST))
 
 
@@ -68,29 +68,30 @@ def test_estimate_tokens():
     assert estimate_tokens("a" * 40) == 10
 
 
-# -------------------- mock provider -------------------- #
-def test_mock_always_available():
-    assert MockProvider().available() is True
+# -------------------- native own-brain provider -------------------- #
+def test_native_always_available():
+    assert NativeProvider().available() is True
 
 
-def test_mock_deterministic():
-    p = MockProvider()
+def test_native_deterministic():
+    p = NativeProvider()
     req = LLMRequest.from_prompt("hello")
     assert p.complete(req).text == p.complete(req).text
 
 
-def test_mock_echoes_prompt():
-    p = MockProvider()
+def test_native_answers_from_own_brain_not_echo():
+    p = NativeProvider()
     resp = p.complete(LLMRequest.from_prompt("remember me"))
-    assert "remember me" in resp.text
-    assert resp.provider == "mock"
+    # her own always-on brain drafts real text — it never parrots the prompt back
+    assert isinstance(resp.text, str) and resp.text.strip()
+    assert resp.provider == "native"
     assert resp.usage.total_tokens > 0
 
 
-def test_mock_json_mode():
-    p = MockProvider()
+def test_native_json_mode():
+    p = NativeProvider()
     resp = p.complete(LLMRequest.from_prompt("data", json_mode=True))
-    assert resp.parse_json()["mock"] is True
+    assert resp.parse_json()["native"] is True
 
 
 # -------------------- response parsing -------------------- #
@@ -119,51 +120,51 @@ def test_parse_json_bad_raises():
 
 
 # -------------------- LLM facade -------------------- #
-def test_facade_uses_mock_in_test_profile():
-    llm = _mock_llm()
-    assert llm.chosen_provider().name == "mock"
+def test_facade_uses_native_in_test_profile():
+    llm = _native_llm()
+    assert llm.chosen_provider().name == "native"
 
 
 def test_facade_generate():
-    llm = _mock_llm()
+    llm = _native_llm()
     out = llm.generate("hello world", system="be nice")
-    assert "hello world" in out
+    assert isinstance(out, str) and out.strip()
 
 
 def test_facade_generate_json():
-    llm = _mock_llm()
+    llm = _native_llm()
     data = llm.generate_json("give me json")
-    assert data["mock"] is True
+    assert data["native"] is True
 
 
 def test_facade_chat():
-    llm = _mock_llm()
+    llm = _native_llm()
     resp = llm.chat([Message(Role.USER, "hi")])
     assert isinstance(resp, LLMResponse)
 
 
 def test_facade_statelessness():
-    llm = _mock_llm()
+    llm = _native_llm()
     # identical requests -> identical output; no carried-over state
     assert llm.generate("same") == llm.generate("same")
     assert llm.stateless is True
 
 
 def test_provider_status():
-    llm = _mock_llm()
+    llm = _native_llm()
     status = llm.provider_status()
-    assert status["mock"] is True
-    assert set(status) == {"qwen", "self", "mock"}
+    assert status["native"] is True
+    assert set(status) == {"qwen", "self", "native"}
 
 
 def test_async_complete():
-    llm = _mock_llm()
+    llm = _native_llm()
 
     async def go():
         return await llm.acomplete(LLMRequest.from_prompt("async hi"))
 
     resp = asyncio.run(go())
-    assert "async hi" in resp.text
+    assert isinstance(resp.text, str) and resp.text.strip()
 
 
 # -------------------- fallback + resilience -------------------- #
@@ -194,14 +195,14 @@ def test_retry_then_success():
     flaky = _FlakyProvider(fail_times=2)
     settings = NyxaraSettings.for_profile(Profile.DEV)
     settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": flaky, "mock": MockProvider()},
+    llm = LLM(settings=settings, providers={"qwen": flaky, "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=5, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("x"))
     assert resp.text == "recovered"
     assert flaky.calls == 3
 
 
-def test_falls_back_to_mock_when_provider_dead():
+def test_falls_back_to_native_when_provider_dead():
     from nyxara.kernel.errors import RetryPolicy
 
     class _Dead(LLMProviderBase):
@@ -217,16 +218,19 @@ def test_falls_back_to_mock_when_provider_dead():
             from nyxara.kernel.errors import ExternalServiceError
             raise ExternalServiceError("always down")
 
-    settings = NyxaraSettings.for_profile(Profile.DEV)  # allows mock fallback
+    settings = NyxaraSettings.for_profile(Profile.DEV)
     settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": _Dead(), "mock": MockProvider()},
+    llm = LLM(settings=settings, providers={"qwen": _Dead(), "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=2, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("fallback please"))
-    assert resp.provider == "mock"
-    assert "fallback please" in resp.text
+    # her always-on native own-brain is the guaranteed floor — it answers, never an echo
+    assert resp.provider == "native"
+    assert isinstance(resp.text, str) and resp.text.strip()
 
 
-def test_no_fallback_raises_when_disabled():
+def test_native_floor_is_always_available():
+    # There is no way to disable the native own-brain floor: a dead configured provider
+    # falls back to her own always-on brain rather than raising — she is never voiceless.
     class _Dead(LLMProviderBase):
         name = "dead"
 
@@ -242,15 +246,14 @@ def test_no_fallback_raises_when_disabled():
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
     settings.llm.provider = ProviderName.QWEN
-    settings.llm.allow_mock_fallback = False
     from nyxara.kernel.errors import RetryPolicy
-    llm = LLM(settings=settings, providers={"qwen": _Dead()},
+    llm = LLM(settings=settings, providers={"qwen": _Dead(), "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=1, base_delay=0))
-    with pytest.raises(LLMError):
-        llm.complete(LLMRequest.from_prompt("x"))
+    resp = llm.complete(LLMRequest.from_prompt("x"))
+    assert resp.provider == "native" and resp.text.strip()
 
 
-def test_unavailable_provider_falls_back_to_mock():
+def test_unavailable_provider_falls_back_to_native():
     class _Unavailable(LLMProviderBase):
         name = "x"
 
@@ -259,8 +262,8 @@ def test_unavailable_provider_falls_back_to_mock():
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
     settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": _Unavailable(), "mock": MockProvider()})
-    assert llm.chosen_provider().name == "mock"
+    llm = LLM(settings=settings, providers={"qwen": _Unavailable(), "native": NativeProvider()})
+    assert llm.chosen_provider().name == "native"
 
 
 # -------------------- self-model prompt formatting (Phase 0) -------------------- #

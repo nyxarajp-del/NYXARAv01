@@ -212,7 +212,7 @@ def test_mock_llm_is_not_used():
     class _MockLLM:
         def chosen_provider(self):
             class P:
-                name = "mock"
+                name = "native"
             return P()
 
     lex = GroundedLexicon(llm=_MockLLM())

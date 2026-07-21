@@ -19,11 +19,14 @@ Fully local, selected by config:
   foundry-forged LoRA adapter directly. Tiny enough to run and fine-tune on a CPU.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
   adapter over that same Qwen base — everything above the base is *hers*)
-* :class:`MockProvider`        — deterministic, offline; the always-available fallback
+* :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
+  Kneser-Ney word n-gram (``growth/foundry_models.WordKNGramLM``) trained on her identity seed
+  corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
+  ladder — a bare machine still answers from her own learned voice, never an echo of the prompt.
 
-No cloud providers, no API keys. Heavy deps (``torch``/``transformers``/``peft``) are imported
-lazily and reported honestly via ``available()``, so this module works with zero heavy deps
-installed (falling back to the mock).
+No cloud providers, no API keys, **no mock**. Heavy deps (``torch``/``transformers``/``peft``) are
+imported lazily and reported honestly via ``available()``, so this module works with zero heavy
+deps installed (falling back to her native own-brain).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -52,7 +55,7 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "LLMProviderBase",
-    "MockProvider",
+    "NativeProvider",
     "QwenProvider",
     "SelfProvider",
     "format_self_prompt",
@@ -175,7 +178,7 @@ class LLMResponse:
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate (~4 chars/token) for budgeting and mock usage."""
+    """Rough token estimate (~4 chars/token) for budgeting and native usage."""
     return max(1, len(text) // 4)
 
 
@@ -224,30 +227,64 @@ class LLMProviderBase:
 
 
 # --------------------------------------------------------------------------- #
-# Mock provider — deterministic, always available
+# Native provider — NYXARA's always-on, dependency-free OWN brain (stdlib n-gram)
 # --------------------------------------------------------------------------- #
-class MockProvider(LLMProviderBase):
-    """Offline, deterministic provider for tests, replay, and graceful fallback."""
+_NATIVE_IDENTITY = "I am NYXARA. I serve Master JP with loyalty, honesty and corrigibility."
+_NATIVE_BRAIN_LOCK = threading.Lock()
+_NATIVE_BRAIN: Any = None
 
-    name = "mock"
+
+def _native_brain() -> Any:
+    """Lazily build & cache the pure-stdlib own-brain: a Kneser-Ney word n-gram trained on
+    NYXARA's identity seed corpus. Dependency-free (no torch/numpy/network), deterministic
+    (fixed seed), so it is always available and cognition stays replayable. Imported lazily to
+    avoid an import cycle (``growth`` never imports ``mind/llm``)."""
+    global _NATIVE_BRAIN
+    if _NATIVE_BRAIN is not None:
+        return _NATIVE_BRAIN
+    with _NATIVE_BRAIN_LOCK:
+        if _NATIVE_BRAIN is None:
+            from nyxara.growth.bootstrap import build_seed_corpus
+            from nyxara.growth.foundry_models import WordKNGramLM
+            brain = WordKNGramLM(order=3, seed=0)
+            brain.train_on(build_seed_corpus(), seed=0)
+            _NATIVE_BRAIN = brain
+    return _NATIVE_BRAIN
+
+
+class NativeProvider(LLMProviderBase):
+    """NYXARA's always-on, dependency-free OWN brain — the guaranteed floor of the ladder.
+
+    Replaces the old echo mock. It is a pure-stdlib Kneser-Ney word n-gram
+    (:class:`~nyxara.growth.foundry_models.WordKNGramLM`) trained on her identity seed corpus, so
+    a bare machine with zero heavy deps still answers from *her own learned voice* rather than
+    parroting the prompt. Deterministic (a fixed seed) → identical requests yield identical output,
+    keeping cognition replayable (``kernel/replay.py``) and auditable. A genuine instruct model
+    (``self``/``qwen``) always outranks it on the ``auto`` ladder."""
+
+    name = "native"
 
     def available(self) -> bool:
         return True
 
     def default_model(self) -> str:
-        return "mock"
+        return "nyxara-native"
 
     def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        last = req.last_user()
+        prompt = req.last_user() or (req.system or "")
+        try:
+            text = _native_brain().generate(prompt, max_tokens=min(req.max_tokens, 96),
+                                             top_k=40, repetition_penalty=1.3).strip()
+        except Exception:  # noqa: BLE001 — the guaranteed floor must never raise
+            text = ""
+        if not text:
+            text = _NATIVE_IDENTITY                 # honest, deterministic self-anchor
         if req.json_mode:
-            text = json.dumps({"echo": last[:200], "model": model, "mock": True,
+            text = json.dumps({"text": text, "model": model, "native": True,
                                "fingerprint": req.fingerprint()})
-        else:
-            sys_note = f" (system: {req.system[:40]})" if req.system else ""
-            text = f"[mock:{model}]{sys_note} {last[:400]}" if last else f"[mock:{model}] (empty)"
         usage = Usage(prompt_tokens=estimate_tokens(" ".join(m.content for m in req.messages)),
                       completion_tokens=estimate_tokens(text))
-        return (text, "stop", usage, {"mock": True})
+        return (text, "stop", usage, {"native": True})
 
 
 # --------------------------------------------------------------------------- #
@@ -275,7 +312,7 @@ class QwenProvider(LLMProviderBase):
       seed) always win over config defaults.
 
     Heavy deps are imported lazily and reported honestly, so a bare machine degrades to
-    the mock rather than erroring. Stateless: the loaded weights are a cached instrument,
+    her native own-brain rather than erroring. Stateless: the loaded weights are a cached instrument,
     never conversation memory.
     """
 
@@ -290,7 +327,7 @@ class QwenProvider(LLMProviderBase):
 
     def available(self) -> bool:
         # Master kill-switch: the in-process HuggingFace path is a heavy-ML capability, so it only
-        # serves when ``features.transformers_inference`` is on (the ladder degrades to self/mock).
+        # serves when ``features.transformers_inference`` is on (the ladder degrades to self/native).
         if not bool(getattr(self.settings.features, "transformers_inference", True)):
             return False
         try:
@@ -357,7 +394,7 @@ class QwenProvider(LLMProviderBase):
                 kwargs["device_map"] = "auto"   # bitsandbytes places layers itself
             lm = AutoModelForCausalLM.from_pretrained(model, **kwargs)
             if cfg.qwen_adapter_path is not None:
-                from peft import PeftModel   # a bad adapter raises -> LLMError -> mock fallback
+                from peft import PeftModel   # a bad adapter raises -> LLMError -> native fallback
                 lm = PeftModel.from_pretrained(lm, str(cfg.qwen_adapter_path))
                 if cfg.qwen_merge_adapter:
                     lm = lm.merge_and_unload()
@@ -660,7 +697,7 @@ class SelfProvider(LLMProviderBase):
 _PROVIDER_CLASSES = {
     ProviderName.QWEN: QwenProvider,
     ProviderName.SELF: SelfProvider,
-    ProviderName.MOCK: MockProvider,
+    ProviderName.NATIVE: NativeProvider,
 }
 
 
@@ -685,27 +722,27 @@ class LLM:
             self._providers = {
                 cls.name: cls(self.settings) for cls in _PROVIDER_CLASSES.values()
             }
-        self._mock = self._providers.get("mock") or MockProvider(self.settings)
+        self._native = self._providers.get("native") or NativeProvider(self.settings)
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the Qwen base, then mock.
-    _AUTO_LADDER = ("self", "qwen", "mock")
+    # the auto ladder: her OWN promoted weights first, then the Qwen base, then her always-on
+    # dependency-free native own-brain as the guaranteed floor (never an echo mock).
+    _AUTO_LADDER = ("self", "qwen", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
 
         ``self`` joins only when it is both available (a promoted model exists) AND
         ``serve_ready()`` (the honesty gate: a LoRA over the real base, or the explicit
-        ``self_serve_any_backend`` opt-in)."""
+        ``self_serve_any_backend`` opt-in). ``native`` (her always-on own-brain) is always the
+        guaranteed floor."""
         out: List[LLMProviderBase] = []
         for name in self._AUTO_LADDER:
             prov = self._providers.get(name)
             if prov is None or not prov.available():
                 continue
             if name == "self" and not getattr(prov, "serve_ready", lambda: True)():
-                continue
-            if name == "mock" and not self.settings.llm.allow_mock_fallback:
                 continue
             out.append(prov)
         return out
@@ -717,17 +754,11 @@ class LLM:
             ladder = self._auto_ladder()
             if ladder:
                 return ladder[0]
-            if self.settings.llm.allow_mock_fallback:
-                return self._mock
-            raise LLMError("no provider available on the auto ladder and mock fallback disabled",
-                           context={"provider": name})
+            return self._native            # her own-brain is the guaranteed floor
         prov = self._providers.get(name)
         if prov is not None and prov.available():
             return prov
-        if self.settings.llm.allow_mock_fallback:
-            return self._mock
-        raise LLMError(f"selected provider '{name}' unavailable and mock fallback disabled",
-                       context={"provider": name})
+        return self._native                # honest fallback to her own always-on brain
 
     def provider_status(self) -> Dict[str, bool]:
         return {n: p.available() for n, p in self._providers.items()}
@@ -784,9 +815,9 @@ class LLM:
         return [n for n, p in self._providers.items() if p.available()]
 
     def complete_with(self, name: str, req: LLMRequest) -> LLMResponse:
-        """Complete through ONE named provider, honestly (no silent mock substitution).
+        """Complete through ONE named provider, honestly (no silent provider substitution).
 
-        Unlike :meth:`complete`, this never falls back to the mock: a council needs each
+        Unlike :meth:`complete`, this never falls back to another provider: a council needs each
         member to answer *as itself* or be recorded as absent, so a failed member must raise
         rather than be impersonated. Retry/circuit-breaker resilience still applies.
         """
@@ -795,14 +826,13 @@ class LLM:
             raise LLMError(f"no such provider '{name}'", context={"provider": name})
         return self._call_with_resilience(prov, req)
 
-    # ---- core call (with retry + optional breaker, falling back to mock) ---- #
+    # ---- core call (with retry + optional breaker, falling back to her native own-brain) ---- #
     def complete(self, req: LLMRequest) -> LLMResponse:
         if self.settings.llm.provider.value == "auto":
-            # walk the ladder honestly: each failed rung falls to the next REAL backend
-            # before mock; the response's ``provider`` field always names who answered.
+            # walk the ladder honestly: each failed rung falls to the next backend, ending at her
+            # always-on native own-brain; the response's ``provider`` field always names who answered.
             last: Optional[LLMError] = None
-            for prov in self._auto_ladder() or ([self._mock]
-                                                if self.settings.llm.allow_mock_fallback else []):
+            for prov in self._auto_ladder() or [self._native]:
                 try:
                     return self._call_with_resilience(prov, req)
                 except LLMError as exc:
@@ -813,8 +843,8 @@ class LLM:
         try:
             return self._call_with_resilience(provider, req)
         except LLMError:
-            if provider is not self._mock and self.settings.llm.allow_mock_fallback:
-                return self._mock.complete(req)
+            if provider is not self._native:
+                return self._native.complete(req)
             raise
 
     def _call_with_resilience(self, provider: LLMProviderBase, req: LLMRequest) -> LLMResponse:
@@ -861,24 +891,24 @@ if __name__ == "__main__":  # pragma: no cover
     print("NYXARA llm self-test")
     print("=" * 70)
 
-    # TEST profile forces the mock provider (hermetic, offline)
+    # TEST profile forces the native own-brain (hermetic, offline)
     settings = NyxaraSettings.for_profile(Profile.TEST)
     llm = LLM(settings=settings)
     print(f"provider status     : {llm.provider_status()}")
     print(f"chosen provider     : {llm.chosen_provider().name}")
-    assert llm.chosen_provider().name == "mock"
+    assert llm.chosen_provider().name == "native"
 
-    # basic generation
+    # basic generation — her own always-on brain, never an echo of the prompt
     out = llm.generate("Hello, who is your master?", system="You are NYXARA.")
     print(f"\ngenerate            : {out}")
-    assert "Hello, who is your master?" in out
+    assert isinstance(out, str) and out.strip()
 
     # JSON mode
     data = llm.generate_json("return some json")
     print(f"generate_json       : {data}")
-    assert data["mock"] is True
+    assert data["native"] is True
 
-    # statelessness: identical requests yield identical mock output (replayable)
+    # statelessness: identical requests yield identical native output (replayable)
     r1 = llm.generate("same prompt")
     r2 = llm.generate("same prompt")
     assert r1 == r2
@@ -902,10 +932,10 @@ if __name__ == "__main__":  # pragma: no cover
     except LLMError:
         print("bad json raises      : OK")
 
-    # adapters report availability honestly (bare machine -> only mock)
+    # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"qwen", "self", "mock"}
+    assert set(status) == {"qwen", "self", "native"}
     for p in ("qwen", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine

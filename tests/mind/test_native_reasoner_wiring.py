@@ -15,7 +15,7 @@ from nyxara.mind.nyxara_reasoner import NyxaraReasoner
 
 
 class _CountingProvider:
-    name = "qwen"  # not "mock" → _real_llm() is True, so the teacher path is live
+    name = "qwen"  # not "native" → _real_llm() is True, so the teacher path is live
 
 
 class _CountingLLM:

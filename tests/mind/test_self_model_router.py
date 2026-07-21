@@ -33,7 +33,7 @@ class _Own:
 
 
 class _Teacher:
-    def __init__(self, providers=("qwen", "self", "mock")):
+    def __init__(self, providers=("qwen", "self", "native")):
         self._p = list(providers)
 
     def available_providers(self):
@@ -112,7 +112,7 @@ def test_teacher_route_on_known_unknown():
 
 
 def test_abstain_when_weak_and_no_teacher():
-    psr = _psr(teacher=_Teacher(providers=["mock"]))
+    psr = _psr(teacher=_Teacher(providers=["native"]))
     plan = psr.plan("How do I improve my cooking?")
     assert plan.route is Route.ABSTAIN
     res = psr.route_respond("How do I improve my cooking?")

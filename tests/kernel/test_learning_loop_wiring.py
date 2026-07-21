@@ -47,7 +47,7 @@ def _settings(tmp_path) -> NyxaraSettings:
 def test_closed_loop_turns_to_forge_to_live_serving(tmp_path):
     s = _settings(tmp_path)
     llm = LLM(settings=s)                        # the live brain, built BEFORE any training
-    assert llm.chosen_provider().name == "mock"  # nothing forged yet — mock answers
+    assert llm.chosen_provider().name == "native"  # nothing forged yet — mock answers
 
     # 1) lived experience accrues (what _feed_flywheel does per cleared turn)
     fw = DataFlywheel.from_settings(s)

@@ -1083,7 +1083,7 @@ def _llm_real(llm: Any) -> bool:
     if llm is None:
         return False
     try:
-        return llm.chosen_provider().name != "mock"
+        return llm.chosen_provider().name != "native"
     except Exception:  # noqa: BLE001
         return False
 

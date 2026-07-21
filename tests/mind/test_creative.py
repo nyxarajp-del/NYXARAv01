@@ -182,7 +182,7 @@ def test_write_with_llm():
     from nyxara.mind.llm import LLM
     eng = CreativeEngine(llm=LLM(settings=NyxaraSettings.for_profile(Profile.TEST)))
     out = eng.write("a haiku")
-    assert "haiku" in out
+    assert isinstance(out, str) and out.strip()   # her native own-brain drafts real text, no echo
 
 
 # -------------------- proposal -------------------- #

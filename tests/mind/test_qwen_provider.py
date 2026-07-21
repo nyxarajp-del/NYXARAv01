@@ -31,12 +31,12 @@ def _has_torch() -> bool:
 # -------------------- enum / registry / config routing -------------------- #
 def test_provider_enum_is_local_only():
     assert LLMProvider.QWEN.value == "qwen"
-    assert {p.value for p in LLMProvider} == {"auto", "qwen", "self", "mock"}
+    assert {p.value for p in LLMProvider} == {"auto", "qwen", "self", "native"}
 
 
 def test_registered_in_facade():
     status = LLM(settings=_settings()).provider_status()
-    assert set(status) == {"qwen", "self", "mock"}
+    assert set(status) == {"qwen", "self", "native"}
 
 
 def test_config_routes_model_and_no_keys():
@@ -88,13 +88,13 @@ def test_complete_with_raises_when_unavailable():
         llm.complete_with("qwen", LLMRequest.from_prompt("hi"))
 
 
-def test_facade_falls_back_to_mock_when_unavailable():
+def test_facade_falls_back_to_native_when_unavailable():
     if _has_torch():
         pytest.skip("torch installed; fallback path not exercised")
     s = _settings()
     s.llm.provider = LLMProvider.QWEN
     out = LLM(settings=s).generate("hello there")
-    assert "hello there" in out  # deterministic mock answered, no crash
+    assert isinstance(out, str) and out.strip()  # her native own-brain answered, no crash
 
 
 # -------------------- generation-control plumbing (no real weights) -------------------- #

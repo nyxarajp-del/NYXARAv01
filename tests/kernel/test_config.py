@@ -43,7 +43,6 @@ def test_prod_hardening_forces_safety():
     assert s.features.audit_logging is True
     assert s.features.corrigibility is True
     assert s.guard.rule_modification_locked is True
-    assert s.llm.allow_mock_fallback is False
     assert s.features.simulation_required is True
     assert s.is_prod and not s.is_dev
 
@@ -59,9 +58,9 @@ def test_safety_flags_cannot_be_disabled_even_in_dev():
     assert s.features.corrigibility is True
 
 
-def test_test_profile_forces_mock_llm():
+def test_test_profile_forces_native_llm():
     s = NyxaraSettings.for_profile(Profile.TEST)
-    assert s.llm.provider is LLMProvider.MOCK
+    assert s.llm.provider is LLMProvider.NATIVE
     assert s.observability.telemetry_enabled is False
 
 
@@ -73,7 +72,7 @@ def test_real_learning_defaults_on():
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
     assert s.flywheel.correction_weight == 3
-    assert s.llm.self_serve_any_backend is False     # the honesty serve gate
+    assert s.llm.self_serve_any_backend is True      # she serves her OWN forged brain from first boot
     assert s.llm.self_reload_lean is True
 
 
@@ -92,7 +91,7 @@ def test_llm_active_model_and_key():
     assert s.llm.active_model() == "nyxara-self"
     # every backend is local now — there are no API keys anywhere
     assert s.llm.active_key() is None
-    s.llm.provider = LLMProvider.MOCK
+    s.llm.provider = LLMProvider.NATIVE
     assert s.llm.active_key() is None
 
 

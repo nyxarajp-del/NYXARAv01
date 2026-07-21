@@ -52,7 +52,7 @@ class _Own:
 
 
 class _Teacher:
-    def __init__(self, providers=("qwen", "self", "mock")):
+    def __init__(self, providers=("qwen", "self", "native")):
         self._p = list(providers)
 
     def available_providers(self):
@@ -102,14 +102,14 @@ def test_no_self_model_uses_teacher():
 
 
 def test_no_self_no_teacher_is_honest_none():
-    r = Router(_Teacher(providers=["mock"]), settings=_settings(),
+    r = Router(_Teacher(providers=["native"]), settings=_settings(),
                self_provider=_Own("x", ok=False))
     res = r.draft("hi")
     assert res.source == "none" and res.text == "" and res.handed_off is False
 
 
 def test_no_teacher_keeps_a_confident_own_answer():
-    r = Router(_Teacher(providers=["mock"]), settings=_settings(consult_teacher=False),
+    r = Router(_Teacher(providers=["native"]), settings=_settings(consult_teacher=False),
                self_provider=_Own("A coherent, confident answer, Master."))
     res = r.draft("status?")
     assert res.source == "self" and res.handed_off is True
@@ -156,14 +156,14 @@ def test_router_result_serialises():
 # --------------------------------------------------------------------------- #
 def test_faculty_answers_math_exactly_even_without_any_llm():
     # no own model, no real teacher — yet exact arithmetic is still computed
-    r = Router(_Teacher(providers=["mock"]), settings=_settings(),
+    r = Router(_Teacher(providers=["native"]), settings=_settings(),
                self_provider=_Own("x", ok=False))
     res = r.draft("What is 12 * 12?")
     assert res.source == "faculty" and res.text == "144" and res.handed_off is True
 
 
 def test_faculty_proves_logic():
-    r = Router(_Teacher(providers=["mock"]), settings=_settings(),
+    r = Router(_Teacher(providers=["native"]), settings=_settings(),
                self_provider=_Own("x", ok=False))
     res = r.draft("Is (A -> B) and A -> B a tautology?")
     assert res.source == "faculty" and "valid" in res.text
@@ -178,7 +178,7 @@ def test_faculty_beats_even_a_confident_own_model():
 
 def test_abstains_when_own_is_weak_and_no_teacher():
     from nyxara.mind.metacognition import HONEST_ABSTENTION
-    r = Router(_Teacher(providers=["mock"]),
+    r = Router(_Teacher(providers=["native"]),
                settings=_settings(consult_teacher=False, abstain_below=0.3),
                self_provider=_Own("the the the the the"))
     res = r.draft("Explain quantum chromodynamics.")

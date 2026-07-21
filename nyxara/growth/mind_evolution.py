@@ -414,7 +414,7 @@ def default_base_sampler(*, llm: Any = None, core: Any = None) -> Sampler:
 
 def _llm_is_real(llm: Any) -> bool:
     try:
-        return llm.chosen_provider().name != "mock"
+        return llm.chosen_provider().name != "native"
     except Exception:  # noqa: BLE001
         return False
 

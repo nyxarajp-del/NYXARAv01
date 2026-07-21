@@ -267,7 +267,7 @@ class AutonomousToolForge:
         if self.llm is None:
             return False
         try:
-            return self.llm.chosen_provider().name != "mock"
+            return self.llm.chosen_provider().name != "native"
         except Exception:  # noqa: BLE001 — a scripted fake LLM is treated as real for testing
             return hasattr(self.llm, "generate")
 

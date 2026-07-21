@@ -131,10 +131,10 @@ class Router:
         except Exception:  # noqa: BLE001
             return None
         pref = self.settings.llm.provider.value
-        if pref in avail and pref not in ("self", "mock"):
+        if pref in avail and pref not in ("self", "native"):
             return pref
         for name in avail:
-            if name not in ("self", "mock"):
+            if name not in ("self", "native"):
                 return name
         return None
 
@@ -340,7 +340,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     class _Teacher:
         def available_providers(self):
-            return ["qwen", "self", "mock"]
+            return ["qwen", "self", "native"]
 
         def complete_with(self, name, req):
             return type("_R", (), {"text": f"[teacher:{name}] a careful answer"})()
@@ -367,7 +367,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     class _NoTeacher:
         def available_providers(self):
-            return ["mock"]
+            return ["native"]
 
     none = Router(_NoTeacher(), settings=s2,
                   self_provider=_OwnProvider("x", ok=False)).draft("hi")

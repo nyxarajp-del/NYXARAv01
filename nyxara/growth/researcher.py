@@ -364,7 +364,7 @@ class AutonomousResearcher:
         if llm is None:
             return False
         try:
-            return llm.chosen_provider().name != "mock"
+            return llm.chosen_provider().name != "native"
         except Exception:  # noqa: BLE001
             return False
 

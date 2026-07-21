@@ -144,7 +144,7 @@ def test_summarize_never_discards_fetched_text():
 def test_lazy_llm_callable_resolved():
     # a zero-arg provider hook (llm built after the researcher) is resolved lazily
     class _Prov:
-        name = "mock"
+        name = "native"
 
     class _LLM:
         def chosen_provider(self):

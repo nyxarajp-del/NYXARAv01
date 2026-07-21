@@ -125,7 +125,7 @@ def test_self_model_is_an_author_but_mock_is_not(tmp_path: Path):
     # NYXARA's OWN model authors her redesigns — this is the whole point of the feature
     assert LLMEditGenerator(llm=_StubLLM(provider="self"), settings=s).available() is True
     # the mock impersonator is never an author (it would only fake a fix)
-    assert LLMEditGenerator(llm=_StubLLM(provider="mock"), settings=s).available() is False
+    assert LLMEditGenerator(llm=_StubLLM(provider="native"), settings=s).available() is False
     # an unavailable own-model can't author
     assert LLMEditGenerator(llm=_StubLLM(provider="self", ok=False), settings=s).available() is False
 
