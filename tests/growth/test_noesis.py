@@ -152,6 +152,21 @@ def test_engine_compounds_capability_per_compute():
     assert len(eng.library.abstractions) >= 1
 
 
+def test_core_noesis_runs_through_the_kernel():
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    core = NyxaraCore()
+    try:
+        rep = core.noesis(cycles=1)
+    finally:
+        stop = getattr(core, "stop_cognition", None)
+        if callable(stop):
+            stop()
+    assert "error" not in rep, rep.get("error")
+    assert rep["cycles"] >= 1 and rep["library_size"] >= 20
+    assert "metacognition" in rep  # F1 introspection surfaced through the kernel
+
+
 def test_engine_state_persists_across_restart(tmp_path):
     eng = NoesisEngine(seed=2, tasks_per_cycle=10)
     eng.run(3)
