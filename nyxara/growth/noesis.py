@@ -804,11 +804,19 @@ def _random_list(rnd: random.Random) -> List[int]:
     return [rnd.randint(-5, 9) for _ in range(n)]
 
 
-def synthetic_tasks(rnd: random.Random, n: int, *, min_examples: int = 3) -> List[Task]:
+SYNTHETIC_FAMILIES: Tuple[str, ...] = (
+    "sum_scaled", "sum_inc", "count_over", "max_scaled", "scaled_sorted",
+)
+
+
+def synthetic_tasks(rnd: random.Random, n: int, *, min_examples: int = 3,
+                    family_weights: Optional[Dict[str, float]] = None) -> List[Task]:
     """Fantasise tasks from a family of hidden programs (list→int / list→list) she must rediscover.
 
     The families deliberately SHARE structure (e.g. ``sum(scale_each(x, k))`` across k) so SLEEP has
-    real recurring structure to compress — the honest source of the compounding curve.
+    real recurring structure to compress — the honest source of the compounding curve. When
+    ``family_weights`` is given (the F2 epistemic scheduler), families are sampled in proportion to how
+    little she yet understands them — curiosity toward her own weak spots.
     """
     lib = base_library()
     families: List[Tuple[str, Type, Callable[[int], Prog]]] = [
@@ -818,9 +826,15 @@ def synthetic_tasks(rnd: random.Random, n: int, *, min_examples: int = 3) -> Lis
         ("max_scaled", INT, lambda k: app("maximum", INT, [app("scale_each", INTLIST, [var(INTLIST), lit(k, INT)])])),
         ("scaled_sorted", INTLIST, lambda k: app("sort_", INTLIST, [app("scale_each", INTLIST, [var(INTLIST), lit(k, INT)])])),
     ]
+    names = [f[0] for f in families]
     tasks: List[Task] = []
     for _ in range(n):
-        fname, rtype, make = rnd.choice(families)
+        if family_weights:
+            ws = [max(1e-6, family_weights.get(nm, 1.0)) for nm in names]
+            fname = rnd.choices(names, weights=ws, k=1)[0]
+            _, rtype, make = next(f for f in families if f[0] == fname)
+        else:
+            fname, rtype, make = rnd.choice(families)
         k = rnd.choice([2, 3, 4, 5])
         prog = make(k)
         target_ex = max(3, min_examples)
@@ -880,7 +894,7 @@ class NoesisEngine:
     def __init__(self, library: Optional[Library] = None, *, seed: int = 0,
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
-                 ledger: Any = None, prune_every: int = 3) -> None:
+                 ledger: Any = None, prune_every: int = 3, curiosity: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -897,6 +911,9 @@ class NoesisEngine:
         self.pruner = pruner
         self.ledger = ledger
         self.prune_every = max(1, prune_every)
+        # F2 — epistemic curiosity (duck-typed: .observe(family, solved) / .weights(families)). When
+        # set, DREAM samples task-families toward the ones she understands least.
+        self.curiosity = curiosity
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -941,6 +958,10 @@ class NoesisEngine:
             # F1: diagnose this outcome (feeds her calibrated solve/over-fit beliefs)
             if self.metacognition is not None:
                 self.metacognition.diagnose(solved=res.solved, refuted=was_refuted)
+            # F2: feed the outcome to epistemic curiosity, keyed by task family
+            if self.curiosity is not None:
+                family = task.name.rsplit("_", 1)[0]
+                self.curiosity.observe(family, res.solved)
         adopted = self.sleep()
         # F1: retune bounded search knobs from the cycle's calibrated evidence
         if self.metacognition is not None:
@@ -992,7 +1013,8 @@ class NoesisEngine:
 
     def dream(self, n: int) -> List[Task]:
         min_ex = self.metacognition.geti("min_examples") if self.metacognition is not None else 3
-        return synthetic_tasks(self._rnd, n, min_examples=min_ex)
+        weights = self.curiosity.weights(SYNTHETIC_FAMILIES) if self.curiosity is not None else None
+        return synthetic_tasks(self._rnd, n, min_examples=min_ex, family_weights=weights)
 
     def run(self, cycles: int, tasks: Optional[Sequence[Task]] = None) -> List[NoesisReport]:
         return [self.step(tasks) for _ in range(cycles)]
