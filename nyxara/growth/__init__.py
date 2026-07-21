@@ -94,6 +94,12 @@ from nyxara.growth.formal_proof import (
     equivalent,
     typecheck,
 )
+from nyxara.growth.grammar import (
+    CATALOG,
+    GrammarEvolver,
+    TypeExtension,
+    install_extension,
+)
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -449,4 +455,9 @@ __all__ = [
     "Certificate",
     "typecheck",
     "equivalent",
+    # F6 — self-evolving grammar + meta-types
+    "GrammarEvolver",
+    "TypeExtension",
+    "install_extension",
+    "CATALOG",
 ]

@@ -318,6 +318,7 @@ class Library:
     abstractions: Dict[str, Abstraction] = field(default_factory=dict)
     counts: Dict[str, float] = field(default_factory=dict)
     archived: Dict[str, Abstraction] = field(default_factory=dict)  # pruned, reversibly (F3 REM)
+    extra_types: Dict[str, Callable[[Any], Any]] = field(default_factory=dict)  # F6 meta-types
 
     # ---- entry access ---- #
     def entry(self, name: str) -> Optional[Any]:
@@ -420,22 +421,33 @@ def abs_name_tokens(name: str) -> List[str]:
 # --------------------------------------------------------------------------- #
 # Interpreter — guarded, hard-bounded evaluation
 # --------------------------------------------------------------------------- #
-def _coerce(value: Any, rtype: Type) -> Any:
+def _coerce(value: Any, rtype: Type, lib: Optional["Library"] = None) -> Any:
     if rtype == INT:
         return _clamp_int(value)
     if rtype == BOOL:
         return value if isinstance(value, bool) else None
     if rtype == INTLIST:
         return _clamp_list(value)
+    # F6: a self-invented meta-type validates through the library's coercer registry.
+    if lib is not None and rtype in lib.extra_types:
+        try:
+            return lib.extra_types[rtype](value)
+        except Exception:  # noqa: BLE001 — a bad meta-typed value fails closed
+            return None
     return None
+
+
+def active_types(lib: "Library") -> Tuple[Type, ...]:
+    """Base types plus any self-invented meta-types currently installed (F6)."""
+    return TYPES + tuple(t for t in lib.extra_types if t not in TYPES)
 
 
 def _eval(prog: Prog, x: Any, lib: Library, budget: _Budget) -> Any:
     budget.tick()
     if prog.kind == "lit":
-        return _coerce(prog.value, prog.rtype)
+        return _coerce(prog.value, prog.rtype, lib)
     if prog.kind == "var":
-        return _coerce(x, prog.rtype)
+        return _coerce(x, prog.rtype, lib)
     if prog.kind == "hole":  # only meaningful inside an abstraction body pre-substitution
         return None
     # app
@@ -458,7 +470,7 @@ def _eval(prog: Prog, x: Any, lib: Library, budget: _Budget) -> Any:
         raise
     except Exception:  # noqa: BLE001 — any op fault fails the program closed, never the machine
         return None
-    return _coerce(out, prog.rtype)
+    return _coerce(out, prog.rtype, lib)
 
 
 def evaluate(prog: Prog, x: Any, lib: Library) -> Any:
@@ -512,13 +524,20 @@ _DEFAULT_LITS: Tuple[Tuple[Any, Type], ...] = (
 )
 
 
+def _freeze(v: Any) -> Any:
+    """Deeply convert lists/tuples to hashable tuples so any value (incl. F6 meta-types) can key a bank."""
+    if isinstance(v, (list, tuple)):
+        return tuple(_freeze(x) for x in v)
+    return v
+
+
 def _sig(prog: Prog, inputs: Sequence[Any], lib: Library) -> Optional[Tuple[Any, ...]]:
     out: List[Any] = []
     for x in inputs:
         v = evaluate(prog, x, lib)
         if v is None:
             return None
-        out.append(tuple(v) if isinstance(v, list) else v)
+        out.append(_freeze(v))
     return tuple(out)
 
 
@@ -533,10 +552,12 @@ def synthesize(task: Task, lib: Library, *, max_rounds: int = 3, beam: int = 300
     """
     inputs = task.inputs()
     target = task.target()
-    target_norm = tuple(tuple(v) if isinstance(v, list) else v for v in target)
+    target_norm = tuple(_freeze(v) for v in target)
 
-    # bank[type][signature] -> smallest Prog with that observable behaviour
-    bank: Dict[Type, Dict[Tuple[Any, ...], Prog]] = {t: {} for t in TYPES}
+    # bank[type][signature] -> smallest Prog with that observable behaviour (over active types,
+    # which includes any F6 self-invented meta-types currently installed)
+    types = active_types(lib)
+    bank: Dict[Type, Dict[Tuple[Any, ...], Prog]] = {t: {} for t in types}
     expansions = 0
 
     def consider(prog: Prog) -> Optional[Prog]:
@@ -572,7 +593,7 @@ def synthesize(task: Task, lib: Library, *, max_rounds: int = 3, beam: int = 300
             break
         # snapshot the current bank per type, keeping the cheapest `beam` programs
         pool: Dict[Type, List[Prog]] = {}
-        for t in TYPES:
+        for t in types:
             progs = sorted(bank[t].values(), key=lambda p: (p.size(), lib.dl(p)))
             pool[t] = progs[:beam]
         grew = False
@@ -881,6 +902,7 @@ class NoesisReport:
     pruned: int = 0
     certified: int = 0
     unified: int = 0
+    grammar_extended: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -893,6 +915,7 @@ class NoesisReport:
             "pruned": self.pruned,
             "certified": self.certified,
             "unified": self.unified,
+            "grammar_extended": self.grammar_extended,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -908,7 +931,7 @@ class NoesisEngine:
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
                  ledger: Any = None, prune_every: int = 3, curiosity: Any = None,
-                 formal: Any = None) -> None:
+                 formal: Any = None, grammar: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -931,6 +954,9 @@ class NoesisEngine:
         # F9 — proof-carrying abstractions (duck-typed: .certify / .unify). Certifies each adopted
         # abstraction and merges provably-equivalent ones (univalence).
         self.formal = formal
+        # F6 — self-evolving grammar (duck-typed: .evolve(lib, tasks)). When set, DREAM includes tasks
+        # the base grammar cannot express and she invents the meta-type needed to solve them.
+        self.grammar = grammar
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -946,9 +972,12 @@ class NoesisEngine:
         refuted = 0
         sizes: List[int] = []
         expansions: List[int] = []
+        abstained: List[Task] = []
         for task in tasks:
             res = self.wake(task)
             expansions.append(res.expansions)
+            if not res.solved:
+                abstained.append(task)
             was_refuted = False
             if res.solved and res.program is not None:
                 solved += 1
@@ -979,6 +1008,11 @@ class NoesisEngine:
             if self.curiosity is not None:
                 family = task.name.rsplit("_", 1)[0]
                 self.curiosity.observe(family, res.solved)
+        # F6: if tasks fell outside the current grammar, invent the meta-type that captures them —
+        # adopted only if it makes the abstained tasks solvable (a strict capability gain).
+        grammar_extended = 0
+        if self.grammar is not None and abstained:
+            grammar_extended = len(self.grammar.evolve(self.library, abstained))
         adopted = self.sleep()
         # F9: certify each newly-adopted abstraction (well-typed proof) and unify any that are
         # provably equivalent — the library keeps one representative per behaviour.
@@ -1020,6 +1054,7 @@ class NoesisEngine:
             pruned=pruned,
             certified=certified,
             unified=unified,
+            grammar_extended=grammar_extended,
         )
         self.history.append(rep)
         return rep
@@ -1045,7 +1080,13 @@ class NoesisEngine:
     def dream(self, n: int) -> List[Task]:
         min_ex = self.metacognition.geti("min_examples") if self.metacognition is not None else 3
         weights = self.curiosity.weights(SYNTHETIC_FAMILIES) if self.curiosity is not None else None
-        return synthetic_tasks(self._rnd, n, min_examples=min_ex, family_weights=weights)
+        tasks = synthetic_tasks(self._rnd, n, min_examples=min_ex, family_weights=weights)
+        # F6: when a grammar evolver is present, dream a couple of tasks the base grammar cannot yet
+        # express — so she has a reason to invent a new meta-type.
+        if self.grammar is not None:
+            from nyxara.growth.grammar import meta_tasks
+            tasks = tasks + meta_tasks(self._rnd, 2)
+        return tasks
 
     def run(self, cycles: int, tasks: Optional[Sequence[Task]] = None) -> List[NoesisReport]:
         return [self.step(tasks) for _ in range(cycles)]
