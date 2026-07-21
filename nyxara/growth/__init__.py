@@ -100,6 +100,7 @@ from nyxara.growth.grammar import (
     TypeExtension,
     install_extension,
 )
+from nyxara.growth.ecosystem import Ecosystem, Explorer, Skeptic, Synthesizer
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -460,4 +461,9 @@ __all__ = [
     "TypeExtension",
     "install_extension",
     "CATALOG",
+    # F11 — the internal ecosystem (Explorer / Skeptic / Synthesizer)
+    "Ecosystem",
+    "Explorer",
+    "Skeptic",
+    "Synthesizer",
 ]

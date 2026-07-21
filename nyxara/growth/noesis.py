@@ -772,12 +772,17 @@ class _AbsCandidate:
 
 
 def sleep_abstract(corpus: Sequence[Prog], lib: Library, *, next_id: int = 0,
-                   holdout_frac: float = 0.34, seed: int = 0) -> List[Abstraction]:
+                   holdout_frac: float = 0.34, seed: int = 0,
+                   candidate_fn: Optional[Callable[[Sequence[Prog]], Sequence[Prog]]] = None,
+                   skeptic: Optional[Callable[[Prog, Library], bool]] = None) -> List[Abstraction]:
     """Adopt abstractions that STRICTLY lower total description length on a held-out split.
 
     Repeatedly: propose candidate bodies (anti-unification) on a train split, pick the one whose
     adoption most reduces total program size, and adopt it **only if** it also strictly reduces size
     on a disjoint held-out split (anti-overfit). Returns the abstractions adopted this pass.
+
+    ``candidate_fn`` (F11 Explorer) overrides how candidate bodies are proposed; ``skeptic`` (F11
+    Skeptic) is an extra veto a candidate must pass before it can compete on MDL.
     """
     corpus = [p for p in corpus if p.kind == "app"]
     adopted: List[Abstraction] = []
@@ -791,11 +796,14 @@ def sleep_abstract(corpus: Sequence[Prog], lib: Library, *, next_id: int = 0,
     train = [corpus[i] for i in idx[:cut]]
     holdout = [corpus[i] for i in idx[cut:]] or train  # tiny corpus → confirm on train
 
+    propose = candidate_fn or _candidate_bodies
     existing_bodies = [a.body for a in lib.abstractions.values()]
     work = list(corpus)
     for _ in range(8):  # bounded number of adoptions per pass
         best: Optional[_AbsCandidate] = None
-        for body in _candidate_bodies(work):
+        for body in propose(work):
+            if skeptic is not None and not skeptic(body, lib):
+                continue  # the Skeptic broke it — it never reaches the MDL contest
             if any(body.equal(b) for b in existing_bodies):
                 continue  # never adopt a concept she already holds
             nh = body.leaves_holes()
@@ -931,7 +939,7 @@ class NoesisEngine:
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
                  ledger: Any = None, prune_every: int = 3, curiosity: Any = None,
-                 formal: Any = None, grammar: Any = None) -> None:
+                 formal: Any = None, grammar: Any = None, ecosystem: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -957,6 +965,9 @@ class NoesisEngine:
         # F6 — self-evolving grammar (duck-typed: .evolve(lib, tasks)). When set, DREAM includes tasks
         # the base grammar cannot express and she invents the meta-type needed to solve them.
         self.grammar = grammar
+        # F11 — the internal ecosystem (duck-typed: .evolve(corpus, lib, ...)). When set, SLEEP runs
+        # as Explorer→Skeptic→Synthesizer competitive evolution instead of the default abstraction.
+        self.ecosystem = ecosystem
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -1068,9 +1079,12 @@ class NoesisEngine:
         return synthesize(task, self.library, beam=self.beam)
 
     def sleep(self) -> List[Abstraction]:
-        adopted = sleep_abstract(self.corpus, self.library,
-                                 next_id=len(self.library.abstractions),
-                                 seed=self._rnd.randint(0, 1 << 30))
+        next_id = len(self.library.abstractions)
+        seed = self._rnd.randint(0, 1 << 30)
+        if self.ecosystem is not None:
+            adopted = self.ecosystem.evolve(self.corpus, self.library, next_id=next_id, seed=seed)
+        else:
+            adopted = sleep_abstract(self.corpus, self.library, next_id=next_id, seed=seed)
         if adopted:
             # keep the corpus expressed in the richest current language
             for a in adopted:
