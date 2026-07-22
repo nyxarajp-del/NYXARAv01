@@ -1763,6 +1763,24 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
 
 
+class HolographicMemoryConfig(BaseModel):
+    """Holographic Memory Field (memory/holographic_field.py) — a continuous, entangled recall layer.
+
+    Every memory is stored as a key⊗value binding **bundled into one continuous hypervector field**;
+    recall is a single unbind + cleanup — associative, near-constant work over the whole field, not a
+    per-chunk scan. Memories share the one field, so they are genuinely entangled. Honest about
+    physics: a bundle saturates, so it holds a bounded working horizon at a given width with
+    graceful forgetting past capacity (spilling to the ordinary store). No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)      # HDC width (near-orthogonality ↑ with dim)
+    capacity: int = Field(default=512, ge=8, le=32768)     # working horizon before graceful fade/spill
+    recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    seed: int = 42
+
+
 class SuperpositionConfig(BaseModel):
     """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
 
@@ -2845,6 +2863,7 @@ class NyxaraSettings(BaseSettings):
         default_factory=CognitiveArchitectConfig)
     self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
+    holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
