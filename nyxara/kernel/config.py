@@ -1763,6 +1763,23 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
 
 
+class InternalCivilizationConfig(BaseModel):
+    """Multi-Agent Societal Mimicry (mind/internal_civilization.py) — deterministic persona debate.
+
+    On a big architectural / ethical decision, an internal society of deterministic sub-personas
+    (Scientist, Engineer, Strategist, Critic, Security Officer, Philosopher) debates over the
+    decision's own dimensions through several rounds of cross-examination, then NYXARA synthesises a
+    consensus she owns — with residual conflict reported honestly and an absolute safety/ethics veto
+    that is never out-voted. No LLM (the Master's 'khud kare, LLM na kare')."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    rounds: int = Field(default=2, ge=1, le=16)          # debate/cross-examination rounds
+    ensemble: int = Field(default=1, ge=1, le=64)        # voices per archetype ('hundreds of voices')
+    seed: int = 0
+
+
 class MetaEpistemologyConfig(BaseModel):
     """Autonomous Synthetic Mathematics (growth/meta_epistemology.py) — invent new axioms.
 
@@ -2899,6 +2916,8 @@ class NyxaraSettings(BaseSettings):
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
     meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
+    internal_civilization: InternalCivilizationConfig = Field(
+        default_factory=InternalCivilizationConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
