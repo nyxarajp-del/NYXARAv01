@@ -102,13 +102,24 @@ inequality *is* the result.
 2. `python -m nyxara.growth.noesis --cycles 6` — watch avg solution size ↓ and expansions ↓.
 3. `pytest -q` — full suite stays green (new behaviour is opt-in / self-contained).
 
-## 9. Roadmap (remaining, per the approved plan)
+## 9. Roadmap — COMPLETE (all 23 phases shipped)
 
-- **Tier 2** — F9 proof-carrying abstractions, F6 self-evolving grammar + meta-types, F11 internal
-  ecosystem (Explorer/Skeptic/Synthesizer), F7 category-theoretic functorial transfer, F10 counterfactual
-  causal dreaming, F8 continuous world-simulators.
-- **Tier 3** — F17 integrity under isolation, F12 hardware self-sensing, F14 self-repair + portable
-  bundle, F13 bounded axiom invention, F15 meta-invention codegen, F16 hyper-temporal planning.
-- **F18** — online / connected mode (continuous **verified** acquisition; offline stays the floor).
+All faculties built, each layered on the working core, each inside the sovereign gates, each keeping the
+honest ceiling. Every one is torch-free (heavy deps optional with honest fallbacks), no LLM in any loop.
 
-Each layers on this working core, each stays inside the sovereign gates, each keeps the honest ceiling.
+- **Tier 1** ✅ — F5 red-team, F1 metacognition, F3 neuromodulation+pruning, F2 active inference,
+  F4 latent geometry.
+- **Tier 2** ✅ — F9 proof-carrying abstractions, F6 self-evolving grammar + meta-types, F11 internal
+  ecosystem (Explorer/Skeptic/Synthesizer), F7 functorial transfer, F10 counterfactual dreaming,
+  F8 continuous world-simulators.
+- **Tier 3** ✅ — F17 integrity under isolation (the safety anchor), F12 hardware self-sensing,
+  F14 self-repair + portable bundle, F13 bounded axiom invention + sub-perceptual DSP, F15 meta-invention
+  codegen, F16 hyper-temporal planning.
+- **F18** ✅ — online / connected mode: continuous **verified** acquisition, offline stays the floor,
+  outbound actions escalate to the Master.
+
+Module map: `growth/{noesis,redteam,postmortem,neuromod,formal_proof,grammar,ecosystem,counterfactual,
+integrity,self_repair,ontogenesis,codegen,online}.py`, `mind/{active_inference,latent_geometry,
+category_transfer,continuous_world}.py`, `planning/hypertemporal.py`, `senses/hardware.py`. Every phase
+ships with its own test module; the safety line (corrigibility / oversight / immutable values) is
+untouched throughout, and F17 pins the anti-shutdown guarantee that all of Tier 3 inherits.

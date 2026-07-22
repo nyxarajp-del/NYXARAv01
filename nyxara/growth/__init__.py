@@ -111,6 +111,7 @@ from nyxara.growth.ontogenesis import (
     SubPerception,
 )
 from nyxara.growth.codegen import KernelForge, KernelResult, compile_prog
+from nyxara.growth.online import AcquisitionResult, OnlineItem, OnlineMode
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -498,4 +499,8 @@ __all__ = [
     "KernelForge",
     "KernelResult",
     "compile_prog",
+    # F18 — online / connected mode (verify-before-trust; offline is the floor)
+    "OnlineMode",
+    "OnlineItem",
+    "AcquisitionResult",
 ]
