@@ -103,6 +103,7 @@ from nyxara.growth.grammar import (
 from nyxara.growth.ecosystem import Ecosystem, Explorer, Skeptic, Synthesizer
 from nyxara.growth.counterfactual import CounterfactualDreamer, DreamReport, Failure
 from nyxara.growth.integrity import HibernateAndDream, HibernationReport, IntegritySeal
+from nyxara.growth.self_repair import HealOutcome, SelfRepair, pack_bundle, unpack_bundle
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -476,4 +477,9 @@ __all__ = [
     "IntegritySeal",
     "HibernateAndDream",
     "HibernationReport",
+    # F14 — epistemic self-repair + substrate portability
+    "SelfRepair",
+    "HealOutcome",
+    "pack_bundle",
+    "unpack_bundle",
 ]
