@@ -1763,6 +1763,23 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
 
 
+class SynesthesiaConfig(BaseModel):
+    """Cross-Domain Biomimetic Synesthesia (mind/synesthesia.py) — universal pattern transposition.
+
+    A pattern's scale-invariant *shape* (trend/curvature/oscillation/exp-power linearity) is lifted
+    into the shared HDC space, so patterns from different domains that share shape land near each
+    other. A known law is **transposed** across domains only when it **verifiably fits** the target
+    (R² past a threshold); otherwise she abstains. No LLM; pure numeric maths."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)
+    adopt_r2: float = Field(default=0.9, ge=0.0, le=1.0)          # fit needed to ADOPT a transposed law
+    min_similarity: float = Field(default=0.15, ge=0.0, le=1.0)   # cross-domain shape-match floor
+    seed: int = 7
+
+
 class HolographicMemoryConfig(BaseModel):
     """Holographic Memory Field (memory/holographic_field.py) — a continuous, entangled recall layer.
 
@@ -2864,6 +2881,7 @@ class NyxaraSettings(BaseSettings):
     self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
+    synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
