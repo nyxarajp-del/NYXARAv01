@@ -7245,6 +7245,25 @@ class NyxaraCore:
                             salience=0.62)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.4) True Original Creativity — on idle she CREATES something genuinely new
+        #       herself (idea / verse / procedural art): the Muse opens her own project,
+        #       the atelier competes, and the piece is kept only if it survives the
+        #       critic + novelty + reality gates. No LLM in the loop. Throttled and
+        #       oversight-gated — a paused/scrammed mind creates nothing of its own accord.
+        try:
+            tick = getattr(self, "_create_idle_count", 0) + 1
+            self._create_idle_count = tick
+            if tick % 8 == 0 and self.oversight.gate():
+                piece = self._originality().step()
+                self._originality_engine.save(self._originality_path)
+                if piece is not None:
+                    report["originals"] = report.get("originals", 0) + 1
+                    self.mind.record(
+                        ThoughtKind.INSIGHT,
+                        f"created [{piece.modality}] nov={piece.novelty:.2f}: "
+                        f"{piece.content[:36]}", salience=0.66)
+        except Exception:  # noqa: BLE001 — creativity is a capability, never fatal to idle
+            pass
         # 4f.3) Frontier Law Discovery — on idle she runs her own experiments and *invents new
         #       laws* (no LLM in the loop). When the Discovery Director is wired she DECIDES which act
         #       of discovery is worth most this beat (experiment in her least-mastered science, recover
@@ -7924,6 +7943,94 @@ class NyxaraCore:
             return report
         except Exception as exc:  # noqa: BLE001
             return {"cycles": cycles, "error": str(exc)}
+
+    def _originality(self) -> Any:
+        """The True-Original-Creativity engine, lazily built and session-persisted.
+
+        The whole creative organism — novelty archive, aesthetic taste, concept graph,
+        inner critic, muse, atelier, strategy evolver — lives in one engine whose state
+        persists under ``~/.nyxara/originality.json``, so her taste, her self-model and
+        her archive of originals compound across restarts. **No LLM in the loop.**"""
+        import os
+        import random as _random
+        from nyxara.mind.originality import OriginalityEngine
+        if getattr(self, "_originality_engine", None) is None:
+            self._originality_engine = OriginalityEngine(rng=_random.Random())
+            self._originality_path = os.path.expanduser("~/.nyxara/originality.json")
+            self._originality_engine.load(self._originality_path)
+        return self._originality_engine
+
+    def create(self, topic: str, *, modality: str = "idea",
+               rounds: int = 2) -> Dict[str, Any]:
+        """TRUE ORIGINAL CREATIVITY — she creates ``topic`` herself; the LLM plays no part.
+
+        The closed loop: her four-persona atelier proposes genomes (MCTS-simulated
+        futures included), each candidate is expressed for real (structured invention /
+        formed verse / procedural or simulated-automaton art), then gated — inner-critic
+        adversary, causal do-intervention + reality-anchor energy ledger (ideas),
+        measured novelty against her own archive, aesthetic resonance — and only what
+        survives every gate is KEPT. Returns the honest report as a dict (best-effort);
+        nothing here touches the world or side-steps the control law."""
+        try:
+            eng = self._originality()
+            out = eng.create(topic, modality=modality, rounds=max(1, int(rounds)))
+            eng.save(self._originality_path)
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"topic": topic, "error": str(exc)}
+
+    def imagine(self, topic: str, *, blend_with: Optional[str] = None) -> Dict[str, Any]:
+        """Structured divergent imagination via HER OWN CreativeEngine — no LLM.
+
+        SCAMPER, lateral thinking, analogy and conceptual blending run a real divergent
+        storm on ``topic`` (optionally blended with ``blend_with``), then convergent
+        selection keeps the best five. This wires in the previously-orphaned
+        :class:`~nyxara.mind.creative.CreativeEngine` as a first-class kernel capability."""
+        try:
+            import random as _random
+            from nyxara.mind.creative import CreativeEngine, Technique
+            if getattr(self, "_creative", None) is None:
+                self._creative = CreativeEngine(llm=None, rng=_random.Random())
+            ideas = self._creative.select(
+                self._creative.brainstorm(topic, techniques=list(Technique),
+                                          blend_with=blend_with), k=5)
+            prop = self._creative.propose(topic)
+            return {"topic": topic, "llm_used": False,
+                    "ideas": [i.to_dict() for i in ideas],
+                    "best": {"content": prop.content,
+                             "confidence": round(prop.confidence, 3),
+                             "provenance": "self_reflection"}}
+        except Exception as exc:  # noqa: BLE001
+            return {"topic": topic, "error": str(exc)}
+
+    def originality_report(self) -> Dict[str, Any]:
+        """Everything her creative organism knows about itself: kept originals per
+        modality, archive coverage, atelier persona economy, critic stats, strategy
+        genome + invented operators, muse projects and the ego's self-narrative."""
+        try:
+            return self._originality().report()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def rate_creation(self, rating: float) -> Dict[str, Any]:
+        """The Master's explicit aesthetic feedback (1–10) on her most recent original.
+
+        Feeds the Aesthetic Feedback Loop: her per-feature taste weights move toward
+        what the Master valued, and the update persists — her style genuinely evolves."""
+        try:
+            eng = self._originality()
+            if not eng.kept:
+                return {"error": "no creation to rate yet — try /create first"}
+            piece = eng.kept[-1]
+            signal = max(0.0, min(1.0, (float(rating) - 1.0) / 9.0))
+            weights = eng.judge.learn(piece.content, piece.modality, signal)
+            eng.save(self._originality_path)
+            return {"rated": piece.original_id, "modality": piece.modality,
+                    "signal": round(signal, 3),
+                    "preview": piece.content[:64].replace("\n", " "),
+                    "aesthetic_weights": {k: round(v, 3) for k, v in weights.items()}}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
 
     def intuit(self, puzzle: Any) -> Dict[str, Any]:
         """A non-algorithmic **creative leap** at ``puzzle`` — a fast, unproven 'Aha!' from

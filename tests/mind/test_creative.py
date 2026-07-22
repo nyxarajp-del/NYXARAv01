@@ -192,3 +192,12 @@ def test_propose_returns_proposal():
     assert prop.source_faculty == "creative"
     assert "technique" in prop.metadata
     assert 0.0 <= prop.confidence <= 1.0
+
+
+def test_propose_provenance_is_her_own_not_the_llm():
+    """The wiring contract CreativeFaculty depends on (P24 · F19): with no LLM,
+    the proposal's provenance is SELF_REFLECTION — her own computation."""
+    from nyxara.memory.provenance import SourceType
+    prop = CreativeEngine(llm=None, rng=random.Random(7)).propose("network defense")
+    assert prop.provenance is not None
+    assert prop.provenance.source is SourceType.SELF_REFLECTION
