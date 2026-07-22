@@ -131,6 +131,8 @@ commands:
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
   /solve <p>         solve as the right expert: coding/maths/science/business/medicine/law/…
   /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
+  /noesis [n]        the living algorithm: WAKE→SLEEP→DREAM n cycles — grow her own reusable
+                     abstraction library and show the compression curve (no LLM)
   /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
   /selfimprove N     run the codebase RSI loop N cycles (add 'enact' to apply real source edits)
   /save              persist long-term memory to disk now
@@ -366,6 +368,16 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /swarm <problem>")
         else:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
+    elif cmd == "noesis":
+        # /noesis [n] → run the living algorithm n cycles: grow her own abstraction library and
+        # show the compression curve (avg solution size ↓, compute-per-solve ↓). No LLM in the loop.
+        try:
+            n = int(arg) if arg.strip() else 3
+        except ValueError:
+            n = 3
+        # routes through the kernel: the living algorithm compounds on her persisted library, with
+        # the F5 red-team + F1 metacognition wired in (no LLM in the loop).
+        print(json.dumps(core.noesis(cycles=max(1, n)), indent=2, default=str))
     elif cmd in ("selfimprove", "self-improve", "self_improve"):
         tokens = arg.split()
         # /selfimprove [N] [enact] → drive the codebase-level RSI loop N times (observable).

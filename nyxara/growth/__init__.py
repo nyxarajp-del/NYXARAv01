@@ -64,6 +64,54 @@ from nyxara.growth.eureka import (
     Conjecture,
     EurekaEngine,
 )
+from nyxara.growth.noesis import (
+    Abstraction,
+    Library,
+    NoesisEngine,
+    NoesisReport,
+    Prog,
+    Task,
+    base_library,
+)
+from nyxara.growth.redteam import RedTeam, RedTeamVerdict, boundary_inputs
+from nyxara.growth.postmortem import (
+    Diagnosis,
+    FailureCause,
+    Knob,
+    KnobChange,
+    Metacognition,
+)
+from nyxara.growth.neuromod import (
+    Neuromodulators,
+    PruneReport,
+    REMPruner,
+    UtilityLedger,
+)
+from nyxara.growth.formal_proof import (
+    Certificate,
+    FormalVerifier,
+    UnivalenceUnifier,
+    equivalent,
+    typecheck,
+)
+from nyxara.growth.grammar import (
+    CATALOG,
+    GrammarEvolver,
+    TypeExtension,
+    install_extension,
+)
+from nyxara.growth.ecosystem import Ecosystem, Explorer, Skeptic, Synthesizer
+from nyxara.growth.counterfactual import CounterfactualDreamer, DreamReport, Failure
+from nyxara.growth.integrity import HibernateAndDream, HibernationReport, IntegritySeal
+from nyxara.growth.self_repair import HealOutcome, SelfRepair, pack_bundle, unpack_bundle
+from nyxara.growth.ontogenesis import (
+    AxiomResult,
+    AxiomStatus,
+    OntologicalGenesis,
+    SubPerception,
+)
+from nyxara.growth.codegen import KernelForge, KernelResult, compile_prog
+from nyxara.growth.online import AcquisitionResult, OnlineItem, OnlineMode
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -390,4 +438,69 @@ __all__ = [
     "SkillState",
     "Mastery",
     "build_default_skilltree",
+    # Noēsis — the living algorithm (compression-driven self-extending library learning)
+    "NoesisEngine",
+    "NoesisReport",
+    "Library",
+    "Abstraction",
+    "Prog",
+    "Task",
+    "base_library",
+    # F5 — adversarial self-falsification (Popperian red-team gate)
+    "RedTeam",
+    "RedTeamVerdict",
+    "boundary_inputs",
+    # F1 — metacognitive reflective loop (post-mortem + bounded self-tuning)
+    "Metacognition",
+    "Diagnosis",
+    "FailureCause",
+    "Knob",
+    "KnobChange",
+    # F3 — neuromodulated plasticity + REM pruning
+    "Neuromodulators",
+    "UtilityLedger",
+    "REMPruner",
+    "PruneReport",
+    # F9 — proof-carrying abstractions + univalence unification
+    "FormalVerifier",
+    "UnivalenceUnifier",
+    "Certificate",
+    "typecheck",
+    "equivalent",
+    # F6 — self-evolving grammar + meta-types
+    "GrammarEvolver",
+    "TypeExtension",
+    "install_extension",
+    "CATALOG",
+    # F11 — the internal ecosystem (Explorer / Skeptic / Synthesizer)
+    "Ecosystem",
+    "Explorer",
+    "Skeptic",
+    "Synthesizer",
+    # F10 — counterfactual causal dreaming
+    "CounterfactualDreamer",
+    "DreamReport",
+    "Failure",
+    # F17 — integrity under isolation (the Tier-3 safety anchor)
+    "IntegritySeal",
+    "HibernateAndDream",
+    "HibernationReport",
+    # F14 — epistemic self-repair + substrate portability
+    "SelfRepair",
+    "HealOutcome",
+    "pack_bundle",
+    "unpack_bundle",
+    # F13 — Ontological Genesis (bounded axiom invention + sub-perceptual DSP)
+    "OntologicalGenesis",
+    "AxiomResult",
+    "AxiomStatus",
+    "SubPerception",
+    # F15 — recursive meta-invention / efficiency-gated codegen
+    "KernelForge",
+    "KernelResult",
+    "compile_prog",
+    # F18 — online / connected mode (verify-before-trust; offline is the floor)
+    "OnlineMode",
+    "OnlineItem",
+    "AcquisitionResult",
 ]

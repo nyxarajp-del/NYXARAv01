@@ -7897,6 +7897,34 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
 
+    def noesis(self, cycles: int = 3) -> Dict[str, Any]:
+        """Run **Noēsis, the living algorithm** — a self-extending abstraction library that compounds
+        capability-per-compute, **with no LLM in the loop**.
+
+        Each cycle WAKEs (search for the shortest *verified* program per task; abstain, never bluff),
+        SLEEPs (compress solved programs into new first-class DSL primitives, adopted only on a strict
+        held-out description-length win — the language she thinks in grows), and DREAMs (invents her
+        own tasks). Solutions must survive the F5 adversarial red-team before entering the corpus, and
+        the F1 metacognition retunes her bounded search knobs from calibrated evidence. The learned
+        library persists to the session dir, so power compounds across restarts. Returns the report as
+        a dict (best-effort). Nothing here touches the world or side-steps the control law."""
+        try:
+            import os
+            from nyxara.growth.noesis import NoesisEngine
+            from nyxara.growth.postmortem import Metacognition
+            from nyxara.growth.redteam import RedTeam
+            if getattr(self, "_noesis", None) is None:
+                self._noesis = NoesisEngine(red_team=RedTeam(), metacognition=Metacognition())
+                self._noesis_path = os.path.expanduser("~/.nyxara/noesis.json")
+                self._noesis.load(self._noesis_path)
+            self._noesis.run(max(1, cycles))
+            self._noesis.save(self._noesis_path)
+            report = self._noesis.report()
+            report["metacognition"] = self._noesis.metacognition.snapshot()
+            return report
+        except Exception as exc:  # noqa: BLE001
+            return {"cycles": cycles, "error": str(exc)}
+
     def intuit(self, puzzle: Any) -> Dict[str, Any]:
         """A non-algorithmic **creative leap** at ``puzzle`` — a fast, unproven 'Aha!' from
         NYXARA's own Intuition Core (gestalt / analogy / superposition / dark-data / first-
