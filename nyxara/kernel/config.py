@@ -1763,6 +1763,22 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
 
 
+class MetaEpistemologyConfig(BaseModel):
+    """Autonomous Synthetic Mathematics (growth/meta_epistemology.py) — invent new axioms.
+
+    When a goal is unprovable in her current axioms she invents a new one, admitting it only if it is
+    consistent (proves no falsehood), non-trivial (the goal was unprovable before and provable after),
+    and generative (also proves an independent held-out goal). A real congruence-closure decision
+    procedure — 'provable' means actually derivable. Admitted axioms persist so her mathematics
+    compounds. No LLM. Honest, bounded automated theory extension over a small algebra."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    persist: bool = True
+    persist_filename: str = "invented_axioms.json"
+
+
 class SynesthesiaConfig(BaseModel):
     """Cross-Domain Biomimetic Synesthesia (mind/synesthesia.py) — universal pattern transposition.
 
@@ -2882,6 +2898,7 @@ class NyxaraSettings(BaseSettings):
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
+    meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
