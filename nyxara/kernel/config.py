@@ -1763,6 +1763,20 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
 
 
+class EpistemicCryptoConfig(BaseModel):
+    """Quantum-Resistant Epistemic Cryptography (growth/epistemic_crypto.py) — signed knowledge.
+
+    Every learned fact/axiom/skill is HMAC-SHA256 signed and chained (a tamper-evident hash chain);
+    altering any past fact breaks every signature after it. A context-safe share/execute policy (the
+    'digital immune system') decides — only if the signature still verifies — whether a fact may leave
+    her mind or run, by its sensitivity (public/internal/secret/executable) and the calling context.
+    Symmetric primitives (HMAC-SHA256) are not broken by Shor's algorithm. No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+
+
 class InternalCivilizationConfig(BaseModel):
     """Multi-Agent Societal Mimicry (mind/internal_civilization.py) — deterministic persona debate.
 
@@ -2918,6 +2932,7 @@ class NyxaraSettings(BaseSettings):
     meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
     internal_civilization: InternalCivilizationConfig = Field(
         default_factory=InternalCivilizationConfig)
+    epistemic_crypto: EpistemicCryptoConfig = Field(default_factory=EpistemicCryptoConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
