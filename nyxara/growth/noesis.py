@@ -912,6 +912,7 @@ class NoesisReport:
     unified: int = 0
     grammar_extended: int = 0
     transferred: int = 0
+    cf_credited: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -926,6 +927,7 @@ class NoesisReport:
             "unified": self.unified,
             "grammar_extended": self.grammar_extended,
             "transferred": self.transferred,
+            "cf_credited": self.cf_credited,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -942,7 +944,7 @@ class NoesisEngine:
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
                  ledger: Any = None, prune_every: int = 3, curiosity: Any = None,
                  formal: Any = None, grammar: Any = None, ecosystem: Any = None,
-                 transfer: Any = None) -> None:
+                 transfer: Any = None, dreamer: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -974,6 +976,9 @@ class NoesisEngine:
         # F7 — functorial transfer (duck-typed: .transfer_all(lib, sources, probes)). Transfers proven
         # abstractions zero-shot into sibling domains, verified before adoption.
         self.transfer = transfer
+        # F10 — counterfactual dreamer (duck-typed: .dream(failures, lib)). Replays abstentions,
+        # runs the counterfactual, and credits the causal bottleneck priors.
+        self.dreamer = dreamer
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -1048,6 +1053,13 @@ class NoesisEngine:
         transferred = 0
         if self.transfer is not None and adopted:
             transferred = len(self.transfer.transfer_all(self.library, adopted, list(tasks)))
+        # F10: dream over this cycle's abstentions — run the counterfactual and credit the causal
+        # bottleneck priors so the same problem is in reach next time.
+        cf_credited = 0
+        if self.dreamer is not None and abstained:
+            from nyxara.growth.counterfactual import Failure
+            rep = self.dreamer.dream([Failure(t, "abstained") for t in abstained], self.library)
+            cf_credited = len(rep.credited)
         # F1: retune bounded search knobs from the cycle's calibrated evidence
         if self.metacognition is not None:
             self.metacognition.adapt()
@@ -1078,6 +1090,7 @@ class NoesisEngine:
             unified=unified,
             grammar_extended=grammar_extended,
             transferred=transferred,
+            cf_credited=cf_credited,
         )
         self.history.append(rep)
         return rep

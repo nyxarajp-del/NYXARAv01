@@ -101,6 +101,7 @@ from nyxara.growth.grammar import (
     install_extension,
 )
 from nyxara.growth.ecosystem import Ecosystem, Explorer, Skeptic, Synthesizer
+from nyxara.growth.counterfactual import CounterfactualDreamer, DreamReport, Failure
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -466,4 +467,8 @@ __all__ = [
     "Explorer",
     "Skeptic",
     "Synthesizer",
+    # F10 — counterfactual causal dreaming
+    "CounterfactualDreamer",
+    "DreamReport",
+    "Failure",
 ]
