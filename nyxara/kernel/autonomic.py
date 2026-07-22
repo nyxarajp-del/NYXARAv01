@@ -350,6 +350,19 @@ class AutonomicLoop:
                     return "curiosity"
             except Exception:  # noqa: BLE001
                 self._note_error("fallback:curiosity")
+        # creation — she makes something genuinely NEW of her own (muse-chosen project,
+        # atelier competition, critic/novelty/reality gates — no LLM). Real self-work.
+        # Reuses the engine only when it is ALREADY alive on the core (built by a
+        # /create, the idle hook, or a previous session) — a fallback tick must never
+        # pay the cost of building and loading the whole creative organism itself.
+        if getattr(core, "_originality_engine", None) is not None:
+            try:
+                piece = core._originality().step()
+                if piece is not None:
+                    self.fallback_acts += 1
+                    return "creation"
+            except Exception:  # noqa: BLE001
+                self._note_error("fallback:creation")
         # consolidation — rehearse and strengthen what is worth keeping (real work, not a no-op)
         consolidator = getattr(core, "consolidator", None)
         if consolidator is not None:

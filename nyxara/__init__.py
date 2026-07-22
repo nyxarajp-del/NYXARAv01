@@ -152,6 +152,23 @@ from nyxara.mind.metacontrol import (
     DifficultySignals,
     MetacognitiveController,
 )
+from nyxara.mind.creative import CreativeEngine, Idea, Technique
+from nyxara.mind.aesthetic import AestheticJudge
+from nyxara.mind.concept_graph import ConceptGraph
+from nyxara.mind.inner_critic import Dialectic, InnerCritic, Objection
+from nyxara.mind.muse import CreativeProject, EgoNarrative, MuseEngine
+from nyxara.mind.atelier import Atelier, Persona
+from nyxara.mind.originality import (
+    CausalSketch,
+    CreativeFaculty,
+    Genome,
+    ImaginationTree,
+    Original,
+    OriginalityEngine,
+    RealityAnchor,
+    StrategyEvolver,
+    StrategyGenome,
+)
 
 __version__ = "0.1.0"
 
@@ -176,6 +193,29 @@ __all__ = [
     "Mission",
     "MissionExecutive",
     "MissionStatus",
+    # True Original Creativity (P24 · F19): the closed creative loop + its organs
+    "CreativeEngine",
+    "Idea",
+    "Technique",
+    "AestheticJudge",
+    "ConceptGraph",
+    "InnerCritic",
+    "Dialectic",
+    "Objection",
+    "MuseEngine",
+    "EgoNarrative",
+    "CreativeProject",
+    "Atelier",
+    "Persona",
+    "OriginalityEngine",
+    "Original",
+    "Genome",
+    "CreativeFaculty",
+    "CausalSketch",
+    "RealityAnchor",
+    "ImaginationTree",
+    "StrategyGenome",
+    "StrategyEvolver",
     # first-principles derivation · deep planning · tool selection
     "Derivation",
     "DerivationStep",

@@ -1013,6 +1013,10 @@ def build_default_faculties(llm: object = None,
     reg.register(ComparativeFaculty())
     from nyxara.mind.first_principles import FirstPrinciplesFaculty
     reg.register(FirstPrinciplesFaculty())
+    # her OWN generative engine handles GENERATION — the LLM is outranked there
+    # (suitability 0.85 × reliability 0.75 / cost 0.5 = 1.275 vs the LLM's 0.18)
+    from nyxara.mind.originality import CreativeFaculty
+    reg.register(CreativeFaculty())
     if intuition is not None:
         from nyxara.mind.intuition import IntuitionFaculty
         reg.register(IntuitionFaculty(intuition))

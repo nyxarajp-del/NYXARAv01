@@ -133,6 +133,15 @@ commands:
   /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
   /noesis [n]        the living algorithm: WAKE→SLEEP→DREAM n cycles — grow her own reusable
                      abstraction library and show the compression curve (no LLM)
+  /create [idea|verse|art] <topic>  TRUE ORIGINAL CREATIVITY: her atelier competes, MCTS
+                     simulates futures, and only what beats the critic + novelty +
+                     reality gates is kept (no LLM)
+  /imagine <topic> [~ <blend>]  structured divergent imagination: SCAMPER + lateral +
+                     analogy + conceptual blending, convergently pruned (no LLM)
+  /originals         her creative organism's report: kept originals, atelier economy,
+                     critic stats, strategy evolution, muse projects, self-narrative
+  /muse              her self-chosen creative research projects (hypothesis → verdict)
+  /rate <1-10>       rate her latest creation — her aesthetic taste learns and persists
   /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
   /selfimprove N     run the codebase RSI loop N cycles (add 'enact' to apply real source edits)
   /save              persist long-term memory to disk now
@@ -378,6 +387,45 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         # routes through the kernel: the living algorithm compounds on her persisted library, with
         # the F5 red-team + F1 metacognition wired in (no LLM in the loop).
         print(json.dumps(core.noesis(cycles=max(1, n)), indent=2, default=str))
+    elif cmd == "create":
+        # /create verse the night sky   -> closed-loop original creation, no LLM
+        tokens = arg.split(None, 1)
+        modality, topic = "idea", arg
+        aliases = {"idea": "idea", "invention": "idea", "verse": "verse",
+                   "poem": "verse", "art": "art", "image": "art"}
+        if tokens and tokens[0].lower() in aliases:
+            modality = aliases[tokens[0].lower()]
+            topic = tokens[1] if len(tokens) > 1 else ""
+        if not topic.strip():
+            print("usage: /create [idea|verse|art] <topic>")
+        else:
+            print(json.dumps(core.create(topic.strip(), modality=modality),
+                             indent=2, default=str))
+    elif cmd == "imagine":
+        # /imagine defense ~ chess   -> divergent storm on 'defense' blended with 'chess'
+        if not arg:
+            print("usage: /imagine <topic> [~ <blend-with>]")
+        else:
+            topic, _, blend = arg.partition("~")
+            print(json.dumps(core.imagine(topic.strip(),
+                                          blend_with=blend.strip() or None),
+                             indent=2, default=str))
+    elif cmd == "originals":
+        print(json.dumps(core.originality_report(), indent=2, default=str))
+    elif cmd == "muse":
+        # her self-chosen creative research projects, straight from the muse
+        rep = core.originality_report()
+        print(json.dumps(rep.get("muse", rep), indent=2, default=str))
+    elif cmd == "rate":
+        # /rate 9   -> the Master's aesthetic feedback; her taste learns from it
+        try:
+            rating = float(arg)
+        except (TypeError, ValueError):
+            rating = -1.0
+        if not (1.0 <= rating <= 10.0):
+            print("usage: /rate <1-10>")
+        else:
+            print(json.dumps(core.rate_creation(rating), indent=2, default=str))
     elif cmd in ("selfimprove", "self-improve", "self_improve"):
         tokens = arg.split()
         # /selfimprove [N] [enact] → drive the codebase-level RSI loop N times (observable).
