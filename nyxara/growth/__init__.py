@@ -110,6 +110,7 @@ from nyxara.growth.ontogenesis import (
     OntologicalGenesis,
     SubPerception,
 )
+from nyxara.growth.codegen import KernelForge, KernelResult, compile_prog
 from nyxara.growth.efficiency import (
     ComputeLedger,
     EfficiencyFrontier,
@@ -493,4 +494,8 @@ __all__ = [
     "AxiomResult",
     "AxiomStatus",
     "SubPerception",
+    # F15 — recursive meta-invention / efficiency-gated codegen
+    "KernelForge",
+    "KernelResult",
+    "compile_prog",
 ]
