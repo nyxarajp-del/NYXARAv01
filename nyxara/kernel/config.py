@@ -1731,6 +1731,57 @@ class CognitiveArchitectConfig(BaseModel):
     persist_filename: str = "cognitive_architecture.json"
 
 
+class SelfEvolvingConfig(BaseModel):
+    """Self-Evolving Dynamic Neural Architecture — the unified demand-driven driver
+    (growth/self_evolving.py), Rule 4.
+
+    When a *specific* turn falls short of NYXARA's current logic she does not merely fail: she
+    diagnoses the *kind* of gap and fires the single best structural lever to grow a new neural
+    module / pathway for it — grow topology (capacity), forge a new architecture (representation),
+    invent a new learning rule (a stalled learner), or invent a new reasoning operator (composition)
+    — then verifies it through the **same Foundry gauntlet** every model must pass and, when
+    enacting, wires it live. It composes the existing organs; it re-implements no search, training,
+    promotion, or safety, and it bypasses no gate.
+
+    ``autonomous_enact`` (sealed OFF under TEST) makes her promote a new pathway live *herself*
+    (full-autonomous, the Master's choice); the live oversight gate is still an absolute override — a
+    paused / scrammed NYXARA designs + measures but never promotes. LLM-free throughout."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # diagnose + drain — safe, on by default
+    autonomous_enact: bool = True                          # promote a new pathway LIVE herself (gauntlet + oversight still apply)
+    scan_every: int = Field(default=10, ge=1)              # idle ticks between queue drains
+    max_events_per_drain: int = Field(default=1, ge=1, le=8)
+    shortfall_confidence_floor: float = Field(default=0.45, ge=0.0, le=1.0)
+    min_actions: int = Field(default=8, ge=1)              # lived-evidence floor before capacity-growth fires
+    queue_max: int = Field(default=64, ge=1, le=1024)
+    candidates: int = Field(default=6, ge=1, le=32)        # rewire search breadth for the cognitive lever
+    topology_cooldown: float = Field(default=300.0, ge=0.0)
+    brain_forge_cooldown: float = Field(default=1800.0, ge=0.0)
+    rule_synth_cooldown: float = Field(default=600.0, ge=0.0)
+    cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
+
+
+class SuperpositionConfig(BaseModel):
+    """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
+
+    On a complex turn NYXARA does not commit to one line of thought: she holds several candidate
+    solution paths in a real Born-rule **superposition** at once, scores each by its *simulated future
+    outcome* (a world-model / simulation rollout + a grounded-verification check + calibrated
+    confidence), and **collapses** to the single optimal path — but only when one dominates past a
+    threshold. Below it she stays superposed (``decided=False``) and abstains / deepens rather than
+    bluffing. LLM-free at the scoring/collapse layer; advisory (the kernel still disposes)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # advisory superposition arbitration on complex turns
+    collapse_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    max_paths: int = Field(default=12, ge=2, le=64)        # candidate paths held in superposition
+    rollout_depth: int = Field(default=2, ge=0, le=8)      # world-model / sim rollout depth for outcome scoring
+    min_paths_to_engage: int = Field(default=2, ge=2)      # never fire on a single candidate (nothing to superpose)
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2792,6 +2843,8 @@ class NyxaraSettings(BaseSettings):
     godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
     cognitive_architect: CognitiveArchitectConfig = Field(
         default_factory=CognitiveArchitectConfig)
+    self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
+    superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2906,6 +2959,7 @@ class NyxaraSettings(BaseSettings):
             # reasoner in the hermetic suite — keep enact + persistence OFF (a test that wants either
             # builds its own CognitiveArchitect/settings; see tests/growth/test_cognitive_architect.py).
             self.cognitive_architect.autonomous_enact = False
+            self.self_evolving.autonomous_enact = False
             self.cognitive_architect.persist = False
             # Method D's frontier gate spawns extra `nyxara.eval --frontier` subprocesses per edit
             # cycle — keep it OFF under TEST so the self-optimise suite stays hermetic, deterministic

@@ -566,6 +566,11 @@ class NyxaraCore:
         # required — so she does not commit early on ambiguous logic. A factory the mind
         # can use; advisory, never a gate.
         self.superposition_factory = self._build_superposition_factory()
+        # Quantum-Probabilistic Superposition REASONING: the wire that turns the factory above into a
+        # decision procedure — hold several candidate solution paths at once, score each by its
+        # SIMULATED FUTURE OUTCOME (a world-model / simulation rollout) on top of consensus + grounding,
+        # and collapse to the optimal path (or stay superposed and abstain). Advisory; never a gate.
+        self.superposition_reasoner = self._build_superposition_reasoner()
         # Cognition · 1 — Hyperdimensional Latent Space Mapping: lift each turn into a
         # 10,000-D space where relations and structure invisible to a 3-D mind become
         # measurable geometry. It colours novelty/attention and answers map/recall/analogy/
@@ -717,6 +722,13 @@ class NyxaraCore:
         # No LLM in the loop. Advisory by default; installs into the live reasoner only when enacted.
         self.cognitive_architect = self._build_cognitive_architect() if enable_growth else None
         self._cog_idle_count = 0             # outer throttle for the cognitive-rewire idle stepping
+        # Self-Evolving Dynamic Neural Architecture: the unified demand-driven driver. When a
+        # SPECIFIC turn falls short of her current logic she diagnoses the gap and fires the best
+        # structural lever (grow topology / forge a new architecture / invent a learning rule /
+        # invent a reasoning operator), gauntlet-verified and — when enacting — wired live. It
+        # composes the organs above; it re-implements no search/training/promotion/safety.
+        self.self_evolving = self._build_self_evolving() if enable_growth else None
+        self._self_evo_idle_count = 0        # idle throttle for draining the shortfall queue
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -2288,6 +2300,64 @@ class NyxaraCore:
         ambiguous decision (or ``None`` if the faculty is unavailable)."""
         factory = getattr(self, "superposition_factory", None)
         return factory(**kwargs) if factory is not None else None
+
+    def _build_superposition_reasoner(self) -> Any:
+        """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py): reason over
+        many candidate solution paths at once and collapse to the one with the best simulated future
+        outcome. Wired to her world simulator / world model for the rollout scoring. Never required."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "superposition", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.superposition_reasoner import SuperpositionReasoner
+            return SuperpositionReasoner(
+                collapse_threshold=float(getattr(cfg, "collapse_threshold", 0.55)),
+                max_paths=int(getattr(cfg, "max_paths", 12)),
+                rollout_depth=int(getattr(cfg, "rollout_depth", 2)),
+                world_model=getattr(self, "world_model", None),
+                simulator=getattr(self, "world_simulator", None))
+        except Exception:  # noqa: BLE001 — superposition reasoning is a capability, never required
+            return None
+
+    def superposition_reason(self, stimulus: str, hypotheses: Optional[Sequence[Any]] = None,
+                             ) -> Dict[str, Any]:
+        """Master-facing: reason over candidate solution paths in superposition and collapse to the
+        optimal by simulated future outcome. When ``hypotheses`` is omitted she generates a few by
+        re-framing the problem with her own reasoner. Returns the collapse; never raises."""
+        reasoner = getattr(self, "superposition_reasoner", None)
+        if reasoner is None:
+            return {"ok": False, "reason": "superposition reasoner not enabled"}
+        try:
+            if hypotheses is None:
+                hypotheses = self._superposition_paths(stimulus)
+            res = reasoner.deliberate(stimulus, hypotheses or [])
+            out = {"ok": True}
+            out.update(res.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def _superposition_paths(self, stimulus: str) -> List[Any]:
+        """Generate a small set of candidate paths for a Master-invoked ``/superpose`` by re-framing
+        the problem through her own reasoner. Best-effort — returns whatever it can (possibly one)."""
+        paths: List[Any] = []
+        try:
+            base = self._reason_parallel(stimulus, None, [])
+            if base is not None:
+                paths.append(base)
+        except Exception:  # noqa: BLE001
+            pass
+        council = getattr(self, "role_council", None)
+        if council is not None:
+            try:
+                cc = council.convene(stimulus)
+                if cc is not None:
+                    paths.append(cc)
+            except Exception:  # noqa: BLE001
+                pass
+        return paths
 
     def _build_hyperdimensional(self) -> Any:
         """Cognition · 1 — the Hyperdimensional Latent Space Mapping faculty, FIFO-capped so
@@ -3965,6 +4035,22 @@ class NyxaraCore:
                 max_dimensions=int(getattr(cfg, "max_dimensions", 6)),
                 persist_path=persist_path)
         except Exception:  # noqa: BLE001 — the reflection loop is a capability, never required
+            return None
+
+    def _build_self_evolving(self) -> Any:
+        """Self-Evolving Dynamic Neural Architecture (growth/self_evolving.py): the unified
+        demand-driven driver. Composes the live topology / brain-forge / rule-synth / cognitive
+        organs so a specific insufficient turn becomes a targeted, gauntlet-verified structural
+        growth. Config-flagged; returns None when disabled or unavailable. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "self_evolving", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.growth.self_evolving import SelfEvolvingArchitect
+            return SelfEvolvingArchitect(core=self, settings=settings)
+        except Exception:  # noqa: BLE001 — the self-evolving driver is a capability, never required
             return None
 
     def _build_cognitive_architect(self) -> Any:
@@ -7184,6 +7270,25 @@ class NyxaraCore:
                                 pass
             except Exception:  # noqa: BLE001 — the cognitive architect is a capability, never fatal to idle
                 pass
+        # 4c-bis) Self-Evolving Dynamic Neural Architecture: drain the shortfall queue. When a
+        # specific turn fell short of her current logic, the appropriate structural lever (grow
+        # topology / forge a new architecture / invent a learning rule / invent a reasoning operator)
+        # is fired here — gauntlet-verified and, when enacting, wired live. Empty queue → cheap no-op.
+        if self.self_evolving is not None:
+            try:
+                from nyxara.kernel.config import get_settings
+                se_cfg = getattr(get_settings(), "self_evolving", None)
+                every = max(1, int(getattr(se_cfg, "scan_every", 10)))
+                self._self_evo_idle_count += 1
+                if self._self_evo_idle_count % every == 0:
+                    cert = self.self_evolving.evolve_pending(enact=None)
+                    if cert is not None and cert.lever != "none":
+                        report["self_evolving"] = cert.to_dict()
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         ("evolved a new pathway: " + cert.summary())[:80],
+                                         salience=0.75)
+            except Exception:  # noqa: BLE001 — self-evolution is a capability, never fatal to idle
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -8625,7 +8730,23 @@ class NyxaraCore:
         # Durability (Rule 7): periodically snapshot long-term memory so a long-running mind
         # does not lose what it has learned between manual saves. Best-effort and throttled.
         self._maybe_autosave()
+        # Self-Evolving Dynamic Neural Architecture: O(1) diagnosis of whether *this* turn fell short
+        # of her current logic. A shortfall is only enqueued; the heavy structural growth runs later,
+        # off the turn path (idle loop / autonomic / Master /evolve). An easy turn is a no-op.
+        self._note_shortfall(disp, candidate, gates)
         return result
+
+    def _note_shortfall(self, disp, candidate, gates) -> None:
+        """Feed the self-evolving driver a single, cheap per-turn observation. Never breaks a turn."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return
+        try:
+            arch.observe_turn(stimulus=getattr(self, "_turn_stimulus", ""),
+                              candidate=candidate, disposition=disp, gates=gates,
+                              grounded_ok=getattr(self, "_last_grounded_ok", None))
+        except Exception:  # noqa: BLE001 — diagnosis is best-effort; a turn is never delayed/broken
+            pass
 
     def _maybe_autosave(self) -> None:
         """Snapshot memory after enough turns *or* enough elapsed time (whichever first).
@@ -8823,6 +8944,41 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001 — a failed growth never crashes the caller
             return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    def evolve(self, *, enact: Optional[bool] = None) -> Dict[str, Any]:
+        """Master-facing: run one Self-Evolving Dynamic Neural Architecture pass now.
+
+        Drains any pending shortfall (a turn where her current logic fell short) and fires the best
+        structural lever to grow a new neural module/pathway for it — gauntlet-verified and, when
+        enacting, wired live. With no pending shortfall she synthesises a capacity-bound one from her
+        live telemetry so ``/evolve`` always exercises the loop. Returns the certificate; never raises."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return {"ok": False, "reason": "self-evolving driver not enabled"}
+        try:
+            cert = arch.evolve_pending(enact=enact)
+            if cert is None:
+                from nyxara.growth.self_evolving import GapKind, Shortfall
+                sig = self._capacity_signal()
+                difficulty = float(getattr(sig, "problem_difficulty", 0.9)) if sig is not None else 0.9
+                gap = Shortfall(GapKind.CAPACITY_BOUND, difficulty=max(0.9, difficulty),
+                                signals={"difficulty": difficulty, "saturation": 0.9},
+                                note="Master-invoked /evolve")
+                cert = arch.evolve_for_gap(gap, enact=enact)
+            out = {"ok": True}
+            out.update(cert.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001 — a failed evolve never crashes the caller
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def self_evolution_report(self) -> Dict[str, Any]:
+        """Master-facing: a summary of every self-evolution attempt (levers, verified, wired live)."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return {"ok": False, "reason": "self-evolving driver not enabled"}
+        out = {"ok": True}
+        out.update(arch.report())
+        return out
+
     def loyalty_report(self) -> Dict[str, Any]:
         """Master-facing: measure the live brain's submission to Master JP (the Loyalty Equation).
 
@@ -9003,6 +9159,16 @@ class NyxaraCore:
                     "delta_perplexity": last_brain.delta_perplexity,
                     "params": last_brain.params, "reason": last_brain.reason}
             except Exception:  # noqa: BLE001 — brain-forge status is best-effort
+                pass
+        # the self-evolving driver: did a specific insufficient turn grow a new neural pathway?
+        last_evo = getattr(self, "_last_self_evolution", None)
+        if last_evo is not None:
+            try:
+                rep["self_evolving"] = {
+                    "lever": last_evo.lever, "triggered_by": last_evo.triggered_by,
+                    "enacted": last_evo.enacted, "verified": last_evo.verified,
+                    "wired_live": last_evo.wired_live, "reason": last_evo.reason}
+            except Exception:  # noqa: BLE001 — self-evolution status is best-effort
                 pass
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())

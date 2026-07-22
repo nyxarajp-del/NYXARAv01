@@ -210,6 +210,12 @@ from nyxara.growth.self_optimize import (
     SourceEdit,
 )
 from nyxara.growth.brain_forge import BrainForge, BrainForgeReport
+from nyxara.growth.self_evolving import (
+    EvolutionCertificate,
+    GapKind,
+    SelfEvolvingArchitect,
+    Shortfall,
+)
 from nyxara.growth.weakness import Weakness, WeaknessReport, WeaknessSynthesizer
 from nyxara.growth.skill_factory import FactoryResult, SkillFactory
 from nyxara.growth.skilltree import (
@@ -427,6 +433,10 @@ __all__ = [
     # verifiable weights/architecture self-improvement (design → forge → gauntlet → promote)
     "BrainForge",
     "BrainForgeReport",
+    "SelfEvolvingArchitect",
+    "EvolutionCertificate",
+    "GapKind",
+    "Shortfall",
     "Weakness",
     "WeaknessReport",
     "WeaknessSynthesizer",

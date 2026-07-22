@@ -77,6 +77,7 @@ class AutonomicLoop:
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[Any] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
+    self_evolution_reports: List[Any] = field(default_factory=list)
     prompt_sources: List[str] = field(default_factory=list)
     missions_advanced: int = 0
     intents_adopted: int = 0
@@ -140,6 +141,29 @@ class AutonomicLoop:
             except Exception:  # noqa: BLE001 — learning is best-effort, never fatal
                 pass
         self._maybe_grow_topology()
+        self._maybe_self_evolve()
+
+    def _maybe_self_evolve(self) -> None:
+        """Let the ALWAYS-ON daemon drain the self-evolving shortfall queue between the Master's turns.
+
+        When a specific turn fell short of her current logic, the driver fires the best structural
+        lever (grow topology / forge a new architecture / invent a learning rule / invent a reasoning
+        operator), gauntlet-verified and — when enacting — wired live. Empty queue → cheap no-op.
+        Oversight-gated exactly like topology growth. Best-effort; never fatal."""
+        arch = getattr(self.core, "self_evolving", None)
+        if arch is None:
+            return
+        try:
+            gate = getattr(getattr(self.core, "oversight", None), "gate", None)
+            if callable(gate) and not gate():
+                return
+            cert = arch.evolve_pending(enact=None)
+            if cert is not None and cert.lever != "none":
+                # kept OUT of growth_reports so it never inflates the growth-pass count — a
+                # self-evolution is its own kind of pass, tracked separately.
+                self.self_evolution_reports.append(cert.to_dict())
+        except Exception:  # noqa: BLE001 — self-evolution is a capability, never fatal
+            pass
 
     def _maybe_grow_topology(self) -> None:
         """Also let the ALWAYS-ON daemon re-organize her own brain under real capacity pressure.
@@ -638,6 +662,7 @@ class AutonomicLoop:
                "escalations": len(self.escalations),
                "missions_advanced": self.missions_advanced,
                "growth_passes": len(self.growth_reports),
+               "self_evolutions": len(self.self_evolution_reports),
                # code-driven metrics: what NYXARA decided and did on her own, without the LLM
                "intents_adopted": self.intents_adopted,
                "code_acts": self.code_acts,
