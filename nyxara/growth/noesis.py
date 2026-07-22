@@ -911,6 +911,7 @@ class NoesisReport:
     certified: int = 0
     unified: int = 0
     grammar_extended: int = 0
+    transferred: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -924,6 +925,7 @@ class NoesisReport:
             "certified": self.certified,
             "unified": self.unified,
             "grammar_extended": self.grammar_extended,
+            "transferred": self.transferred,
             "library_size": self.library_size, "corpus_size": self.corpus_size,
         }
 
@@ -939,7 +941,8 @@ class NoesisEngine:
                  tasks_per_cycle: int = 12, beam: int = 300, red_team: Any = None,
                  metacognition: Any = None, neuromod: Any = None, pruner: Any = None,
                  ledger: Any = None, prune_every: int = 3, curiosity: Any = None,
-                 formal: Any = None, grammar: Any = None, ecosystem: Any = None) -> None:
+                 formal: Any = None, grammar: Any = None, ecosystem: Any = None,
+                 transfer: Any = None) -> None:
         self.library = library if library is not None else base_library()
         self._rnd = random.Random(seed)
         self.tasks_per_cycle = tasks_per_cycle
@@ -968,6 +971,9 @@ class NoesisEngine:
         # F11 — the internal ecosystem (duck-typed: .evolve(corpus, lib, ...)). When set, SLEEP runs
         # as Explorer→Skeptic→Synthesizer competitive evolution instead of the default abstraction.
         self.ecosystem = ecosystem
+        # F7 — functorial transfer (duck-typed: .transfer_all(lib, sources, probes)). Transfers proven
+        # abstractions zero-shot into sibling domains, verified before adoption.
+        self.transfer = transfer
         self._seen: set = set()
         self._usage_prev: Dict[str, int] = {}
         self.corpus: List[Prog] = []
@@ -1037,6 +1043,11 @@ class NoesisEngine:
                 self.corpus = [_rename_app(p, drop, keep) for p in self.corpus]
                 self._usage_prev.pop(drop, None)
                 unified += 1
+        # F7: transfer newly-proven abstractions zero-shot into sibling domains via verified functors,
+        # using this cycle's tasks (which carry oracles) as the held-out verification probes.
+        transferred = 0
+        if self.transfer is not None and adopted:
+            transferred = len(self.transfer.transfer_all(self.library, adopted, list(tasks)))
         # F1: retune bounded search knobs from the cycle's calibrated evidence
         if self.metacognition is not None:
             self.metacognition.adapt()
@@ -1066,6 +1077,7 @@ class NoesisEngine:
             certified=certified,
             unified=unified,
             grammar_extended=grammar_extended,
+            transferred=transferred,
         )
         self.history.append(rep)
         return rep
