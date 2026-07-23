@@ -294,6 +294,10 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /prove <decidable claim>   e.g. /prove 2+2=4   |   /prove p and not p")
         else:
             print(json.dumps(core.vsa_prove(arg.strip()), indent=2, default=str))
+    elif cmd in ("causal-repair", "causal_repair", "self-repair"):
+        # /causal-repair [tests/path]  -> causal-tree root-cause of a failing test → gated reversible fix
+        tp = arg.strip() or None
+        print(json.dumps(core.causal_repair(test_path=tp), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

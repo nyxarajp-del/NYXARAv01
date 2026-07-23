@@ -29,6 +29,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
 * ``POST /v1/prove``            — vectorized reasoning, disposed by the exact prover:
   ``{statement, kind?, candidate_answer?}`` → PROVEN/REFUTED/ABSTAIN + certificate (no LLM).
+* ``POST /v1/causal-repair``    — Causal Code Engine: ``{test_path?, max_fixes?}`` → causal-tree
+  root-cause of a failing test, then gated reversible repair of the causal root module.
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
@@ -172,6 +174,11 @@ class VsaProveRequest(BaseModel):
     statement: str = Field(..., min_length=1)
     kind: Optional[str] = None
     candidate_answer: Optional[str] = None
+
+
+class CausalRepairRequest(BaseModel):
+    test_path: Optional[str] = None
+    max_fixes: int = Field(default=3, ge=0, le=20)
 
 
 class ControlRequest(BaseModel):
@@ -570,6 +577,11 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         # (PROVEN/REFUTED) or an honest ABSTAIN — never token-guessing, no LLM.
         return core.vsa_prove(req.statement, kind=req.kind,
                               candidate_answer=req.candidate_answer)
+
+    @app.post("/v1/causal-repair", dependencies=auth)
+    def causal_repair(req: CausalRepairRequest = CausalRepairRequest()) -> dict:
+        # Causal-tree root-cause of a failing test → gated, reversible repair of the causal root.
+        return core.causal_repair(test_path=req.test_path, max_fixes=req.max_fixes)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)

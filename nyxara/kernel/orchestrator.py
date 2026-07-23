@@ -8292,6 +8292,22 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"verdict": "abstain", "error": str(exc), "statement": statement}
 
+    def causal_repair(self, *, test_path: Optional[str] = None,
+                      max_fixes: int = 3) -> Dict[str, Any]:
+        """The Causal Code Engine: when a test fails, analyse the **causal tree** of the fault from
+        its real traceback (the deepest executed nyxara frame is the proximate cause, not the test's
+        filename namesake), rerank across sessions with her causal world-model, and repair the causal
+        **root** module through the *existing* byte-for-byte reversible gauntlet + improvement proof +
+        Rule-8 constitutional lock. **No gate is weakened**; self-authored edits stay the debugger's
+        own off-by-default option, so on a bare box she still does real, reversible, causally-aimed
+        repair with no LLM. Returns the per-failure diagnosis + fix outcome."""
+        try:
+            from nyxara.growth.causal_code_engine import CausalCodeEngine
+            engine = CausalCodeEngine(core=self)
+            return engine.run(test_path=test_path, max_fixes=max_fixes)
+        except Exception as exc:  # noqa: BLE001
+            return {"detected": 0, "repaired": 0, "error": str(exc)}
+
     def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
         """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
         Engine (best-effort).

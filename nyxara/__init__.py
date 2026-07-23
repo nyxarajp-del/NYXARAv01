@@ -60,6 +60,11 @@ from nyxara.growth.scientist import (
 )
 from nyxara.growth.skill_memory import SkillMemory
 from nyxara.growth.vsa_reasoner import VSAReasoner, VSAResult, VSAVerdict
+from nyxara.growth.causal_code_engine import (
+    CausalCodeEngine,
+    CausalDiagnosis,
+    CausalNode,
+)
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.growth.self_optimization import (
     PhaseResult,
@@ -239,6 +244,10 @@ __all__ = [
     "VSAReasoner",
     "VSAResult",
     "VSAVerdict",
+    # Causal Code Engine — causal-tree root-cause → gated reversible repair (no LLM required)
+    "CausalCodeEngine",
+    "CausalDiagnosis",
+    "CausalNode",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",
