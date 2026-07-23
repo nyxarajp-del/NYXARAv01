@@ -287,6 +287,26 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "intuit":
         # /intuit 1, 4, 9, 16, 25   -> a non-algorithmic creative leap (no LLM), then self-verify
         print(json.dumps(core.intuit(arg), indent=2, default=str))
+    elif cmd in ("prove", "vsa", "vsa-prove"):
+        # /prove 2 + 2 = 4          -> vectorized reasoning, disposed by the exact prover (no LLM):
+        #                              a machine-checkable certificate (PROVEN/REFUTED) or honest ABSTAIN
+        if not arg.strip():
+            print("usage: /prove <decidable claim>   e.g. /prove 2+2=4   |   /prove p and not p")
+        else:
+            print(json.dumps(core.vsa_prove(arg.strip()), indent=2, default=str))
+    elif cmd in ("causal-repair", "causal_repair", "self-repair"):
+        # /causal-repair [tests/path]  -> causal-tree root-cause of a failing test → gated reversible fix
+        tp = arg.strip() or None
+        print(json.dumps(core.causal_repair(test_path=tp), indent=2, default=str))
+    elif cmd in ("teleology", "self-direct", "self_direct"):
+        # /teleology                -> invent her own measurable, envelope-gated self-improvement targets
+        print(json.dumps(core.self_direct(), indent=2, default=str))
+    elif cmd in ("hypothesize", "edge-cases", "hunt"):
+        # /hypothesize              -> Monte-Carlo concurrent-fault edge-case discovery (simulated, no LLM)
+        print(json.dumps(core.hunt_edge_cases(), indent=2, default=str))
+    elif cmd in ("time-away", "away", "elapsed"):
+        # /time-away                -> her honest awareness of how long since the Master last spoke
+        print(json.dumps(core.time_away(), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

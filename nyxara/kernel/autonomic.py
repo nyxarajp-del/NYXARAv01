@@ -59,6 +59,7 @@ class AutonomicLoop:
     decision_mode: str = "reasoner"
     growth_every: int = 0                 # run a learning pass every N ticks (0 = never)
     growth_engine: Any = None
+    teleology_every: int = 0              # invent her own measurable self-targets every N calm ticks (0 = off)
     inner_life: bool = False              # draw prompts from her own mind, not a fixed list
     stream: Any = None                    # DefaultModeStream (auto-wired from core if inner_life)
     prospective: Any = None               # ProspectiveMemory — standing intentions that come due
@@ -68,6 +69,7 @@ class AutonomicLoop:
     mission_executive: Any = None         # MissionExecutive (auto-wired from core)
     # code-driven decision+action machinery (auto-wired from the core in __post_init__)
     intent: Any = None                    # IntentSystem — autonomous goal genesis (active inference)
+    active_inference: Any = None          # ContinuousActiveInference — per-tick surprise/entropy meter
     scheduler: Any = None                 # agency Scheduler — where cleared ACTs execute, in code
     journal: Any = None                   # Journal — hash-chained provenance of autonomous action
     presence: Any = None                  # Presence — arousal state drives cadence + proactive gate
@@ -85,6 +87,8 @@ class AutonomicLoop:
     scheduler_runs: int = 0
     fallback_acts: int = 0                 # guaranteed self-work steps taken on an otherwise-idle tick
     intentions_fired: int = 0             # standing prospective intentions that came due and acted
+    preemptions: int = 0                  # ticks where surprise/entropy spiked → pre-emptive probe
+    preemptive_probes: List[Any] = field(default_factory=list)  # bounded log of recent pre-emptions
     ticks: int = 0
     # observability + self-healing: a mind that silently swallows every failure and does nothing is
     # indistinguishable from an idle one. These make a stalled/broken loop VISIBLE (report + health)
@@ -96,6 +100,7 @@ class AutonomicLoop:
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
     _intention_queue: List[str] = field(default_factory=list, init=False)
+    _preempt_now: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         # auto-build a growth engine bound to this core when periodic learning is requested
@@ -131,6 +136,76 @@ class AutonomicLoop:
                 self.mission_executive = MissionExecutive(self.core, authority=self.authority)
             except Exception:  # noqa: BLE001 — missions are a capability, never required
                 self.mission_executive = None
+        # the continuous inference tick: measure surprise/entropy of her own state each turn and,
+        # when it spikes, probe pre-emptively (through the same gauntlet). Reuse the core's shared
+        # FreeEnergyEngine when present so perception and action minimise the one objective.
+        if self.active_inference is None:
+            self.active_inference = getattr(self.core, "continuous_ai", None)
+        if self.active_inference is None:
+            try:
+                from nyxara.mind.active_inference_loop import ContinuousActiveInference
+                self.active_inference = ContinuousActiveInference(
+                    free_energy_engine=getattr(self.core, "free_energy", None))
+            except Exception:  # noqa: BLE001 — inference tick is a capability, never required
+                self.active_inference = None
+
+    def _gather_inference_channels(self) -> dict:
+        """Collect the numeric channels the continuous-inference tick predicts against — her own
+        internal state (loop telemetry) plus host interoception when a reader is available. Every
+        source is best-effort; a missing one is simply an absent channel, never an error."""
+        core = self.core
+        ch: dict = {}
+        # 1) internal-state channels — always available, zero-dependency
+        t = max(1, self.ticks)
+        ch["error_rate"] = self.errors / t
+        ch["unproductive_streak"] = float(self.consecutive_unproductive)
+        ch["escalations"] = float(len(self.escalations))
+        ch["intents"] = float(self.intents_adopted)
+        # 2) interoception / host vitals when the core exposes a snapshot (honest degrade otherwise)
+        for attr in ("interoception", "system_monitor", "health"):
+            src = getattr(core, attr, None)
+            snap = None
+            if src is not None:
+                for meth in ("vitals", "snapshot", "read", "status"):
+                    fn = getattr(src, meth, None)
+                    if callable(fn):
+                        try:
+                            snap = fn()
+                            break
+                        except Exception:  # noqa: BLE001
+                            snap = None
+            if isinstance(snap, dict):
+                for k, v in snap.items():
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        ch[f"{attr}.{k}"] = float(v)
+        return ch
+
+    def _active_inference_step(self, summary: dict) -> None:
+        """One continuous-inference tick: predict → measure surprise/entropy → pre-empt if it spikes.
+
+        A high reading enqueues an epistemic probe (a curiosity intention for the most-informative
+        channel) so the pre-emptive action flows through the ordinary proactive gauntlet — surprise
+        drives attention, the gate still decides whether anything runs. Best-effort; never fatal."""
+        ai = self.active_inference
+        if ai is None:
+            return
+        try:
+            reading = ai.observe(self._gather_inference_channels())
+        except Exception:  # noqa: BLE001 — the inference tick must never crash the loop
+            self._note_error("active_inference")
+            return
+        summary["free_energy"] = round(reading.free_energy, 4)
+        summary["entropy"] = round(reading.entropy, 4)
+        summary["preemptive"] = reading.preemptive
+        self._preempt_now = False
+        if reading.preemptive and reading.probe:
+            self._preempt_now = True
+            self.preemptions += 1
+            # bounded telemetry — the last few pre-emptions, so a rising-uncertainty run is visible
+            self.preemptive_probes.append(reading.to_dict())
+            if len(self.preemptive_probes) > 32:
+                self.preemptive_probes = self.preemptive_probes[-32:]
+            summary["probe"] = reading.probe
 
     def _maybe_grow(self) -> None:
         if not self.growth_every or self.ticks % self.growth_every != 0:
@@ -354,6 +429,26 @@ class AutonomicLoop:
         self.intentions_fired += n
         return n
 
+    def _maybe_self_direct(self, summary: dict) -> None:
+        """Opt-in periodic teleology: invent envelope-gated self-targets on a calm tick. No-op unless
+        ``teleology_every`` is set. Crisis (a pre-emptive tick) defers self-direction by design."""
+        if not self.teleology_every or (self.ticks % self.teleology_every != 0):
+            return
+        fn = getattr(self.core, "self_direct", None)
+        if not callable(fn):
+            return
+        try:
+            rep = fn(crisis=bool(self._preempt_now))
+            adopted = len(rep.get("adopted", [])) if isinstance(rep, dict) else 0
+            if adopted:
+                summary["self_targets"] = adopted
+                # keep the objective space bounded even under a long-running daemon
+                goals = getattr(self.core, "goals", None)
+                if goals is not None and hasattr(goals, "dedupe"):
+                    goals.dedupe()
+        except Exception:  # noqa: BLE001 — self-direction is best-effort, never fatal
+            self._note_error("teleology")
+
     def _guaranteed_self_work(self) -> Optional[str]:
         """When a tick would otherwise do nothing, make her own work — in code, LLM-free.
 
@@ -419,6 +514,13 @@ class AutonomicLoop:
                 affect.tick(self.interval_s if self.interval_s > 0 else 1.0)
             except Exception:  # noqa: BLE001 — affect is advisory, never fatal
                 self._note_error("affect")
+        # 1.5) CONTINUOUS ACTIVE INFERENCE — predict her own state, measure surprise + entropy, and
+        # flag pre-emption when uncertainty spikes (acted on at step 4.5, through the same gauntlet).
+        self._active_inference_step(summary)
+        # 1.6) RECURSIVE SELF-DIRECTED TELEOLOGY (opt-in) — on a *calm* tick (no pre-emption), invent
+        # her own measurable, envelope-gated self-improvement targets. Off by default so the reactive
+        # path is unchanged; the daemon enables it. Crisis (pre-emption) defers it, by construction.
+        self._maybe_self_direct(summary)
         # 2) adopt her own lowest-free-energy goal (owner-aligned by construction; no LLM/human)
         if self.intent is not None:
             try:
@@ -464,12 +566,18 @@ class AutonomicLoop:
             except Exception:  # noqa: BLE001
                 self._note_error("scheduler")
         self.code_acts += summary["acted"]
-        # 5) did this tick actually do anything? if not, make her own work (never idle-and-silent)
+        # 5) did this tick do real work? if not — OR if the continuous-inference tick flagged rising
+        # uncertainty (pre-emption) — make her own uncertainty-reducing self-work NOW (curiosity /
+        # consolidation), through the same gated engine. So she is never idle-and-silent, and she
+        # acts PRE-EMPTIVELY (before a surprise becomes a problem) even on an otherwise-busy tick.
         productive = bool(summary["intent"] or summary["acted"] or summary["ran"]
                           or summary["fired"])
-        if not productive:
-            summary["fallback"] = self._guaranteed_self_work()
-            productive = summary["fallback"] is not None
+        if (not productive) or self._preempt_now:
+            work = self._guaranteed_self_work()
+            summary["fallback"] = work
+            if self._preempt_now and work is not None:
+                summary["preemptive_action"] = work
+            productive = productive or (work is not None)
         summary["productive"] = productive
         # 6) self-heal telemetry: track unproductive streaks so a stalled loop is visible, not calm
         if productive:
@@ -669,6 +777,8 @@ class AutonomicLoop:
                "scheduler_runs": self.scheduler_runs,
                "fallback_acts": self.fallback_acts,
                "intentions_fired": self.intentions_fired,
+               # continuous active inference: how often surprise/entropy spiked into a pre-emptive probe
+               "preemptions": self.preemptions,
                # observability: a stalled or silently-failing loop is now visible, not "calm"
                "errors": self.errors,
                "stage_errors": dict(self.stage_errors),
@@ -684,6 +794,11 @@ class AutonomicLoop:
         if self.health is not None:
             try:
                 rep["health"] = self.health.evaluate().overall.label
+            except Exception:  # noqa: BLE001
+                pass
+        if self.active_inference is not None:
+            try:
+                rep["active_inference"] = self.active_inference.report()
             except Exception:  # noqa: BLE001
                 pass
         return rep

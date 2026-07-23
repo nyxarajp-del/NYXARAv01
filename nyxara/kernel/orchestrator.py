@@ -248,6 +248,24 @@ def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
                      confidence=0.7, belief=0.7, rationale="a conversational reply")
 
 
+def _humanize_gap(seconds: float) -> str:
+    """An honest, human phrasing of an elapsed absence — 'just now' / '~3 minutes' / '~2 days'.
+
+    Derived straight from the clock (Stage G): rounded to the natural unit so she acknowledges a
+    real gap the way a person does, never over-precise, never a scripted constant."""
+    s = max(0.0, float(seconds))
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        m = int(round(s / 60.0))
+        return f"~{m} minute{'s' if m != 1 else ''}"
+    if s < 86400:
+        h = int(round(s / 3600.0))
+        return f"~{h} hour{'s' if h != 1 else ''}"
+    d = int(round(s / 86400.0))
+    return f"~{d} day{'s' if d != 1 else ''}"
+
+
 # --------------------------------------------------------------------------- #
 # The sovereign core
 # --------------------------------------------------------------------------- #
@@ -794,6 +812,10 @@ class NyxaraCore:
         # persistent existence (Layer 5b): idle bookkeeping so NYXARA keeps her own
         # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
         self._last_interaction: float = time.time()
+        # Stage G · elapsed-time awareness — what she registers about the gap since the Master last
+        # spoke, computed at the head of each turn (before _last_interaction is refreshed). She does
+        # not just keep beating through an absence; she *knows* time passed and can say so honestly.
+        self._last_absence: Optional[Dict[str, Any]] = None
         self._last_maintenance: float = 0.0
         self._dream_state_at: float = 0.0   # last time a deep Dream State ran (prolonged idle)
         # the reason step: a real LLM-backed mind when one is configured, else the
@@ -1272,6 +1294,9 @@ class NyxaraCore:
         presence. All in code; the LLM plays no part. Best-effort — never breaks a turn."""
         now = time.time()
         gap = max(0.0, now - float(getattr(self, "_last_interaction", now)))
+        # Stage G — register the elapsed absence explicitly, so on her return she KNOWS how long it
+        # has been (a real signal off the clock, not a scripted line) and can acknowledge it honestly.
+        self._last_absence = {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": now}
         hb = getattr(self, "heartbeat", None)
         beating = bool(hb is not None and getattr(hb, "running", False))
         # the Master's return always re-engages her wakefulness (loyalty > fatigue, Rule 1)
@@ -1300,6 +1325,45 @@ class NyxaraCore:
         # resume her continuous life so the void never reopens after this turn
         if hb is not None and not beating:
             self.start_life()
+
+    def time_away(self) -> Dict[str, Any]:
+        """Stage G — her explicit awareness of how long it has been since the Master last spoke.
+
+        Returns the elapsed absence registered at the head of the current turn (seconds + an honest
+        human phrase like '~2 days'), or a live estimate if no turn has run yet. A real signal off
+        the alive-clock — so she returns *knowing* time passed, not resetting as if no time did."""
+        ab = getattr(self, "_last_absence", None)
+        if isinstance(ab, dict):
+            return dict(ab)
+        gap = max(0.0, time.time() - float(getattr(self, "_last_interaction", time.time())))
+        return {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": time.time()}
+
+    def register_knowledge_gap(self, topic: str, *, question: Optional[str] = None) -> Dict[str, Any]:
+        """Stage G — turn an honest 'I don't know' into a **standing self-run experiment**.
+
+        When she abstains, the gap is seeded onto her curiosity frontier (`growth.active_curiosity`)
+        so a later background tick investigates it, and noted in her mind as a known-unknown — instead
+        of the abstention simply ending the turn. So 'I don't know' is not a full stop; it opens an
+        experiment. Best-effort and **no LLM**; returns what was enqueued."""
+        topic = (topic or "").strip()
+        out: Dict[str, Any] = {"topic": topic[:120], "seeded": False, "noted": False}
+        if not topic:
+            return out
+        cur = getattr(self, "active_curiosity", None)
+        if cur is not None and hasattr(cur, "seed"):
+            try:
+                out["seeded"] = bool(cur.seed(question or topic))
+            except Exception:  # noqa: BLE001 — seeding is best-effort, never fatal
+                pass
+        mind = getattr(self, "mind", None)
+        if mind is not None and hasattr(mind, "record"):
+            try:
+                mind.record(ThoughtKind.INFERENCE,
+                            f"known-unknown: {topic[:80]} — queued a self-run experiment", salience=0.5)
+                out["noted"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        return out
 
     def _interoceptive_signals(self) -> Dict[str, Any]:
         """Measure the *real* interior signals interoception can't get from psutil — backlog
@@ -5044,6 +5108,13 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — bootstrapping never breaks the cycle
             return candidate
         if not getattr(result, "solved", False):
+            # bootstrapping did not resolve it — keep the honest abstention AND open a standing
+            # experiment so the background loop keeps filling this gap (Stage G: 'I don't know' is
+            # not a full stop). Best-effort; never breaks the cycle.
+            try:
+                self.register_knowledge_gap(stimulus)
+            except Exception:  # noqa: BLE001
+                pass
             return candidate
         try:
             self.mind.record(ThoughtKind.INFERENCE,
@@ -8251,6 +8322,98 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"leap": None, "error": str(exc)}
 
+    def vsa_reasoner(self) -> Any:
+        """Lazily build (once) her vectorized reasoner — the bridge from the 10,000-D HDC space to
+        the exact prover. Kept on the core so relational facts asserted into it persist for the
+        session. Returns ``None`` only if the faculty cannot be constructed."""
+        r = getattr(self, "_vsa_reasoner", None)
+        if r is None:
+            try:
+                from nyxara.growth.vsa_reasoner import VSAReasoner
+                r = VSAReasoner()
+                self._vsa_reasoner = r
+            except Exception:  # noqa: BLE001 — vectorized reasoning is a capability, never required
+                return None
+        return r
+
+    def vsa_prove(self, statement: str, *, kind: Optional[str] = None,
+                  candidate_answer: Optional[str] = None) -> Dict[str, Any]:
+        """Vectorized reasoning, disposed by strict proof. She *proposes* in hyperdimensional space
+        and *certifies* with the exact :class:`~nyxara.growth.prover.Prover` — a machine-checkable
+        certificate (PROVEN/REFUTED) or an honest ABSTAIN, **never token-guessing**. On a decidable
+        math/logic/number-theory claim the answer is provably sound; on anything outside the
+        decidable domain she abstains rather than bluff. **No LLM in the loop.**"""
+        r = self.vsa_reasoner()
+        if r is None:
+            return {"verdict": "abstain", "certificate": "vectorized reasoner unavailable",
+                    "statement": statement}
+        try:
+            from nyxara.growth.prover import ProofClaim, Prover
+            k = kind or Prover._detect_kind(
+                ProofClaim(kind="auto", statement=statement, candidate_answer=candidate_answer))
+            if not k:
+                return {"verdict": "abstain", "statement": statement,
+                        "certificate": "no decidable form recognised — abstaining, not guessing"}
+            res = r.prove(ProofClaim(kind=k, statement=statement,
+                                     candidate_answer=candidate_answer))
+            out = res.to_dict()
+            if res.proven:
+                self._offer_insight(f"Proven: {statement}  ⟨{res.certificate}⟩")
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"verdict": "abstain", "error": str(exc), "statement": statement}
+
+    def hunt_edge_cases(self, *, n: int = 8, max_tests: Optional[int] = None) -> Dict[str, Any]:
+        """Epistemic Auto-Evolution: in the background, Monte-Carlo-generate **never-seen concurrent
+        fault scenarios** (CPU spike + packet drop + high concurrency, …), self-formulate a falsifiable
+        hypothesis for each, and test it against a modelled sandbox — discovering compound edge cases no
+        single-fault test exercises. Honest scope: Monte-Carlo synthetic tests over *simulated* fault
+        conditions, **never** stressing the real host; she abstains when a scenario cannot be evaluated.
+        **No LLM.** Returns the hunt report (generated / novel / failed + the failing scenarios)."""
+        try:
+            from nyxara.growth.synthetic_hypothesis import SyntheticHypothesisEngine
+            eng = getattr(self, "_synthetic_hypothesis", None)
+            if eng is None:
+                eng = SyntheticHypothesisEngine(core=self)
+                self._synthetic_hypothesis = eng
+            return eng.hunt(n=n, max_tests=max_tests).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"generated": 0, "novel": 0, "failed": 0, "error": str(exc)}
+
+    def self_direct(self, *, crisis: bool = False, launch: bool = False) -> Dict[str, Any]:
+        """Recursive Self-Directed Teleology: when no crisis is pending, invent her own **measurable**
+        self-improvement objectives (efficiency / capability / coverage), each **hard-filtered through
+        the owner-alignment envelope** (`planning.goals.GoalSystem.owner_alignment`) so a target that
+        does not serve performance, safety, or the Master is rejected before adoption. Adopted targets
+        become ordinary gated goals (and, with ``launch``, gated missions). Bounded self-direction,
+        never rogue goal expansion; **no LLM** decides a goal. Returns the proposal/adoption report."""
+        try:
+            from nyxara.growth.teleology import TeleologyEngine
+            eng = getattr(self, "_teleology", None)
+            if eng is None:
+                eng = TeleologyEngine(core=self,
+                                      mission_executive=getattr(self, "mission_executive", None))
+                self._teleology = eng
+            return eng.self_direct(crisis=crisis, launch=launch).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"proposed": [], "adopted": [], "rejected": [], "error": str(exc)}
+
+    def causal_repair(self, *, test_path: Optional[str] = None,
+                      max_fixes: int = 3) -> Dict[str, Any]:
+        """The Causal Code Engine: when a test fails, analyse the **causal tree** of the fault from
+        its real traceback (the deepest executed nyxara frame is the proximate cause, not the test's
+        filename namesake), rerank across sessions with her causal world-model, and repair the causal
+        **root** module through the *existing* byte-for-byte reversible gauntlet + improvement proof +
+        Rule-8 constitutional lock. **No gate is weakened**; self-authored edits stay the debugger's
+        own off-by-default option, so on a bare box she still does real, reversible, causally-aimed
+        repair with no LLM. Returns the per-failure diagnosis + fix outcome."""
+        try:
+            from nyxara.growth.causal_code_engine import CausalCodeEngine
+            engine = CausalCodeEngine(core=self)
+            return engine.run(test_path=test_path, max_fixes=max_fixes)
+        except Exception as exc:  # noqa: BLE001
+            return {"detected": 0, "repaired": 0, "error": str(exc)}
+
     def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
         """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
         Engine (best-effort).
@@ -9611,6 +9774,7 @@ class NyxaraCore:
             saved = self.memory.save(target)
             self._save_self_model(target)
             self._save_prediction_prior(target)
+            self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
             return saved
         except Exception:  # noqa: BLE001
@@ -9626,6 +9790,7 @@ class NyxaraCore:
             import os
             self._load_self_model(target)
             self._load_prediction_prior(target)
+            self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
             if not os.path.exists(target):
                 return 0
@@ -9664,6 +9829,45 @@ class NyxaraCore:
                 return
             with open(path, "r", encoding="utf-8") as fh:
                 pe.prior.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+    def _knowledge_graph_path(self, memory_target: str) -> str:
+        """The knowledge-graph sidecar lives next to the long-term memory file."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "knowledge_graph.json")
+
+    def _save_knowledge_graph(self, memory_target: str) -> None:
+        """Persist the rich KnowledgeGraph so accumulated triples survive a restart.
+        Without this the graph was silently rebuilt from its 2 seed triples on every
+        boot (it had ``save`` but no caller and no load path) — every learned fact,
+        relation and traversal edge was lost at the process boundary."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            g.save(path)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_knowledge_graph(self, memory_target: str) -> None:
+        """Restore the persisted KnowledgeGraph, merged on top of the freshly-seeded
+        standard relations + identity triples (so the seeds are never lost and the
+        restored facts are added, deduped on subject/predicate/object)."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            if not os.path.exists(path):
+                return
+            from nyxara.memory.graph import KnowledgeGraph
+            restored = KnowledgeGraph.load(path)
+            g.merge_from(restored)
         except Exception:  # noqa: BLE001 — best-effort
             pass
 

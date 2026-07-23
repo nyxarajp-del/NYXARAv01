@@ -230,6 +230,16 @@ class ActiveCuriosity:
         cp = self.wonder()
         return cp if cp.wondered else None
 
+    def seed(self, subject: str) -> bool:
+        """Push a specific subject onto the curiosity frontier so a later idle ``tick`` investigates
+        it. Used to turn an honest 'I don't know' into a *standing* self-run experiment: the gap does
+        not just end the turn — the background loop keeps working it. Returns True if seeded."""
+        s = (subject or "").strip()
+        if not s:
+            return False
+        self._frontier.append(s)
+        return True
+
     def investigate(self, question: Question) -> CuriosityFinding:
         """Design and run the right *internal* experiment for ``question``. Always data."""
         t0 = time.monotonic()

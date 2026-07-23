@@ -59,6 +59,22 @@ from nyxara.growth.scientist import (
     Verdict,
 )
 from nyxara.growth.skill_memory import SkillMemory
+from nyxara.growth.vsa_reasoner import VSAReasoner, VSAResult, VSAVerdict
+from nyxara.growth.causal_code_engine import (
+    CausalCodeEngine,
+    CausalDiagnosis,
+    CausalNode,
+)
+from nyxara.growth.teleology import (
+    TeleologicalTarget,
+    TeleologyEngine,
+    TeleologyReport,
+)
+from nyxara.growth.synthetic_hypothesis import (
+    FaultScenario,
+    SyntheticHypothesisEngine,
+    SyntheticReport,
+)
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.growth.self_optimization import (
     PhaseResult,
@@ -75,6 +91,10 @@ from nyxara.memory.elastic_synapses import (
 )
 from nyxara.memory.equation_memory import EquationCode, EquationMemory
 from nyxara.kernel.autonomic import AutonomicLoop
+from nyxara.mind.active_inference_loop import (
+    ContinuousActiveInference,
+    InferenceReading,
+)
 from nyxara.temporal import (
     Awareness,
     BehaviorEpoch,
@@ -180,6 +200,9 @@ __all__ = [
     "Candidate",
     "CycleResult",
     "AutonomicLoop",
+    # Continuous active inference — per-tick surprise + belief entropy → pre-emptive probing
+    "ContinuousActiveInference",
+    "InferenceReading",
     # Fractal Temporal Hierarchies — loops within loops (ms / s / days)
     "FractalTemporalHierarchy",
     "MicroLayer",
@@ -227,6 +250,22 @@ __all__ = [
     "ToolChoice",
     "ToolRouter",
     "SkillMemory",
+    # Vectorized ATP — HDC proposes, the exact prover disposes (PROVEN/REFUTED/ABSTAIN, no LLM)
+    "VSAReasoner",
+    "VSAResult",
+    "VSAVerdict",
+    # Causal Code Engine — causal-tree root-cause → gated reversible repair (no LLM required)
+    "CausalCodeEngine",
+    "CausalDiagnosis",
+    "CausalNode",
+    # Recursive Self-Directed Teleology — invent her own measurable, envelope-gated self-targets
+    "TeleologyEngine",
+    "TeleologicalTarget",
+    "TeleologyReport",
+    # Epistemic Auto-Evolution — Monte-Carlo concurrent-fault edge cases, self-hypothesized & tested
+    "SyntheticHypothesisEngine",
+    "FaultScenario",
+    "SyntheticReport",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",
