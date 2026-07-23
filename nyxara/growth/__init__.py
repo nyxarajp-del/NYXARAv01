@@ -106,6 +106,8 @@ from nyxara.growth.integrity import HibernateAndDream, HibernationReport, Integr
 from nyxara.growth.self_repair import HealOutcome, SelfRepair, pack_bundle, unpack_bundle
 from nyxara.growth.mdl_refactor import MDLRefactor, MDLReport, description_length
 from nyxara.growth.patch_gossip import PatchGossip, PatchGram
+from nyxara.growth.immunology import Finding, ImmuneReport, Immunologist, fuzz_callable
+from nyxara.growth.substrate_tune import SubstrateProfile, SubstrateTuner, probe_substrate
 from nyxara.growth.ontogenesis import (
     AxiomResult,
     AxiomStatus,
@@ -504,6 +506,13 @@ __all__ = [
     "description_length",
     "PatchGossip",
     "PatchGram",
+    "Immunologist",
+    "ImmuneReport",
+    "Finding",
+    "fuzz_callable",
+    "SubstrateTuner",
+    "SubstrateProfile",
+    "probe_substrate",
     "HealOutcome",
     "pack_bundle",
     "unpack_bundle",
