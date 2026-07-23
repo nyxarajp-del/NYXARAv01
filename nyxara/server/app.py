@@ -33,6 +33,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
   root-cause of a failing test, then gated reversible repair of the causal root module.
 * ``POST /v1/teleology``        — Recursive Self-Directed Teleology: ``{launch?}`` → invent her own
   measurable self-improvement targets, envelope-gated (out-of-envelope rejected). No LLM.
+* ``POST /v1/synthesize-scenarios`` — Epistemic Auto-Evolution: ``{n?, max_tests?}`` → Monte-Carlo
+  concurrent-fault edge cases over simulated conditions, self-hypothesized + tested. No LLM.
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
@@ -185,6 +187,11 @@ class CausalRepairRequest(BaseModel):
 
 class TeleologyRequest(BaseModel):
     launch: bool = False
+
+
+class SynthesizeScenariosRequest(BaseModel):
+    n: int = Field(default=8, ge=1, le=128)
+    max_tests: Optional[int] = Field(default=None, ge=0, le=128)
 
 
 class ControlRequest(BaseModel):
@@ -594,6 +601,12 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         # Invent her own measurable self-improvement targets — hard-filtered through the owner
         # alignment envelope (out-of-envelope targets rejected before adoption). No LLM.
         return core.self_direct(launch=req.launch)
+
+    @app.post("/v1/synthesize-scenarios", dependencies=auth)
+    def synthesize_scenarios(req: SynthesizeScenariosRequest = SynthesizeScenariosRequest()) -> dict:
+        # Monte-Carlo concurrent-fault edge-case discovery over simulated conditions (no real host
+        # stressed, no LLM): generate never-seen scenarios, self-hypothesize, test in the sandbox.
+        return core.hunt_edge_cases(n=req.n, max_tests=req.max_tests)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)

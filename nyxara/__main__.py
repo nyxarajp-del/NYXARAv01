@@ -301,6 +301,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd in ("teleology", "self-direct", "self_direct"):
         # /teleology                -> invent her own measurable, envelope-gated self-improvement targets
         print(json.dumps(core.self_direct(), indent=2, default=str))
+    elif cmd in ("hypothesize", "edge-cases", "hunt"):
+        # /hypothesize              -> Monte-Carlo concurrent-fault edge-case discovery (simulated, no LLM)
+        print(json.dumps(core.hunt_edge_cases(), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

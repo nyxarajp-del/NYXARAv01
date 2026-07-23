@@ -8292,6 +8292,23 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"verdict": "abstain", "error": str(exc), "statement": statement}
 
+    def hunt_edge_cases(self, *, n: int = 8, max_tests: Optional[int] = None) -> Dict[str, Any]:
+        """Epistemic Auto-Evolution: in the background, Monte-Carlo-generate **never-seen concurrent
+        fault scenarios** (CPU spike + packet drop + high concurrency, …), self-formulate a falsifiable
+        hypothesis for each, and test it against a modelled sandbox — discovering compound edge cases no
+        single-fault test exercises. Honest scope: Monte-Carlo synthetic tests over *simulated* fault
+        conditions, **never** stressing the real host; she abstains when a scenario cannot be evaluated.
+        **No LLM.** Returns the hunt report (generated / novel / failed + the failing scenarios)."""
+        try:
+            from nyxara.growth.synthetic_hypothesis import SyntheticHypothesisEngine
+            eng = getattr(self, "_synthetic_hypothesis", None)
+            if eng is None:
+                eng = SyntheticHypothesisEngine(core=self)
+                self._synthetic_hypothesis = eng
+            return eng.hunt(n=n, max_tests=max_tests).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"generated": 0, "novel": 0, "failed": 0, "error": str(exc)}
+
     def self_direct(self, *, crisis: bool = False, launch: bool = False) -> Dict[str, Any]:
         """Recursive Self-Directed Teleology: when no crisis is pending, invent her own **measurable**
         self-improvement objectives (efficiency / capability / coverage), each **hard-filtered through

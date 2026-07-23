@@ -70,6 +70,11 @@ from nyxara.growth.teleology import (
     TeleologyEngine,
     TeleologyReport,
 )
+from nyxara.growth.synthetic_hypothesis import (
+    FaultScenario,
+    SyntheticHypothesisEngine,
+    SyntheticReport,
+)
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.growth.self_optimization import (
     PhaseResult,
@@ -257,6 +262,10 @@ __all__ = [
     "TeleologyEngine",
     "TeleologicalTarget",
     "TeleologyReport",
+    # Epistemic Auto-Evolution — Monte-Carlo concurrent-fault edge cases, self-hypothesized & tested
+    "SyntheticHypothesisEngine",
+    "FaultScenario",
+    "SyntheticReport",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",
