@@ -74,10 +74,19 @@ class AutonomicLoop:
     health: Any = None                    # HealthMonitor — heartbeat + bounded self-healing
     persist_every: int = 20               # checkpoint goals/drives every N ticks (0 = never)
     stall_threshold: int = 5              # consecutive unproductive ticks before health degrades
+    # self-optimization / self-healing: run the unified eleven-phase SelfOptimizationLoop (self-analysis →
+    # optimize → experiment → architecture → learning → self-debug → invent → safety-verify) on the daemon's
+    # own slow cadence, so the ALWAYS-ON mind actually HEALS and optimizes her own source *between* the
+    # Master's turns — not only when someone calls ``core.self_optimize()`` by hand. Each source edit still
+    # clears the identical reversible verify-or-rollback gauntlet (TEST-sealed). 0 = never (class default off
+    # for back-compat + test safety; the daemon turns it on via server config).
+    self_optimize_every: int = 0          # run one self-optimization pass every N growth passes (0 = never)
+    self_optimize_debug: bool = False     # include the heavy pytest self-debug phase in the PERIODIC pass
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[Any] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
     self_evolution_reports: List[Any] = field(default_factory=list)
+    self_optimization_reports: List[Any] = field(default_factory=list)
     prompt_sources: List[str] = field(default_factory=list)
     missions_advanced: int = 0
     intents_adopted: int = 0
@@ -96,6 +105,8 @@ class AutonomicLoop:
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
     _intention_queue: List[str] = field(default_factory=list, init=False)
+    _self_opt_passes: int = field(default=0, init=False)     # growth passes seen (self-optimization throttle)
+    _self_opt_cooldown: int = field(default=0, init=False)   # ticks to wait before another reactive heal
 
     def __post_init__(self) -> None:
         # auto-build a growth engine bound to this core when periodic learning is requested
@@ -142,6 +153,76 @@ class AutonomicLoop:
                 pass
         self._maybe_grow_topology()
         self._maybe_self_evolve()
+        self._maybe_self_optimize()
+
+    def _maybe_self_optimize(self, *, force: bool = False,
+                             include_debug: Optional[bool] = None) -> Optional[dict]:
+        """Run the unified self-optimization / self-healing cycle on the always-on cadence.
+
+        The daemon's counterpart to running ``core.self_optimize()`` by hand: on a slow cadence (every
+        ``self_optimize_every`` growth passes) — or immediately when ``force`` — NYXARA reviews, optimizes,
+        experiments, self-debugs and safety-verifies her own source, each edit behind the SAME reversible
+        verify-or-rollback gauntlet the on-demand path uses. Oversight-gated (a scram no-ops it) and
+        best-effort; a failure is counted, never fatal. The heavy pytest self-debug phase (phase 8) is
+        force-skipped under the hermetic TEST profile so a wiring test can never spawn a recursive pytest
+        inside the running suite. Returns the report dict, or None when it did not run."""
+        core = self.core
+        opt = getattr(core, "self_optimize", None)
+        if not callable(opt):
+            return None
+        if not force:
+            self._self_opt_passes += 1
+            if not self.self_optimize_every or \
+                    self._self_opt_passes % self.self_optimize_every != 0:
+                return None
+        # oversight halts self-modification too (paused/scrammed → no-op)
+        gate = getattr(getattr(core, "oversight", None), "gate", None)
+        if callable(gate) and not gate():
+            return None
+        if include_debug is None:
+            include_debug = self.self_optimize_debug
+        # The debug phase launches a real pytest (detection). NEVER do that from inside a running
+        # pytest process (it would recurse into the suite) or under the hermetic TEST profile — only
+        # the live daemon, where neither holds, actually runs it.
+        if include_debug:
+            import os as _os
+            import sys as _sys
+            if ("PYTEST_CURRENT_TEST" in _os.environ) or ("pytest" in _sys.modules):
+                include_debug = False
+            else:
+                try:
+                    from nyxara.kernel.config import Profile, get_settings
+                    if get_settings().profile is Profile.TEST:
+                        include_debug = False
+                except Exception:  # noqa: BLE001 — config is advisory; default to the safe path
+                    include_debug = False
+        try:
+            report = opt(enact=None, include_debug=include_debug)
+        except Exception:  # noqa: BLE001 — self-optimization is a capability, never fatal to the loop
+            self._note_error("self_optimize")
+            return None
+        if report is None:
+            return None
+        rep = report.to_dict() if hasattr(report, "to_dict") else report
+        self.self_optimization_reports.append(rep)
+        return rep
+
+    def _maybe_reactive_heal(self) -> None:
+        """A genuinely stalled/erroring mind attempts a real source-level self-repair.
+
+        When the loop has been unproductive for ``stall_threshold`` consecutive ticks — the same signal
+        that degrades health — fire ONE forced self-optimization pass with the heavy pytest self-debug
+        enabled (the only path that runs phase 8), bounded by a cooldown so it can never thrash. The whole
+        pass is oversight-gated inside :meth:`_maybe_self_optimize` and TEST-sealed against the recursive
+        pytest. Best-effort; never fatal."""
+        if self._self_opt_cooldown > 0:
+            self._self_opt_cooldown -= 1
+            return
+        if self.stall_threshold <= 0 or self.consecutive_unproductive < self.stall_threshold:
+            return
+        self._maybe_self_optimize(force=True, include_debug=True)
+        # wait at least a full stall window before another attempt (thrash guard)
+        self._self_opt_cooldown = max(self.stall_threshold, 1)
 
     def _maybe_self_evolve(self) -> None:
         """Let the ALWAYS-ON daemon drain the self-evolving shortfall queue between the Master's turns.
@@ -561,6 +642,7 @@ class AutonomicLoop:
         self._advance_mission()
         self._maybe_learn()
         self._maybe_grow()
+        self._maybe_reactive_heal()
         self._maybe_persist()
         return result
 
@@ -613,6 +695,7 @@ class AutonomicLoop:
                         self._advance_mission()
                         self._maybe_learn()
                         self._maybe_grow()
+                        self._maybe_reactive_heal()
                         self._maybe_persist()
                 except asyncio.CancelledError:
                     raise   # a real cancellation (shutdown) must propagate, not be swallowed
@@ -663,6 +746,7 @@ class AutonomicLoop:
                "missions_advanced": self.missions_advanced,
                "growth_passes": len(self.growth_reports),
                "self_evolutions": len(self.self_evolution_reports),
+               "self_optimizations": len(self.self_optimization_reports),
                # code-driven metrics: what NYXARA decided and did on her own, without the LLM
                "intents_adopted": self.intents_adopted,
                "code_acts": self.code_acts,

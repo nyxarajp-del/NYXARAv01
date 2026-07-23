@@ -2625,6 +2625,13 @@ class ServerConfig(BaseModel):
     # compounds: her GrowthEngine (reflect → consolidate → abstract → induce skills) runs on
     # this cadence inside the supervised loop, not only in the console.
     autonomic_growth_every: int = Field(default=20, ge=0)     # learning pass every N ticks (0 = never)
+    # Self-optimization / self-healing on the always-on cadence: run the unified eleven-phase
+    # SelfOptimizationLoop (core.self_optimize) every N *growth passes*, so the daemon actually heals +
+    # optimizes her own source between the Master's turns — not only on demand. ≈6 growth passes ≈ 1h at
+    # the default 30s/20-tick cadence (slow, non-thrashing). 0 = never. The heavy pytest self-debug phase
+    # stays OFF on the periodic pass and fires only reactively on a real stall/error signal.
+    autonomic_self_optimize_every: int = Field(default=6, ge=0)   # self-optimization pass every N growth passes
+    autonomic_self_optimize_debug: bool = False                   # heavy pytest self-debug in the periodic pass
     # How the always-on background mind DECIDES each tick. "code" (default) — NYXARA decides and
     # acts entirely in her own deterministic engines (drive → intent → proactive gauntlet →
     # scheduler); the LLM is never the decider. "reasoner" — the legacy path that composes a

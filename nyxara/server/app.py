@@ -299,6 +299,8 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                     core,
                     interval_s=cfg.autonomic_interval_s,
                     growth_every=cfg.autonomic_growth_every,
+                    self_optimize_every=cfg.autonomic_self_optimize_every,
+                    self_optimize_debug=cfg.autonomic_self_optimize_debug,
                     inner_life=inner_life,
                     decision_mode=cfg.autonomic_decision_mode,
                     presence=presence,
@@ -320,7 +322,8 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                 app_.state.autonomic_runtime = runtime
                 print(f"NYXARA background mind (AutonomicLoop) started "
                       f"[interval {cfg.autonomic_interval_s}s, growth_every "
-                      f"{cfg.autonomic_growth_every}, inner_life {inner_life}, "
+                      f"{cfg.autonomic_growth_every}, self_optimize_every "
+                      f"{cfg.autonomic_self_optimize_every}, inner_life {inner_life}, "
                       f"decision_mode {cfg.autonomic_decision_mode}, supervised]")
 
                 # Deep self-directed cognition: the AutonomicLoop above decides + acts, but the
