@@ -301,6 +301,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                     growth_every=cfg.autonomic_growth_every,
                     self_optimize_every=cfg.autonomic_self_optimize_every,
                     self_optimize_debug=cfg.autonomic_self_optimize_debug,
+                    free_energy_threshold=cfg.autonomic_free_energy_threshold,
                     inner_life=inner_life,
                     decision_mode=cfg.autonomic_decision_mode,
                     presence=presence,

@@ -2632,6 +2632,11 @@ class ServerConfig(BaseModel):
     # stays OFF on the periodic pass and fires only reactively on a real stall/error signal.
     autonomic_self_optimize_every: int = Field(default=6, ge=0)   # self-optimization pass every N growth passes
     autonomic_self_optimize_debug: bool = False                   # heavy pytest self-debug in the periodic pass
+    # Active-inference free-energy pre-emptive self-heal (autonomic N): when the daemon's running
+    # free-energy estimate over its own telemetry (errors/stalls) spikes past this, NYXARA heals
+    # PRE-EMPTIVELY, ahead of an actual stall. In [0,1); 0 disables the pre-emptive path (the reactive
+    # stall trigger still runs). Conservative default so only genuine surprise spikes trip it.
+    autonomic_free_energy_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     # How the always-on background mind DECIDES each tick. "code" (default) — NYXARA decides and
     # acts entirely in her own deterministic engines (drive → intent → proactive gauntlet →
     # scheduler); the LLM is never the decider. "reasoner" — the legacy path that composes a

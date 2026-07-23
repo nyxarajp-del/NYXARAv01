@@ -82,6 +82,11 @@ class AutonomicLoop:
     # for back-compat + test safety; the daemon turns it on via server config).
     self_optimize_every: int = 0          # run one self-optimization pass every N growth passes (0 = never)
     self_optimize_debug: bool = False     # include the heavy pytest self-debug phase in the PERIODIC pass
+    # active-inference free-energy pre-emptive self-heal (N): NYXARA keeps a running surprise/free-energy
+    # estimate over her OWN telemetry (errors, unproductive streaks) via mind/active_inference and heals
+    # PRE-EMPTIVELY when expected free energy spikes — before the stall floor (_maybe_reactive_heal) trips.
+    # 0.0 = disabled (class default for back-compat/tests; the daemon arms it via server config).
+    free_energy_threshold: float = 0.0
     history: List[CycleResult] = field(default_factory=list)
     escalations: List[Any] = field(default_factory=list)
     growth_reports: List[Any] = field(default_factory=list)
@@ -107,6 +112,10 @@ class AutonomicLoop:
     _intention_queue: List[str] = field(default_factory=list, init=False)
     _self_opt_passes: int = field(default=0, init=False)     # growth passes seen (self-optimization throttle)
     _self_opt_cooldown: int = field(default=0, init=False)   # ticks to wait before another reactive heal
+    _genmodel: Any = field(default=None, init=False)         # active-inference GenerativeModel (N)
+    _fe_last_errors: int = field(default=0, init=False)      # last-seen error total (for the surprise delta)
+    _fe_cooldown: int = field(default=0, init=False)         # ticks to wait before another pre-emptive heal
+    _free_energy: float = field(default=0.0, init=False)     # last computed free-energy estimate
 
     def __post_init__(self) -> None:
         # auto-build a growth engine bound to this core when periodic learning is requested
@@ -142,6 +151,14 @@ class AutonomicLoop:
                 self.mission_executive = MissionExecutive(self.core, authority=self.authority)
             except Exception:  # noqa: BLE001 — missions are a capability, never required
                 self.mission_executive = None
+        # active-inference free-energy driver (N): build a generative model over her own telemetry when
+        # pre-emptive healing is armed. Best-effort — a missing model just disables the pre-emptive path.
+        if self.free_energy_threshold > 0 and self._genmodel is None:
+            try:
+                from nyxara.mind.active_inference import GenerativeModel
+                self._genmodel = GenerativeModel()
+            except Exception:  # noqa: BLE001 — active inference is a capability, never required
+                self._genmodel = None
 
     def _maybe_grow(self) -> None:
         if not self.growth_every or self.ticks % self.growth_every != 0:
@@ -223,6 +240,41 @@ class AutonomicLoop:
         self._maybe_self_optimize(force=True, include_debug=True)
         # wait at least a full stall window before another attempt (thrash guard)
         self._self_opt_cooldown = max(self.stall_threshold, 1)
+
+    def _observe_free_energy(self) -> float:
+        """Fold this tick's telemetry into the generative model and return the current free energy.
+
+        Rising surprise comes from spikes in swallowed errors and unproductive streaks — the loop's own
+        signals that something is going wrong. Best-effort; a model fault just leaves free energy at 0."""
+        gm = self._genmodel
+        if gm is None:
+            return 0.0
+        try:
+            d_err = float(max(0, self.errors - self._fe_last_errors))
+            self._fe_last_errors = self.errors
+            gm.observe("errors", d_err)
+            gm.observe("unproductive", 1.0 if self.consecutive_unproductive > 0 else 0.0)
+            self._free_energy = float(gm.free_energy())
+        except Exception:  # noqa: BLE001 — active inference is advisory, never fatal
+            self._note_error("free_energy")
+        return self._free_energy
+
+    def _maybe_preemptive_heal(self) -> None:
+        """Pre-emptive self-heal on a free-energy spike — before the stall floor trips (N).
+
+        Each tick observes the loop's telemetry; when expected free energy crosses
+        ``free_energy_threshold`` (and the cooldown is clear) NYXARA fires a forced self-heal *ahead* of
+        an actual stall. This is the primary trigger; :meth:`_maybe_reactive_heal` stays as the floor.
+        Oversight-gated and TEST-sealed inside :meth:`_maybe_self_optimize`. Best-effort; never fatal."""
+        if self.free_energy_threshold <= 0 or self._genmodel is None:
+            return
+        fe = self._observe_free_energy()
+        if self._fe_cooldown > 0:
+            self._fe_cooldown -= 1
+            return
+        if fe >= self.free_energy_threshold:
+            self._maybe_self_optimize(force=True, include_debug=True)
+            self._fe_cooldown = max(self.stall_threshold, 1)
 
     def _maybe_self_evolve(self) -> None:
         """Let the ALWAYS-ON daemon drain the self-evolving shortfall queue between the Master's turns.
@@ -642,6 +694,7 @@ class AutonomicLoop:
         self._advance_mission()
         self._maybe_learn()
         self._maybe_grow()
+        self._maybe_preemptive_heal()
         self._maybe_reactive_heal()
         self._maybe_persist()
         return result
@@ -695,6 +748,7 @@ class AutonomicLoop:
                         self._advance_mission()
                         self._maybe_learn()
                         self._maybe_grow()
+                        self._maybe_preemptive_heal()
                         self._maybe_reactive_heal()
                         self._maybe_persist()
                 except asyncio.CancelledError:
@@ -747,6 +801,7 @@ class AutonomicLoop:
                "growth_passes": len(self.growth_reports),
                "self_evolutions": len(self.self_evolution_reports),
                "self_optimizations": len(self.self_optimization_reports),
+               "free_energy": round(self._free_energy, 4),
                # code-driven metrics: what NYXARA decided and did on her own, without the LLM
                "intents_adopted": self.intents_adopted,
                "code_acts": self.code_acts,
