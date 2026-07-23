@@ -7583,6 +7583,7 @@ class NyxaraCore:
                                 f"wondered [{cp.chosen.kind}]: {cp.chosen.text[:32]} → "
                                 f"{cp.finding.answer[:40]}", salience=0.6,
                                 confidence=cp.finding.confidence)
+                        self._feed_curiosity_gap(cp)
             except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
                 pass
         # 4f-) Infinite Explorer — drain a queued unknown and self-bootstrap a solution on
@@ -7877,6 +7878,7 @@ class NyxaraCore:
             if cp.finding is not None:
                 report["answer"] = cp.finding.answer
                 report["method"] = cp.finding.method
+            self._feed_curiosity_gap(cp)          # an unresolved wonder becomes a self-evolve shortfall
         except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
             pass
         return report
@@ -8838,6 +8840,38 @@ class NyxaraCore:
                               candidate=candidate, disposition=disp, gates=gates,
                               grounded_ok=getattr(self, "_last_grounded_ok", None))
         except Exception:  # noqa: BLE001 — diagnosis is best-effort; a turn is never delayed/broken
+            pass
+
+    def _feed_curiosity_gap(self, cp: Any) -> None:
+        """Feed an UNRESOLVED curiosity pass into the self-evolving shortfall queue.
+
+        When NYXARA wondered about something but her current faculties could not answer it (no answer /
+        an error / a very low-confidence finding), that is a real gap her current logic could not close
+        — exactly what the self-evolving driver should grow a new pathway for. A resolved pass adds
+        nothing. O(1), best-effort; never raises into the idle loop."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None or cp is None or not getattr(cp, "wondered", False):
+            return
+        try:
+            from nyxara.growth.self_evolving import GapKind, Shortfall, _digest as _se_digest
+            finding = getattr(cp, "finding", None)
+            conf = float(getattr(finding, "confidence", 0.0) or 0.0) if finding is not None else 0.0
+            if getattr(cp, "resolved", False) and conf >= 0.45:
+                return                                    # she answered it herself — no gap to grow
+            q = getattr(cp, "chosen", None)
+            uncertainty = float(getattr(q, "uncertainty", 1.0) or 1.0) if q is not None else 1.0
+            # no answer / error ⇒ her *composition* of faculties fell short; a weak answer ⇒ her
+            # *representation* did. Either way it is a real, lived capability gap.
+            unresolved = finding is None or getattr(finding, "error", None) or not getattr(
+                finding, "answer", "")
+            kind = GapKind.REASONING_COMPOSITION if unresolved else GapKind.REPRESENTATIONAL
+            subject = str(getattr(q, "text", "") or getattr(cp, "event", "")) if q is not None else ""
+            arch.note_shortfall(Shortfall(
+                kind, difficulty=max(0.5, uncertainty), confidence=conf,
+                stimulus_digest=_se_digest(subject),
+                signals={"curiosity_uncertainty": uncertainty, "finding_confidence": conf},
+                note=f"unresolved curiosity: {subject[:60]}"))
+        except Exception:  # noqa: BLE001 — feeding the queue is best-effort, never fatal to idle
             pass
 
     def _maybe_autosave(self) -> None:
