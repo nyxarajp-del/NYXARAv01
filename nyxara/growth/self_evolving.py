@@ -273,6 +273,32 @@ class SelfEvolvingArchitect:
             self._queue.append(leftover)          # keep the rest for the next drain
         return self.evolve_for_gap(top, enact=enact)
 
+    # ---- opt-in bridge from the intelligence planner's coarse growth directives ---- #
+    # (growth/intelligence.py Thompson-samples the weakest of four dimensions → one of four coarse
+    #  actions; this maps those actions to the STRUCTURAL levers so the planner can reach them.)
+    _DIRECTIVE_GAP: Dict[str, GapKind] = {
+        "deepen_reasoning": GapKind.REASONING_COMPOSITION,   # weak reasoning → invent a reasoning operator
+        "train_self_model": GapKind.REPRESENTATIONAL,        # over-reliant on the teacher → forge own brain
+        "resolve_weaknesses": GapKind.CAPACITY_BOUND,        # backlog/plateau → grow capacity
+    }
+
+    def gap_for_directive(self, action: str) -> Optional[GapKind]:
+        """Map an :mod:`intelligence`-planner directive action to a structural gap kind (or None when
+        the directive is not a brain-structure problem, e.g. ``acquire_knowledge``)."""
+        return self._DIRECTIVE_GAP.get(str(action))
+
+    def evolve_from_directive(self, action: str, *, difficulty: float = 0.8,
+                              enact: Optional[bool] = None) -> Optional[EvolutionCertificate]:
+        """Turn a planner directive into one structural-evolution pass (opt-in routing). Returns None
+        when the directive maps to no structural lever."""
+        kind = self.gap_for_directive(action)
+        if kind is None:
+            return None
+        return self.evolve_for_gap(
+            Shortfall(kind, difficulty=float(difficulty),
+                      signals={"difficulty": float(difficulty), "saturation": 0.9},
+                      note=f"intelligence directive '{action}'"), enact=enact)
+
     def evolve_for_gap(self, gap: Shortfall, *, enact: Optional[bool] = None) -> EvolutionCertificate:
         """Select the best lever for ``gap``, fire that organ through its own gauntlet, and certify the
         outcome. Never raises — an organ failure becomes an honest ``verified=False`` certificate."""

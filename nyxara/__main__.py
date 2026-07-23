@@ -323,6 +323,17 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.rewire_cognition(generations=gens), indent=2, default=str))
     elif cmd in ("cognitive-architecture", "cognitive", "mind-architecture"):
         print(json.dumps(core.cognitive_architecture_report(), indent=2, default=str))
+    elif cmd in ("sign", "sign-knowledge"):
+        # /sign <text>  -> HMAC-sign + chain a fact (tamper-evident epistemic ledger)
+        print(json.dumps(core.sign_knowledge(arg.strip() or "a fact"), indent=2, default=str))
+    elif cmd in ("holo", "holo-recall", "holographic"):
+        # /holo <cue>   -> associative content recall from the holographic memory field
+        print(json.dumps(core.holographic_recall(arg.strip() or ""), indent=2, default=str))
+    elif cmd in ("holo-learn", "holo-remember"):
+        # /holo-learn key | text  -> fold key→text into the holographic field
+        k, _, t = arg.partition("|")
+        print(json.dumps(core.holographic_remember(k.strip() or "note", t.strip() or arg.strip()),
+                         indent=2, default=str))
     elif cmd in ("superpose", "superposition", "quantum"):
         # /superpose <question>  -> reason over many candidate paths in a Born-rule superposition
         #                           and collapse to the best by simulated future outcome

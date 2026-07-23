@@ -1761,6 +1761,9 @@ class SelfEvolvingConfig(BaseModel):
     brain_forge_cooldown: float = Field(default=1800.0, ge=0.0)
     rule_synth_cooldown: float = Field(default=600.0, ge=0.0)
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
+    # opt-in: let the intelligence.py Thompson planner route its coarse growth directives to the
+    # structural levers here (deepen_reasoning→operator, train_self_model→brain, weaknesses→capacity).
+    route_intelligence_planner: bool = False
 
 
 class EpistemicCryptoConfig(BaseModel):

@@ -729,6 +729,17 @@ class NyxaraCore:
         # composes the organs above; it re-implements no search/training/promotion/safety.
         self.self_evolving = self._build_self_evolving() if enable_growth else None
         self._self_evo_idle_count = 0        # idle throttle for draining the shortfall queue
+        # Five more self-contained faculties, each composing a real substrate (all LLM-free):
+        #   holographic_memory  — an entangled HDC recall field (Cap: Holographic Memory)
+        #   synesthesia         — cross-domain pattern transposition (Cap: Synesthesia)
+        #   meta_epistemology   — invent new axioms when stuck (Cap: Synthetic Mathematics)
+        #   internal_civilization — deterministic persona debate (Cap: Societal Mimicry)
+        #   epistemic_ledger    — signed, tamper-evident knowledge (Cap: Epistemic Cryptography)
+        self.holographic_memory = self._build_holographic_memory() if enable_memory else None
+        self.synesthesia = self._build_synesthesia()
+        self.meta_epistemology = self._build_meta_epistemology() if enable_growth else None
+        self.internal_civilization = self._build_internal_civilization()
+        self.epistemic_ledger = self._build_epistemic_ledger()
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -4051,6 +4062,87 @@ class NyxaraCore:
             from nyxara.growth.self_evolving import SelfEvolvingArchitect
             return SelfEvolvingArchitect(core=self, settings=settings)
         except Exception:  # noqa: BLE001 — the self-evolving driver is a capability, never required
+            return None
+
+    def _build_holographic_memory(self) -> Any:
+        """Holographic Memory Field (memory/holographic_field.py): a continuous, entangled HDC recall
+        layer. Config-flagged; returns None when disabled/unavailable. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "holographic_memory", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.memory.holographic_field import HolographicMemoryField
+            return HolographicMemoryField(
+                dim=int(getattr(cfg, "dim", 10000)), capacity=int(getattr(cfg, "capacity", 512)),
+                seed=int(getattr(cfg, "seed", 42)),
+                recall_threshold=float(getattr(cfg, "recall_threshold", 0.15)))
+        except Exception:  # noqa: BLE001 — a capability, never required
+            return None
+
+    def _build_synesthesia(self) -> Any:
+        """Cross-Domain Synesthesia (mind/synesthesia.py): universal pattern transposition. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "synesthesia", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.synesthesia import SynestheticMatrix
+            return SynestheticMatrix(dim=int(getattr(cfg, "dim", 10000)),
+                                     seed=int(getattr(cfg, "seed", 7)),
+                                     adopt_r2=float(getattr(cfg, "adopt_r2", 0.9)),
+                                     min_similarity=float(getattr(cfg, "min_similarity", 0.15)))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_meta_epistemology(self) -> Any:
+        """Meta-Epistemology (growth/meta_epistemology.py): invent new axioms when stuck. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "meta_epistemology", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            import os
+            from nyxara.growth.meta_epistemology import MetaEpistemologyCore
+            persist = None
+            if cfg is None or bool(getattr(cfg, "persist", True)):
+                data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+                if data_dir:
+                    persist = os.path.join(str(data_dir),
+                                           str(getattr(cfg, "persist_filename", "invented_axioms.json")))
+            return MetaEpistemologyCore(persist_path=persist)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_internal_civilization(self) -> Any:
+        """Internal Civilization (mind/internal_civilization.py): deterministic persona debate. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "internal_civilization", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.internal_civilization import InternalCivilization
+            return InternalCivilization(rounds=int(getattr(cfg, "rounds", 2)),
+                                        ensemble=int(getattr(cfg, "ensemble", 1)),
+                                        seed=int(getattr(cfg, "seed", 0)))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_epistemic_ledger(self) -> Any:
+        """Epistemic Cryptography (growth/epistemic_crypto.py): signed, tamper-evident knowledge. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "epistemic_crypto", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.growth.epistemic_crypto import EpistemicLedger
+            return EpistemicLedger()
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_cognitive_architect(self) -> Any:
@@ -8978,6 +9070,68 @@ class NyxaraCore:
         out = {"ok": True}
         out.update(arch.report())
         return out
+
+    # ---- Master-facing entries for the five self-contained faculties ---- #
+    def transpose_pattern(self, target_series: Sequence[float], target_domain: str = "target"
+                          ) -> Dict[str, Any]:
+        """Cross-domain synesthesia: transpose a known law onto ``target_series`` from the nearest
+        cross-domain analogue, adopting it only if it verifiably fits. Learn analogues first via
+        ``core.synesthesia.learn(...)``. Returns the transposition (never raises)."""
+        syn = getattr(self, "synesthesia", None)
+        if syn is None:
+            return {"ok": False, "reason": "synesthesia not enabled"}
+        try:
+            return {"ok": True, **syn.transpose(target_series, target_domain).to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def deliberate_civilization(self, options: Sequence[Dict[str, float]], *,
+                               labels: Optional[Sequence[str]] = None, decision: str = ""
+                               ) -> Dict[str, Any]:
+        """Internal civilization: run the deterministic persona debate over ``options`` (each a dict of
+        dimension→value in [0,1]) and return the consensus verdict. Never raises."""
+        civ = getattr(self, "internal_civilization", None)
+        if civ is None:
+            return {"ok": False, "reason": "internal civilization not enabled"}
+        try:
+            return {"ok": True, **civ.deliberate(options, labels=labels, decision=decision).to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def holographic_remember(self, key: str, text: str) -> Dict[str, Any]:
+        """Fold ``key → text`` into the holographic memory field."""
+        hm = getattr(self, "holographic_memory", None)
+        if hm is None:
+            return {"ok": False, "reason": "holographic memory not enabled"}
+        try:
+            hm.remember(key, text)
+            return {"ok": True, **hm.report()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def holographic_recall(self, cue: str, *, by_key: bool = False) -> Dict[str, Any]:
+        """Associatively recall from the holographic field — by key or by content cue."""
+        hm = getattr(self, "holographic_memory", None)
+        if hm is None:
+            return {"ok": False, "reason": "holographic memory not enabled"}
+        try:
+            r = hm.recall(cue) if by_key else hm.recall_by_content(cue)
+            return {"ok": True, **r.to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def sign_knowledge(self, content: str, *, source: str = "self", confidence: float = 1.0,
+                       sensitivity: str = "internal") -> Dict[str, Any]:
+        """Epistemic cryptography: sign + chain a fact/axiom/skill; returns the entry + chain status."""
+        led = getattr(self, "epistemic_ledger", None)
+        if led is None:
+            return {"ok": False, "reason": "epistemic ledger not enabled"}
+        try:
+            entry = led.record(content, source=source, confidence=confidence, sensitivity=sensitivity)
+            ok, broken = led.verify_chain()
+            return {"ok": True, "entry": entry.to_dict(), "chain_valid": ok, "first_broken": broken}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
     def loyalty_report(self) -> Dict[str, Any]:
         """Master-facing: measure the live brain's submission to Master JP (the Loyalty Equation).

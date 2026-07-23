@@ -179,6 +179,20 @@ def test_measure_only_when_enact_false(tmp_path):
     assert cert.enacted is False and cert.wired_live is False
 
 
+def test_gap_for_directive_mapping():
+    arch = SelfEvolvingArchitect(core=None, settings=None)
+    assert arch.gap_for_directive("deepen_reasoning") is GapKind.REASONING_COMPOSITION
+    assert arch.gap_for_directive("train_self_model") is GapKind.REPRESENTATIONAL
+    assert arch.gap_for_directive("resolve_weaknesses") is GapKind.CAPACITY_BOUND
+    assert arch.gap_for_directive("acquire_knowledge") is None      # a knowledge gap, not structural
+    assert arch.gap_for_directive("nonsense") is None
+
+
+def test_evolve_from_directive_returns_none_for_knowledge():
+    arch = SelfEvolvingArchitect(core=None, settings=None)
+    assert arch.evolve_from_directive("acquire_knowledge") is None
+
+
 def test_never_verified_without_promotion(tmp_path):
     """A rule-synth lever whose report reports not-adopted must never claim verified/wired."""
     s = _settings(tmp_path)
