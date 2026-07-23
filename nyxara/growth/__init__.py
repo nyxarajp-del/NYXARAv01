@@ -104,6 +104,8 @@ from nyxara.growth.ecosystem import Ecosystem, Explorer, Skeptic, Synthesizer
 from nyxara.growth.counterfactual import CounterfactualDreamer, DreamReport, Failure
 from nyxara.growth.integrity import HibernateAndDream, HibernationReport, IntegritySeal
 from nyxara.growth.self_repair import HealOutcome, SelfRepair, pack_bundle, unpack_bundle
+from nyxara.growth.mdl_refactor import MDLRefactor, MDLReport, description_length
+from nyxara.growth.patch_gossip import PatchGossip, PatchGram
 from nyxara.growth.ontogenesis import (
     AxiomResult,
     AxiomStatus,
@@ -497,6 +499,11 @@ __all__ = [
     "HibernationReport",
     # F14 — epistemic self-repair + substrate portability
     "SelfRepair",
+    "MDLRefactor",
+    "MDLReport",
+    "description_length",
+    "PatchGossip",
+    "PatchGram",
     "HealOutcome",
     "pack_bundle",
     "unpack_bundle",
