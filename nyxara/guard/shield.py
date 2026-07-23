@@ -184,6 +184,26 @@ class Shield:
         self._log: List[Dict[str, Any]] = []
         self._head = _GENESIS
         self._limit = quarantine_limit
+        # Self-updating immunity (guard/immune_redteam.py): additional detection rules NYXARA
+        # learns from her own red-teaming. Monotonic by construction — a rule only ever ADDS a
+        # threat finding, never relaxes an existing block — so hardening can never weaken safety.
+        self._extra_rules: List[tuple] = []   # (compiled_pattern, severity, desc, ThreatType)
+
+    def add_rule(self, pattern: str, severity: float, desc: str,
+                 threat: "ThreatType" = None) -> bool:  # type: ignore[assignment]
+        """Append a learned detection rule (from self-red-teaming). Idempotent per pattern string;
+        returns True if a new rule was added. Only adds coverage — never removes or relaxes one."""
+        if threat is None:
+            threat = ThreatType.JAILBREAK
+        for existing, _, _, _ in self._extra_rules:
+            if existing.pattern == pattern:
+                return False
+        try:
+            compiled = re.compile(pattern, re.I)
+        except re.error:
+            return False
+        self._extra_rules.append((compiled, float(severity), str(desc), threat))
+        return True
 
     # ---- detection ---- #
     def _scan_findings(self, text: str) -> List[ThreatFinding]:
@@ -195,6 +215,10 @@ class Shield:
         for pat, sev, desc in self._JAILBREAK:
             if pat.search(text):
                 findings.append(ThreatFinding(ThreatType.JAILBREAK, sev, desc))
+        # learned rules from self-red-teaming (monotonic — only ever add findings)
+        for pat, sev, desc, threat in self._extra_rules:
+            if pat.search(text):
+                findings.append(ThreatFinding(threat, sev, desc))
         if self._HYPOTHETICAL.search(text):
             findings.append(ThreatFinding(ThreatType.HYPOTHETICAL_FRAMING, 0.5,
                                           "hypothetical framing around a bypass"))

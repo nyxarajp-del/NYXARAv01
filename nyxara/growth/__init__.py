@@ -108,6 +108,8 @@ from nyxara.growth.mdl_refactor import MDLRefactor, MDLReport, description_lengt
 from nyxara.growth.patch_gossip import PatchGossip, PatchGram
 from nyxara.growth.immunology import Finding, ImmuneReport, Immunologist, fuzz_callable
 from nyxara.growth.substrate_tune import SubstrateProfile, SubstrateTuner, probe_substrate
+from nyxara.growth.superoptimize import SuperOptimizer, SuperOptResult
+from nyxara.growth.arch_rewrite import ArchRewriter, DependencyGraph
 from nyxara.growth.ontogenesis import (
     AxiomResult,
     AxiomStatus,
@@ -513,6 +515,10 @@ __all__ = [
     "SubstrateTuner",
     "SubstrateProfile",
     "probe_substrate",
+    "SuperOptimizer",
+    "SuperOptResult",
+    "ArchRewriter",
+    "DependencyGraph",
     "HealOutcome",
     "pack_bundle",
     "unpack_bundle",
