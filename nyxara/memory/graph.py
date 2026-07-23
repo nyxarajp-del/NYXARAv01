@@ -62,6 +62,53 @@ def _norm(s: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Provenance (de)serialisation — full-fidelity, reconstructable round-trip.
+# `Provenance.to_dict` is a *live report* (it bakes in decayed trust/age and
+# collapses evidence to counts), so it cannot rebuild the object. These helpers
+# persist exactly the fields the constructor needs, so trust decay, source and
+# evidence survive a save→load cycle instead of resetting on every restart.
+# --------------------------------------------------------------------------- #
+def _prov_persist(p: Optional[Provenance]) -> Optional[Dict[str, Any]]:
+    if p is None:
+        return None
+    return {
+        "source": p.source.value,
+        "confidence": p.confidence,
+        "detail": p.detail,
+        "method": p.method,
+        "acquired_at": p.acquired_at,
+        "half_life_days": p.half_life_days,
+        "parents": list(p.parents),
+        "tags": sorted(p.tags),
+        "prov_id": p.prov_id,
+        "corroborations": [list(c) for c in p.corroborations],
+        "contradictions": [list(c) for c in p.contradictions],
+    }
+
+
+def _prov_restore(d: Optional[Dict[str, Any]]) -> Optional[Provenance]:
+    if not d:
+        return None
+    try:
+        prov = Provenance(
+            source=SourceType(d.get("source", SourceType.MEMORY_DERIVED.value)),
+            confidence=float(d.get("confidence", 0.8)),
+            detail=str(d.get("detail", "")),
+            method=str(d.get("method", "asserted")),
+            acquired_at=float(d.get("acquired_at", time.time())),
+            half_life_days=float(d.get("half_life_days", 30.0)),
+            parents=tuple(d.get("parents", ())),
+            tags=frozenset(d.get("tags", ())),
+            prov_id=str(d.get("prov_id")) if d.get("prov_id") else uuid.uuid4().hex,
+        )
+        prov.corroborations = [tuple(c) for c in d.get("corroborations", [])]
+        prov.contradictions = [tuple(c) for c in d.get("contradictions", [])]
+        return prov
+    except Exception:  # noqa: BLE001 — a corrupt provenance blob must never lose the triple
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # Entity & triple
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -83,7 +130,8 @@ class Entity:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"eid": self.eid, "name": self.name, "etype": self.etype,
-                "aliases": sorted(self.aliases), "attributes": self.attributes}
+                "aliases": sorted(self.aliases), "attributes": self.attributes,
+                "provenance": _prov_persist(self.provenance)}
 
 
 @dataclass
@@ -108,7 +156,8 @@ class Triple:
     def to_dict(self) -> Dict[str, Any]:
         return {"s": self.subject, "p": self.predicate, "o": self.object,
                 "confidence": round(self.confidence, 4), "triple_id": self.triple_id,
-                "attributes": self.attributes}
+                "attributes": self.attributes, "created_at": self.created_at,
+                "provenance": _prov_persist(self.provenance)}
 
 
 @dataclass
@@ -470,6 +519,94 @@ class KnowledgeGraph:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, default=str)
         return path
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "KnowledgeGraph":
+        """Rebuild a graph from :meth:`to_dict`. The inverse of ``to_dict``, so a
+        persisted graph survives a restart with entities, triples, provenance
+        (hence live trust decay) and the inverse/transitive/symmetric schema
+        intact — closing the data-loss gap where the accumulated graph used to be
+        wiped to its seed triples on every boot. Malformed rows are skipped, never
+        fatal, so a partially-corrupt file still restores what it can."""
+        g = cls()
+        for ed in d.get("entities", []):
+            try:
+                ent = Entity(
+                    name=ed["name"],
+                    etype=ed.get("etype", "thing"),
+                    eid=ed.get("eid", ""),
+                    aliases=set(ed.get("aliases", ())),
+                    attributes=dict(ed.get("attributes", {})),
+                    provenance=_prov_restore(ed.get("provenance")),
+                )
+                g._entities[ent.eid] = ent
+                g._out.setdefault(ent.eid, [])
+                g._in.setdefault(ent.eid, [])
+                for n in ent.all_names():
+                    g._names[n] = ent.eid
+            except Exception:  # noqa: BLE001 — one bad entity must not sink the graph
+                continue
+        for td in d.get("triples", []):
+            try:
+                t = Triple(
+                    subject=td["s"], predicate=td["p"], object=td["o"],
+                    confidence=float(td.get("confidence", 0.9)),
+                    provenance=_prov_restore(td.get("provenance")),
+                    attributes=dict(td.get("attributes", {})),
+                )
+                if td.get("created_at") is not None:
+                    t.created_at = float(td["created_at"])
+                if td.get("triple_id"):
+                    t.triple_id = str(td["triple_id"])
+                # a triple whose endpoints were dropped (corrupt entity row) is skipped
+                if t.subject not in g._out or t.object not in g._in:
+                    continue
+                g._triples[t.triple_id] = t
+                g._out[t.subject].append(t.triple_id)
+                g._in[t.object].append(t.triple_id)
+            except Exception:  # noqa: BLE001
+                continue
+        g._inverse = dict(d.get("inverse", {}))
+        g._transitive = set(d.get("transitive", ()))
+        g._symmetric = set(d.get("symmetric", ()))
+        return g
+
+    @classmethod
+    def load(cls, path: str) -> "KnowledgeGraph":
+        """Restore a graph saved by :meth:`save` (best-effort; a missing/corrupt
+        file yields an empty graph rather than raising)."""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return cls.from_dict(json.load(f))
+        except Exception:  # noqa: BLE001
+            return cls()
+
+    def merge_from(self, other: "KnowledgeGraph") -> int:
+        """Fold another graph's triples into this one (used to restore a persisted
+        graph on top of the freshly-seeded standard relations without losing the
+        seeds). Returns the number of triples added. Deduplicates on (s, p, o)."""
+        existing = {(t.subject, t.predicate, t.object) for t in self._triples.values()}
+        added = 0
+        for t in other._triples.values():
+            if (t.subject, t.predicate, t.object) in existing:
+                continue
+            src = other._entities.get(t.subject)
+            obj = other._entities.get(t.object)
+            self.add_triple(
+                src.name if src else t.subject,
+                t.predicate,
+                obj.name if obj else t.object,
+                confidence=t.confidence, provenance=t.provenance,
+                attributes=dict(t.attributes),
+            )
+            existing.add((t.subject, t.predicate, t.object))
+            added += 1
+        # carry over any schema the restored graph knew that the seed did not
+        for p, q in other._inverse.items():
+            self._inverse.setdefault(p, q)
+        self._transitive |= other._transitive
+        self._symmetric |= other._symmetric
+        return added
 
     def stats(self) -> Dict[str, Any]:
         preds: Dict[str, int] = {}

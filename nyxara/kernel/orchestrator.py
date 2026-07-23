@@ -9611,6 +9611,7 @@ class NyxaraCore:
             saved = self.memory.save(target)
             self._save_self_model(target)
             self._save_prediction_prior(target)
+            self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
             return saved
         except Exception:  # noqa: BLE001
@@ -9626,6 +9627,7 @@ class NyxaraCore:
             import os
             self._load_self_model(target)
             self._load_prediction_prior(target)
+            self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
             if not os.path.exists(target):
                 return 0
@@ -9664,6 +9666,45 @@ class NyxaraCore:
                 return
             with open(path, "r", encoding="utf-8") as fh:
                 pe.prior.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+    def _knowledge_graph_path(self, memory_target: str) -> str:
+        """The knowledge-graph sidecar lives next to the long-term memory file."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "knowledge_graph.json")
+
+    def _save_knowledge_graph(self, memory_target: str) -> None:
+        """Persist the rich KnowledgeGraph so accumulated triples survive a restart.
+        Without this the graph was silently rebuilt from its 2 seed triples on every
+        boot (it had ``save`` but no caller and no load path) — every learned fact,
+        relation and traversal edge was lost at the process boundary."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            g.save(path)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_knowledge_graph(self, memory_target: str) -> None:
+        """Restore the persisted KnowledgeGraph, merged on top of the freshly-seeded
+        standard relations + identity triples (so the seeds are never lost and the
+        restored facts are added, deduped on subject/predicate/object)."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            if not os.path.exists(path):
+                return
+            from nyxara.memory.graph import KnowledgeGraph
+            restored = KnowledgeGraph.load(path)
+            g.merge_from(restored)
         except Exception:  # noqa: BLE001 — best-effort
             pass
 
