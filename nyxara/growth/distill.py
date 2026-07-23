@@ -379,7 +379,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     # MULTI-TEACHER: the same prompt is captured once per teacher (diverse supervision)
     class _MultiFacade:
-        answers = {"qwen": "Qwen's take."}
+        answers = {"qwen": "The base model's take."}
 
         def available_providers(self):
             return ["native", "qwen", "self"]

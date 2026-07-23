@@ -66,7 +66,7 @@ This is the crux (GPU + API key available). The frontier LLM becomes the *teache
 voice.
 
 - **Make LoRA-on-real-base the default foundry backend.** `NYXARA_FOUNDRY__BACKEND=lora`,
-  `NYXARA_FOUNDRY__BASE_MODEL` = the local open base (`Qwen/Qwen2.5-0.5B-Instruct`).
+  `NYXARA_FOUNDRY__BASE_MODEL` = the local open base (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`).
   This is the path the README calls "genuine capability." The base already speaks the
   language; we only learn a small low-rank adapter for NYXARA's **voice + lived memory +
   teacher answers**.
@@ -130,7 +130,7 @@ neural model calls / cross-checks against:
 
 ## Phase 5 — Scaling the substrate (genuine capability)
 
-- **Base-model ladder.** Climb as compute allows: Qwen2.5-0.5B LoRA (today's base)
+- **Base-model ladder.** Climb as compute allows: TinyLlama-1.1B LoRA (today's base)
   (`FoundryConfig` already has profiles + `estimated_params()`). Recommendation:
   **LoRA-on-a-strong-open-base** is the realistic "own brain" — from-scratch GPT-2 pretraining
   has poor ROI.

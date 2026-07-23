@@ -103,7 +103,7 @@ class LLMProvider(str, Enum):
 
     AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
     #                               the moment they exist (and pass the serve gate) — no manual flip
-    QWEN = "qwen"                 # in-process Qwen2.5-0.5B-Instruct, downloaded via HuggingFace
+    QWEN = "qwen"                 # in-process TinyLlama-1.1B-Chat-v1.0, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
@@ -304,8 +304,9 @@ class LLMConfig(BaseModel):
 
     One real base runs in-process, no cloud providers and no API keys: the HuggingFace
     ``transformers`` path (``qwen``, any HF causal-LM id via ``NYXARA_LLM__QWEN_*``),
-    defaulting to **Qwen2.5-0.5B-Instruct** — tiny enough to run and LoRA-fine-tune on a
-    CPU or a modest GPU. That single base is the only pretrained model NYXARA stands on;
+    defaulting to **TinyLlama-1.1B-Chat-v1.0** — small enough to QLoRA-fine-tune (4-bit base +
+    LoRA adapter) on a single consumer GPU, and to run full-precision on a CPU. That single
+    base is the only pretrained model NYXARA stands on;
     everything above it is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes that
     same base on her lived memory, and ``self`` serves the promoted adapter. ``native`` is
     her always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity
@@ -315,31 +316,32 @@ class LLMConfig(BaseModel):
     The default ``auto`` closes the train→serve loop: it walks the ladder
     self→qwen→native, so the moment the foundry promotes her own weights (and they pass the
     serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
-    reconfiguration; until then the Qwen base answers, and a bare machine her native own-brain.
+    reconfiguration; until then the TinyLlama base answers, and a bare machine her native own-brain.
     """
 
     model_config = {"validate_assignment": True}
 
     provider: LLMProvider = LLMProvider.AUTO
-    # ---- Qwen2.5-0.5B: model & load-time control ---- #
-    qwen_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
+    # ---- TinyLlama-1.1B: model & load-time control ---- #
+    qwen_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     qwen_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
     qwen_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
-    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). Off by
-    # default — a 0.5B base runs full-precision on a CPU without needing quantization.
-    qwen_load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
+    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). ON by
+    # default — QLoRA-style 4-bit NF4 serving keeps the 1.1B base light on a consumer GPU;
+    # a CPU-only box silently loads full precision instead (no crash, no config change).
+    qwen_load_in_4bit: bool = True     # QLoRA-style serve (needs bitsandbytes+CUDA; 8bit exclusive)
     qwen_load_in_8bit: bool = False
     qwen_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     qwen_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
     qwen_bnb_4bit_use_double_quant: bool = True
     qwen_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
     qwen_use_cache: bool = True        # KV cache during generation
-    qwen_trust_remote_code: bool = False   # Qwen2.5 native arch; enable via .env/max for custom ids
+    qwen_trust_remote_code: bool = False   # TinyLlama is a native Llama arch; enable via .env/max for custom ids
     # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
     # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
     qwen_adapter_path: Optional[Path] = None
     qwen_merge_adapter: bool = False
-    # ---- Qwen2.5-0.5B: generation control (per-request LLMRequest fields win) ---- #
+    # ---- TinyLlama-1.1B: generation control (per-request LLMRequest fields win) ---- #
     qwen_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
     qwen_repetition_penalty: float = Field(default=1.1, ge=0.5, le=2.0)
     qwen_no_repeat_ngram_size: int = Field(default=0, ge=0, le=20)  # 0 -> disabled
@@ -348,9 +350,9 @@ class LLMConfig(BaseModel):
     qwen_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
     # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
     qwen_do_sample: Literal["auto", "always", "never"] = "auto"
-    # Qwen2.5's context window is 32768 tokens; prompts are left-truncated to fit.
-    qwen_max_input_tokens: int = Field(default=16384, ge=64, le=32768)
-    # Qwen2.5 chat template (system/user/assistant). False -> flat prompt, for base checkpoints.
+    # TinyLlama-1.1B's context window is 2048 tokens; prompts are left-truncated to fit.
+    qwen_max_input_tokens: int = Field(default=2048, ge=64, le=32768)
+    # TinyLlama chat template (Zephyr-style system/user/assistant). False -> flat prompt, for base checkpoints.
     qwen_use_chat_template: bool = True
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
@@ -435,9 +437,9 @@ class FoundryConfig(BaseModel):
     transformer on a torch-less box, or — the honest floor when even NumPy is absent —
     a Kneser-Ney n-gram. Heavy & self-modifying, so still fully gauntlet-gated and
     reversible (the TEST profile seals it off for hermetic suites). The default backend
-    is ``lora`` — LoRA fine-tuning of the Qwen2.5-0.5B base (real capability); at 0.5B it
-    fine-tunes on a CPU or a modest GPU, so ``lora_requires_gpu`` is off by default (a tiny
-    base is no multi-GB download to stall on).
+    is ``lora`` — QLoRA fine-tuning of the TinyLlama-1.1B base (real capability): the frozen
+    base loads 4-bit (NF4) on a CUDA GPU and the LoRA adapter trains on top; on a CPU it
+    trains full-precision LoRA instead, so ``lora_requires_gpu`` stays off by default.
 
     ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
     dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
@@ -454,7 +456,7 @@ class FoundryConfig(BaseModel):
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
     backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
-    # Whether the LoRA forge insists on CUDA. The Qwen2.5-0.5B base is small enough to
+    # Whether the LoRA forge insists on CUDA. The TinyLlama-1.1B base is small enough to
     # LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
     # own adapter even on a GPU-less box. Set True to downshift to a genuinely trainable
     # neural backend (nanogpt with torch, the NumPy transformer without) when no GPU is present.
@@ -546,11 +548,12 @@ class FoundryConfig(BaseModel):
     n_embd: int = Field(default=64, ge=8, le=2048)
     # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
     # Adapts the base to NYXARA's lived memory by training a small low-rank adapter — the path
-    # to genuine capability. Default base is Qwen2.5-0.5B-Instruct: the single small pretrained
-    # model she stands on, tiny enough to LoRA-fine-tune in full precision on a CPU or a modest
-    # GPU (no QLoRA required), degrading to the always-on n-gram backend only when torch is absent.
-    base_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
-    # Qwen2.5 is a native transformers architecture (standard Qwen2 modeling code), so no remote
+    # to genuine capability. Default base is TinyLlama-1.1B-Chat-v1.0: the single small pretrained
+    # model she stands on, trained QLoRA-style by default (4-bit NF4 frozen base + LoRA adapter,
+    # when bitsandbytes+CUDA are present; full-precision LoRA on a CPU), degrading to the
+    # always-on n-gram backend only when torch is absent.
+    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # TinyLlama is a native transformers architecture (standard Llama modeling code), so no remote
     # code is needed to load it. Kept a knob so an exotic base that ships custom modeling code can
     # turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
     trust_remote_code: bool = False
@@ -562,7 +565,7 @@ class FoundryConfig(BaseModel):
     lora_alpha: int = Field(default=16, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
-    # Which modules receive LoRA adapters. Qwen2.5 uses the llama-style projection names, so the
+    # Which modules receive LoRA adapters. TinyLlama (Llama arch) uses the llama-style projection names, so the
     # default targets every attention + MLP projection explicitly. LoRAModel._apply_lora falls
     # back to peft's architecture inference (and then "all-linear") if any name is absent, so an
     # unusual base still trains. Clear the list to force pure inference on an unknown base.
@@ -573,11 +576,11 @@ class FoundryConfig(BaseModel):
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
     lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
-    # QLoRA: load the frozen base in 4-bit (or 8-bit) so bigger bases fine-tune on a single
+    # QLoRA: load the frozen base in 4-bit (or 8-bit) so the base fine-tunes on a single
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
-    # to full-precision LoRA (no crash). OFF by default — the Qwen2.5-0.5B base fits and trains
-    # in full precision anywhere; flip it on only if you swap in a much larger base.
-    load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
+    # to full-precision LoRA (no crash). ON by default — the TinyLlama-1.1B forge is a QLoRA
+    # (4-bit NF4 + double quant) wherever the hardware allows it.
+    load_in_4bit: bool = True     # QLoRA training default (needs bitsandbytes+CUDA; 8bit exclusive)
     load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"

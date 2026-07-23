@@ -5,7 +5,7 @@
 # in the background. Two phases:
 #   1. LEAN profile (.[dev,reasoning,server] + httpx) — mirrors .github/workflows/ci.yml.
 #      This is all the test suite, the Master console and the FastAPI server need.
-#   2. HEAVY ML extras (senses/foundry/qwen/vector/qdrant/embeddings/generate/llm) —
+#   2. HEAVY ML extras (senses/foundry/qlora/tinyllama/vector/qdrant/embeddings/generate/llm) —
 #      best-effort. These pull torch/transformers/whisper (~GBs) and light up the
 #      optional faculties; every one degrades gracefully if its install is skipped,
 #      so a failure here never blocks a working session.
@@ -31,5 +31,5 @@ python -m pip install --upgrade pip || true
 python -m pip install -e ".[dev,reasoning,server]" "httpx>=0.27"
 
 # Phase 2 — heavy ML extras. Best-effort: graceful fallbacks cover any gap.
-python -m pip install -e ".[senses,foundry,qwen,vector,qdrant,embeddings,generate,llm,security,observe]" || \
+python -m pip install -e ".[senses,foundry,qlora,tinyllama,vector,qdrant,embeddings,generate,llm,security,observe]" || \
   echo "NYXARA: heavy ML extras skipped/partial — optional faculties degrade gracefully." >&2
