@@ -68,7 +68,7 @@ def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
     s = NyxaraSettings.for_profile(Profile.DEV)
     assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
-    assert s.foundry.lora_requires_gpu is False      # 0.5B base LoRA-tunes on a CPU, no GPU needed
+    assert s.foundry.lora_requires_gpu is False      # 1.1B base LoRA-tunes on a CPU too, no GPU required
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
     assert s.flywheel.correction_weight == 3
@@ -86,7 +86,7 @@ def test_llm_active_model_and_key():
     s = NyxaraSettings()
     s.llm.provider = LLMProvider.QWEN
     assert s.llm.active_model() == s.llm.qwen_model
-    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert s.llm.qwen_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
     # every backend is local now — there are no API keys anywhere
@@ -96,19 +96,20 @@ def test_llm_active_model_and_key():
 
 
 def test_qwen_is_the_single_base_and_foundry_base():
-    """The shipped defaults wire the single Qwen2.5-0.5B base end to end."""
+    """The shipped defaults wire the single TinyLlama-1.1B base end to end."""
     s = NyxaraSettings()
     # serving: the auto ladder by default (self→qwen→mock), so her own promoted
-    # weights serve the moment they exist; until then the Qwen base answers
+    # weights serve the moment they exist; until then the TinyLlama base answers
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert s.llm.qwen_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     # training: the foundry LoRA-tunes that same single base — everything above it is hers
-    assert s.foundry.base_model == "Qwen/Qwen2.5-0.5B-Instruct"
-    # a 0.5B base needs no QLoRA and no remote code
-    assert s.foundry.load_in_4bit is False
+    assert s.foundry.base_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # QLoRA (4-bit) is the default forge; no remote code needed for TinyLlama
+    assert s.foundry.load_in_4bit is True
+    assert s.llm.qwen_load_in_4bit is True           # QLoRA-style 4-bit serve by default too
     assert s.foundry.trust_remote_code is False
-    # Qwen2.5 uses llama-style projection names — the default pins the full set
+    # TinyLlama (Llama arch) uses the llama-style projection names — the default pins the full set
     assert s.foundry.lora_target_modules == [
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 

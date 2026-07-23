@@ -195,7 +195,7 @@ class _MultiFacade:
     """A stub LLM facade exposing several named providers (for distill_multi)."""
 
     def __init__(self):
-        self.answers = {"qwen": "Qwen's answer.", "self": "NYXARA's own answer."}
+        self.answers = {"qwen": "The base model's answer.", "self": "NYXARA's own answer."}
 
     def available_providers(self):
         return ["native", "qwen", "self"]

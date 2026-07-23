@@ -6,7 +6,7 @@ The Master's order has two halves and this module is the second one.
     **NYXARA herself** judges what they say. The panel advises; the sovereign decides.
 
 Where :mod:`mind.llm` exposes each provider one at a time, the council convenes them
-*together*. For a single question it asks every available member — the local Qwen2.5-0.5B
+*together*. For a single question it asks every available member — the local TinyLlama-1.1B
 base (``qwen``, in-process) and most importantly NYXARA's OWN model forged by the
 foundry (``self``) — then aggregates their verdicts into one answer that NYXARA owns.
 

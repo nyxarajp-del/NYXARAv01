@@ -1,4 +1,4 @@
-"""Tests for the Qwen2.5-0.5B backend — NYXARA's sole real LLM (local, in-process).
+"""Tests for the TinyLlama-1.1B backend — NYXARA's sole real LLM (local, in-process).
 
 No heavy deps needed: generation-control plumbing is tested against a fake tokenizer/model
 injected through ``_ensure_model``, so every knob (sampling policy, top_k, repetition
@@ -43,7 +43,7 @@ def test_config_routes_model_and_no_keys():
     s = _settings()
     s.llm.provider = LLMProvider.QWEN
     assert s.llm.active_model() == s.llm.qwen_model
-    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert s.llm.qwen_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     assert s.llm.active_key() is None
 
 
@@ -349,9 +349,9 @@ def test_env_overrides_foundry_knobs(monkeypatch):
 
 def test_foundry_default_base_and_targets():
     s = NyxaraSettings()
-    # default base is her single small base: Qwen2.5-0.5B-Instruct
-    assert s.foundry.base_model == "Qwen/Qwen2.5-0.5B-Instruct"
-    # Qwen2.5 uses llama-style projection names — the default pins the full attention + MLP set
+    # default base is her single small base: TinyLlama-1.1B-Chat-v1.0
+    assert s.foundry.base_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # TinyLlama (Llama arch) uses the llama-style projection names — the default pins the full attention + MLP set
     assert s.foundry.lora_target_modules == [
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 

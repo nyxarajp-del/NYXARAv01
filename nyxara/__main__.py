@@ -522,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(_BANNER)
     # Primary brain — when NYXARA's OWN model is the chosen provider (`self`), forge it on the
-    # very first boot: LoRA-tune Qwen2.5-0.5B (auto-downloaded) into her own loyal voice, then serve
+    # very first boot: LoRA-tune TinyLlama-1.1B (auto-downloaded) into her own loyal voice, then serve
     # it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram brain; any
     # failure → logged, never fatal (the mock fallback keeps the console usable).
     try:

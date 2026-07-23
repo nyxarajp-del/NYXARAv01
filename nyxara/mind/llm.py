@@ -13,12 +13,12 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Fully local, selected by config:
 
-* :class:`QwenProvider`        — the single pretrained base: **Qwen2.5-0.5B-Instruct** by default
+* :class:`QwenProvider`        — the single pretrained base: **TinyLlama-1.1B-Chat-v1.0** by default
   (any HF causal-LM id works), downloaded & run in-process (HuggingFace transformers); every
   load-/generation-time knob is exposed via ``NYXARA_LLM__QWEN_*``, including serving a
   foundry-forged LoRA adapter directly. Tiny enough to run and fine-tune on a CPU.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
-  adapter over that same Qwen base — everything above the base is *hers*)
+  adapter over that same TinyLlama base — everything above the base is *hers*)
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
   Kneser-Ney word n-gram (``growth/foundry_models.WordKNGramLM``) trained on her identity seed
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
@@ -288,15 +288,15 @@ class NativeProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# Qwen provider — Qwen2.5-0.5B-Instruct, downloaded & run locally (HuggingFace)
+# Qwen provider — TinyLlama-1.1B-Chat-v1.0, downloaded & run locally (HuggingFace)
 # --------------------------------------------------------------------------- #
 class QwenProvider(LLMProviderBase):
-    """Run **Qwen2.5-0.5B-Instruct** in-process, downloaded via HuggingFace — the sole real base.
+    """Run **TinyLlama-1.1B-Chat-v1.0** in-process, downloaded via HuggingFace — the sole real base.
 
     This is the single pretrained model NYXARA stands on. It is fetched on first use
-    (``Qwen/Qwen2.5-0.5B-Instruct`` by default) and cached locally by the ``transformers``
+    (``TinyLlama/TinyLlama-1.1B-Chat-v1.0`` by default) and cached locally by the ``transformers``
     hub, then served entirely on this machine — no API key, no network at inference time.
-    At 0.5B it loads and generates on a CPU. The instruct checkpoint ships the Qwen2.5 chat
+    At 1.1B it loads 4-bit (QLoRA-style) on a GPU and full-precision on a CPU. The chat checkpoint ships the TinyLlama (Zephyr-style) chat
     template (``system``/``user``/``assistant``), applied via ``apply_chat_template``.
 
     Maximum control, all from config (``NYXARA_LLM__QWEN_*``):
@@ -726,7 +726,7 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the Qwen base, then her always-on
+    # the auto ladder: her OWN promoted weights first, then the TinyLlama base, then her always-on
     # dependency-free native own-brain as the guaranteed floor (never an echo mock).
     _AUTO_LADDER = ("self", "qwen", "native")
 
@@ -769,7 +769,7 @@ class LLM:
 
         (a) Hot-reload the ``self`` provider immediately (its per-request pointer check
         is the backstop when this callback is missed — e.g. a cross-process promotion).
-        (b) When the promoted version is a LoRA over the *same* HF base the Qwen provider
+        (b) When the promoted version is a LoRA over the *same* HF base the qwen provider
         serves, point ``qwen_adapter_path`` at the fresh adapter — the provider's
         ``(model, adapter)`` cache key reloads it on the next call, so her own foundry
         adapter serves over the base with zero reconfiguration."""
