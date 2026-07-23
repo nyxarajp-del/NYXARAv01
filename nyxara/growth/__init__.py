@@ -110,6 +110,14 @@ from nyxara.growth.immunology import Finding, ImmuneReport, Immunologist, fuzz_c
 from nyxara.growth.substrate_tune import SubstrateProfile, SubstrateTuner, probe_substrate
 from nyxara.growth.superoptimize import SuperOptimizer, SuperOptResult
 from nyxara.growth.arch_rewrite import ArchRewriter, DependencyGraph
+from nyxara.growth.reasoning_organs import (
+    ForkChoice,
+    MetacognitiveMonitor,
+    MetacognitiveSignal,
+    backward_next_action,
+    fork_and_collapse,
+    invent_axiom_if_stuck,
+)
 from nyxara.growth.ontogenesis import (
     AxiomResult,
     AxiomStatus,
@@ -519,6 +527,12 @@ __all__ = [
     "SuperOptResult",
     "ArchRewriter",
     "DependencyGraph",
+    "fork_and_collapse",
+    "ForkChoice",
+    "MetacognitiveMonitor",
+    "MetacognitiveSignal",
+    "invent_axiom_if_stuck",
+    "backward_next_action",
     "HealOutcome",
     "pack_bundle",
     "unpack_bundle",
