@@ -27,6 +27,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
   poses the question, runs the experiment, and invents the governing law (zero-to-discovery, no LLM).
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
+* ``POST /v1/prove``            — vectorized reasoning, disposed by the exact prover:
+  ``{statement, kind?, candidate_answer?}`` → PROVEN/REFUTED/ABSTAIN + certificate (no LLM).
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
@@ -164,6 +166,12 @@ class StrategizeRequest(BaseModel):
 
 class SolveRequest(BaseModel):
     problem: str = Field(..., min_length=1)
+
+
+class VsaProveRequest(BaseModel):
+    statement: str = Field(..., min_length=1)
+    kind: Optional[str] = None
+    candidate_answer: Optional[str] = None
 
 
 class ControlRequest(BaseModel):
@@ -555,6 +563,13 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/solve", dependencies=auth)
     def solve(req: SolveRequest) -> dict:
         return core.solve(req.problem)
+
+    @app.post("/v1/prove", dependencies=auth)
+    def prove(req: VsaProveRequest) -> dict:
+        # Vectorized reasoning disposed by the exact prover: a machine-checkable certificate
+        # (PROVEN/REFUTED) or an honest ABSTAIN — never token-guessing, no LLM.
+        return core.vsa_prove(req.statement, kind=req.kind,
+                              candidate_answer=req.candidate_answer)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)

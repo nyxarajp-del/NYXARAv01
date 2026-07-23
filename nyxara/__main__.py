@@ -287,6 +287,13 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "intuit":
         # /intuit 1, 4, 9, 16, 25   -> a non-algorithmic creative leap (no LLM), then self-verify
         print(json.dumps(core.intuit(arg), indent=2, default=str))
+    elif cmd in ("prove", "vsa", "vsa-prove"):
+        # /prove 2 + 2 = 4          -> vectorized reasoning, disposed by the exact prover (no LLM):
+        #                              a machine-checkable certificate (PROVEN/REFUTED) or honest ABSTAIN
+        if not arg.strip():
+            print("usage: /prove <decidable claim>   e.g. /prove 2+2=4   |   /prove p and not p")
+        else:
+            print(json.dumps(core.vsa_prove(arg.strip()), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

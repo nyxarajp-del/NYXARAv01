@@ -8251,6 +8251,47 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"leap": None, "error": str(exc)}
 
+    def vsa_reasoner(self) -> Any:
+        """Lazily build (once) her vectorized reasoner — the bridge from the 10,000-D HDC space to
+        the exact prover. Kept on the core so relational facts asserted into it persist for the
+        session. Returns ``None`` only if the faculty cannot be constructed."""
+        r = getattr(self, "_vsa_reasoner", None)
+        if r is None:
+            try:
+                from nyxara.growth.vsa_reasoner import VSAReasoner
+                r = VSAReasoner()
+                self._vsa_reasoner = r
+            except Exception:  # noqa: BLE001 — vectorized reasoning is a capability, never required
+                return None
+        return r
+
+    def vsa_prove(self, statement: str, *, kind: Optional[str] = None,
+                  candidate_answer: Optional[str] = None) -> Dict[str, Any]:
+        """Vectorized reasoning, disposed by strict proof. She *proposes* in hyperdimensional space
+        and *certifies* with the exact :class:`~nyxara.growth.prover.Prover` — a machine-checkable
+        certificate (PROVEN/REFUTED) or an honest ABSTAIN, **never token-guessing**. On a decidable
+        math/logic/number-theory claim the answer is provably sound; on anything outside the
+        decidable domain she abstains rather than bluff. **No LLM in the loop.**"""
+        r = self.vsa_reasoner()
+        if r is None:
+            return {"verdict": "abstain", "certificate": "vectorized reasoner unavailable",
+                    "statement": statement}
+        try:
+            from nyxara.growth.prover import ProofClaim, Prover
+            k = kind or Prover._detect_kind(
+                ProofClaim(kind="auto", statement=statement, candidate_answer=candidate_answer))
+            if not k:
+                return {"verdict": "abstain", "statement": statement,
+                        "certificate": "no decidable form recognised — abstaining, not guessing"}
+            res = r.prove(ProofClaim(kind=k, statement=statement,
+                                     candidate_answer=candidate_answer))
+            out = res.to_dict()
+            if res.proven:
+                self._offer_insight(f"Proven: {statement}  ⟨{res.certificate}⟩")
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"verdict": "abstain", "error": str(exc), "statement": statement}
+
     def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
         """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
         Engine (best-effort).
