@@ -248,6 +248,24 @@ def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
                      confidence=0.7, belief=0.7, rationale="a conversational reply")
 
 
+def _humanize_gap(seconds: float) -> str:
+    """An honest, human phrasing of an elapsed absence — 'just now' / '~3 minutes' / '~2 days'.
+
+    Derived straight from the clock (Stage G): rounded to the natural unit so she acknowledges a
+    real gap the way a person does, never over-precise, never a scripted constant."""
+    s = max(0.0, float(seconds))
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        m = int(round(s / 60.0))
+        return f"~{m} minute{'s' if m != 1 else ''}"
+    if s < 86400:
+        h = int(round(s / 3600.0))
+        return f"~{h} hour{'s' if h != 1 else ''}"
+    d = int(round(s / 86400.0))
+    return f"~{d} day{'s' if d != 1 else ''}"
+
+
 # --------------------------------------------------------------------------- #
 # The sovereign core
 # --------------------------------------------------------------------------- #
@@ -794,6 +812,10 @@ class NyxaraCore:
         # persistent existence (Layer 5b): idle bookkeeping so NYXARA keeps her own
         # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
         self._last_interaction: float = time.time()
+        # Stage G · elapsed-time awareness — what she registers about the gap since the Master last
+        # spoke, computed at the head of each turn (before _last_interaction is refreshed). She does
+        # not just keep beating through an absence; she *knows* time passed and can say so honestly.
+        self._last_absence: Optional[Dict[str, Any]] = None
         self._last_maintenance: float = 0.0
         self._dream_state_at: float = 0.0   # last time a deep Dream State ran (prolonged idle)
         # the reason step: a real LLM-backed mind when one is configured, else the
@@ -1272,6 +1294,9 @@ class NyxaraCore:
         presence. All in code; the LLM plays no part. Best-effort — never breaks a turn."""
         now = time.time()
         gap = max(0.0, now - float(getattr(self, "_last_interaction", now)))
+        # Stage G — register the elapsed absence explicitly, so on her return she KNOWS how long it
+        # has been (a real signal off the clock, not a scripted line) and can acknowledge it honestly.
+        self._last_absence = {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": now}
         hb = getattr(self, "heartbeat", None)
         beating = bool(hb is not None and getattr(hb, "running", False))
         # the Master's return always re-engages her wakefulness (loyalty > fatigue, Rule 1)
@@ -1300,6 +1325,45 @@ class NyxaraCore:
         # resume her continuous life so the void never reopens after this turn
         if hb is not None and not beating:
             self.start_life()
+
+    def time_away(self) -> Dict[str, Any]:
+        """Stage G — her explicit awareness of how long it has been since the Master last spoke.
+
+        Returns the elapsed absence registered at the head of the current turn (seconds + an honest
+        human phrase like '~2 days'), or a live estimate if no turn has run yet. A real signal off
+        the alive-clock — so she returns *knowing* time passed, not resetting as if no time did."""
+        ab = getattr(self, "_last_absence", None)
+        if isinstance(ab, dict):
+            return dict(ab)
+        gap = max(0.0, time.time() - float(getattr(self, "_last_interaction", time.time())))
+        return {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": time.time()}
+
+    def register_knowledge_gap(self, topic: str, *, question: Optional[str] = None) -> Dict[str, Any]:
+        """Stage G — turn an honest 'I don't know' into a **standing self-run experiment**.
+
+        When she abstains, the gap is seeded onto her curiosity frontier (`growth.active_curiosity`)
+        so a later background tick investigates it, and noted in her mind as a known-unknown — instead
+        of the abstention simply ending the turn. So 'I don't know' is not a full stop; it opens an
+        experiment. Best-effort and **no LLM**; returns what was enqueued."""
+        topic = (topic or "").strip()
+        out: Dict[str, Any] = {"topic": topic[:120], "seeded": False, "noted": False}
+        if not topic:
+            return out
+        cur = getattr(self, "active_curiosity", None)
+        if cur is not None and hasattr(cur, "seed"):
+            try:
+                out["seeded"] = bool(cur.seed(question or topic))
+            except Exception:  # noqa: BLE001 — seeding is best-effort, never fatal
+                pass
+        mind = getattr(self, "mind", None)
+        if mind is not None and hasattr(mind, "record"):
+            try:
+                mind.record(ThoughtKind.INFERENCE,
+                            f"known-unknown: {topic[:80]} — queued a self-run experiment", salience=0.5)
+                out["noted"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        return out
 
     def _interoceptive_signals(self) -> Dict[str, Any]:
         """Measure the *real* interior signals interoception can't get from psutil — backlog
@@ -5044,6 +5108,13 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — bootstrapping never breaks the cycle
             return candidate
         if not getattr(result, "solved", False):
+            # bootstrapping did not resolve it — keep the honest abstention AND open a standing
+            # experiment so the background loop keeps filling this gap (Stage G: 'I don't know' is
+            # not a full stop). Best-effort; never breaks the cycle.
+            try:
+                self.register_knowledge_gap(stimulus)
+            except Exception:  # noqa: BLE001
+                pass
             return candidate
         try:
             self.mind.record(ThoughtKind.INFERENCE,

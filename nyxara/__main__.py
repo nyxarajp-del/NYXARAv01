@@ -304,6 +304,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd in ("hypothesize", "edge-cases", "hunt"):
         # /hypothesize              -> Monte-Carlo concurrent-fault edge-case discovery (simulated, no LLM)
         print(json.dumps(core.hunt_edge_cases(), indent=2, default=str))
+    elif cmd in ("time-away", "away", "elapsed"):
+        # /time-away                -> her honest awareness of how long since the Master last spoke
+        print(json.dumps(core.time_away(), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)
