@@ -1731,6 +1731,142 @@ class CognitiveArchitectConfig(BaseModel):
     persist_filename: str = "cognitive_architecture.json"
 
 
+class SelfEvolvingConfig(BaseModel):
+    """Self-Evolving Dynamic Neural Architecture — the unified demand-driven driver
+    (growth/self_evolving.py), Rule 4.
+
+    When a *specific* turn falls short of NYXARA's current logic she does not merely fail: she
+    diagnoses the *kind* of gap and fires the single best structural lever to grow a new neural
+    module / pathway for it — grow topology (capacity), forge a new architecture (representation),
+    invent a new learning rule (a stalled learner), or invent a new reasoning operator (composition)
+    — then verifies it through the **same Foundry gauntlet** every model must pass and, when
+    enacting, wires it live. It composes the existing organs; it re-implements no search, training,
+    promotion, or safety, and it bypasses no gate.
+
+    ``autonomous_enact`` (sealed OFF under TEST) makes her promote a new pathway live *herself*
+    (full-autonomous, the Master's choice); the live oversight gate is still an absolute override — a
+    paused / scrammed NYXARA designs + measures but never promotes. LLM-free throughout."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # diagnose + drain — safe, on by default
+    autonomous_enact: bool = True                          # promote a new pathway LIVE herself (gauntlet + oversight still apply)
+    scan_every: int = Field(default=10, ge=1)              # idle ticks between queue drains
+    max_events_per_drain: int = Field(default=1, ge=1, le=8)
+    shortfall_confidence_floor: float = Field(default=0.45, ge=0.0, le=1.0)
+    min_actions: int = Field(default=8, ge=1)              # lived-evidence floor before capacity-growth fires
+    queue_max: int = Field(default=64, ge=1, le=1024)
+    candidates: int = Field(default=6, ge=1, le=32)        # rewire search breadth for the cognitive lever
+    topology_cooldown: float = Field(default=300.0, ge=0.0)
+    brain_forge_cooldown: float = Field(default=1800.0, ge=0.0)
+    rule_synth_cooldown: float = Field(default=600.0, ge=0.0)
+    cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
+    # opt-in: let the intelligence.py Thompson planner route its coarse growth directives to the
+    # structural levers here (deepen_reasoning→operator, train_self_model→brain, weaknesses→capacity).
+    route_intelligence_planner: bool = False
+
+
+class EpistemicCryptoConfig(BaseModel):
+    """Quantum-Resistant Epistemic Cryptography (growth/epistemic_crypto.py) — signed knowledge.
+
+    Every learned fact/axiom/skill is HMAC-SHA256 signed and chained (a tamper-evident hash chain);
+    altering any past fact breaks every signature after it. A context-safe share/execute policy (the
+    'digital immune system') decides — only if the signature still verifies — whether a fact may leave
+    her mind or run, by its sensitivity (public/internal/secret/executable) and the calling context.
+    Symmetric primitives (HMAC-SHA256) are not broken by Shor's algorithm. No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+
+
+class InternalCivilizationConfig(BaseModel):
+    """Multi-Agent Societal Mimicry (mind/internal_civilization.py) — deterministic persona debate.
+
+    On a big architectural / ethical decision, an internal society of deterministic sub-personas
+    (Scientist, Engineer, Strategist, Critic, Security Officer, Philosopher) debates over the
+    decision's own dimensions through several rounds of cross-examination, then NYXARA synthesises a
+    consensus she owns — with residual conflict reported honestly and an absolute safety/ethics veto
+    that is never out-voted. No LLM (the Master's 'khud kare, LLM na kare')."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    rounds: int = Field(default=2, ge=1, le=16)          # debate/cross-examination rounds
+    ensemble: int = Field(default=1, ge=1, le=64)        # voices per archetype ('hundreds of voices')
+    seed: int = 0
+
+
+class MetaEpistemologyConfig(BaseModel):
+    """Autonomous Synthetic Mathematics (growth/meta_epistemology.py) — invent new axioms.
+
+    When a goal is unprovable in her current axioms she invents a new one, admitting it only if it is
+    consistent (proves no falsehood), non-trivial (the goal was unprovable before and provable after),
+    and generative (also proves an independent held-out goal). A real congruence-closure decision
+    procedure — 'provable' means actually derivable. Admitted axioms persist so her mathematics
+    compounds. No LLM. Honest, bounded automated theory extension over a small algebra."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    persist: bool = True
+    persist_filename: str = "invented_axioms.json"
+
+
+class SynesthesiaConfig(BaseModel):
+    """Cross-Domain Biomimetic Synesthesia (mind/synesthesia.py) — universal pattern transposition.
+
+    A pattern's scale-invariant *shape* (trend/curvature/oscillation/exp-power linearity) is lifted
+    into the shared HDC space, so patterns from different domains that share shape land near each
+    other. A known law is **transposed** across domains only when it **verifiably fits** the target
+    (R² past a threshold); otherwise she abstains. No LLM; pure numeric maths."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)
+    adopt_r2: float = Field(default=0.9, ge=0.0, le=1.0)          # fit needed to ADOPT a transposed law
+    min_similarity: float = Field(default=0.15, ge=0.0, le=1.0)   # cross-domain shape-match floor
+    seed: int = 7
+
+
+class HolographicMemoryConfig(BaseModel):
+    """Holographic Memory Field (memory/holographic_field.py) — a continuous, entangled recall layer.
+
+    Every memory is stored as a key⊗value binding **bundled into one continuous hypervector field**;
+    recall is a single unbind + cleanup — associative, near-constant work over the whole field, not a
+    per-chunk scan. Memories share the one field, so they are genuinely entangled. Honest about
+    physics: a bundle saturates, so it holds a bounded working horizon at a given width with
+    graceful forgetting past capacity (spilling to the ordinary store). No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)      # HDC width (near-orthogonality ↑ with dim)
+    capacity: int = Field(default=512, ge=8, le=32768)     # working horizon before graceful fade/spill
+    recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    seed: int = 42
+
+
+class SuperpositionConfig(BaseModel):
+    """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
+
+    On a complex turn NYXARA does not commit to one line of thought: she holds several candidate
+    solution paths in a real Born-rule **superposition** at once, scores each by its *simulated future
+    outcome* (a world-model / simulation rollout + a grounded-verification check + calibrated
+    confidence), and **collapses** to the single optimal path — but only when one dominates past a
+    threshold. Below it she stays superposed (``decided=False``) and abstains / deepens rather than
+    bluffing. LLM-free at the scoring/collapse layer; advisory (the kernel still disposes)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # advisory superposition arbitration on complex turns
+    collapse_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    max_paths: int = Field(default=12, ge=2, le=64)        # candidate paths held in superposition
+    rollout_depth: int = Field(default=2, ge=0, le=8)      # world-model / sim rollout depth for outcome scoring
+    min_paths_to_engage: int = Field(default=2, ge=2)      # never fire on a single candidate (nothing to superpose)
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2792,6 +2928,14 @@ class NyxaraSettings(BaseSettings):
     godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
     cognitive_architect: CognitiveArchitectConfig = Field(
         default_factory=CognitiveArchitectConfig)
+    self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
+    superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
+    holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
+    synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
+    meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
+    internal_civilization: InternalCivilizationConfig = Field(
+        default_factory=InternalCivilizationConfig)
+    epistemic_crypto: EpistemicCryptoConfig = Field(default_factory=EpistemicCryptoConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2906,6 +3050,7 @@ class NyxaraSettings(BaseSettings):
             # reasoner in the hermetic suite — keep enact + persistence OFF (a test that wants either
             # builds its own CognitiveArchitect/settings; see tests/growth/test_cognitive_architect.py).
             self.cognitive_architect.autonomous_enact = False
+            self.self_evolving.autonomous_enact = False
             self.cognitive_architect.persist = False
             # Method D's frontier gate spawns extra `nyxara.eval --frontier` subprocesses per edit
             # cycle — keep it OFF under TEST so the self-optimise suite stays hermetic, deterministic

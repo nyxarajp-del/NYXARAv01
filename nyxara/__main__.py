@@ -122,6 +122,8 @@ commands:
   /upgrade-device [name] re-optimize an existing device, keep it only if measurably better (compounding power)
   /engineering-report  devices designed, upgrades applied, impossible "magic" targets honestly logged
   /rewire-mind [n]   rewire her OWN cognitive architecture: invent new composite reasoning operators (trans-logic), keep only what strictly beats a held-out fold (no LLM); n: generations
+  /evolve            self-evolving neural architecture: when her current logic falls short, she grows a NEW neural module/pathway for it (topology/architecture/learning-rule/reasoning-operator), gauntlet-verified, wired live (no LLM); /evolve report for status
+  /superpose [q]     quantum-probabilistic superposition reasoning: hold many candidate solution paths at once (Born-rule amplitudes) and collapse to the one with the best SIMULATED FUTURE OUTCOME, or stay superposed and abstain (no LLM)
   /cognitive-architecture  her thinking as data: operators, how many she invented, accuracy/fitness, resilience, meta-policy, intelligence index
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
@@ -321,6 +323,30 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.rewire_cognition(generations=gens), indent=2, default=str))
     elif cmd in ("cognitive-architecture", "cognitive", "mind-architecture"):
         print(json.dumps(core.cognitive_architecture_report(), indent=2, default=str))
+    elif cmd in ("sign", "sign-knowledge"):
+        # /sign <text>  -> HMAC-sign + chain a fact (tamper-evident epistemic ledger)
+        print(json.dumps(core.sign_knowledge(arg.strip() or "a fact"), indent=2, default=str))
+    elif cmd in ("holo", "holo-recall", "holographic"):
+        # /holo <cue>   -> associative content recall from the holographic memory field
+        print(json.dumps(core.holographic_recall(arg.strip() or ""), indent=2, default=str))
+    elif cmd in ("holo-learn", "holo-remember"):
+        # /holo-learn key | text  -> fold key→text into the holographic field
+        k, _, t = arg.partition("|")
+        print(json.dumps(core.holographic_remember(k.strip() or "note", t.strip() or arg.strip()),
+                         indent=2, default=str))
+    elif cmd in ("superpose", "superposition", "quantum"):
+        # /superpose <question>  -> reason over many candidate paths in a Born-rule superposition
+        #                           and collapse to the best by simulated future outcome
+        print(json.dumps(core.superposition_reason(arg.strip() or "what should I do next?"),
+                         indent=2, default=str))
+    elif cmd in ("evolve", "self-evolve", "self_evolve"):
+        # /evolve         -> grow a new neural module/pathway for a problem her current logic can't
+        #                    handle (diagnose gap → best structural lever → gauntlet → wire live)
+        # /evolve report  -> a summary of every self-evolution attempt
+        if arg.strip() in ("report", "status"):
+            print(json.dumps(core.self_evolution_report(), indent=2, default=str))
+        else:
+            print(json.dumps(core.evolve(), indent=2, default=str))
     elif cmd in ("generalize", "openworld", "open-world"):
         try:
             budget = int(arg) if arg else 48
