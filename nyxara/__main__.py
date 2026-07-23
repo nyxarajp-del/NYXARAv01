@@ -298,6 +298,9 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         # /causal-repair [tests/path]  -> causal-tree root-cause of a failing test → gated reversible fix
         tp = arg.strip() or None
         print(json.dumps(core.causal_repair(test_path=tp), indent=2, default=str))
+    elif cmd in ("teleology", "self-direct", "self_direct"):
+        # /teleology                -> invent her own measurable, envelope-gated self-improvement targets
+        print(json.dumps(core.self_direct(), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)

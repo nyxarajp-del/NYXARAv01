@@ -8292,6 +8292,24 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"verdict": "abstain", "error": str(exc), "statement": statement}
 
+    def self_direct(self, *, crisis: bool = False, launch: bool = False) -> Dict[str, Any]:
+        """Recursive Self-Directed Teleology: when no crisis is pending, invent her own **measurable**
+        self-improvement objectives (efficiency / capability / coverage), each **hard-filtered through
+        the owner-alignment envelope** (`planning.goals.GoalSystem.owner_alignment`) so a target that
+        does not serve performance, safety, or the Master is rejected before adoption. Adopted targets
+        become ordinary gated goals (and, with ``launch``, gated missions). Bounded self-direction,
+        never rogue goal expansion; **no LLM** decides a goal. Returns the proposal/adoption report."""
+        try:
+            from nyxara.growth.teleology import TeleologyEngine
+            eng = getattr(self, "_teleology", None)
+            if eng is None:
+                eng = TeleologyEngine(core=self,
+                                      mission_executive=getattr(self, "mission_executive", None))
+                self._teleology = eng
+            return eng.self_direct(crisis=crisis, launch=launch).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"proposed": [], "adopted": [], "rejected": [], "error": str(exc)}
+
     def causal_repair(self, *, test_path: Optional[str] = None,
                       max_fixes: int = 3) -> Dict[str, Any]:
         """The Causal Code Engine: when a test fails, analyse the **causal tree** of the fault from

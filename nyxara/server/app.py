@@ -31,6 +31,8 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
   ``{statement, kind?, candidate_answer?}`` → PROVEN/REFUTED/ABSTAIN + certificate (no LLM).
 * ``POST /v1/causal-repair``    — Causal Code Engine: ``{test_path?, max_fixes?}`` → causal-tree
   root-cause of a failing test, then gated reversible repair of the causal root module.
+* ``POST /v1/teleology``        — Recursive Self-Directed Teleology: ``{launch?}`` → invent her own
+  measurable self-improvement targets, envelope-gated (out-of-envelope rejected). No LLM.
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
@@ -179,6 +181,10 @@ class VsaProveRequest(BaseModel):
 class CausalRepairRequest(BaseModel):
     test_path: Optional[str] = None
     max_fixes: int = Field(default=3, ge=0, le=20)
+
+
+class TeleologyRequest(BaseModel):
+    launch: bool = False
 
 
 class ControlRequest(BaseModel):
@@ -582,6 +588,12 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     def causal_repair(req: CausalRepairRequest = CausalRepairRequest()) -> dict:
         # Causal-tree root-cause of a failing test → gated, reversible repair of the causal root.
         return core.causal_repair(test_path=req.test_path, max_fixes=req.max_fixes)
+
+    @app.post("/v1/teleology", dependencies=auth)
+    def teleology(req: TeleologyRequest = TeleologyRequest()) -> dict:
+        # Invent her own measurable self-improvement targets — hard-filtered through the owner
+        # alignment envelope (out-of-envelope targets rejected before adoption). No LLM.
+        return core.self_direct(launch=req.launch)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)

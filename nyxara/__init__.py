@@ -65,6 +65,11 @@ from nyxara.growth.causal_code_engine import (
     CausalDiagnosis,
     CausalNode,
 )
+from nyxara.growth.teleology import (
+    TeleologicalTarget,
+    TeleologyEngine,
+    TeleologyReport,
+)
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.growth.self_optimization import (
     PhaseResult,
@@ -248,6 +253,10 @@ __all__ = [
     "CausalCodeEngine",
     "CausalDiagnosis",
     "CausalNode",
+    # Recursive Self-Directed Teleology — invent her own measurable, envelope-gated self-targets
+    "TeleologyEngine",
+    "TeleologicalTarget",
+    "TeleologyReport",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",

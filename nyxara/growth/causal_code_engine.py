@@ -84,8 +84,12 @@ class CausalCodeEngine:
         self.core = core
         self.debugger = debugger or SelfDebugger.from_core(core, root=root)
         self.root = self.debugger.root
-        # a shared, possibly-persisted causal model when the core has one; else a private one
-        self.causal = causal_model or getattr(core, "causal_world_model", None)
+        # a shared, possibly-persisted causal model when the core has one; else a private one.
+        # (explicit None checks — a causal model may define __len__/__bool__ and read as falsy empty)
+        if causal_model is not None:
+            self.causal = causal_model
+        else:
+            self.causal = getattr(core, "causal_world_model", None)
         if self.causal is None:
             try:
                 from nyxara.mind.causal_world_model import CausalWorldModel

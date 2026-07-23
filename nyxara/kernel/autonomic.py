@@ -59,6 +59,7 @@ class AutonomicLoop:
     decision_mode: str = "reasoner"
     growth_every: int = 0                 # run a learning pass every N ticks (0 = never)
     growth_engine: Any = None
+    teleology_every: int = 0              # invent her own measurable self-targets every N calm ticks (0 = off)
     inner_life: bool = False              # draw prompts from her own mind, not a fixed list
     stream: Any = None                    # DefaultModeStream (auto-wired from core if inner_life)
     prospective: Any = None               # ProspectiveMemory — standing intentions that come due
@@ -428,6 +429,26 @@ class AutonomicLoop:
         self.intentions_fired += n
         return n
 
+    def _maybe_self_direct(self, summary: dict) -> None:
+        """Opt-in periodic teleology: invent envelope-gated self-targets on a calm tick. No-op unless
+        ``teleology_every`` is set. Crisis (a pre-emptive tick) defers self-direction by design."""
+        if not self.teleology_every or (self.ticks % self.teleology_every != 0):
+            return
+        fn = getattr(self.core, "self_direct", None)
+        if not callable(fn):
+            return
+        try:
+            rep = fn(crisis=bool(self._preempt_now))
+            adopted = len(rep.get("adopted", [])) if isinstance(rep, dict) else 0
+            if adopted:
+                summary["self_targets"] = adopted
+                # keep the objective space bounded even under a long-running daemon
+                goals = getattr(self.core, "goals", None)
+                if goals is not None and hasattr(goals, "dedupe"):
+                    goals.dedupe()
+        except Exception:  # noqa: BLE001 — self-direction is best-effort, never fatal
+            self._note_error("teleology")
+
     def _guaranteed_self_work(self) -> Optional[str]:
         """When a tick would otherwise do nothing, make her own work — in code, LLM-free.
 
@@ -496,6 +517,10 @@ class AutonomicLoop:
         # 1.5) CONTINUOUS ACTIVE INFERENCE — predict her own state, measure surprise + entropy, and
         # flag pre-emption when uncertainty spikes (acted on at step 4.5, through the same gauntlet).
         self._active_inference_step(summary)
+        # 1.6) RECURSIVE SELF-DIRECTED TELEOLOGY (opt-in) — on a *calm* tick (no pre-emption), invent
+        # her own measurable, envelope-gated self-improvement targets. Off by default so the reactive
+        # path is unchanged; the daemon enables it. Crisis (pre-emption) defers it, by construction.
+        self._maybe_self_direct(summary)
         # 2) adopt her own lowest-free-energy goal (owner-aligned by construction; no LLM/human)
         if self.intent is not None:
             try:
