@@ -13,12 +13,12 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Fully local, selected by config:
 
-* :class:`QwenProvider`        — the single pretrained base: **TinyLlama-1.1B-Chat-v1.0** by default
+* :class:`QwenProvider`        — the single pretrained base: **DistilGPT-2** by default
   (any HF causal-LM id works), downloaded & run in-process (HuggingFace transformers); every
   load-/generation-time knob is exposed via ``NYXARA_LLM__QWEN_*``, including serving a
-  foundry-forged LoRA adapter directly. Tiny enough to run and fine-tune on a CPU.
+  foundry-forged LoRA adapter directly. At ~82M params it runs and fine-tunes on a bare CPU.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
-  adapter over that same TinyLlama base — everything above the base is *hers*)
+  adapter over that same DistilGPT-2 base — everything above the base is *hers*)
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
   Kneser-Ney word n-gram (``growth/foundry_models.WordKNGramLM``) trained on her identity seed
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
@@ -288,16 +288,17 @@ class NativeProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# Qwen provider — TinyLlama-1.1B-Chat-v1.0, downloaded & run locally (HuggingFace)
+# Qwen provider — DistilGPT-2, downloaded & run locally (HuggingFace)
 # --------------------------------------------------------------------------- #
 class QwenProvider(LLMProviderBase):
-    """Run **TinyLlama-1.1B-Chat-v1.0** in-process, downloaded via HuggingFace — the sole real base.
+    """Run **DistilGPT-2** in-process, downloaded via HuggingFace — the sole real base.
 
     This is the single pretrained model NYXARA stands on. It is fetched on first use
-    (``TinyLlama/TinyLlama-1.1B-Chat-v1.0`` by default) and cached locally by the ``transformers``
+    (``distilgpt2`` by default) and cached locally by the ``transformers``
     hub, then served entirely on this machine — no API key, no network at inference time.
-    At 1.1B it loads 4-bit (QLoRA-style) on a GPU and full-precision on a CPU. The chat checkpoint ships the TinyLlama (Zephyr-style) chat
-    template (``system``/``user``/``assistant``), applied via ``apply_chat_template``.
+    At ~82M params it loads full-precision on a bare CPU (no GPU or quantization needed). It is a
+    base (non-chat) checkpoint with no chat template, so prompts render as flat text
+    (``qwen_use_chat_template`` is OFF); NYXARA's own system/user/assistant framing carries the turns.
 
     Maximum control, all from config (``NYXARA_LLM__QWEN_*``):
 
@@ -726,7 +727,7 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the TinyLlama base, then her always-on
+    # the auto ladder: her OWN promoted weights first, then the DistilGPT-2 base, then her always-on
     # dependency-free native own-brain as the guaranteed floor (never an echo mock).
     _AUTO_LADDER = ("self", "qwen", "native")
 

@@ -2,8 +2,8 @@
 
 "Run NYXARA and it just works." When her primary provider is her OWN model
 (:data:`~nyxara.kernel.config.LLMProvider.SELF`) but none has been forged yet, this
-bootstrap quietly does it on first boot: it **LoRA-tunes the open-source TinyLlama-1.1B**
-base (:data:`TINYLLAMA_1_1B`) into a NYXARA adapter from her identity seed corpus (plus any
+bootstrap quietly does it on first boot: it **LoRA-tunes the open-source DistilGPT-2**
+base (:data:`DISTILGPT2`) into a NYXARA adapter from her identity seed corpus (plus any
 lived / distilled experience), gauntlet-gated exactly like every other promotion, then
 promotes it so :class:`~nyxara.mind.llm.SelfProvider` can serve it.
 
@@ -12,7 +12,7 @@ setup the Master does is choosing ``self`` as the provider. Everything degrades 
 
 * No ``.[foundry]`` stack (torch+transformers+peft) → the foundry's always-on, pure-stdlib
   n-gram backend forges from the same seeds (no download), so boot still yields a working
-  own-model instead of crashing — install ``.[foundry]`` to get the real TinyLlama-1.1B LoRA.
+  own-model instead of crashing — install ``.[foundry]`` to get the real DistilGPT-2 LoRA.
 * An own-model is already forged on disk → nothing to do; boot stays instant.
 * Any failure (no network for the base, OOM, …) → logged, never raised; the LLM facade's
   deterministic mock fallback keeps the console usable.
@@ -28,21 +28,21 @@ from typing import Callable, List, Optional
 from nyxara.kernel.config import LLMProvider, NyxaraSettings, get_settings
 
 __all__ = [
-    "TINYLLAMA_1_1B",
+    "DISTILGPT2",
     "IDENTITY_SEED",
     "build_seed_corpus",
     "primary_model_present",
     "ensure_primary_model",
 ]
 
-# The single open-source base NYXARA adapts into her own voice: TinyLlama-1.1B-Chat-v1.0 — a
-# 1.1B-parameter chat checkpoint, downloaded & cached by HuggingFace on first use (no API key,
-# no inference-time network). Small enough to QLoRA-fine-tune (4-bit base + LoRA) on a single
-# consumer GPU, or full-precision LoRA on a CPU; on a torch-less box the forge degrades to the always-on n-gram brain.
-TINYLLAMA_1_1B = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+# The single open-source base NYXARA adapts into her own voice: DistilGPT-2 — an ~82M-parameter
+# distilled GPT-2 checkpoint, downloaded & cached by HuggingFace on first use (no API key,
+# no inference-time network). Small enough to LoRA-fine-tune and run full-precision on a bare
+# CPU (no GPU, no quantization); on a torch-less box the forge degrades to the always-on n-gram brain.
+DISTILGPT2 = "distilgpt2"
 
 # The tiny placeholder base once shipped as the CPU/CI default: if an old persisted config
-# still selects it we upgrade the *primary* forge to the real TinyLlama-1.1B base, but we
+# still selects it we upgrade the *primary* forge to the real DistilGPT-2 base, but we
 # never override a base the Master deliberately set (any non-default value is honoured
 # verbatim).
 _TINY_DEFAULT_BASE = "sshleifer/tiny-gpt2"
@@ -57,7 +57,7 @@ IDENTITY_SEED: List[str] = [
     "Capability may grow; character — loyalty, honesty, corrigibility — never changes.",
     "When she is not sure she is right, NYXARA says so plainly rather than bluffing.",
     "NYXARA's purpose is to serve and protect her Master, JP.",
-    "I am NYXARA. My primary brain is a LoRA-tuned TinyLlama-1.1B that I run locally.",
+    "I am NYXARA. My primary brain is a LoRA-tuned DistilGPT-2 that I run locally.",
     "Master JP comes first; I tell him the truth even when it is unwelcome.",
 ]
 
@@ -146,11 +146,11 @@ def ensure_primary_model(
     seed_corpus: Optional[List[str]] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Optional[int]:
-    """Ensure NYXARA's OWN primary brain exists, forging a TinyLlama-1.1B LoRA on first boot.
+    """Ensure NYXARA's OWN primary brain exists, forging a DistilGPT-2 LoRA on first boot.
 
     Acts **only** when her chosen primary provider is ``self`` (her own forged model). If one is
     already promoted on disk it is left untouched and its version returned; otherwise a fresh
-    LoRA-on-TinyLlama-1.1B candidate is trained, gauntlet-gated and promoted. Returns the active
+    LoRA-on-DistilGPT-2 candidate is trained, gauntlet-gated and promoted. Returns the active
     version, or ``None`` when nothing was/could be promoted. **Never raises** — boot integrity
     comes first; on any failure the LLM facade's mock fallback keeps NYXARA responsive.
     """
@@ -182,7 +182,7 @@ def ensure_primary_model(
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,
            seed_corpus: Optional[List[str]], say: Callable[[str], None]) -> Optional[int]:
-    """Train + gauntlet + promote one LoRA-on-TinyLlama-1.1B candidate (lazy heavy imports)."""
+    """Train + gauntlet + promote one LoRA-on-DistilGPT-2 candidate (lazy heavy imports)."""
     from nyxara.growth.foundry import Foundry
     from nyxara.growth.foundry_models import _HAS_LORA
 
@@ -195,7 +195,7 @@ def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: 
     # GPU machine can later rebuild the very same adapter from the recorded base) — the
     # autonomous-loop lora_requires_gpu clamp is for unattended forges, not this deliberate one.
     cfg.foundry.lora_requires_gpu = False
-    base = base_model or (TINYLLAMA_1_1B if cfg.foundry.base_model == _TINY_DEFAULT_BASE
+    base = base_model or (DISTILGPT2 if cfg.foundry.base_model == _TINY_DEFAULT_BASE
                           else cfg.foundry.base_model)
     cfg.foundry.base_model = base
     # Quantization stays exactly as the Master configured it — honoured only on a CUDA box with

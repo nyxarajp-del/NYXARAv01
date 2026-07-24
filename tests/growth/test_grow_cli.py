@@ -31,31 +31,33 @@ def test_grow_distill_skips_cleanly_without_a_teacher(tmp_path: Path, capsys):
     assert (tmp_path / "foundry" / "active").exists()
 
 
-def test_grow_tinyllama_shortcut_sets_lora_base(tmp_path: Path):
-    # --tinyllama presets the LoRA backend on the TinyLlama-1.1B base; on a deps-free box it
+def test_grow_distilgpt2_shortcut_sets_lora_base(tmp_path: Path):
+    # --distilgpt2 presets the LoRA backend on the DistilGPT-2 base; on a deps-free box it
     # degrades to the n-gram brain but still records the base in the promoted spec.
     import json
 
-    from nyxara.growth.bootstrap import TINYLLAMA_1_1B
+    from nyxara.growth.bootstrap import DISTILGPT2
 
-    code = main(["--tinyllama", "--generations", "1", "--data-dir", str(tmp_path)])
+    code = main(["--distilgpt2", "--generations", "1", "--data-dir", str(tmp_path)])
     assert code == 0
     assert (tmp_path / "foundry" / "active").exists()
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == TINYLLAMA_1_1B
+    assert spec["base_model"] == DISTILGPT2
     assert spec["kind"] == "lora"
 
 
-def test_grow_qwen_alias_still_works(tmp_path: Path):
-    # the old --qwen spelling stays as a deprecated alias for --tinyllama
+def test_grow_deprecated_aliases_still_work(tmp_path: Path):
+    # the old --tinyllama / --qwen spellings stay as deprecated aliases for --distilgpt2
     import json
 
-    from nyxara.growth.bootstrap import TINYLLAMA_1_1B
+    from nyxara.growth.bootstrap import DISTILGPT2
 
-    code = main(["--qwen", "--generations", "1", "--data-dir", str(tmp_path)])
-    assert code == 0
-    spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == TINYLLAMA_1_1B
+    for alias in ("--tinyllama", "--qwen"):
+        d = tmp_path / alias.strip("-")
+        code = main([alias, "--generations", "1", "--data-dir", str(d)])
+        assert code == 0
+        spec = json.loads((d / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
+        assert spec["base_model"] == DISTILGPT2
 
 
 def test_grow_does_not_mutate_global_settings(tmp_path: Path):

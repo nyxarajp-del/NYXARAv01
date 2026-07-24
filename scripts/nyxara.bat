@@ -1,13 +1,13 @@
 @echo off
 REM ===========================================================================
-REM  NYXARA — one-click launcher for Windows (local TinyLlama-1.1B brain, CPU).
+REM  NYXARA — one-click launcher for Windows (local DistilGPT-2 brain, CPU).
 REM
 REM  Double-click this file. The FIRST run sets everything up automatically:
 REM    * ensures Python is installed (via winget if missing),
 REM    * creates a private virtual environment (.venv),
 REM    * installs NYXARA + the local-model dependencies,
-REM    * writes a .env pointing at the local TinyLlama-1.1B brain on CPU,
-REM    * downloads the model weights once (~1 GB) on first launch.
+REM    * writes a .env pointing at the local DistilGPT-2 brain on CPU,
+REM    * downloads the model weights once (~350 MB) on first launch.
 REM  EVERY run after that just starts NYXARA instantly — no re-download.
 REM
 REM  Nothing here is destructive: it only creates .venv/.env if they are
@@ -44,7 +44,7 @@ if not exist ".venv\Scripts\python.exe" (
     call ".venv\Scripts\activate.bat"
     python -m pip install --upgrade pip
     echo [setup] Installing NYXARA + local-model dependencies (torch is large)...
-    pip install -e ".[tinyllama,reasoning]"
+    pip install -e ".[distilgpt2,reasoning]"
     if errorlevel 1 (
         echo [error] Dependency install failed. Check your internet connection.
         pause
@@ -54,12 +54,12 @@ if not exist ".venv\Scripts\python.exe" (
     call ".venv\Scripts\activate.bat"
 )
 
-REM --- 3. Write .env for the local TinyLlama-1.1B brain (only if missing) -----
+REM --- 3. Write .env for the local DistilGPT-2 brain (only if missing) -----
 if not exist ".env" (
-    echo [setup] Writing .env for the local TinyLlama-1.1B brain (CPU)...
+    echo [setup] Writing .env for the local DistilGPT-2 brain (CPU)...
     >  ".env" echo NYXARA_PROFILE=dev
     >> ".env" echo NYXARA_LLM__PROVIDER=qwen
-    >> ".env" echo NYXARA_LLM__QWEN_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0
+    >> ".env" echo NYXARA_LLM__QWEN_MODEL=distilgpt2
     >> ".env" echo NYXARA_LLM__QWEN_DEVICE=cpu
         >> ".env" echo NYXARA_FEATURES__MULTI_LLM_COUNCIL=false
     >> ".env" echo NYXARA_COUNCIL__ENABLED=false

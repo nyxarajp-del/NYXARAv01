@@ -90,7 +90,7 @@ applied to the documentation itself).
 | 68 | Independent Problem Solving | `nyxara.growth.open_world` + `nyxara.mind.transfer` | UPGRADED |
 | 69 | Oracle-based Verification | `nyxara.growth.prover` | REAL+WIRED |
 | 70 | Honest Failure Recognition | `nyxara.observe.honesty` | UPGRADED |
-| 71 | Own-Model Ownership (TinyLlama-1.1B LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
+| 71 | Own-Model Ownership (DistilGPT-2 LoRA foundry + in-process serving) | `nyxara.growth.foundry` + `nyxara.mind.llm` | REAL+WIRED |
 | 72 | Frontier Law Discovery (invent NEW empirical/physical laws from data & self-run experiments, no LLM) | `nyxara.growth.law_discovery` | REAL+WIRED |
 | 73 | Non-Algorithmic Intuition / Creative Leap (guess a candidate *before* proof, on puzzles with no training data — a portfolio of self-contained leap generators, fused + self-verified, **no LLM**) | `nyxara.mind.intuition` | UPGRADED |
 | 74 | Engineering Foundry (use invented laws + real physics sims to DESIGN, multi-objectively optimise, and iteratively UPGRADE real device concepts — a portfolio optimiser over a coupled multi-physics evaluator, **no LLM**) | `nyxara.growth.engineering_foundry` | REAL+WIRED |
@@ -238,7 +238,7 @@ four capabilities — each backed by a test:
   offline path is unchanged).
 - **#1 / #3 / #29 The ceiling-break — her search now selects by TRUTH, not fluency**
   (`nyxara.mind.grounded_verifier`). The honest answer to *"NYXARA's reasoning is capped at her
-  1.1B–9B base model; scaffolding polishes the output, it doesn't break the ceiling."* Her deepest
+  small (DistilGPT-2-scale) base model; scaffolding polishes the output, it doesn't break the ceiling."* Her deepest
   search — the always-max effort ladder (`mind.deep_reasoning`: self-consistency → deliberation →
   MCTS → verified-refine) — used to keep the answer an **intrinsic** verifier scored highest, and
   that verifier (`router.answer_quality`) *cannot know correctness*; it rewards fluent, non-degenerate
