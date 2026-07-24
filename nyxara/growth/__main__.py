@@ -10,12 +10,12 @@ One Master-facing command for the sovereign-brain flywheel, end to end:
 4. **Report** (optional) — measure the handoff rate so "wrapper → her own AI" is visible.
 
 The dependency-free **n-gram** backend runs anywhere (so this is CI-testable); the ``lora``
-backend fine-tunes the TinyLlama-1.1B base (CPU-runnable, comfortable on any GPU) for
+backend fine-tunes the DistilGPT-2 base (CPU-runnable, no GPU needed) for
 genuine capability — the very same flywheel, only the backend swaps. Nothing here reaches
 around a gate: a promoted model still proposes through the sovereign loop the kernel disposes.
 
     python -m nyxara.growth --backend ngram --generations 1 --bench
-    python -m nyxara.growth --tinyllama --distill --bench   # QLoRA-tune TinyLlama-1.1B (her primary)
+    python -m nyxara.growth --distilgpt2 --distill --bench   # LoRA-tune DistilGPT-2 (her primary)
     python -m nyxara.growth --distill --backend lora --bench
 """
 
@@ -26,10 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-# The shared identity seed corpus + the TinyLlama-1.1B base live in growth/bootstrap.py, so the
+# The shared identity seed corpus + the DistilGPT-2 base live in growth/bootstrap.py, so the
 # Master-facing CLI and the auto-on-boot forge train the *same* loyal self from the *same* base.
 from nyxara.growth.bootstrap import IDENTITY_SEED as _IDENTITY_SEED
-from nyxara.growth.bootstrap import TINYLLAMA_1_1B
+from nyxara.growth.bootstrap import DISTILGPT2
 
 
 def _build_foundry(args: argparse.Namespace) -> Any:
@@ -40,12 +40,12 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     settings = get_settings().model_copy(deep=True)   # honour env config, leak nothing back
     if args.data_dir:
         settings.paths.data_dir = Path(args.data_dir)
-    # --tinyllama is the one-command shortcut for NYXARA's primary brain: QLoRA-tune
-    # TinyLlama-1.1B (4-bit NF4 base on a CUDA box, full-precision on CPU); explicit
+    # --distilgpt2 is the one-command shortcut for NYXARA's primary brain: LoRA-tune
+    # DistilGPT-2 (full-precision on CPU, no GPU or quantization needed); explicit
     # flags still override it.
-    if args.tinyllama:
+    if args.distilgpt2:
         settings.foundry.backend = "lora"
-        settings.foundry.base_model = TINYLLAMA_1_1B
+        settings.foundry.base_model = DISTILGPT2
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
@@ -147,19 +147,19 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="self-improvement generations to run (default 1)")
     parser.add_argument("--distill", type=int, nargs="?", const=-1, default=0, metavar="N",
                         help="first distil N teacher prompts into the corpus (all if N omitted)")
-    parser.add_argument("--tinyllama", "--qwen", dest="tinyllama", action="store_true",
-                        help="one-command preset: QLoRA-tune TinyLlama/TinyLlama-1.1B-Chat-v1.0 "
-                             "as her primary brain; weights download on first use. Needs "
-                             ".[foundry] for the real base (degrades to the n-gram brain "
-                             "otherwise). --qwen is kept as a deprecated alias")
+    parser.add_argument("--distilgpt2", "--tinyllama", "--qwen", dest="distilgpt2",
+                        action="store_true",
+                        help="one-command preset: LoRA-tune distilgpt2 as her primary brain; "
+                             "weights download on first use. Needs .[foundry] for the real base "
+                             "(degrades to the n-gram brain otherwise). --tinyllama/--qwen are "
+                             "kept as deprecated aliases")
     parser.add_argument("--trust-remote-code", action="store_true",
                         help="allow the base's custom modeling code to load (needed only for an "
-                             "exotic base that ships its own modeling code; TinyLlama does not)")
+                             "exotic base that ships its own modeling code; DistilGPT-2 does not)")
     parser.add_argument("--backend", choices=["auto", "ngram", "nanogpt", "lora"], default=None,
-                        help="override the foundry backend (lora needs a GPU + .[foundry])")
+                        help="override the foundry backend (lora needs .[foundry]; CPU-runnable)")
     parser.add_argument("--base-model", default=None,
-                        help="base checkpoint for the lora backend, "
-                             "e.g. TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+                        help="base checkpoint for the lora backend, e.g. distilgpt2")
     parser.add_argument("--load-in-4bit", action="store_true",
                         help="QLoRA: load the base in 4-bit (needs bitsandbytes + a GPU); "
                              "lets a 7B+ base fine-tune on one consumer GPU, degrades on CPU")

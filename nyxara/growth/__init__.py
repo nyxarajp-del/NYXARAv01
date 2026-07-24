@@ -36,8 +36,8 @@ from nyxara.growth.meta_engine import (
     MetaSample,
 )
 from nyxara.growth.bootstrap import (
+    DISTILGPT2,
     IDENTITY_SEED,
-    TINYLLAMA_1_1B,
     ensure_primary_model,
     primary_model_present,
 )
@@ -370,7 +370,7 @@ __all__ = [
     "ensure_primary_model",
     "primary_model_present",
     "IDENTITY_SEED",
-    "TINYLLAMA_1_1B",
+    "DISTILGPT2",
     "NeuralArchitectureSearch",
     "ArchitectureGenome",
     "LayerGene",

@@ -103,7 +103,7 @@ class LLMProvider(str, Enum):
 
     AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
     #                               the moment they exist (and pass the serve gate) — no manual flip
-    QWEN = "qwen"                 # in-process TinyLlama-1.1B-Chat-v1.0, downloaded via HuggingFace
+    QWEN = "qwen"                 # in-process DistilGPT-2, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
@@ -304,9 +304,9 @@ class LLMConfig(BaseModel):
 
     One real base runs in-process, no cloud providers and no API keys: the HuggingFace
     ``transformers`` path (``qwen``, any HF causal-LM id via ``NYXARA_LLM__QWEN_*``),
-    defaulting to **TinyLlama-1.1B-Chat-v1.0** — small enough to QLoRA-fine-tune (4-bit base +
-    LoRA adapter) on a single consumer GPU, and to run full-precision on a CPU. That single
-    base is the only pretrained model NYXARA stands on;
+    defaulting to **DistilGPT-2** — an ~82M-parameter distilled GPT-2 small enough to
+    LoRA-fine-tune and run full-precision on a bare CPU (no GPU, no quantization needed).
+    That single base is the only pretrained model NYXARA stands on;
     everything above it is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes that
     same base on her lived memory, and ``self`` serves the promoted adapter. ``native`` is
     her always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity
@@ -316,32 +316,32 @@ class LLMConfig(BaseModel):
     The default ``auto`` closes the train→serve loop: it walks the ladder
     self→qwen→native, so the moment the foundry promotes her own weights (and they pass the
     serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
-    reconfiguration; until then the TinyLlama base answers, and a bare machine her native own-brain.
+    reconfiguration; until then the DistilGPT-2 base answers, and a bare machine her native own-brain.
     """
 
     model_config = {"validate_assignment": True}
 
     provider: LLMProvider = LLMProvider.AUTO
-    # ---- TinyLlama-1.1B: model & load-time control ---- #
-    qwen_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # ---- DistilGPT-2: model & load-time control ---- #
+    qwen_model: str = "distilgpt2"
     qwen_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
     qwen_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
-    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). ON by
-    # default — QLoRA-style 4-bit NF4 serving keeps the 1.1B base light on a consumer GPU;
-    # a CPU-only box silently loads full precision instead (no crash, no config change).
-    qwen_load_in_4bit: bool = True     # QLoRA-style serve (needs bitsandbytes+CUDA; 8bit exclusive)
+    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). OFF by
+    # default — DistilGPT-2 is an ~82M-parameter model that loads and runs full-precision on a
+    # bare CPU, so there is nothing to quantize; flip on only for an exotic large base.
+    qwen_load_in_4bit: bool = False    # DistilGPT-2 is tiny — full precision everywhere (8bit exclusive)
     qwen_load_in_8bit: bool = False
     qwen_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     qwen_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
     qwen_bnb_4bit_use_double_quant: bool = True
     qwen_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
     qwen_use_cache: bool = True        # KV cache during generation
-    qwen_trust_remote_code: bool = False   # TinyLlama is a native Llama arch; enable via .env/max for custom ids
+    qwen_trust_remote_code: bool = False   # DistilGPT-2 is a native GPT-2 arch; enable via .env/max for custom ids
     # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
     # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
     qwen_adapter_path: Optional[Path] = None
     qwen_merge_adapter: bool = False
-    # ---- TinyLlama-1.1B: generation control (per-request LLMRequest fields win) ---- #
+    # ---- DistilGPT-2: generation control (per-request LLMRequest fields win) ---- #
     qwen_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
     qwen_repetition_penalty: float = Field(default=1.1, ge=0.5, le=2.0)
     qwen_no_repeat_ngram_size: int = Field(default=0, ge=0, le=20)  # 0 -> disabled
@@ -350,10 +350,11 @@ class LLMConfig(BaseModel):
     qwen_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
     # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
     qwen_do_sample: Literal["auto", "always", "never"] = "auto"
-    # TinyLlama-1.1B's context window is 2048 tokens; prompts are left-truncated to fit.
-    qwen_max_input_tokens: int = Field(default=2048, ge=64, le=32768)
-    # TinyLlama chat template (Zephyr-style system/user/assistant). False -> flat prompt, for base checkpoints.
-    qwen_use_chat_template: bool = True
+    # DistilGPT-2's context window is 1024 tokens; prompts are left-truncated to fit.
+    qwen_max_input_tokens: int = Field(default=1024, ge=64, le=32768)
+    # DistilGPT-2 is a base (non-chat) checkpoint with no chat template, so this is OFF: prompts
+    # render as flat text (system + turns) via NYXARA's own template. Enable only for a chat base.
+    qwen_use_chat_template: bool = False
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
@@ -437,9 +438,9 @@ class FoundryConfig(BaseModel):
     transformer on a torch-less box, or — the honest floor when even NumPy is absent —
     a Kneser-Ney n-gram. Heavy & self-modifying, so still fully gauntlet-gated and
     reversible (the TEST profile seals it off for hermetic suites). The default backend
-    is ``lora`` — QLoRA fine-tuning of the TinyLlama-1.1B base (real capability): the frozen
-    base loads 4-bit (NF4) on a CUDA GPU and the LoRA adapter trains on top; on a CPU it
-    trains full-precision LoRA instead, so ``lora_requires_gpu`` stays off by default.
+    is ``lora`` — LoRA fine-tuning of the DistilGPT-2 base (real capability): at ~82M params
+    the frozen base trains full-precision LoRA on a bare CPU (no GPU, no quantization needed),
+    so ``lora_requires_gpu`` stays off by default.
 
     ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
     dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
@@ -456,8 +457,8 @@ class FoundryConfig(BaseModel):
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
     backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
-    # Whether the LoRA forge insists on CUDA. The TinyLlama-1.1B base is small enough to
-    # LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
+    # Whether the LoRA forge insists on CUDA. The DistilGPT-2 base (~82M params) is small enough
+    # to LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
     # own adapter even on a GPU-less box. Set True to downshift to a genuinely trainable
     # neural backend (nanogpt with torch, the NumPy transformer without) when no GPU is present.
     lora_requires_gpu: bool = False
@@ -548,14 +549,13 @@ class FoundryConfig(BaseModel):
     n_embd: int = Field(default=64, ge=8, le=2048)
     # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
     # Adapts the base to NYXARA's lived memory by training a small low-rank adapter — the path
-    # to genuine capability. Default base is TinyLlama-1.1B-Chat-v1.0: the single small pretrained
-    # model she stands on, trained QLoRA-style by default (4-bit NF4 frozen base + LoRA adapter,
-    # when bitsandbytes+CUDA are present; full-precision LoRA on a CPU), degrading to the
-    # always-on n-gram backend only when torch is absent.
-    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    # TinyLlama is a native transformers architecture (standard Llama modeling code), so no remote
-    # code is needed to load it. Kept a knob so an exotic base that ships custom modeling code can
-    # turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
+    # to genuine capability. Default base is DistilGPT-2: the single small pretrained model she
+    # stands on (~82M params), trained full-precision LoRA on a bare CPU (no GPU, no quantization
+    # needed), degrading to the always-on n-gram backend only when torch is absent.
+    base_model: str = "distilgpt2"
+    # DistilGPT-2 is a native transformers architecture (standard GPT-2 modeling code), so no
+    # remote code is needed to load it. Kept a knob so an exotic base that ships custom modeling
+    # code can turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
     trust_remote_code: bool = False
     lora_r: int = Field(default=8, ge=1, le=256)
     # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
@@ -565,22 +565,23 @@ class FoundryConfig(BaseModel):
     lora_alpha: int = Field(default=16, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
-    # Which modules receive LoRA adapters. TinyLlama (Llama arch) uses the llama-style projection names, so the
-    # default targets every attention + MLP projection explicitly. LoRAModel._apply_lora falls
-    # back to peft's architecture inference (and then "all-linear") if any name is absent, so an
-    # unusual base still trains. Clear the list to force pure inference on an unknown base.
+    # Which modules receive LoRA adapters. DistilGPT-2 (GPT-2 arch) uses Conv1D projections named
+    # ``c_attn`` (fused q/k/v), ``c_proj`` (attention + MLP output) and ``c_fc`` (MLP input), so the
+    # default targets attention + MLP explicitly. LoRAModel._apply_lora falls back to peft's
+    # architecture inference (and then "all-linear") if any name is absent, so an unusual base still
+    # trains. Clear the list to force pure inference on an unknown base.
     lora_target_modules: List[str] = Field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+        "c_attn", "c_proj", "c_fc"])
     lora_bias: Literal["none", "all", "lora_only"] = "none"
     lora_use_rslora: bool = False           # rank-stabilised LoRA scaling (enable via .env/max)
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
     lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
-    # QLoRA: load the frozen base in 4-bit (or 8-bit) so the base fine-tunes on a single
+    # QLoRA: load the frozen base in 4-bit (or 8-bit) so a large base fine-tunes on a single
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
-    # to full-precision LoRA (no crash). ON by default — the TinyLlama-1.1B forge is a QLoRA
-    # (4-bit NF4 + double quant) wherever the hardware allows it.
-    load_in_4bit: bool = True     # QLoRA training default (needs bitsandbytes+CUDA; 8bit exclusive)
+    # to full-precision LoRA (no crash). OFF by default — DistilGPT-2 (~82M params) trains
+    # full-precision LoRA on a bare CPU, so there is nothing to quantize.
+    load_in_4bit: bool = False    # DistilGPT-2 is tiny — full-precision LoRA (8bit exclusive)
     load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"

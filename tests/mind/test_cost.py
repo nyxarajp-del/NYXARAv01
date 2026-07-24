@@ -1,6 +1,6 @@
 """Tests for nyxara.mind.cost — the LLM token/cost ledger.
 
-Every backend runs locally now (TinyLlama / self / mock), so real spend is always $0;
+Every backend runs locally now (DistilGPT-2 / self / mock), so real spend is always $0;
 the budget-gate machinery is still exercised via a hand-priced entry monkeypatched
 into PRICES.
 """
@@ -14,14 +14,14 @@ from nyxara.mind.llm import LLMResponse, Usage
 
 
 def test_estimate_cost_local_models_zero():
-    assert UsageLedger.estimate_cost("TinyLlama/TinyLlama-1.1B-Chat-v1.0", 1000, 1000) == 0.0
+    assert UsageLedger.estimate_cost("distilgpt2", 1000, 1000) == 0.0
     assert UsageLedger.estimate_cost("nyxara-self", 5000, 5000) == 0.0
     assert UsageLedger.estimate_cost("native", 100, 100) == 0.0
 
 
 def test_longest_prefix_matching():
-    # the full TinyLlama model id must match the "TinyLlama" prefix entry
-    assert UsageLedger.price_for("TinyLlama/TinyLlama-1.1B-Chat-v1.0") == PRICES["TinyLlama"]
+    # the distilgpt2 model id must match the "distilgpt2" prefix entry
+    assert UsageLedger.price_for("distilgpt2") == PRICES["distilgpt2"]
 
 
 def test_unknown_model_costs_nothing():
@@ -32,7 +32,7 @@ def test_unknown_model_costs_nothing():
 def test_record_from_llm_response():
     ledger = UsageLedger()
     resp = LLMResponse(text="hi", provider="qwen",
-                       model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                       model="distilgpt2",
                        usage=Usage(prompt_tokens=1000, completion_tokens=1000))
     item = ledger.record(resp)
     assert item.cost_usd == 0.0
@@ -50,11 +50,11 @@ def test_record_from_raw_usage():
 def test_aggregations_track_tokens_per_model_and_provider():
     ledger = UsageLedger()
     ledger.record(Usage(1000, 1000), provider="qwen",
-                  model="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+                  model="distilgpt2")
     ledger.record(Usage(1000, 0), provider="self", model="nyxara-self")
     assert ledger.total_cost() == 0.0
     assert ledger.total_tokens() == 3000
-    assert "TinyLlama/TinyLlama-1.1B-Chat-v1.0" in ledger.by_model()
+    assert "distilgpt2" in ledger.by_model()
     assert set(ledger.by_provider()) == {"qwen", "self"}
 
 
@@ -72,7 +72,7 @@ def test_budget_tracking_with_a_priced_entry(monkeypatch):
 def test_free_local_models_never_trip_the_budget():
     ledger = UsageLedger(daily_budget=1.0)
     ledger.record(Usage(10_000, 10_000), provider="qwen",
-                  model="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+                  model="distilgpt2")
     assert ledger.total_cost() == 0.0
     assert not ledger.over_budget()
     assert ledger.remaining() == pytest.approx(1.0)

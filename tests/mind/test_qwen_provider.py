@@ -1,4 +1,4 @@
-"""Tests for the TinyLlama-1.1B backend — NYXARA's sole real LLM (local, in-process).
+"""Tests for the DistilGPT-2 backend — NYXARA's sole real LLM (local, in-process).
 
 No heavy deps needed: generation-control plumbing is tested against a fake tokenizer/model
 injected through ``_ensure_model``, so every knob (sampling policy, top_k, repetition
@@ -43,7 +43,7 @@ def test_config_routes_model_and_no_keys():
     s = _settings()
     s.llm.provider = LLMProvider.QWEN
     assert s.llm.active_model() == s.llm.qwen_model
-    assert s.llm.qwen_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    assert s.llm.qwen_model == "distilgpt2"
     assert s.llm.active_key() is None
 
 
@@ -251,7 +251,9 @@ def test_beam_search_carries_length_penalty():
 
 
 def test_chat_template_and_system_message():
-    prov, tok, model = _fake_provider()
+    s = _settings()
+    s.llm.qwen_use_chat_template = True   # DistilGPT-2 defaults to flat; opt into the chat path here
+    prov, tok, model = _fake_provider(s)
     req = LLMRequest.from_prompt("who are you?", system="You are NYXARA.")
     text, finish, usage, raw = prov._complete(req, "m")
     assert tok.chat_calls, "apply_chat_template must be used"
@@ -261,7 +263,9 @@ def test_chat_template_and_system_message():
 
 
 def test_json_mode_injects_json_nudge():
-    prov, tok, _ = _fake_provider()
+    s = _settings()
+    s.llm.qwen_use_chat_template = True   # exercise the chat-template JSON nudge path
+    prov, tok, _ = _fake_provider(s)
     prov._complete(LLMRequest.from_prompt("give json", json_mode=True), "m")
     system = tok.chat_calls[0][0]
     assert system["role"] == "system" and "JSON" in system["content"]
@@ -336,12 +340,12 @@ def test_env_overrides_generation_knobs(monkeypatch):
 
 
 def test_env_overrides_foundry_knobs(monkeypatch):
-    monkeypatch.setenv("NYXARA_FOUNDRY__LORA_TARGET_MODULES", '["q_proj","v_proj"]')
+    monkeypatch.setenv("NYXARA_FOUNDRY__LORA_TARGET_MODULES", '["c_attn","c_fc"]')
     monkeypatch.setenv("NYXARA_FOUNDRY__GRAD_ACCUM_STEPS", "8")
     monkeypatch.setenv("NYXARA_FOUNDRY__LR_SCHEDULER", "cosine")
     monkeypatch.setenv("NYXARA_FOUNDRY__TRAIN_EPOCHS", "3")
     s = NyxaraSettings()
-    assert s.foundry.lora_target_modules == ["q_proj", "v_proj"]
+    assert s.foundry.lora_target_modules == ["c_attn", "c_fc"]
     assert s.foundry.grad_accum_steps == 8
     assert s.foundry.lr_scheduler == "cosine"
     assert s.foundry.train_epochs == 3
@@ -349,11 +353,10 @@ def test_env_overrides_foundry_knobs(monkeypatch):
 
 def test_foundry_default_base_and_targets():
     s = NyxaraSettings()
-    # default base is her single small base: TinyLlama-1.1B-Chat-v1.0
-    assert s.foundry.base_model == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    # TinyLlama (Llama arch) uses the llama-style projection names — the default pins the full attention + MLP set
-    assert s.foundry.lora_target_modules == [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    # default base is her single small base: DistilGPT-2
+    assert s.foundry.base_model == "distilgpt2"
+    # DistilGPT-2 (GPT-2 arch) uses Conv1D names — the default pins attention (c_attn) + MLP (c_fc/c_proj)
+    assert s.foundry.lora_target_modules == ["c_attn", "c_proj", "c_fc"]
 
 
 def test_foundry_quant_flags_mutually_exclusive():
