@@ -343,8 +343,10 @@ class LLMConfig(BaseModel):
     qwen_merge_adapter: bool = False
     # ---- DistilGPT-2: generation control (per-request LLMRequest fields win) ---- #
     qwen_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
-    qwen_repetition_penalty: float = Field(default=1.1, ge=0.5, le=2.0)
-    qwen_no_repeat_ngram_size: int = Field(default=0, ge=0, le=20)  # 0 -> disabled
+    qwen_repetition_penalty: float = Field(default=1.3, ge=0.5, le=2.0)
+    # Safety-net against degenerate repetition loops (small base checkpoints otherwise spam a
+    # single token — e.g. ",,,,,"). 3 blocks any repeated 3-gram; 0 -> disabled.
+    qwen_no_repeat_ngram_size: int = Field(default=3, ge=0, le=20)
     qwen_min_new_tokens: int = Field(default=0, ge=0)            # 0 -> disabled
     qwen_num_beams: int = Field(default=1, ge=1, le=16)
     qwen_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
