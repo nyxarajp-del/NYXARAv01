@@ -494,6 +494,15 @@ class GenomeConfig(BaseModel):
     allow_inprocess_native: bool = False
 
 
+class DistributedConfig(BaseModel):
+    """Distributed Hive / P2P device mesh (agency/distributed/). Single-node no-op until real peers +
+    a permissive network policy are present; pairing is Master-authorized, never open to the network."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True               # ON, but a clean no-op with zero peers (single live node)
+
+
 # Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
 # (n_layer, n_head, n_embd, block_size) tuple; "gpt2" is the canonical 124M-parameter
 # GPT-2 architecture (the requested minimum-GPT-2-scale substrate), reachable only when
@@ -3018,6 +3027,7 @@ class NyxaraSettings(BaseSettings):
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     epistemic_distill: EpistemicDistillConfig = Field(default_factory=EpistemicDistillConfig)
     genome: GenomeConfig = Field(default_factory=GenomeConfig)
+    distributed: DistributedConfig = Field(default_factory=DistributedConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
