@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 __all__ = ["Heartbeat", "LifePulse"]
@@ -134,11 +134,32 @@ class Heartbeat:
         if not engaged and beat_idx % self.self_work_every == 0:
             acted, did = self._self_work()
 
+        # 3b) THERMODYNAMIC HEARTBEAT — the CAUSAL engine reads her own surprise/entropy every
+        #     beat and pre-emptively heals on a spike (causal/thermo_inference.py). Never raises.
+        self._thermo_beat(core)
+
         pulse = LifePulse(beat=beat_idx, at=now, dt=dt, alive_seconds=self.alive_seconds,
                           awake=awake, state=state, engaged=engaged, monologue=monologue,
                           acted=acted, did=did)
         self._last_pulse = pulse
         return pulse
+
+    def _thermo_beat(self, core: Any) -> None:
+        """Tick the CAUSAL engine's thermodynamic monitor (surprise → pre-emptive heal).
+
+        A capability, never a hard dependency: if the engine is absent or disabled, or the beat
+        is switched off in config, this is a no-op. One bad reading must never end her life.
+        """
+        engine = getattr(core, "causal_engine", None)
+        if engine is None:
+            return
+        try:
+            settings = getattr(engine, "_beat_thermo", True)
+            if settings is False:
+                return
+            engine.beat(core)
+        except Exception:  # noqa: BLE001 — the thermodynamic loop is advisory; the heart beats on
+            pass
 
     def _keep_awake(self, now: float) -> tuple:
         """Pin any wired Presence above sleep. Returns (awake, state_label)."""

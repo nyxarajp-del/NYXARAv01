@@ -124,6 +124,11 @@ commands:
   /rewire-mind [n]   rewire her OWN cognitive architecture: invent new composite reasoning operators (trans-logic), keep only what strictly beats a held-out fold (no LLM); n: generations
   /evolve            self-evolving neural architecture: when her current logic falls short, she grows a NEW neural module/pathway for it (topology/architecture/learning-rule/reasoning-operator), gauntlet-verified, wired live (no LLM); /evolve report for status
   /superpose [q]     quantum-probabilistic superposition reasoning: hold many candidate solution paths at once (Born-rule amplitudes) and collapse to the one with the best SIMULATED FUTURE OUTCOME, or stay superposed and abstain (no LLM)
+  /causal            CAUSAL / OMNISCIENCE engine status: field-resonance, causal-knot gate, thermodynamic heartbeat, phase-shift, axioms, hot-swap, hyper-graph compression, self-simulation
+  /resonate <query>  resonate a query against her continuous concept fields (interference retrieval, no tokens) and show the most resonant concepts
+  /axioms            discover & PROVE a new axiom (symbolic regression + Z3/Sympy/exhaustive proof); adopted only if the proof passes
+  /compress          fold a knowledge graph + causal history into a dense lossless hyper-graph and report the measured ratio
+  /simulate          race bounded parallel self-simulation sandboxes and collapse to the lowest-free-energy / best-verified branch
   /cognitive-architecture  her thinking as data: operators, how many she invented, accuracy/fitness, resilience, meta-policy, intelligence index
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
@@ -190,6 +195,54 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.self_knowledge(), indent=2, default=str))
     elif cmd == "explain":
         print(core.explain_last())
+    elif cmd in ("causal", "omniscience"):
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled (NYXARA_CAUSAL_ENGINE__ENABLED=false).")
+        else:
+            print(json.dumps(eng.status(), indent=2, default=str))
+    elif cmd == "resonate":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None or not arg:
+            print("usage: /resonate <query>  (the CAUSAL engine must be enabled)")
+        else:
+            hits = eng.resonate(arg, top=5)
+            if not hits:
+                print("no resonance — this would trigger a live phase-shift on a real turn.")
+            for h in hits:
+                print(f"  {h.label:16s} {h.score:+.3f}  (weighted {h.weighted:+.3f})")
+    elif cmd == "axioms":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            # demonstrate: discover & PROVE commutativity of addition over a finite domain
+            samples = [({"a": a, "b": b}, a + b) for a in range(3) for b in range(3)]
+            ax = eng.discover_axioms("addition_commutes", samples, ["a", "b"],
+                                     reference_fn=lambda e: e["a"] + e["b"],
+                                     domain={"a": range(-4, 5), "b": range(-4, 5)})
+            print(json.dumps(ax.to_dict() if ax else {"discovered": False}, indent=2, default=str))
+    elif cmd == "compress":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            triples = [("nyxara", "knows", f"concept_{i}") for i in range(200)]
+            triples += [(f"turn_{i}", "observed_by", "nyxara") for i in range(100)]
+            _blob, report = eng.compress_memory(triples, history=["boot", "learn", "learn"])
+            print(report.summary())
+    elif cmd == "simulate":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            # race a few toy resolution paths; the lowest-free-energy branch wins & collapses
+            energies = {"conservative": 4.0, "balanced": 1.5, "aggressive": 6.0}
+            verdict = eng.simulate_and_collapse(
+                list(energies), lambda h: (h, energies[h]), verify=lambda o: 1.0)
+            w = verdict.winner
+            print(f"collapsed to: {w.hypothesis!r} (free-energy {w.free_energy})"
+                  if w else "no branch survived the sandboxes.")
     elif cmd == "pause":
         core.pause()
         print("loop paused — the Master may /resume.")

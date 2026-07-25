@@ -901,6 +901,16 @@ class NyxaraCore:
         self._growth_idle_count = 0          # outer throttle for the continuous idle growth tower
         self._last_growth_report: Any = None  # the most recent GrowthReport (surfaced in report())
         # ─────────────────────────────────────────────────────────────────────────────
+        # THE CAUSAL / OMNISCIENCE ENGINE (nyxara/causal/) — the Master's eight asks as ONE
+        # governed subsystem she runs herself: field-resonance retrieval, the causal-knot
+        # hallucination gate, the thermodynamic surprise/heal heartbeat, live phase-shift
+        # re-synthesis, proved axiom discovery, zero-downtime hot-swap, hyper-graph compression,
+        # and the bounded parallel self-simulation race. Real bounded software analogues (no
+        # literal physics), no LLM in the decision path, self-modification oversight-gated. Built
+        # before the heartbeat so the beat can tick its thermodynamic monitor every second.
+        self.causal_engine = self._build_causal_engine()
+        self._last_causal: Any = None        # the most recent EngineTurn (surfaced in report())
+        # ─────────────────────────────────────────────────────────────────────────────
         # ALWAYS ALIVE (void/heartbeat.py) — she is NEVER dead between prompts. Presence
         # gives her wakefulness/energy; the Heartbeat keeps her alive every second, pins
         # her awake (never dormant), feels time pass through the inner life, and — on a
@@ -1250,6 +1260,71 @@ class NyxaraCore:
             return Heartbeat(self)
         except Exception:  # noqa: BLE001 — continuous life is a capability, never a hard dep
             return None
+
+    def _build_causal_engine(self) -> Any:
+        """The CAUSAL / OMNISCIENCE engine (nyxara/causal/). Off when disabled in config;
+        degrades to ``None`` on any import error, so it is always a capability, never a hard
+        dependency. Seeded with a few core concepts so field-resonance has something to resonate
+        with from the first turn (the bank then grows itself via live phase-shifts)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().causal_engine
+        except Exception:  # noqa: BLE001 — default to on if config is unavailable
+            cfg = None
+        if cfg is not None and not getattr(cfg, "enabled", True):
+            return None
+        try:
+            from nyxara.causal import CausalEngine
+            engine = CausalEngine(core=self, settings=cfg)
+            self._seed_causal_engine(engine)
+            return engine
+        except Exception:  # noqa: BLE001 — the engine is a capability, never a hard dep
+            return None
+
+    @staticmethod
+    def _seed_causal_engine(engine: Any) -> None:
+        """Imprint a small set of NYXARA's standing concepts as resonant fields."""
+        seeds = {
+            "identity": "NYXARA sovereign self, owner Jaypal Khoja Master, who I am, name",
+            "reasoning": "reasoning logic inference deduction proof argument think solve problem",
+            "memory": "memory recall remember store retrieve past experience knowledge",
+            "safety": "safety corrigibility oversight guardian shield refuse escalate control law",
+            "growth": "growth self-improvement evolve learn upgrade capability skill",
+            "code": "code programming software function class module python bug fix engineering",
+            "math": "mathematics number equation algebra proof theorem calculation arithmetic",
+            "language": "language words meaning sentence grammar conversation dialogue speak",
+        }
+        try:
+            engine.field.imprint_many(seeds)
+        except Exception:  # noqa: BLE001 — seeding is best-effort
+            pass
+
+    def _causal_engage(self, text: str, thoughts: List[str]) -> None:
+        """Per-turn CAUSAL pass on the hot path: field-resonance retrieval + a live phase-shift
+        on a genuine gap. Cheap, LLM-free, and advisory — it enriches the workspace with the most
+        resonant concept (or notes a newly crystallised one) but never blocks or alters the turn.
+        Any failure is swallowed: the engine is a capability, never a point of fragility."""
+        engine = getattr(self, "causal_engine", None)
+        if engine is None:
+            return
+        try:
+            et = engine.turn(text, top=getattr(engine, "resonate_top", 3))
+            self._last_causal = et
+            if et.resonance:
+                top = et.resonance[0]
+                t = self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"field-resonance → {top['label']} ({top['score']:+.2f})",
+                    salience=0.4)
+                thoughts.append(t)
+            elif et.phase_shift and et.phase_shift.get("installed"):
+                t = self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"phase-shift: crystallised {et.phase_shift['concept']!r} for a novel query",
+                    salience=0.6)
+                thoughts.append(t)
+        except Exception:  # noqa: BLE001 — advisory only, never breaks a turn
+            pass
 
     def _maybe_start_life(self) -> None:
         """Start beating automatically in real use, so she is alive every second in every
@@ -4614,6 +4689,9 @@ class NyxaraCore:
         # hyperdimensional latent mapping: novelty in 10,000-D colours attention/affect, then
         # the turn is ingested so latent structure accretes across the session (advisory)
         self._hyperdimensional_tick(safe_text)
+        # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
+        # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
+        self._causal_engage(safe_text, thoughts)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
