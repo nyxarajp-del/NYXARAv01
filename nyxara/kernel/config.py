@@ -471,6 +471,29 @@ class EpistemicDistillConfig(BaseModel):
     tentative_half_life_days: float = Field(default=7.0, gt=0)    # graded, low-confidence knowledge
 
 
+class GenomeConfig(BaseModel):
+    """Autopoietic Genome Compiling (growth/native_forge.py, growth/genomic_recombination.py).
+
+    NYXARA profiles her own hot pure functions, translates them to native C/Rust, and adopts a compiled
+    kernel ONLY when it is proven behaviorally identical AND measurably faster — reversibly. Bounded to
+    narrow pure numeric/string functions; never the kernel internals or the constitutional core.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    recombination: bool = True         # Part D: breed pure functions/algorithms (crossover+mutation)
+    languages: list = Field(default_factory=lambda: ["c", "rust"])
+    min_speedup: float = Field(default=1.2, ge=1.0)
+    max_swaps_per_cycle: int = Field(default=4, ge=0)
+    eligible_only_pure: bool = True
+    # The ONE opt-in switch (the user's explicit choice: subprocess default, in-process opt-in): loading
+    # a self-compiled binary into the LIVE process via ctypes opens the containment wall, so it stays OFF
+    # by default and additionally requires the Capability.NATIVE_COMPILE grant. The subprocess tier and
+    # the compile+verify gauntlet run regardless; only the in-process hot-swap is gated here.
+    allow_inprocess_native: bool = False
+
+
 # Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
 # (n_layer, n_head, n_embd, block_size) tuple; "gpt2" is the canonical 124M-parameter
 # GPT-2 architecture (the requested minimum-GPT-2-scale substrate), reachable only when
@@ -2994,6 +3017,7 @@ class NyxaraSettings(BaseSettings):
     loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
     epistemic_distill: EpistemicDistillConfig = Field(default_factory=EpistemicDistillConfig)
+    genome: GenomeConfig = Field(default_factory=GenomeConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
