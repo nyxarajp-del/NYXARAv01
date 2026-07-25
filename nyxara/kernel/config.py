@@ -2170,6 +2170,38 @@ class CausalConfig(BaseModel):
     structure_min_samples: int = Field(default=30, ge=4)  # time-bins needed before NOTEARS runs
 
 
+class CausalEngineConfig(BaseModel):
+    """The CAUSAL / OMNISCIENCE engine (nyxara/causal/) — the Master's eight asks, honestly.
+
+    One branded subsystem NYXARA runs herself: field-resonance retrieval, a causal-knot
+    hallucination gate, a thermodynamic surprise/heal heartbeat, runtime phase-shift
+    re-synthesis, proved axiom discovery, zero-downtime hot-swap, lossless hyper-graph
+    compression, and a bounded parallel self-simulation race. Real bounded software analogues
+    (no literal physics), no LLM in the decision path, self-modification oversight-gated. On by
+    default with graceful fallback; the heavy OMNISCIENCE passes run off the hot per-turn path.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # field-resonance
+    field_dim: int = Field(default=512, ge=8, le=8192)          # waveform field dimensionality
+    field_capacity: int = Field(default=4096, ge=16)            # bounded concept bank size
+    resonance_floor: float = Field(default=0.15, ge=0.0, le=1.0)  # min interference to count
+    resonate_top: int = Field(default=3, ge=1, le=32)          # concepts fed to the reasoner
+    # thermodynamic heartbeat
+    thermo_window: int = Field(default=64, ge=4)               # recent-surprise window
+    spike_z: float = Field(default=2.5, ge=0.5)               # σ-units that trigger a heal
+    beat_thermo: bool = True                                   # tick the monitor each heartbeat
+    # phase-shift
+    max_phase_shifts_per_min: int = Field(default=30, ge=0)   # rate cap on live re-synthesis
+    # self-simulation
+    max_sim_branches: int = Field(default=16, ge=1, le=256)   # bounded N parallel sandboxes
+    max_sim_workers: int = Field(default=8, ge=1, le=64)      # thread-pool width
+    # knot gate: on a Knot Mutation Failure in a turn's claims, flag (advisory) vs. abstain
+    knot_gate_abstains: bool = False
+
+
 class WorldModelConfig(BaseModel):
     """The imagination faculty (mind/world_model.py + mind/jepa_world_model.py).
 
@@ -2923,6 +2955,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)
+    causal_engine: CausalEngineConfig = Field(default_factory=CausalEngineConfig)
     world_model: WorldModelConfig = Field(default_factory=WorldModelConfig)
     native_reasoning: NativeReasoningConfig = Field(default_factory=NativeReasoningConfig)
     metacontrol: MetaControlConfig = Field(default_factory=MetaControlConfig)
