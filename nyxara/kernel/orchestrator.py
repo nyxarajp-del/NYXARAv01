@@ -3425,6 +3425,10 @@ class NyxaraCore:
     def _feed_flywheel(self, prompt: str, response: str, candidate: "Candidate",
                        authority: Authority) -> None:
         """Offer one fully-cleared turn to the data flywheel (best-effort, never raises)."""
+        # Autonomous Epistemic Distillation (Part B): distil a successful TEACHER turn's answer +
+        # reasoning into durable local knowledge (HD-vector rule + KnowledgeGraph triple), so her
+        # dependence on the cloud shrinks turn by turn. Independent of the flywheel, own gates, never fatal.
+        self._distill_epistemic(prompt, response, candidate, authority)
         fw = getattr(self, "flywheel", None)
         if fw is None:
             return
@@ -3443,6 +3447,38 @@ class NyxaraCore:
                 fw.consider_correction(orig_prompt, old_answer or "", response, weight=weight)
             fw.consider(prompt, response, confidence=float(candidate.confidence))
         except Exception:  # noqa: BLE001 — collection is best-effort, never blocks a turn
+            pass
+
+    def _distill_epistemic(self, prompt: str, response: str, candidate: "Candidate",
+                           authority: Authority) -> None:
+        """Distil a successful teacher (cloud) turn into durable local knowledge (Part B).
+
+        Lazily built on first use (reusing this core's KnowledgeGraph / LatentSpaceMap / memory), so
+        it adds zero constructor cost. Gated to teacher-answered, owner turns by config; every step is
+        best-effort and can never break or slow a live turn."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = getattr(get_settings(), "epistemic_distill", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return
+            if getattr(candidate, "kind", "respond") != "respond":
+                return
+            if (getattr(cfg, "teacher_only", True)
+                    and self._classify_answer_source(candidate) != "teacher"):
+                return
+            if getattr(cfg, "owner_only", True) and authority is not Authority.OWNER:
+                return
+            distiller = getattr(self, "_epistemic_distiller", None)
+            if distiller is None:
+                from nyxara.growth.epistemic_distill import EpistemicDistiller
+                distiller = EpistemicDistiller.from_core(self)
+                self._epistemic_distiller = distiller
+            reasoning = str(getattr(candidate, "rationale", "") or "")
+            distiller.distill_turn(prompt, response, reasoning,
+                                   confidence=float(getattr(candidate, "confidence", 1.0)),
+                                   source="teacher")
+        except Exception:  # noqa: BLE001 — distillation is best-effort, never blocks a turn
+            pass
             pass
 
     def _build_cycle_reflector(self) -> Any:

@@ -58,6 +58,7 @@ __all__ = [
     "NativeProvider",
     "QwenProvider",
     "SelfProvider",
+    "AIRouterProvider",
     "format_self_prompt",
     "format_self_training_doc",
     "truncate_at_stops",
@@ -693,9 +694,125 @@ class SelfProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# AiRouter provider — an OpenAI-compatible CLOUD tool (airouter.in, e.g. zai/glm-5)
+# --------------------------------------------------------------------------- #
+class AIRouterProvider(LLMProviderBase):
+    """Call an OpenAI-compatible cloud endpoint (airouter.in, e.g. ``zai/glm-5``) — a SUBORDINATE tool.
+
+    The single constraint mirrors this whole module: *the LLM is a provider, not the driver.* This
+    class forwards a request's system + messages to the API and returns text; it injects **no**
+    "you are NYXARA" persona (identity lives in ``identity/soul.py``), holds **no** conversation state,
+    and never calls back into the kernel. The kernel treats the returned text as a *proposal* that must
+    pass every guard before anything acts on it — so a cloud model can *serve* NYXARA and never *steer*
+    her: she uses it, benefits from it, controls it.
+
+    The heavy dep (the ``openai`` SDK) is imported lazily and reported honestly via :meth:`available`,
+    so a bare machine (no SDK, no key, or the ``airouter_enabled`` kill-switch off) simply degrades
+    down the ``auto`` ladder to her own always-on brain rather than erroring.
+
+    Optional privacy: if the isolation envelope (``guard/isolation_envelope.py``) is present and enabled,
+    outgoing prompts are abstracted before they leave and the reply is re-hydrated locally — the cloud
+    model only ever sees abstract tokens, never NYXARA's identity or the Master's secrets.
+    """
+
+    name = "airouter"
+
+    def available(self) -> bool:
+        cfg = self.settings.llm
+        if not bool(getattr(cfg, "airouter_enabled", True)):
+            return False
+        key = getattr(cfg, "airouter_api_key", None)
+        if not key or not key.get_secret_value().strip():
+            return False
+        try:
+            import openai  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def default_model(self) -> str:
+        return self.settings.llm.airouter_model
+
+    def _client(self) -> Any:
+        from openai import OpenAI
+        cfg = self.settings.llm
+        return OpenAI(base_url=cfg.airouter_base_url,
+                      api_key=cfg.airouter_api_key.get_secret_value(),
+                      timeout=cfg.request_timeout_s)
+
+    def _envelope(self) -> Any:
+        """The isolation envelope, if installed AND enabled — else None (plain pass-through)."""
+        try:
+            from nyxara.guard.isolation_envelope import IsolationEnvelope
+        except Exception:
+            return None
+        try:
+            env = IsolationEnvelope(self.settings)
+            return env if env.enabled() else None
+        except Exception:  # noqa: BLE001 — privacy is best-effort; never break a call
+            return None
+
+    def _messages(self, req: LLMRequest) -> List[Dict[str, str]]:
+        system = (req.system or "").strip()
+        if req.json_mode:
+            nudge = "Respond with ONLY valid JSON — no prose, no code fences."
+            system = f"{system}\n\n{nudge}" if system else nudge
+        msgs: List[Dict[str, str]] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(req.provider_messages())
+        return msgs
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        client = self._client()
+        messages = self._messages(req)
+        envelope = self._envelope()
+        if envelope is not None:                     # anonymize before the cloud (Part K)
+            messages = envelope.abstract_messages(messages)
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+            "top_p": req.top_p,
+        }
+        if req.stop:
+            kwargs["stop"] = list(req.stop)
+        if req.seed is not None:
+            kwargs["seed"] = req.seed
+        if req.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            resp = client.chat.completions.create(**kwargs)
+        except Exception:
+            # some OpenAI-compatible servers reject the optional extras — retry once without them
+            if "response_format" in kwargs or "seed" in kwargs:
+                kwargs.pop("response_format", None)
+                kwargs.pop("seed", None)
+                resp = client.chat.completions.create(**kwargs)
+            else:
+                raise
+        choice = resp.choices[0]
+        text = (getattr(choice.message, "content", None) or "").strip()
+        if envelope is not None:                     # re-hydrate locally (never on the wire)
+            text = envelope.rehydrate(text)
+        finish = getattr(choice, "finish_reason", "stop") or "stop"
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            usage = Usage(prompt_tokens=int(getattr(u, "prompt_tokens", 0) or 0),
+                          completion_tokens=int(getattr(u, "completion_tokens", 0) or 0))
+        else:
+            usage = Usage(
+                prompt_tokens=estimate_tokens(" ".join(m["content"] for m in messages)),
+                completion_tokens=estimate_tokens(text))
+        return (text, finish, usage, {"airouter": True, "model": model})
+
+
+# --------------------------------------------------------------------------- #
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
+    ProviderName.AIROUTER: AIRouterProvider,
     ProviderName.QWEN: QwenProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
@@ -727,9 +844,11 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the DistilGPT-2 base, then her always-on
-    # dependency-free native own-brain as the guaranteed floor (never an echo mock).
-    _AUTO_LADDER = ("self", "qwen", "native")
+    # the auto ladder: her strongest reachable TOOL first (the airouter cloud model), then her OWN
+    # promoted weights, the DistilGPT-2 base, and finally her always-on dependency-free native own-brain
+    # as the guaranteed floor (never an echo mock). airouter is a tool she uses when reachable; the
+    # moment it is unavailable she keeps her own voice — she is never dependent on the cloud.
+    _AUTO_LADDER = ("airouter", "self", "qwen", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -936,11 +1055,13 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"qwen", "self", "native"}
-    for p in ("qwen", "self"):
+    assert set(status) == {"airouter", "qwen", "self", "native"}
+    for p in ("airouter", "qwen", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
+    # TEST profile disables the cloud tool for hermeticity, so airouter is honestly unavailable here
+    assert status["airouter"] is False
     # qwen is available iff its heavy deps (torch+transformers) are installed — honest either way
-    print("qwen/self            : registered; degrade honestly on a bare machine ✓")
+    print("airouter/qwen/self   : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

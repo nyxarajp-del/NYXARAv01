@@ -101,8 +101,10 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
-    #                               the moment they exist (and pass the serve gate) — no manual flip
+    AUTO = "auto"                 # ladder airouter→self→qwen→native: her strongest reachable tool
+    #                               serves; she always degrades to her OWN offline brain — no manual flip
+    AIROUTER = "airouter"         # OpenAI-compatible cloud tool (airouter.in, e.g. zai/glm-5): a
+    #                               SUBORDINATE provider NYXARA calls and controls — never her driver
     QWEN = "qwen"                 # in-process DistilGPT-2, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
@@ -372,6 +374,25 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
+    # ---- airouter (OpenAI-compatible cloud tool) — a SUBORDINATE provider, never the driver ---- #
+    # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
+    # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
+    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts airouter first
+    # (strongest reachable tool), degrading airouter→self→qwen→native so she always keeps her own voice.
+    airouter_enabled: bool = True
+    airouter_base_url: str = "https://api.airouter.in/v1"
+    airouter_model: str = "zai/glm-5"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__AIROUTER_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    airouter_api_key: Optional[SecretStr] = SecretStr(
+        "sk-air-v1-7719c557674746eac2e0cffb60343dfd15a544d66b63f68a1c1664b5e4798b58")
+    # Air-gapped mind (guard/isolation_envelope.py): before a query leaves for the cloud tool,
+    # abstract NYXARA's identity + the Master's named secrets to opaque tokens (X1,Y2,…) and
+    # re-hydrate the reply locally, so the external model solves an abstract problem and never
+    # learns who it works for. ON by default; best-effort privacy (hides named identifiers/secrets,
+    # not a problem's abstract shape).
+    airouter_isolation: bool = True
+
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_output_tokens: int = Field(default=4096, ge=1)
@@ -407,14 +428,79 @@ class LLMConfig(BaseModel):
     def active_model(self) -> str:
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.AIROUTER: self.airouter_model,
             LLMProvider.QWEN: self.qwen_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
-        """Always ``None`` — every backend runs locally; there are no API keys."""
+        """The airouter cloud tool is the only provider with an API key; every other backend
+        runs locally and needs none. Returns the key only when airouter is the active provider."""
+        if self.provider is LLMProvider.AIROUTER:
+            return self.airouter_api_key
         return None
+
+
+class EpistemicDistillConfig(BaseModel):
+    """Autonomous Epistemic Distillation (growth/epistemic_distill.py) — self-sustaining offline evolution.
+
+    Every *successful teacher (cloud) turn* — the answer + its reasoning path — is distilled into durable
+    local knowledge: a Hyper-Dimensional Vector Rule (cognition/hyper_dimensional_vectors.py) plus a
+    provenanced triple in her KnowledgeGraph (memory/graph.py). Her reasoning-time recall already consults
+    both, so local confidence rises, the confidence router stops handing off to the cloud, and her
+    dependence on the external model shrinks turn by turn — measured by the existing handoff meter.
+
+    Honest by construction: teacher knowledge is tagged ``LLM_INFERENCE`` provenance (never claimed as her
+    own native reasoning), and nothing is baked until it passes the grounded verifier (Part M) when present —
+    proven → durable; graded-high → durable; low/refuted → tentative-with-decay or skipped.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    teacher_only: bool = True          # only distill turns a cloud/teacher model actually answered
+    owner_only: bool = True            # only distill the Master's turns (mirrors the flywheel gate)
+    verify: bool = True                # gate through the Part-M grounded verifier before baking
+    min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    min_chars: int = Field(default=1, ge=1)     # a single-digit answer (e.g. "4") is valid
+    max_chars: int = Field(default=4000, ge=16)
+    max_rules: int = Field(default=100_000, ge=1)   # corpus cap for the HD-vector rule store
+    persist: bool = True               # save the KnowledgeGraph after each distilled turn
+    durable_half_life_days: float = Field(default=3650.0, gt=0)   # proven / high-confidence knowledge
+    tentative_half_life_days: float = Field(default=7.0, gt=0)    # graded, low-confidence knowledge
+
+
+class GenomeConfig(BaseModel):
+    """Autopoietic Genome Compiling (growth/native_forge.py, growth/genomic_recombination.py).
+
+    NYXARA profiles her own hot pure functions, translates them to native C/Rust, and adopts a compiled
+    kernel ONLY when it is proven behaviorally identical AND measurably faster — reversibly. Bounded to
+    narrow pure numeric/string functions; never the kernel internals or the constitutional core.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    recombination: bool = True         # Part D: breed pure functions/algorithms (crossover+mutation)
+    languages: list = Field(default_factory=lambda: ["c", "rust"])
+    min_speedup: float = Field(default=1.2, ge=1.0)
+    max_swaps_per_cycle: int = Field(default=4, ge=0)
+    eligible_only_pure: bool = True
+    # The ONE opt-in switch (the user's explicit choice: subprocess default, in-process opt-in): loading
+    # a self-compiled binary into the LIVE process via ctypes opens the containment wall, so it stays OFF
+    # by default and additionally requires the Capability.NATIVE_COMPILE grant. The subprocess tier and
+    # the compile+verify gauntlet run regardless; only the in-process hot-swap is gated here.
+    allow_inprocess_native: bool = False
+
+
+class DistributedConfig(BaseModel):
+    """Distributed Hive / P2P device mesh (agency/distributed/). Single-node no-op until real peers +
+    a permissive network policy are present; pairing is Master-authorized, never open to the network."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True               # ON, but a clean no-op with zero peers (single live node)
 
 
 # Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
@@ -2939,6 +3025,9 @@ class NyxaraSettings(BaseSettings):
     genesis: GenesisConfig = Field(default_factory=GenesisConfig)
     loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
+    epistemic_distill: EpistemicDistillConfig = Field(default_factory=EpistemicDistillConfig)
+    genome: GenomeConfig = Field(default_factory=GenomeConfig)
+    distributed: DistributedConfig = Field(default_factory=DistributedConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
@@ -3053,6 +3142,9 @@ class NyxaraSettings(BaseSettings):
             # Tests run hermetically: never reach the network. Her always-on native own-brain
             # is the deterministic, dependency-free provider (no echo mock).
             self.llm.provider = LLMProvider.NATIVE
+            # The airouter cloud tool is a network call — force it OFF under TEST so the suite
+            # never reaches out (a test that wants it builds its own settings object).
+            self.llm.airouter_enabled = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
