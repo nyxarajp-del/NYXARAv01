@@ -442,6 +442,35 @@ class LLMConfig(BaseModel):
         return None
 
 
+class EpistemicDistillConfig(BaseModel):
+    """Autonomous Epistemic Distillation (growth/epistemic_distill.py) — self-sustaining offline evolution.
+
+    Every *successful teacher (cloud) turn* — the answer + its reasoning path — is distilled into durable
+    local knowledge: a Hyper-Dimensional Vector Rule (cognition/hyper_dimensional_vectors.py) plus a
+    provenanced triple in her KnowledgeGraph (memory/graph.py). Her reasoning-time recall already consults
+    both, so local confidence rises, the confidence router stops handing off to the cloud, and her
+    dependence on the external model shrinks turn by turn — measured by the existing handoff meter.
+
+    Honest by construction: teacher knowledge is tagged ``LLM_INFERENCE`` provenance (never claimed as her
+    own native reasoning), and nothing is baked until it passes the grounded verifier (Part M) when present —
+    proven → durable; graded-high → durable; low/refuted → tentative-with-decay or skipped.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    teacher_only: bool = True          # only distill turns a cloud/teacher model actually answered
+    owner_only: bool = True            # only distill the Master's turns (mirrors the flywheel gate)
+    verify: bool = True                # gate through the Part-M grounded verifier before baking
+    min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    min_chars: int = Field(default=1, ge=1)     # a single-digit answer (e.g. "4") is valid
+    max_chars: int = Field(default=4000, ge=16)
+    max_rules: int = Field(default=100_000, ge=1)   # corpus cap for the HD-vector rule store
+    persist: bool = True               # save the KnowledgeGraph after each distilled turn
+    durable_half_life_days: float = Field(default=3650.0, gt=0)   # proven / high-confidence knowledge
+    tentative_half_life_days: float = Field(default=7.0, gt=0)    # graded, low-confidence knowledge
+
+
 # Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
 # (n_layer, n_head, n_embd, block_size) tuple; "gpt2" is the canonical 124M-parameter
 # GPT-2 architecture (the requested minimum-GPT-2-scale substrate), reachable only when
@@ -2964,6 +2993,7 @@ class NyxaraSettings(BaseSettings):
     genesis: GenesisConfig = Field(default_factory=GenesisConfig)
     loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
+    epistemic_distill: EpistemicDistillConfig = Field(default_factory=EpistemicDistillConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
