@@ -29,14 +29,15 @@ def _has_torch() -> bool:
 
 
 # -------------------- enum / registry / config routing -------------------- #
-def test_provider_enum_is_local_only():
+def test_provider_enum_includes_airouter_tool():
     assert LLMProvider.QWEN.value == "qwen"
-    assert {p.value for p in LLMProvider} == {"auto", "qwen", "self", "native"}
+    # airouter is the one CLOUD tool; the rest run locally.
+    assert {p.value for p in LLMProvider} == {"auto", "airouter", "qwen", "self", "native"}
 
 
 def test_registered_in_facade():
     status = LLM(settings=_settings()).provider_status()
-    assert set(status) == {"qwen", "self", "native"}
+    assert set(status) == {"airouter", "qwen", "self", "native"}
 
 
 def test_config_routes_model_and_no_keys():

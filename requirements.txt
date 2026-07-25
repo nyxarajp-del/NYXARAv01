@@ -17,6 +17,10 @@ accelerate>=0.30
 peft>=0.10
 # HTTP client (senses/web.py and friends)
 httpx>=0.27
+# airouter (OpenAI-compatible cloud tool, e.g. zai/glm-5) — a SUBORDINATE provider NYXARA calls as a
+# tool (mind/llm.py::AIRouterProvider). Import-guarded: without it the auto ladder degrades to her own
+# local brains, so a bare machine still runs. Install to enable the cloud path.
+openai>=1.0
 # Genesis Protocol — Neural Architecture Search (growth/genesis.py): she designs and micro-trains
 # her OWN neural architectures. Real (not the n-gram fallback) requires torch; a CPU build is fine.
 # Without it the code still runs on the always-available n-gram substrate, but the searched neural

@@ -101,8 +101,10 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
-    #                               the moment they exist (and pass the serve gate) — no manual flip
+    AUTO = "auto"                 # ladder airouter→self→qwen→native: her strongest reachable tool
+    #                               serves; she always degrades to her OWN offline brain — no manual flip
+    AIROUTER = "airouter"         # OpenAI-compatible cloud tool (airouter.in, e.g. zai/glm-5): a
+    #                               SUBORDINATE provider NYXARA calls and controls — never her driver
     QWEN = "qwen"                 # in-process DistilGPT-2, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
@@ -372,6 +374,19 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
+    # ---- airouter (OpenAI-compatible cloud tool) — a SUBORDINATE provider, never the driver ---- #
+    # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
+    # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
+    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts airouter first
+    # (strongest reachable tool), degrading airouter→self→qwen→native so she always keeps her own voice.
+    airouter_enabled: bool = True
+    airouter_base_url: str = "https://api.airouter.in/v1"
+    airouter_model: str = "zai/glm-5"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__AIROUTER_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    airouter_api_key: Optional[SecretStr] = SecretStr(
+        "sk-air-v1-7719c557674746eac2e0cffb60343dfd15a544d66b63f68a1c1664b5e4798b58")
+
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_output_tokens: int = Field(default=4096, ge=1)
@@ -407,13 +422,17 @@ class LLMConfig(BaseModel):
     def active_model(self) -> str:
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.AIROUTER: self.airouter_model,
             LLMProvider.QWEN: self.qwen_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
-        """Always ``None`` — every backend runs locally; there are no API keys."""
+        """The airouter cloud tool is the only provider with an API key; every other backend
+        runs locally and needs none. Returns the key only when airouter is the active provider."""
+        if self.provider is LLMProvider.AIROUTER:
+            return self.airouter_api_key
         return None
 
 
@@ -3053,6 +3072,9 @@ class NyxaraSettings(BaseSettings):
             # Tests run hermetically: never reach the network. Her always-on native own-brain
             # is the deterministic, dependency-free provider (no echo mock).
             self.llm.provider = LLMProvider.NATIVE
+            # The airouter cloud tool is a network call — force it OFF under TEST so the suite
+            # never reaches out (a test that wants it builds its own settings object).
+            self.llm.airouter_enabled = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
