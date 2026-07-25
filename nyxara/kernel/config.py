@@ -386,6 +386,12 @@ class LLMConfig(BaseModel):
     # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
     airouter_api_key: Optional[SecretStr] = SecretStr(
         "sk-air-v1-7719c557674746eac2e0cffb60343dfd15a544d66b63f68a1c1664b5e4798b58")
+    # Air-gapped mind (guard/isolation_envelope.py): before a query leaves for the cloud tool,
+    # abstract NYXARA's identity + the Master's named secrets to opaque tokens (X1,Y2,…) and
+    # re-hydrate the reply locally, so the external model solves an abstract problem and never
+    # learns who it works for. ON by default; best-effort privacy (hides named identifiers/secrets,
+    # not a problem's abstract shape).
+    airouter_isolation: bool = True
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
