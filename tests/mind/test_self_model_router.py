@@ -33,7 +33,7 @@ class _Own:
 
 
 class _Teacher:
-    def __init__(self, providers=("qwen", "self", "native")):
+    def __init__(self, providers=("airouter", "self", "native")):
         self._p = list(providers)
 
     def available_providers(self):

@@ -6,8 +6,8 @@ The Master's order has two halves and this module is the second one.
     **NYXARA herself** judges what they say. The panel advises; the sovereign decides.
 
 Where :mod:`mind.llm` exposes each provider one at a time, the council convenes them
-*together*. For a single question it asks every available member — the local DistilGPT-2
-base (``qwen``, in-process) and most importantly NYXARA's OWN model forged by the
+*together*. For a single question it asks every available member — the ``airouter`` cloud
+tool (GLM-5) she governs and most importantly NYXARA's OWN model forged by the
 foundry (``self``) — then aggregates their verdicts into one answer that NYXARA owns.
 
 Two ways to decide, both driven by NYXARA's own code (no member is ever handed control):

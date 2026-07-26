@@ -129,7 +129,7 @@ def test_bare_machine_floor_is_her_native_own_brain(fake_openai):
     """No key at all (bare machine): the guaranteed floor is her native own-brain, not an error."""
     s = _settings(airouter_api_key=None)
     # Model a truly bare machine: no self model promoted (fresh TEST profile) and the heavy-ML
-    # qwen path off, so only her always-on native own-brain remains — the guaranteed floor.
+    # inference path off, so only her always-on native own-brain remains — the guaranteed floor.
     s.features.transformers_inference = False
     llm = LLM(settings=s)
     resp = llm.complete(LLMRequest.from_prompt("hello"))

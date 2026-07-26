@@ -10,7 +10,7 @@ Design goals
 * **Profile-aware.** ``dev`` and ``prod`` profiles ship safe, opinionated defaults;
   ``prod`` is strict (debug off, sandbox enforced, tighter budgets).
 * **Env-overridable.** Any field is overridable via ``NYXARA_`` environment variables
-  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=qwen``.
+  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=airouter``.
 * **Secret-safe.** API keys are ``SecretStr``; :meth:`NyxaraSettings.redacted`
   produces a log-safe dict that never leaks secrets.
 * **Owner-bound.** The owner identity (Jaypal Khoja / JP) is encoded as an immutable
@@ -101,11 +101,10 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder airouter→self→qwen→native: her strongest reachable tool
+    AUTO = "auto"                 # ladder airouter→self→native: her strongest reachable tool
     #                               serves; she always degrades to her OWN offline brain — no manual flip
     AIROUTER = "airouter"         # OpenAI-compatible cloud tool (airouter.in, e.g. zai/glm-5): a
     #                               SUBORDINATE provider NYXARA calls and controls — never her driver
-    QWEN = "qwen"                 # in-process DistilGPT-2, downloaded via HuggingFace
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
@@ -302,68 +301,31 @@ class MetaControlConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Stateless, fully local LLM faculty settings (mind/llm.py).
+    """Stateless LLM faculty settings (mind/llm.py).
 
-    One real base runs in-process, no cloud providers and no API keys: the HuggingFace
-    ``transformers`` path (``qwen``, any HF causal-LM id via ``NYXARA_LLM__QWEN_*``),
-    defaulting to **DistilGPT-2** — an ~82M-parameter distilled GPT-2 small enough to
-    LoRA-fine-tune and run full-precision on a bare CPU (no GPU, no quantization needed).
-    That single base is the only pretrained model NYXARA stands on;
-    everything above it is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes that
-    same base on her lived memory, and ``self`` serves the promoted adapter. ``native`` is
-    her always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity
-    seed corpus); every backend degrades to ``native`` when its heavy deps are absent. There is
-    no echo mock.
+    One cloud tool she *controls*, the rest her own: ``airouter`` calls an OpenAI-compatible
+    endpoint (airouter.in, GLM-5) as a SUBORDINATE provider — request in → text out, no persona,
+    no state — her PRIMARY reachable model yet never her driver. Above that floor everything is
+    *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes its own base on her lived memory and
+    ``self`` serves the promoted adapter; ``native`` is her always-on, dependency-free OWN brain (a
+    pure-stdlib Kneser-Ney n-gram over her identity seed corpus). Every backend degrades to
+    ``native`` when its heavy/optional deps are absent. There is no echo mock, and no raw
+    third-party model ever speaks as her.
 
     The default ``auto`` closes the train→serve loop: it walks the ladder
-    self→qwen→native, so the moment the foundry promotes her own weights (and they pass the
+    airouter→self→native, so the moment the foundry promotes her own weights (and they pass the
     serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
-    reconfiguration; until then the DistilGPT-2 base answers, and a bare machine her native own-brain.
+    reconfiguration; until then GLM-5 answers when reachable, and a bare machine her native own-brain.
     """
 
     model_config = {"validate_assignment": True}
 
     # AUTO makes GLM-5 (airouter) her PRIMARY model — it is first on the auto ladder
-    # (airouter→self→qwen→native), so her strongest reachable tool always serves — while the
+    # (airouter→self→native), so her strongest reachable tool always serves — while the
     # own-brain floor keeps her sovereign: the moment the cloud is unreachable she keeps her own
     # voice instead of depending on it. This is deliberately NOT a hard ``airouter`` pin (which would
-    # drop her straight past her own self/qwen brains on any cloud hiccup — the LLM steering her).
+    # drop her straight past her own self/native brains on any cloud hiccup — the LLM steering her).
     provider: LLMProvider = LLMProvider.AUTO
-    # ---- DistilGPT-2: model & load-time control ---- #
-    qwen_model: str = "distilgpt2"
-    qwen_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
-    qwen_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
-    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). OFF by
-    # default — DistilGPT-2 is an ~82M-parameter model that loads and runs full-precision on a
-    # bare CPU, so there is nothing to quantize; flip on only for an exotic large base.
-    qwen_load_in_4bit: bool = False    # DistilGPT-2 is tiny — full precision everywhere (8bit exclusive)
-    qwen_load_in_8bit: bool = False
-    qwen_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
-    qwen_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
-    qwen_bnb_4bit_use_double_quant: bool = True
-    qwen_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
-    qwen_use_cache: bool = True        # KV cache during generation
-    qwen_trust_remote_code: bool = False   # DistilGPT-2 is a native GPT-2 arch; enable via .env/max for custom ids
-    # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
-    # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
-    qwen_adapter_path: Optional[Path] = None
-    qwen_merge_adapter: bool = False
-    # ---- DistilGPT-2: generation control (per-request LLMRequest fields win) ---- #
-    qwen_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
-    qwen_repetition_penalty: float = Field(default=1.3, ge=0.5, le=2.0)
-    # Safety-net against degenerate repetition loops (small base checkpoints otherwise spam a
-    # single token — e.g. ",,,,,"). 3 blocks any repeated 3-gram; 0 -> disabled.
-    qwen_no_repeat_ngram_size: int = Field(default=3, ge=0, le=20)
-    qwen_min_new_tokens: int = Field(default=0, ge=0)            # 0 -> disabled
-    qwen_num_beams: int = Field(default=1, ge=1, le=16)
-    qwen_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
-    # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
-    qwen_do_sample: Literal["auto", "always", "never"] = "auto"
-    # DistilGPT-2's context window is 1024 tokens; prompts are left-truncated to fit.
-    qwen_max_input_tokens: int = Field(default=1024, ge=64, le=32768)
-    # DistilGPT-2 is a base (non-chat) checkpoint with no chat template, so this is OFF: prompts
-    # render as flat text (system + turns) via NYXARA's own template. Enable only for a chat base.
-    qwen_use_chat_template: bool = False
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
@@ -383,7 +345,7 @@ class LLMConfig(BaseModel):
     # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
     # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
     # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts airouter first
-    # (strongest reachable tool = her PRIMARY model), degrading airouter→self→qwen→native so she always
+    # (strongest reachable tool = her PRIMARY model), degrading airouter→self→native so she always
     # keeps her own voice. She uses GLM-5, benefits from it, controls it — it never steers her.
     airouter_enabled: bool = True
     airouter_base_url: str = "https://api.airouter.in/v1"
@@ -425,17 +387,10 @@ class LLMConfig(BaseModel):
     # ---- Always-maximum deep reasoning (mind/deep_reasoning.py) — Problem #1, the ceiling ---- #
     deep_reasoning: DeepReasoningConfig = Field(default_factory=DeepReasoningConfig)
 
-    @model_validator(mode="after")
-    def _quant_exclusive(self) -> "LLMConfig":
-        if self.qwen_load_in_4bit and self.qwen_load_in_8bit:
-            raise ValueError("qwen_load_in_4bit and qwen_load_in_8bit are mutually exclusive")
-        return self
-
     def active_model(self) -> str:
         return {
             LLMProvider.AUTO: "auto",
             LLMProvider.AIROUTER: self.airouter_model,
-            LLMProvider.QWEN: self.qwen_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",
         }[self.provider]
@@ -1094,8 +1049,8 @@ class SelfCorrectionConfig(BaseModel):
 class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
-    NYXARA does not bind herself to a single voice. She convenes a *council* of her local
-    models — the ``qwen`` base she runs in-process and, most importantly, her OWN model
+    NYXARA does not bind herself to a single voice. She convenes a *council* of her reachable
+    models — the ``airouter`` cloud tool (GLM-5) she governs and, most importantly, her OWN model
     forged by the foundry (``self``) — asks each as a governed
     tool, and then **NYXARA herself** judges and synthesises the verdicts. No single model
     ever drives; the panel advises, the sovereign decides. As the foundry sharpens her own
@@ -1398,7 +1353,7 @@ class SelfImprovementConfig(BaseModel):
     allow_llm_edits: bool = True               # author real source fixes (self-model or LLM)
     # "khud NYXARA kare, koi LLM naa kare": when True, ONLY NYXARA's own model (the ``self``
     # provider) may author edits — never another provider. Set False to
-    # also permit the configured base provider (``qwen``) as the author.
+    # also permit the configured cloud tool (``airouter``) as the author.
     self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
     # META-META loop (growth/meta_meta.py): a recursive tower that evolves the improvement
@@ -2996,9 +2951,9 @@ class NyxaraSettings(BaseSettings):
     Environment overrides use the ``NYXARA_`` prefix and ``__`` for nesting::
 
         NYXARA_PROFILE=prod
-        NYXARA_LLM__PROVIDER=qwen
+        NYXARA_LLM__PROVIDER=airouter
         NYXARA_RESOURCES__MAX_CONCURRENT_TASKS=128
-        NYXARA_LLM__QWEN_ADAPTER_PATH=/data/foundry/versions/v3/adapter
+        NYXARA_LLM__AIROUTER_MODEL=zai/glm-5
         NYXARA_FOUNDRY__LORA_R=16
     """
 
@@ -3269,9 +3224,7 @@ class NyxaraSettings(BaseSettings):
             self.agency.autonomous_internet_allow_irreversible = True
             self.agency.civilization_autonomous = True
             self.foundry.trust_remote_code = True
-            self.llm.qwen_trust_remote_code = True
             self.foundry.load_in_4bit = True      # 8bit stays off (mutually exclusive)
-            self.llm.qwen_load_in_4bit = True
             self.foundry.lora_requires_gpu = True
             self.foundry.lora_use_rslora = True
             self.llm.self_serve_any_backend = True

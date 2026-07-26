@@ -47,7 +47,6 @@ PRICES: Dict[str, Tuple[float, float]] = {
     # Everything runs in-process on NYXARA's own hardware — zero marginal dollar cost.
     "distilgpt2": (0.0, 0.0),
     "gpt2": (0.0, 0.0),
-    "qwen": (0.0, 0.0),
     "nyxara-self": (0.0, 0.0),
     "native": (0.0, 0.0),
 }
@@ -260,9 +259,9 @@ if __name__ == "__main__":  # pragma: no cover
     ledger = UsageLedger(daily_budget=10.0)
 
     # record from an LLMResponse-like object — local models cost nothing
-    r = _Resp("qwen", "distilgpt2", _Usage(1000, 1000))
+    r = _Resp("native", "distilgpt2", _Usage(1000, 1000))
     item = ledger.record(r)
-    print(f"qwen 1k/1k cost      : ${item.cost_usd:.4f}")
+    print(f"native 1k/1k cost    : ${item.cost_usd:.4f}")
     assert item.cost_usd == 0.0
 
     # record from a raw Usage (+ explicit provider/model)
@@ -280,7 +279,7 @@ if __name__ == "__main__":  # pragma: no cover
     bm = ledger.by_model()
     bp = ledger.by_provider()
     assert "distilgpt2" in bm and "nyxara-self" in bm
-    assert set(bp) == {"qwen", "self"}
+    assert set(bp) == {"native", "self"}
     print(f"by_provider          : { {k: int(v['tokens']) for k, v in bp.items()} }")
 
     # totals: tokens counted, zero spend

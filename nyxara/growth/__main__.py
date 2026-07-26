@@ -66,7 +66,8 @@ def _maybe_distill(args: argparse.Namespace, settings: Any) -> int:
 
     distiller = Distiller(settings=settings)
     if not distiller.available():
-        print("· no real teacher available (install .[llm] so the qwen provider runs) — "
+        print("· no real teacher available (enable the airouter cloud tool: install .[llm] "
+              "and set NYXARA_LLM__AIROUTER_API_KEY) — "
               "skipping distillation; training on seeds / lived memory only.")
         return 0
     n: Optional[int] = None if args.distill < 0 else args.distill
@@ -147,12 +148,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="self-improvement generations to run (default 1)")
     parser.add_argument("--distill", type=int, nargs="?", const=-1, default=0, metavar="N",
                         help="first distil N teacher prompts into the corpus (all if N omitted)")
-    parser.add_argument("--distilgpt2", "--tinyllama", "--qwen", dest="distilgpt2",
+    parser.add_argument("--distilgpt2", "--tinyllama", dest="distilgpt2",
                         action="store_true",
                         help="one-command preset: LoRA-tune distilgpt2 as her primary brain; "
                              "weights download on first use. Needs .[foundry] for the real base "
-                             "(degrades to the n-gram brain otherwise). --tinyllama/--qwen are "
-                             "kept as deprecated aliases")
+                             "(degrades to the n-gram brain otherwise). --tinyllama is "
+                             "kept as a deprecated alias")
     parser.add_argument("--trust-remote-code", action="store_true",
                         help="allow the base's custom modeling code to load (needed only for an "
                              "exotic base that ships its own modeling code; DistilGPT-2 does not)")

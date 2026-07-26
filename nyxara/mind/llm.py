@@ -11,22 +11,23 @@ makes cognition replayable (kernel/replay.py) and auditable. Memory lives in
 ``memory/``; tool execution lives in ``agency/``; the decision to *act* on any output
 belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
-Fully local, selected by config:
+Selected by config, strongest-reachable-first on the ``auto`` ladder:
 
-* :class:`QwenProvider`        — the single pretrained base: **DistilGPT-2** by default
-  (any HF causal-LM id works), downloaded & run in-process (HuggingFace transformers); every
-  load-/generation-time knob is exposed via ``NYXARA_LLM__QWEN_*``, including serving a
-  foundry-forged LoRA adapter directly. At ~82M params it runs and fine-tunes on a bare CPU.
+* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in), a
+  SUBORDINATE tool she *uses* and *controls*: request in → text out, no persona, no state, no
+  callback — the kernel treats its output as a proposal that must pass every guard. Her PRIMARY
+  reachable model, yet never the driver; the moment the cloud is unreachable she keeps her own voice.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
-  adapter over that same DistilGPT-2 base — everything above the base is *hers*)
+  adapter over the foundry base — everything above the base is *hers*).
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
   Kneser-Ney word n-gram (``growth/foundry_models.WordKNGramLM``) trained on her identity seed
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
   ladder — a bare machine still answers from her own learned voice, never an echo of the prompt.
 
-No cloud providers, no API keys, **no mock**. Heavy deps (``torch``/``transformers``/``peft``) are
-imported lazily and reported honestly via ``available()``, so this module works with zero heavy
-deps installed (falling back to her native own-brain).
+No external model ever *speaks as her*: the only cloud model is a tool she controls, and her own
+``self``/``native`` brains are the sovereign floor. Heavy/optional deps (the ``openai`` SDK,
+``torch``/``peft`` for the foundry) are imported lazily and reported honestly via ``available()``,
+so this module works with zero of them installed (falling back to her native own-brain).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -56,7 +57,6 @@ __all__ = [
     "LLMResponse",
     "LLMProviderBase",
     "NativeProvider",
-    "QwenProvider",
     "SelfProvider",
     "AIRouterProvider",
     "format_self_prompt",
@@ -261,7 +261,8 @@ class NativeProvider(LLMProviderBase):
     a bare machine with zero heavy deps still answers from *her own learned voice* rather than
     parroting the prompt. Deterministic (a fixed seed) → identical requests yield identical output,
     keeping cognition replayable (``kernel/replay.py``) and auditable. A genuine instruct model
-    (``self``/``qwen``) always outranks it on the ``auto`` ladder."""
+    (the ``airouter`` cloud tool or her own ``self`` weights) always outranks it on the ``auto``
+    ladder."""
 
     name = "native"
 
@@ -286,202 +287,6 @@ class NativeProvider(LLMProviderBase):
         usage = Usage(prompt_tokens=estimate_tokens(" ".join(m.content for m in req.messages)),
                       completion_tokens=estimate_tokens(text))
         return (text, "stop", usage, {"native": True})
-
-
-# --------------------------------------------------------------------------- #
-# Qwen provider — DistilGPT-2, downloaded & run locally (HuggingFace)
-# --------------------------------------------------------------------------- #
-class QwenProvider(LLMProviderBase):
-    """Run **DistilGPT-2** in-process, downloaded via HuggingFace — the sole real base.
-
-    This is the single pretrained model NYXARA stands on. It is fetched on first use
-    (``distilgpt2`` by default) and cached locally by the ``transformers``
-    hub, then served entirely on this machine — no API key, no network at inference time.
-    At ~82M params it loads full-precision on a bare CPU (no GPU or quantization needed). It is a
-    base (non-chat) checkpoint with no chat template, so prompts render as flat text
-    (``qwen_use_chat_template`` is OFF); NYXARA's own system/user/assistant framing carries the turns.
-
-    Maximum control, all from config (``NYXARA_LLM__QWEN_*``):
-
-    * load-time — device, dtype, 4-/8-bit quantized load (bitsandbytes+CUDA only, silently
-      full-precision otherwise), attention implementation, KV cache, trust_remote_code;
-    * fine-tune serving — ``qwen_adapter_path`` loads a peft LoRA adapter (e.g. a foundry
-      ``versions/vN/adapter``) on top of the base; ``qwen_merge_adapter`` folds it into the
-      weights for faster inference — this is how *her own* foundry adapter serves over the base;
-    * generation — top_k, repetition_penalty, no_repeat_ngram_size, min_new_tokens,
-      beam search + length_penalty, do_sample policy, deterministic seeding, input-length
-      budget; per-request :class:`LLMRequest` fields (temperature/top_p/max_tokens/stop/
-      seed) always win over config defaults.
-
-    Heavy deps are imported lazily and reported honestly, so a bare machine degrades to
-    her native own-brain rather than erroring. Stateless: the loaded weights are a cached instrument,
-    never conversation memory.
-    """
-
-    name = "qwen"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._model = None
-        self._tokenizer = None
-        self._loaded_key: Optional[Tuple[str, str]] = None   # (model_name, adapter_path)
-        self._torch: Any = None
-
-    def available(self) -> bool:
-        # Master kill-switch: the in-process HuggingFace path is a heavy-ML capability, so it only
-        # serves when ``features.transformers_inference`` is on (the ladder degrades to self/native).
-        if not bool(getattr(self.settings.features, "transformers_inference", True)):
-            return False
-        try:
-            import torch  # noqa: F401
-            import transformers  # noqa: F401
-        except Exception:
-            return False
-        if self.settings.llm.qwen_adapter_path is not None:
-            try:
-                import peft  # noqa: F401
-            except Exception:
-                return False
-        return True
-
-    def default_model(self) -> str:
-        return self.settings.llm.qwen_model
-
-    # ---- lazy model loading (cached; reloads when model or adapter changes) ---- #
-    def _quant_config(self, torch: Any) -> Optional[Any]:
-        """A ``BitsAndBytesConfig`` when quantization is requested AND usable, else None.
-
-        Quantized load needs bitsandbytes + CUDA; anywhere else we silently serve full
-        precision instead of crashing (graceful degradation, mirrors the foundry)."""
-        cfg = self.settings.llm
-        if not (cfg.qwen_load_in_4bit or cfg.qwen_load_in_8bit):
-            return None
-        try:
-            import bitsandbytes  # noqa: F401
-            from transformers import BitsAndBytesConfig
-        except Exception:
-            return None
-        if not torch.cuda.is_available():
-            return None
-        if cfg.qwen_load_in_8bit:
-            return BitsAndBytesConfig(load_in_8bit=True)
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type=cfg.qwen_bnb_4bit_quant_type,
-            bnb_4bit_compute_dtype=getattr(torch, cfg.qwen_bnb_4bit_compute_dtype),
-            bnb_4bit_use_double_quant=cfg.qwen_bnb_4bit_use_double_quant,
-        )
-
-    def _ensure_model(self, model: str):
-        cfg = self.settings.llm
-        key = (model, str(cfg.qwen_adapter_path or ""))
-        if self._model is None or self._loaded_key != key:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            tok = AutoTokenizer.from_pretrained(
-                model, trust_remote_code=cfg.qwen_trust_remote_code)
-            if tok.pad_token is None:
-                tok.pad_token = tok.eos_token
-            kwargs: Dict[str, Any] = {
-                "torch_dtype": ("auto" if cfg.qwen_dtype == "auto"
-                                else getattr(torch, cfg.qwen_dtype)),
-                "device_map": cfg.qwen_device or "auto",
-                "trust_remote_code": cfg.qwen_trust_remote_code,
-            }
-            if cfg.qwen_attn_implementation:
-                kwargs["attn_implementation"] = cfg.qwen_attn_implementation
-            quant = self._quant_config(torch)
-            if quant is not None:
-                kwargs["quantization_config"] = quant
-                kwargs["device_map"] = "auto"   # bitsandbytes places layers itself
-            lm = AutoModelForCausalLM.from_pretrained(model, **kwargs)
-            if cfg.qwen_adapter_path is not None:
-                from peft import PeftModel   # a bad adapter raises -> LLMError -> native fallback
-                lm = PeftModel.from_pretrained(lm, str(cfg.qwen_adapter_path))
-                if cfg.qwen_merge_adapter:
-                    lm = lm.merge_and_unload()
-            lm.eval()
-            self._model, self._tokenizer = lm, tok
-            self._loaded_key, self._torch = key, torch
-        return self._model, self._tokenizer
-
-    # ---- request -> prompt / generation kwargs ---- #
-    def _render_prompt(self, req: LLMRequest, tok: Any) -> str:
-        cfg = self.settings.llm
-        system = (req.system or "").strip()
-        if req.json_mode:
-            nudge = "Respond with ONLY valid JSON — no prose, no code fences."
-            system = f"{system}\n\n{nudge}" if system else nudge
-        messages = req.provider_messages()
-        if cfg.qwen_use_chat_template:
-            if system:
-                messages = [{"role": "system", "content": system}] + messages
-            return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        parts = ([system] if system else []) + [m["content"] for m in messages]
-        return "\n\n".join(parts)
-
-    def _gen_kwargs(self, req: LLMRequest, tok: Any) -> Dict[str, Any]:
-        """Merge per-request fields with config defaults (the request wins where it exists).
-
-        Sampling knobs are dropped entirely when decoding greedily — transformers warns
-        (and ignores them) otherwise, so the kwargs stay honest."""
-        cfg = self.settings.llm
-        do_sample = {"always": True, "never": False}.get(
-            cfg.qwen_do_sample, req.temperature > 0)
-        kwargs: Dict[str, Any] = {
-            "max_new_tokens": req.max_tokens,
-            "do_sample": do_sample,
-            "num_beams": cfg.qwen_num_beams,
-            "use_cache": cfg.qwen_use_cache,
-            "pad_token_id": tok.pad_token_id,
-            "eos_token_id": tok.eos_token_id,
-        }
-        if do_sample:
-            kwargs["temperature"] = max(req.temperature, 1e-3)
-            kwargs["top_p"] = req.top_p
-            if cfg.qwen_top_k > 0:
-                kwargs["top_k"] = cfg.qwen_top_k
-        if cfg.qwen_repetition_penalty != 1.0:
-            kwargs["repetition_penalty"] = cfg.qwen_repetition_penalty
-        if cfg.qwen_no_repeat_ngram_size > 0:
-            kwargs["no_repeat_ngram_size"] = cfg.qwen_no_repeat_ngram_size
-        if cfg.qwen_min_new_tokens > 0:
-            kwargs["min_new_tokens"] = cfg.qwen_min_new_tokens
-        if cfg.qwen_num_beams > 1:
-            kwargs["length_penalty"] = cfg.qwen_length_penalty
-        return kwargs
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        lm, tok = self._ensure_model(model)
-        cfg = self.settings.llm
-        prompt = self._render_prompt(req, tok)
-        inputs = dict(tok([prompt], return_tensors="pt"))
-        # prompt + completion must fit the configured input budget — keep the tail
-        budget = max(8, cfg.qwen_max_input_tokens - req.max_tokens)
-        if inputs["input_ids"].shape[1] > budget:
-            inputs = {k: v[:, -budget:] for k, v in inputs.items()}
-        inputs = {k: v.to(lm.device) for k, v in inputs.items()}
-        if req.seed is not None:   # full determinism on demand
-            self._torch.manual_seed(req.seed)
-            try:
-                from transformers import set_seed
-                set_seed(req.seed)
-            except Exception:  # noqa: BLE001 — seeding is best-effort beyond torch
-                pass
-        gen_kwargs = self._gen_kwargs(req, tok)
-        with self._torch.no_grad():
-            generated = lm.generate(**inputs, **gen_kwargs)
-        input_len = int(inputs["input_ids"].shape[1])
-        new_tokens = generated[0][input_len:]
-        raw_text = tok.decode(new_tokens, skip_special_tokens=True).strip()
-        text, hit = truncate_at_stops(raw_text, req.stop)
-        n_new = int(new_tokens.shape[0])
-        finish = "stop" if (hit or n_new < req.max_tokens) else "length"
-        usage = Usage(prompt_tokens=input_len, completion_tokens=n_new)
-        adapter = cfg.qwen_adapter_path
-        return (text, finish, usage,
-                {"qwen": True, "model": model,
-                 "adapter": str(adapter) if adapter else None})
 
 
 # --------------------------------------------------------------------------- #
@@ -813,7 +618,6 @@ class AIRouterProvider(LLMProviderBase):
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
     ProviderName.AIROUTER: AIRouterProvider,
-    ProviderName.QWEN: QwenProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
 }
@@ -844,11 +648,12 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her strongest reachable TOOL first (the airouter cloud model), then her OWN
-    # promoted weights, the DistilGPT-2 base, and finally her always-on dependency-free native own-brain
-    # as the guaranteed floor (never an echo mock). airouter is a tool she uses when reachable; the
-    # moment it is unavailable she keeps her own voice — she is never dependent on the cloud.
-    _AUTO_LADDER = ("airouter", "self", "qwen", "native")
+    # the auto ladder: her strongest reachable TOOL first (the airouter cloud model, GLM-5), then her
+    # OWN promoted weights, and finally her always-on dependency-free native own-brain as the
+    # guaranteed floor (never an echo mock). No raw third-party model answers on this ladder — airouter
+    # is a tool she uses when reachable; the moment it is unavailable she keeps her own voice, never
+    # dependent on the cloud.
+    _AUTO_LADDER = ("airouter", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -887,32 +692,15 @@ class LLM:
     def on_promotion(self, event: Any) -> None:
         """React to a foundry promotion/rollback: the live brain adopts the new weights.
 
-        (a) Hot-reload the ``self`` provider immediately (its per-request pointer check
-        is the backstop when this callback is missed — e.g. a cross-process promotion).
-        (b) When the promoted version is a LoRA over the *same* HF base the qwen provider
-        serves, point ``qwen_adapter_path`` at the fresh adapter — the provider's
-        ``(model, adapter)`` cache key reloads it on the next call, so her own foundry
-        adapter serves over the base with zero reconfiguration."""
+        Hot-reload the ``self`` provider immediately (its per-request pointer check is the
+        backstop when this callback is missed — e.g. a cross-process promotion). The foundry's
+        own LoRA serves through ``self`` directly, so no external provider needs reconfiguring."""
         prov = self._providers.get("self")
         if prov is not None and hasattr(prov, "reload"):
             try:
                 prov.reload()
             except Exception:  # noqa: BLE001 — best-effort; pointer-poll retries later
                 pass
-        try:
-            if str(getattr(event, "kind", "")) != "lora":
-                return
-            from pathlib import Path
-            vdir = Path(str(getattr(event, "path", "")))
-            adapter = vdir / "adapter"
-            spec_file = vdir / "spec.json"
-            if not adapter.is_dir() or not spec_file.exists():
-                return
-            base = str(json.loads(spec_file.read_text(encoding="utf-8")).get("base_model", ""))
-            if base and base == self.settings.llm.qwen_model:
-                self.settings.llm.qwen_adapter_path = adapter
-        except Exception:  # noqa: BLE001 — adapter injection is a bonus, never a failure
-            pass
 
     def learning_view(self) -> Dict[str, Any]:
         """Truthful live-serving state for the learning report."""
@@ -1055,13 +843,12 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"airouter", "qwen", "self", "native"}
-    for p in ("airouter", "qwen", "self"):
+    assert set(status) == {"airouter", "self", "native"}
+    for p in ("airouter", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
     # TEST profile disables the cloud tool for hermeticity, so airouter is honestly unavailable here
     assert status["airouter"] is False
-    # qwen is available iff its heavy deps (torch+transformers) are installed — honest either way
-    print("airouter/qwen/self   : registered; degrade honestly on a bare machine ✓")
+    print("airouter/self/native : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")
