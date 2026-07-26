@@ -77,3 +77,33 @@ def test_disabled_is_noop():
     d = _distiller(enabled=False)
     assert d.distill_turn("what is 6*7?", "42").stored is False
     assert d.count() == 0
+
+
+# --------------------------------------------------------------------------- #
+# chat turns are never baked as durable "verified answers" (they'd replay forever)
+# --------------------------------------------------------------------------- #
+def _verifierless_distiller():
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    return EpistemicDistiller(
+        knowledge_graph=KnowledgeGraph(),
+        latent_map=LatentSpaceMap(dim=2048, seed=1),
+        verifier=None,
+        settings=s,
+        graph_path=None,
+    )
+
+
+def test_chat_turn_is_not_baked_as_a_verified_answer_triple():
+    d = _verifierless_distiller()
+    res = d.distill_turn("Tum kon ho", "Main NYXARA hoon, Master.", confidence=0.9)
+    # the exchange may still be distilled (HD rule / memory) but the whole chat utterance
+    # must never become a has_verified_answer key that replays this reply forever
+    assert res.stored is True and res.triples == 0
+    assert not d.knowledge_graph.match(GraphQuery(predicate="has_verified_answer"))
+
+
+def test_factual_turn_is_still_baked():
+    d = _verifierless_distiller()
+    res = d.distill_turn("Who wrote Hamlet?", "William Shakespeare", confidence=0.9)
+    assert res.stored is True and res.triples == 1
+    assert d.knowledge_graph.match(GraphQuery(predicate="has_verified_answer"))

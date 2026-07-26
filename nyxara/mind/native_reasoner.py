@@ -528,8 +528,10 @@ class NativeReasoner:
     # ------------------------------------------------------------------ #
     def _dispatch(self, part: str, intent: str, steps: List[ReasoningStep]
                   ) -> Optional[Tuple[str, float, str, bool, str]]:
-        # her own verified past work answers repeats instantly (compounding loop)
-        cached = self._cached_answer(part)
+        # her own verified past work answers repeats instantly (compounding loop).
+        # ordinary conversation has no durable "verified answer" — a chat turn keyed on the
+        # whole utterance must never replay a stale reply, so the cache is skipped for it.
+        cached = self._cached_answer(part) if intent != "chat" else None
         if cached is not None:
             answer, conf = cached
             self._step(steps, StepKind.RECALL,
@@ -1075,6 +1077,12 @@ class NativeReasoner:
                                                predicate="has_verified_answer"))
         except Exception:  # noqa: BLE001
             return None
+        # only genuinely verified work may replay: her own certified compute, or a triple a
+        # verifier actually proved. Teacher-inferred distillations (an LLM's best guess baked
+        # by epistemic distillation) are knowledge, not certainty — replaying one as VERIFIED
+        # freezes a possibly-wrong answer forever, so they are filtered out here (which also
+        # neutralizes any such triples already persisted by earlier versions).
+        hits = [t for t in hits if self._replayable(t)]
         if not hits:
             return None
         best = max(hits, key=lambda t: t.confidence)
@@ -1083,6 +1091,17 @@ class NativeReasoner:
         except Exception:  # noqa: BLE001
             return None
         return answer, float(best.confidence)
+
+    @staticmethod
+    def _replayable(triple: Any) -> bool:
+        """True iff this ``has_verified_answer`` triple was genuinely verified."""
+        attrs = getattr(triple, "attributes", None) or {}
+        if attrs.get("source") == "native_reasoner":     # her own certified compute (_promote)
+            return True
+        if attrs.get("verdict") == "proven":             # a verifier actually proved it
+            return True
+        method = getattr(getattr(triple, "provenance", None), "method", "")
+        return method == "verified"
 
     def _promote(self, conclusion: NativeConclusion) -> None:
         """Write a VERIFIED conclusion back into the knowledge graph (bounded)."""

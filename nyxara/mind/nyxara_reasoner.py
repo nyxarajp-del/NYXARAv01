@@ -34,7 +34,7 @@ The LLM proposes; the kernel still disposes — this reasoner only ever returns 
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.kernel.config import NyxaraSettings, get_settings
@@ -882,15 +882,24 @@ class NyxaraReasoner:
             return None
         return res.render(), float(res.confidence), str(res.source), bool(res.analogical)
 
-    def teach_self_brain(self, *docs: str, reward: float = 0.0) -> None:
+    def teach_self_brain(self, *docs: str, reward: float = 0.0,
+                         speakable: Optional[Sequence[bool]] = None) -> None:
         """Compound the own learned brain from lived exchanges (called by the kernel's _grow).
 
         ``reward`` threads the turn's outcome through so the brain genuinely *learns* — its weights
-        accumulate ∝ reward and a punished reply is suppressed — rather than only remembering text."""
+        accumulate ∝ reward and a punished reply is suppressed — rather than only remembering text.
+        ``speakable`` (parallel to ``docs``) marks which docs are her OWN words; the Master's
+        messages train weights/embedder but never enter her recall/compose index."""
         brain = self._own_brain()
         if brain is not None:
             try:
-                brain.learn(*docs, reward=reward)
+                brain.learn(*docs, reward=reward, speakable=speakable)
+            except TypeError:
+                # a brain that predates speakable-aware learning — compound without it
+                try:
+                    brain.learn(*docs, reward=reward)
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception:  # noqa: BLE001 — compounding is best-effort
                 pass
 

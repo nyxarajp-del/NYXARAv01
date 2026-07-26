@@ -19,6 +19,23 @@ from nyxara.memory.store import (
 
 
 # -------------------- embedder -------------------- #
+def test_sentence_transformer_embedder_is_shared_per_model(monkeypatch):
+    """One heavy sentence-transformer per (model, device) for the whole process."""
+    import nyxara.memory.store as store_mod
+
+    class _Stub:
+        def __init__(self, model_name, device):
+            self.model_name, self.device = model_name, device
+
+    monkeypatch.setattr(store_mod, "SentenceTransformerEmbedder", _Stub)
+    monkeypatch.setattr(store_mod, "_ST_EMBEDDER_CACHE", {})
+    a = store_mod._shared_st_embedder("m1", "")
+    b = store_mod._shared_st_embedder("m1", "")
+    c = store_mod._shared_st_embedder("m2", "")
+    assert a is b
+    assert c is not a and c.model_name == "m2"
+
+
 def test_embedder_deterministic_and_normalised():
     e = HashingEmbedder(dim=64)
     v1 = e.embed("the quick brown fox")

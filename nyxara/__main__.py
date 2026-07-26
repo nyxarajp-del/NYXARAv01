@@ -565,8 +565,23 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     return True
 
 
+def _quiet_model_loading() -> None:
+    """Silence transformers' per-load progress bars and weight reports on the console.
+
+    Background faculties (foundry, genesis, embedders) load models mid-conversation; their
+    "Loading weights …" bars and LOAD REPORT tables would otherwise interleave with the
+    Master's chat. Best-effort: purely cosmetic, never fatal, real errors still surface."""
+    try:
+        from transformers.utils import logging as hf_logging
+        hf_logging.set_verbosity_error()
+        hf_logging.disable_progress_bar()
+    except Exception:  # noqa: BLE001 — transformers absent or too old; nothing to quiet
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """Boot NYXARA and run the interactive Master console."""
+    _quiet_model_loading()
     try:
         core = NyxaraCore()
     except Exception as exc:  # noqa: BLE001 - boot integrity failed

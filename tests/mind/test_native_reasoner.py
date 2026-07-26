@@ -238,6 +238,42 @@ def test_verified_causal_answer_promotes_causes_triples(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# verified-answer replay gate — only genuinely verified work may answer repeats
+# --------------------------------------------------------------------------- #
+def test_teacher_baked_chat_triple_never_replays(tmp_path):
+    """A chat utterance that an old epistemic-distill pass baked must not replay forever."""
+    from nyxara.memory.graph import KnowledgeGraph
+    kg = KnowledgeGraph()
+    kg.add_triple("tum kon ho", "has_verified_answer",
+                  "Yes — it is valid under every truth assignment.",
+                  confidence=0.78, attributes={"verdict": "graded", "source": "teacher"})
+    nr = _reasoner(tmp_path, knowledge_graph=kg)
+    assert nr.reason("tum kon ho") is None      # chat → honest abstain, never the stale bake
+
+
+def test_unproven_teacher_triple_is_not_replayable(tmp_path):
+    from nyxara.memory.graph import KnowledgeGraph
+    kg = KnowledgeGraph()
+    kg.add_triple("what is the airspeed of a swallow", "has_verified_answer",
+                  "an unverified teacher guess",
+                  confidence=0.9, attributes={"verdict": "graded", "source": "teacher"})
+    nr = _reasoner(tmp_path, knowledge_graph=kg)
+    assert nr._cached_answer("what is the airspeed of a swallow") is None
+
+
+def test_proven_or_native_triples_still_replay(tmp_path):
+    from nyxara.memory.graph import KnowledgeGraph
+    kg = KnowledgeGraph()
+    kg.add_triple("what is 6 times 7", "has_verified_answer", "42",
+                  confidence=1.0, attributes={"verdict": "proven", "source": "teacher"})
+    kg.add_triple("what is 12 times 12", "has_verified_answer", "144",
+                  confidence=0.9, attributes={"source": "native_reasoner"})
+    nr = _reasoner(tmp_path, knowledge_graph=kg)
+    assert nr._cached_answer("what is 6 times 7") == ("42", 1.0)
+    assert nr._cached_answer("what is 12 times 12") == ("144", 0.9)
+
+
+# --------------------------------------------------------------------------- #
 # self-improvement — measure, propose, PROVE on replay, apply (bounded)
 # --------------------------------------------------------------------------- #
 def _write_replay(path, records):

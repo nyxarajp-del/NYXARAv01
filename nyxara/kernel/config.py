@@ -585,6 +585,10 @@ class FoundryConfig(BaseModel):
     self_brain_retrieval: bool = True               # answer from learned sentences before generating
     self_brain_top_k: int = Field(default=4, ge=1, le=16)        # retrieved sentences considered
     self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
+    # the *handoff* path (her brain answering in place of a capable teacher) demands a much closer
+    # retrieval match than the offline voice — below this floor she defers to the teacher instead
+    # of stitching loosely-related learned sentences into a plausible-looking non-answer.
+    self_brain_handoff_sim: float = Field(default=0.6, ge=0.0, le=1.0)
     # Generative backend for the always-on brain. "auto" now means **neural-when-possible**:
     # the torch nano-GPT when torch is present, else the pure-NumPy transformer (genesis_np) —
     # a real gradient-trained neural net with backprop, no torch/LLM/cloud — and only the

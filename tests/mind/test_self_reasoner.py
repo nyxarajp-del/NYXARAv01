@@ -230,3 +230,61 @@ def test_handoff_path_never_bluffs_from_the_persona_seed():
     # ...but the handoff path answers only from genuine grounding:
     assert brain.reply("Give me an unrelated random anecdote.",
                        require_grounding=True) == ""
+
+
+# --------------------------------------------------------------------------- #
+# heard vs speakable — the Master's words are never composed back at them
+# --------------------------------------------------------------------------- #
+def test_heard_master_text_never_enters_the_compose_index():
+    brain = _cold_brain()
+    brain.reply("warm up")                         # build the index
+    before = brain.index_size
+    brain.learn("The Master's secret plan involves quasars and pulsars tonight.",
+                speakable=[False])
+    assert brain.index_size == before              # heard, not indexed for recall
+    assert brain.learned_count == 0                # heard text is not a learned reply
+    reply = brain.reply("Tell me about quasars and pulsars.")
+    assert "secret plan" not in (reply or "").lower()
+
+
+def test_mixed_turn_indexes_only_her_own_reply():
+    brain = _cold_brain()
+    brain.reply("warm up")
+    before = brain.index_size
+    brain.learn("What do you know about tardigrade cryptobiosis, tell me now?",
+                "Tardigrades survive desiccation through cryptobiosis, Master.",
+                speakable=[False, True])
+    assert brain.index_size == before + 1          # only the reply entered recall
+    assert brain.learned_count == 1
+
+
+def test_semantic_handoff_floor_defers_on_a_loose_match():
+    """In a semantic space a merely-adjacent match is a bluff — the handoff defers."""
+
+    class _SemStub:
+        is_lexical = False
+
+        def embed(self, text):
+            # learned sentence ⟂-ish to the query: cosine 0.5 (above the compose floor
+            # 0.35, below the handoff floor 0.6)
+            return [1.0, 0.0] if "zephyr" in text.lower() else [0.5, 0.8660254]
+
+    brain = _cold_brain()
+    brain._embedder = _SemStub()
+    brain.reply("warm up")
+    brain.learn("The zephyr protocol rotates its keys hourly.")
+    q = "Describe the key rotation schedule."   # embeds to the 0.5-cosine vector
+    assert brain.reply(q, require_grounding=True) == ""     # handoff defers
+    assert brain.reply(q) != ""                             # offline voice still speaks
+
+
+def test_lexical_space_keeps_the_ordinary_compose_floor():
+    class _LexStub:
+        is_lexical = True
+
+        def embed(self, text):
+            return [1.0, 0.0]
+
+    brain = _cold_brain()
+    brain._embedder = _LexStub()
+    assert brain._handoff_floor() == brain._sim_threshold
