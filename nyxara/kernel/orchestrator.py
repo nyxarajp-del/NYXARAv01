@@ -6482,7 +6482,12 @@ class NyxaraCore:
         """
         text = str(stimulus or "").strip()
         reply = str(getattr(candidate, "text", "") or "").strip()
-        docs = [d for d in (text, reply) if d]
+        # the Master's message is HEARD (trains weights + embedder), only her own reply is
+        # SPEAKABLE (may be recalled/composed later) — she must never answer a future turn by
+        # stitching the Master's own words back at them.
+        pairs = [(d, spk) for d, spk in ((text, False), (reply, True)) if d]
+        docs = [d for d, _ in pairs]
+        speakable = [spk for _, spk in pairs]
         if not docs:
             return
         # emergent curiosity: a question she answered with low confidence is something she could
@@ -6499,11 +6504,16 @@ class NyxaraCore:
             teach = getattr(getattr(self.reasoner, "llm_reasoner", None), "teach_self_brain", None)
         if callable(teach):
             try:
-                teach(*docs, reward=reward)
+                teach(*docs, reward=reward, speakable=speakable)
             except TypeError:
-                # a brain/reasoner that predates reward-aware learning — compound without it
+                # a brain/reasoner that predates speakable/reward-aware learning — degrade gently
                 try:
-                    teach(*docs)
+                    teach(*docs, reward=reward)
+                except TypeError:
+                    try:
+                        teach(*docs)
+                    except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                        pass
                 except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
                     pass
             except Exception:  # noqa: BLE001 — compounding the own brain is best-effort

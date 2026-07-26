@@ -112,6 +112,15 @@ class EpistemicDistiller:
                 "hd_rules": (len(self.latent_map) if self.latent_map is not None else 0),
                 "graph_triples": (len(self.knowledge_graph) if self.knowledge_graph is not None else 0)}
 
+    @staticmethod
+    def _bakeable(prompt: str) -> bool:
+        """True iff ``prompt`` is the kind of question whose answer can be durable knowledge."""
+        try:
+            from nyxara.mind.native_reasoner import classify_intent
+            return classify_intent(prompt) != "chat"
+        except Exception:  # noqa: BLE001 — classification is advisory; bake rather than lose
+            return True
+
     # ---- the distillation ---- #
     def distill_turn(self, prompt: str, answer: str, reasoning: Optional[str] = None, *,
                      confidence: float = 1.0, source: str = "teacher") -> EpistemicResult:
@@ -158,8 +167,12 @@ class EpistemicDistiller:
         )
 
         # ---- 1) durable, queryable KnowledgeGraph triple ---- #
+        # ordinary conversation is never baked as a "verified answer": a chat utterance keyed on
+        # the whole prompt would replay a one-off conversational reply forever. Only questions
+        # with extractable structure (factual / computational / causal …) earn a durable triple;
+        # the HD-vector rule below still learns the exchange either way.
         triples = 0
-        if self.knowledge_graph is not None:
+        if self.knowledge_graph is not None and self._bakeable(p):
             try:
                 self.knowledge_graph.add_triple(
                     p[:80], "has_verified_answer", a[:200],

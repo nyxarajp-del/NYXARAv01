@@ -28,7 +28,7 @@ Stateless per call, like the faculty it sits on.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from nyxara.agency.permissions import Capability, RiskTier
 from nyxara.kernel.config import NyxaraSettings, get_settings
@@ -291,15 +291,24 @@ class LLMReasoner:
             pass
         return base                           # honest floor: never worse than the template
 
-    def teach_self_brain(self, *docs: str, reward: float = 0.0) -> None:
+    def teach_self_brain(self, *docs: str, reward: float = 0.0,
+                         speakable: Optional[Sequence[bool]] = None) -> None:
         """Fold real exchanges/observations into the own brain so it compounds (Rule 4).
 
         ``reward`` carries the turn's outcome so the brain *learns* (weights accumulate ∝ reward, a
-        punished reply is suppressed), not merely remembers. Safe no-op when the brain was never
-        built (a real external LLM is in use)."""
+        punished reply is suppressed), not merely remembers. ``speakable`` (parallel to ``docs``)
+        marks which docs are her OWN words — the Master's messages train weights/embedder but never
+        enter her recall/compose index. Safe no-op when the brain was never built (a real external
+        LLM is in use)."""
         if self._self_brain is not None:
             try:
-                self._self_brain.learn(*docs, reward=reward)
+                self._self_brain.learn(*docs, reward=reward, speakable=speakable)
+            except TypeError:
+                # a brain that predates speakable-aware learning — compound without it
+                try:
+                    self._self_brain.learn(*docs, reward=reward)
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception:  # noqa: BLE001
                 pass
 
