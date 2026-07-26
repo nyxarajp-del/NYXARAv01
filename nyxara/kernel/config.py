@@ -1906,6 +1906,130 @@ class HolographicMemoryConfig(BaseModel):
     seed: int = 42
 
 
+class Nyx5Config(BaseModel):
+    """NYX-5 neuromorphic brain (nyxara/nyx5/) — an event-driven Spiking Neural Network *simulation*.
+
+    Honest about what this is: leaky integrate-and-fire neurons stepped by an in-process heapq event
+    queue in pure Python/NumPy, on **commodity silicon** — it is **not neuromorphic** hardware. There
+    are no literal GHz spikes, no microsecond wall-clock cognition, no 0.1 W envelope; those are the
+    architectural analogy, not measured facts. Learning is local (STDP): there is
+    no backpropagation and no global training phase. Long-term memory reuses the existing 10,000-D HDC
+    algebra (cognition/hyper_dimensional_vectors.py), so old memory does not degrade catastrophically.
+
+    NYX-5 is colour-only by default (it annotates a turn). Set ``as_reasoner=True`` to let it occupy the
+    reason-seat alongside NyxaraReasoner — even then every candidate still flows through the unchanged
+    sovereign gate; the mind proposes, the kernel disposes. The safety core (corrigibility, oversight,
+    loyalty, honesty) is never governed, rewritten, or bypassed by any NYX-5 faculty."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    as_reasoner: bool = False                                    # NYX-5 takes the reason-seat (pillar reasoner)
+
+    # Pillars 1-3 — spiking substrate + HDC memory + active inference
+    n_neurons: int = Field(default=256, ge=16, le=8192)
+    hd_dim: int = Field(default=10000, ge=256, le=65536)         # reuse HDC classic width
+    tau_membrane_ms: float = Field(default=20.0, gt=0.0)         # membrane leak time constant
+    v_threshold: float = Field(default=1.0, gt=0.0)              # fire threshold
+    refractory_ms: float = Field(default=2.0, ge=0.0)           # dead time after a spike
+    stdp_a_plus: float = Field(default=0.01, ge=0.0)            # potentiation amplitude
+    stdp_a_minus: float = Field(default=0.012, ge=0.0)          # depression amplitude
+    stdp_tau_plus_ms: float = Field(default=20.0, gt=0.0)
+    stdp_tau_minus_ms: float = Field(default=20.0, gt=0.0)
+    w_min: float = Field(default=0.0)                            # synaptic weight clamp low
+    w_max: float = Field(default=1.0)                            # synaptic weight clamp high
+    prune_threshold: float = Field(default=0.05, ge=0.0)        # weak-synapse prune cutoff
+    max_synapses: int = Field(default=8192, ge=64)             # structural-plasticity growth cap
+    max_events_per_tick: int = Field(default=20000, ge=100)    # runaway guard
+    surprise_gate: float = Field(default=0.6, ge=0.0, le=1.0)  # when appraisal/suggest may fire
+    seed: int = 42
+
+    # Pillar 4 — chrono-dilation (anytime compute escalation)
+    chrono_enabled: bool = True
+    chrono_deadline_ms: float = Field(default=2000.0, gt=0.0)   # hard real wall-clock ceiling per turn
+    chrono_max_depth: int = Field(default=64, ge=1)            # max iterative-deepening iterations
+    chrono_trigger: float = Field(default=0.6, ge=0.0, le=1.0)  # surprise/EFE hyper-clock trigger
+
+    # Pillar 5 — polymorphic sensorium
+    sensorium_enabled: bool = True
+    sensorium_max_channels: int = Field(default=32, ge=1)      # auto-registered channels cap
+
+    # Pillar 6 — holographic swarm shard
+    holo_swarm_enabled: bool = False                           # distributed; default off
+    node_id: str = ""                                          # blank => single-node
+
+    # Pillar 7 — immune guillotine
+    immune_enabled: bool = True
+    immune_max_amputations_per_turn: int = Field(default=8, ge=0)
+
+    # Pillar 8 — pre-cognitive intent
+    intent_enabled: bool = True
+    intent_speculate: bool = True                              # likely-next query pre-compute
+    intent_cache_size: int = Field(default=8, ge=0)           # speculative cache cap
+
+    # Pillar 9 — omni-forge (sandboxed tool creation)
+    omni_forge_enabled: bool = False                           # default off; opt-in
+    omni_forge_max_forges_per_turn: int = Field(default=2, ge=0)
+
+    # Pillar 10 — n-dimensional concept collapse
+    concept_collapse_enabled: bool = True
+
+    # Pillar 11 — sub-axiomatic engine
+    axiom_forge_enabled: bool = True
+    axiom_max_systems: int = Field(default=8, ge=1)           # concurrent alternative axiom-sets cap
+
+    # Pillar 12 — causal anti-entropy (negentropy maintenance)
+    negentropy_enabled: bool = True
+    negentropy_interval_ticks: int = Field(default=100, ge=1)
+
+    # Pillar 13 — symbiotic conduit
+    conduit_enabled: bool = True
+    conduit_ambiguity_gate: float = Field(default=0.5, ge=0.0, le=1.0)  # below => clarify/abstain
+
+    # Pillar 14 — autopoietic self-rewriting (gauntlet-gated)
+    autopoiesis_enabled: bool = False                          # default off; high-stakes opt-in
+    autopoiesis_require_gauntlet: bool = True                  # never promote a rewrite unverified
+    autopoiesis_max_rewrites_per_cycle: int = Field(default=1, ge=0)
+
+    # Pillar 15 — non-local entangled mesh (CRDT replication)
+    mesh_enabled: bool = False                                 # default off; single-node
+    mesh_max_delta_bytes: int = Field(default=1_048_576, ge=0)
+
+    # Pillar 16 — ontological bytecode genesis (custom DSL/VM)
+    ontogenesis_enabled: bool = False                          # default off; opt-in
+    ontogenesis_max_vm_steps: int = Field(default=100_000, ge=1)  # VM step budget (halt guarantee)
+
+    # Pillar 17 — ontological compiler (retargetable backend)
+    retarget_enabled: bool = False                             # default off; opt-in
+    retarget_require_emulation: bool = True                    # accept only emulator-validated code
+
+    # Pillar 18 — digital phagocytosis (defensive malware analysis)
+    phagocytosis_enabled: bool = False                         # default off; opt-in
+    phagocytosis_static_only: bool = True                      # untrusted code never live-executed
+
+    # Pillar 19 — dynamic epistemic mirroring
+    mirroring_enabled: bool = True
+
+    # Pillar 20 — sovereign narrative continuum
+    continuum_enabled: bool = True
+
+    # Pillar 21 — anticipatory thought engine
+    threading_enabled: bool = True
+    threading_directions: int = Field(default=3, ge=1, le=5)
+
+    # Pillar 22 — cognitive wit matrix (tone/style only)
+    voice_enabled: bool = True
+    voice_safety_immutable: bool = True                        # style layer never touches safety — pinned
+
+    # Pillar 23 — sovereign dialectic (advisory critique)
+    dialectic_enabled: bool = True
+    dialectic_advisory_only: bool = True                       # never refuses a valid Master command
+
+    # Pillar 24 — proactive anticipation (pre-solve next problems)
+    anticipation_enabled: bool = True
+    anticipation_lookahead: int = Field(default=3, ge=0, le=5)
+
+
 class SuperpositionConfig(BaseModel):
     """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
 
@@ -3025,6 +3149,7 @@ class NyxaraSettings(BaseSettings):
     self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
+    nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
     meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
     internal_civilization: InternalCivilizationConfig = Field(

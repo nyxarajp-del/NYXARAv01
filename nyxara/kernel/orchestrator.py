@@ -594,6 +594,11 @@ class NyxaraCore:
         # measurable geometry. It colours novelty/attention and answers map/recall/analogy/
         # pattern queries; FIFO-capped over the live stream. Advisory — it never gates.
         self.hyperdimensional = self._build_hyperdimensional()
+        # NYX-5 — the neuromorphic brain: an event-driven spiking-network *simulation* (LIF neurons,
+        # STDP local learning, live-graph structural plasticity) with 10,000-D long-term memory and
+        # active-inference surprise. Colour-only by default; it can occupy the reason-seat when
+        # ``nyx5.as_reasoner`` is set (still gated by the sovereign kernel). Advisory — never a gate.
+        self.nyx5 = self._build_nyx5()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -1155,7 +1160,7 @@ class NyxaraCore:
         # finally convenes the faculties it was built with).
         try:
             from nyxara.mind.nyxara_reasoner import NyxaraReasoner
-            return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
+            reasoner = NyxaraReasoner(llm=llm, council=council, memory=self.memory,
                                   retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
                                   knowledge=self.knowledge,
@@ -1176,7 +1181,23 @@ class NyxaraCore:
                                   metacontrol=getattr(self, "metacontrol", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
-            return base
+            reasoner = base
+        # NYX-5 reason-seat (opt-in): when ``nyx5.as_reasoner`` is set, the neuromorphic brain occupies
+        # the reason-seat, wrapping the reasoner above for the linguistic surface and driving it with
+        # spiking-substrate + active-inference signals. It only ever PROPOSES — every candidate still
+        # flows through the unchanged, fail-closed gate. The mind proposes; the kernel disposes.
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            brain = getattr(self, "nyx5", None)
+            if brain is not None and getattr(getattr(settings, "nyx5", None), "as_reasoner", False):
+                from nyxara.nyx5 import Nyx5Reasoner
+                return Nyx5Reasoner(base=reasoner, brain=brain,
+                                    free_energy=getattr(self, "free_energy", None),
+                                    predictive=getattr(self, "predictive", None))
+        except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
+            pass
+        return reasoner
 
     def _build_soul(self) -> Any:
         try:
@@ -2517,6 +2538,68 @@ class NyxaraCore:
             return LatentSpaceMap(max_corpus=512)
         except Exception:  # noqa: BLE001 — hyperdimensional cognition is a capability, never required
             return None
+
+    def _build_nyx5(self) -> Any:
+        """Build the NYX-5 neuromorphic brain (guarded). Honest: a spiking-network *simulation* on
+        commodity silicon — not neuromorphic hardware, no backpropagation. A capability, never a
+        hard dependency; disabled cleanly when ``nyx5.enabled`` is false."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "nyx5", None)
+            if cfg is None or not cfg.enabled:
+                return None
+            from nyxara.nyx5 import Nyx5Brain
+            return Nyx5Brain(cfg)
+        except Exception:  # noqa: BLE001 — the neuromorphic brain is a capability, never required
+            return None
+
+    # ---- NYX-5 neuromorphic brain — advisory public API ---- #
+    def nyx5_perceive(self, text: str) -> Any:
+        """Perceive ``text`` through the spiking substrate (learns by STDP), returning a Nyx5Tick."""
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return None
+        try:
+            return brain.perceive(text)
+        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return None
+
+    def nyx5_recall(self, query: str, *, threshold: float = 0.0) -> Any:
+        """Recall the nearest stored NYX-5 memory to ``query`` (a CleanupResult or None)."""
+        brain = getattr(self, "nyx5", None)
+        try:
+            return brain.recall(query, threshold=threshold) if brain is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def nyx5_stats(self) -> Dict[str, Any]:
+        """A snapshot of the NYX-5 brain (spikes, synapses, memories) — or {} when absent."""
+        brain = getattr(self, "nyx5", None)
+        try:
+            return brain.stats() if brain is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _nyx5_tick(self, text: str) -> None:
+        """Colour-only PERCEIVE tick: perceive the turn through the spiking substrate so STDP learns
+        continuously, and let high surprise colour attention/affect. It MUST NOT alter disposition,
+        gate, or candidate scores — advisory, best-effort, never fatal."""
+        brain = getattr(self, "nyx5", None)
+        if brain is None or not text:
+            return
+        try:
+            tick = brain.perceive(text)
+            self._last_nyx5_surprise = float(getattr(tick, "surprise", 0.0))
+            tag = " pre-emptive" if tick.preemptive else ""
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"nyx5: surprise={tick.surprise:.2f} entropy={tick.entropy:.2f} "
+                             f"spikes={tick.n_spikes}{tag}",
+                             salience=_clamp01(tick.surprise))
+            if tick.preemptive and self.affect is not None:
+                self.affect.note_novelty(magnitude=_clamp01(tick.surprise))
+        except Exception:  # noqa: BLE001 — the neuromorphic tick is best-effort, never fatal
+            pass
 
     # ---- hyperdimensional latent space (Cognition · 1) — advisory public API ---- #
     def map_latent_space(self, data: Any, *, name: Optional[str] = None) -> Any:
@@ -4725,6 +4808,10 @@ class NyxaraCore:
         # hyperdimensional latent mapping: novelty in 10,000-D colours attention/affect, then
         # the turn is ingested so latent structure accretes across the session (advisory)
         self._hyperdimensional_tick(safe_text)
+        # NYX-5 neuromorphic tick: perceive the turn through the spiking substrate so STDP learns
+        # continuously (no train/infer split) and surprise colours attention. Colour-only — it never
+        # touches disposition or the gate.
+        self._nyx5_tick(safe_text)
         # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
         # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
         self._causal_engage(safe_text, thoughts)
@@ -9900,6 +9987,7 @@ class NyxaraCore:
             self._save_prediction_prior(target)
             self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
+            self._save_nyx5(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
@@ -9916,6 +10004,7 @@ class NyxaraCore:
             self._load_prediction_prior(target)
             self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
+            self._load_nyx5(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
@@ -9954,6 +10043,40 @@ class NyxaraCore:
             with open(path, "r", encoding="utf-8") as fh:
                 pe.prior.load_dict(json.load(fh))
         except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+    def _nyx5_path(self, memory_target: str) -> str:
+        """The NYX-5 brain sidecar (learned synapse weights + HD memory keys) lives next to memory."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "nyx5.json")
+
+    def _save_nyx5(self, memory_target: str) -> None:
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return
+        try:
+            import json
+            import os
+            path = self._nyx5_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(brain.to_dict(), fh)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_nyx5(self, memory_target: str) -> None:
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return
+        try:
+            import json
+            import os
+            path = self._nyx5_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                brain.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
             pass
 
     def _knowledge_graph_path(self, memory_target: str) -> str:

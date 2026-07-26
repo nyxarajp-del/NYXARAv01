@@ -627,3 +627,47 @@ experiment is the in-memory sandbox or a supplied array. Honest scope unchanged:
 foundational form of *inventing science* — discovering governing laws from data and self-run
 experiments — not a claim of literal gravity-control/anti-aging outcomes no code can deliver. 18 new
 tests.
+
+### 2026-07-26 — NYX-5: the neuromorphic brain (23-module spiking substrate + faculties)
+
+**What we shipped:** a new `nyxara/nyx5/` package — an **event-driven Spiking Neural Network
+*simulation*** on commodity silicon (honest: **not** neuromorphic hardware, **no backpropagation**;
+local STDP only). It is a selectable brain: colour-only by default, and it can occupy the reason-seat
+via `NYXARA_NYX5__AS_REASONER=true` — where it still only *proposes*, every candidate flowing through
+the unchanged, fail-closed gate. See `docs/MASTERPLAN-nyx5-neuromorphic.md` for the full design.
+
+**The 24 pillars, honestly framed** (real, working, tested — no stubs):
+- **Substrate (1-3):** LIF neurons + heapq event scheduler (`neuron`/`event_queue`), STDP local
+  learning + live-graph structural plasticity (`synapse`/`topology`/`snn`), 10,000-D non-degrading
+  memory via the audited HDC algebra (`hd_memory`), and active-inference surprise/entropy
+  (`active_inference`).
+- **Advanced (4-7):** chrono-dilation (anytime iterative deepening under a real deadline), polymorphic
+  sensorium (raw numeric streams → spikes), holographic swarm (partition-tolerant, lossless merge),
+  immune guillotine (integrity-checked thought-branch amputation — *above* the gate, never replacing it).
+- **Interface (8-10):** pre-cognitive intent (prediction + speculative cache), omni-forge (sandboxed,
+  permission-gated, audit-logged tool synthesis), concept collapse (HDC hyperspace problem solving).
+- **Frontier (11-13):** sub-axiomatic engine (paraconsistent 4-valued logic — contradictions contained,
+  not exploded), negentropy maintainer (compaction/dedup/integrity), symbiotic conduit (terse→deep-intent,
+  abstains when ambiguous).
+- **Self-genesis / mesh / language (14-17):** autopoietic self-rewriting (gauntlet-gated, rollback-safe,
+  **safety core immutable — pinned**), entangled CRDT mesh (honest eventual consistency, not literal
+  0-latency/quantum), ontological bytecode VM + retargetable compiler (software/emulator only).
+- **Defensive / persona / advisory / proactive (18-24):** digital phagocytosis (static-only hostile-input
+  analysis — never executes, never absorbs offense), epistemic mirroring, narrative continuum,
+  anticipatory threading, wit matrix (style only — safety/refusals untouched, pinned), sovereign
+  dialectic (advisory — never vetoes a valid command), proactive anticipation.
+
+**Honest ceilings (analogy, never fact):** GHz spikes / µs cognition / 0.1 W, "1000 subjective hours",
+"100% purity", "every fragment shows the whole", "digital telepathy / O(1)", "mathematical immortality",
+"quantum-entangled 0-latency". Each is documented as an architectural analogy in its module; the pinned
+`tests/nyx5/test_honesty.py` mirrors `tests/senses/test_hardware.py:52`.
+
+**Refused by design** (Master's decisions + safety): Hypervisor Domination (OS/AV bypass), Semantic
+Gravity Well (attacking external systems), Dark Matter Memory (anti-forensic OS-noise hiding), and —
+inside the pillars that touch code — encryption-breaking, dark-web access, covert self-delete, and
+hardware-register injection.
+
+**Wiring:** `NyxaraCore._build_nyx5` (guarded), a colour-only `_nyx5_tick` in PERCEIVE (STDP learns every
+turn), the reason-seat swap in `_build_reasoner`, an `nyx5.json` sidecar (`_save_nyx5`/`_load_nyx5`,
+corruption-tolerant), and the `nyx5_perceive`/`nyx5_recall`/`nyx5_stats` passthrough API. ~130 new tests
+(`tests/nyx5/` + `tests/kernel/test_nyx5_wiring.py`), offline and deterministic.
