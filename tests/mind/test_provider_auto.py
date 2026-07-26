@@ -99,5 +99,7 @@ def test_on_promotion_reloads_self_provider(tmp_path):
 
 def test_active_model_supports_auto():
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.llm.provider is LLMProvider.AUTO
+    assert s.llm.provider is LLMProvider.AIROUTER    # GLM-5 pinned primary by default
+    assert s.llm.active_model() == "zai/glm-5"
+    s.llm.provider = LLMProvider.AUTO
     assert s.llm.active_model() == "auto"            # no KeyError on the new member
