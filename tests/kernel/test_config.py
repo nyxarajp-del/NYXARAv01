@@ -100,10 +100,10 @@ def test_llm_active_model_and_key():
 def test_glm5_is_primary_and_foundry_base_is_local():
     """The shipped defaults put GLM-5 first while the foundry LoRA-tunes its own local base."""
     s = NyxaraSettings()
-    # serving: the auto ladder by default (airouter→self→native), so GLM-5 is her PRIMARY
-    # reachable model while her own promoted weights and native own-brain keep her sovereign
-    assert s.llm.provider is LLMProvider.AUTO
-    assert s.llm.active_model() == "auto"
+    # serving: airouter (GLM-5) is the pinned PRIMARY provider by default; the facade still
+    # degrades to her native own-brain when the cloud is unreachable, keeping her sovereign
+    assert s.llm.provider is LLMProvider.AIROUTER
+    assert s.llm.active_model() == "zai/glm-5"
     assert s.llm.airouter_model == "zai/glm-5"
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"

@@ -58,7 +58,7 @@ REM --- 3. Write .env: GLM-5 primary, her own local brains as the floor (only if
 if not exist ".env" (
     echo [setup] Writing .env: GLM-5 (airouter) primary, native own-brain floor...
     >  ".env" echo NYXARA_PROFILE=dev
-    >> ".env" echo NYXARA_LLM__PROVIDER=auto
+    >> ".env" echo NYXARA_LLM__PROVIDER=airouter
     >> ".env" echo NYXARA_LLM__AIROUTER_MODEL=zai/glm-5
         >> ".env" echo NYXARA_FEATURES__MULTI_LLM_COUNCIL=false
     >> ".env" echo NYXARA_COUNCIL__ENABLED=false

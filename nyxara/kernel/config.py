@@ -312,20 +312,21 @@ class LLMConfig(BaseModel):
     ``native`` when its heavy/optional deps are absent. There is no echo mock, and no raw
     third-party model ever speaks as her.
 
-    The default ``auto`` closes the train→serve loop: it walks the ladder
-    airouter→self→native, so the moment the foundry promotes her own weights (and they pass the
-    serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
-    reconfiguration; until then GLM-5 answers when reachable, and a bare machine her native own-brain.
+    The default pins ``airouter`` (GLM-5) as her PRIMARY provider: GLM-5 drafts every turn it is
+    reachable, and the moment it is not the facade degrades to her always-on native own-brain, so a
+    keyless or offline machine never crashes. Set ``provider=auto`` to restore the closed train→serve
+    loop instead: the ladder airouter→self→native serves her own promoted foundry weights (past the
+    serve gate — see ``self_serve_any_backend``) with zero manual reconfiguration.
     """
 
     model_config = {"validate_assignment": True}
 
-    # AUTO makes GLM-5 (airouter) her PRIMARY model — it is first on the auto ladder
-    # (airouter→self→native), so her strongest reachable tool always serves — while the
-    # own-brain floor keeps her sovereign: the moment the cloud is unreachable she keeps her own
-    # voice instead of depending on it. This is deliberately NOT a hard ``airouter`` pin (which would
-    # drop her straight past her own self/native brains on any cloud hiccup — the LLM steering her).
-    provider: LLMProvider = LLMProvider.AUTO
+    # GLM-5 (airouter) is the pinned PRIMARY model: it drafts first on every turn it is reachable,
+    # never queued behind the local self/native brains. Sovereignty holds regardless — the facade
+    # (mind/llm.py complete()) degrades to her native own-brain when the cloud is unreachable, the
+    # reply is always a PROPOSAL under the guards, and no persona is injected. Set ``auto`` for the
+    # airouter→self→native ladder that auto-serves her own promoted weights.
+    provider: LLMProvider = LLMProvider.AIROUTER
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
