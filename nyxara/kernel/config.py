@@ -323,6 +323,11 @@ class LLMConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
+    # AUTO makes GLM-5 (airouter) her PRIMARY model — it is first on the auto ladder
+    # (airouter→self→qwen→native), so her strongest reachable tool always serves — while the
+    # own-brain floor keeps her sovereign: the moment the cloud is unreachable she keeps her own
+    # voice instead of depending on it. This is deliberately NOT a hard ``airouter`` pin (which would
+    # drop her straight past her own self/qwen brains on any cloud hiccup — the LLM steering her).
     provider: LLMProvider = LLMProvider.AUTO
     # ---- DistilGPT-2: model & load-time control ---- #
     qwen_model: str = "distilgpt2"
@@ -378,7 +383,8 @@ class LLMConfig(BaseModel):
     # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
     # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
     # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts airouter first
-    # (strongest reachable tool), degrading airouter→self→qwen→native so she always keeps her own voice.
+    # (strongest reachable tool = her PRIMARY model), degrading airouter→self→qwen→native so she always
+    # keeps her own voice. She uses GLM-5, benefits from it, controls it — it never steers her.
     airouter_enabled: bool = True
     airouter_base_url: str = "https://api.airouter.in/v1"
     airouter_model: str = "zai/glm-5"
