@@ -29,9 +29,9 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when it would actually serve (`self`, or the `auto` ladder
-    # once its serve gate is open). An explicit base-only provider like `qwen` is a clean no-op.
+    # once its serve gate is open). An explicit non-self provider like `airouter` is a clean no-op.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    s.llm.provider = LLMProvider.QWEN
+    s.llm.provider = LLMProvider.AIROUTER
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
@@ -55,7 +55,7 @@ def test_forges_and_promotes_primary_brain(tmp_path: Path):
     assert (tmp_path / "foundry" / "active").read_text().strip() == "v1"
 
 
-def test_records_qwen_base_even_when_degraded(tmp_path: Path):
+def test_records_distilgpt2_base_even_when_degraded(tmp_path: Path):
     # the spec is written with the real DistilGPT-2 base; only the *backend* degrades on a bare
     # box, so a machine with the foundry stack rebuilds the very same LoRA from the recorded base.
     s = _self_settings(tmp_path)

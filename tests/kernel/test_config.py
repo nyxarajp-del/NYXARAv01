@@ -84,36 +84,34 @@ def test_test_profile_seals_the_foundry():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
-    s.llm.provider = LLMProvider.QWEN
-    assert s.llm.active_model() == s.llm.qwen_model
-    assert s.llm.qwen_model == "distilgpt2"
+    s.llm.provider = LLMProvider.AIROUTER
+    assert s.llm.active_model() == s.llm.airouter_model
+    assert s.llm.airouter_model == "zai/glm-5"
+    # airouter is the one provider that carries an API key (the cloud tool she controls)
+    assert s.llm.active_key() is not None
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
-    # every backend is local now — there are no API keys anywhere
+    # her own local brains carry no API key
     assert s.llm.active_key() is None
     s.llm.provider = LLMProvider.NATIVE
     assert s.llm.active_key() is None
 
 
-def test_qwen_is_the_single_base_and_foundry_base():
-    """The shipped defaults wire the single DistilGPT-2 base end to end."""
+def test_glm5_is_primary_and_foundry_base_is_local():
+    """The shipped defaults put GLM-5 first while the foundry LoRA-tunes its own local base."""
     s = NyxaraSettings()
-    # serving: the auto ladder by default (self→qwen→mock), so her own promoted
-    # weights serve the moment they exist; until then the DistilGPT-2 base answers
+    # serving: the auto ladder by default (airouter→self→native), so GLM-5 is her PRIMARY
+    # reachable model while her own promoted weights and native own-brain keep her sovereign
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    assert s.llm.qwen_model == "distilgpt2"
-    # training: the foundry LoRA-tunes that same single base — everything above it is hers
+    assert s.llm.airouter_model == "zai/glm-5"
+    # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"
     # DistilGPT-2 is tiny — full-precision LoRA everywhere; no quantization, no remote code
     assert s.foundry.load_in_4bit is False
-    assert s.llm.qwen_load_in_4bit is False           # full-precision serve by default too
     assert s.foundry.trust_remote_code is False
     # DistilGPT-2 (GPT-2 arch) uses Conv1D names — the default pins attention (c_attn) + MLP (c_fc/c_proj)
     assert s.foundry.lora_target_modules == ["c_attn", "c_proj", "c_fc"]
-    # DistilGPT-2's context window is 1024 tokens and it has no chat template (base checkpoint)
-    assert s.llm.qwen_max_input_tokens == 1024
-    assert s.llm.qwen_use_chat_template is False
 
 
 def test_resource_limits_validation():
@@ -146,11 +144,11 @@ def test_save_and_from_file_roundtrip(tmp_path):
 
 def test_env_override(monkeypatch):
     monkeypatch.setenv("NYXARA_PROFILE", "prod")
-    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "qwen")
+    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "airouter")
     monkeypatch.setenv("NYXARA_RESOURCES__MAX_CONCURRENT_TASKS", "128")
     s = NyxaraSettings()
     assert s.profile is Profile.PROD
-    assert s.llm.provider is LLMProvider.QWEN
+    assert s.llm.provider is LLMProvider.AIROUTER
     assert s.resources.max_concurrent_tasks == 128
 
 

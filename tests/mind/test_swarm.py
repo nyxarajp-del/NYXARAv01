@@ -20,7 +20,7 @@ class _Recording(LLMProviderBase):
 
     def __init__(self, answer: str = "a balanced position on the matter") -> None:
         super().__init__()
-        self.name = "qwen"
+        self.name = "airouter"
         self._answer = answer
         self.prompts: List[str] = []
 
@@ -28,7 +28,7 @@ class _Recording(LLMProviderBase):
         return True
 
     def default_model(self) -> str:
-        return "qwen-1"
+        return "airouter-1"
 
     def _complete(self, req, model):
         try:
@@ -41,9 +41,9 @@ class _Recording(LLMProviderBase):
 def _llm_backed():
     """An LLM facade whose chosen provider is a real recording provider (not mock)."""
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
+    settings.llm.provider = ProviderName.AIROUTER
     provider = _Recording()
-    return LLM(settings=settings, providers={"qwen": provider}), settings, provider
+    return LLM(settings=settings, providers={"airouter": provider}), settings, provider
 
 
 def _offline(*, rounds: int = 3, memory=None, **swarm_overrides) -> DeliberativeSwarm:

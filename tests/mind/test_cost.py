@@ -31,12 +31,12 @@ def test_unknown_model_costs_nothing():
 
 def test_record_from_llm_response():
     ledger = UsageLedger()
-    resp = LLMResponse(text="hi", provider="qwen",
+    resp = LLMResponse(text="hi", provider="native",
                        model="distilgpt2",
                        usage=Usage(prompt_tokens=1000, completion_tokens=1000))
     item = ledger.record(resp)
     assert item.cost_usd == 0.0
-    assert item.provider == "qwen"
+    assert item.provider == "native"
     assert item.total_tokens == 2000
 
 
@@ -49,13 +49,13 @@ def test_record_from_raw_usage():
 
 def test_aggregations_track_tokens_per_model_and_provider():
     ledger = UsageLedger()
-    ledger.record(Usage(1000, 1000), provider="qwen",
+    ledger.record(Usage(1000, 1000), provider="native",
                   model="distilgpt2")
     ledger.record(Usage(1000, 0), provider="self", model="nyxara-self")
     assert ledger.total_cost() == 0.0
     assert ledger.total_tokens() == 3000
     assert "distilgpt2" in ledger.by_model()
-    assert set(ledger.by_provider()) == {"qwen", "self"}
+    assert set(ledger.by_provider()) == {"native", "self"}
 
 
 def test_budget_tracking_with_a_priced_entry(monkeypatch):
@@ -71,7 +71,7 @@ def test_budget_tracking_with_a_priced_entry(monkeypatch):
 
 def test_free_local_models_never_trip_the_budget():
     ledger = UsageLedger(daily_budget=1.0)
-    ledger.record(Usage(10_000, 10_000), provider="qwen",
+    ledger.record(Usage(10_000, 10_000), provider="native",
                   model="distilgpt2")
     assert ledger.total_cost() == 0.0
     assert not ledger.over_budget()

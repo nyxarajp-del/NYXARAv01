@@ -52,7 +52,7 @@ class _Own:
 
 
 class _Teacher:
-    def __init__(self, providers=("qwen", "self", "native")):
+    def __init__(self, providers=("airouter", "self", "native")):
         self._p = list(providers)
 
     def available_providers(self):
@@ -87,7 +87,7 @@ def test_weak_own_answer_defers_to_teacher():
                self_provider=_Own("the the the the the"))
     res = r.draft("Explain entropy.")
     assert res.source == "teacher" and res.handed_off is False
-    assert res.text.startswith("[teacher:qwen]")
+    assert res.text.startswith("[teacher:airouter]")
 
 
 def test_high_threshold_forces_teacher():

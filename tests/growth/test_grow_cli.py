@@ -47,12 +47,12 @@ def test_grow_distilgpt2_shortcut_sets_lora_base(tmp_path: Path):
 
 
 def test_grow_deprecated_aliases_still_work(tmp_path: Path):
-    # the old --tinyllama / --qwen spellings stay as deprecated aliases for --distilgpt2
+    # the old --tinyllama spelling stays as a deprecated alias for --distilgpt2
     import json
 
     from nyxara.growth.bootstrap import DISTILGPT2
 
-    for alias in ("--tinyllama", "--qwen"):
+    for alias in ("--tinyllama",):
         d = tmp_path / alias.strip("-")
         code = main([alias, "--generations", "1", "--data-dir", str(d)])
         assert code == 0

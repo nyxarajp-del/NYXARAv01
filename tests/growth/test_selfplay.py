@@ -17,7 +17,7 @@ class _Teacher:
         return "A clear, correct answer in NYXARA's own voice, Master."
 
     def chosen_provider(self):
-        return type("_P", (), {"name": "qwen"})()
+        return type("_P", (), {"name": "airouter"})()
 
 
 def _sp(tmp_path, teacher=None) -> SelfPlay:
