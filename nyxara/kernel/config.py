@@ -203,7 +203,9 @@ class FeatureFlags(BaseModel):
     metacognitive_control: bool = True       # mind/metacontrol.py — calibrated uncertainty drives per-turn compute allocation: easy = 1 pass, hard = deep search; her own code decides, never the LLM (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
-    multi_llm_council: bool = True      # mind/council.py — convene many LLMs as a panel of tools
+    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools;
+    #                                     OFF by default (airouter/GLM-5 alone is her active tool) —
+    #                                     flip NYXARA_FEATURES__MULTI_LLM_COUNCIL=true to re-seat it
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
     vision: bool = True                 # senses/vision.py — gated; degrades if heavy ML deps absent
@@ -354,7 +356,7 @@ class LLMConfig(BaseModel):
     # Baked default so it works out-of-box; override with NYXARA_LLM__AIROUTER_API_KEY. NOTE: a key
     # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
     airouter_api_key: Optional[SecretStr] = SecretStr(
-        "sk-air-v1-ee348217fe40d58b9b25d7818e96c4e2f8862549652ea19d63eb2f7a75aee272")
+        "sk-air-v1-dd9f812be7fee85933dbd4bd7c0b57e1cef24baf63e6a83a2be05b5a01d919a0")
     # Air-gapped mind (guard/isolation_envelope.py): before a query leaves for the cloud tool,
     # abstract NYXARA's identity + the Master's named secrets to opaque tokens (X1,Y2,…) and
     # re-hydrate the reply locally, so the external model solves an abstract problem and never
