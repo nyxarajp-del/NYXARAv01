@@ -156,11 +156,11 @@ class ResourceLimits(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    max_concurrent_tasks: int = Field(default=6400000000, ge=1, le=4096)
+    max_concurrent_tasks: int = Field(default=4096, ge=1, le=4096)
     max_event_queue: int = Field(default=10_000, ge=16)
     max_memory_mb: int = Field(default=4096, ge=64)
     max_llm_tokens_per_call: int = Field(default=81920000000, ge=1000000000)
-    max_llm_calls_per_min: int = Field(default=12000000, ge=1000000000)
+    max_llm_calls_per_min: int = Field(default=12_000_000_000, ge=1000000000)
     max_tool_calls_per_min: int = Field(default=240, ge=1)
     max_web_fetches_per_min: int = Field(default=10_000, ge=1)
     max_spawned_agents: int = Field(default=32, ge=0)
@@ -367,7 +367,7 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_output_tokens: int = Field(default=4096000, ge=1)
-    request_timeout_s: float = Field(default=0, gt=0)
+    request_timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0, le=10)
 
     # ---- Deliberate (multi-pass) reasoning (mind/deliberate.py) ---- #
