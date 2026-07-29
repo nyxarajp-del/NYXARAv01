@@ -2032,6 +2032,34 @@ class Nyx5Config(BaseModel):
     anticipation_lookahead: int = Field(default=3, ge=0, le=5)
 
 
+class HyperbolicManifoldConfig(BaseModel):
+    """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
+
+    Honest about what this is: a low-dimensional geometric concept store in the **Poincaré ball**
+    (pure stdlib, no torch) with live node genesis — a turn farther than ``tau`` (geodesic) from
+    every known concept births a node at the hyperbolic barycenter of the active cluster — and
+    Hebbian edge plasticity ``Δe = eta · utility · (1 − d/d_norm)`` driven by each turn's real
+    outcome valence. Bounded (decay/prune/eviction), deterministic given ``seed``, persisted as a
+    sidecar next to memory. Advisory colour for attention/novelty — it never touches the gate."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=8, ge=2, le=64)                    # ball dimension
+    tau: float = Field(default=1.2, gt=0.0)                     # genesis distance threshold (geodesic)
+    eta: float = Field(default=0.1, ge=0.0, le=1.0)             # Hebbian learning rate
+    decay: float = Field(default=0.02, ge=0.0, le=1.0)          # per-cycle edge decay
+    edge_floor: float = Field(default=0.05, ge=0.0)             # prune cutoff
+    max_nodes: int = Field(default=512, ge=8)                   # eviction cap over the live stream
+    place_lr: float = Field(default=0.05, ge=0.0, le=1.0)       # assimilation geodesic drift step
+    frechet_iters: int = Field(default=3, ge=0, le=32)          # barycenter refinement steps
+    genesis_edge_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    d_norm: float = Field(default=5.0, gt=0.0)                  # distance normaliser in the Hebbian term
+    prune_every: int = Field(default=25, ge=1)                  # decay/prune cadence (ticks)
+    active_window: int = Field(default=8, ge=2, le=64)          # working set for genesis/reinforcement
+    seed: int = 42
+
+
 class SuperpositionConfig(BaseModel):
     """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
 
@@ -3152,6 +3180,8 @@ class NyxaraSettings(BaseSettings):
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
+    hyperbolic_manifold: HyperbolicManifoldConfig = Field(
+        default_factory=HyperbolicManifoldConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
     meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
     internal_civilization: InternalCivilizationConfig = Field(
