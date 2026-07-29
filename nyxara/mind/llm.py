@@ -38,6 +38,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import logging
 import threading
 import time
 import uuid
@@ -48,6 +49,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from nyxara.kernel.config import LLMProvider as ProviderName
 from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.errors import LLMError, RetryPolicy, classify
+
+log = logging.getLogger("nyxara.mind.llm")
 
 __all__ = [
     "Role",
@@ -656,6 +659,11 @@ class LLM:
                 cls.name: cls(self.settings) for cls in _PROVIDER_CLASSES.values()
             }
         self._native = self._providers.get("native") or NativeProvider(self.settings)
+        # Degradation surface (operational health, not conversation state): the last provider
+        # failure that forced a fallback, so an operator can see WHY the cloud went quiet
+        # (billing, network, 4xx) instead of a silent drop to the native floor.
+        self.last_fallback: Optional[Dict[str, Any]] = None
+        self._warned_at: Dict[str, float] = {}
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
@@ -720,7 +728,8 @@ class LLM:
         except Exception:  # noqa: BLE001
             chosen = None
         view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
-                                "chosen": chosen}
+                                "chosen": chosen,
+                                "last_fallback": self.last_fallback}
         prov = self._providers.get("self")
         if prov is not None and hasattr(prov, "learning_view"):
             try:
@@ -755,16 +764,38 @@ class LLM:
                 try:
                     return self._call_with_resilience(prov, req)
                 except LLMError as exc:
+                    self._warn_fallback(prov.name, exc)
                     last = exc
             raise last or LLMError("no provider available on the auto ladder",
                                    context={"provider": "auto"})
         provider = self.chosen_provider()
         try:
             return self._call_with_resilience(provider, req)
-        except LLMError:
+        except LLMError as exc:
             if provider is not self._native:
+                self._warn_fallback(provider.name, exc)
                 return self._native.complete(req)
             raise
+
+    def _warn_fallback(self, provider_name: str, exc: Exception) -> None:
+        """Record + surface a provider failure that forces a fallback — never silently.
+
+        The warning carries the real upstream reason (billing_error, timeout, 4xx …) so an
+        operator immediately sees why the primary model went quiet. Throttled to one log line
+        per provider+reason per 60s: a deep-reasoning turn can retry dozens of times, and the
+        point is visibility, not spam. Best-effort — this must never break a completion."""
+        try:
+            reason = str(exc) or exc.__class__.__name__
+            self.last_fallback = {"provider": provider_name, "error": reason,
+                                  "ts": time.time()}
+            key = f"{provider_name}:{reason}"
+            now = time.monotonic()
+            if now - self._warned_at.get(key, -1e9) >= 60.0:
+                self._warned_at[key] = now
+                log.warning("LLM provider '%s' failed — falling back to her own brain: %s",
+                            provider_name, reason)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _call_with_resilience(self, provider: LLMProviderBase, req: LLMRequest) -> LLMResponse:
         attempt = 0

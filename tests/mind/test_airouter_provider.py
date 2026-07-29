@@ -177,6 +177,31 @@ def test_json_mode_requests_json_object(fake_openai):
     assert _FakeOpenAI.captured.get("response_format") == {"type": "json_object"}
 
 
+def test_cloud_failure_falls_back_loudly_not_silently(fake_openai, caplog):
+    """Regression: a dead cloud (billing, network, 4xx) used to drop to native with zero trace,
+    so nobody could tell WHY GLM-5 went quiet. The fallback must warn and record the reason."""
+    def broke_create(self, **kwargs):
+        raise RuntimeError("Insufficient credits. Add credits to continue.")
+
+    orig_create = _FakeCompletions.create
+    _FakeCompletions.create = broke_create
+    try:
+        llm = LLM(settings=_settings())
+        with caplog.at_level("WARNING", logger="nyxara.mind.llm"):
+            resp = llm.complete(LLMRequest.from_prompt("hello"))
+        # the invariant holds — never raises, her own brain answers honestly
+        assert resp.provider == "native"
+        # …but the degradation is now visible: a warning with the real upstream reason
+        assert any("airouter" in r.message and "Insufficient credits" in r.message
+                   for r in caplog.records)
+        # …and recorded for the self-report
+        assert llm.last_fallback["provider"] == "airouter"
+        assert "Insufficient credits" in llm.last_fallback["error"]
+        assert llm.learning_view()["last_fallback"]["provider"] == "airouter"
+    finally:
+        _FakeCompletions.create = orig_create
+
+
 def test_auto_ladder_prefers_airouter_when_available(fake_openai):
     s = _settings()
     s.llm.provider = LLMProvider.AUTO
