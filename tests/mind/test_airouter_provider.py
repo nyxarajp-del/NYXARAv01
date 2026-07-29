@@ -140,6 +140,37 @@ def test_complete_maps_request_and_response(fake_openai):
     assert _FakeOpenAI.init_kwargs["api_key"] == "test-key-123"
 
 
+def test_complete_clamps_absurd_max_tokens(fake_openai):
+    """Regression: a huge configured max_output_tokens used to go out on the wire unclamped,
+    the endpoint 400'd, and every cloud turn silently fell to the native n-gram."""
+    prov = AIRouterProvider(_settings())
+    resp = prov.complete(LLMRequest.from_prompt("hello", max_tokens=4096000))
+    assert resp.provider == "airouter"
+    assert _FakeOpenAI.captured["max_tokens"] == AIRouterProvider._AIROUTER_MAX_TOKENS_CEILING
+
+
+def test_complete_retries_with_halved_max_tokens_on_rejection(fake_openai):
+    """If the server still rejects the cap, one retry goes out with max_tokens halved."""
+    calls: list = []
+    orig_create = _FakeCompletions.create
+
+    def flaky_create(self, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1 and kwargs.get("max_tokens", 0) > 8192:
+            raise RuntimeError("400: max_tokens too large")
+        return orig_create(self, **kwargs)
+
+    _FakeCompletions.create = flaky_create
+    try:
+        resp = AIRouterProvider(_settings()).complete(
+            LLMRequest.from_prompt("hello", max_tokens=32768))
+        assert resp.text == "forty-two"
+        assert len(calls) == 2
+        assert calls[1]["max_tokens"] == 16384
+    finally:
+        _FakeCompletions.create = orig_create
+
+
 def test_json_mode_requests_json_object(fake_openai):
     prov = AIRouterProvider(_settings())
     prov.complete(LLMRequest.from_prompt("give json", json_mode=True))

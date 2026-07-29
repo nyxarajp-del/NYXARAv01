@@ -522,6 +522,11 @@ class AIRouterProvider(LLMProviderBase):
 
     name = "airouter"
 
+    # Completion-token ceiling forwarded to the wire. OpenAI-compatible endpoints (GLM-5 via
+    # airouter included) reject an absurd ``max_tokens`` with a 400, which would silently drop
+    # every cloud call down the ladder to the native n-gram — clamp here so no caller can.
+    _AIROUTER_MAX_TOKENS_CEILING = 32768
+
     def available(self) -> bool:
         cfg = self.settings.llm
         if not bool(getattr(cfg, "airouter_enabled", True)):
@@ -578,7 +583,7 @@ class AIRouterProvider(LLMProviderBase):
             "model": model,
             "messages": messages,
             "temperature": req.temperature,
-            "max_tokens": req.max_tokens,
+            "max_tokens": min(int(req.max_tokens), self._AIROUTER_MAX_TOKENS_CEILING),
             "top_p": req.top_p,
         }
         if req.stop:
@@ -590,13 +595,19 @@ class AIRouterProvider(LLMProviderBase):
         try:
             resp = client.chat.completions.create(**kwargs)
         except Exception:
-            # some OpenAI-compatible servers reject the optional extras — retry once without them
+            # some OpenAI-compatible servers reject the optional extras or a too-large
+            # ``max_tokens`` cap — retry once without the extras and with a halved cap
+            retried = False
             if "response_format" in kwargs or "seed" in kwargs:
                 kwargs.pop("response_format", None)
                 kwargs.pop("seed", None)
-                resp = client.chat.completions.create(**kwargs)
-            else:
+                retried = True
+            if int(kwargs.get("max_tokens", 0)) > 4096:
+                kwargs["max_tokens"] = max(1024, int(kwargs["max_tokens"]) // 2)
+                retried = True
+            if not retried:
                 raise
+            resp = client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         text = (getattr(choice.message, "content", None) or "").strip()
         if envelope is not None:                     # re-hydrate locally (never on the wire)

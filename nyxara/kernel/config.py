@@ -366,7 +366,7 @@ class LLMConfig(BaseModel):
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    max_output_tokens: int = Field(default=4096000, ge=1)
+    max_output_tokens: int = Field(default=8192, ge=1, le=131072)
     request_timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0, le=10)
 
@@ -1929,7 +1929,7 @@ class Nyx5Config(BaseModel):
     as_reasoner: bool = False                                    # NYX-5 takes the reason-seat (pillar reasoner)
 
     # Pillars 1-3 — spiking substrate + HDC memory + active inference
-    n_neurons: int = Field(default=256, ge=16, le=8192)
+    n_neurons: int = Field(default=1024, ge=16, le=8192)
     hd_dim: int = Field(default=10000, ge=256, le=65536)         # reuse HDC classic width
     tau_membrane_ms: float = Field(default=20.0, gt=0.0)         # membrane leak time constant
     v_threshold: float = Field(default=1.0, gt=0.0)              # fire threshold
