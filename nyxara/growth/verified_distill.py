@@ -1,6 +1,6 @@
 """NYXARA · growth/verified_distill.py — the adversarial hallucination trap (Part M).
 
-"Trust the tool, but verify." A cloud model (groq, or GLM-5 via airouter) is a powerful *proposer*, and proposers
+"Trust the tool, but verify." A cloud model (aicredits, groq, or GLM-5 via airouter) is a powerful *proposer*, and proposers
 hallucinate — so nothing it says is baked into NYXARA's durable knowledge until it survives a check:
 
 * **Decidable claim** (arithmetic / algebra / logic / number theory) → run it through

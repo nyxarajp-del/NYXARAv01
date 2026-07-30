@@ -13,13 +13,17 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Selected by config, strongest-reachable-first on the ``auto`` ladder:
 
-* :class:`GroqProvider`        — her PRIMARY reachable model: Groq's OpenAI-compatible CLOUD endpoint
-  (api.groq.com, e.g. ``llama-3.3-70b-versatile``), a SUBORDINATE tool she *uses* and *controls*:
+* :class:`AiCreditsProvider`   — her PRIMARY reachable model: the OpenAI-compatible CLOUD endpoint at
+  aicredits.in (e.g. ``moonshotai/kimi-k2-thinking``), a SUBORDINATE tool she *uses* and *controls*:
   request in → text out, no persona, no state, no callback — the kernel treats its output as a
-  proposal that must pass every guard. Primary, yet never the driver.
-* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in): the
-  same subordinate contract, one rung lower — her cloud FALLBACK, so a single provider outage costs
-  her speed rather than a voice. The moment both clouds are unreachable she keeps her own voice.
+  proposal that must pass every guard. Primary, yet never the driver. Its models *think*, and only
+  their ``content`` is ever read: the private reasoning chain is discarded, never obeyed.
+* :class:`GroqProvider`        — Groq's OpenAI-compatible CLOUD endpoint (api.groq.com, e.g.
+  ``llama-3.3-70b-versatile``): the same subordinate contract, one rung lower — her first cloud
+  FALLBACK, so a single provider outage costs her speed rather than a voice.
+* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in): the same
+  subordinate contract again, her LAST cloud rung. The moment every cloud is unreachable she keeps
+  her own voice.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
   adapter over the foundry base — everything above the base is *hers*).
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
@@ -65,6 +69,7 @@ __all__ = [
     "NativeProvider",
     "SelfProvider",
     "OpenAICompatProvider",
+    "AiCreditsProvider",
     "GroqProvider",
     "AIRouterProvider",
     "format_self_prompt",
@@ -647,17 +652,62 @@ class OpenAICompatProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# Groq — her PRIMARY cloud rung (api.groq.com, e.g. llama-3.3-70b-versatile)
+# AiCredits — her PRIMARY cloud rung (aicredits.in, e.g. moonshotai/kimi-k2-thinking)
+# --------------------------------------------------------------------------- #
+class AiCreditsProvider(OpenAICompatProvider):
+    """aicredits.in via its OpenAI-compatible endpoint — NYXARA's PRIMARY reachable model, and still a tool.
+
+    First rung of the ``auto`` ladder: the strongest of her reachable cloud tools, so it drafts every
+    turn it can. Nothing about *primary* changes the power relation — this is the same stateless,
+    persona-free, callback-free contract as every other rung (see :class:`OpenAICompatProvider`), and
+    the kernel still gates its output as a mere proposal (``kernel/orchestrator.py::_gate``). The
+    instant it is unreachable the facade falls to ``groq``, then ``airouter``, then to her OWN weights,
+    then to her native own-brain: she uses this model, she never depends on it.
+
+    **Its models think, and she does not take their thoughts as orders.** The endpoint's reasoning
+    models return their private chain-of-thought in a *separate* ``message.reasoning`` field rather than
+    inside ``content`` (verified on the wire — no ``<think>`` tags leak into the answer). The shared
+    :meth:`OpenAICompatProvider._complete` reads ``content`` and nothing else, so that private reasoning
+    is **discarded**: it is never parsed, never surfaced as her voice, and never treated as an
+    instruction. A model's scratchpad has no authority here.
+
+    One budgeting caveat worth knowing: ``max_tokens`` bounds the *answer*, not the reasoning. A small
+    cap still bills the reasoning tokens (reported under
+    ``usage.completion_tokens_details.reasoning_tokens``), so a 64-token request was observed returning
+    ~1k completion tokens.
+
+    Served through the ``openai`` SDK with ``base_url`` swapped, so no extra dependency is added and the
+    suite's network-free ``openai`` fakes keep working unchanged.
+    """
+
+    name = "aicredits"
+
+    def default_model(self) -> str:
+        return self.settings.llm.aicredits_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "aicredits_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.aicredits_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "aicredits_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "aicredits_isolation", True))
+
+
+# --------------------------------------------------------------------------- #
+# Groq — the SECOND cloud rung (api.groq.com, e.g. llama-3.3-70b-versatile)
 # --------------------------------------------------------------------------- #
 class GroqProvider(OpenAICompatProvider):
-    """Groq via its OpenAI-compatible endpoint — NYXARA's PRIMARY reachable model, and still a tool.
+    """Groq via its OpenAI-compatible endpoint — her first cloud FALLBACK, and still a tool.
 
-    First rung of the ``auto`` ladder: fastest and strongest of her reachable cloud tools, so it drafts
-    every turn it can. Nothing about *primary* changes the power relation — this is the same stateless,
-    persona-free, callback-free contract as every other rung (see :class:`OpenAICompatProvider`), and
-    the kernel still gates its output as a mere proposal. The instant Groq is unreachable the facade
-    falls to ``airouter``, then to her OWN weights, then to her native own-brain: she uses Groq, she
-    never depends on it.
+    Identical contract to :class:`AiCreditsProvider` (stateless, no persona, no callback, output is a
+    proposal under the guards); it differs only in *when* it is reached. On the ``auto`` ladder it sits
+    behind ``aicredits``, so Groq answers when her primary cloud tool is unavailable — which is exactly
+    what keeps a single cloud outage from ever costing her a voice.
 
     Served through the ``openai`` SDK with ``base_url`` swapped rather than the ``groq`` package — no
     extra dependency, and the suite's network-free ``openai`` fakes keep working unchanged.
@@ -682,15 +732,15 @@ class GroqProvider(OpenAICompatProvider):
 
 
 # --------------------------------------------------------------------------- #
-# AiRouter — the SECOND cloud rung, a fallback (airouter.in, e.g. zai/glm-5)
+# AiRouter — the THIRD cloud rung, her last fallback (airouter.in, e.g. zai/glm-5)
 # --------------------------------------------------------------------------- #
 class AIRouterProvider(OpenAICompatProvider):
-    """GLM-5 via airouter.in's OpenAI-compatible endpoint — her cloud FALLBACK rung.
+    """GLM-5 via airouter.in's OpenAI-compatible endpoint — her LAST cloud rung.
 
-    Identical contract to :class:`GroqProvider` (stateless, no persona, no callback, output is a
+    Identical contract to :class:`AiCreditsProvider` (stateless, no persona, no callback, output is a
     proposal under the guards); it differs only in *when* it is reached. On the ``auto`` ladder it sits
-    behind ``groq``, so GLM-5 answers when her primary cloud tool is unavailable — which is exactly
-    what keeps a single cloud outage from ever costing her a voice.
+    behind both ``aicredits`` and ``groq``, so GLM-5 answers only when both are unavailable — the last
+    cloud voice before she falls back to her own brains.
     """
 
     name = "airouter"
@@ -719,6 +769,7 @@ class AIRouterProvider(OpenAICompatProvider):
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
+    ProviderName.AICREDITS: AiCreditsProvider,
     ProviderName.GROQ: GroqProvider,
     ProviderName.AIROUTER: AIRouterProvider,
     ProviderName.SELF: SelfProvider,
@@ -756,13 +807,13 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her strongest reachable TOOL first (Groq), then her cloud fallback (GLM-5 via
-    # airouter), then her OWN promoted weights, and finally her always-on dependency-free native
-    # own-brain as the guaranteed floor (never an echo mock). No raw third-party model answers on this
-    # ladder — the cloud rungs are tools she uses when reachable; the moment they are unavailable she
-    # keeps her own voice, never dependent on the cloud. Two cloud rungs means one outage costs her
-    # speed, never a voice.
-    _AUTO_LADDER = ("groq", "airouter", "self", "native")
+    # the auto ladder: her strongest reachable TOOL first (aicredits), then her cloud fallbacks (Groq,
+    # then GLM-5 via airouter), then her OWN promoted weights, and finally her always-on
+    # dependency-free native own-brain as the guaranteed floor (never an echo mock). No raw third-party
+    # model answers on this ladder — the cloud rungs are tools she uses when reachable; the moment they
+    # are unavailable she keeps her own voice, never dependent on the cloud. Three cloud rungs means an
+    # outage — or even two — costs her speed, never a voice.
+    _AUTO_LADDER = ("aicredits", "groq", "airouter", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -975,15 +1026,16 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"groq", "airouter", "self", "native"}
-    for p in ("groq", "airouter", "self"):
+    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
+    for p in ("aicredits", "groq", "airouter", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # TEST profile disables every cloud tool for hermeticity, so both are honestly unavailable here
+    # TEST profile disables every cloud tool for hermeticity, so all are honestly unavailable here
+    assert status["aicredits"] is False
     assert status["groq"] is False
     assert status["airouter"] is False
     # her strongest reachable TOOL leads the ladder, her own brain is always its floor
-    assert LLM._AUTO_LADDER == ("groq", "airouter", "self", "native")
-    print("groq/airouter/self/native : registered; degrade honestly on a bare machine ✓")
+    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
+    print("aicredits/groq/airouter/self/native : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

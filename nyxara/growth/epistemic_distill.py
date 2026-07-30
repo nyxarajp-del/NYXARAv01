@@ -1,7 +1,7 @@
 """NYXARA · growth/epistemic_distill.py — Autonomous Epistemic Distillation (Part B).
 
 The point: **kill the dependence on the cloud, one turn at a time.** Every successful teacher (a cloud rung —
-groq, or GLM-5 via airouter) turn is a gift of knowledge — so instead of throwing it away after answering, NYXARA extracts the
+aicredits, groq, or GLM-5 via airouter) turn is a gift of knowledge — so instead of throwing it away after answering, NYXARA extracts the
 answer *and its reasoning path* and bakes them into her own durable, local memory:
 
 * a **Hyper-Dimensional Vector Rule** — the (condition, answer, reasoning) record encoded as one

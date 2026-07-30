@@ -55,8 +55,9 @@ os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 # such test reached the live endpoint, making the suite non-hermetic, non-reproducible (it failed on
 # a 402/429 rather than on the code) and a silent consumer of the Master's API quota. Same
 # ``setdefault`` posture as the flags above: OFF for the suite, and a test that genuinely wants a
-# cloud rung still opts in by setting ``groq_enabled``/``airouter_enabled`` on its own settings
-# object (see tests/mind/test_groq_provider.py), which overrides these defaults.
+# cloud rung still opts in by setting ``aicredits_enabled``/``groq_enabled``/``airouter_enabled`` on
+# its own settings object (see tests/mind/test_aicredits_provider.py), which overrides these defaults.
+os.environ.setdefault("NYXARA_LLM__AICREDITS_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__GROQ_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__AIROUTER_ENABLED", "false")
 
