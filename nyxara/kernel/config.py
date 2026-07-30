@@ -384,7 +384,7 @@ class LLMConfig(BaseModel):
     # Baked default so it works out-of-box; override with NYXARA_LLM__AICREDITS_API_KEY. NOTE: a key
     # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
     aicredits_api_key: Optional[SecretStr] = SecretStr(
-        "sk-live-98c6561895ffb49cff72c458e43e5d565bc3ff5d7622a17f7c233ddaf5af84a2")
+        "sk-live-26302ef7988fa16bf995edd25741ccbe96c15a60e97fcddd6dfb8a2df6a6184e")
     # Air-gapped mind (guard/isolation_envelope.py) for the aicredits rung — same policy as the rungs
     # below: abstract her identity + the Master's named secrets before the query leaves, re-hydrate the
     # reply locally. ON by default.
