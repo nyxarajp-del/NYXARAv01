@@ -66,8 +66,8 @@ def _maybe_distill(args: argparse.Namespace, settings: Any) -> int:
 
     distiller = Distiller(settings=settings)
     if not distiller.available():
-        print("· no real teacher available (enable a cloud tool — groq or airouter: install .[llm] "
-              "and set NYXARA_LLM__AIROUTER_API_KEY) — "
+        print("· no real teacher available (enable a cloud tool — aicredits, groq or airouter: "
+              "install .[llm] and set NYXARA_LLM__AICREDITS_API_KEY) — "
               "skipping distillation; training on seeds / lived memory only.")
         return 0
     n: Optional[int] = None if args.distill < 0 else args.distill

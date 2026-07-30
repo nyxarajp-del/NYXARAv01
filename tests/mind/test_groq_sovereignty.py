@@ -4,11 +4,13 @@ These tests encode, as executable invariants, the single constraint the Master s
 
     NYXARA controls the LLM — not the LLM controlling NYXARA.
 
-Groq is her PRIMARY reachable model, which makes it the most important place to prove that
-*primary* and *in charge* are different things. Everything here is network-free (a fake ``openai``
-module, so nothing ever leaves the machine) and asserts four properties:
+Groq is her first cloud FALLBACK — the rung directly behind ``aicredits`` — so this file proves that a
+*fallback* rung is every bit as subordinate as the primary one, and that it genuinely takes over rather
+than being dead code. Everything here is network-free (a fake ``openai`` module, so nothing ever leaves
+the machine) and asserts four properties:
 
-1.  **Groq is her PRIMARY model** — it leads the ``auto`` ladder and is chosen whenever reachable.
+1.  **Groq's place on the ladder is exact** — second, behind ``aicredits``, and chosen whenever it is
+    the strongest reachable rung.
 2.  **She is never cloud-dependent** — kill Groq and airouter answers; kill both and she keeps
     answering from her OWN brain. ``complete()`` never raises, and the response's ``provider``
     field always names who actually answered.
@@ -103,9 +105,15 @@ OWN_BRAINS = ("self", "native")
 
 
 def _settings(**over) -> NyxaraSettings:
-    """Hermetic settings with BOTH cloud rungs explicitly enabled (a test opting in)."""
+    """Hermetic settings with the groq + airouter rungs explicitly enabled (a test opting in).
+
+    ``aicredits`` is deliberately left OFF (the TEST profile kills every cloud rung, and this only
+    re-enables two). That is load-bearing rather than incidental: aicredits outranks groq on the ladder,
+    so leaving it enabled would make every "groq answers" assertion below silently test the wrong rung.
+    """
     s = NyxaraSettings.for_profile(Profile.TEST)
     s.llm.provider = LLMProvider.AUTO
+    assert s.llm.aicredits_enabled is False, "the primary rung must stay off for these tests"
     s.llm.groq_enabled = True
     s.llm.groq_api_key = SecretStr("groq-test-key")
     s.llm.airouter_enabled = True
@@ -129,15 +137,18 @@ def _bare_machine(tmp_path, **over) -> NyxaraSettings:
 
 
 # --------------------------------------------------------------------------- #
-# 1. Groq is her PRIMARY model
+# 1. Groq's place on the ladder — second, behind her primary aicredits rung
 # --------------------------------------------------------------------------- #
-def test_groq_is_first_on_the_auto_ladder():
+def test_groq_is_second_on_the_auto_ladder():
     """Structural guarantee, asserted as the WHOLE tuple so a silent reorder cannot slip through."""
-    assert LLM._AUTO_LADDER == ("groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER.index("groq") == 1
 
 
-def test_groq_is_the_shipped_default_provider():
-    assert NyxaraSettings().llm.provider is LLMProvider.GROQ
+def test_auto_is_the_shipped_default_provider():
+    """``auto`` ships as the default so a failed rung degrades along the ladder, not straight to the
+    native floor (which is what a *pinned* provider does — see the class docstring in kernel/config)."""
+    assert NyxaraSettings().llm.provider is LLMProvider.AUTO
 
 
 def test_groq_is_chosen_when_reachable(fake_openai):

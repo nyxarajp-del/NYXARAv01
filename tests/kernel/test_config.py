@@ -99,6 +99,9 @@ def test_test_profile_seals_the_foundry():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_model() == s.llm.aicredits_model
+    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
     s.llm.provider = LLMProvider.GROQ
     assert s.llm.active_model() == s.llm.groq_model
     assert s.llm.groq_model == "llama-3.3-70b-versatile"
@@ -106,11 +109,13 @@ def test_llm_active_model_and_key():
     assert s.llm.active_model() == s.llm.airouter_model
     assert s.llm.airouter_model == "zai/glm-5"
     # the cloud tools are the only providers carrying an API key — and each returns its OWN,
-    # never the other's, so the two can never be confused on the wire
+    # never another's, so they can never be confused on the wire
     assert s.llm.active_key() is not None
     assert s.llm.active_key().get_secret_value() == s.llm.airouter_api_key.get_secret_value()
     s.llm.provider = LLMProvider.GROQ
     assert s.llm.active_key().get_secret_value() == s.llm.groq_api_key.get_secret_value()
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_key().get_secret_value() == s.llm.aicredits_api_key.get_secret_value()
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
     # her own local brains carry no API key
@@ -119,15 +124,24 @@ def test_llm_active_model_and_key():
     assert s.llm.active_key() is None
 
 
-def test_groq_is_primary_and_foundry_base_is_local():
-    """The shipped defaults put Groq first while the foundry LoRA-tunes its own local base."""
+def test_aicredits_is_primary_and_foundry_base_is_local():
+    """The shipped defaults put AiCredits first while the foundry LoRA-tunes its own local base."""
     s = NyxaraSettings()
-    # serving: groq is the pinned PRIMARY provider by default; the facade still degrades to her
-    # native own-brain when the cloud is unreachable, keeping her sovereign
-    assert s.llm.provider is LLMProvider.GROQ
-    assert s.llm.active_model() == "llama-3.3-70b-versatile"
+    # serving: ``auto`` ships as the default, which makes aicredits her PRIMARY reachable model while
+    # keeping the degradation path intact (a *pinned* rung would skip the other clouds and drop
+    # straight to her native own-brain). Either way the facade degrades to her own brains when no
+    # cloud is reachable, keeping her sovereign.
+    assert s.llm.provider is LLMProvider.AUTO
+    assert s.llm.active_model() == "auto"
+    assert s.llm.aicredits_base_url == "https://aicredits.in/api/v1"
+    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
+    # pinning the primary rung by name resolves to its model
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_model() == "moonshotai/kimi-k2-thinking"
+    s.llm.provider = LLMProvider.AUTO
+    # groq and GLM-5-via-airouter stay configured as the cloud FALLBACK rungs, not the primary
+    assert s.llm.groq_model == "llama-3.3-70b-versatile"
     assert s.llm.groq_base_url == "https://api.groq.com/openai/v1"
-    # GLM-5 via airouter stays configured as the cloud FALLBACK rung, not the primary
     assert s.llm.airouter_model == "zai/glm-5"
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"

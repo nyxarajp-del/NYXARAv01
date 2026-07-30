@@ -1,7 +1,7 @@
 """NYXARA · guard/isolation_envelope.py — the air-gapped mind (Part K).
 
-When NYXARA calls an external cloud tool (any ``mind/llm.py::OpenAICompatProvider`` — Groq, airouter),
-the biggest privacy risk
+When NYXARA calls an external cloud tool (any ``mind/llm.py::OpenAICompatProvider`` — aicredits, Groq,
+airouter), the biggest privacy risk
 is that the provider — or anything on the wire — learns *who* she is, *whose* secrets she holds, or the
 internal names of her own architecture. The Isolation Envelope closes that gap the only honest way it can:
 
@@ -17,8 +17,9 @@ code/math/logic — not a guarantee of total information hiding.
 
 Stateless across requests, stateful within one: the calling cloud provider builds a fresh envelope per
 call, so the substitution map lives only for that single request/response round-trip. Each provider passes
-its OWN isolation flag via ``enabled=`` (``groq_isolation`` / ``airouter_isolation``), so privacy is
-per-rung rather than tied to whichever provider happened to be the first one written.
+its OWN isolation flag via ``enabled=`` (``aicredits_isolation`` / ``groq_isolation`` /
+``airouter_isolation``), so privacy is per-rung rather than tied to whichever provider happened to be
+the first one written.
 """
 from __future__ import annotations
 
@@ -45,8 +46,9 @@ class IsolationEnvelope:
                  extra_secrets: Sequence[str] = (),
                  enabled: Optional[bool] = None) -> None:
         self.settings = settings or get_settings()
-        # ``enabled`` lets the CALLING provider supply its own isolation flag (groq_isolation /
-        # airouter_isolation), so privacy is decided per cloud rung. Left None the envelope has no
+        # ``enabled`` lets the CALLING provider supply its own isolation flag (aicredits_isolation /
+        # groq_isolation / airouter_isolation), so privacy is decided per cloud rung. Left None the
+        # envelope has no
         # provider scope and falls back to the legacy read below.
         self._enabled_override = enabled
         self._forward: Dict[str, str] = {}   # original term -> token

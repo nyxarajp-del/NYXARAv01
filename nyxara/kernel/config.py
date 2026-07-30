@@ -10,7 +10,7 @@ Design goals
 * **Profile-aware.** ``dev`` and ``prod`` profiles ship safe, opinionated defaults;
   ``prod`` is strict (debug off, sandbox enforced, tighter budgets).
 * **Env-overridable.** Any field is overridable via ``NYXARA_`` environment variables
-  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=groq``.
+  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=aicredits``.
 * **Secret-safe.** API keys are ``SecretStr``; :meth:`NyxaraSettings.redacted`
   produces a log-safe dict that never leaks secrets.
 * **Owner-bound.** The owner identity (Jaypal Khoja / JP) is encoded as an immutable
@@ -101,13 +101,17 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder groq→airouter→self→native: her strongest reachable tool
-    #                               serves; she always degrades to her OWN offline brain — no manual flip
-    GROQ = "groq"                  # OpenAI-compatible cloud tool (api.groq.com, e.g.
-    #                               llama-3.3-70b-versatile): her PRIMARY reachable model and a
+    AUTO = "auto"                 # ladder aicredits→groq→airouter→self→native: her strongest reachable
+    #                               tool serves; she always degrades to her OWN offline brain — no
+    #                               manual flip. THE SHIPPED DEFAULT.
+    AICREDITS = "aicredits"       # OpenAI-compatible cloud tool (aicredits.in, e.g.
+    #                               moonshotai/kimi-k2-thinking): her PRIMARY reachable model and a
     #                               SUBORDINATE provider she calls and controls — never her driver
+    GROQ = "groq"                  # OpenAI-compatible cloud tool (api.groq.com, e.g.
+    #                               llama-3.3-70b-versatile): the SECOND cloud rung — her first
+    #                               fallback when aicredits is unreachable
     AIROUTER = "airouter"         # OpenAI-compatible cloud tool (airouter.in, e.g. zai/glm-5): the
-    #                               SECOND cloud rung — a fallback for when Groq is unreachable
+    #                               THIRD cloud rung — reached when both rungs above are unreachable
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
@@ -308,30 +312,35 @@ class MetaControlConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Stateless LLM faculty settings (mind/llm.py).
 
-    Two cloud tools she *controls*, the rest her own: ``groq`` and ``airouter`` each call an
-    OpenAI-compatible endpoint (api.groq.com / airouter.in) as SUBORDINATE providers — request in →
-    text out, no persona, no state — reachable models she uses yet never her drivers. Above that
-    floor everything is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes its own base on
-    her lived memory and ``self`` serves the promoted adapter; ``native`` is her always-on,
-    dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity seed corpus). Every
-    backend degrades to ``native`` when its heavy/optional deps are absent. There is no echo mock,
-    and no raw third-party model ever speaks as her.
+    Three cloud tools she *controls*, the rest her own: ``aicredits``, ``groq`` and ``airouter`` each
+    call an OpenAI-compatible endpoint (aicredits.in / api.groq.com / airouter.in) as SUBORDINATE
+    providers — request in → text out, no persona, no state — reachable models she uses yet never her
+    drivers. Above that floor everything is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes
+    its own base on her lived memory and ``self`` serves the promoted adapter; ``native`` is her
+    always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity seed
+    corpus). Every backend degrades to ``native`` when its heavy/optional deps are absent. There is no
+    echo mock, and no raw third-party model ever speaks as her.
 
-    The default pins ``groq`` as her PRIMARY provider: it drafts every turn it is reachable, and the
-    moment it is not the facade degrades to her always-on native own-brain, so a keyless or offline
-    machine never crashes. Set ``provider=auto`` to restore the closed train→serve loop instead: the
-    ladder groq→airouter→self→native tries both cloud tools and then serves her own promoted foundry
-    weights (past the serve gate — see ``self_serve_any_backend``) with zero manual reconfiguration.
+    The default is ``auto``, which makes ``aicredits`` her PRIMARY model *without* making her depend on
+    it: the ladder aicredits→groq→airouter→self→native drafts on the strongest reachable rung, so
+    aicredits answers every turn it can, one cloud outage costs her speed rather than a voice, and she
+    still ends on her own promoted foundry weights (past the serve gate — see
+    ``self_serve_any_backend``) and finally her always-on native own-brain. A keyless or offline machine
+    never crashes. Pinning a single provider by name is still supported, but note the asymmetry in
+    ``mind/llm.py::LLM.complete()``: a *pinned* provider that fails falls straight to ``native``,
+    skipping the intermediate cloud rungs — which is exactly why ``auto`` is the shipped default.
     """
 
     model_config = {"validate_assignment": True}
 
-    # Groq is the pinned PRIMARY model: it drafts first on every turn it is reachable, never queued
-    # behind the local self/native brains. Sovereignty holds regardless — the facade (mind/llm.py
-    # complete()) degrades to her native own-brain when the cloud is unreachable, the reply is always
-    # a PROPOSAL under the guards, and no persona is injected. Set ``auto`` for the
-    # groq→airouter→self→native ladder that also auto-serves her own promoted weights.
-    provider: LLMProvider = LLMProvider.GROQ
+    # ``auto`` is the shipped default and makes ``aicredits`` her PRIMARY model: the ladder
+    # aicredits→groq→airouter→self→native always drafts on the strongest REACHABLE rung, so aicredits
+    # answers every turn it can while a single cloud outage costs her speed rather than a voice.
+    # Sovereignty holds regardless — the facade (mind/llm.py complete()) walks down to her own brains
+    # when no cloud is reachable, the reply is always a PROPOSAL under the guards, and no persona is
+    # injected. Pin a provider by name to force one rung (see the class docstring for the caveat: a
+    # pinned rung that fails skips the other clouds and falls straight to her native own-brain).
+    provider: LLMProvider = LLMProvider.AUTO
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
@@ -347,12 +356,45 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
-    # ---- groq (OpenAI-compatible cloud tool) — her PRIMARY provider, still never the driver ---- #
+    # ---- aicredits (OpenAI-compatible cloud tool) — her PRIMARY provider, still never the driver -- #
     # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
     # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
-    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts groq first
-    # (strongest reachable tool = her PRIMARY model), degrading groq→airouter→self→native so she
-    # always keeps her own voice. She uses Groq, benefits from it, controls it — it never steers her.
+    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts aicredits first
+    # (strongest reachable tool = her PRIMARY model), degrading aicredits→groq→airouter→self→native so
+    # she always keeps her own voice. She uses it, benefits from it, controls it — it never steers her.
+    # Served through the ``openai`` SDK with ``base_url`` swapped, so no extra dependency is needed and
+    # the network-free test fakes keep working.
+    aicredits_enabled: bool = True
+    aicredits_base_url: str = "https://aicredits.in/api/v1"
+    # Verified live against this key (2026-07): the endpoint fronts ~420 models and ACCEPTS the full
+    # kwarg set mind/llm.py sends — max_tokens=32768, seed, stop, top_p and
+    # response_format={"type":"json_object"} — so the shared retry-without-extras fallback never has to
+    # fire here. ``moonshotai/kimi-k2-thinking`` is the default: a strong reasoning model, verified
+    # reachable. Faster/cheaper alternates on the same key: ``qwen/qwen3-vl-8b-thinking`` (only 8B, so
+    # noticeably weaker) and ``qwen/qwen3-vl-235b-a22b-thinking``.
+    #
+    # TWO non-obvious properties of these *thinking* models, both confirmed on the wire:
+    #   1. The private chain-of-thought comes back in a SEPARATE ``message.reasoning`` field — never
+    #      inside ``content`` and never as ``<think>`` tags. mind/llm.py reads only ``content``, so her
+    #      output is clean and the model's private reasoning is DISCARDED rather than acted upon.
+    #   2. ``max_tokens`` bounds the ANSWER, not the reasoning: a 64-token cap was observed returning
+    #      1052 completion tokens (987 of them reasoning, and billed). Budget accordingly — reasoning
+    #      tokens are reported under ``usage.completion_tokens_details.reasoning_tokens``.
+    aicredits_model: str = "moonshotai/kimi-k2-thinking"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__AICREDITS_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    aicredits_api_key: Optional[SecretStr] = SecretStr(
+        "sk-live-98c6561895ffb49cff72c458e43e5d565bc3ff5d7622a17f7c233ddaf5af84a2")
+    # Air-gapped mind (guard/isolation_envelope.py) for the aicredits rung — same policy as the rungs
+    # below: abstract her identity + the Master's named secrets before the query leaves, re-hydrate the
+    # reply locally. ON by default.
+    aicredits_isolation: bool = True
+
+    # ---- groq (OpenAI-compatible cloud tool) — the SECOND cloud rung, her first fallback ---- #
+    # Identical subordinate contract to aicredits above: stateless, no persona, output is a proposal
+    # under the guards. The ``auto`` ladder reaches it only when aicredits is unavailable
+    # (aicredits→groq→airouter→self→native), so it is her backup cloud voice rather than her primary
+    # one — and either way she degrades to her own brains rather than depending on the cloud.
     # Served through the ``openai`` SDK with ``base_url`` swapped (Groq is OpenAI-compatible), so no
     # extra dependency is needed and the network-free test fakes keep working.
     groq_enabled: bool = True
@@ -372,11 +414,11 @@ class LLMConfig(BaseModel):
     # the reply locally. ON by default.
     groq_isolation: bool = True
 
-    # ---- airouter (OpenAI-compatible cloud tool) — the SECOND cloud rung, a fallback ---- #
-    # Identical contract to groq above: stateless, no persona, output is a proposal under the guards.
-    # The ``auto`` ladder reaches it only when groq is unavailable (groq→airouter→self→native), so
-    # GLM-5 is her backup cloud voice rather than her primary one — and either way she degrades to her
-    # own brains rather than depending on the cloud.
+    # ---- airouter (OpenAI-compatible cloud tool) — the THIRD cloud rung, the last fallback ---- #
+    # Identical contract to the rungs above: stateless, no persona, output is a proposal under the
+    # guards. The ``auto`` ladder reaches it only when BOTH aicredits and groq are unavailable
+    # (aicredits→groq→airouter→self→native), so GLM-5 is her last cloud voice before she falls back to
+    # her own brains — and either way she degrades rather than depending on the cloud.
     airouter_enabled: bool = True
     airouter_base_url: str = "https://api.airouter.in/v1"
     airouter_model: str = "zai/glm-5"
@@ -422,6 +464,7 @@ class LLMConfig(BaseModel):
         # loudly at first use instead of silently reporting the wrong model.
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.AICREDITS: self.aicredits_model,
             LLMProvider.GROQ: self.groq_model,
             LLMProvider.AIROUTER: self.airouter_model,
             LLMProvider.SELF: "nyxara-self",
@@ -429,9 +472,11 @@ class LLMConfig(BaseModel):
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
-        """The cloud tools (``groq``, ``airouter``) are the only providers with an API key; every
-        other backend runs locally and needs none. Returns the key belonging to the *active* cloud
-        provider — never another one's, so the two are impossible to confuse."""
+        """The cloud tools (``aicredits``, ``groq``, ``airouter``) are the only providers with an API
+        key; every other backend runs locally and needs none. Returns the key belonging to the
+        *active* cloud provider — never another one's, so they are impossible to confuse."""
+        if self.provider is LLMProvider.AICREDITS:
+            return self.aicredits_api_key
         if self.provider is LLMProvider.GROQ:
             return self.groq_api_key
         if self.provider is LLMProvider.AIROUTER:
@@ -1086,8 +1131,8 @@ class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
     NYXARA does not bind herself to a single voice. She convenes a *council* of her reachable
-    models — the ``groq`` and ``airouter`` cloud tools she governs and, most importantly, her OWN model
-    forged by the foundry (``self``) — asks each as a governed
+    models — the ``aicredits``/``groq``/``airouter`` cloud tools she governs and, most importantly,
+    her OWN model forged by the foundry (``self``) — asks each as a governed
     tool, and then **NYXARA herself** judges and synthesises the verdicts. No single model
     ever drives; the panel advises, the sovereign decides. As the foundry sharpens her own
     model and promotes it, ``self`` joins the council and (via ``prefer_self_weight``)
@@ -1389,7 +1434,7 @@ class SelfImprovementConfig(BaseModel):
     allow_llm_edits: bool = True               # author real source fixes (self-model or LLM)
     # "khud NYXARA kare, koi LLM naa kare": when True, ONLY NYXARA's own model (the ``self``
     # provider) may author edits — never another provider. Set False to
-    # also permit the configured cloud tool (``groq``/``airouter``) as the author.
+    # also permit the configured cloud tool (``aicredits``/``groq``/``airouter``) as the author.
     self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
     # META-META loop (growth/meta_meta.py): a recursive tower that evolves the improvement
@@ -3139,9 +3184,9 @@ class NyxaraSettings(BaseSettings):
     Environment overrides use the ``NYXARA_`` prefix and ``__`` for nesting::
 
         NYXARA_PROFILE=prod
-        NYXARA_LLM__PROVIDER=groq
+        NYXARA_LLM__PROVIDER=aicredits
         NYXARA_RESOURCES__MAX_CONCURRENT_TASKS=128
-        NYXARA_LLM__GROQ_MODEL=llama-3.3-70b-versatile
+        NYXARA_LLM__AICREDITS_MODEL=moonshotai/kimi-k2-thinking
         NYXARA_FOUNDRY__LORA_R=16
     """
 
@@ -3302,6 +3347,7 @@ class NyxaraSettings(BaseSettings):
             # reaches out (a test that wants one builds its own settings object). Adding a new cloud
             # provider MUST add its kill-switch here; tests/kernel/test_config.py derives the cloud
             # set from the schema and fails if one is left reachable.
+            self.llm.aicredits_enabled = False
             self.llm.groq_enabled = False
             self.llm.airouter_enabled = False
             self.observability.telemetry_enabled = False

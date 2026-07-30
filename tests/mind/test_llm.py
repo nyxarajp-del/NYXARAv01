@@ -154,7 +154,7 @@ def test_provider_status():
     llm = _native_llm()
     status = llm.provider_status()
     assert status["native"] is True
-    assert set(status) == {"groq", "airouter", "self", "native"}
+    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
 
 
 def test_async_complete():
