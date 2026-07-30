@@ -7,8 +7,10 @@ These tests encode, as executable invariants, the single constraint the Master s
 Concretely that means three things, all network-free (a fake ``openai`` module, so nothing
 ever leaves the machine):
 
-1.  **GLM-5 is her PRIMARY model** — the airouter cloud tool sits first on the ``auto`` ladder
-    and is chosen whenever it is reachable.
+1.  **GLM-5 is a reachable cloud tool** — the airouter provider is chosen whenever it is reachable
+    and no stronger rung is. (Groq leads the ``auto`` ladder; see ``test_groq_sovereignty.py`` for
+    the primary-rung invariants. These tests pin airouter's own behaviour as the FALLBACK rung, so
+    each test here disables groq explicitly rather than relying on the TEST profile to do it.)
 2.  **She is never cloud-dependent** — the instant the cloud tool is unavailable, ``complete()``
     keeps answering from a *local* provider (down to her always-on native own-brain) and never
     raises. She uses the cloud; she never needs it.
@@ -85,9 +87,14 @@ def fake_openai(monkeypatch):
 
 
 def _settings(**over) -> NyxaraSettings:
-    """Hermetic settings with the cloud tool explicitly enabled (a test opting in)."""
+    """Hermetic settings with the airouter cloud tool explicitly enabled (a test opting in).
+
+    ``groq`` is disabled explicitly, not left to the TEST profile: these tests are about airouter's
+    own behaviour, and a precondition that important should be stated in the test rather than
+    inherited — otherwise they would silently start exercising a different rung."""
     s = NyxaraSettings.for_profile(Profile.TEST)
     s.llm.provider = LLMProvider.AUTO
+    s.llm.groq_enabled = False
     s.llm.airouter_enabled = True
     s.llm.airouter_api_key = SecretStr("test-key-123")
     for k, v in over.items():
@@ -96,11 +103,13 @@ def _settings(**over) -> NyxaraSettings:
 
 
 # --------------------------------------------------------------------------- #
-# 1. GLM-5 is her PRIMARY model
+# 1. GLM-5 is a reachable cloud tool (the fallback rung)
 # --------------------------------------------------------------------------- #
-def test_airouter_is_first_on_the_auto_ladder():
-    """Structural guarantee: her strongest reachable tool is the cloud GLM-5."""
-    assert LLM._AUTO_LADDER[0] == "airouter"
+def test_airouter_is_the_cloud_fallback_rung():
+    """Structural guarantee: airouter sits on the ladder, directly behind her primary cloud tool."""
+    assert LLM._AUTO_LADDER.index("airouter") == LLM._AUTO_LADDER.index("groq") + 1
+    # and always ahead of her own local brains, which remain the floor
+    assert LLM._AUTO_LADDER.index("airouter") < LLM._AUTO_LADDER.index("native")
 
 
 def test_glm5_is_chosen_when_reachable(fake_openai):

@@ -77,8 +77,12 @@ def fake_openai(monkeypatch):
 
 
 def _settings(**over) -> NyxaraSettings:
-    """A hermetic settings object with the cloud tool explicitly enabled (a test opting in)."""
+    """A hermetic settings object with the airouter cloud tool explicitly enabled (a test opting in).
+
+    ``groq`` is disabled explicitly so these tests exercise the airouter rung on purpose rather than
+    because the TEST profile happens to disable the primary one."""
     s = NyxaraSettings.for_profile(Profile.TEST)
+    s.llm.groq_enabled = False
     s.llm.airouter_enabled = True
     s.llm.airouter_api_key = SecretStr("test-key-123")
     s.llm.provider = LLMProvider.AIROUTER
@@ -202,9 +206,11 @@ def test_cloud_failure_falls_back_loudly_not_silently(fake_openai, caplog):
         _FakeCompletions.create = orig_create
 
 
-def test_auto_ladder_prefers_airouter_when_available(fake_openai):
+def test_auto_ladder_prefers_airouter_when_groq_is_down(fake_openai):
+    """With her primary cloud rung unreachable, the ladder falls to airouter — not to a local brain."""
     s = _settings()
     s.llm.provider = LLMProvider.AUTO
+    assert s.llm.groq_enabled is False        # stated precondition, not an inherited accident
     llm = LLM(settings=s)
     assert "airouter" in llm.provider_status()
     assert llm.chosen_provider().name == "airouter"

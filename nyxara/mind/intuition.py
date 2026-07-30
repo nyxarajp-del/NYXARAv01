@@ -967,6 +967,7 @@ if __name__ == "__main__":  # pragma: no cover
     full = open(_self.__file__, "r", encoding="utf-8").read()
     code = full.split("if __name__ ==")[0]
     banned = ["from nyxara.mind." + "llm", "import " + "LLM", "AIRouter" + "Provider",
+              "Groq" + "Provider", "OpenAICompat" + "Provider",
               "SelfProvider", ".generate(", ".complete("]
     for pat in banned:
         assert pat not in code, f"intuition must be LLM-free (found {pat!r})"
