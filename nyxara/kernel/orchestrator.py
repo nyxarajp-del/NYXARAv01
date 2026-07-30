@@ -594,6 +594,10 @@ class NyxaraCore:
         # measurable geometry. It colours novelty/attention and answers map/recall/analogy/
         # pattern queries; FIFO-capped over the live stream. Advisory — it never gates.
         self.hyperdimensional = self._build_hyperdimensional()
+        # Self-mutating hyperbolic manifold — concept nodes live in the Poincaré ball; a turn
+        # farther than τ from everything known births a node at the hyperbolic barycenter of the
+        # active cluster, and edges adapt Hebbianly from each turn's real outcome. Advisory.
+        self.hyperbolic_manifold = self._build_hyperbolic_manifold()
         # NYX-5 — the neuromorphic brain: an event-driven spiking-network *simulation* (LIF neurons,
         # STDP local learning, live-graph structural plasticity) with 10,000-D long-term memory and
         # active-inference surprise. Colour-only by default; it can occupy the reason-seat when
@@ -790,6 +794,7 @@ class NyxaraCore:
         self.metacontrol = self._build_metacontrol()
         self._last_compute_plan: Any = None   # this turn's ComputeBudget (for the outcome loop)
         self._last_latent_novelty: Any = None  # hyperdimensional novelty stashed for the estimate
+        self._last_manifold: Any = None        # this turn's hyperbolic-manifold ObserveResult
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
         # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
         # threads whose winner still passes the one gate (the control law is preserved).
@@ -2539,6 +2544,26 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — hyperdimensional cognition is a capability, never required
             return None
 
+    def _build_hyperbolic_manifold(self) -> Any:
+        """Build the self-mutating hyperbolic concept manifold (guarded). Honest: a pure-stdlib
+        Poincaré-ball concept store with live node genesis and Hebbian edge plasticity — a
+        capability, never a hard dependency; disabled cleanly when the section says so."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "hyperbolic_manifold", None)
+            if cfg is None or not cfg.enabled:
+                return None
+            from nyxara.mind.hyperbolic_manifold import HyperbolicConceptManifold
+            return HyperbolicConceptManifold(
+                dim=cfg.dim, tau=cfg.tau, eta=cfg.eta, decay=cfg.decay,
+                edge_floor=cfg.edge_floor, max_nodes=cfg.max_nodes, seed=cfg.seed,
+                place_lr=cfg.place_lr, frechet_iters=cfg.frechet_iters,
+                genesis_edge_weight=cfg.genesis_edge_weight, d_norm=cfg.d_norm,
+                prune_every=cfg.prune_every, active_window=cfg.active_window)
+        except Exception:  # noqa: BLE001 — the manifold is a capability, never required
+            return None
+
     def _build_nyx5(self) -> Any:
         """Build the NYX-5 neuromorphic brain (guarded). Honest: a spiking-network *simulation* on
         commodity silicon — not neuromorphic hardware, no backpropagation. A capability, never a
@@ -2644,6 +2669,75 @@ class NyxaraCore:
             return hd.analogy(a, b, c) if hd is not None else None
         except Exception:  # noqa: BLE001
             return None
+
+    # ---- hyperbolic concept manifold — advisory public API ---- #
+    def manifold_observe(self, text: str, *, concept_id: Optional[str] = None) -> Any:
+        """Observe ``text`` on the hyperbolic manifold (genesis beyond τ, assimilation else).
+        Returns an ObserveResult, or None when the manifold is absent."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return None
+        try:
+            return mm.observe(text, concept_id=concept_id)
+        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return None
+
+    def manifold_nearest(self, text: str, *, k: int = 5) -> List[Any]:
+        """Top-``k`` nearest concepts (id, geodesic distance) to ``text`` on the manifold."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.nearest(text, k=k) if mm is not None else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def manifold_distance(self, a: str, b: str) -> Optional[float]:
+        """Geodesic (Poincaré) distance between two known concepts — or None."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.distance(a, b) if mm is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def manifold_reinforce(self, a: str, b: str, utility: float) -> Optional[float]:
+        """Hebbian edge update Δe = η·utility·(1 − d/d_norm) between two concepts — new weight or None."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.reinforce(a, b, utility) if mm is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def manifold_stats(self) -> Dict[str, Any]:
+        """A snapshot of the manifold (nodes, edges, genesis count, radii) — or {} when absent."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.stats() if mm is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def manifold_sync_graph(self, *, limit: int = 128) -> Dict[str, Any]:
+        """Seed the manifold from the knowledge graph's ``is_a`` taxonomy: each entity is observed
+        with its already-present parents as the genesis context cluster, so hierarchy depth maps
+        to radius organically. Idle-loop helper — never wired into the live turn path."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        kg = getattr(self, "knowledge_graph", None)
+        if mm is None or kg is None:
+            return {}
+        added = 0
+        try:
+            from nyxara.memory.graph import GraphQuery
+            triples = kg.match(GraphQuery(predicate="is_a"))[: max(1, int(limit))]
+            for t in triples:
+                subj = str(getattr(t, "subject", "") or "")
+                obj = str(getattr(t, "object", "") or "")
+                for name, parents in ((obj, []), (subj, [f"kg:{obj}"])):
+                    cid = f"kg:{name}"
+                    if name and cid not in mm._nodes:
+                        ctx = [p for p in parents if p in mm._nodes]
+                        mm.observe(name, concept_id=cid, context_ids=ctx or None)
+                        added += 1
+        except Exception:  # noqa: BLE001 — best-effort seeding, never fatal
+            pass
+        return {"added": added, **self.manifold_stats()}
 
     def _build_knowledge_graph(self) -> Any:
         """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
@@ -4755,6 +4849,7 @@ class NyxaraCore:
         self._turn_authority = authority
         self._last_social = {}   # fresh social read per turn (no stale carry-over on early exits)
         self._last_latent_novelty = None   # fresh hyperdimensional novelty per turn
+        self._last_manifold = None         # fresh hyperbolic-manifold observation per turn
         self._last_compute_plan = None     # fresh metacognitive allocation per turn
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
@@ -4808,6 +4903,11 @@ class NyxaraCore:
         # hyperdimensional latent mapping: novelty in 10,000-D colours attention/affect, then
         # the turn is ingested so latent structure accretes across the session (advisory)
         self._hyperdimensional_tick(safe_text)
+        # Hyperbolic manifold tick: the turn lands as a point in the Poincaré ball — a genuine
+        # semantic gap (geodesic > τ from everything known) births a concept node at the
+        # hyperbolic barycenter of the active cluster; familiarity drifts the nearest node.
+        # Colour-only — it never touches disposition or the gate.
+        self._manifold_tick(safe_text)
         # NYX-5 neuromorphic tick: perceive the turn through the spiking substrate so STDP learns
         # continuously (no train/infer split) and surprise colours attention. Colour-only — it never
         # touches disposition or the gate.
@@ -6169,6 +6269,37 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — latent mapping is best-effort, never fatal
             pass
 
+    def _manifold_tick(self, text: str) -> None:
+        """Observe this turn on the hyperbolic concept manifold: a turn farther than τ (geodesic)
+        from every known concept BIRTHS a new node at the hyperbolic barycenter of the active
+        cluster; a familiar turn pulls its nearest concept along the geodesic toward it. The
+        memory embedder feeds the point when present (strongest semantics available), else the
+        manifold's own stdlib featurizer. Advisory, best-effort — never gates."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None or not text:
+            return
+        try:
+            vector = None
+            try:
+                emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+                if emb is not None:
+                    vec = [float(x) for x in emb.embed(text)]
+                    vector = vec or None
+            except Exception:  # noqa: BLE001 — fall back to the manifold's own featurizer
+                vector = None
+            res = mm.observe(text, vector=vector, concept_id=f"turn:{self._turns}:{text[:24]}")
+            self._last_manifold = res
+            tag = " genesis" if res.created else ""
+            d_min = res.min_dist if math.isfinite(res.min_dist) else 0.0
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"manifold: d_min={d_min:.2f} "
+                             f"nearest={res.nearest_id or '∅'}{tag}",
+                             salience=_clamp01(d_min / max(mm.tau, 1e-9) * 0.5))
+            if res.created and self.affect is not None:
+                self.affect.note_novelty(magnitude=0.6)
+        except Exception:  # noqa: BLE001 — manifold observation is best-effort, never fatal
+            pass
+
     def _observation_vector(self, percept: Any) -> Optional[List[float]]:
         """Derive a fixed-length observation vector for the predictive core from the
         percept's text — via the memory embedder when present, else a cheap projection.
@@ -6871,6 +7002,15 @@ class NyxaraCore:
         brain_reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
         self._compound_own_models(stimulus, candidate, success, reward=brain_reward)
+        # Hebbian edge adaptation on the hyperbolic manifold: the turn's REAL outcome valence
+        # strengthens/weakens edges among the concepts this turn touched — Δe = η·utility·
+        # (1 − d/d_norm). Structure follows lived success, not co-occurrence alone.
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is not None:
+            try:
+                mm.reinforce_active(brain_reward)
+            except Exception:  # noqa: BLE001 — plasticity is best-effort, never fatal
+                pass
         # preference learning: a lived good outcome pulls the preference prior C toward
         # what just happened (goals are learned from experience, not only declared);
         # a bad outcome only softens C's precision. Owner-alignment gates are untouched.
@@ -9988,6 +10128,7 @@ class NyxaraCore:
             self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
             self._save_nyx5(target)
+            self._save_manifold(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
@@ -10005,6 +10146,7 @@ class NyxaraCore:
             self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
             self._load_nyx5(target)
+            self._load_manifold(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
@@ -10076,6 +10218,40 @@ class NyxaraCore:
                 return
             with open(path, "r", encoding="utf-8") as fh:
                 brain.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
+            pass
+
+    def _manifold_path(self, memory_target: str) -> str:
+        """The hyperbolic-manifold sidecar (concept points + Hebbian edges) lives next to memory."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "hyperbolic_manifold.json")
+
+    def _save_manifold(self, memory_target: str) -> None:
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return
+        try:
+            import json
+            import os
+            path = self._manifold_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(mm.to_dict(), fh)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_manifold(self, memory_target: str) -> None:
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return
+        try:
+            import json
+            import os
+            path = self._manifold_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                mm.load_dict(json.load(fh))
         except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
             pass
 
