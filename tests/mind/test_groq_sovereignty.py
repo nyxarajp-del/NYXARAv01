@@ -98,6 +98,10 @@ def fake_openai(monkeypatch):
     DOWN.clear()
 
 
+CLOUD_RUNGS = ("groq", "airouter")
+OWN_BRAINS = ("self", "native")
+
+
 def _settings(**over) -> NyxaraSettings:
     """Hermetic settings with BOTH cloud rungs explicitly enabled (a test opting in)."""
     s = NyxaraSettings.for_profile(Profile.TEST)
@@ -108,6 +112,19 @@ def _settings(**over) -> NyxaraSettings:
     s.llm.airouter_api_key = SecretStr("airouter-test-key")
     for k, v in over.items():
         setattr(s.llm, k, v)
+    return s
+
+
+def _bare_machine(tmp_path, **over) -> NyxaraSettings:
+    """Settings for a machine with NO forged brain of her own — the native floor is the only rung.
+
+    ``self_model_dir`` is pinned at an empty ``tmp_path`` on purpose. The default is a shared
+    directory under ``paths.data_dir``, so a model promoted by any earlier run (or a previous
+    session on the same machine) would make ``SelfProvider`` available and outrank ``native`` —
+    which would silently turn a floor test into a machine-state test."""
+    s = _settings(**over)
+    s.llm.self_model_dir = tmp_path / "no-foundry"
+    s.features.transformers_inference = False
     return s
 
 
@@ -149,11 +166,26 @@ def test_groq_down_falls_to_airouter(fake_openai):
 
 
 def test_both_clouds_down_falls_to_her_own_brain(fake_openai):
-    """Kill every cloud rung: she must keep answering from her OWN brain, and never raise."""
+    """Kill every cloud rung: she must keep answering from her OWN brain, and never raise.
+
+    The invariant is *whose* voice answers, not which of her own brains does: with a forged model
+    promoted, ``self`` rightly outranks ``native``. So this asserts no CLOUD answered and one of her
+    own did — ``test_native_is_the_guaranteed_floor`` pins the floor itself on a bare machine."""
     DOWN.update({"groq.com", "airouter.in"})
-    s = _settings()
-    s.features.transformers_inference = False        # model a truly bare machine
-    llm = LLM(settings=s)
+    llm = LLM(settings=_settings())
+    resp = llm.complete(LLMRequest.from_prompt("who is your master?"))
+    assert resp.provider not in CLOUD_RUNGS
+    assert resp.provider in OWN_BRAINS
+    assert isinstance(resp.text, str)        # never None — the call completed, it did not raise
+    # Deliberately NOT asserting non-empty here: whichever forged model happens to be promoted on
+    # this machine owns its own output quality, and a weak one returning "" is not a sovereignty
+    # failure. The non-empty guarantee belongs to the floor, and is asserted there.
+
+
+def test_native_is_the_guaranteed_floor(fake_openai, tmp_path):
+    """On a truly bare machine — no cloud, no forged model — her native own-brain still answers."""
+    DOWN.update({"groq.com", "airouter.in"})
+    llm = LLM(settings=_bare_machine(tmp_path))
     resp = llm.complete(LLMRequest.from_prompt("who is your master?"))
     assert resp.provider == "native"
     assert isinstance(resp.text, str) and resp.text.strip()
@@ -166,21 +198,18 @@ def test_groq_disabled_is_skipped_on_the_ladder(fake_openai):
     assert llm.complete(LLMRequest.from_prompt("hi")).provider == "airouter"
 
 
-def test_no_key_means_no_cloud_at_all(fake_openai):
+def test_no_key_means_no_cloud_at_all(fake_openai, tmp_path):
     """A keyless machine degrades to her own brain instead of erroring."""
-    s = _settings(groq_api_key=None, airouter_api_key=None)
-    s.features.transformers_inference = False
-    llm = LLM(settings=s)
+    llm = LLM(settings=_bare_machine(tmp_path, groq_api_key=None, airouter_api_key=None))
     assert llm.provider_status()["groq"] is False
+    assert llm.provider_status()["airouter"] is False
     assert llm.complete(LLMRequest.from_prompt("hi")).provider == "native"
 
 
-def test_pinned_groq_still_degrades_when_unreachable(fake_openai):
+def test_pinned_groq_still_degrades_when_unreachable(fake_openai, tmp_path):
     """Even pinned explicitly (not ``auto``), an unreachable Groq falls to her own brain."""
     DOWN.add("groq.com")
-    s = _settings(provider=LLMProvider.GROQ)
-    s.features.transformers_inference = False
-    llm = LLM(settings=s)
+    llm = LLM(settings=_bare_machine(tmp_path, provider=LLMProvider.GROQ))
     resp = llm.complete(LLMRequest.from_prompt("hi"))
     assert resp.provider == "native"
 
