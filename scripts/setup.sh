@@ -42,7 +42,7 @@ fi
 # Seed a .env from the template if the user hasn't made one yet.
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  echo "==> Created .env from .env.example — tweak the NYXARA_LLM__AIROUTER_* knobs as you like"
+  echo "==> Created .env from .env.example — tweak the NYXARA_LLM__GROQ_* knobs as you like"
 else
   echo "==> .env already exists — left untouched"
 fi

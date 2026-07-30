@@ -13,10 +13,13 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Selected by config, strongest-reachable-first on the ``auto`` ladder:
 
-* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in), a
-  SUBORDINATE tool she *uses* and *controls*: request in → text out, no persona, no state, no
-  callback — the kernel treats its output as a proposal that must pass every guard. Her PRIMARY
-  reachable model, yet never the driver; the moment the cloud is unreachable she keeps her own voice.
+* :class:`GroqProvider`        — her PRIMARY reachable model: Groq's OpenAI-compatible CLOUD endpoint
+  (api.groq.com, e.g. ``llama-3.3-70b-versatile``), a SUBORDINATE tool she *uses* and *controls*:
+  request in → text out, no persona, no state, no callback — the kernel treats its output as a
+  proposal that must pass every guard. Primary, yet never the driver.
+* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in): the
+  same subordinate contract, one rung lower — her cloud FALLBACK, so a single provider outage costs
+  her speed rather than a voice. The moment both clouds are unreachable she keeps her own voice.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
   adapter over the foundry base — everything above the base is *hers*).
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
@@ -24,7 +27,7 @@ Selected by config, strongest-reachable-first on the ``auto`` ladder:
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
   ladder — a bare machine still answers from her own learned voice, never an echo of the prompt.
 
-No external model ever *speaks as her*: the only cloud model is a tool she controls, and her own
+No external model ever *speaks as her*: the cloud models are tools she controls, and her own
 ``self``/``native`` brains are the sovereign floor. Heavy/optional deps (the ``openai`` SDK,
 ``torch``/``peft`` for the foundry) are imported lazily and reported honestly via ``available()``,
 so this module works with zero of them installed (falling back to her native own-brain).
@@ -61,6 +64,8 @@ __all__ = [
     "LLMProviderBase",
     "NativeProvider",
     "SelfProvider",
+    "OpenAICompatProvider",
+    "GroqProvider",
     "AIRouterProvider",
     "format_self_prompt",
     "format_self_training_doc",
@@ -264,8 +269,8 @@ class NativeProvider(LLMProviderBase):
     a bare machine with zero heavy deps still answers from *her own learned voice* rather than
     parroting the prompt. Deterministic (a fixed seed) → identical requests yield identical output,
     keeping cognition replayable (``kernel/replay.py``) and auditable. A genuine instruct model
-    (the ``airouter`` cloud tool or her own ``self`` weights) always outranks it on the ``auto``
-    ladder."""
+    (the ``groq``/``airouter`` cloud tools or her own ``self`` weights) always outranks it on the
+    ``auto`` ladder."""
 
     name = "native"
 
@@ -502,10 +507,10 @@ class SelfProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
-# AiRouter provider — an OpenAI-compatible CLOUD tool (airouter.in, e.g. zai/glm-5)
+# OpenAI-compatible CLOUD providers — SUBORDINATE tools she calls (Groq, airouter)
 # --------------------------------------------------------------------------- #
-class AIRouterProvider(LLMProviderBase):
-    """Call an OpenAI-compatible cloud endpoint (airouter.in, e.g. ``zai/glm-5``) — a SUBORDINATE tool.
+class OpenAICompatProvider(LLMProviderBase):
+    """Call an OpenAI-compatible cloud endpoint — a SUBORDINATE tool, shared by every cloud rung.
 
     The single constraint mirrors this whole module: *the LLM is a provider, not the driver.* This
     class forwards a request's system + messages to the API and returns text; it injects **no**
@@ -515,26 +520,44 @@ class AIRouterProvider(LLMProviderBase):
     her: she uses it, benefits from it, controls it.
 
     The heavy dep (the ``openai`` SDK) is imported lazily and reported honestly via :meth:`available`,
-    so a bare machine (no SDK, no key, or the ``airouter_enabled`` kill-switch off) simply degrades
-    down the ``auto`` ladder to her own always-on brain rather than erroring.
+    so a bare machine (no SDK, no key, or the provider's kill-switch off) simply degrades down the
+    ``auto`` ladder to her own always-on brain rather than erroring.
 
-    Optional privacy: if the isolation envelope (``guard/isolation_envelope.py``) is present and enabled,
-    outgoing prompts are abstracted before they leave and the reply is re-hydrated locally — the cloud
-    model only ever sees abstract tokens, never NYXARA's identity or the Master's secrets.
+    Optional privacy: if the isolation envelope (``guard/isolation_envelope.py``) is present and enabled
+    for this rung, outgoing prompts are abstracted before they leave and the reply is re-hydrated
+    locally — the cloud model only ever sees abstract tokens, never NYXARA's identity or the Master's
+    secrets.
+
+    Subclasses supply only *which config block to read* via four small hooks (:meth:`_enabled_flag`,
+    :meth:`_base_url`, :meth:`_api_key`, :meth:`_isolation_flag`) plus ``name`` and
+    :meth:`default_model`. The wire logic — the ``max_tokens`` clamp and the retry-without-extras
+    fallback — lives here once, so a fix to either can never land on one endpoint and miss the other.
     """
 
-    name = "airouter"
+    name = "openai-compat"
 
-    # Completion-token ceiling forwarded to the wire. OpenAI-compatible endpoints (GLM-5 via
-    # airouter included) reject an absurd ``max_tokens`` with a 400, which would silently drop
-    # every cloud call down the ladder to the native n-gram — clamp here so no caller can.
-    _AIROUTER_MAX_TOKENS_CEILING = 32768
+    # Completion-token ceiling forwarded to the wire. OpenAI-compatible endpoints reject an absurd
+    # ``max_tokens`` with a 400, which would silently drop every cloud call down the ladder to the
+    # native n-gram — clamp here so no caller can.
+    _MAX_TOKENS_CEILING = 32768
+
+    # ---- per-endpoint hooks (explicit, not prefix-derived, so config reads stay greppable) ---- #
+    def _enabled_flag(self) -> bool:
+        raise NotImplementedError
+
+    def _base_url(self) -> str:
+        raise NotImplementedError
+
+    def _api_key(self) -> Any:
+        raise NotImplementedError
+
+    def _isolation_flag(self) -> bool:
+        raise NotImplementedError
 
     def available(self) -> bool:
-        cfg = self.settings.llm
-        if not bool(getattr(cfg, "airouter_enabled", True)):
+        if not self._enabled_flag():
             return False
-        key = getattr(cfg, "airouter_api_key", None)
+        key = self._api_key()
         if not key or not key.get_secret_value().strip():
             return False
         try:
@@ -543,24 +566,20 @@ class AIRouterProvider(LLMProviderBase):
             return False
         return True
 
-    def default_model(self) -> str:
-        return self.settings.llm.airouter_model
-
     def _client(self) -> Any:
         from openai import OpenAI
-        cfg = self.settings.llm
-        return OpenAI(base_url=cfg.airouter_base_url,
-                      api_key=cfg.airouter_api_key.get_secret_value(),
-                      timeout=cfg.request_timeout_s)
+        return OpenAI(base_url=self._base_url(),
+                      api_key=self._api_key().get_secret_value(),
+                      timeout=self.settings.llm.request_timeout_s)
 
     def _envelope(self) -> Any:
-        """The isolation envelope, if installed AND enabled — else None (plain pass-through)."""
+        """The isolation envelope, if installed AND enabled for this rung — else None (pass-through)."""
         try:
             from nyxara.guard.isolation_envelope import IsolationEnvelope
         except Exception:
             return None
         try:
-            env = IsolationEnvelope(self.settings)
+            env = IsolationEnvelope(self.settings, enabled=self._isolation_flag())
             return env if env.enabled() else None
         except Exception:  # noqa: BLE001 — privacy is best-effort; never break a call
             return None
@@ -586,7 +605,7 @@ class AIRouterProvider(LLMProviderBase):
             "model": model,
             "messages": messages,
             "temperature": req.temperature,
-            "max_tokens": min(int(req.max_tokens), self._AIROUTER_MAX_TOKENS_CEILING),
+            "max_tokens": min(int(req.max_tokens), self._MAX_TOKENS_CEILING),
             "top_p": req.top_p,
         }
         if req.stop:
@@ -624,13 +643,83 @@ class AIRouterProvider(LLMProviderBase):
             usage = Usage(
                 prompt_tokens=estimate_tokens(" ".join(m["content"] for m in messages)),
                 completion_tokens=estimate_tokens(text))
-        return (text, finish, usage, {"airouter": True, "model": model})
+        return (text, finish, usage, {self.name: True, "model": model})
+
+
+# --------------------------------------------------------------------------- #
+# Groq — her PRIMARY cloud rung (api.groq.com, e.g. llama-3.3-70b-versatile)
+# --------------------------------------------------------------------------- #
+class GroqProvider(OpenAICompatProvider):
+    """Groq via its OpenAI-compatible endpoint — NYXARA's PRIMARY reachable model, and still a tool.
+
+    First rung of the ``auto`` ladder: fastest and strongest of her reachable cloud tools, so it drafts
+    every turn it can. Nothing about *primary* changes the power relation — this is the same stateless,
+    persona-free, callback-free contract as every other rung (see :class:`OpenAICompatProvider`), and
+    the kernel still gates its output as a mere proposal. The instant Groq is unreachable the facade
+    falls to ``airouter``, then to her OWN weights, then to her native own-brain: she uses Groq, she
+    never depends on it.
+
+    Served through the ``openai`` SDK with ``base_url`` swapped rather than the ``groq`` package — no
+    extra dependency, and the suite's network-free ``openai`` fakes keep working unchanged.
+    """
+
+    name = "groq"
+
+    def default_model(self) -> str:
+        return self.settings.llm.groq_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "groq_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.groq_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "groq_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "groq_isolation", True))
+
+
+# --------------------------------------------------------------------------- #
+# AiRouter — the SECOND cloud rung, a fallback (airouter.in, e.g. zai/glm-5)
+# --------------------------------------------------------------------------- #
+class AIRouterProvider(OpenAICompatProvider):
+    """GLM-5 via airouter.in's OpenAI-compatible endpoint — her cloud FALLBACK rung.
+
+    Identical contract to :class:`GroqProvider` (stateless, no persona, no callback, output is a
+    proposal under the guards); it differs only in *when* it is reached. On the ``auto`` ladder it sits
+    behind ``groq``, so GLM-5 answers when her primary cloud tool is unavailable — which is exactly
+    what keeps a single cloud outage from ever costing her a voice.
+    """
+
+    name = "airouter"
+
+    # Back-compat alias for the shared ceiling: kept as a live class attribute because the regression
+    # test for the clamp reads it by name (tests/mind/test_airouter_provider.py).
+    _AIROUTER_MAX_TOKENS_CEILING = OpenAICompatProvider._MAX_TOKENS_CEILING
+
+    def default_model(self) -> str:
+        return self.settings.llm.airouter_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "airouter_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.airouter_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "airouter_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "airouter_isolation", True))
 
 
 # --------------------------------------------------------------------------- #
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
+    ProviderName.GROQ: GroqProvider,
     ProviderName.AIROUTER: AIRouterProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
@@ -667,12 +756,13 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her strongest reachable TOOL first (the airouter cloud model, GLM-5), then her
-    # OWN promoted weights, and finally her always-on dependency-free native own-brain as the
-    # guaranteed floor (never an echo mock). No raw third-party model answers on this ladder — airouter
-    # is a tool she uses when reachable; the moment it is unavailable she keeps her own voice, never
-    # dependent on the cloud.
-    _AUTO_LADDER = ("airouter", "self", "native")
+    # the auto ladder: her strongest reachable TOOL first (Groq), then her cloud fallback (GLM-5 via
+    # airouter), then her OWN promoted weights, and finally her always-on dependency-free native
+    # own-brain as the guaranteed floor (never an echo mock). No raw third-party model answers on this
+    # ladder — the cloud rungs are tools she uses when reachable; the moment they are unavailable she
+    # keeps her own voice, never dependent on the cloud. Two cloud rungs means one outage costs her
+    # speed, never a voice.
+    _AUTO_LADDER = ("groq", "airouter", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -885,12 +975,15 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"airouter", "self", "native"}
-    for p in ("airouter", "self"):
+    assert set(status) == {"groq", "airouter", "self", "native"}
+    for p in ("groq", "airouter", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # TEST profile disables the cloud tool for hermeticity, so airouter is honestly unavailable here
+    # TEST profile disables every cloud tool for hermeticity, so both are honestly unavailable here
+    assert status["groq"] is False
     assert status["airouter"] is False
-    print("airouter/self/native : registered; degrade honestly on a bare machine ✓")
+    # her strongest reachable TOOL leads the ladder, her own brain is always its floor
+    assert LLM._AUTO_LADDER == ("groq", "airouter", "self", "native")
+    print("groq/airouter/self/native : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

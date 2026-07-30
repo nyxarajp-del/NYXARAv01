@@ -1,4 +1,4 @@
-"""The ``auto`` provider ladder (mind/llm.py): airouter→self→native.
+"""The ``auto`` provider ladder (mind/llm.py): groq→airouter→self→native.
 
 Her own promoted weights answer first — but only past the honesty serve gate (a LoRA over
 the real base, or the explicit any-backend opt-in). Every rung degrades honestly; the
@@ -99,7 +99,18 @@ def test_on_promotion_reloads_self_provider(tmp_path):
 
 def test_active_model_supports_auto():
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.llm.provider is LLMProvider.AIROUTER    # GLM-5 pinned primary by default
-    assert s.llm.active_model() == "zai/glm-5"
+    assert s.llm.provider is LLMProvider.GROQ        # groq pinned primary by default
+    assert s.llm.active_model() == "llama-3.3-70b-versatile"
     s.llm.provider = LLMProvider.AUTO
     assert s.llm.active_model() == "auto"            # no KeyError on the new member
+
+
+def test_active_model_covers_every_provider_member():
+    """``active_model()`` is a TOTAL lookup — every member must have a row, forever.
+
+    Registering provider #5 without one raises KeyError at first use, so this test is what makes
+    that mistake impossible to ship rather than merely unlikely."""
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    for p in LLMProvider:
+        s.llm.provider = p
+        assert isinstance(s.llm.active_model(), str) and s.llm.active_model().strip(), p

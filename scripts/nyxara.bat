@@ -54,12 +54,12 @@ if not exist ".venv\Scripts\python.exe" (
     call ".venv\Scripts\activate.bat"
 )
 
-REM --- 3. Write .env: GLM-5 primary, her own local brains as the floor (only if missing) -----
+REM --- 3. Write .env: Groq primary, her own local brains as the floor (only if missing) -----
 if not exist ".env" (
-    echo [setup] Writing .env: GLM-5 (airouter) primary, native own-brain floor...
+    echo [setup] Writing .env: Groq primary, native own-brain floor...
     >  ".env" echo NYXARA_PROFILE=dev
-    >> ".env" echo NYXARA_LLM__PROVIDER=airouter
-    >> ".env" echo NYXARA_LLM__AIROUTER_MODEL=zai/glm-5
+    >> ".env" echo NYXARA_LLM__PROVIDER=groq
+    >> ".env" echo NYXARA_LLM__GROQ_MODEL=llama-3.3-70b-versatile
         >> ".env" echo NYXARA_FEATURES__MULTI_LLM_COUNCIL=false
     >> ".env" echo NYXARA_COUNCIL__ENABLED=false
 )

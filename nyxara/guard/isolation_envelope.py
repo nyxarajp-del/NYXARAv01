@@ -1,6 +1,7 @@
 """NYXARA · guard/isolation_envelope.py — the air-gapped mind (Part K).
 
-When NYXARA calls an external cloud tool (``mind/llm.py::AIRouterProvider``), the biggest privacy risk
+When NYXARA calls an external cloud tool (any ``mind/llm.py::OpenAICompatProvider`` — Groq, airouter),
+the biggest privacy risk
 is that the provider — or anything on the wire — learns *who* she is, *whose* secrets she holds, or the
 internal names of her own architecture. The Isolation Envelope closes that gap the only honest way it can:
 
@@ -14,8 +15,10 @@ and de-identifies code/logic. It **cannot** hide the abstract *shape* of a probl
 language cannot be fully anonymized without destroying meaning. So it is strong best-effort privacy for
 code/math/logic — not a guarantee of total information hiding.
 
-Stateless across requests, stateful within one: the ``AIRouterProvider`` builds a fresh envelope per call,
-so the substitution map lives only for that single request/response round-trip.
+Stateless across requests, stateful within one: the calling cloud provider builds a fresh envelope per
+call, so the substitution map lives only for that single request/response round-trip. Each provider passes
+its OWN isolation flag via ``enabled=`` (``groq_isolation`` / ``airouter_isolation``), so privacy is
+per-rung rather than tied to whichever provider happened to be the first one written.
 """
 from __future__ import annotations
 
@@ -39,14 +42,21 @@ class IsolationEnvelope:
     """
 
     def __init__(self, settings: Optional[NyxaraSettings] = None, *,
-                 extra_secrets: Sequence[str] = ()) -> None:
+                 extra_secrets: Sequence[str] = (),
+                 enabled: Optional[bool] = None) -> None:
         self.settings = settings or get_settings()
+        # ``enabled`` lets the CALLING provider supply its own isolation flag (groq_isolation /
+        # airouter_isolation), so privacy is decided per cloud rung. Left None the envelope has no
+        # provider scope and falls back to the legacy read below.
+        self._enabled_override = enabled
         self._forward: Dict[str, str] = {}   # original term -> token
         self._reverse: Dict[str, str] = {}   # token -> original term
         self._terms: List[str] = self._collect_terms(extra_secrets)
 
     # ---- policy ---- #
     def enabled(self) -> bool:
+        if self._enabled_override is not None:
+            return bool(self._enabled_override)
         return bool(getattr(self.settings.llm, "airouter_isolation", True))
 
     def _collect_terms(self, extra_secrets: Sequence[str]) -> List[str]:

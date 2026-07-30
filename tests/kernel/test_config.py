@@ -64,6 +64,21 @@ def test_test_profile_forces_native_llm():
     assert s.observability.telemetry_enabled is False
 
 
+def test_test_profile_kills_every_cloud_provider():
+    """No cloud rung may be reachable under TEST — the suite must never touch the network.
+
+    The cloud set is derived from the schema (a ``*_api_key`` field is what makes a provider a
+    remote one) rather than hardcoded, so adding provider #5 and forgetting its kill-switch fails
+    HERE instead of quietly sending ~6.6k tests out over the wire."""
+    from nyxara.kernel.config import LLMConfig
+
+    cloud = [f[: -len("_api_key")] for f in LLMConfig.model_fields if f.endswith("_api_key")]
+    assert cloud, "expected at least one cloud provider in LLMConfig"
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    for prefix in cloud:
+        assert getattr(s.llm, f"{prefix}_enabled") is False, f"TEST profile leaks {prefix}"
+
+
 def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
     s = NyxaraSettings.for_profile(Profile.DEV)
@@ -84,11 +99,18 @@ def test_test_profile_seals_the_foundry():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
+    s.llm.provider = LLMProvider.GROQ
+    assert s.llm.active_model() == s.llm.groq_model
+    assert s.llm.groq_model == "llama-3.3-70b-versatile"
     s.llm.provider = LLMProvider.AIROUTER
     assert s.llm.active_model() == s.llm.airouter_model
     assert s.llm.airouter_model == "zai/glm-5"
-    # airouter is the one provider that carries an API key (the cloud tool she controls)
+    # the cloud tools are the only providers carrying an API key — and each returns its OWN,
+    # never the other's, so the two can never be confused on the wire
     assert s.llm.active_key() is not None
+    assert s.llm.active_key().get_secret_value() == s.llm.airouter_api_key.get_secret_value()
+    s.llm.provider = LLMProvider.GROQ
+    assert s.llm.active_key().get_secret_value() == s.llm.groq_api_key.get_secret_value()
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
     # her own local brains carry no API key
@@ -97,13 +119,15 @@ def test_llm_active_model_and_key():
     assert s.llm.active_key() is None
 
 
-def test_glm5_is_primary_and_foundry_base_is_local():
-    """The shipped defaults put GLM-5 first while the foundry LoRA-tunes its own local base."""
+def test_groq_is_primary_and_foundry_base_is_local():
+    """The shipped defaults put Groq first while the foundry LoRA-tunes its own local base."""
     s = NyxaraSettings()
-    # serving: airouter (GLM-5) is the pinned PRIMARY provider by default; the facade still
-    # degrades to her native own-brain when the cloud is unreachable, keeping her sovereign
-    assert s.llm.provider is LLMProvider.AIROUTER
-    assert s.llm.active_model() == "zai/glm-5"
+    # serving: groq is the pinned PRIMARY provider by default; the facade still degrades to her
+    # native own-brain when the cloud is unreachable, keeping her sovereign
+    assert s.llm.provider is LLMProvider.GROQ
+    assert s.llm.active_model() == "llama-3.3-70b-versatile"
+    assert s.llm.groq_base_url == "https://api.groq.com/openai/v1"
+    # GLM-5 via airouter stays configured as the cloud FALLBACK rung, not the primary
     assert s.llm.airouter_model == "zai/glm-5"
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"
