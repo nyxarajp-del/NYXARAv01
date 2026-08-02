@@ -17,6 +17,12 @@ accelerate>=0.30
 peft>=0.10
 # HTTP client (senses/web.py and friends)
 httpx>=0.27
+# The OpenAI-compatible CLOUD tools — aicredits (aicredits.in, her primary), groq (api.groq.com) and
+# airouter (GLM-5) — are SUBORDINATE providers NYXARA calls as tools
+# (mind/llm.py::OpenAICompatProvider). One SDK serves all three: only the base_url differs, so no
+# groq package is needed. Import-guarded:
+# without it the auto ladder degrades to her own local brains, so a bare machine still runs.
+openai>=1.0
 # Genesis Protocol — Neural Architecture Search (growth/genesis.py): she designs and micro-trains
 # her OWN neural architectures. Real (not the n-gram fallback) requires torch; a CPU build is fine.
 # Without it the code still runs on the always-available n-gram substrate, but the searched neural

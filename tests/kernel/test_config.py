@@ -64,11 +64,26 @@ def test_test_profile_forces_native_llm():
     assert s.observability.telemetry_enabled is False
 
 
+def test_test_profile_kills_every_cloud_provider():
+    """No cloud rung may be reachable under TEST — the suite must never touch the network.
+
+    The cloud set is derived from the schema (a ``*_api_key`` field is what makes a provider a
+    remote one) rather than hardcoded, so adding provider #5 and forgetting its kill-switch fails
+    HERE instead of quietly sending ~6.6k tests out over the wire."""
+    from nyxara.kernel.config import LLMConfig
+
+    cloud = [f[: -len("_api_key")] for f in LLMConfig.model_fields if f.endswith("_api_key")]
+    assert cloud, "expected at least one cloud provider in LLMConfig"
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    for prefix in cloud:
+        assert getattr(s.llm, f"{prefix}_enabled") is False, f"TEST profile leaks {prefix}"
+
+
 def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
     s = NyxaraSettings.for_profile(Profile.DEV)
     assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
-    assert s.foundry.lora_requires_gpu is False      # 0.5B base LoRA-tunes on a CPU, no GPU needed
+    assert s.foundry.lora_requires_gpu is False      # DistilGPT-2 LoRA-tunes on a CPU too, no GPU required
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
     assert s.flywheel.correction_weight == 3
@@ -84,33 +99,57 @@ def test_test_profile_seals_the_foundry():
 
 def test_llm_active_model_and_key():
     s = NyxaraSettings()
-    s.llm.provider = LLMProvider.QWEN
-    assert s.llm.active_model() == s.llm.qwen_model
-    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_model() == s.llm.aicredits_model
+    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
+    s.llm.provider = LLMProvider.GROQ
+    assert s.llm.active_model() == s.llm.groq_model
+    assert s.llm.groq_model == "llama-3.3-70b-versatile"
+    s.llm.provider = LLMProvider.AIROUTER
+    assert s.llm.active_model() == s.llm.airouter_model
+    assert s.llm.airouter_model == "zai/glm-5"
+    # the cloud tools are the only providers carrying an API key — and each returns its OWN,
+    # never another's, so they can never be confused on the wire
+    assert s.llm.active_key() is not None
+    assert s.llm.active_key().get_secret_value() == s.llm.airouter_api_key.get_secret_value()
+    s.llm.provider = LLMProvider.GROQ
+    assert s.llm.active_key().get_secret_value() == s.llm.groq_api_key.get_secret_value()
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_key().get_secret_value() == s.llm.aicredits_api_key.get_secret_value()
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
-    # every backend is local now — there are no API keys anywhere
+    # her own local brains carry no API key
     assert s.llm.active_key() is None
     s.llm.provider = LLMProvider.NATIVE
     assert s.llm.active_key() is None
 
 
-def test_qwen_is_the_single_base_and_foundry_base():
-    """The shipped defaults wire the single Qwen2.5-0.5B base end to end."""
+def test_aicredits_is_primary_and_foundry_base_is_local():
+    """The shipped defaults put AiCredits first while the foundry LoRA-tunes its own local base."""
     s = NyxaraSettings()
-    # serving: the auto ladder by default (self→qwen→mock), so her own promoted
-    # weights serve the moment they exist; until then the Qwen base answers
+    # serving: ``auto`` ships as the default, which makes aicredits her PRIMARY reachable model while
+    # keeping the degradation path intact (a *pinned* rung would skip the other clouds and drop
+    # straight to her native own-brain). Either way the facade degrades to her own brains when no
+    # cloud is reachable, keeping her sovereign.
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    assert s.llm.qwen_model == "Qwen/Qwen2.5-0.5B-Instruct"
-    # training: the foundry LoRA-tunes that same single base — everything above it is hers
-    assert s.foundry.base_model == "Qwen/Qwen2.5-0.5B-Instruct"
-    # a 0.5B base needs no QLoRA and no remote code
+    assert s.llm.aicredits_base_url == "https://aicredits.in/api/v1"
+    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
+    # pinning the primary rung by name resolves to its model
+    s.llm.provider = LLMProvider.AICREDITS
+    assert s.llm.active_model() == "moonshotai/kimi-k2-thinking"
+    s.llm.provider = LLMProvider.AUTO
+    # groq and GLM-5-via-airouter stay configured as the cloud FALLBACK rungs, not the primary
+    assert s.llm.groq_model == "llama-3.3-70b-versatile"
+    assert s.llm.groq_base_url == "https://api.groq.com/openai/v1"
+    assert s.llm.airouter_model == "zai/glm-5"
+    # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
+    assert s.foundry.base_model == "distilgpt2"
+    # DistilGPT-2 is tiny — full-precision LoRA everywhere; no quantization, no remote code
     assert s.foundry.load_in_4bit is False
     assert s.foundry.trust_remote_code is False
-    # Qwen2.5 uses llama-style projection names — the default pins the full set
-    assert s.foundry.lora_target_modules == [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    # DistilGPT-2 (GPT-2 arch) uses Conv1D names — the default pins attention (c_attn) + MLP (c_fc/c_proj)
+    assert s.foundry.lora_target_modules == ["c_attn", "c_proj", "c_fc"]
 
 
 def test_resource_limits_validation():
@@ -143,11 +182,11 @@ def test_save_and_from_file_roundtrip(tmp_path):
 
 def test_env_override(monkeypatch):
     monkeypatch.setenv("NYXARA_PROFILE", "prod")
-    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "qwen")
+    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "airouter")
     monkeypatch.setenv("NYXARA_RESOURCES__MAX_CONCURRENT_TASKS", "128")
     s = NyxaraSettings()
     assert s.profile is Profile.PROD
-    assert s.llm.provider is LLMProvider.QWEN
+    assert s.llm.provider is LLMProvider.AIROUTER
     assert s.resources.max_concurrent_tasks == 128
 
 

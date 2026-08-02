@@ -217,7 +217,7 @@ def test_router_routes_novel_domain_to_own_faculty_not_the_teacher():
 
     class _Teacher:
         def available_providers(self):
-            return ["qwen", "native"]
+            return ["airouter", "native"]
 
         def complete_with(self, name, req):
             return type("_R", (), {"text": "[teacher] a generic answer"})()

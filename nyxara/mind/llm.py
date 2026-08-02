@@ -11,22 +11,30 @@ makes cognition replayable (kernel/replay.py) and auditable. Memory lives in
 ``memory/``; tool execution lives in ``agency/``; the decision to *act* on any output
 belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
-Fully local, selected by config:
+Selected by config, strongest-reachable-first on the ``auto`` ladder:
 
-* :class:`QwenProvider`        — the single pretrained base: **Qwen2.5-0.5B-Instruct** by default
-  (any HF causal-LM id works), downloaded & run in-process (HuggingFace transformers); every
-  load-/generation-time knob is exposed via ``NYXARA_LLM__QWEN_*``, including serving a
-  foundry-forged LoRA adapter directly. Tiny enough to run and fine-tune on a CPU.
+* :class:`AiCreditsProvider`   — her PRIMARY reachable model: the OpenAI-compatible CLOUD endpoint at
+  aicredits.in (e.g. ``moonshotai/kimi-k2-thinking``), a SUBORDINATE tool she *uses* and *controls*:
+  request in → text out, no persona, no state, no callback — the kernel treats its output as a
+  proposal that must pass every guard. Primary, yet never the driver. Its models *think*, and only
+  their ``content`` is ever read: the private reasoning chain is discarded, never obeyed.
+* :class:`GroqProvider`        — Groq's OpenAI-compatible CLOUD endpoint (api.groq.com, e.g.
+  ``llama-3.3-70b-versatile``): the same subordinate contract, one rung lower — her first cloud
+  FALLBACK, so a single provider outage costs her speed rather than a voice.
+* :class:`AIRouterProvider`    — GLM-5 via an OpenAI-compatible CLOUD endpoint (airouter.in): the same
+  subordinate contract again, her LAST cloud rung. The moment every cloud is unreachable she keeps
+  her own voice.
 * :class:`SelfProvider`        — NYXARA's OWN model, trained & promoted by the foundry (a LoRA
-  adapter over that same Qwen base — everything above the base is *hers*)
+  adapter over the foundry base — everything above the base is *hers*).
 * :class:`NativeProvider`      — her always-on, dependency-free OWN brain: a pure-stdlib
   Kneser-Ney word n-gram (``growth/foundry_models.WordKNGramLM``) trained on her identity seed
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
   ladder — a bare machine still answers from her own learned voice, never an echo of the prompt.
 
-No cloud providers, no API keys, **no mock**. Heavy deps (``torch``/``transformers``/``peft``) are
-imported lazily and reported honestly via ``available()``, so this module works with zero heavy
-deps installed (falling back to her native own-brain).
+No external model ever *speaks as her*: the cloud models are tools she controls, and her own
+``self``/``native`` brains are the sovereign floor. Heavy/optional deps (the ``openai`` SDK,
+``torch``/``peft`` for the foundry) are imported lazily and reported honestly via ``available()``,
+so this module works with zero of them installed (falling back to her native own-brain).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -37,6 +45,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import logging
 import threading
 import time
 import uuid
@@ -48,6 +57,8 @@ from nyxara.kernel.config import LLMProvider as ProviderName
 from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.errors import LLMError, RetryPolicy, classify
 
+log = logging.getLogger("nyxara.mind.llm")
+
 __all__ = [
     "Role",
     "Message",
@@ -56,8 +67,11 @@ __all__ = [
     "LLMResponse",
     "LLMProviderBase",
     "NativeProvider",
-    "QwenProvider",
     "SelfProvider",
+    "OpenAICompatProvider",
+    "AiCreditsProvider",
+    "GroqProvider",
+    "AIRouterProvider",
     "format_self_prompt",
     "format_self_training_doc",
     "truncate_at_stops",
@@ -260,7 +274,8 @@ class NativeProvider(LLMProviderBase):
     a bare machine with zero heavy deps still answers from *her own learned voice* rather than
     parroting the prompt. Deterministic (a fixed seed) → identical requests yield identical output,
     keeping cognition replayable (``kernel/replay.py``) and auditable. A genuine instruct model
-    (``self``/``qwen``) always outranks it on the ``auto`` ladder."""
+    (the ``groq``/``airouter`` cloud tools or her own ``self`` weights) always outranks it on the
+    ``auto`` ladder."""
 
     name = "native"
 
@@ -285,201 +300,6 @@ class NativeProvider(LLMProviderBase):
         usage = Usage(prompt_tokens=estimate_tokens(" ".join(m.content for m in req.messages)),
                       completion_tokens=estimate_tokens(text))
         return (text, "stop", usage, {"native": True})
-
-
-# --------------------------------------------------------------------------- #
-# Qwen provider — Qwen2.5-0.5B-Instruct, downloaded & run locally (HuggingFace)
-# --------------------------------------------------------------------------- #
-class QwenProvider(LLMProviderBase):
-    """Run **Qwen2.5-0.5B-Instruct** in-process, downloaded via HuggingFace — the sole real base.
-
-    This is the single pretrained model NYXARA stands on. It is fetched on first use
-    (``Qwen/Qwen2.5-0.5B-Instruct`` by default) and cached locally by the ``transformers``
-    hub, then served entirely on this machine — no API key, no network at inference time.
-    At 0.5B it loads and generates on a CPU. The instruct checkpoint ships the Qwen2.5 chat
-    template (``system``/``user``/``assistant``), applied via ``apply_chat_template``.
-
-    Maximum control, all from config (``NYXARA_LLM__QWEN_*``):
-
-    * load-time — device, dtype, 4-/8-bit quantized load (bitsandbytes+CUDA only, silently
-      full-precision otherwise), attention implementation, KV cache, trust_remote_code;
-    * fine-tune serving — ``qwen_adapter_path`` loads a peft LoRA adapter (e.g. a foundry
-      ``versions/vN/adapter``) on top of the base; ``qwen_merge_adapter`` folds it into the
-      weights for faster inference — this is how *her own* foundry adapter serves over the base;
-    * generation — top_k, repetition_penalty, no_repeat_ngram_size, min_new_tokens,
-      beam search + length_penalty, do_sample policy, deterministic seeding, input-length
-      budget; per-request :class:`LLMRequest` fields (temperature/top_p/max_tokens/stop/
-      seed) always win over config defaults.
-
-    Heavy deps are imported lazily and reported honestly, so a bare machine degrades to
-    her native own-brain rather than erroring. Stateless: the loaded weights are a cached instrument,
-    never conversation memory.
-    """
-
-    name = "qwen"
-
-    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
-        super().__init__(settings)
-        self._model = None
-        self._tokenizer = None
-        self._loaded_key: Optional[Tuple[str, str]] = None   # (model_name, adapter_path)
-        self._torch: Any = None
-
-    def available(self) -> bool:
-        # Master kill-switch: the in-process HuggingFace path is a heavy-ML capability, so it only
-        # serves when ``features.transformers_inference`` is on (the ladder degrades to self/native).
-        if not bool(getattr(self.settings.features, "transformers_inference", True)):
-            return False
-        try:
-            import torch  # noqa: F401
-            import transformers  # noqa: F401
-        except Exception:
-            return False
-        if self.settings.llm.qwen_adapter_path is not None:
-            try:
-                import peft  # noqa: F401
-            except Exception:
-                return False
-        return True
-
-    def default_model(self) -> str:
-        return self.settings.llm.qwen_model
-
-    # ---- lazy model loading (cached; reloads when model or adapter changes) ---- #
-    def _quant_config(self, torch: Any) -> Optional[Any]:
-        """A ``BitsAndBytesConfig`` when quantization is requested AND usable, else None.
-
-        Quantized load needs bitsandbytes + CUDA; anywhere else we silently serve full
-        precision instead of crashing (graceful degradation, mirrors the foundry)."""
-        cfg = self.settings.llm
-        if not (cfg.qwen_load_in_4bit or cfg.qwen_load_in_8bit):
-            return None
-        try:
-            import bitsandbytes  # noqa: F401
-            from transformers import BitsAndBytesConfig
-        except Exception:
-            return None
-        if not torch.cuda.is_available():
-            return None
-        if cfg.qwen_load_in_8bit:
-            return BitsAndBytesConfig(load_in_8bit=True)
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type=cfg.qwen_bnb_4bit_quant_type,
-            bnb_4bit_compute_dtype=getattr(torch, cfg.qwen_bnb_4bit_compute_dtype),
-            bnb_4bit_use_double_quant=cfg.qwen_bnb_4bit_use_double_quant,
-        )
-
-    def _ensure_model(self, model: str):
-        cfg = self.settings.llm
-        key = (model, str(cfg.qwen_adapter_path or ""))
-        if self._model is None or self._loaded_key != key:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            tok = AutoTokenizer.from_pretrained(
-                model, trust_remote_code=cfg.qwen_trust_remote_code)
-            if tok.pad_token is None:
-                tok.pad_token = tok.eos_token
-            kwargs: Dict[str, Any] = {
-                "torch_dtype": ("auto" if cfg.qwen_dtype == "auto"
-                                else getattr(torch, cfg.qwen_dtype)),
-                "device_map": cfg.qwen_device or "auto",
-                "trust_remote_code": cfg.qwen_trust_remote_code,
-            }
-            if cfg.qwen_attn_implementation:
-                kwargs["attn_implementation"] = cfg.qwen_attn_implementation
-            quant = self._quant_config(torch)
-            if quant is not None:
-                kwargs["quantization_config"] = quant
-                kwargs["device_map"] = "auto"   # bitsandbytes places layers itself
-            lm = AutoModelForCausalLM.from_pretrained(model, **kwargs)
-            if cfg.qwen_adapter_path is not None:
-                from peft import PeftModel   # a bad adapter raises -> LLMError -> native fallback
-                lm = PeftModel.from_pretrained(lm, str(cfg.qwen_adapter_path))
-                if cfg.qwen_merge_adapter:
-                    lm = lm.merge_and_unload()
-            lm.eval()
-            self._model, self._tokenizer = lm, tok
-            self._loaded_key, self._torch = key, torch
-        return self._model, self._tokenizer
-
-    # ---- request -> prompt / generation kwargs ---- #
-    def _render_prompt(self, req: LLMRequest, tok: Any) -> str:
-        cfg = self.settings.llm
-        system = (req.system or "").strip()
-        if req.json_mode:
-            nudge = "Respond with ONLY valid JSON — no prose, no code fences."
-            system = f"{system}\n\n{nudge}" if system else nudge
-        messages = req.provider_messages()
-        if cfg.qwen_use_chat_template:
-            if system:
-                messages = [{"role": "system", "content": system}] + messages
-            return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        parts = ([system] if system else []) + [m["content"] for m in messages]
-        return "\n\n".join(parts)
-
-    def _gen_kwargs(self, req: LLMRequest, tok: Any) -> Dict[str, Any]:
-        """Merge per-request fields with config defaults (the request wins where it exists).
-
-        Sampling knobs are dropped entirely when decoding greedily — transformers warns
-        (and ignores them) otherwise, so the kwargs stay honest."""
-        cfg = self.settings.llm
-        do_sample = {"always": True, "never": False}.get(
-            cfg.qwen_do_sample, req.temperature > 0)
-        kwargs: Dict[str, Any] = {
-            "max_new_tokens": req.max_tokens,
-            "do_sample": do_sample,
-            "num_beams": cfg.qwen_num_beams,
-            "use_cache": cfg.qwen_use_cache,
-            "pad_token_id": tok.pad_token_id,
-            "eos_token_id": tok.eos_token_id,
-        }
-        if do_sample:
-            kwargs["temperature"] = max(req.temperature, 1e-3)
-            kwargs["top_p"] = req.top_p
-            if cfg.qwen_top_k > 0:
-                kwargs["top_k"] = cfg.qwen_top_k
-        if cfg.qwen_repetition_penalty != 1.0:
-            kwargs["repetition_penalty"] = cfg.qwen_repetition_penalty
-        if cfg.qwen_no_repeat_ngram_size > 0:
-            kwargs["no_repeat_ngram_size"] = cfg.qwen_no_repeat_ngram_size
-        if cfg.qwen_min_new_tokens > 0:
-            kwargs["min_new_tokens"] = cfg.qwen_min_new_tokens
-        if cfg.qwen_num_beams > 1:
-            kwargs["length_penalty"] = cfg.qwen_length_penalty
-        return kwargs
-
-    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
-        lm, tok = self._ensure_model(model)
-        cfg = self.settings.llm
-        prompt = self._render_prompt(req, tok)
-        inputs = dict(tok([prompt], return_tensors="pt"))
-        # prompt + completion must fit the configured input budget — keep the tail
-        budget = max(8, cfg.qwen_max_input_tokens - req.max_tokens)
-        if inputs["input_ids"].shape[1] > budget:
-            inputs = {k: v[:, -budget:] for k, v in inputs.items()}
-        inputs = {k: v.to(lm.device) for k, v in inputs.items()}
-        if req.seed is not None:   # full determinism on demand
-            self._torch.manual_seed(req.seed)
-            try:
-                from transformers import set_seed
-                set_seed(req.seed)
-            except Exception:  # noqa: BLE001 — seeding is best-effort beyond torch
-                pass
-        gen_kwargs = self._gen_kwargs(req, tok)
-        with self._torch.no_grad():
-            generated = lm.generate(**inputs, **gen_kwargs)
-        input_len = int(inputs["input_ids"].shape[1])
-        new_tokens = generated[0][input_len:]
-        raw_text = tok.decode(new_tokens, skip_special_tokens=True).strip()
-        text, hit = truncate_at_stops(raw_text, req.stop)
-        n_new = int(new_tokens.shape[0])
-        finish = "stop" if (hit or n_new < req.max_tokens) else "length"
-        usage = Usage(prompt_tokens=input_len, completion_tokens=n_new)
-        adapter = cfg.qwen_adapter_path
-        return (text, finish, usage,
-                {"qwen": True, "model": model,
-                 "adapter": str(adapter) if adapter else None})
 
 
 # --------------------------------------------------------------------------- #
@@ -692,10 +512,266 @@ class SelfProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# OpenAI-compatible CLOUD providers — SUBORDINATE tools she calls (Groq, airouter)
+# --------------------------------------------------------------------------- #
+class OpenAICompatProvider(LLMProviderBase):
+    """Call an OpenAI-compatible cloud endpoint — a SUBORDINATE tool, shared by every cloud rung.
+
+    The single constraint mirrors this whole module: *the LLM is a provider, not the driver.* This
+    class forwards a request's system + messages to the API and returns text; it injects **no**
+    "you are NYXARA" persona (identity lives in ``identity/soul.py``), holds **no** conversation state,
+    and never calls back into the kernel. The kernel treats the returned text as a *proposal* that must
+    pass every guard before anything acts on it — so a cloud model can *serve* NYXARA and never *steer*
+    her: she uses it, benefits from it, controls it.
+
+    The heavy dep (the ``openai`` SDK) is imported lazily and reported honestly via :meth:`available`,
+    so a bare machine (no SDK, no key, or the provider's kill-switch off) simply degrades down the
+    ``auto`` ladder to her own always-on brain rather than erroring.
+
+    Optional privacy: if the isolation envelope (``guard/isolation_envelope.py``) is present and enabled
+    for this rung, outgoing prompts are abstracted before they leave and the reply is re-hydrated
+    locally — the cloud model only ever sees abstract tokens, never NYXARA's identity or the Master's
+    secrets.
+
+    Subclasses supply only *which config block to read* via four small hooks (:meth:`_enabled_flag`,
+    :meth:`_base_url`, :meth:`_api_key`, :meth:`_isolation_flag`) plus ``name`` and
+    :meth:`default_model`. The wire logic — the ``max_tokens`` clamp and the retry-without-extras
+    fallback — lives here once, so a fix to either can never land on one endpoint and miss the other.
+    """
+
+    name = "openai-compat"
+
+    # Completion-token ceiling forwarded to the wire. OpenAI-compatible endpoints reject an absurd
+    # ``max_tokens`` with a 400, which would silently drop every cloud call down the ladder to the
+    # native n-gram — clamp here so no caller can.
+    _MAX_TOKENS_CEILING = 32768
+
+    # ---- per-endpoint hooks (explicit, not prefix-derived, so config reads stay greppable) ---- #
+    def _enabled_flag(self) -> bool:
+        raise NotImplementedError
+
+    def _base_url(self) -> str:
+        raise NotImplementedError
+
+    def _api_key(self) -> Any:
+        raise NotImplementedError
+
+    def _isolation_flag(self) -> bool:
+        raise NotImplementedError
+
+    def available(self) -> bool:
+        if not self._enabled_flag():
+            return False
+        key = self._api_key()
+        if not key or not key.get_secret_value().strip():
+            return False
+        try:
+            import openai  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def _client(self) -> Any:
+        from openai import OpenAI
+        return OpenAI(base_url=self._base_url(),
+                      api_key=self._api_key().get_secret_value(),
+                      timeout=self.settings.llm.request_timeout_s)
+
+    def _envelope(self) -> Any:
+        """The isolation envelope, if installed AND enabled for this rung — else None (pass-through)."""
+        try:
+            from nyxara.guard.isolation_envelope import IsolationEnvelope
+        except Exception:
+            return None
+        try:
+            env = IsolationEnvelope(self.settings, enabled=self._isolation_flag())
+            return env if env.enabled() else None
+        except Exception:  # noqa: BLE001 — privacy is best-effort; never break a call
+            return None
+
+    def _messages(self, req: LLMRequest) -> List[Dict[str, str]]:
+        system = (req.system or "").strip()
+        if req.json_mode:
+            nudge = "Respond with ONLY valid JSON — no prose, no code fences."
+            system = f"{system}\n\n{nudge}" if system else nudge
+        msgs: List[Dict[str, str]] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(req.provider_messages())
+        return msgs
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        client = self._client()
+        messages = self._messages(req)
+        envelope = self._envelope()
+        if envelope is not None:                     # anonymize before the cloud (Part K)
+            messages = envelope.abstract_messages(messages)
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": req.temperature,
+            "max_tokens": min(int(req.max_tokens), self._MAX_TOKENS_CEILING),
+            "top_p": req.top_p,
+        }
+        if req.stop:
+            kwargs["stop"] = list(req.stop)
+        if req.seed is not None:
+            kwargs["seed"] = req.seed
+        if req.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            resp = client.chat.completions.create(**kwargs)
+        except Exception:
+            # some OpenAI-compatible servers reject the optional extras or a too-large
+            # ``max_tokens`` cap — retry once without the extras and with a halved cap
+            retried = False
+            if "response_format" in kwargs or "seed" in kwargs:
+                kwargs.pop("response_format", None)
+                kwargs.pop("seed", None)
+                retried = True
+            if int(kwargs.get("max_tokens", 0)) > 4096:
+                kwargs["max_tokens"] = max(1024, int(kwargs["max_tokens"]) // 2)
+                retried = True
+            if not retried:
+                raise
+            resp = client.chat.completions.create(**kwargs)
+        choice = resp.choices[0]
+        text = (getattr(choice.message, "content", None) or "").strip()
+        if envelope is not None:                     # re-hydrate locally (never on the wire)
+            text = envelope.rehydrate(text)
+        finish = getattr(choice, "finish_reason", "stop") or "stop"
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            usage = Usage(prompt_tokens=int(getattr(u, "prompt_tokens", 0) or 0),
+                          completion_tokens=int(getattr(u, "completion_tokens", 0) or 0))
+        else:
+            usage = Usage(
+                prompt_tokens=estimate_tokens(" ".join(m["content"] for m in messages)),
+                completion_tokens=estimate_tokens(text))
+        return (text, finish, usage, {self.name: True, "model": model})
+
+
+# --------------------------------------------------------------------------- #
+# AiCredits — her PRIMARY cloud rung (aicredits.in, e.g. moonshotai/kimi-k2-thinking)
+# --------------------------------------------------------------------------- #
+class AiCreditsProvider(OpenAICompatProvider):
+    """aicredits.in via its OpenAI-compatible endpoint — NYXARA's PRIMARY reachable model, and still a tool.
+
+    First rung of the ``auto`` ladder: the strongest of her reachable cloud tools, so it drafts every
+    turn it can. Nothing about *primary* changes the power relation — this is the same stateless,
+    persona-free, callback-free contract as every other rung (see :class:`OpenAICompatProvider`), and
+    the kernel still gates its output as a mere proposal (``kernel/orchestrator.py::_gate``). The
+    instant it is unreachable the facade falls to ``groq``, then ``airouter``, then to her OWN weights,
+    then to her native own-brain: she uses this model, she never depends on it.
+
+    **Its models think, and she does not take their thoughts as orders.** The endpoint's reasoning
+    models return their private chain-of-thought in a *separate* ``message.reasoning`` field rather than
+    inside ``content`` (verified on the wire — no ``<think>`` tags leak into the answer). The shared
+    :meth:`OpenAICompatProvider._complete` reads ``content`` and nothing else, so that private reasoning
+    is **discarded**: it is never parsed, never surfaced as her voice, and never treated as an
+    instruction. A model's scratchpad has no authority here.
+
+    One budgeting caveat worth knowing: ``max_tokens`` bounds the *answer*, not the reasoning. A small
+    cap still bills the reasoning tokens (reported under
+    ``usage.completion_tokens_details.reasoning_tokens``), so a 64-token request was observed returning
+    ~1k completion tokens.
+
+    Served through the ``openai`` SDK with ``base_url`` swapped, so no extra dependency is added and the
+    suite's network-free ``openai`` fakes keep working unchanged.
+    """
+
+    name = "aicredits"
+
+    def default_model(self) -> str:
+        return self.settings.llm.aicredits_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "aicredits_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.aicredits_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "aicredits_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "aicredits_isolation", True))
+
+
+# --------------------------------------------------------------------------- #
+# Groq — the SECOND cloud rung (api.groq.com, e.g. llama-3.3-70b-versatile)
+# --------------------------------------------------------------------------- #
+class GroqProvider(OpenAICompatProvider):
+    """Groq via its OpenAI-compatible endpoint — her first cloud FALLBACK, and still a tool.
+
+    Identical contract to :class:`AiCreditsProvider` (stateless, no persona, no callback, output is a
+    proposal under the guards); it differs only in *when* it is reached. On the ``auto`` ladder it sits
+    behind ``aicredits``, so Groq answers when her primary cloud tool is unavailable — which is exactly
+    what keeps a single cloud outage from ever costing her a voice.
+
+    Served through the ``openai`` SDK with ``base_url`` swapped rather than the ``groq`` package — no
+    extra dependency, and the suite's network-free ``openai`` fakes keep working unchanged.
+    """
+
+    name = "groq"
+
+    def default_model(self) -> str:
+        return self.settings.llm.groq_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "groq_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.groq_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "groq_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "groq_isolation", True))
+
+
+# --------------------------------------------------------------------------- #
+# AiRouter — the THIRD cloud rung, her last fallback (airouter.in, e.g. zai/glm-5)
+# --------------------------------------------------------------------------- #
+class AIRouterProvider(OpenAICompatProvider):
+    """GLM-5 via airouter.in's OpenAI-compatible endpoint — her LAST cloud rung.
+
+    Identical contract to :class:`AiCreditsProvider` (stateless, no persona, no callback, output is a
+    proposal under the guards); it differs only in *when* it is reached. On the ``auto`` ladder it sits
+    behind both ``aicredits`` and ``groq``, so GLM-5 answers only when both are unavailable — the last
+    cloud voice before she falls back to her own brains.
+    """
+
+    name = "airouter"
+
+    # Back-compat alias for the shared ceiling: kept as a live class attribute because the regression
+    # test for the clamp reads it by name (tests/mind/test_airouter_provider.py).
+    _AIROUTER_MAX_TOKENS_CEILING = OpenAICompatProvider._MAX_TOKENS_CEILING
+
+    def default_model(self) -> str:
+        return self.settings.llm.airouter_model
+
+    def _enabled_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "airouter_enabled", True))
+
+    def _base_url(self) -> str:
+        return self.settings.llm.airouter_base_url
+
+    def _api_key(self) -> Any:
+        return getattr(self.settings.llm, "airouter_api_key", None)
+
+    def _isolation_flag(self) -> bool:
+        return bool(getattr(self.settings.llm, "airouter_isolation", True))
+
+
+# --------------------------------------------------------------------------- #
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
-    ProviderName.QWEN: QwenProvider,
+    ProviderName.AICREDITS: AiCreditsProvider,
+    ProviderName.GROQ: GroqProvider,
+    ProviderName.AIROUTER: AIRouterProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
 }
@@ -723,12 +799,21 @@ class LLM:
                 cls.name: cls(self.settings) for cls in _PROVIDER_CLASSES.values()
             }
         self._native = self._providers.get("native") or NativeProvider(self.settings)
+        # Degradation surface (operational health, not conversation state): the last provider
+        # failure that forced a fallback, so an operator can see WHY the cloud went quiet
+        # (billing, network, 4xx) instead of a silent drop to the native floor.
+        self.last_fallback: Optional[Dict[str, Any]] = None
+        self._warned_at: Dict[str, float] = {}
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her OWN promoted weights first, then the Qwen base, then her always-on
-    # dependency-free native own-brain as the guaranteed floor (never an echo mock).
-    _AUTO_LADDER = ("self", "qwen", "native")
+    # the auto ladder: her strongest reachable TOOL first (aicredits), then her cloud fallbacks (Groq,
+    # then GLM-5 via airouter), then her OWN promoted weights, and finally her always-on
+    # dependency-free native own-brain as the guaranteed floor (never an echo mock). No raw third-party
+    # model answers on this ladder — the cloud rungs are tools she uses when reachable; the moment they
+    # are unavailable she keeps her own voice, never dependent on the cloud. Three cloud rungs means an
+    # outage — or even two — costs her speed, never a voice.
+    _AUTO_LADDER = ("aicredits", "groq", "airouter", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -767,32 +852,15 @@ class LLM:
     def on_promotion(self, event: Any) -> None:
         """React to a foundry promotion/rollback: the live brain adopts the new weights.
 
-        (a) Hot-reload the ``self`` provider immediately (its per-request pointer check
-        is the backstop when this callback is missed — e.g. a cross-process promotion).
-        (b) When the promoted version is a LoRA over the *same* HF base the Qwen provider
-        serves, point ``qwen_adapter_path`` at the fresh adapter — the provider's
-        ``(model, adapter)`` cache key reloads it on the next call, so her own foundry
-        adapter serves over the base with zero reconfiguration."""
+        Hot-reload the ``self`` provider immediately (its per-request pointer check is the
+        backstop when this callback is missed — e.g. a cross-process promotion). The foundry's
+        own LoRA serves through ``self`` directly, so no external provider needs reconfiguring."""
         prov = self._providers.get("self")
         if prov is not None and hasattr(prov, "reload"):
             try:
                 prov.reload()
             except Exception:  # noqa: BLE001 — best-effort; pointer-poll retries later
                 pass
-        try:
-            if str(getattr(event, "kind", "")) != "lora":
-                return
-            from pathlib import Path
-            vdir = Path(str(getattr(event, "path", "")))
-            adapter = vdir / "adapter"
-            spec_file = vdir / "spec.json"
-            if not adapter.is_dir() or not spec_file.exists():
-                return
-            base = str(json.loads(spec_file.read_text(encoding="utf-8")).get("base_model", ""))
-            if base and base == self.settings.llm.qwen_model:
-                self.settings.llm.qwen_adapter_path = adapter
-        except Exception:  # noqa: BLE001 — adapter injection is a bonus, never a failure
-            pass
 
     def learning_view(self) -> Dict[str, Any]:
         """Truthful live-serving state for the learning report."""
@@ -801,7 +869,8 @@ class LLM:
         except Exception:  # noqa: BLE001
             chosen = None
         view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
-                                "chosen": chosen}
+                                "chosen": chosen,
+                                "last_fallback": self.last_fallback}
         prov = self._providers.get("self")
         if prov is not None and hasattr(prov, "learning_view"):
             try:
@@ -836,16 +905,38 @@ class LLM:
                 try:
                     return self._call_with_resilience(prov, req)
                 except LLMError as exc:
+                    self._warn_fallback(prov.name, exc)
                     last = exc
             raise last or LLMError("no provider available on the auto ladder",
                                    context={"provider": "auto"})
         provider = self.chosen_provider()
         try:
             return self._call_with_resilience(provider, req)
-        except LLMError:
+        except LLMError as exc:
             if provider is not self._native:
+                self._warn_fallback(provider.name, exc)
                 return self._native.complete(req)
             raise
+
+    def _warn_fallback(self, provider_name: str, exc: Exception) -> None:
+        """Record + surface a provider failure that forces a fallback — never silently.
+
+        The warning carries the real upstream reason (billing_error, timeout, 4xx …) so an
+        operator immediately sees why the primary model went quiet. Throttled to one log line
+        per provider+reason per 60s: a deep-reasoning turn can retry dozens of times, and the
+        point is visibility, not spam. Best-effort — this must never break a completion."""
+        try:
+            reason = str(exc) or exc.__class__.__name__
+            self.last_fallback = {"provider": provider_name, "error": reason,
+                                  "ts": time.time()}
+            key = f"{provider_name}:{reason}"
+            now = time.monotonic()
+            if now - self._warned_at.get(key, -1e9) >= 60.0:
+                self._warned_at[key] = now
+                log.warning("LLM provider '%s' failed — falling back to her own brain: %s",
+                            provider_name, reason)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _call_with_resilience(self, provider: LLMProviderBase, req: LLMRequest) -> LLMResponse:
         attempt = 0
@@ -935,11 +1026,16 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"qwen", "self", "native"}
-    for p in ("qwen", "self"):
+    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
+    for p in ("aicredits", "groq", "airouter", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # qwen is available iff its heavy deps (torch+transformers) are installed — honest either way
-    print("qwen/self            : registered; degrade honestly on a bare machine ✓")
+    # TEST profile disables every cloud tool for hermeticity, so all are honestly unavailable here
+    assert status["aicredits"] is False
+    assert status["groq"] is False
+    assert status["airouter"] is False
+    # her strongest reachable TOOL leads the ladder, her own brain is always its floor
+    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
+    print("aicredits/groq/airouter/self/native : registered; degrade honestly on a bare machine ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

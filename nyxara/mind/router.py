@@ -340,7 +340,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     class _Teacher:
         def available_providers(self):
-            return ["qwen", "self", "native"]
+            return ["aicredits", "groq", "airouter", "self", "native"]
 
         def complete_with(self, name, req):
             return type("_R", (), {"text": f"[teacher:{name}] a careful answer"})()

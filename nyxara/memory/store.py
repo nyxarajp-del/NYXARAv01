@@ -393,7 +393,9 @@ class SentenceTransformerEmbedder:
         from sentence_transformers import SentenceTransformer  # lazy, optional dep
         self.model_name = model_name
         self._model = SentenceTransformer(model_name, device=device or None)
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        getter = getattr(self._model, "get_embedding_dimension", None) \
+            or self._model.get_sentence_embedding_dimension
+        self.dim = int(getter())
 
     @staticmethod
     def available() -> bool:
@@ -408,6 +410,24 @@ class SentenceTransformerEmbedder:
         return [float(x) for x in vec]
 
 
+# one sentence-transformer per (model, device) for the whole process: the model is heavy
+# (~100 tensors) and read-only at inference, but many components (memory store, council,
+# self-reasoner, HDC map) each build "their" embedder — without this cache every one of them
+# re-downloads/re-loads the same weights into a separate copy.
+_ST_EMBEDDER_CACHE: Dict[Tuple[str, str], "SentenceTransformerEmbedder"] = {}
+_ST_EMBEDDER_LOCK = threading.Lock()
+
+
+def _shared_st_embedder(model_name: str, device: str) -> "SentenceTransformerEmbedder":
+    key = (str(model_name), str(device or ""))
+    with _ST_EMBEDDER_LOCK:
+        emb = _ST_EMBEDDER_CACHE.get(key)
+        if emb is None:
+            emb = SentenceTransformerEmbedder(model_name, device)
+            _ST_EMBEDDER_CACHE[key] = emb
+        return emb
+
+
 def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
     """Build the strongest available embedder: learned-neural → learned-distributional → lexical.
 
@@ -420,7 +440,7 @@ def make_embedder(settings: Optional[NyxaraSettings] = None) -> Any:
     mc = s.memory
     if getattr(mc, "semantic_embeddings", False) and SentenceTransformerEmbedder.available():
         try:
-            return SentenceTransformerEmbedder(mc.embedding_model, mc.embedding_device)
+            return _shared_st_embedder(mc.embedding_model, mc.embedding_device)
         except Exception:  # noqa: BLE001 — fall back rather than fail to boot
             pass
     dim = min(256, mc.embedding_dim) if mc.embedding_dim else 128

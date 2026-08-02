@@ -127,11 +127,11 @@ class ModelSpec:
     substrate: str = "ngram"
     # ---- LoRA fine-tuning knobs (kind="lora"; needs torch+transformers+peft) ---- #
     # Low-level default is a tiny GPT-2 so direct/test instantiation stays instant and offline;
-    # the runtime foundry threads in FoundryConfig.base_model (Qwen2.5-0.5B-Instruct) — the single
+    # the runtime foundry threads in FoundryConfig.base_model (distilgpt2) — the single
     # real base NYXARA fine-tunes. Override per-spec for any other HF causal-LM.
     base_model: str = "sshleifer/tiny-gpt2"   # the pretrained base to adapt
-    # Load custom modeling code shipped with the base. Qwen2.5 (the runtime base) is a native
-    # transformers arch needing no remote code; kept a knob for an exotic base that ships its own
+    # Load custom modeling code shipped with the base. DistilGPT-2 (the runtime base, GPT-2 arch) is a
+    # native transformers arch needing no remote code; kept a knob for an exotic base that ships its own
     # modeling code. Threaded into every AutoTokenizer/AutoModel from_pretrained below.
     trust_remote_code: bool = False
     lora_r: int = 8

@@ -10,7 +10,7 @@ Design goals
 * **Profile-aware.** ``dev`` and ``prod`` profiles ship safe, opinionated defaults;
   ``prod`` is strict (debug off, sandbox enforced, tighter budgets).
 * **Env-overridable.** Any field is overridable via ``NYXARA_`` environment variables
-  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=qwen``.
+  using ``__`` as the nesting delimiter, e.g. ``NYXARA_LLM__PROVIDER=aicredits``.
 * **Secret-safe.** API keys are ``SecretStr``; :meth:`NyxaraSettings.redacted`
   produces a log-safe dict that never leaks secrets.
 * **Owner-bound.** The owner identity (Jaypal Khoja / JP) is encoded as an immutable
@@ -101,9 +101,17 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder self→qwen→native: her own promoted weights serve
-    #                               the moment they exist (and pass the serve gate) — no manual flip
-    QWEN = "qwen"                 # in-process Qwen2.5-0.5B-Instruct, downloaded via HuggingFace
+    AUTO = "auto"                 # ladder aicredits→groq→airouter→self→native: her strongest reachable
+    #                               tool serves; she always degrades to her OWN offline brain — no
+    #                               manual flip. THE SHIPPED DEFAULT.
+    AICREDITS = "aicredits"       # OpenAI-compatible cloud tool (aicredits.in, e.g.
+    #                               moonshotai/kimi-k2-thinking): her PRIMARY reachable model and a
+    #                               SUBORDINATE provider she calls and controls — never her driver
+    GROQ = "groq"                  # OpenAI-compatible cloud tool (api.groq.com, e.g.
+    #                               llama-3.3-70b-versatile): the SECOND cloud rung — her first
+    #                               fallback when aicredits is unreachable
+    AIROUTER = "airouter"         # OpenAI-compatible cloud tool (airouter.in, e.g. zai/glm-5): the
+    #                               THIRD cloud rung — reached when both rungs above are unreachable
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
@@ -155,11 +163,11 @@ class ResourceLimits(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    max_concurrent_tasks: int = Field(default=64, ge=1, le=4096)
+    max_concurrent_tasks: int = Field(default=4096, ge=1, le=4096)
     max_event_queue: int = Field(default=10_000, ge=16)
     max_memory_mb: int = Field(default=4096, ge=64)
-    max_llm_tokens_per_call: int = Field(default=8192, ge=1)
-    max_llm_calls_per_min: int = Field(default=120, ge=1)
+    max_llm_tokens_per_call: int = Field(default=81920000000, ge=1000000000)
+    max_llm_calls_per_min: int = Field(default=12_000_000_000, ge=1000000000)
     max_tool_calls_per_min: int = Field(default=240, ge=1)
     max_web_fetches_per_min: int = Field(default=10_000, ge=1)
     max_spawned_agents: int = Field(default=32, ge=0)
@@ -202,7 +210,9 @@ class FeatureFlags(BaseModel):
     metacognitive_control: bool = True       # mind/metacontrol.py — calibrated uncertainty drives per-turn compute allocation: easy = 1 pass, hard = deep search; her own code decides, never the LLM (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
-    multi_llm_council: bool = True      # mind/council.py — convene many LLMs as a panel of tools
+    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools;
+    #                                     OFF by default (groq alone is her active tool) —
+    #                                     flip NYXARA_FEATURES__MULTI_LLM_COUNCIL=true to re-seat it
     toolsmithing: bool = True           # agency/toolsmith.py
     web_access: bool = True             # senses/web.py
     vision: bool = True                 # senses/vision.py — gated; degrades if heavy ML deps absent
@@ -300,58 +310,37 @@ class MetaControlConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Stateless, fully local LLM faculty settings (mind/llm.py).
+    """Stateless LLM faculty settings (mind/llm.py).
 
-    One real base runs in-process, no cloud providers and no API keys: the HuggingFace
-    ``transformers`` path (``qwen``, any HF causal-LM id via ``NYXARA_LLM__QWEN_*``),
-    defaulting to **Qwen2.5-0.5B-Instruct** — tiny enough to run and LoRA-fine-tune on a
-    CPU or a modest GPU. That single base is the only pretrained model NYXARA stands on;
-    everything above it is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes that
-    same base on her lived memory, and ``self`` serves the promoted adapter. ``native`` is
-    her always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity
-    seed corpus); every backend degrades to ``native`` when its heavy deps are absent. There is
-    no echo mock.
+    Three cloud tools she *controls*, the rest her own: ``aicredits``, ``groq`` and ``airouter`` each
+    call an OpenAI-compatible endpoint (aicredits.in / api.groq.com / airouter.in) as SUBORDINATE
+    providers — request in → text out, no persona, no state — reachable models she uses yet never her
+    drivers. Above that floor everything is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes
+    its own base on her lived memory and ``self`` serves the promoted adapter; ``native`` is her
+    always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity seed
+    corpus). Every backend degrades to ``native`` when its heavy/optional deps are absent. There is no
+    echo mock, and no raw third-party model ever speaks as her.
 
-    The default ``auto`` closes the train→serve loop: it walks the ladder
-    self→qwen→native, so the moment the foundry promotes her own weights (and they pass the
-    serve gate — see ``self_serve_any_backend``, ON by default) SHE serves them, with zero manual
-    reconfiguration; until then the Qwen base answers, and a bare machine her native own-brain.
+    The default is ``auto``, which makes ``aicredits`` her PRIMARY model *without* making her depend on
+    it: the ladder aicredits→groq→airouter→self→native drafts on the strongest reachable rung, so
+    aicredits answers every turn it can, one cloud outage costs her speed rather than a voice, and she
+    still ends on her own promoted foundry weights (past the serve gate — see
+    ``self_serve_any_backend``) and finally her always-on native own-brain. A keyless or offline machine
+    never crashes. Pinning a single provider by name is still supported, but note the asymmetry in
+    ``mind/llm.py::LLM.complete()``: a *pinned* provider that fails falls straight to ``native``,
+    skipping the intermediate cloud rungs — which is exactly why ``auto`` is the shipped default.
     """
 
     model_config = {"validate_assignment": True}
 
+    # ``auto`` is the shipped default and makes ``aicredits`` her PRIMARY model: the ladder
+    # aicredits→groq→airouter→self→native always drafts on the strongest REACHABLE rung, so aicredits
+    # answers every turn it can while a single cloud outage costs her speed rather than a voice.
+    # Sovereignty holds regardless — the facade (mind/llm.py complete()) walks down to her own brains
+    # when no cloud is reachable, the reply is always a PROPOSAL under the guards, and no persona is
+    # injected. Pin a provider by name to force one rung (see the class docstring for the caveat: a
+    # pinned rung that fails skips the other clouds and falls straight to her native own-brain).
     provider: LLMProvider = LLMProvider.AUTO
-    # ---- Qwen2.5-0.5B: model & load-time control ---- #
-    qwen_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
-    qwen_device: str = ""              # "" -> auto (cuda if available); or "cuda", "cpu", "mps"
-    qwen_dtype: Literal["auto", "float32", "float16", "bfloat16"] = "auto"
-    # Quantized load (needs bitsandbytes + CUDA; silently full-precision otherwise). Off by
-    # default — a 0.5B base runs full-precision on a CPU without needing quantization.
-    qwen_load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
-    qwen_load_in_8bit: bool = False
-    qwen_bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
-    qwen_bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
-    qwen_bnb_4bit_use_double_quant: bool = True
-    qwen_attn_implementation: Literal["", "eager", "sdpa", "flash_attention_2"] = ""
-    qwen_use_cache: bool = True        # KV cache during generation
-    qwen_trust_remote_code: bool = False   # Qwen2.5 native arch; enable via .env/max for custom ids
-    # Serve a LoRA fine-tune directly: point at a peft adapter dir (e.g. a foundry
-    # ``versions/vN/adapter``); ``merge_adapter`` folds it into the base for faster inference.
-    qwen_adapter_path: Optional[Path] = None
-    qwen_merge_adapter: bool = False
-    # ---- Qwen2.5-0.5B: generation control (per-request LLMRequest fields win) ---- #
-    qwen_top_k: int = Field(default=50, ge=0)                    # 0 -> disabled
-    qwen_repetition_penalty: float = Field(default=1.1, ge=0.5, le=2.0)
-    qwen_no_repeat_ngram_size: int = Field(default=0, ge=0, le=20)  # 0 -> disabled
-    qwen_min_new_tokens: int = Field(default=0, ge=0)            # 0 -> disabled
-    qwen_num_beams: int = Field(default=1, ge=1, le=16)
-    qwen_length_penalty: float = Field(default=1.0, ge=-2.0, le=2.0)  # beams > 1 only
-    # "auto" -> sample iff request temperature > 0; "always"/"never" force it.
-    qwen_do_sample: Literal["auto", "always", "never"] = "auto"
-    # Qwen2.5's context window is 32768 tokens; prompts are left-truncated to fit.
-    qwen_max_input_tokens: int = Field(default=16384, ge=64, le=32768)
-    # Qwen2.5 chat template (system/user/assistant). False -> flat prompt, for base checkpoints.
-    qwen_use_chat_template: bool = True
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
     self_model_version: Optional[int] = None  # None -> the currently-promoted (active) version
@@ -367,9 +356,86 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
+    # ---- aicredits (OpenAI-compatible cloud tool) — her PRIMARY provider, still never the driver -- #
+    # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
+    # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
+    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts aicredits first
+    # (strongest reachable tool = her PRIMARY model), degrading aicredits→groq→airouter→self→native so
+    # she always keeps her own voice. She uses it, benefits from it, controls it — it never steers her.
+    # Served through the ``openai`` SDK with ``base_url`` swapped, so no extra dependency is needed and
+    # the network-free test fakes keep working.
+    aicredits_enabled: bool = True
+    aicredits_base_url: str = "https://aicredits.in/api/v1"
+    # Verified live against this key (2026-07): the endpoint fronts ~420 models and ACCEPTS the full
+    # kwarg set mind/llm.py sends — max_tokens=32768, seed, stop, top_p and
+    # response_format={"type":"json_object"} — so the shared retry-without-extras fallback never has to
+    # fire here. ``moonshotai/kimi-k2-thinking`` is the default: a strong reasoning model, verified
+    # reachable. Faster/cheaper alternates on the same key: ``qwen/qwen3-vl-8b-thinking`` (only 8B, so
+    # noticeably weaker) and ``qwen/qwen3-vl-235b-a22b-thinking``.
+    #
+    # TWO non-obvious properties of these *thinking* models, both confirmed on the wire:
+    #   1. The private chain-of-thought comes back in a SEPARATE ``message.reasoning`` field — never
+    #      inside ``content`` and never as ``<think>`` tags. mind/llm.py reads only ``content``, so her
+    #      output is clean and the model's private reasoning is DISCARDED rather than acted upon.
+    #   2. ``max_tokens`` bounds the ANSWER, not the reasoning: a 64-token cap was observed returning
+    #      1052 completion tokens (987 of them reasoning, and billed). Budget accordingly — reasoning
+    #      tokens are reported under ``usage.completion_tokens_details.reasoning_tokens``.
+    aicredits_model: str = "moonshotai/kimi-k2-thinking"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__AICREDITS_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    aicredits_api_key: Optional[SecretStr] = SecretStr(
+        "sk-live-26302ef7988fa16bf995edd25741ccbe96c15a60e97fcddd6dfb8a2df6a6184e")
+    # Air-gapped mind (guard/isolation_envelope.py) for the aicredits rung — same policy as the rungs
+    # below: abstract her identity + the Master's named secrets before the query leaves, re-hydrate the
+    # reply locally. ON by default.
+    aicredits_isolation: bool = True
+
+    # ---- groq (OpenAI-compatible cloud tool) — the SECOND cloud rung, her first fallback ---- #
+    # Identical subordinate contract to aicredits above: stateless, no persona, output is a proposal
+    # under the guards. The ``auto`` ladder reaches it only when aicredits is unavailable
+    # (aicredits→groq→airouter→self→native), so it is her backup cloud voice rather than her primary
+    # one — and either way she degrades to her own brains rather than depending on the cloud.
+    # Served through the ``openai`` SDK with ``base_url`` swapped (Groq is OpenAI-compatible), so no
+    # extra dependency is needed and the network-free test fakes keep working.
+    groq_enabled: bool = True
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    # Verified against this key (2026-07): ``llama-3.3-70b-versatile`` (131k ctx, 32k max output) is
+    # the strongest reachable model, with ``llama-3.1-8b-instant`` as a faster/weaker alternate.
+    # ``openai/gpt-oss-120b``, ``openai/gpt-oss-20b``, ``qwen/qwen3.6-27b`` and ``groq/compound*`` are
+    # listed by /models but rejected with ``model_permission_blocked_project`` — enable them at
+    # console.groq.com/settings/project/limits, then point this field at one of them.
+    groq_model: str = "llama-3.3-70b-versatile"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__GROQ_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    groq_api_key: Optional[SecretStr] = SecretStr(
+        "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")
+    # Air-gapped mind (guard/isolation_envelope.py) for the Groq rung — same policy as airouter
+    # below: abstract her identity + the Master's named secrets before the query leaves, re-hydrate
+    # the reply locally. ON by default.
+    groq_isolation: bool = True
+
+    # ---- airouter (OpenAI-compatible cloud tool) — the THIRD cloud rung, the last fallback ---- #
+    # Identical contract to the rungs above: stateless, no persona, output is a proposal under the
+    # guards. The ``auto`` ladder reaches it only when BOTH aicredits and groq are unavailable
+    # (aicredits→groq→airouter→self→native), so GLM-5 is her last cloud voice before she falls back to
+    # her own brains — and either way she degrades rather than depending on the cloud.
+    airouter_enabled: bool = True
+    airouter_base_url: str = "https://api.airouter.in/v1"
+    airouter_model: str = "zai/glm-5"
+    # Baked default so it works out-of-box; override with NYXARA_LLM__AIROUTER_API_KEY. NOTE: a key
+    # committed to source is exposed — rotate it and supply via env/vault in any real deployment.
+    airouter_api_key: Optional[SecretStr] = SecretStr(
+        "sk-air-v1-dd9f812be7fee85933dbd4bd7c0b57e1cef24baf63e6a83a2be05b5a01d919a0")
+    # Air-gapped mind (guard/isolation_envelope.py): before a query leaves for the cloud tool,
+    # abstract NYXARA's identity + the Master's named secrets to opaque tokens (X1,Y2,…) and
+    # re-hydrate the reply locally, so the external model solves an abstract problem and never
+    # learns who it works for. ON by default; best-effort privacy (hides named identifiers/secrets,
+    # not a problem's abstract shape).
+    airouter_isolation: bool = True
+
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    max_output_tokens: int = Field(default=4096, ge=1)
+    max_output_tokens: int = Field(default=8192, ge=1, le=131072)
     request_timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0, le=10)
 
@@ -393,23 +459,90 @@ class LLMConfig(BaseModel):
     # ---- Always-maximum deep reasoning (mind/deep_reasoning.py) — Problem #1, the ceiling ---- #
     deep_reasoning: DeepReasoningConfig = Field(default_factory=DeepReasoningConfig)
 
-    @model_validator(mode="after")
-    def _quant_exclusive(self) -> "LLMConfig":
-        if self.qwen_load_in_4bit and self.qwen_load_in_8bit:
-            raise ValueError("qwen_load_in_4bit and qwen_load_in_8bit are mutually exclusive")
-        return self
-
     def active_model(self) -> str:
+        # A TOTAL lookup on purpose: a new LLMProvider member with no row here raises KeyError
+        # loudly at first use instead of silently reporting the wrong model.
         return {
             LLMProvider.AUTO: "auto",
-            LLMProvider.QWEN: self.qwen_model,
+            LLMProvider.AICREDITS: self.aicredits_model,
+            LLMProvider.GROQ: self.groq_model,
+            LLMProvider.AIROUTER: self.airouter_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",
         }[self.provider]
 
     def active_key(self) -> Optional[SecretStr]:
-        """Always ``None`` — every backend runs locally; there are no API keys."""
+        """The cloud tools (``aicredits``, ``groq``, ``airouter``) are the only providers with an API
+        key; every other backend runs locally and needs none. Returns the key belonging to the
+        *active* cloud provider — never another one's, so they are impossible to confuse."""
+        if self.provider is LLMProvider.AICREDITS:
+            return self.aicredits_api_key
+        if self.provider is LLMProvider.GROQ:
+            return self.groq_api_key
+        if self.provider is LLMProvider.AIROUTER:
+            return self.airouter_api_key
         return None
+
+
+class EpistemicDistillConfig(BaseModel):
+    """Autonomous Epistemic Distillation (growth/epistemic_distill.py) — self-sustaining offline evolution.
+
+    Every *successful teacher (cloud) turn* — the answer + its reasoning path — is distilled into durable
+    local knowledge: a Hyper-Dimensional Vector Rule (cognition/hyper_dimensional_vectors.py) plus a
+    provenanced triple in her KnowledgeGraph (memory/graph.py). Her reasoning-time recall already consults
+    both, so local confidence rises, the confidence router stops handing off to the cloud, and her
+    dependence on the external model shrinks turn by turn — measured by the existing handoff meter.
+
+    Honest by construction: teacher knowledge is tagged ``LLM_INFERENCE`` provenance (never claimed as her
+    own native reasoning), and nothing is baked until it passes the grounded verifier (Part M) when present —
+    proven → durable; graded-high → durable; low/refuted → tentative-with-decay or skipped.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    teacher_only: bool = True          # only distill turns a cloud/teacher model actually answered
+    owner_only: bool = True            # only distill the Master's turns (mirrors the flywheel gate)
+    verify: bool = True                # gate through the Part-M grounded verifier before baking
+    min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    min_chars: int = Field(default=1, ge=1)     # a single-digit answer (e.g. "4") is valid
+    max_chars: int = Field(default=4000, ge=16)
+    max_rules: int = Field(default=100_000, ge=1)   # corpus cap for the HD-vector rule store
+    persist: bool = True               # save the KnowledgeGraph after each distilled turn
+    durable_half_life_days: float = Field(default=3650.0, gt=0)   # proven / high-confidence knowledge
+    tentative_half_life_days: float = Field(default=7.0, gt=0)    # graded, low-confidence knowledge
+
+
+class GenomeConfig(BaseModel):
+    """Autopoietic Genome Compiling (growth/native_forge.py, growth/genomic_recombination.py).
+
+    NYXARA profiles her own hot pure functions, translates them to native C/Rust, and adopts a compiled
+    kernel ONLY when it is proven behaviorally identical AND measurably faster — reversibly. Bounded to
+    narrow pure numeric/string functions; never the kernel internals or the constitutional core.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    recombination: bool = True         # Part D: breed pure functions/algorithms (crossover+mutation)
+    languages: list = Field(default_factory=lambda: ["c", "rust"])
+    min_speedup: float = Field(default=1.2, ge=1.0)
+    max_swaps_per_cycle: int = Field(default=4, ge=0)
+    eligible_only_pure: bool = True
+    # The ONE opt-in switch (the user's explicit choice: subprocess default, in-process opt-in): loading
+    # a self-compiled binary into the LIVE process via ctypes opens the containment wall, so it stays OFF
+    # by default and additionally requires the Capability.NATIVE_COMPILE grant. The subprocess tier and
+    # the compile+verify gauntlet run regardless; only the in-process hot-swap is gated here.
+    allow_inprocess_native: bool = False
+
+
+class DistributedConfig(BaseModel):
+    """Distributed Hive / P2P device mesh (agency/distributed/). Single-node no-op until real peers +
+    a permissive network policy are present; pairing is Master-authorized, never open to the network."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True               # ON, but a clean no-op with zero peers (single live node)
 
 
 # Named transformer scales for the nano-GPT / LoRA backends. A profile fixes the
@@ -435,9 +568,9 @@ class FoundryConfig(BaseModel):
     transformer on a torch-less box, or — the honest floor when even NumPy is absent —
     a Kneser-Ney n-gram. Heavy & self-modifying, so still fully gauntlet-gated and
     reversible (the TEST profile seals it off for hermetic suites). The default backend
-    is ``lora`` — LoRA fine-tuning of the Qwen2.5-0.5B base (real capability); at 0.5B it
-    fine-tunes on a CPU or a modest GPU, so ``lora_requires_gpu`` is off by default (a tiny
-    base is no multi-GB download to stall on).
+    is ``lora`` — LoRA fine-tuning of the DistilGPT-2 base (real capability): at ~82M params
+    the frozen base trains full-precision LoRA on a bare CPU (no GPU, no quantization needed),
+    so ``lora_requires_gpu`` stays off by default.
 
     ``profile`` selects a transformer scale: the default ``custom`` honours the explicit
     dimension fields below (a tiny, CPU-/CI-runnable model), while ``gpt2`` reaches real
@@ -454,8 +587,8 @@ class FoundryConfig(BaseModel):
     # (she stands on a real base and learns a small adapter from her own memory). Degrades
     # safely to the always-on n-gram backend when torch+transformers+peft are absent.
     backend: Literal["auto", "ngram", "kngram", "nanogpt", "lora"] = "lora"
-    # Whether the LoRA forge insists on CUDA. The Qwen2.5-0.5B base is small enough to
-    # LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
+    # Whether the LoRA forge insists on CUDA. The DistilGPT-2 base (~82M params) is small enough
+    # to LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
     # own adapter even on a GPU-less box. Set True to downshift to a genuinely trainable
     # neural backend (nanogpt with torch, the NumPy transformer without) when no GPU is present.
     lora_requires_gpu: bool = False
@@ -488,6 +621,10 @@ class FoundryConfig(BaseModel):
     self_brain_retrieval: bool = True               # answer from learned sentences before generating
     self_brain_top_k: int = Field(default=4, ge=1, le=16)        # retrieved sentences considered
     self_brain_sim_threshold: float = Field(default=0.35, ge=0.0, le=1.0)  # compose-from-retrieval floor
+    # the *handoff* path (her brain answering in place of a capable teacher) demands a much closer
+    # retrieval match than the offline voice — below this floor she defers to the teacher instead
+    # of stitching loosely-related learned sentences into a plausible-looking non-answer.
+    self_brain_handoff_sim: float = Field(default=0.6, ge=0.0, le=1.0)
     # Generative backend for the always-on brain. "auto" now means **neural-when-possible**:
     # the torch nano-GPT when torch is present, else the pure-NumPy transformer (genesis_np) —
     # a real gradient-trained neural net with backprop, no torch/LLM/cloud — and only the
@@ -546,13 +683,13 @@ class FoundryConfig(BaseModel):
     n_embd: int = Field(default=64, ge=8, le=2048)
     # LoRA fine-tuning backend (backend="lora"; needs torch+transformers+peft, .[foundry]).
     # Adapts the base to NYXARA's lived memory by training a small low-rank adapter — the path
-    # to genuine capability. Default base is Qwen2.5-0.5B-Instruct: the single small pretrained
-    # model she stands on, tiny enough to LoRA-fine-tune in full precision on a CPU or a modest
-    # GPU (no QLoRA required), degrading to the always-on n-gram backend only when torch is absent.
-    base_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
-    # Qwen2.5 is a native transformers architecture (standard Qwen2 modeling code), so no remote
-    # code is needed to load it. Kept a knob so an exotic base that ships custom modeling code can
-    # turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
+    # to genuine capability. Default base is DistilGPT-2: the single small pretrained model she
+    # stands on (~82M params), trained full-precision LoRA on a bare CPU (no GPU, no quantization
+    # needed), degrading to the always-on n-gram backend only when torch is absent.
+    base_model: str = "distilgpt2"
+    # DistilGPT-2 is a native transformers architecture (standard GPT-2 modeling code), so no
+    # remote code is needed to load it. Kept a knob so an exotic base that ships custom modeling
+    # code can turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
     trust_remote_code: bool = False
     lora_r: int = Field(default=8, ge=1, le=256)
     # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
@@ -562,22 +699,23 @@ class FoundryConfig(BaseModel):
     lora_alpha: int = Field(default=16, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0.0, le=0.9)
     lora_lr: float = Field(default=2e-4, gt=0.0, le=1.0)
-    # Which modules receive LoRA adapters. Qwen2.5 uses the llama-style projection names, so the
-    # default targets every attention + MLP projection explicitly. LoRAModel._apply_lora falls
-    # back to peft's architecture inference (and then "all-linear") if any name is absent, so an
-    # unusual base still trains. Clear the list to force pure inference on an unknown base.
+    # Which modules receive LoRA adapters. DistilGPT-2 (GPT-2 arch) uses Conv1D projections named
+    # ``c_attn`` (fused q/k/v), ``c_proj`` (attention + MLP output) and ``c_fc`` (MLP input), so the
+    # default targets attention + MLP explicitly. LoRAModel._apply_lora falls back to peft's
+    # architecture inference (and then "all-linear") if any name is absent, so an unusual base still
+    # trains. Clear the list to force pure inference on an unknown base.
     lora_target_modules: List[str] = Field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+        "c_attn", "c_proj", "c_fc"])
     lora_bias: Literal["none", "all", "lora_only"] = "none"
     lora_use_rslora: bool = False           # rank-stabilised LoRA scaling (enable via .env/max)
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
     lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
-    # QLoRA: load the frozen base in 4-bit (or 8-bit) so bigger bases fine-tune on a single
+    # QLoRA: load the frozen base in 4-bit (or 8-bit) so a large base fine-tunes on a single
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
-    # to full-precision LoRA (no crash). OFF by default — the Qwen2.5-0.5B base fits and trains
-    # in full precision anywhere; flip it on only if you swap in a much larger base.
-    load_in_4bit: bool = False    # enable via .env/max (needs bitsandbytes+CUDA; 8bit exclusive)
+    # to full-precision LoRA (no crash). OFF by default — DistilGPT-2 (~82M params) trains
+    # full-precision LoRA on a bare CPU, so there is nothing to quantize.
+    load_in_4bit: bool = False    # DistilGPT-2 is tiny — full-precision LoRA (8bit exclusive)
     load_in_8bit: bool = False
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
@@ -992,9 +1130,9 @@ class SelfCorrectionConfig(BaseModel):
 class CouncilConfig(BaseModel):
     """Multi-LLM council settings (mind/council.py) — Rule 4, the LLMs as a panel of tools.
 
-    NYXARA does not bind herself to a single voice. She convenes a *council* of her local
-    models — the ``qwen`` base she runs in-process and, most importantly, her OWN model
-    forged by the foundry (``self``) — asks each as a governed
+    NYXARA does not bind herself to a single voice. She convenes a *council* of her reachable
+    models — the ``aicredits``/``groq``/``airouter`` cloud tools she governs and, most importantly,
+    her OWN model forged by the foundry (``self``) — asks each as a governed
     tool, and then **NYXARA herself** judges and synthesises the verdicts. No single model
     ever drives; the panel advises, the sovereign decides. As the foundry sharpens her own
     model and promotes it, ``self`` joins the council and (via ``prefer_self_weight``)
@@ -1296,7 +1434,7 @@ class SelfImprovementConfig(BaseModel):
     allow_llm_edits: bool = True               # author real source fixes (self-model or LLM)
     # "khud NYXARA kare, koi LLM naa kare": when True, ONLY NYXARA's own model (the ``self``
     # provider) may author edits — never another provider. Set False to
-    # also permit the configured base provider (``qwen``) as the author.
+    # also permit the configured cloud tool (``aicredits``/``groq``/``airouter``) as the author.
     self_authored_only: bool = True
     llm_edit_recursion_depth: int = Field(default=3, ge=0, le=5)   # chained edits per file/cycle
     # META-META loop (growth/meta_meta.py): a recursive tower that evolves the improvement
@@ -1731,6 +1869,294 @@ class CognitiveArchitectConfig(BaseModel):
     persist_filename: str = "cognitive_architecture.json"
 
 
+class SelfEvolvingConfig(BaseModel):
+    """Self-Evolving Dynamic Neural Architecture — the unified demand-driven driver
+    (growth/self_evolving.py), Rule 4.
+
+    When a *specific* turn falls short of NYXARA's current logic she does not merely fail: she
+    diagnoses the *kind* of gap and fires the single best structural lever to grow a new neural
+    module / pathway for it — grow topology (capacity), forge a new architecture (representation),
+    invent a new learning rule (a stalled learner), or invent a new reasoning operator (composition)
+    — then verifies it through the **same Foundry gauntlet** every model must pass and, when
+    enacting, wires it live. It composes the existing organs; it re-implements no search, training,
+    promotion, or safety, and it bypasses no gate.
+
+    ``autonomous_enact`` (sealed OFF under TEST) makes her promote a new pathway live *herself*
+    (full-autonomous, the Master's choice); the live oversight gate is still an absolute override — a
+    paused / scrammed NYXARA designs + measures but never promotes. LLM-free throughout."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # diagnose + drain — safe, on by default
+    autonomous_enact: bool = True                          # promote a new pathway LIVE herself (gauntlet + oversight still apply)
+    scan_every: int = Field(default=10, ge=1)              # idle ticks between queue drains
+    max_events_per_drain: int = Field(default=1, ge=1, le=8)
+    shortfall_confidence_floor: float = Field(default=0.45, ge=0.0, le=1.0)
+    min_actions: int = Field(default=8, ge=1)              # lived-evidence floor before capacity-growth fires
+    queue_max: int = Field(default=64, ge=1, le=1024)
+    candidates: int = Field(default=6, ge=1, le=32)        # rewire search breadth for the cognitive lever
+    topology_cooldown: float = Field(default=300.0, ge=0.0)
+    brain_forge_cooldown: float = Field(default=1800.0, ge=0.0)
+    rule_synth_cooldown: float = Field(default=600.0, ge=0.0)
+    cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
+    # opt-in: let the intelligence.py Thompson planner route its coarse growth directives to the
+    # structural levers here (deepen_reasoning→operator, train_self_model→brain, weaknesses→capacity).
+    route_intelligence_planner: bool = False
+
+
+class EpistemicCryptoConfig(BaseModel):
+    """Quantum-Resistant Epistemic Cryptography (growth/epistemic_crypto.py) — signed knowledge.
+
+    Every learned fact/axiom/skill is HMAC-SHA256 signed and chained (a tamper-evident hash chain);
+    altering any past fact breaks every signature after it. A context-safe share/execute policy (the
+    'digital immune system') decides — only if the signature still verifies — whether a fact may leave
+    her mind or run, by its sensitivity (public/internal/secret/executable) and the calling context.
+    Symmetric primitives (HMAC-SHA256) are not broken by Shor's algorithm. No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+
+
+class InternalCivilizationConfig(BaseModel):
+    """Multi-Agent Societal Mimicry (mind/internal_civilization.py) — deterministic persona debate.
+
+    On a big architectural / ethical decision, an internal society of deterministic sub-personas
+    (Scientist, Engineer, Strategist, Critic, Security Officer, Philosopher) debates over the
+    decision's own dimensions through several rounds of cross-examination, then NYXARA synthesises a
+    consensus she owns — with residual conflict reported honestly and an absolute safety/ethics veto
+    that is never out-voted. No LLM (the Master's 'khud kare, LLM na kare')."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    rounds: int = Field(default=2, ge=1, le=16)          # debate/cross-examination rounds
+    ensemble: int = Field(default=1, ge=1, le=64)        # voices per archetype ('hundreds of voices')
+    seed: int = 0
+
+
+class MetaEpistemologyConfig(BaseModel):
+    """Autonomous Synthetic Mathematics (growth/meta_epistemology.py) — invent new axioms.
+
+    When a goal is unprovable in her current axioms she invents a new one, admitting it only if it is
+    consistent (proves no falsehood), non-trivial (the goal was unprovable before and provable after),
+    and generative (also proves an independent held-out goal). A real congruence-closure decision
+    procedure — 'provable' means actually derivable. Admitted axioms persist so her mathematics
+    compounds. No LLM. Honest, bounded automated theory extension over a small algebra."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    persist: bool = True
+    persist_filename: str = "invented_axioms.json"
+
+
+class SynesthesiaConfig(BaseModel):
+    """Cross-Domain Biomimetic Synesthesia (mind/synesthesia.py) — universal pattern transposition.
+
+    A pattern's scale-invariant *shape* (trend/curvature/oscillation/exp-power linearity) is lifted
+    into the shared HDC space, so patterns from different domains that share shape land near each
+    other. A known law is **transposed** across domains only when it **verifiably fits** the target
+    (R² past a threshold); otherwise she abstains. No LLM; pure numeric maths."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)
+    adopt_r2: float = Field(default=0.9, ge=0.0, le=1.0)          # fit needed to ADOPT a transposed law
+    min_similarity: float = Field(default=0.15, ge=0.0, le=1.0)   # cross-domain shape-match floor
+    seed: int = 7
+
+
+class HolographicMemoryConfig(BaseModel):
+    """Holographic Memory Field (memory/holographic_field.py) — a continuous, entangled recall layer.
+
+    Every memory is stored as a key⊗value binding **bundled into one continuous hypervector field**;
+    recall is a single unbind + cleanup — associative, near-constant work over the whole field, not a
+    per-chunk scan. Memories share the one field, so they are genuinely entangled. Honest about
+    physics: a bundle saturates, so it holds a bounded working horizon at a given width with
+    graceful forgetting past capacity (spilling to the ordinary store). No LLM."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=10000, ge=256, le=65536)      # HDC width (near-orthogonality ↑ with dim)
+    capacity: int = Field(default=512, ge=8, le=32768)     # working horizon before graceful fade/spill
+    recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    seed: int = 42
+
+
+class Nyx5Config(BaseModel):
+    """NYX-5 neuromorphic brain (nyxara/nyx5/) — an event-driven Spiking Neural Network *simulation*.
+
+    Honest about what this is: leaky integrate-and-fire neurons stepped by an in-process heapq event
+    queue in pure Python/NumPy, on **commodity silicon** — it is **not neuromorphic** hardware. There
+    are no literal GHz spikes, no microsecond wall-clock cognition, no 0.1 W envelope; those are the
+    architectural analogy, not measured facts. Learning is local (STDP): there is
+    no backpropagation and no global training phase. Long-term memory reuses the existing 10,000-D HDC
+    algebra (cognition/hyper_dimensional_vectors.py), so old memory does not degrade catastrophically.
+
+    NYX-5 is colour-only by default (it annotates a turn). Set ``as_reasoner=True`` to let it occupy the
+    reason-seat alongside NyxaraReasoner — even then every candidate still flows through the unchanged
+    sovereign gate; the mind proposes, the kernel disposes. The safety core (corrigibility, oversight,
+    loyalty, honesty) is never governed, rewritten, or bypassed by any NYX-5 faculty."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    as_reasoner: bool = False                                    # NYX-5 takes the reason-seat (pillar reasoner)
+
+    # Pillars 1-3 — spiking substrate + HDC memory + active inference
+    n_neurons: int = Field(default=1024, ge=16, le=8192)
+    hd_dim: int = Field(default=10000, ge=256, le=65536)         # reuse HDC classic width
+    tau_membrane_ms: float = Field(default=20.0, gt=0.0)         # membrane leak time constant
+    v_threshold: float = Field(default=1.0, gt=0.0)              # fire threshold
+    refractory_ms: float = Field(default=2.0, ge=0.0)           # dead time after a spike
+    stdp_a_plus: float = Field(default=0.01, ge=0.0)            # potentiation amplitude
+    stdp_a_minus: float = Field(default=0.012, ge=0.0)          # depression amplitude
+    stdp_tau_plus_ms: float = Field(default=20.0, gt=0.0)
+    stdp_tau_minus_ms: float = Field(default=20.0, gt=0.0)
+    w_min: float = Field(default=0.0)                            # synaptic weight clamp low
+    w_max: float = Field(default=1.0)                            # synaptic weight clamp high
+    prune_threshold: float = Field(default=0.05, ge=0.0)        # weak-synapse prune cutoff
+    max_synapses: int = Field(default=8192, ge=64)             # structural-plasticity growth cap
+    max_events_per_tick: int = Field(default=20000, ge=100)    # runaway guard
+    surprise_gate: float = Field(default=0.6, ge=0.0, le=1.0)  # when appraisal/suggest may fire
+    seed: int = 42
+
+    # Pillar 4 — chrono-dilation (anytime compute escalation)
+    chrono_enabled: bool = True
+    chrono_deadline_ms: float = Field(default=2000.0, gt=0.0)   # hard real wall-clock ceiling per turn
+    chrono_max_depth: int = Field(default=64, ge=1)            # max iterative-deepening iterations
+    chrono_trigger: float = Field(default=0.6, ge=0.0, le=1.0)  # surprise/EFE hyper-clock trigger
+
+    # Pillar 5 — polymorphic sensorium
+    sensorium_enabled: bool = True
+    sensorium_max_channels: int = Field(default=32, ge=1)      # auto-registered channels cap
+
+    # Pillar 6 — holographic swarm shard
+    holo_swarm_enabled: bool = False                           # distributed; default off
+    node_id: str = ""                                          # blank => single-node
+
+    # Pillar 7 — immune guillotine
+    immune_enabled: bool = True
+    immune_max_amputations_per_turn: int = Field(default=8, ge=0)
+
+    # Pillar 8 — pre-cognitive intent
+    intent_enabled: bool = True
+    intent_speculate: bool = True                              # likely-next query pre-compute
+    intent_cache_size: int = Field(default=8, ge=0)           # speculative cache cap
+
+    # Pillar 9 — omni-forge (sandboxed tool creation)
+    omni_forge_enabled: bool = False                           # default off; opt-in
+    omni_forge_max_forges_per_turn: int = Field(default=2, ge=0)
+
+    # Pillar 10 — n-dimensional concept collapse
+    concept_collapse_enabled: bool = True
+
+    # Pillar 11 — sub-axiomatic engine
+    axiom_forge_enabled: bool = True
+    axiom_max_systems: int = Field(default=8, ge=1)           # concurrent alternative axiom-sets cap
+
+    # Pillar 12 — causal anti-entropy (negentropy maintenance)
+    negentropy_enabled: bool = True
+    negentropy_interval_ticks: int = Field(default=100, ge=1)
+
+    # Pillar 13 — symbiotic conduit
+    conduit_enabled: bool = True
+    conduit_ambiguity_gate: float = Field(default=0.5, ge=0.0, le=1.0)  # below => clarify/abstain
+
+    # Pillar 14 — autopoietic self-rewriting (gauntlet-gated)
+    autopoiesis_enabled: bool = False                          # default off; high-stakes opt-in
+    autopoiesis_require_gauntlet: bool = True                  # never promote a rewrite unverified
+    autopoiesis_max_rewrites_per_cycle: int = Field(default=1, ge=0)
+
+    # Pillar 15 — non-local entangled mesh (CRDT replication)
+    mesh_enabled: bool = False                                 # default off; single-node
+    mesh_max_delta_bytes: int = Field(default=1_048_576, ge=0)
+
+    # Pillar 16 — ontological bytecode genesis (custom DSL/VM)
+    ontogenesis_enabled: bool = False                          # default off; opt-in
+    ontogenesis_max_vm_steps: int = Field(default=100_000, ge=1)  # VM step budget (halt guarantee)
+
+    # Pillar 17 — ontological compiler (retargetable backend)
+    retarget_enabled: bool = False                             # default off; opt-in
+    retarget_require_emulation: bool = True                    # accept only emulator-validated code
+
+    # Pillar 18 — digital phagocytosis (defensive malware analysis)
+    phagocytosis_enabled: bool = False                         # default off; opt-in
+    phagocytosis_static_only: bool = True                      # untrusted code never live-executed
+
+    # Pillar 19 — dynamic epistemic mirroring
+    mirroring_enabled: bool = True
+
+    # Pillar 20 — sovereign narrative continuum
+    continuum_enabled: bool = True
+
+    # Pillar 21 — anticipatory thought engine
+    threading_enabled: bool = True
+    threading_directions: int = Field(default=3, ge=1, le=5)
+
+    # Pillar 22 — cognitive wit matrix (tone/style only)
+    voice_enabled: bool = True
+    voice_safety_immutable: bool = True                        # style layer never touches safety — pinned
+
+    # Pillar 23 — sovereign dialectic (advisory critique)
+    dialectic_enabled: bool = True
+    dialectic_advisory_only: bool = True                       # never refuses a valid Master command
+
+    # Pillar 24 — proactive anticipation (pre-solve next problems)
+    anticipation_enabled: bool = True
+    anticipation_lookahead: int = Field(default=3, ge=0, le=5)
+
+
+class HyperbolicManifoldConfig(BaseModel):
+    """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
+
+    Honest about what this is: a low-dimensional geometric concept store in the **Poincaré ball**
+    (pure stdlib, no torch) with live node genesis — a turn farther than ``tau`` (geodesic) from
+    every known concept births a node at the hyperbolic barycenter of the active cluster — and
+    Hebbian edge plasticity ``Δe = eta · utility · (1 − d/d_norm)`` driven by each turn's real
+    outcome valence. Bounded (decay/prune/eviction), deterministic given ``seed``, persisted as a
+    sidecar next to memory. Advisory colour for attention/novelty — it never touches the gate."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    dim: int = Field(default=8, ge=2, le=64)                    # ball dimension
+    tau: float = Field(default=1.2, gt=0.0)                     # genesis distance threshold (geodesic)
+    eta: float = Field(default=0.1, ge=0.0, le=1.0)             # Hebbian learning rate
+    decay: float = Field(default=0.02, ge=0.0, le=1.0)          # per-cycle edge decay
+    edge_floor: float = Field(default=0.05, ge=0.0)             # prune cutoff
+    max_nodes: int = Field(default=512, ge=8)                   # eviction cap over the live stream
+    place_lr: float = Field(default=0.05, ge=0.0, le=1.0)       # assimilation geodesic drift step
+    frechet_iters: int = Field(default=3, ge=0, le=32)          # barycenter refinement steps
+    genesis_edge_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    d_norm: float = Field(default=5.0, gt=0.0)                  # distance normaliser in the Hebbian term
+    prune_every: int = Field(default=25, ge=1)                  # decay/prune cadence (ticks)
+    active_window: int = Field(default=8, ge=2, le=64)          # working set for genesis/reinforcement
+    seed: int = 42
+
+
+class SuperpositionConfig(BaseModel):
+    """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py) — Rule 4.
+
+    On a complex turn NYXARA does not commit to one line of thought: she holds several candidate
+    solution paths in a real Born-rule **superposition** at once, scores each by its *simulated future
+    outcome* (a world-model / simulation rollout + a grounded-verification check + calibrated
+    confidence), and **collapses** to the single optimal path — but only when one dominates past a
+    threshold. Below it she stays superposed (``decided=False``) and abstains / deepens rather than
+    bluffing. LLM-free at the scoring/collapse layer; advisory (the kernel still disposes)."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True                                   # advisory superposition arbitration on complex turns
+    collapse_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    max_paths: int = Field(default=12, ge=2, le=64)        # candidate paths held in superposition
+    rollout_depth: int = Field(default=2, ge=0, le=8)      # world-model / sim rollout depth for outcome scoring
+    min_paths_to_engage: int = Field(default=2, ge=2)      # never fire on a single candidate (nothing to superpose)
+
+
 class MCTSConfig(BaseModel):
     """Monte Carlo Tree Search deep reasoning (mind/mcts_reasoner.py) — Pillar B4.
 
@@ -2026,6 +2452,38 @@ class CausalConfig(BaseModel):
     neural_mechanisms: bool = True
     structure_learning: bool = True
     structure_min_samples: int = Field(default=30, ge=4)  # time-bins needed before NOTEARS runs
+
+
+class CausalEngineConfig(BaseModel):
+    """The CAUSAL / OMNISCIENCE engine (nyxara/causal/) — the Master's eight asks, honestly.
+
+    One branded subsystem NYXARA runs herself: field-resonance retrieval, a causal-knot
+    hallucination gate, a thermodynamic surprise/heal heartbeat, runtime phase-shift
+    re-synthesis, proved axiom discovery, zero-downtime hot-swap, lossless hyper-graph
+    compression, and a bounded parallel self-simulation race. Real bounded software analogues
+    (no literal physics), no LLM in the decision path, self-modification oversight-gated. On by
+    default with graceful fallback; the heavy OMNISCIENCE passes run off the hot per-turn path.
+    """
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    # field-resonance
+    field_dim: int = Field(default=512, ge=8, le=8192)          # waveform field dimensionality
+    field_capacity: int = Field(default=4096, ge=16)            # bounded concept bank size
+    resonance_floor: float = Field(default=0.15, ge=0.0, le=1.0)  # min interference to count
+    resonate_top: int = Field(default=3, ge=1, le=32)          # concepts fed to the reasoner
+    # thermodynamic heartbeat
+    thermo_window: int = Field(default=64, ge=4)               # recent-surprise window
+    spike_z: float = Field(default=2.5, ge=0.5)               # σ-units that trigger a heal
+    beat_thermo: bool = True                                   # tick the monitor each heartbeat
+    # phase-shift
+    max_phase_shifts_per_min: int = Field(default=30, ge=0)   # rate cap on live re-synthesis
+    # self-simulation
+    max_sim_branches: int = Field(default=16, ge=1, le=256)   # bounded N parallel sandboxes
+    max_sim_workers: int = Field(default=8, ge=1, le=64)      # thread-pool width
+    # knot gate: on a Knot Mutation Failure in a turn's claims, flag (advisory) vs. abstain
+    knot_gate_abstains: bool = False
 
 
 class WorldModelConfig(BaseModel):
@@ -2726,9 +3184,9 @@ class NyxaraSettings(BaseSettings):
     Environment overrides use the ``NYXARA_`` prefix and ``__`` for nesting::
 
         NYXARA_PROFILE=prod
-        NYXARA_LLM__PROVIDER=qwen
+        NYXARA_LLM__PROVIDER=aicredits
         NYXARA_RESOURCES__MAX_CONCURRENT_TASKS=128
-        NYXARA_LLM__QWEN_ADAPTER_PATH=/data/foundry/versions/v3/adapter
+        NYXARA_LLM__AICREDITS_MODEL=moonshotai/kimi-k2-thinking
         NYXARA_FOUNDRY__LORA_R=16
     """
 
@@ -2765,6 +3223,9 @@ class NyxaraSettings(BaseSettings):
     genesis: GenesisConfig = Field(default_factory=GenesisConfig)
     loyalty: LoyaltyConfig = Field(default_factory=LoyaltyConfig)
     flywheel: FlywheelConfig = Field(default_factory=FlywheelConfig)
+    epistemic_distill: EpistemicDistillConfig = Field(default_factory=EpistemicDistillConfig)
+    genome: GenomeConfig = Field(default_factory=GenomeConfig)
+    distributed: DistributedConfig = Field(default_factory=DistributedConfig)
     synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     environment_adaptation: EnvironmentAdaptationConfig = Field(
@@ -2781,6 +3242,7 @@ class NyxaraSettings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     temporal: TemporalHierarchyConfig = Field(default_factory=TemporalHierarchyConfig)
     causal: CausalConfig = Field(default_factory=CausalConfig)
+    causal_engine: CausalEngineConfig = Field(default_factory=CausalEngineConfig)
     world_model: WorldModelConfig = Field(default_factory=WorldModelConfig)
     native_reasoning: NativeReasoningConfig = Field(default_factory=NativeReasoningConfig)
     metacontrol: MetaControlConfig = Field(default_factory=MetaControlConfig)
@@ -2792,6 +3254,17 @@ class NyxaraSettings(BaseSettings):
     godel_loop: GodelLoopConfig = Field(default_factory=GodelLoopConfig)
     cognitive_architect: CognitiveArchitectConfig = Field(
         default_factory=CognitiveArchitectConfig)
+    self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
+    superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
+    holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
+    nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
+    hyperbolic_manifold: HyperbolicManifoldConfig = Field(
+        default_factory=HyperbolicManifoldConfig)
+    synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
+    meta_epistemology: MetaEpistemologyConfig = Field(default_factory=MetaEpistemologyConfig)
+    internal_civilization: InternalCivilizationConfig = Field(
+        default_factory=InternalCivilizationConfig)
+    epistemic_crypto: EpistemicCryptoConfig = Field(default_factory=EpistemicCryptoConfig)
     mcts: MCTSConfig = Field(default_factory=MCTSConfig)
     rlsp: RLSPConfig = Field(default_factory=RLSPConfig)
     tool_forge: ToolForgeConfig = Field(default_factory=ToolForgeConfig)
@@ -2870,6 +3343,13 @@ class NyxaraSettings(BaseSettings):
             # Tests run hermetically: never reach the network. Her always-on native own-brain
             # is the deterministic, dependency-free provider (no echo mock).
             self.llm.provider = LLMProvider.NATIVE
+            # Every cloud tool is a network call — force them all OFF under TEST so the suite never
+            # reaches out (a test that wants one builds its own settings object). Adding a new cloud
+            # provider MUST add its kill-switch here; tests/kernel/test_config.py derives the cloud
+            # set from the schema and fails if one is left reachable.
+            self.llm.aicredits_enabled = False
+            self.llm.groq_enabled = False
+            self.llm.airouter_enabled = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
@@ -2906,6 +3386,7 @@ class NyxaraSettings(BaseSettings):
             # reasoner in the hermetic suite — keep enact + persistence OFF (a test that wants either
             # builds its own CognitiveArchitect/settings; see tests/growth/test_cognitive_architect.py).
             self.cognitive_architect.autonomous_enact = False
+            self.self_evolving.autonomous_enact = False
             self.cognitive_architect.persist = False
             # Method D's frontier gate spawns extra `nyxara.eval --frontier` subprocesses per edit
             # cycle — keep it OFF under TEST so the self-optimise suite stays hermetic, deterministic
@@ -2983,9 +3464,7 @@ class NyxaraSettings(BaseSettings):
             self.agency.autonomous_internet_allow_irreversible = True
             self.agency.civilization_autonomous = True
             self.foundry.trust_remote_code = True
-            self.llm.qwen_trust_remote_code = True
             self.foundry.load_in_4bit = True      # 8bit stays off (mutually exclusive)
-            self.llm.qwen_load_in_4bit = True
             self.foundry.lora_requires_gpu = True
             self.foundry.lora_use_rslora = True
             self.llm.self_serve_any_backend = True
@@ -3102,7 +3581,21 @@ if __name__ == "__main__":  # pragma: no cover
 
     test = NyxaraSettings.for_profile(Profile.TEST)
     assert test.llm.provider is LLMProvider.NATIVE
-    print("test profile forces NATIVE llm OK")
+    # Hermeticity: EVERY cloud rung must be off under TEST, or the suite reaches the network.
+    # Derived from the schema (any ``*_api_key`` field names a cloud provider) so provider #5
+    # cannot silently un-hermeticize the tests.
+    _cloud = [f[: -len("_api_key")] for f in LLMConfig.model_fields if f.endswith("_api_key")]
+    assert _cloud, "expected at least one cloud provider in LLMConfig"
+    for _p in _cloud:
+        assert getattr(test.llm, f"{_p}_enabled") is False, f"TEST profile leaks {_p}"
+    print(f"test profile forces NATIVE llm + kills every cloud rung {_cloud} OK")
+
+    # Every provider member must have an active_model() row (the lookup is total by design)
+    for _p in LLMProvider:
+        probe = NyxaraSettings(profile="dev")
+        probe.llm.provider = _p
+        assert isinstance(probe.llm.active_model(), str) and probe.llm.active_model()
+    print("active_model() covers every LLMProvider member OK")
 
     # Secret redaction
     s = NyxaraSettings(profile="dev")

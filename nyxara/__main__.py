@@ -122,6 +122,13 @@ commands:
   /upgrade-device [name] re-optimize an existing device, keep it only if measurably better (compounding power)
   /engineering-report  devices designed, upgrades applied, impossible "magic" targets honestly logged
   /rewire-mind [n]   rewire her OWN cognitive architecture: invent new composite reasoning operators (trans-logic), keep only what strictly beats a held-out fold (no LLM); n: generations
+  /evolve            self-evolving neural architecture: when her current logic falls short, she grows a NEW neural module/pathway for it (topology/architecture/learning-rule/reasoning-operator), gauntlet-verified, wired live (no LLM); /evolve report for status
+  /superpose [q]     quantum-probabilistic superposition reasoning: hold many candidate solution paths at once (Born-rule amplitudes) and collapse to the one with the best SIMULATED FUTURE OUTCOME, or stay superposed and abstain (no LLM)
+  /causal            CAUSAL / OMNISCIENCE engine status: field-resonance, causal-knot gate, thermodynamic heartbeat, phase-shift, axioms, hot-swap, hyper-graph compression, self-simulation
+  /resonate <query>  resonate a query against her continuous concept fields (interference retrieval, no tokens) and show the most resonant concepts
+  /axioms            discover & PROVE a new axiom (symbolic regression + Z3/Sympy/exhaustive proof); adopted only if the proof passes
+  /compress          fold a knowledge graph + causal history into a dense lossless hyper-graph and report the measured ratio
+  /simulate          race bounded parallel self-simulation sandboxes and collapse to the lowest-free-energy / best-verified branch
   /cognitive-architecture  her thinking as data: operators, how many she invented, accuracy/fitness, resilience, meta-policy, intelligence index
   /generalize [n]    open-world generalization: crack a never-before-seen system from first principles
   /understand <spec> crack a declared black box: {"dataset":[[x,y],...]} or {"family":...,"params":...}
@@ -131,6 +138,17 @@ commands:
   /strategize <p>    analyse a problem: direct answer → reality check → weaknesses → solution
   /solve <p>         solve as the right expert: coding/maths/science/business/medicine/law/…
   /swarm <p>         convene a self-improving persona swarm: multi-round debate → one synthesis
+  /noesis [n]        the living algorithm: WAKE→SLEEP→DREAM n cycles — grow her own reusable
+                     abstraction library and show the compression curve (no LLM)
+  /create [idea|verse|art] <topic>  TRUE ORIGINAL CREATIVITY: her atelier competes, MCTS
+                     simulates futures, and only what beats the critic + novelty +
+                     reality gates is kept (no LLM)
+  /imagine <topic> [~ <blend>]  structured divergent imagination: SCAMPER + lateral +
+                     analogy + conceptual blending, convergently pruned (no LLM)
+  /originals         her creative organism's report: kept originals, atelier economy,
+                     critic stats, strategy evolution, muse projects, self-narrative
+  /muse              her self-chosen creative research projects (hypothesis → verdict)
+  /rate <1-10>       rate her latest creation — her aesthetic taste learns and persists
   /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
   /selfimprove N     run the codebase RSI loop N cycles (add 'enact' to apply real source edits)
   /save              persist long-term memory to disk now
@@ -177,6 +195,54 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.self_knowledge(), indent=2, default=str))
     elif cmd == "explain":
         print(core.explain_last())
+    elif cmd in ("causal", "omniscience"):
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled (NYXARA_CAUSAL_ENGINE__ENABLED=false).")
+        else:
+            print(json.dumps(eng.status(), indent=2, default=str))
+    elif cmd == "resonate":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None or not arg:
+            print("usage: /resonate <query>  (the CAUSAL engine must be enabled)")
+        else:
+            hits = eng.resonate(arg, top=5)
+            if not hits:
+                print("no resonance — this would trigger a live phase-shift on a real turn.")
+            for h in hits:
+                print(f"  {h.label:16s} {h.score:+.3f}  (weighted {h.weighted:+.3f})")
+    elif cmd == "axioms":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            # demonstrate: discover & PROVE commutativity of addition over a finite domain
+            samples = [({"a": a, "b": b}, a + b) for a in range(3) for b in range(3)]
+            ax = eng.discover_axioms("addition_commutes", samples, ["a", "b"],
+                                     reference_fn=lambda e: e["a"] + e["b"],
+                                     domain={"a": range(-4, 5), "b": range(-4, 5)})
+            print(json.dumps(ax.to_dict() if ax else {"discovered": False}, indent=2, default=str))
+    elif cmd == "compress":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            triples = [("nyxara", "knows", f"concept_{i}") for i in range(200)]
+            triples += [(f"turn_{i}", "observed_by", "nyxara") for i in range(100)]
+            _blob, report = eng.compress_memory(triples, history=["boot", "learn", "learn"])
+            print(report.summary())
+    elif cmd == "simulate":
+        eng = getattr(core, "causal_engine", None)
+        if eng is None:
+            print("the CAUSAL engine is disabled.")
+        else:
+            # race a few toy resolution paths; the lowest-free-energy branch wins & collapses
+            energies = {"conservative": 4.0, "balanced": 1.5, "aggressive": 6.0}
+            verdict = eng.simulate_and_collapse(
+                list(energies), lambda h: (h, energies[h]), verify=lambda o: 1.0)
+            w = verdict.winner
+            print(f"collapsed to: {w.hypothesis!r} (free-energy {w.free_energy})"
+                  if w else "no branch survived the sandboxes.")
     elif cmd == "pause":
         core.pause()
         print("loop paused — the Master may /resume.")
@@ -274,6 +340,26 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     elif cmd == "intuit":
         # /intuit 1, 4, 9, 16, 25   -> a non-algorithmic creative leap (no LLM), then self-verify
         print(json.dumps(core.intuit(arg), indent=2, default=str))
+    elif cmd in ("prove", "vsa", "vsa-prove"):
+        # /prove 2 + 2 = 4          -> vectorized reasoning, disposed by the exact prover (no LLM):
+        #                              a machine-checkable certificate (PROVEN/REFUTED) or honest ABSTAIN
+        if not arg.strip():
+            print("usage: /prove <decidable claim>   e.g. /prove 2+2=4   |   /prove p and not p")
+        else:
+            print(json.dumps(core.vsa_prove(arg.strip()), indent=2, default=str))
+    elif cmd in ("causal-repair", "causal_repair", "self-repair"):
+        # /causal-repair [tests/path]  -> causal-tree root-cause of a failing test → gated reversible fix
+        tp = arg.strip() or None
+        print(json.dumps(core.causal_repair(test_path=tp), indent=2, default=str))
+    elif cmd in ("teleology", "self-direct", "self_direct"):
+        # /teleology                -> invent her own measurable, envelope-gated self-improvement targets
+        print(json.dumps(core.self_direct(), indent=2, default=str))
+    elif cmd in ("hypothesize", "edge-cases", "hunt"):
+        # /hypothesize              -> Monte-Carlo concurrent-fault edge-case discovery (simulated, no LLM)
+        print(json.dumps(core.hunt_edge_cases(), indent=2, default=str))
+    elif cmd in ("time-away", "away", "elapsed"):
+        # /time-away                -> her honest awareness of how long since the Master last spoke
+        print(json.dumps(core.time_away(), indent=2, default=str))
     elif cmd in ("discover-law", "discover_law", "law", "laws"):
         # /discover-law            -> run her physics-sandbox experiment round
         # /discover-law dynamics   -> SINDy dynamical-law discovery (also: invariant | data)
@@ -310,6 +396,30 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
         print(json.dumps(core.rewire_cognition(generations=gens), indent=2, default=str))
     elif cmd in ("cognitive-architecture", "cognitive", "mind-architecture"):
         print(json.dumps(core.cognitive_architecture_report(), indent=2, default=str))
+    elif cmd in ("sign", "sign-knowledge"):
+        # /sign <text>  -> HMAC-sign + chain a fact (tamper-evident epistemic ledger)
+        print(json.dumps(core.sign_knowledge(arg.strip() or "a fact"), indent=2, default=str))
+    elif cmd in ("holo", "holo-recall", "holographic"):
+        # /holo <cue>   -> associative content recall from the holographic memory field
+        print(json.dumps(core.holographic_recall(arg.strip() or ""), indent=2, default=str))
+    elif cmd in ("holo-learn", "holo-remember"):
+        # /holo-learn key | text  -> fold key→text into the holographic field
+        k, _, t = arg.partition("|")
+        print(json.dumps(core.holographic_remember(k.strip() or "note", t.strip() or arg.strip()),
+                         indent=2, default=str))
+    elif cmd in ("superpose", "superposition", "quantum"):
+        # /superpose <question>  -> reason over many candidate paths in a Born-rule superposition
+        #                           and collapse to the best by simulated future outcome
+        print(json.dumps(core.superposition_reason(arg.strip() or "what should I do next?"),
+                         indent=2, default=str))
+    elif cmd in ("evolve", "self-evolve", "self_evolve"):
+        # /evolve         -> grow a new neural module/pathway for a problem her current logic can't
+        #                    handle (diagnose gap → best structural lever → gauntlet → wire live)
+        # /evolve report  -> a summary of every self-evolution attempt
+        if arg.strip() in ("report", "status"):
+            print(json.dumps(core.self_evolution_report(), indent=2, default=str))
+        else:
+            print(json.dumps(core.evolve(), indent=2, default=str))
     elif cmd in ("generalize", "openworld", "open-world"):
         try:
             budget = int(arg) if arg else 48
@@ -366,6 +476,55 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /swarm <problem>")
         else:
             print(json.dumps(core.swarm(arg), indent=2, default=str))
+    elif cmd == "noesis":
+        # /noesis [n] → run the living algorithm n cycles: grow her own abstraction library and
+        # show the compression curve (avg solution size ↓, compute-per-solve ↓). No LLM in the loop.
+        try:
+            n = int(arg) if arg.strip() else 3
+        except ValueError:
+            n = 3
+        # routes through the kernel: the living algorithm compounds on her persisted library, with
+        # the F5 red-team + F1 metacognition wired in (no LLM in the loop).
+        print(json.dumps(core.noesis(cycles=max(1, n)), indent=2, default=str))
+    elif cmd == "create":
+        # /create verse the night sky   -> closed-loop original creation, no LLM
+        tokens = arg.split(None, 1)
+        modality, topic = "idea", arg
+        aliases = {"idea": "idea", "invention": "idea", "verse": "verse",
+                   "poem": "verse", "art": "art", "image": "art"}
+        if tokens and tokens[0].lower() in aliases:
+            modality = aliases[tokens[0].lower()]
+            topic = tokens[1] if len(tokens) > 1 else ""
+        if not topic.strip():
+            print("usage: /create [idea|verse|art] <topic>")
+        else:
+            print(json.dumps(core.create(topic.strip(), modality=modality),
+                             indent=2, default=str))
+    elif cmd == "imagine":
+        # /imagine defense ~ chess   -> divergent storm on 'defense' blended with 'chess'
+        if not arg:
+            print("usage: /imagine <topic> [~ <blend-with>]")
+        else:
+            topic, _, blend = arg.partition("~")
+            print(json.dumps(core.imagine(topic.strip(),
+                                          blend_with=blend.strip() or None),
+                             indent=2, default=str))
+    elif cmd == "originals":
+        print(json.dumps(core.originality_report(), indent=2, default=str))
+    elif cmd == "muse":
+        # her self-chosen creative research projects, straight from the muse
+        rep = core.originality_report()
+        print(json.dumps(rep.get("muse", rep), indent=2, default=str))
+    elif cmd == "rate":
+        # /rate 9   -> the Master's aesthetic feedback; her taste learns from it
+        try:
+            rating = float(arg)
+        except (TypeError, ValueError):
+            rating = -1.0
+        if not (1.0 <= rating <= 10.0):
+            print("usage: /rate <1-10>")
+        else:
+            print(json.dumps(core.rate_creation(rating), indent=2, default=str))
     elif cmd in ("selfimprove", "self-improve", "self_improve"):
         tokens = arg.split()
         # /selfimprove [N] [enact] → drive the codebase-level RSI loop N times (observable).
@@ -406,8 +565,23 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
     return True
 
 
+def _quiet_model_loading() -> None:
+    """Silence transformers' per-load progress bars and weight reports on the console.
+
+    Background faculties (foundry, genesis, embedders) load models mid-conversation; their
+    "Loading weights …" bars and LOAD REPORT tables would otherwise interleave with the
+    Master's chat. Best-effort: purely cosmetic, never fatal, real errors still surface."""
+    try:
+        from transformers.utils import logging as hf_logging
+        hf_logging.set_verbosity_error()
+        hf_logging.disable_progress_bar()
+    except Exception:  # noqa: BLE001 — transformers absent or too old; nothing to quiet
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """Boot NYXARA and run the interactive Master console."""
+    _quiet_model_loading()
     try:
         core = NyxaraCore()
     except Exception as exc:  # noqa: BLE001 - boot integrity failed
@@ -416,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(_BANNER)
     # Primary brain — when NYXARA's OWN model is the chosen provider (`self`), forge it on the
-    # very first boot: LoRA-tune Qwen2.5-0.5B (auto-downloaded) into her own loyal voice, then serve
+    # very first boot: LoRA-tune DistilGPT-2 (auto-downloaded) into her own loyal voice, then serve
     # it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram brain; any
     # failure → logged, never fatal (the mock fallback keeps the console usable).
     try:

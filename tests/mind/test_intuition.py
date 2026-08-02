@@ -187,7 +187,8 @@ def test_intuition_is_llm_free():
 
     import nyxara.mind.intuition as intu
     code = open(intu.__file__, "r", encoding="utf-8").read().split("if __name__ ==")[0]
-    for pat in ("from nyxara.mind." + "llm", "Qwen" + "Provider", ".generate(", ".complete("):
+    for pat in ("from nyxara.mind." + "llm", "AIRouter" + "Provider", "Groq" + "Provider",
+                "OpenAICompat" + "Provider", ".generate(", ".complete("):
         assert pat not in code
     # importing intuition must not drag in the LLM faculty
     assert "nyxara.mind.llm" not in sys.modules or True  # tolerant: other tests may have loaded it

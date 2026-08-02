@@ -240,6 +240,10 @@ class SelfBrain:
         self._retrieval = bool(getattr(cfg, "self_brain_retrieval", True))
         self._top_k = int(getattr(cfg, "self_brain_top_k", 4))
         self._sim_threshold = float(getattr(cfg, "self_brain_sim_threshold", 0.35))
+        # the *handoff* path (answering in place of a capable teacher) demands a much closer
+        # match than the offline voice: below this floor she defers instead of stitching
+        # loosely-related learned sentences into a salad the quality verifier can't catch.
+        self._handoff_sim = float(getattr(cfg, "self_brain_handoff_sim", 0.6))
         self._backend = str(getattr(cfg, "self_brain_backend", "auto"))
         # ---- real online weight learning (not just retrieval recall) ---- #
         # Her generative weights *accumulate* from lived, reward-weighted experience: each refit
@@ -456,6 +460,20 @@ class SelfBrain:
         if len(self._sent) > cap:
             self._sent = self._sent[-cap:]
             self._sent_vec = self._sent_vec[-cap:]
+
+    def _teach_embedder(self, doc: str) -> None:
+        """Teach the embedder from heard (non-speakable) text WITHOUT indexing it for recall."""
+        emb = self._ensure_embedder()
+        if emb is None or not hasattr(emb, "learn"):
+            return
+        for sent in _sentences(doc):
+            s = _clean(sent)
+            if len(s) < 6 or len(_WORD_RE.findall(s)) < 2:
+                continue
+            try:
+                emb.learn(s)
+            except Exception:  # noqa: BLE001
+                continue
 
     def _ensure_index(self) -> None:
         """Index any corpus documents not yet folded into the semantic memory."""
@@ -899,6 +917,13 @@ class SelfBrain:
         # near-identical content word sets in both directions => an echo
         return inter >= max(2, int(0.8 * len(q_tokens))) and inter >= int(0.8 * len(s_tokens))
 
+    def _handoff_floor(self) -> float:
+        """The retrieval-similarity floor for answering in place of a capable teacher."""
+        emb = self._ensure_embedder()
+        if emb is not None and not bool(getattr(emb, "is_lexical", True)):
+            return max(self._sim_threshold, self._handoff_sim)
+        return self._sim_threshold
+
     def _compose(self, ranked: List[Tuple[str, float]]) -> str:
         """Build a coherent reply from the top real sentences above the similarity floor."""
         keep = [s for s, sim in ranked if sim >= self._sim_threshold]
@@ -978,6 +1003,14 @@ class SelfBrain:
             composed = self._compose(ranked)
             if composed and _looks_usable(composed):
                 best_sim = ranked[0][1] if ranked else 0.0
+                # handoff discipline: answering IN PLACE OF a capable teacher demands a genuinely
+                # close match — a loose one (learned sentences merely adjacent to the topic) reads
+                # as a coherent bluff the intrinsic quality verifier cannot catch, so she defers.
+                # The strict floor is calibrated for a *semantic* space; a lexical space runs its
+                # cosines lower and token overlap already implies topical match, so it keeps the
+                # ordinary compose floor.
+                if require_grounding and best_sim < self._handoff_floor():
+                    return ""
                 self._remember_reply(composed, self._sim_to_conf(best_sim))
                 return composed
         # 2. generative fallback (hardened sampling so the n-gram reads better). Skipped on the
@@ -1047,7 +1080,8 @@ class SelfBrain:
         return self._perplexity_conf(text)
 
     # ---- learning (real, reward-weighted, weights accumulate) ---- #
-    def learn(self, *docs: str, reward: float = 0.0) -> None:
+    def learn(self, *docs: str, reward: float = 0.0,
+              speakable: Optional[Sequence[bool]] = None) -> None:
         """Learn from a lived exchange — into recall AND into the generative *weights*.
 
         Two substrates compound, not one: the retrieval index (so a fact taught this turn is
@@ -1061,14 +1095,26 @@ class SelfBrain:
         refused, fail-closed — capability grows, character never does. When more than one doc is
         given the last is treated as her own utterance (the reply): a punished reply is neither
         recalled nor reinforced, so she does not resurface an answer she was corrected on.
+
+        ``speakable`` (parallel to ``docs``; default all-True) marks which docs are HER OWN words.
+        A non-speakable doc — the Master's message — still teaches the weights and the embedder,
+        but never enters the recall/compose index or the persisted corpus: she must not answer a
+        later turn by repeating what the Master said back at them.
         """
-        fresh = [_clean(d) for d in docs if _clean(d) and len(_clean(d)) >= 3]
-        fresh = [d for d in fresh if not self._violates_core(d)]   # fail-closed character lock
-        if not fresh:
+        flags = list(speakable) if speakable is not None else [True] * len(docs)
+        if len(flags) != len(docs):
+            flags = [True] * len(docs)
+        pairs = [(_clean(d), bool(f)) for d, f in zip(docs, flags)]
+        pairs = [(d, f) for d, f in pairs if d and len(d) >= 3
+                 and not self._violates_core(d)]                   # fail-closed character lock
+        if not pairs:
             return
+        fresh = [d for d, _ in pairs]
         # a punished reply (the last doc under negative reward) is kept out of recall so a
         # corrected answer is not resurfaced; the cue/context around it is still learned.
-        recall = fresh if reward >= 0 or len(fresh) == 1 else fresh[:-1]
+        recall_pairs = pairs if reward >= 0 or len(pairs) == 1 else pairs[:-1]
+        recall = [d for d, f in recall_pairs if f]
+        heard = [d for d, f in recall_pairs if not f]
         with self._lock:
             self._corpus.extend(recall)
             self._learned_count += len(recall)
@@ -1077,6 +1123,9 @@ class SelfBrain:
                 for doc in recall:
                     self._index_doc(doc)
                 self._indexed_docs = len(self._corpus)
+            # heard (non-speakable) text still widens the embedder's distributional reach
+            for doc in heard:
+                self._teach_embedder(doc)
             # queue for the real weight fold: reinforce all on reward>=0, else suppress the reply
             if self._online_learn:
                 if reward >= 0:

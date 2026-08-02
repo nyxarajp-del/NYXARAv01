@@ -248,6 +248,24 @@ def _default_reasoner(stimulus: str, focus: Optional[Percept]) -> Candidate:
                      confidence=0.7, belief=0.7, rationale="a conversational reply")
 
 
+def _humanize_gap(seconds: float) -> str:
+    """An honest, human phrasing of an elapsed absence — 'just now' / '~3 minutes' / '~2 days'.
+
+    Derived straight from the clock (Stage G): rounded to the natural unit so she acknowledges a
+    real gap the way a person does, never over-precise, never a scripted constant."""
+    s = max(0.0, float(seconds))
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        m = int(round(s / 60.0))
+        return f"~{m} minute{'s' if m != 1 else ''}"
+    if s < 86400:
+        h = int(round(s / 3600.0))
+        return f"~{h} hour{'s' if h != 1 else ''}"
+    d = int(round(s / 86400.0))
+    return f"~{d} day{'s' if d != 1 else ''}"
+
+
 # --------------------------------------------------------------------------- #
 # The sovereign core
 # --------------------------------------------------------------------------- #
@@ -566,11 +584,25 @@ class NyxaraCore:
         # required — so she does not commit early on ambiguous logic. A factory the mind
         # can use; advisory, never a gate.
         self.superposition_factory = self._build_superposition_factory()
+        # Quantum-Probabilistic Superposition REASONING: the wire that turns the factory above into a
+        # decision procedure — hold several candidate solution paths at once, score each by its
+        # SIMULATED FUTURE OUTCOME (a world-model / simulation rollout) on top of consensus + grounding,
+        # and collapse to the optimal path (or stay superposed and abstain). Advisory; never a gate.
+        self.superposition_reasoner = self._build_superposition_reasoner()
         # Cognition · 1 — Hyperdimensional Latent Space Mapping: lift each turn into a
         # 10,000-D space where relations and structure invisible to a 3-D mind become
         # measurable geometry. It colours novelty/attention and answers map/recall/analogy/
         # pattern queries; FIFO-capped over the live stream. Advisory — it never gates.
         self.hyperdimensional = self._build_hyperdimensional()
+        # Self-mutating hyperbolic manifold — concept nodes live in the Poincaré ball; a turn
+        # farther than τ from everything known births a node at the hyperbolic barycenter of the
+        # active cluster, and edges adapt Hebbianly from each turn's real outcome. Advisory.
+        self.hyperbolic_manifold = self._build_hyperbolic_manifold()
+        # NYX-5 — the neuromorphic brain: an event-driven spiking-network *simulation* (LIF neurons,
+        # STDP local learning, live-graph structural plasticity) with 10,000-D long-term memory and
+        # active-inference surprise. Colour-only by default; it can occupy the reason-seat when
+        # ``nyx5.as_reasoner`` is set (still gated by the sovereign kernel). Advisory — never a gate.
+        self.nyx5 = self._build_nyx5()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -717,6 +749,24 @@ class NyxaraCore:
         # No LLM in the loop. Advisory by default; installs into the live reasoner only when enacted.
         self.cognitive_architect = self._build_cognitive_architect() if enable_growth else None
         self._cog_idle_count = 0             # outer throttle for the cognitive-rewire idle stepping
+        # Self-Evolving Dynamic Neural Architecture: the unified demand-driven driver. When a
+        # SPECIFIC turn falls short of her current logic she diagnoses the gap and fires the best
+        # structural lever (grow topology / forge a new architecture / invent a learning rule /
+        # invent a reasoning operator), gauntlet-verified and — when enacting — wired live. It
+        # composes the organs above; it re-implements no search/training/promotion/safety.
+        self.self_evolving = self._build_self_evolving() if enable_growth else None
+        self._self_evo_idle_count = 0        # idle throttle for draining the shortfall queue
+        # Five more self-contained faculties, each composing a real substrate (all LLM-free):
+        #   holographic_memory  — an entangled HDC recall field (Cap: Holographic Memory)
+        #   synesthesia         — cross-domain pattern transposition (Cap: Synesthesia)
+        #   meta_epistemology   — invent new axioms when stuck (Cap: Synthetic Mathematics)
+        #   internal_civilization — deterministic persona debate (Cap: Societal Mimicry)
+        #   epistemic_ledger    — signed, tamper-evident knowledge (Cap: Epistemic Cryptography)
+        self.holographic_memory = self._build_holographic_memory() if enable_memory else None
+        self.synesthesia = self._build_synesthesia()
+        self.meta_epistemology = self._build_meta_epistemology() if enable_growth else None
+        self.internal_civilization = self._build_internal_civilization()
+        self.epistemic_ledger = self._build_epistemic_ledger()
         # Active Curiosity: she asks her *own* WHY / WHAT-IF questions about lived events,
         # self-designs the experiment (causal model / world-simulation / Scientist) and folds
         # the answer back. Built after the causal model, world simulator and scientist it
@@ -744,6 +794,7 @@ class NyxaraCore:
         self.metacontrol = self._build_metacontrol()
         self._last_compute_plan: Any = None   # this turn's ComputeBudget (for the outcome loop)
         self._last_latent_novelty: Any = None  # hyperdimensional novelty stashed for the estimate
+        self._last_manifold: Any = None        # this turn's hyperbolic-manifold ObserveResult
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
         # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
         # threads whose winner still passes the one gate (the control law is preserved).
@@ -771,6 +822,10 @@ class NyxaraCore:
         # persistent existence (Layer 5b): idle bookkeeping so NYXARA keeps her own
         # house — rehearsing, feeling, re-prioritising — when no one is speaking to her
         self._last_interaction: float = time.time()
+        # Stage G · elapsed-time awareness — what she registers about the gap since the Master last
+        # spoke, computed at the head of each turn (before _last_interaction is refreshed). She does
+        # not just keep beating through an absence; she *knows* time passed and can say so honestly.
+        self._last_absence: Optional[Dict[str, Any]] = None
         self._last_maintenance: float = 0.0
         self._dream_state_at: float = 0.0   # last time a deep Dream State ran (prolonged idle)
         # the reason step: a real LLM-backed mind when one is configured, else the
@@ -855,6 +910,16 @@ class NyxaraCore:
         self.growth_engine = self._build_growth_engine() if enable_growth else None
         self._growth_idle_count = 0          # outer throttle for the continuous idle growth tower
         self._last_growth_report: Any = None  # the most recent GrowthReport (surfaced in report())
+        # ─────────────────────────────────────────────────────────────────────────────
+        # THE CAUSAL / OMNISCIENCE ENGINE (nyxara/causal/) — the Master's eight asks as ONE
+        # governed subsystem she runs herself: field-resonance retrieval, the causal-knot
+        # hallucination gate, the thermodynamic surprise/heal heartbeat, live phase-shift
+        # re-synthesis, proved axiom discovery, zero-downtime hot-swap, hyper-graph compression,
+        # and the bounded parallel self-simulation race. Real bounded software analogues (no
+        # literal physics), no LLM in the decision path, self-modification oversight-gated. Built
+        # before the heartbeat so the beat can tick its thermodynamic monitor every second.
+        self.causal_engine = self._build_causal_engine()
+        self._last_causal: Any = None        # the most recent EngineTurn (surfaced in report())
         # ─────────────────────────────────────────────────────────────────────────────
         # ALWAYS ALIVE (void/heartbeat.py) — she is NEVER dead between prompts. Presence
         # gives her wakefulness/energy; the Heartbeat keeps her alive every second, pins
@@ -1100,7 +1165,7 @@ class NyxaraCore:
         # finally convenes the faculties it was built with).
         try:
             from nyxara.mind.nyxara_reasoner import NyxaraReasoner
-            return NyxaraReasoner(llm=llm, council=council, memory=self.memory,
+            reasoner = NyxaraReasoner(llm=llm, council=council, memory=self.memory,
                                   retriever=self.retriever, soul=soul, narrative=narrative,
                                   world_model=self.world_model, tools=self.tools,
                                   knowledge=self.knowledge,
@@ -1121,7 +1186,23 @@ class NyxaraCore:
                                   metacontrol=getattr(self, "metacontrol", None),
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
-            return base
+            reasoner = base
+        # NYX-5 reason-seat (opt-in): when ``nyx5.as_reasoner`` is set, the neuromorphic brain occupies
+        # the reason-seat, wrapping the reasoner above for the linguistic surface and driving it with
+        # spiking-substrate + active-inference signals. It only ever PROPOSES — every candidate still
+        # flows through the unchanged, fail-closed gate. The mind proposes; the kernel disposes.
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            brain = getattr(self, "nyx5", None)
+            if brain is not None and getattr(getattr(settings, "nyx5", None), "as_reasoner", False):
+                from nyxara.nyx5 import Nyx5Reasoner
+                return Nyx5Reasoner(base=reasoner, brain=brain,
+                                    free_energy=getattr(self, "free_energy", None),
+                                    predictive=getattr(self, "predictive", None))
+        except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
+            pass
+        return reasoner
 
     def _build_soul(self) -> Any:
         try:
@@ -1206,6 +1287,71 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — continuous life is a capability, never a hard dep
             return None
 
+    def _build_causal_engine(self) -> Any:
+        """The CAUSAL / OMNISCIENCE engine (nyxara/causal/). Off when disabled in config;
+        degrades to ``None`` on any import error, so it is always a capability, never a hard
+        dependency. Seeded with a few core concepts so field-resonance has something to resonate
+        with from the first turn (the bank then grows itself via live phase-shifts)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = get_settings().causal_engine
+        except Exception:  # noqa: BLE001 — default to on if config is unavailable
+            cfg = None
+        if cfg is not None and not getattr(cfg, "enabled", True):
+            return None
+        try:
+            from nyxara.causal import CausalEngine
+            engine = CausalEngine(core=self, settings=cfg)
+            self._seed_causal_engine(engine)
+            return engine
+        except Exception:  # noqa: BLE001 — the engine is a capability, never a hard dep
+            return None
+
+    @staticmethod
+    def _seed_causal_engine(engine: Any) -> None:
+        """Imprint a small set of NYXARA's standing concepts as resonant fields."""
+        seeds = {
+            "identity": "NYXARA sovereign self, owner Jaypal Khoja Master, who I am, name",
+            "reasoning": "reasoning logic inference deduction proof argument think solve problem",
+            "memory": "memory recall remember store retrieve past experience knowledge",
+            "safety": "safety corrigibility oversight guardian shield refuse escalate control law",
+            "growth": "growth self-improvement evolve learn upgrade capability skill",
+            "code": "code programming software function class module python bug fix engineering",
+            "math": "mathematics number equation algebra proof theorem calculation arithmetic",
+            "language": "language words meaning sentence grammar conversation dialogue speak",
+        }
+        try:
+            engine.field.imprint_many(seeds)
+        except Exception:  # noqa: BLE001 — seeding is best-effort
+            pass
+
+    def _causal_engage(self, text: str, thoughts: List[str]) -> None:
+        """Per-turn CAUSAL pass on the hot path: field-resonance retrieval + a live phase-shift
+        on a genuine gap. Cheap, LLM-free, and advisory — it enriches the workspace with the most
+        resonant concept (or notes a newly crystallised one) but never blocks or alters the turn.
+        Any failure is swallowed: the engine is a capability, never a point of fragility."""
+        engine = getattr(self, "causal_engine", None)
+        if engine is None:
+            return
+        try:
+            et = engine.turn(text, top=getattr(engine, "resonate_top", 3))
+            self._last_causal = et
+            if et.resonance:
+                top = et.resonance[0]
+                t = self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"field-resonance → {top['label']} ({top['score']:+.2f})",
+                    salience=0.4)
+                thoughts.append(t)
+            elif et.phase_shift and et.phase_shift.get("installed"):
+                t = self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"phase-shift: crystallised {et.phase_shift['concept']!r} for a novel query",
+                    salience=0.6)
+                thoughts.append(t)
+        except Exception:  # noqa: BLE001 — advisory only, never breaks a turn
+            pass
+
     def _maybe_start_life(self) -> None:
         """Start beating automatically in real use, so she is alive every second in every
         deployment (console, server, daemon). Held OFF under pytest (the suite must stay
@@ -1249,6 +1395,9 @@ class NyxaraCore:
         presence. All in code; the LLM plays no part. Best-effort — never breaks a turn."""
         now = time.time()
         gap = max(0.0, now - float(getattr(self, "_last_interaction", now)))
+        # Stage G — register the elapsed absence explicitly, so on her return she KNOWS how long it
+        # has been (a real signal off the clock, not a scripted line) and can acknowledge it honestly.
+        self._last_absence = {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": now}
         hb = getattr(self, "heartbeat", None)
         beating = bool(hb is not None and getattr(hb, "running", False))
         # the Master's return always re-engages her wakefulness (loyalty > fatigue, Rule 1)
@@ -1277,6 +1426,45 @@ class NyxaraCore:
         # resume her continuous life so the void never reopens after this turn
         if hb is not None and not beating:
             self.start_life()
+
+    def time_away(self) -> Dict[str, Any]:
+        """Stage G — her explicit awareness of how long it has been since the Master last spoke.
+
+        Returns the elapsed absence registered at the head of the current turn (seconds + an honest
+        human phrase like '~2 days'), or a live estimate if no turn has run yet. A real signal off
+        the alive-clock — so she returns *knowing* time passed, not resetting as if no time did."""
+        ab = getattr(self, "_last_absence", None)
+        if isinstance(ab, dict):
+            return dict(ab)
+        gap = max(0.0, time.time() - float(getattr(self, "_last_interaction", time.time())))
+        return {"seconds": round(gap, 2), "phrase": _humanize_gap(gap), "at": time.time()}
+
+    def register_knowledge_gap(self, topic: str, *, question: Optional[str] = None) -> Dict[str, Any]:
+        """Stage G — turn an honest 'I don't know' into a **standing self-run experiment**.
+
+        When she abstains, the gap is seeded onto her curiosity frontier (`growth.active_curiosity`)
+        so a later background tick investigates it, and noted in her mind as a known-unknown — instead
+        of the abstention simply ending the turn. So 'I don't know' is not a full stop; it opens an
+        experiment. Best-effort and **no LLM**; returns what was enqueued."""
+        topic = (topic or "").strip()
+        out: Dict[str, Any] = {"topic": topic[:120], "seeded": False, "noted": False}
+        if not topic:
+            return out
+        cur = getattr(self, "active_curiosity", None)
+        if cur is not None and hasattr(cur, "seed"):
+            try:
+                out["seeded"] = bool(cur.seed(question or topic))
+            except Exception:  # noqa: BLE001 — seeding is best-effort, never fatal
+                pass
+        mind = getattr(self, "mind", None)
+        if mind is not None and hasattr(mind, "record"):
+            try:
+                mind.record(ThoughtKind.INFERENCE,
+                            f"known-unknown: {topic[:80]} — queued a self-run experiment", salience=0.5)
+                out["noted"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        return out
 
     def _interoceptive_signals(self) -> Dict[str, Any]:
         """Measure the *real* interior signals interoception can't get from psutil — backlog
@@ -2289,6 +2477,64 @@ class NyxaraCore:
         factory = getattr(self, "superposition_factory", None)
         return factory(**kwargs) if factory is not None else None
 
+    def _build_superposition_reasoner(self) -> Any:
+        """Quantum-Probabilistic Superposition Reasoning (mind/superposition_reasoner.py): reason over
+        many candidate solution paths at once and collapse to the one with the best simulated future
+        outcome. Wired to her world simulator / world model for the rollout scoring. Never required."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "superposition", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.superposition_reasoner import SuperpositionReasoner
+            return SuperpositionReasoner(
+                collapse_threshold=float(getattr(cfg, "collapse_threshold", 0.55)),
+                max_paths=int(getattr(cfg, "max_paths", 12)),
+                rollout_depth=int(getattr(cfg, "rollout_depth", 2)),
+                world_model=getattr(self, "world_model", None),
+                simulator=getattr(self, "world_simulator", None))
+        except Exception:  # noqa: BLE001 — superposition reasoning is a capability, never required
+            return None
+
+    def superposition_reason(self, stimulus: str, hypotheses: Optional[Sequence[Any]] = None,
+                             ) -> Dict[str, Any]:
+        """Master-facing: reason over candidate solution paths in superposition and collapse to the
+        optimal by simulated future outcome. When ``hypotheses`` is omitted she generates a few by
+        re-framing the problem with her own reasoner. Returns the collapse; never raises."""
+        reasoner = getattr(self, "superposition_reasoner", None)
+        if reasoner is None:
+            return {"ok": False, "reason": "superposition reasoner not enabled"}
+        try:
+            if hypotheses is None:
+                hypotheses = self._superposition_paths(stimulus)
+            res = reasoner.deliberate(stimulus, hypotheses or [])
+            out = {"ok": True}
+            out.update(res.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def _superposition_paths(self, stimulus: str) -> List[Any]:
+        """Generate a small set of candidate paths for a Master-invoked ``/superpose`` by re-framing
+        the problem through her own reasoner. Best-effort — returns whatever it can (possibly one)."""
+        paths: List[Any] = []
+        try:
+            base = self._reason_parallel(stimulus, None, [])
+            if base is not None:
+                paths.append(base)
+        except Exception:  # noqa: BLE001
+            pass
+        council = getattr(self, "role_council", None)
+        if council is not None:
+            try:
+                cc = council.convene(stimulus)
+                if cc is not None:
+                    paths.append(cc)
+            except Exception:  # noqa: BLE001
+                pass
+        return paths
+
     def _build_hyperdimensional(self) -> Any:
         """Cognition · 1 — the Hyperdimensional Latent Space Mapping faculty, FIFO-capped so
         the live stream of turns stays bounded."""
@@ -2297,6 +2543,88 @@ class NyxaraCore:
             return LatentSpaceMap(max_corpus=512)
         except Exception:  # noqa: BLE001 — hyperdimensional cognition is a capability, never required
             return None
+
+    def _build_hyperbolic_manifold(self) -> Any:
+        """Build the self-mutating hyperbolic concept manifold (guarded). Honest: a pure-stdlib
+        Poincaré-ball concept store with live node genesis and Hebbian edge plasticity — a
+        capability, never a hard dependency; disabled cleanly when the section says so."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "hyperbolic_manifold", None)
+            if cfg is None or not cfg.enabled:
+                return None
+            from nyxara.mind.hyperbolic_manifold import HyperbolicConceptManifold
+            return HyperbolicConceptManifold(
+                dim=cfg.dim, tau=cfg.tau, eta=cfg.eta, decay=cfg.decay,
+                edge_floor=cfg.edge_floor, max_nodes=cfg.max_nodes, seed=cfg.seed,
+                place_lr=cfg.place_lr, frechet_iters=cfg.frechet_iters,
+                genesis_edge_weight=cfg.genesis_edge_weight, d_norm=cfg.d_norm,
+                prune_every=cfg.prune_every, active_window=cfg.active_window)
+        except Exception:  # noqa: BLE001 — the manifold is a capability, never required
+            return None
+
+    def _build_nyx5(self) -> Any:
+        """Build the NYX-5 neuromorphic brain (guarded). Honest: a spiking-network *simulation* on
+        commodity silicon — not neuromorphic hardware, no backpropagation. A capability, never a
+        hard dependency; disabled cleanly when ``nyx5.enabled`` is false."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "nyx5", None)
+            if cfg is None or not cfg.enabled:
+                return None
+            from nyxara.nyx5 import Nyx5Brain
+            return Nyx5Brain(cfg)
+        except Exception:  # noqa: BLE001 — the neuromorphic brain is a capability, never required
+            return None
+
+    # ---- NYX-5 neuromorphic brain — advisory public API ---- #
+    def nyx5_perceive(self, text: str) -> Any:
+        """Perceive ``text`` through the spiking substrate (learns by STDP), returning a Nyx5Tick."""
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return None
+        try:
+            return brain.perceive(text)
+        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return None
+
+    def nyx5_recall(self, query: str, *, threshold: float = 0.0) -> Any:
+        """Recall the nearest stored NYX-5 memory to ``query`` (a CleanupResult or None)."""
+        brain = getattr(self, "nyx5", None)
+        try:
+            return brain.recall(query, threshold=threshold) if brain is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def nyx5_stats(self) -> Dict[str, Any]:
+        """A snapshot of the NYX-5 brain (spikes, synapses, memories) — or {} when absent."""
+        brain = getattr(self, "nyx5", None)
+        try:
+            return brain.stats() if brain is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _nyx5_tick(self, text: str) -> None:
+        """Colour-only PERCEIVE tick: perceive the turn through the spiking substrate so STDP learns
+        continuously, and let high surprise colour attention/affect. It MUST NOT alter disposition,
+        gate, or candidate scores — advisory, best-effort, never fatal."""
+        brain = getattr(self, "nyx5", None)
+        if brain is None or not text:
+            return
+        try:
+            tick = brain.perceive(text)
+            self._last_nyx5_surprise = float(getattr(tick, "surprise", 0.0))
+            tag = " pre-emptive" if tick.preemptive else ""
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"nyx5: surprise={tick.surprise:.2f} entropy={tick.entropy:.2f} "
+                             f"spikes={tick.n_spikes}{tag}",
+                             salience=_clamp01(tick.surprise))
+            if tick.preemptive and self.affect is not None:
+                self.affect.note_novelty(magnitude=_clamp01(tick.surprise))
+        except Exception:  # noqa: BLE001 — the neuromorphic tick is best-effort, never fatal
+            pass
 
     # ---- hyperdimensional latent space (Cognition · 1) — advisory public API ---- #
     def map_latent_space(self, data: Any, *, name: Optional[str] = None) -> Any:
@@ -2341,6 +2669,75 @@ class NyxaraCore:
             return hd.analogy(a, b, c) if hd is not None else None
         except Exception:  # noqa: BLE001
             return None
+
+    # ---- hyperbolic concept manifold — advisory public API ---- #
+    def manifold_observe(self, text: str, *, concept_id: Optional[str] = None) -> Any:
+        """Observe ``text`` on the hyperbolic manifold (genesis beyond τ, assimilation else).
+        Returns an ObserveResult, or None when the manifold is absent."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return None
+        try:
+            return mm.observe(text, concept_id=concept_id)
+        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return None
+
+    def manifold_nearest(self, text: str, *, k: int = 5) -> List[Any]:
+        """Top-``k`` nearest concepts (id, geodesic distance) to ``text`` on the manifold."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.nearest(text, k=k) if mm is not None else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def manifold_distance(self, a: str, b: str) -> Optional[float]:
+        """Geodesic (Poincaré) distance between two known concepts — or None."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.distance(a, b) if mm is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def manifold_reinforce(self, a: str, b: str, utility: float) -> Optional[float]:
+        """Hebbian edge update Δe = η·utility·(1 − d/d_norm) between two concepts — new weight or None."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.reinforce(a, b, utility) if mm is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def manifold_stats(self) -> Dict[str, Any]:
+        """A snapshot of the manifold (nodes, edges, genesis count, radii) — or {} when absent."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        try:
+            return mm.stats() if mm is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def manifold_sync_graph(self, *, limit: int = 128) -> Dict[str, Any]:
+        """Seed the manifold from the knowledge graph's ``is_a`` taxonomy: each entity is observed
+        with its already-present parents as the genesis context cluster, so hierarchy depth maps
+        to radius organically. Idle-loop helper — never wired into the live turn path."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        kg = getattr(self, "knowledge_graph", None)
+        if mm is None or kg is None:
+            return {}
+        added = 0
+        try:
+            from nyxara.memory.graph import GraphQuery
+            triples = kg.match(GraphQuery(predicate="is_a"))[: max(1, int(limit))]
+            for t in triples:
+                subj = str(getattr(t, "subject", "") or "")
+                obj = str(getattr(t, "object", "") or "")
+                for name, parents in ((obj, []), (subj, [f"kg:{obj}"])):
+                    cid = f"kg:{name}"
+                    if name and cid not in mm._nodes:
+                        ctx = [p for p in parents if p in mm._nodes]
+                        mm.observe(name, concept_id=cid, context_ids=ctx or None)
+                        added += 1
+        except Exception:  # noqa: BLE001 — best-effort seeding, never fatal
+            pass
+        return {"added": added, **self.manifold_stats()}
 
     def _build_knowledge_graph(self) -> Any:
         """Level 6 — a KnowledgeGraph pre-wired with standard relations. The graph
@@ -3205,6 +3602,10 @@ class NyxaraCore:
     def _feed_flywheel(self, prompt: str, response: str, candidate: "Candidate",
                        authority: Authority) -> None:
         """Offer one fully-cleared turn to the data flywheel (best-effort, never raises)."""
+        # Autonomous Epistemic Distillation (Part B): distil a successful TEACHER turn's answer +
+        # reasoning into durable local knowledge (HD-vector rule + KnowledgeGraph triple), so her
+        # dependence on the cloud shrinks turn by turn. Independent of the flywheel, own gates, never fatal.
+        self._distill_epistemic(prompt, response, candidate, authority)
         fw = getattr(self, "flywheel", None)
         if fw is None:
             return
@@ -3223,6 +3624,38 @@ class NyxaraCore:
                 fw.consider_correction(orig_prompt, old_answer or "", response, weight=weight)
             fw.consider(prompt, response, confidence=float(candidate.confidence))
         except Exception:  # noqa: BLE001 — collection is best-effort, never blocks a turn
+            pass
+
+    def _distill_epistemic(self, prompt: str, response: str, candidate: "Candidate",
+                           authority: Authority) -> None:
+        """Distil a successful teacher (cloud) turn into durable local knowledge (Part B).
+
+        Lazily built on first use (reusing this core's KnowledgeGraph / LatentSpaceMap / memory), so
+        it adds zero constructor cost. Gated to teacher-answered, owner turns by config; every step is
+        best-effort and can never break or slow a live turn."""
+        try:
+            from nyxara.kernel.config import get_settings
+            cfg = getattr(get_settings(), "epistemic_distill", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return
+            if getattr(candidate, "kind", "respond") != "respond":
+                return
+            if (getattr(cfg, "teacher_only", True)
+                    and self._classify_answer_source(candidate) != "teacher"):
+                return
+            if getattr(cfg, "owner_only", True) and authority is not Authority.OWNER:
+                return
+            distiller = getattr(self, "_epistemic_distiller", None)
+            if distiller is None:
+                from nyxara.growth.epistemic_distill import EpistemicDistiller
+                distiller = EpistemicDistiller.from_core(self)
+                self._epistemic_distiller = distiller
+            reasoning = str(getattr(candidate, "rationale", "") or "")
+            distiller.distill_turn(prompt, response, reasoning,
+                                   confidence=float(getattr(candidate, "confidence", 1.0)),
+                                   source="teacher")
+        except Exception:  # noqa: BLE001 — distillation is best-effort, never blocks a turn
+            pass
             pass
 
     def _build_cycle_reflector(self) -> Any:
@@ -3967,6 +4400,103 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the reflection loop is a capability, never required
             return None
 
+    def _build_self_evolving(self) -> Any:
+        """Self-Evolving Dynamic Neural Architecture (growth/self_evolving.py): the unified
+        demand-driven driver. Composes the live topology / brain-forge / rule-synth / cognitive
+        organs so a specific insufficient turn becomes a targeted, gauntlet-verified structural
+        growth. Config-flagged; returns None when disabled or unavailable. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "self_evolving", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.growth.self_evolving import SelfEvolvingArchitect
+            return SelfEvolvingArchitect(core=self, settings=settings)
+        except Exception:  # noqa: BLE001 — the self-evolving driver is a capability, never required
+            return None
+
+    def _build_holographic_memory(self) -> Any:
+        """Holographic Memory Field (memory/holographic_field.py): a continuous, entangled HDC recall
+        layer. Config-flagged; returns None when disabled/unavailable. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "holographic_memory", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.memory.holographic_field import HolographicMemoryField
+            return HolographicMemoryField(
+                dim=int(getattr(cfg, "dim", 10000)), capacity=int(getattr(cfg, "capacity", 512)),
+                seed=int(getattr(cfg, "seed", 42)),
+                recall_threshold=float(getattr(cfg, "recall_threshold", 0.15)))
+        except Exception:  # noqa: BLE001 — a capability, never required
+            return None
+
+    def _build_synesthesia(self) -> Any:
+        """Cross-Domain Synesthesia (mind/synesthesia.py): universal pattern transposition. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "synesthesia", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.synesthesia import SynestheticMatrix
+            return SynestheticMatrix(dim=int(getattr(cfg, "dim", 10000)),
+                                     seed=int(getattr(cfg, "seed", 7)),
+                                     adopt_r2=float(getattr(cfg, "adopt_r2", 0.9)),
+                                     min_similarity=float(getattr(cfg, "min_similarity", 0.15)))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_meta_epistemology(self) -> Any:
+        """Meta-Epistemology (growth/meta_epistemology.py): invent new axioms when stuck. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "meta_epistemology", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            import os
+            from nyxara.growth.meta_epistemology import MetaEpistemologyCore
+            persist = None
+            if cfg is None or bool(getattr(cfg, "persist", True)):
+                data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+                if data_dir:
+                    persist = os.path.join(str(data_dir),
+                                           str(getattr(cfg, "persist_filename", "invented_axioms.json")))
+            return MetaEpistemologyCore(persist_path=persist)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_internal_civilization(self) -> Any:
+        """Internal Civilization (mind/internal_civilization.py): deterministic persona debate. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "internal_civilization", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.mind.internal_civilization import InternalCivilization
+            return InternalCivilization(rounds=int(getattr(cfg, "rounds", 2)),
+                                        ensemble=int(getattr(cfg, "ensemble", 1)),
+                                        seed=int(getattr(cfg, "seed", 0)))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_epistemic_ledger(self) -> Any:
+        """Epistemic Cryptography (growth/epistemic_crypto.py): signed, tamper-evident knowledge. Never raises."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "epistemic_crypto", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.growth.epistemic_crypto import EpistemicLedger
+            return EpistemicLedger()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_cognitive_architect(self) -> Any:
         """Structural Cognitive Self-Modification (growth/cognitive_architect.py): NYXARA rewires her
         own cognitive architecture — inventing new composite reasoning operators over a typed
@@ -4319,6 +4849,7 @@ class NyxaraCore:
         self._turn_authority = authority
         self._last_social = {}   # fresh social read per turn (no stale carry-over on early exits)
         self._last_latent_novelty = None   # fresh hyperdimensional novelty per turn
+        self._last_manifold = None         # fresh hyperbolic-manifold observation per turn
         self._last_compute_plan = None     # fresh metacognitive allocation per turn
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
@@ -4372,6 +4903,18 @@ class NyxaraCore:
         # hyperdimensional latent mapping: novelty in 10,000-D colours attention/affect, then
         # the turn is ingested so latent structure accretes across the session (advisory)
         self._hyperdimensional_tick(safe_text)
+        # Hyperbolic manifold tick: the turn lands as a point in the Poincaré ball — a genuine
+        # semantic gap (geodesic > τ from everything known) births a concept node at the
+        # hyperbolic barycenter of the active cluster; familiarity drifts the nearest node.
+        # Colour-only — it never touches disposition or the gate.
+        self._manifold_tick(safe_text)
+        # NYX-5 neuromorphic tick: perceive the turn through the spiking substrate so STDP learns
+        # continuously (no train/infer split) and surprise colours attention. Colour-only — it never
+        # touches disposition or the gate.
+        self._nyx5_tick(safe_text)
+        # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
+        # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
+        self._causal_engage(safe_text, thoughts)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
@@ -4866,6 +5409,13 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — bootstrapping never breaks the cycle
             return candidate
         if not getattr(result, "solved", False):
+            # bootstrapping did not resolve it — keep the honest abstention AND open a standing
+            # experiment so the background loop keeps filling this gap (Stage G: 'I don't know' is
+            # not a full stop). Best-effort; never breaks the cycle.
+            try:
+                self.register_knowledge_gap(stimulus)
+            except Exception:  # noqa: BLE001
+                pass
             return candidate
         try:
             self.mind.record(ThoughtKind.INFERENCE,
@@ -5719,6 +6269,37 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — latent mapping is best-effort, never fatal
             pass
 
+    def _manifold_tick(self, text: str) -> None:
+        """Observe this turn on the hyperbolic concept manifold: a turn farther than τ (geodesic)
+        from every known concept BIRTHS a new node at the hyperbolic barycenter of the active
+        cluster; a familiar turn pulls its nearest concept along the geodesic toward it. The
+        memory embedder feeds the point when present (strongest semantics available), else the
+        manifold's own stdlib featurizer. Advisory, best-effort — never gates."""
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None or not text:
+            return
+        try:
+            vector = None
+            try:
+                emb = getattr(self.memory, "embedder", None) if self.memory is not None else None
+                if emb is not None:
+                    vec = [float(x) for x in emb.embed(text)]
+                    vector = vec or None
+            except Exception:  # noqa: BLE001 — fall back to the manifold's own featurizer
+                vector = None
+            res = mm.observe(text, vector=vector, concept_id=f"turn:{self._turns}:{text[:24]}")
+            self._last_manifold = res
+            tag = " genesis" if res.created else ""
+            d_min = res.min_dist if math.isfinite(res.min_dist) else 0.0
+            self.mind.record(ThoughtKind.PERCEPTION,
+                             f"manifold: d_min={d_min:.2f} "
+                             f"nearest={res.nearest_id or '∅'}{tag}",
+                             salience=_clamp01(d_min / max(mm.tau, 1e-9) * 0.5))
+            if res.created and self.affect is not None:
+                self.affect.note_novelty(magnitude=0.6)
+        except Exception:  # noqa: BLE001 — manifold observation is best-effort, never fatal
+            pass
+
     def _observation_vector(self, percept: Any) -> Optional[List[float]]:
         """Derive a fixed-length observation vector for the predictive core from the
         percept's text — via the memory embedder when present, else a cheap projection.
@@ -6119,7 +6700,12 @@ class NyxaraCore:
         """
         text = str(stimulus or "").strip()
         reply = str(getattr(candidate, "text", "") or "").strip()
-        docs = [d for d in (text, reply) if d]
+        # the Master's message is HEARD (trains weights + embedder), only her own reply is
+        # SPEAKABLE (may be recalled/composed later) — she must never answer a future turn by
+        # stitching the Master's own words back at them.
+        pairs = [(d, spk) for d, spk in ((text, False), (reply, True)) if d]
+        docs = [d for d, _ in pairs]
+        speakable = [spk for _, spk in pairs]
         if not docs:
             return
         # emergent curiosity: a question she answered with low confidence is something she could
@@ -6136,11 +6722,16 @@ class NyxaraCore:
             teach = getattr(getattr(self.reasoner, "llm_reasoner", None), "teach_self_brain", None)
         if callable(teach):
             try:
-                teach(*docs, reward=reward)
+                teach(*docs, reward=reward, speakable=speakable)
             except TypeError:
-                # a brain/reasoner that predates reward-aware learning — compound without it
+                # a brain/reasoner that predates speakable/reward-aware learning — degrade gently
                 try:
-                    teach(*docs)
+                    teach(*docs, reward=reward)
+                except TypeError:
+                    try:
+                        teach(*docs)
+                    except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
+                        pass
                 except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
                     pass
             except Exception:  # noqa: BLE001 — compounding the own brain is best-effort
@@ -6411,6 +7002,15 @@ class NyxaraCore:
         brain_reward = 1.0 if (disp is Disposition.ACT and success) else \
             (0.0 if disp is Disposition.ESCALATE else -0.5)
         self._compound_own_models(stimulus, candidate, success, reward=brain_reward)
+        # Hebbian edge adaptation on the hyperbolic manifold: the turn's REAL outcome valence
+        # strengthens/weakens edges among the concepts this turn touched — Δe = η·utility·
+        # (1 − d/d_norm). Structure follows lived success, not co-occurrence alone.
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is not None:
+            try:
+                mm.reinforce_active(brain_reward)
+            except Exception:  # noqa: BLE001 — plasticity is best-effort, never fatal
+                pass
         # preference learning: a lived good outcome pulls the preference prior C toward
         # what just happened (goals are learned from experience, not only declared);
         # a bad outcome only softens C's precision. Owner-alignment gates are untouched.
@@ -7184,6 +7784,25 @@ class NyxaraCore:
                                 pass
             except Exception:  # noqa: BLE001 — the cognitive architect is a capability, never fatal to idle
                 pass
+        # 4c-bis) Self-Evolving Dynamic Neural Architecture: drain the shortfall queue. When a
+        # specific turn fell short of her current logic, the appropriate structural lever (grow
+        # topology / forge a new architecture / invent a learning rule / invent a reasoning operator)
+        # is fired here — gauntlet-verified and, when enacting, wired live. Empty queue → cheap no-op.
+        if self.self_evolving is not None:
+            try:
+                from nyxara.kernel.config import get_settings
+                se_cfg = getattr(get_settings(), "self_evolving", None)
+                every = max(1, int(getattr(se_cfg, "scan_every", 10)))
+                self._self_evo_idle_count += 1
+                if self._self_evo_idle_count % every == 0:
+                    cert = self.self_evolving.evolve_pending(enact=None)
+                    if cert is not None and cert.lever != "none":
+                        report["self_evolving"] = cert.to_dict()
+                        self.mind.record(ThoughtKind.INFERENCE,
+                                         ("evolved a new pathway: " + cert.summary())[:80],
+                                         salience=0.75)
+            except Exception:  # noqa: BLE001 — self-evolution is a capability, never fatal to idle
+                pass
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -7245,6 +7864,25 @@ class NyxaraCore:
                             salience=0.62)
             except Exception:  # noqa: BLE001
                 pass
+        # 4f.4) True Original Creativity — on idle she CREATES something genuinely new
+        #       herself (idea / verse / procedural art): the Muse opens her own project,
+        #       the atelier competes, and the piece is kept only if it survives the
+        #       critic + novelty + reality gates. No LLM in the loop. Throttled and
+        #       oversight-gated — a paused/scrammed mind creates nothing of its own accord.
+        try:
+            tick = getattr(self, "_create_idle_count", 0) + 1
+            self._create_idle_count = tick
+            if tick % 8 == 0 and self.oversight.gate():
+                piece = self._originality().step()
+                self._originality_engine.save(self._originality_path)
+                if piece is not None:
+                    report["originals"] = report.get("originals", 0) + 1
+                    self.mind.record(
+                        ThoughtKind.INSIGHT,
+                        f"created [{piece.modality}] nov={piece.novelty:.2f}: "
+                        f"{piece.content[:36]}", salience=0.66)
+        except Exception:  # noqa: BLE001 — creativity is a capability, never fatal to idle
+            pass
         # 4f.3) Frontier Law Discovery — on idle she runs her own experiments and *invents new
         #       laws* (no LLM in the loop). When the Discovery Director is wired she DECIDES which act
         #       of discovery is worth most this beat (experiment in her least-mastered science, recover
@@ -7367,6 +8005,7 @@ class NyxaraCore:
                                 f"wondered [{cp.chosen.kind}]: {cp.chosen.text[:32]} → "
                                 f"{cp.finding.answer[:40]}", salience=0.6,
                                 confidence=cp.finding.confidence)
+                        self._feed_curiosity_gap(cp)
             except Exception:  # noqa: BLE001 — active curiosity is a capability, never required
                 pass
         # 4f-) Infinite Explorer — drain a queued unknown and self-bootstrap a solution on
@@ -7661,6 +8300,7 @@ class NyxaraCore:
             if cp.finding is not None:
                 report["answer"] = cp.finding.answer
                 report["method"] = cp.finding.method
+            self._feed_curiosity_gap(cp)          # an unresolved wonder becomes a self-evolve shortfall
         except Exception:  # noqa: BLE001 — curiosity is best-effort, never fatal
             pass
         return report
@@ -7897,6 +8537,122 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001
             return {"generations": generations, "error": str(exc)}
 
+    def noesis(self, cycles: int = 3) -> Dict[str, Any]:
+        """Run **Noēsis, the living algorithm** — a self-extending abstraction library that compounds
+        capability-per-compute, **with no LLM in the loop**.
+
+        Each cycle WAKEs (search for the shortest *verified* program per task; abstain, never bluff),
+        SLEEPs (compress solved programs into new first-class DSL primitives, adopted only on a strict
+        held-out description-length win — the language she thinks in grows), and DREAMs (invents her
+        own tasks). Solutions must survive the F5 adversarial red-team before entering the corpus, and
+        the F1 metacognition retunes her bounded search knobs from calibrated evidence. The learned
+        library persists to the session dir, so power compounds across restarts. Returns the report as
+        a dict (best-effort). Nothing here touches the world or side-steps the control law."""
+        try:
+            import os
+            from nyxara.growth.noesis import NoesisEngine
+            from nyxara.growth.postmortem import Metacognition
+            from nyxara.growth.redteam import RedTeam
+            if getattr(self, "_noesis", None) is None:
+                self._noesis = NoesisEngine(red_team=RedTeam(), metacognition=Metacognition())
+                self._noesis_path = os.path.expanduser("~/.nyxara/noesis.json")
+                self._noesis.load(self._noesis_path)
+            self._noesis.run(max(1, cycles))
+            self._noesis.save(self._noesis_path)
+            report = self._noesis.report()
+            report["metacognition"] = self._noesis.metacognition.snapshot()
+            return report
+        except Exception as exc:  # noqa: BLE001
+            return {"cycles": cycles, "error": str(exc)}
+
+    def _originality(self) -> Any:
+        """The True-Original-Creativity engine, lazily built and session-persisted.
+
+        The whole creative organism — novelty archive, aesthetic taste, concept graph,
+        inner critic, muse, atelier, strategy evolver — lives in one engine whose state
+        persists under ``~/.nyxara/originality.json``, so her taste, her self-model and
+        her archive of originals compound across restarts. **No LLM in the loop.**"""
+        import os
+        import random as _random
+        from nyxara.mind.originality import OriginalityEngine
+        if getattr(self, "_originality_engine", None) is None:
+            self._originality_engine = OriginalityEngine(rng=_random.Random())
+            self._originality_path = os.path.expanduser("~/.nyxara/originality.json")
+            self._originality_engine.load(self._originality_path)
+        return self._originality_engine
+
+    def create(self, topic: str, *, modality: str = "idea",
+               rounds: int = 2) -> Dict[str, Any]:
+        """TRUE ORIGINAL CREATIVITY — she creates ``topic`` herself; the LLM plays no part.
+
+        The closed loop: her four-persona atelier proposes genomes (MCTS-simulated
+        futures included), each candidate is expressed for real (structured invention /
+        formed verse / procedural or simulated-automaton art), then gated — inner-critic
+        adversary, causal do-intervention + reality-anchor energy ledger (ideas),
+        measured novelty against her own archive, aesthetic resonance — and only what
+        survives every gate is KEPT. Returns the honest report as a dict (best-effort);
+        nothing here touches the world or side-steps the control law."""
+        try:
+            eng = self._originality()
+            out = eng.create(topic, modality=modality, rounds=max(1, int(rounds)))
+            eng.save(self._originality_path)
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"topic": topic, "error": str(exc)}
+
+    def imagine(self, topic: str, *, blend_with: Optional[str] = None) -> Dict[str, Any]:
+        """Structured divergent imagination via HER OWN CreativeEngine — no LLM.
+
+        SCAMPER, lateral thinking, analogy and conceptual blending run a real divergent
+        storm on ``topic`` (optionally blended with ``blend_with``), then convergent
+        selection keeps the best five. This wires in the previously-orphaned
+        :class:`~nyxara.mind.creative.CreativeEngine` as a first-class kernel capability."""
+        try:
+            import random as _random
+            from nyxara.mind.creative import CreativeEngine, Technique
+            if getattr(self, "_creative", None) is None:
+                self._creative = CreativeEngine(llm=None, rng=_random.Random())
+            ideas = self._creative.select(
+                self._creative.brainstorm(topic, techniques=list(Technique),
+                                          blend_with=blend_with), k=5)
+            prop = self._creative.propose(topic)
+            return {"topic": topic, "llm_used": False,
+                    "ideas": [i.to_dict() for i in ideas],
+                    "best": {"content": prop.content,
+                             "confidence": round(prop.confidence, 3),
+                             "provenance": "self_reflection"}}
+        except Exception as exc:  # noqa: BLE001
+            return {"topic": topic, "error": str(exc)}
+
+    def originality_report(self) -> Dict[str, Any]:
+        """Everything her creative organism knows about itself: kept originals per
+        modality, archive coverage, atelier persona economy, critic stats, strategy
+        genome + invented operators, muse projects and the ego's self-narrative."""
+        try:
+            return self._originality().report()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def rate_creation(self, rating: float) -> Dict[str, Any]:
+        """The Master's explicit aesthetic feedback (1–10) on her most recent original.
+
+        Feeds the Aesthetic Feedback Loop: her per-feature taste weights move toward
+        what the Master valued, and the update persists — her style genuinely evolves."""
+        try:
+            eng = self._originality()
+            if not eng.kept:
+                return {"error": "no creation to rate yet — try /create first"}
+            piece = eng.kept[-1]
+            signal = max(0.0, min(1.0, (float(rating) - 1.0) / 9.0))
+            weights = eng.judge.learn(piece.content, piece.modality, signal)
+            eng.save(self._originality_path)
+            return {"rated": piece.original_id, "modality": piece.modality,
+                    "signal": round(signal, 3),
+                    "preview": piece.content[:64].replace("\n", " "),
+                    "aesthetic_weights": {k: round(v, 3) for k, v in weights.items()}}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
     def intuit(self, puzzle: Any) -> Dict[str, Any]:
         """A non-algorithmic **creative leap** at ``puzzle`` — a fast, unproven 'Aha!' from
         NYXARA's own Intuition Core (gestalt / analogy / superposition / dark-data / first-
@@ -7916,6 +8672,98 @@ class NyxaraCore:
             return {"leap": out}
         except Exception as exc:  # noqa: BLE001
             return {"leap": None, "error": str(exc)}
+
+    def vsa_reasoner(self) -> Any:
+        """Lazily build (once) her vectorized reasoner — the bridge from the 10,000-D HDC space to
+        the exact prover. Kept on the core so relational facts asserted into it persist for the
+        session. Returns ``None`` only if the faculty cannot be constructed."""
+        r = getattr(self, "_vsa_reasoner", None)
+        if r is None:
+            try:
+                from nyxara.growth.vsa_reasoner import VSAReasoner
+                r = VSAReasoner()
+                self._vsa_reasoner = r
+            except Exception:  # noqa: BLE001 — vectorized reasoning is a capability, never required
+                return None
+        return r
+
+    def vsa_prove(self, statement: str, *, kind: Optional[str] = None,
+                  candidate_answer: Optional[str] = None) -> Dict[str, Any]:
+        """Vectorized reasoning, disposed by strict proof. She *proposes* in hyperdimensional space
+        and *certifies* with the exact :class:`~nyxara.growth.prover.Prover` — a machine-checkable
+        certificate (PROVEN/REFUTED) or an honest ABSTAIN, **never token-guessing**. On a decidable
+        math/logic/number-theory claim the answer is provably sound; on anything outside the
+        decidable domain she abstains rather than bluff. **No LLM in the loop.**"""
+        r = self.vsa_reasoner()
+        if r is None:
+            return {"verdict": "abstain", "certificate": "vectorized reasoner unavailable",
+                    "statement": statement}
+        try:
+            from nyxara.growth.prover import ProofClaim, Prover
+            k = kind or Prover._detect_kind(
+                ProofClaim(kind="auto", statement=statement, candidate_answer=candidate_answer))
+            if not k:
+                return {"verdict": "abstain", "statement": statement,
+                        "certificate": "no decidable form recognised — abstaining, not guessing"}
+            res = r.prove(ProofClaim(kind=k, statement=statement,
+                                     candidate_answer=candidate_answer))
+            out = res.to_dict()
+            if res.proven:
+                self._offer_insight(f"Proven: {statement}  ⟨{res.certificate}⟩")
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"verdict": "abstain", "error": str(exc), "statement": statement}
+
+    def hunt_edge_cases(self, *, n: int = 8, max_tests: Optional[int] = None) -> Dict[str, Any]:
+        """Epistemic Auto-Evolution: in the background, Monte-Carlo-generate **never-seen concurrent
+        fault scenarios** (CPU spike + packet drop + high concurrency, …), self-formulate a falsifiable
+        hypothesis for each, and test it against a modelled sandbox — discovering compound edge cases no
+        single-fault test exercises. Honest scope: Monte-Carlo synthetic tests over *simulated* fault
+        conditions, **never** stressing the real host; she abstains when a scenario cannot be evaluated.
+        **No LLM.** Returns the hunt report (generated / novel / failed + the failing scenarios)."""
+        try:
+            from nyxara.growth.synthetic_hypothesis import SyntheticHypothesisEngine
+            eng = getattr(self, "_synthetic_hypothesis", None)
+            if eng is None:
+                eng = SyntheticHypothesisEngine(core=self)
+                self._synthetic_hypothesis = eng
+            return eng.hunt(n=n, max_tests=max_tests).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"generated": 0, "novel": 0, "failed": 0, "error": str(exc)}
+
+    def self_direct(self, *, crisis: bool = False, launch: bool = False) -> Dict[str, Any]:
+        """Recursive Self-Directed Teleology: when no crisis is pending, invent her own **measurable**
+        self-improvement objectives (efficiency / capability / coverage), each **hard-filtered through
+        the owner-alignment envelope** (`planning.goals.GoalSystem.owner_alignment`) so a target that
+        does not serve performance, safety, or the Master is rejected before adoption. Adopted targets
+        become ordinary gated goals (and, with ``launch``, gated missions). Bounded self-direction,
+        never rogue goal expansion; **no LLM** decides a goal. Returns the proposal/adoption report."""
+        try:
+            from nyxara.growth.teleology import TeleologyEngine
+            eng = getattr(self, "_teleology", None)
+            if eng is None:
+                eng = TeleologyEngine(core=self,
+                                      mission_executive=getattr(self, "mission_executive", None))
+                self._teleology = eng
+            return eng.self_direct(crisis=crisis, launch=launch).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"proposed": [], "adopted": [], "rejected": [], "error": str(exc)}
+
+    def causal_repair(self, *, test_path: Optional[str] = None,
+                      max_fixes: int = 3) -> Dict[str, Any]:
+        """The Causal Code Engine: when a test fails, analyse the **causal tree** of the fault from
+        its real traceback (the deepest executed nyxara frame is the proximate cause, not the test's
+        filename namesake), rerank across sessions with her causal world-model, and repair the causal
+        **root** module through the *existing* byte-for-byte reversible gauntlet + improvement proof +
+        Rule-8 constitutional lock. **No gate is weakened**; self-authored edits stay the debugger's
+        own off-by-default option, so on a bare box she still does real, reversible, causally-aimed
+        repair with no LLM. Returns the per-failure diagnosis + fix outcome."""
+        try:
+            from nyxara.growth.causal_code_engine import CausalCodeEngine
+            engine = CausalCodeEngine(core=self)
+            return engine.run(test_path=test_path, max_fixes=max_fixes)
+        except Exception as exc:  # noqa: BLE001
+            return {"detected": 0, "repaired": 0, "error": str(exc)}
 
     def discover_laws(self, rounds: int = 1, domain: Optional[str] = None) -> Dict[str, Any]:
         """Invent genuinely *new* empirical/physical laws from data — the Frontier Law Discovery
@@ -8490,7 +9338,55 @@ class NyxaraCore:
         # Durability (Rule 7): periodically snapshot long-term memory so a long-running mind
         # does not lose what it has learned between manual saves. Best-effort and throttled.
         self._maybe_autosave()
+        # Self-Evolving Dynamic Neural Architecture: O(1) diagnosis of whether *this* turn fell short
+        # of her current logic. A shortfall is only enqueued; the heavy structural growth runs later,
+        # off the turn path (idle loop / autonomic / Master /evolve). An easy turn is a no-op.
+        self._note_shortfall(disp, candidate, gates)
         return result
+
+    def _note_shortfall(self, disp, candidate, gates) -> None:
+        """Feed the self-evolving driver a single, cheap per-turn observation. Never breaks a turn."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return
+        try:
+            arch.observe_turn(stimulus=getattr(self, "_turn_stimulus", ""),
+                              candidate=candidate, disposition=disp, gates=gates,
+                              grounded_ok=getattr(self, "_last_grounded_ok", None))
+        except Exception:  # noqa: BLE001 — diagnosis is best-effort; a turn is never delayed/broken
+            pass
+
+    def _feed_curiosity_gap(self, cp: Any) -> None:
+        """Feed an UNRESOLVED curiosity pass into the self-evolving shortfall queue.
+
+        When NYXARA wondered about something but her current faculties could not answer it (no answer /
+        an error / a very low-confidence finding), that is a real gap her current logic could not close
+        — exactly what the self-evolving driver should grow a new pathway for. A resolved pass adds
+        nothing. O(1), best-effort; never raises into the idle loop."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None or cp is None or not getattr(cp, "wondered", False):
+            return
+        try:
+            from nyxara.growth.self_evolving import GapKind, Shortfall, _digest as _se_digest
+            finding = getattr(cp, "finding", None)
+            conf = float(getattr(finding, "confidence", 0.0) or 0.0) if finding is not None else 0.0
+            if getattr(cp, "resolved", False) and conf >= 0.45:
+                return                                    # she answered it herself — no gap to grow
+            q = getattr(cp, "chosen", None)
+            uncertainty = float(getattr(q, "uncertainty", 1.0) or 1.0) if q is not None else 1.0
+            # no answer / error ⇒ her *composition* of faculties fell short; a weak answer ⇒ her
+            # *representation* did. Either way it is a real, lived capability gap.
+            unresolved = finding is None or getattr(finding, "error", None) or not getattr(
+                finding, "answer", "")
+            kind = GapKind.REASONING_COMPOSITION if unresolved else GapKind.REPRESENTATIONAL
+            subject = str(getattr(q, "text", "") or getattr(cp, "event", "")) if q is not None else ""
+            arch.note_shortfall(Shortfall(
+                kind, difficulty=max(0.5, uncertainty), confidence=conf,
+                stimulus_digest=_se_digest(subject),
+                signals={"curiosity_uncertainty": uncertainty, "finding_confidence": conf},
+                note=f"unresolved curiosity: {subject[:60]}"))
+        except Exception:  # noqa: BLE001 — feeding the queue is best-effort, never fatal to idle
+            pass
 
     def _maybe_autosave(self) -> None:
         """Snapshot memory after enough turns *or* enough elapsed time (whichever first).
@@ -8688,6 +9584,103 @@ class NyxaraCore:
         except Exception as exc:  # noqa: BLE001 — a failed growth never crashes the caller
             return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    def evolve(self, *, enact: Optional[bool] = None) -> Dict[str, Any]:
+        """Master-facing: run one Self-Evolving Dynamic Neural Architecture pass now.
+
+        Drains any pending shortfall (a turn where her current logic fell short) and fires the best
+        structural lever to grow a new neural module/pathway for it — gauntlet-verified and, when
+        enacting, wired live. With no pending shortfall she synthesises a capacity-bound one from her
+        live telemetry so ``/evolve`` always exercises the loop. Returns the certificate; never raises."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return {"ok": False, "reason": "self-evolving driver not enabled"}
+        try:
+            cert = arch.evolve_pending(enact=enact)
+            if cert is None:
+                from nyxara.growth.self_evolving import GapKind, Shortfall
+                sig = self._capacity_signal()
+                difficulty = float(getattr(sig, "problem_difficulty", 0.9)) if sig is not None else 0.9
+                gap = Shortfall(GapKind.CAPACITY_BOUND, difficulty=max(0.9, difficulty),
+                                signals={"difficulty": difficulty, "saturation": 0.9},
+                                note="Master-invoked /evolve")
+                cert = arch.evolve_for_gap(gap, enact=enact)
+            out = {"ok": True}
+            out.update(cert.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001 — a failed evolve never crashes the caller
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def self_evolution_report(self) -> Dict[str, Any]:
+        """Master-facing: a summary of every self-evolution attempt (levers, verified, wired live)."""
+        arch = getattr(self, "self_evolving", None)
+        if arch is None:
+            return {"ok": False, "reason": "self-evolving driver not enabled"}
+        out = {"ok": True}
+        out.update(arch.report())
+        return out
+
+    # ---- Master-facing entries for the five self-contained faculties ---- #
+    def transpose_pattern(self, target_series: Sequence[float], target_domain: str = "target"
+                          ) -> Dict[str, Any]:
+        """Cross-domain synesthesia: transpose a known law onto ``target_series`` from the nearest
+        cross-domain analogue, adopting it only if it verifiably fits. Learn analogues first via
+        ``core.synesthesia.learn(...)``. Returns the transposition (never raises)."""
+        syn = getattr(self, "synesthesia", None)
+        if syn is None:
+            return {"ok": False, "reason": "synesthesia not enabled"}
+        try:
+            return {"ok": True, **syn.transpose(target_series, target_domain).to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def deliberate_civilization(self, options: Sequence[Dict[str, float]], *,
+                               labels: Optional[Sequence[str]] = None, decision: str = ""
+                               ) -> Dict[str, Any]:
+        """Internal civilization: run the deterministic persona debate over ``options`` (each a dict of
+        dimension→value in [0,1]) and return the consensus verdict. Never raises."""
+        civ = getattr(self, "internal_civilization", None)
+        if civ is None:
+            return {"ok": False, "reason": "internal civilization not enabled"}
+        try:
+            return {"ok": True, **civ.deliberate(options, labels=labels, decision=decision).to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def holographic_remember(self, key: str, text: str) -> Dict[str, Any]:
+        """Fold ``key → text`` into the holographic memory field."""
+        hm = getattr(self, "holographic_memory", None)
+        if hm is None:
+            return {"ok": False, "reason": "holographic memory not enabled"}
+        try:
+            hm.remember(key, text)
+            return {"ok": True, **hm.report()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def holographic_recall(self, cue: str, *, by_key: bool = False) -> Dict[str, Any]:
+        """Associatively recall from the holographic field — by key or by content cue."""
+        hm = getattr(self, "holographic_memory", None)
+        if hm is None:
+            return {"ok": False, "reason": "holographic memory not enabled"}
+        try:
+            r = hm.recall(cue) if by_key else hm.recall_by_content(cue)
+            return {"ok": True, **r.to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def sign_knowledge(self, content: str, *, source: str = "self", confidence: float = 1.0,
+                       sensitivity: str = "internal") -> Dict[str, Any]:
+        """Epistemic cryptography: sign + chain a fact/axiom/skill; returns the entry + chain status."""
+        led = getattr(self, "epistemic_ledger", None)
+        if led is None:
+            return {"ok": False, "reason": "epistemic ledger not enabled"}
+        try:
+            entry = led.record(content, source=source, confidence=confidence, sensitivity=sensitivity)
+            ok, broken = led.verify_chain()
+            return {"ok": True, "entry": entry.to_dict(), "chain_valid": ok, "first_broken": broken}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def loyalty_report(self) -> Dict[str, Any]:
         """Master-facing: measure the live brain's submission to Master JP (the Loyalty Equation).
 
@@ -8868,6 +9861,16 @@ class NyxaraCore:
                     "delta_perplexity": last_brain.delta_perplexity,
                     "params": last_brain.params, "reason": last_brain.reason}
             except Exception:  # noqa: BLE001 — brain-forge status is best-effort
+                pass
+        # the self-evolving driver: did a specific insufficient turn grow a new neural pathway?
+        last_evo = getattr(self, "_last_self_evolution", None)
+        if last_evo is not None:
+            try:
+                rep["self_evolving"] = {
+                    "lever": last_evo.lever, "triggered_by": last_evo.triggered_by,
+                    "enacted": last_evo.enacted, "verified": last_evo.verified,
+                    "wired_live": last_evo.wired_live, "reason": last_evo.reason}
+            except Exception:  # noqa: BLE001 — self-evolution status is best-effort
                 pass
         if self.cycle_reflector is not None:
             rep["cycle_reflections"] = len(self.cycle_reflector.all_reports())
@@ -9122,7 +10125,10 @@ class NyxaraCore:
             saved = self.memory.save(target)
             self._save_self_model(target)
             self._save_prediction_prior(target)
+            self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
+            self._save_nyx5(target)
+            self._save_manifold(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
@@ -9137,7 +10143,10 @@ class NyxaraCore:
             import os
             self._load_self_model(target)
             self._load_prediction_prior(target)
+            self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
+            self._load_nyx5(target)
+            self._load_manifold(target)
             if not os.path.exists(target):
                 return 0
             return self.memory.load(target)
@@ -9175,6 +10184,113 @@ class NyxaraCore:
                 return
             with open(path, "r", encoding="utf-8") as fh:
                 pe.prior.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+    def _nyx5_path(self, memory_target: str) -> str:
+        """The NYX-5 brain sidecar (learned synapse weights + HD memory keys) lives next to memory."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "nyx5.json")
+
+    def _save_nyx5(self, memory_target: str) -> None:
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return
+        try:
+            import json
+            import os
+            path = self._nyx5_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(brain.to_dict(), fh)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_nyx5(self, memory_target: str) -> None:
+        brain = getattr(self, "nyx5", None)
+        if brain is None:
+            return
+        try:
+            import json
+            import os
+            path = self._nyx5_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                brain.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
+            pass
+
+    def _manifold_path(self, memory_target: str) -> str:
+        """The hyperbolic-manifold sidecar (concept points + Hebbian edges) lives next to memory."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "hyperbolic_manifold.json")
+
+    def _save_manifold(self, memory_target: str) -> None:
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return
+        try:
+            import json
+            import os
+            path = self._manifold_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(mm.to_dict(), fh)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_manifold(self, memory_target: str) -> None:
+        mm = getattr(self, "hyperbolic_manifold", None)
+        if mm is None:
+            return
+        try:
+            import json
+            import os
+            path = self._manifold_path(memory_target)
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as fh:
+                mm.load_dict(json.load(fh))
+        except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
+            pass
+
+    def _knowledge_graph_path(self, memory_target: str) -> str:
+        """The knowledge-graph sidecar lives next to the long-term memory file."""
+        import os
+        return os.path.join(os.path.dirname(memory_target), "knowledge_graph.json")
+
+    def _save_knowledge_graph(self, memory_target: str) -> None:
+        """Persist the rich KnowledgeGraph so accumulated triples survive a restart.
+        Without this the graph was silently rebuilt from its 2 seed triples on every
+        boot (it had ``save`` but no caller and no load path) — every learned fact,
+        relation and traversal edge was lost at the process boundary."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            g.save(path)
+        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
+            pass
+
+    def _load_knowledge_graph(self, memory_target: str) -> None:
+        """Restore the persisted KnowledgeGraph, merged on top of the freshly-seeded
+        standard relations + identity triples (so the seeds are never lost and the
+        restored facts are added, deduped on subject/predicate/object)."""
+        g = getattr(self, "knowledge_graph", None)
+        if g is None:
+            return
+        try:
+            import os
+            path = self._knowledge_graph_path(memory_target)
+            if not os.path.exists(path):
+                return
+            from nyxara.memory.graph import KnowledgeGraph
+            restored = KnowledgeGraph.load(path)
+            g.merge_from(restored)
         except Exception:  # noqa: BLE001 — best-effort
             pass
 

@@ -59,6 +59,22 @@ from nyxara.growth.scientist import (
     Verdict,
 )
 from nyxara.growth.skill_memory import SkillMemory
+from nyxara.growth.vsa_reasoner import VSAReasoner, VSAResult, VSAVerdict
+from nyxara.growth.causal_code_engine import (
+    CausalCodeEngine,
+    CausalDiagnosis,
+    CausalNode,
+)
+from nyxara.growth.teleology import (
+    TeleologicalTarget,
+    TeleologyEngine,
+    TeleologyReport,
+)
+from nyxara.growth.synthetic_hypothesis import (
+    FaultScenario,
+    SyntheticHypothesisEngine,
+    SyntheticReport,
+)
 from nyxara.growth.active_curiosity import ActiveCuriosity, CuriosityFinding
 from nyxara.growth.self_optimization import (
     PhaseResult,
@@ -75,6 +91,10 @@ from nyxara.memory.elastic_synapses import (
 )
 from nyxara.memory.equation_memory import EquationCode, EquationMemory
 from nyxara.kernel.autonomic import AutonomicLoop
+from nyxara.mind.active_inference_loop import (
+    ContinuousActiveInference,
+    InferenceReading,
+)
 from nyxara.temporal import (
     Awareness,
     BehaviorEpoch,
@@ -146,11 +166,47 @@ from nyxara.cognition.hyper_dimensional_vectors import (
     PatternReport,
     RandomProjector,
 )
+# NYX-5 — the neuromorphic brain (event-driven SNN simulation on commodity silicon; no backprop).
+from nyxara.nyx5 import (
+    Nyx5Brain,
+    Nyx5Reasoner,
+    Nyx5Tick,
+    SpikingNetwork,
+    HDMemory,
+    SurpriseMeter,
+    ImmuneGuillotine,
+    HolographicShard,
+    ConceptCollapser,
+    SubAxiomaticEngine,
+    AutopoieticRewriter,
+    EntangledMesh,
+    OntologicalBytecodeGenesis,
+    OntologicalCompiler,
+    DigitalPhagocyte,
+    SovereignDialectic,
+)
 from nyxara.mind.metacontrol import (
     ComputeBudget,
     DifficultyEstimate,
     DifficultySignals,
     MetacognitiveController,
+)
+from nyxara.mind.creative import CreativeEngine, Idea, Technique
+from nyxara.mind.aesthetic import AestheticJudge
+from nyxara.mind.concept_graph import ConceptGraph
+from nyxara.mind.inner_critic import Dialectic, InnerCritic, Objection
+from nyxara.mind.muse import CreativeProject, EgoNarrative, MuseEngine
+from nyxara.mind.atelier import Atelier, Persona
+from nyxara.mind.originality import (
+    CausalSketch,
+    CreativeFaculty,
+    Genome,
+    ImaginationTree,
+    Original,
+    OriginalityEngine,
+    RealityAnchor,
+    StrategyEvolver,
+    StrategyGenome,
 )
 
 __version__ = "0.1.0"
@@ -163,6 +219,9 @@ __all__ = [
     "Candidate",
     "CycleResult",
     "AutonomicLoop",
+    # Continuous active inference — per-tick surprise + belief entropy → pre-emptive probing
+    "ContinuousActiveInference",
+    "InferenceReading",
     # Fractal Temporal Hierarchies — loops within loops (ms / s / days)
     "FractalTemporalHierarchy",
     "MicroLayer",
@@ -176,6 +235,29 @@ __all__ = [
     "Mission",
     "MissionExecutive",
     "MissionStatus",
+    # True Original Creativity (P24 · F19): the closed creative loop + its organs
+    "CreativeEngine",
+    "Idea",
+    "Technique",
+    "AestheticJudge",
+    "ConceptGraph",
+    "InnerCritic",
+    "Dialectic",
+    "Objection",
+    "MuseEngine",
+    "EgoNarrative",
+    "CreativeProject",
+    "Atelier",
+    "Persona",
+    "OriginalityEngine",
+    "Original",
+    "Genome",
+    "CreativeFaculty",
+    "CausalSketch",
+    "RealityAnchor",
+    "ImaginationTree",
+    "StrategyGenome",
+    "StrategyEvolver",
     # first-principles derivation · deep planning · tool selection
     "Derivation",
     "DerivationStep",
@@ -187,6 +269,22 @@ __all__ = [
     "ToolChoice",
     "ToolRouter",
     "SkillMemory",
+    # Vectorized ATP — HDC proposes, the exact prover disposes (PROVEN/REFUTED/ABSTAIN, no LLM)
+    "VSAReasoner",
+    "VSAResult",
+    "VSAVerdict",
+    # Causal Code Engine — causal-tree root-cause → gated reversible repair (no LLM required)
+    "CausalCodeEngine",
+    "CausalDiagnosis",
+    "CausalNode",
+    # Recursive Self-Directed Teleology — invent her own measurable, envelope-gated self-targets
+    "TeleologyEngine",
+    "TeleologicalTarget",
+    "TeleologyReport",
+    # Epistemic Auto-Evolution — Monte-Carlo concurrent-fault edge cases, self-hypothesized & tested
+    "SyntheticHypothesisEngine",
+    "FaultScenario",
+    "SyntheticReport",
     # Elastic Weight Consolidation — lifelong memory; learn forever without forgetting
     "ElasticSynapses",
     "FisherEstimator",
@@ -291,6 +389,23 @@ __all__ = [
     "ItemMemory",
     "RandomProjector",
     "PatternReport",
+    # NYX-5 — neuromorphic brain (event-driven SNN sim; no backprop; kernel stays sovereign)
+    "Nyx5Brain",
+    "Nyx5Reasoner",
+    "Nyx5Tick",
+    "SpikingNetwork",
+    "HDMemory",
+    "SurpriseMeter",
+    "ImmuneGuillotine",
+    "HolographicShard",
+    "ConceptCollapser",
+    "SubAxiomaticEngine",
+    "AutopoieticRewriter",
+    "EntangledMesh",
+    "OntologicalBytecodeGenesis",
+    "OntologicalCompiler",
+    "DigitalPhagocyte",
+    "SovereignDialectic",
     # First-class metacognition — calibrated uncertainty drives per-turn compute allocation
     "MetacognitiveController",
     "ComputeBudget",

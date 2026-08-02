@@ -154,7 +154,7 @@ def test_provider_status():
     llm = _native_llm()
     status = llm.provider_status()
     assert status["native"] is True
-    assert set(status) == {"qwen", "self", "native"}
+    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
 
 
 def test_async_complete():
@@ -194,8 +194,8 @@ def test_retry_then_success():
     from nyxara.kernel.errors import RetryPolicy
     flaky = _FlakyProvider(fail_times=2)
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": flaky, "native": NativeProvider()},
+    settings.llm.provider = ProviderName.AIROUTER
+    llm = LLM(settings=settings, providers={"airouter": flaky, "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=5, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("x"))
     assert resp.text == "recovered"
@@ -219,8 +219,8 @@ def test_falls_back_to_native_when_provider_dead():
             raise ExternalServiceError("always down")
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": _Dead(), "native": NativeProvider()},
+    settings.llm.provider = ProviderName.AIROUTER
+    llm = LLM(settings=settings, providers={"airouter": _Dead(), "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=2, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("fallback please"))
     # her always-on native own-brain is the guaranteed floor — it answers, never an echo
@@ -245,9 +245,9 @@ def test_native_floor_is_always_available():
             raise ExternalServiceError("down")
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
+    settings.llm.provider = ProviderName.AIROUTER
     from nyxara.kernel.errors import RetryPolicy
-    llm = LLM(settings=settings, providers={"qwen": _Dead(), "native": NativeProvider()},
+    llm = LLM(settings=settings, providers={"airouter": _Dead(), "native": NativeProvider()},
               retry_policy=RetryPolicy(max_attempts=1, base_delay=0))
     resp = llm.complete(LLMRequest.from_prompt("x"))
     assert resp.provider == "native" and resp.text.strip()
@@ -261,8 +261,8 @@ def test_unavailable_provider_falls_back_to_native():
             return False
 
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
-    llm = LLM(settings=settings, providers={"qwen": _Unavailable(), "native": NativeProvider()})
+    settings.llm.provider = ProviderName.AIROUTER
+    llm = LLM(settings=settings, providers={"airouter": _Unavailable(), "native": NativeProvider()})
     assert llm.chosen_provider().name == "native"
 
 

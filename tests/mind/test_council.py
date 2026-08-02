@@ -37,7 +37,7 @@ class _Fixed(LLMProviderBase):
 
 def _council(providers, *, synthesizer: str = "self", **council_overrides):
     settings = NyxaraSettings.for_profile(Profile.DEV)
-    settings.llm.provider = ProviderName.QWEN
+    settings.llm.provider = ProviderName.AIROUTER
     settings.council.synthesizer = synthesizer
     for k, v in council_overrides.items():
         setattr(settings.council, k, v)

@@ -19,7 +19,7 @@ computation, **run** it, and **verify** the result?" Three independent reducers 
 * **program** — Program-of-Thought. A candidate *program* is written for the problem and executed in
   the real isolated sandbox (:func:`nyxara.agency.code_sandbox.run_python`); the program's **output**
   is the answer. The candidate programs come from a caller-supplied ``proposer`` — NYXARA's *own*
-  local model (SelfBrain / foundry / Qwen) writing code **only**. The model never asserts the answer;
+  local model (SelfBrain / foundry / DistilGPT-2) writing code **only**. The model never asserts the answer;
   it proposes a program that NYXARA *runs*, so the truth-bearing step is her deterministic execution,
   not the model's word. This is the honest form of "the model proposes, NYXARA computes."
 * **search** — for "is there / find an X such that …" shaped problems, a bounded brute-force /

@@ -60,7 +60,7 @@ def test_build_model_lora_never_raises_for_missing_deps():
 # QLoRA (4-bit) — pure decision/config logic, no GPU or deps needed
 # --------------------------------------------------------------------------- #
 def test_spec_roundtrips_qlora_fields():
-    spec = ModelSpec(kind="lora", base_model="Qwen/Qwen2.5-0.5B-Instruct", load_in_4bit=True,
+    spec = ModelSpec(kind="lora", base_model="distilgpt2", load_in_4bit=True,
                      bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16",
                      bnb_4bit_use_double_quant=False, gradient_checkpointing=False)
     again = ModelSpec.from_dict(spec.to_dict())
@@ -166,7 +166,7 @@ def test_build_model_returns_lora_when_available(lora_model):
 # --------------------------------------------------------------------------- #
 def test_spec_roundtrips_full_control_fields():
     spec = ModelSpec(kind="lora",
-                     lora_target_modules=("q_proj", "v_proj"),
+                     lora_target_modules=("c_attn", "c_fc"),
                      lora_bias="lora_only", lora_use_rslora=True,
                      lora_modules_to_save=("lm_head",),
                      batch_size=4, grad_accum_steps=8, warmup_ratio=0.1,
@@ -174,10 +174,10 @@ def test_spec_roundtrips_full_control_fields():
                      adam_beta1=0.85, adam_beta2=0.95, adam_eps=1e-6,
                      max_grad_norm=0.5, train_epochs=2, load_in_8bit=True)
     d = spec.to_dict()
-    assert d["lora_target_modules"] == ["q_proj", "v_proj"]
+    assert d["lora_target_modules"] == ["c_attn", "c_fc"]
     assert d["lr_scheduler"] == "cosine" and d["grad_accum_steps"] == 8
     again = ModelSpec.from_dict(d)
-    assert tuple(again.lora_target_modules) == ("q_proj", "v_proj")
+    assert tuple(again.lora_target_modules) == ("c_attn", "c_fc")
     assert again.lora_bias == "lora_only" and again.lora_use_rslora is True
     assert again.batch_size == 4 and again.train_epochs == 2
     assert again.load_in_8bit is True

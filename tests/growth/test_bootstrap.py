@@ -1,6 +1,6 @@
 """Tests for growth/bootstrap.py — auto-forge NYXARA's OWN primary brain on boot (CPU/n-gram).
 
-The real path LoRA-tunes the Qwen2.5-0.5B base; on a deps-free CI box the foundry degrades to its
+The real path LoRA-tunes the DistilGPT-2 base; on a deps-free CI box the foundry degrades to its
 always-on n-gram backend, so these tests exercise the *wiring* (provider gating, idempotency,
 the recorded base, SelfProvider hand-off) without any heavy download.
 """
@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 
 from nyxara.growth.bootstrap import (
+    DISTILGPT2,
     IDENTITY_SEED,
-    QWEN_0_5B,
     build_seed_corpus,
     ensure_primary_model,
     primary_model_present,
@@ -29,9 +29,9 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when it would actually serve (`self`, or the `auto` ladder
-    # once its serve gate is open). An explicit base-only provider like `qwen` is a clean no-op.
+    # once its serve gate is open). An explicit non-self provider like `airouter` is a clean no-op.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    s.llm.provider = LLMProvider.QWEN
+    s.llm.provider = LLMProvider.AIROUTER
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
@@ -55,25 +55,25 @@ def test_forges_and_promotes_primary_brain(tmp_path: Path):
     assert (tmp_path / "foundry" / "active").read_text().strip() == "v1"
 
 
-def test_records_qwen_base_even_when_degraded(tmp_path: Path):
-    # the spec is written with the real Qwen2.5-0.5B base; only the *backend* degrades on a bare
+def test_records_distilgpt2_base_even_when_degraded(tmp_path: Path):
+    # the spec is written with the real DistilGPT-2 base; only the *backend* degrades on a bare
     # box, so a machine with the foundry stack rebuilds the very same LoRA from the recorded base.
     s = _self_settings(tmp_path)
     ensure_primary_model(s, log=lambda _m: None)
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == QWEN_0_5B
+    assert spec["base_model"] == DISTILGPT2
     assert spec["kind"] == "lora"
-    assert spec["trust_remote_code"] is False   # Qwen2.5 is a native arch — no remote code
+    assert spec["trust_remote_code"] is False   # DistilGPT-2 (GPT-2 arch) is native — no remote code
 
 
-def test_tiny_placeholder_base_is_upgraded_to_qwen(tmp_path: Path):
+def test_tiny_placeholder_base_is_upgraded_to_distilgpt2(tmp_path: Path):
     # a stale config still pinned to the tiny CPU/CI placeholder is upgraded to the real
-    # Qwen2.5-0.5B for the *primary* forge (a deliberate non-default base is left untouched).
+    # DistilGPT-2 for the *primary* forge (a deliberate non-default base is left untouched).
     s = _self_settings(tmp_path)
     s.foundry.base_model = "sshleifer/tiny-gpt2"
     ensure_primary_model(s, log=lambda _m: None)
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
-    assert spec["base_model"] == QWEN_0_5B
+    assert spec["base_model"] == DISTILGPT2
 
 
 def test_idempotent_does_not_reforge(tmp_path: Path):

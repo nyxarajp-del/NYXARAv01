@@ -27,6 +27,14 @@ Routes (all of ``/v1`` require the bearer token when one is configured):
   poses the question, runs the experiment, and invents the governing law (zero-to-discovery, no LLM).
 * ``POST /v1/dream``             — a deep Dream State: ``{deep?}`` → distil / prune / fix synapses.
 * ``POST /v1/strategize``        — strategic analysis: ``{problem}`` → six-part framework.
+* ``POST /v1/prove``            — vectorized reasoning, disposed by the exact prover:
+  ``{statement, kind?, candidate_answer?}`` → PROVEN/REFUTED/ABSTAIN + certificate (no LLM).
+* ``POST /v1/causal-repair``    — Causal Code Engine: ``{test_path?, max_fixes?}`` → causal-tree
+  root-cause of a failing test, then gated reversible repair of the causal root module.
+* ``POST /v1/teleology``        — Recursive Self-Directed Teleology: ``{launch?}`` → invent her own
+  measurable self-improvement targets, envelope-gated (out-of-envelope rejected). No LLM.
+* ``POST /v1/synthesize-scenarios`` — Epistemic Auto-Evolution: ``{n?, max_tests?}`` → Monte-Carlo
+  concurrent-fault edge cases over simulated conditions, self-hypothesized + tested. No LLM.
 * ``POST /v1/solve``             — domain-aware general intelligence: ``{problem}`` → solved
                                    as the right kind of expert (coding/maths/science/…).
 * ``POST /v1/control/{action}``  — sovereign control: pause / resume / scram (opt-in).
@@ -164,6 +172,26 @@ class StrategizeRequest(BaseModel):
 
 class SolveRequest(BaseModel):
     problem: str = Field(..., min_length=1)
+
+
+class VsaProveRequest(BaseModel):
+    statement: str = Field(..., min_length=1)
+    kind: Optional[str] = None
+    candidate_answer: Optional[str] = None
+
+
+class CausalRepairRequest(BaseModel):
+    test_path: Optional[str] = None
+    max_fixes: int = Field(default=3, ge=0, le=20)
+
+
+class TeleologyRequest(BaseModel):
+    launch: bool = False
+
+
+class SynthesizeScenariosRequest(BaseModel):
+    n: int = Field(default=8, ge=1, le=128)
+    max_tests: Optional[int] = Field(default=None, ge=0, le=128)
 
 
 class ControlRequest(BaseModel):
@@ -555,6 +583,30 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/solve", dependencies=auth)
     def solve(req: SolveRequest) -> dict:
         return core.solve(req.problem)
+
+    @app.post("/v1/prove", dependencies=auth)
+    def prove(req: VsaProveRequest) -> dict:
+        # Vectorized reasoning disposed by the exact prover: a machine-checkable certificate
+        # (PROVEN/REFUTED) or an honest ABSTAIN — never token-guessing, no LLM.
+        return core.vsa_prove(req.statement, kind=req.kind,
+                              candidate_answer=req.candidate_answer)
+
+    @app.post("/v1/causal-repair", dependencies=auth)
+    def causal_repair(req: CausalRepairRequest = CausalRepairRequest()) -> dict:
+        # Causal-tree root-cause of a failing test → gated, reversible repair of the causal root.
+        return core.causal_repair(test_path=req.test_path, max_fixes=req.max_fixes)
+
+    @app.post("/v1/teleology", dependencies=auth)
+    def teleology(req: TeleologyRequest = TeleologyRequest()) -> dict:
+        # Invent her own measurable self-improvement targets — hard-filtered through the owner
+        # alignment envelope (out-of-envelope targets rejected before adoption). No LLM.
+        return core.self_direct(launch=req.launch)
+
+    @app.post("/v1/synthesize-scenarios", dependencies=auth)
+    def synthesize_scenarios(req: SynthesizeScenariosRequest = SynthesizeScenariosRequest()) -> dict:
+        # Monte-Carlo concurrent-fault edge-case discovery over simulated conditions (no real host
+        # stressed, no LLM): generate never-seen scenarios, self-hypothesize, test in the sandbox.
+        return core.hunt_edge_cases(n=req.n, max_tests=req.max_tests)
 
     if cfg.enable_control:
         @app.post("/v1/control/{action}", dependencies=auth)
