@@ -218,3 +218,57 @@ def test_manifest_ignores_a_key_from_a_newer_build() -> None:
     old = _version().to_dict()
     old["some_future_field"] = 42
     assert ModelVersion.from_dict(old).version == 1
+
+
+# --------------------------------------------------------------------------- #
+# Autoscale must not veto a deliberate choice, and must never reach 300M on CPU
+# --------------------------------------------------------------------------- #
+def test_autoscale_never_recommends_a_nyx_profile_without_cuda() -> None:
+    """A CPU run of nyxara-300m is roughly a YEAR; autoscaling into it would start exactly
+    the run that trainer.preflight exists to prevent."""
+    from nyxara.growth.compute_scale import recommend_foundry_profile
+
+    class _Compute:
+        cpu_count, ram_gb, gpu_count = 128, 512, 0
+
+        def recommend_device(self):
+            return "cpu"
+
+    for has_torch in (True, False):
+        rec = recommend_foundry_profile(_Compute(), has_torch=has_torch, has_cuda=False)
+        assert not rec.profile.startswith("nyxara-"), rec.profile
+
+
+def test_autoscale_does_not_downgrade_an_explicit_nyx_profile(tmp_path) -> None:
+    """Setting profile=nyxara-300m is a decision about which brain to build.
+
+    Autoscale is on by default and picks 'tiny' on a CPU box — silently swapping a deliberate
+    300M choice for a 3M one, with the forge then reporting success. The refusal belongs in
+    preflight, where it comes with the arithmetic.
+    """
+    from nyxara.kernel.config import NyxaraSettings, Profile
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "ngram"
+    settings.foundry.profile = "nyxara-300m"
+    settings.foundry.autoscale_to_compute = True
+    f = Foundry(settings=settings, replay=_replay())
+
+    dims, _four_bit = f._scaled_dims()
+    assert dims["n_embd"] == 1024 and dims["n_layer"] == 24, (
+        f"autoscale replaced the chosen 300M profile with {dims}")
+
+
+def test_autoscale_still_applies_to_legacy_profiles(tmp_path) -> None:
+    """Unchanged behaviour for everything that predates the NYX profiles."""
+    from nyxara.kernel.config import NyxaraSettings, Profile
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = tmp_path / "foundry"
+    settings.foundry.backend = "ngram"
+    settings.foundry.profile = "gpt2"
+    settings.foundry.autoscale_to_compute = True
+    f = Foundry(settings=settings, replay=_replay())
+    dims, _four_bit = f._scaled_dims()
+    assert "n_embd" in dims        # whatever the box supports; the point is it still autoscales

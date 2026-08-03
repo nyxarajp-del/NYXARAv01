@@ -192,19 +192,23 @@ def _make_mtp_heads(cfg: LatentHeadConfig, n_embd: int, vocab_size: int):
             return [head(hidden) for head in self.heads]
 
         def loss(self, hidden, targets):
-            """Cross-entropy at offsets 2…n_predict; ``0`` when there are no extra heads."""
+            """Cross-entropy at offsets 2…n_predict; ``0`` when there are no extra heads.
+
+            Head ``d`` predicts the token ``d`` positions ahead, so the hidden state at position
+            ``t`` is scored against ``targets[t + d]``. Both sides are truncated to the ``T - d``
+            positions where such a pair exists.
+            """
             if not self.heads:
                 return hidden.sum() * 0.0
             total = None
+            length = targets.shape[1]
             for depth, head in enumerate(self.heads, start=2):
-                if targets.shape[1] <= depth:
-                    break
-                logits = head(hidden[:, :-depth + 0, :] if depth == 0 else hidden)
-                usable = targets.shape[1] - depth
+                usable = length - depth
                 if usable <= 0:
                     break
+                logits = head(hidden[:, :usable, :])
                 term = nn.functional.cross_entropy(
-                    logits[:, :usable, :].reshape(-1, logits.shape[-1]).float(),
+                    logits.reshape(-1, logits.shape[-1]).float(),
                     targets[:, depth:depth + usable].reshape(-1))
                 total = term if total is None else total + term
             return total if total is not None else hidden.sum() * 0.0

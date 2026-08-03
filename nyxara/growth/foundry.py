@@ -529,6 +529,14 @@ class Foundry:
         static_4bit = bool(self.cfg.load_in_4bit)
         if not getattr(self.cfg, "autoscale_to_compute", False):
             return static_dims, static_4bit
+        # An explicitly-chosen NYX profile is a deliberate decision about which brain to build,
+        # and autoscale must not quietly replace it with a 3M byte-level one. Autoscale exists
+        # to pick a size for someone who did not pick; it is not a veto over someone who did.
+        # The honest refusal for a machine that cannot train the chosen profile lives in
+        # `growth/trainer.preflight`, which says so with the arithmetic instead of substituting
+        # a different model and reporting success.
+        if str(self.cfg.profile).startswith("nyxara-"):
+            return static_dims, static_4bit
         try:
             from nyxara.growth.compute_scale import recommend_foundry_profile
             from nyxara.kernel.compute import compute_report

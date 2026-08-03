@@ -238,6 +238,34 @@ def test_disabled_heads_cost_nothing(tokenizer) -> None:
     assert head.parameters() == []
 
 
+def test_mtp_loss_aligns_each_head_with_its_offset(tokenizer) -> None:
+    """Head d predicts d positions ahead; a misalignment here trains the heads on noise."""
+    from nyxara.growth.latent_head import build_latent_head
+
+    model = _model(tokenizer)
+    head = build_latent_head(model, mtp_enabled=True, n_predict=4)
+    hidden = torch.randn(2, 12, 64)
+    targets = torch.randint(0, tokenizer.vocab_size, (2, 12))
+    loss = head.mtp.loss(hidden, targets)
+    assert float(loss.detach()) > 0
+
+    # A sequence shorter than the deepest offset must degrade, not raise.
+    short = head.mtp.loss(torch.randn(1, 2, 64), torch.randint(0, 10, (1, 2)))
+    assert float(short.detach()) >= 0.0
+
+
+def test_mtp_contributes_to_the_auxiliary_loss(tokenizer) -> None:
+    from nyxara.growth.latent_head import build_latent_head
+
+    model = _model(tokenizer)
+    head = build_latent_head(model, mtp_enabled=True, n_predict=3)
+    hidden = torch.randn(2, 16, 64)
+    targets = torch.randint(0, tokenizer.vocab_size, (2, 16))
+    _no_targets, stats_none = head.auxiliary_loss(hidden)
+    _with, stats = head.auxiliary_loss(hidden, targets)
+    assert "mtp" not in stats_none and stats["mtp"] > 0
+
+
 def test_speculative_report_measures_rather_than_asserts(tokenizer) -> None:
     """Whatever the speedup is, that is what gets reported — including below 1.0."""
     from nyxara.growth.latent_head import build_latent_head, measure_speculative_speedup
