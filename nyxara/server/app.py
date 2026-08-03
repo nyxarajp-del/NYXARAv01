@@ -89,6 +89,19 @@ class SelfImproveRequest(BaseModel):
     enact: bool = False
 
 
+class TrainDatasetRequest(BaseModel):
+    # A server-side path to a dataset file or folder (.txt/.md, .jsonl/.json, .csv/.tsv,
+    # .pdf/.docx). Not an upload — the same posture as every other route here.
+    path: str = Field(..., min_length=1)
+    # Forge generations to run after ingesting. Bounded — never an unattended marathon.
+    generations: int = Field(default=1, ge=1, le=10)
+    # Ingest and report what she WOULD learn without training anything.
+    ingest_only: bool = False
+    # Injection posture: a Master-supplied file is not untrusted web text, so "warn" keeps a
+    # flagged record and counts it; "drop" enforces the stricter acquire.py stance.
+    screen: Optional[str] = Field(default=None, pattern="^(warn|drop|off)$")
+
+
 class DelegateRequest(BaseModel):
     name: str = Field(..., min_length=1)
     subgoal: str = Field(..., min_length=1)
@@ -493,6 +506,37 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         summary = RecursiveSelfImprovement.from_core(core).run_continuous(
             int(req.cycles), enact=bool(req.enact))
         return {k: v for k, v in summary.items() if k != "reports"}
+
+    @app.post("/v1/train", dependencies=auth)
+    def train_dataset(req: TrainDatasetRequest) -> dict:
+        # Hand NYXARA a dataset and let her OWN brain train on it (growth/dataset.py →
+        # growth/foundry.py). Ingestion is durable: the records land in her corpus store, so every
+        # later forge trains on them too, not just this call. The forge backend is pinned to
+        # "auto" — a from-scratch net (the NumPy transformer on a torch-less box), never an
+        # adapter over someone else's pretrained base. Every promotion still clears the full
+        # gauntlet, so a bad dataset can only produce a candidate that is refused, never a
+        # disloyal live brain.
+        from nyxara.growth.dataset import ingest_dataset
+        from nyxara.growth.foundry import Foundry
+
+        # a process-local copy so the route never mutates the app's live configuration
+        train_settings = settings.model_copy(deep=True)
+        train_settings.foundry.enabled = True
+        train_settings.foundry.backend = "auto"
+        report = ingest_dataset(req.path, settings=train_settings, screen=req.screen)
+        out: dict = {"ingest": report.to_dict()}
+        if req.ingest_only:
+            return out
+        try:
+            from nyxara.growth.bootstrap import IDENTITY_SEED
+            results = Foundry(settings=train_settings,
+                              seed_corpus=IDENTITY_SEED).self_improve(generations=req.generations)
+        except Exception as exc:  # noqa: BLE001 — a starved forge is a reported fact, not a 500
+            out["error"] = str(exc)
+            return out
+        out["generations"] = [r.to_dict() for r in results]
+        out["promoted"] = sum(1 for r in results if r.promoted)
+        return out
 
     @app.post("/v1/delegate", dependencies=auth)
     def delegate(req: DelegateRequest) -> dict:

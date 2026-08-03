@@ -20,6 +20,10 @@ methods the Master would call programmatically:
     /pause             pause the loop (the Master may resume)
     /scram [reason]    emergency stop — the loop HALTs until resumed
     /resume            restore the loop after a pause/scram
+    /train <path>      feed a dataset (file or folder) into her own brain and forge on it
+    /dataset <path>    ingest a dataset only — report what she would learn, train nothing
+    /flywheel          the self-generated corpus she verified from her own lived turns
+    /scrape <topic>    harvest screened web text into her training corpus
     /wander [n]        let the idle mind wander n ticks and show the thoughts
     /proactive         detect & govern self-initiated actions (one initiative pass)
     /save              persist long-term memory to disk now
@@ -86,6 +90,74 @@ def _load_session_synapses(core: NyxaraCore) -> bool:
     except Exception:  # noqa: BLE001 — a corrupt snapshot must never block boot
         return False
 
+def _ingest_dataset_command(path: str) -> str:
+    """``/dataset <path>`` — read a file or folder into her durable corpus, train nothing."""
+    try:
+        from nyxara.growth.dataset import ingest_dataset
+        return ingest_dataset(path).summary()
+    except Exception as exc:  # noqa: BLE001 — the console reports, it never tracebacks
+        return f"· could not ingest {path}: {exc}"
+
+
+def _train_on_dataset_command(path: str) -> str:
+    """``/train <path>`` — ingest, then forge HER OWN brain on it and report the outcome."""
+    try:
+        from nyxara.growth.dataset import ingest_dataset
+        from nyxara.growth.foundry import Foundry
+        from nyxara.kernel.config import get_settings
+    except Exception as exc:  # noqa: BLE001
+        return f"· training unavailable: {exc}"
+
+    lines = [ingest_dataset(path).summary()]
+    settings = get_settings().model_copy(deep=True)   # process-local; leak nothing back to config
+    settings.foundry.enabled = True
+    # her OWN brain: "auto" resolves to a from-scratch net (NumPy transformer without torch),
+    # never an adapter over someone else's pretrained base.
+    settings.foundry.backend = "auto"
+    try:
+        from nyxara.growth.bootstrap import IDENTITY_SEED
+        results = Foundry(settings=settings, seed_corpus=IDENTITY_SEED).self_improve(generations=1)
+    except Exception as exc:  # noqa: BLE001 — a starved/failed forge reports, never tracebacks
+        return "\n".join(lines + [f"· could not forge: {exc}"])
+
+    for r in results:
+        tag = "PROMOTED" if r.promoted else f"kept on the bench ({r.reason})"
+        ppl = f"{r.eval_after.perplexity:.2f}" if r.eval_after else "n/a"
+        lines.append(f"· gen v{r.version}: {tag}; perplexity {ppl}")
+    if not results:
+        lines.append("· nothing forged (corpus too small?)")
+    return "\n".join(lines)
+
+
+def _flywheel_command() -> str:
+    """``/flywheel`` — the self-generated corpus: what she verified from her own lived turns."""
+    try:
+        from nyxara.growth.flywheel import DataFlywheel
+        wheel = DataFlywheel.from_settings(None)
+        out = [f"· flywheel: {wheel.count()} verified example(s) of her own"]
+        for ex in wheel.examples(limit=5):
+            out.append(f"    · [{ex.source}] {(ex.prompt or '')[:70]}")
+        return "\n".join(out)
+    except Exception as exc:  # noqa: BLE001
+        return f"· flywheel unavailable: {exc}"
+
+
+def _scrape_command(topic: str) -> str:
+    """``/scrape <topic>`` — harvest screened web text into the corpus (keyless DuckDuckGo)."""
+    try:
+        from nyxara.growth.foundry import Foundry
+        from nyxara.kernel.config import get_settings
+        settings = get_settings().model_copy(deep=True)
+        settings.foundry.acquire_data = True     # an explicit /scrape IS the Master asking
+        report = Foundry(settings=settings).acquire([topic])
+    except Exception as exc:  # noqa: BLE001
+        return f"· could not acquire: {exc}"
+    if report is None:
+        return "· web acquisition unavailable (needs .[llm] for httpx)."
+    return (f"· acquired '{topic}': fetched {report.get('fetched', 0)}, kept {report.get('kept', 0)}, "
+            f"dropped {report.get('dropped_suspicious', 0)} suspicious")
+
+
 _BANNER = """\
 ======================================================================
 NYXARA — sovereign cognitive architecture
@@ -107,6 +179,10 @@ commands:
   /resume            restore the loop after a pause/scram
   /perception [on|off|watch] the always-on senses: live status, open/close, or tail events live
   /read <passage>    learn world dynamics from a passage (read like a textbook)
+  /train <path>      feed a dataset (file or folder) into HER OWN brain and forge on it
+  /dataset <path>    ingest only — report what she would learn, train nothing
+  /flywheel          the self-generated corpus: what she verified from her own turns
+  /scrape <topic>    harvest screened web text into her training corpus
   /wander [n]        let the idle mind wander n ticks and show the thoughts
   /proactive         detect & govern self-initiated actions (one initiative pass)
   /research <topic>  run one autonomous research pass on a topic
@@ -299,6 +375,23 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /read <a passage describing how something behaves>")
         else:
             print(json.dumps(core.learn_from_text(arg), indent=2, default=str))
+    elif cmd in ("dataset", "ingest"):
+        if not arg:
+            print("usage: /dataset <file-or-folder>   (ingest only — trains nothing)")
+        else:
+            print(_ingest_dataset_command(arg))
+    elif cmd == "train":
+        if not arg:
+            print("usage: /train <file-or-folder>   (ingest, then forge her own brain on it)")
+        else:
+            print(_train_on_dataset_command(arg))
+    elif cmd == "flywheel":
+        print(_flywheel_command())
+    elif cmd == "scrape":
+        if not arg:
+            print("usage: /scrape <topic>")
+        else:
+            print(_scrape_command(arg))
     elif cmd == "research":
         if not arg:
             print("usage: /research <topic>")

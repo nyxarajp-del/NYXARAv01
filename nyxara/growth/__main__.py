@@ -46,6 +46,12 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     if args.distilgpt2:
         settings.foundry.backend = "lora"
         settings.foundry.base_model = DISTILGPT2
+    # A dataset forge trains HER OWN brain by default. The stock backend is "lora" — an adapter
+    # over DistilGPT-2, i.e. standing on someone else's base. "auto" resolves through
+    # build_model() to a from-scratch net instead: the torch nano-GPT when torch is present, else
+    # the pure-NumPy transformer (real backprop, no base, no key). An explicit --backend still wins.
+    if args.dataset and not args.backend and not args.distilgpt2:
+        settings.foundry.backend = "auto"
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
@@ -74,6 +80,57 @@ def _maybe_distill(args: argparse.Namespace, settings: Any) -> int:
     examples = distiller.distill_default(n=n)
     print(f"· distilled {len(examples)} teacher example(s) -> {distiller.store_path}")
     return len(examples)
+
+
+def _ingest_datasets(args: argparse.Namespace, settings: Any) -> int:
+    """Ingest every ``--dataset`` path into her durable corpus. Returns the records taken.
+
+    Mirrors :func:`_maybe_distill` — it reports and returns a count, and a failure is printed
+    rather than raised, so a bad path never costs the forge that follows."""
+    if not args.dataset:
+        return 0
+    from nyxara.growth.dataset import ingest_dataset
+
+    total = 0
+    for path in args.dataset:
+        report = ingest_dataset(path, settings=settings, screen=args.dataset_screen)
+        print(report.summary())
+        total += report.records
+    if total:
+        print("· dataset corpus is durable: every later forge trains on it, not just this one.")
+    return total
+
+
+def _acquire_topics(args: argparse.Namespace, foundry: Any) -> int:
+    """Harvest screened web text for each ``--acquire`` topic (keyless DuckDuckGo by default)."""
+    if not args.acquire:
+        return 0
+    # The acquirer is gated by foundry.acquire_data; an explicit --acquire IS the Master asking,
+    # so open the gate for this process only (the settings copy is already process-local).
+    foundry.cfg.acquire_data = True
+    report = foundry.acquire(list(args.acquire))
+    if report is None:
+        print("· web acquisition unavailable (needs .[llm] for httpx) — skipping.")
+        return 0
+    print(f"· acquired: searched {report.get('searched', 0)}, fetched {report.get('fetched', 0)}, "
+          f"kept {report.get('kept', 0)}, dropped {report.get('dropped_suspicious', 0)} suspicious")
+    return int(report.get("kept", 0))
+
+
+def _flywheel_report(settings: Any) -> None:
+    """Show what she has verified and kept from her OWN lived turns (self-generated data)."""
+    try:
+        from nyxara.growth.flywheel import DataFlywheel
+        wheel = DataFlywheel.from_settings(settings)
+        examples = wheel.examples(limit=5)
+    except Exception as exc:  # noqa: BLE001 — a report never breaks the command
+        print(f"· flywheel unavailable: {exc}")
+        return
+    print(f"· flywheel: {wheel.count()} verified example(s) of her own — first-class supervision "
+          f"in the same corpus as the Master's datasets")
+    for ex in examples:
+        prompt = (ex.prompt or "").replace("\n", " ")[:70]
+        print(f"    · [{ex.source}] {prompt}")
 
 
 def _report_handoff(settings: Any) -> None:
@@ -168,6 +225,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="where the foundry/ state (corpus, versions, active) lives")
     parser.add_argument("--bench", action="store_true",
                         help="report the handoff rate + benchmark accuracy afterwards")
+    parser.add_argument("--dataset", action="append", metavar="PATH", default=None,
+                        help="ingest a dataset file OR folder (.txt/.md, .jsonl/.json, .csv/.tsv, "
+                             ".pdf/.docx) into her corpus before forging. Repeatable. Ingested "
+                             "once, trained on by every later forge")
+    parser.add_argument("--dataset-only", action="store_true",
+                        help="with --dataset: ingest and report what she WOULD learn, train nothing")
+    parser.add_argument("--dataset-screen", choices=["warn", "drop", "off"], default=None,
+                        help="injection posture for --dataset (default warn: flagged but kept — a "
+                             "file the Master hands over is not untrusted web text)")
+    parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
+                        help="harvest screened web text for a topic into the corpus (keyless "
+                             "DuckDuckGo). Repeatable")
+    parser.add_argument("--flywheel-report", action="store_true",
+                        help="show the self-generated corpus: what she verified from her own turns")
     parser.add_argument("--forge-brain", type=int, nargs="?", const=0, default=None, metavar="GENS",
                         help="design → forge → gauntlet → PROMOTE a smarter brain on the NumPy "
                              "substrate (verifiable weights/architecture self-improvement). Add "
@@ -191,6 +262,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     foundry, settings = _build_foundry(args)
     _maybe_distill(args, settings)
+    _ingest_datasets(args, settings)
+    _acquire_topics(args, foundry)
+    if args.flywheel_report:
+        _flywheel_report(settings)
+
+    if args.dataset_only:
+        print("· --dataset-only: ingested and reported; nothing trained.")
+        return 0
 
     print(f"· training own-model ({settings.foundry.backend} backend), "
           f"{args.generations} generation(s)…")

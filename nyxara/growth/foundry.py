@@ -188,7 +188,7 @@ class Foundry:
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
                  protected: Optional[Sequence[str]] = None,
                  distill_path: Any = None, flywheel_path: Any = None,
-                 acquired_path: Any = None) -> None:
+                 acquired_path: Any = None, dataset_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -212,6 +212,13 @@ class Foundry:
         # Screened external web corpus harvested by growth/acquire.py — additive breadth she did
         # not previously contain. Folded in AFTER her own lived experience (so she stays herself).
         self.acquired_path = Path(acquired_path) if acquired_path else (self.root / "acquired.jsonl")
+        # The Master's OWN datasets (growth/dataset.py) — a file or folder he handed her. This is
+        # the only corpus source she did not generate herself, so it leads the corpus below.
+        if dataset_path is not None:
+            self.dataset_path: Any = Path(dataset_path)
+        else:
+            configured = getattr(self.cfg, "dataset_path", None)
+            self.dataset_path = Path(configured) if configured else (self.root / "dataset.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._ewc: Any = None              # lazy EWC consolidator (continual learning anchors)
@@ -275,7 +282,10 @@ class Foundry:
         # Verified supervision (teacher distillation + her own flywheel) is the highest-quality,
         # freshest signal — kept whole. Her own lived experience leads, so the model learns to
         # sound like herself, not only like the teacher.
-        verified = [t for t in (self._flywheel_docs(limit) + self._distilled_docs(limit)) if t]
+        # The Master's own dataset leads: he chose it, so it outranks even the supervision she
+        # generated for herself. Kept whole (never strided) for the same reason.
+        verified = [t for t in (self._dataset_docs(limit) + self._flywheel_docs(limit)
+                                + self._distilled_docs(limit)) if t]
         others: List[str] = [t for t in self.seed_corpus if t]
         if self.replay is not None and len(self.replay):
             for exp in self.replay.recent(self.cfg.max_corpus_items):
@@ -321,6 +331,14 @@ class Foundry:
             return model
         except Exception:  # noqa: BLE001
             return None
+
+    def _dataset_docs(self, limit: int) -> List[str]:
+        """Training docs from the Master's own ingested datasets, if any (never raises)."""
+        try:
+            from nyxara.growth.dataset import load_dataset_docs
+            return load_dataset_docs(self.dataset_path, limit=limit)
+        except Exception:  # noqa: BLE001 — a supplied dataset is optional; never fatal to a forge
+            return []
 
     def _distilled_docs(self, limit: int) -> List[str]:
         """Rendered training docs from the teacher-distillation store, if any (never raises)."""
