@@ -88,6 +88,10 @@ class NeuralCausalMechanism:
 
         # the always-available floor + prior (also our no-numpy reload target)
         self._ridge = FunctionalCausalMechanism(ridge=ridge)
+        # The net only replaces the ridge when it measurably fits better. A tiny positive
+        # margin means a tie goes to the simpler model rather than to sampling noise.
+        self.net_margin = 1e-4
+        self._using_net = False        # which fit currently owns predict()/slope
 
         # replay buffer of standardisable samples
         self._bx: List[List[float]] = []
@@ -173,14 +177,37 @@ class NeuralCausalMechanism:
         self._refresh_summary(Xs, Ys)
 
     def _refresh_summary(self, Xs: Any, Ys: Any) -> None:
-        """Recompute the linear-compatible summary (slope/intercept/r2/residual_std) from the net."""
+        """Recompute the summary from the net — but only adopt it if it beats the linear floor.
+
+        Passing warmup used to hand the net the mechanism unconditionally, and that is wrong in a
+        way that quietly corrupts every downstream effect size. On a genuinely linear relation the
+        ridge is *exact* and an under-trained MLP is not: measured on a clean ``B = 2A + 1`` chain
+        with n=200 and σ=0.3 noise, the ridge recovers slope 1.9966 and the net reports 1.9291 — a
+        3.4% attenuation that compounds along a chain (2×3 became 1.93×2.92, so ``do(A)`` on C was
+        out by 6%). Since ``as_causal_graph`` uses this slope as the structural coefficient, every
+        intervention and counterfactual inherited the error.
+
+        So the net must *earn* the mechanism: it is adopted only when its R² actually exceeds the
+        ridge's. Ties go to the ridge, because the simpler model should win when nothing separates
+        them. This is the same propose-then-certify discipline the rest of the package runs on —
+        the net remains a strict superset, now in fact rather than by assertion."""
         pred_s, _ = self._net.forward(Xs)
         pred = pred_s * self._ys + self._ym
         y = Ys * self._ys + self._ym
         resid = (y - pred).reshape(-1)
         ss_res = float(np.sum(resid ** 2))
         ss_tot = float(np.sum((y.reshape(-1) - y.mean()) ** 2))
-        self.r2 = _finite(max(0.0, min(1.0, 1.0 - ss_res / ss_tot))) if ss_tot > 1e-12 else 0.0
+        net_r2 = _finite(max(0.0, min(1.0, 1.0 - ss_res / ss_tot))) if ss_tot > 1e-12 else 0.0
+
+        if net_r2 <= self._ridge.r2 + self.net_margin:
+            # the linear floor explains this relation at least as well — keep it, and keep
+            # predict() on it too, so the reported slope and the predictions never disagree
+            self._using_net = False
+            self._mirror_ridge()
+            return
+
+        self._using_net = True
+        self.r2 = net_r2
         self.residual_std = _finite(math.sqrt(max(0.0, ss_res / max(1, len(resid)))))
         # slope := average local sensitivity d f / d(parent₀) over the observed range (finite diff),
         # so every linear consumer (front-door, predict_effects) still gets a sensible weight.
@@ -197,7 +224,9 @@ class NeuralCausalMechanism:
 
     # ---- query (nonlinear if trained, else the exact linear floor) ------ #
     def predict(self, x: Any) -> float:
-        if not (self._trained and _HAS_NUMPY and self._net is not None):
+        # `_using_net` matters as much as `_trained`: when the ridge won the comparison in
+        # _refresh_summary, predictions have to come from the ridge too.
+        if not (self._trained and self._using_net and _HAS_NUMPY and self._net is not None):
             return self._ridge.predict(float(self._as_vec(x)[0]))
         vec = np.asarray(self._as_vec(x), dtype=np.float64).reshape(1, -1)
         xs = (vec - self._xm) / self._xs
@@ -223,6 +252,10 @@ class NeuralCausalMechanism:
             "batch": self.batch, "slope": round(self.slope, 6), "intercept": round(self.intercept, 6),
             "r2": round(self.r2, 4), "residual_std": round(self.residual_std, 6),
             "ridge": self._ridge.to_dict(), "trained": bool(self._trained),
+            # which fit currently owns predict()/slope. Without this a reloaded mechanism
+            # defaults to the ridge while its saved slope came from the net, and the two
+            # silently disagree — the summary says one thing, predictions do another.
+            "using_net": bool(self._using_net), "net_margin": self.net_margin,
         }
         if self._trained and self._net is not None:
             d["net"] = self._net.to_dict()
@@ -245,6 +278,8 @@ class NeuralCausalMechanism:
             m._ridge = FunctionalCausalMechanism.from_dict(rd)
         m.slope = float(d.get("slope", 0.0)); m.intercept = float(d.get("intercept", 0.0))
         m.r2 = float(d.get("r2", 0.0)); m.residual_std = float(d.get("residual_std", 0.0))
+        m.net_margin = float(d.get("net_margin", m.net_margin))
+        m._using_net = bool(d.get("using_net", False))
         if _HAS_NUMPY and d.get("trained") and d.get("net"):
             m._ensure_net()
             if m._net.load_dict(d["net"]):

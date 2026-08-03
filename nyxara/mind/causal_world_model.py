@@ -412,6 +412,8 @@ class CausalWorldModel:
         # growth/causal_validation.py), so its disagreement is a reason for less confidence
         # rather than a reason to trust it over the symbolic verdict.
         self.structure_disagreement_damping: float = 0.5
+        # Symbolic confidence at or above which the gradient fit gets no vote at all.
+        self.structure_damp_below: float = 0.6
         self._last_struct_n = 0                            # events seen at the last structure fit
 
         self._n = 0                                       # total events seen
@@ -1251,6 +1253,16 @@ class CausalWorldModel:
             return raw
         out = dict(raw)
         for (cause, effect), weight in raw.items():
+            link = self._links.get((cause, effect))
+            # Strong symbolic evidence is not up for renegotiation by the gradient fit. A binary
+            # cause is the case that forced this: on {0,1} data varsortability gives NOTEARS
+            # nothing to work with and it happily learns the reverse edge, so damping a link the
+            # counting layer is certain of (precedence, ΔP, a fitted mechanism) pushed a genuine
+            # 0.94 effect down to 0.47 — under the 0.5 decision threshold, which collapsed
+            # sufficiency for a cause that works 92% of the time. Disagreement is only
+            # informative where the symbolic evidence is itself uncertain.
+            if link is not None and link.confidence >= self.structure_damp_below:
+                continue
             try:
                 forward = abs(float(structure.weight(cause, effect)))
                 reverse = abs(float(structure.weight(effect, cause)))
