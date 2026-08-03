@@ -14,7 +14,6 @@ from nyxara.growth.ontogenesis import (
     AxiomStatus,
     OntologicalGenesis,
     SubPerception,
-    dominant_period,
     phase_lag,
 )
 

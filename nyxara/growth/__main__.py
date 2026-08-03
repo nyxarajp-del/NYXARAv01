@@ -46,6 +46,12 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     if args.distilgpt2:
         settings.foundry.backend = "lora"
         settings.foundry.base_model = DISTILGPT2
+    # A dataset forge trains HER OWN brain by default. The stock backend is "lora" — an adapter
+    # over DistilGPT-2, i.e. standing on someone else's base. "auto" resolves through
+    # build_model() to a from-scratch net instead: the torch nano-GPT when torch is present, else
+    # the pure-NumPy transformer (real backprop, no base, no key). An explicit --backend still wins.
+    if args.dataset and not args.backend and not args.distilgpt2:
+        settings.foundry.backend = "auto"
     if args.backend:
         settings.foundry.backend = args.backend
     if args.base_model:
@@ -74,6 +80,120 @@ def _maybe_distill(args: argparse.Namespace, settings: Any) -> int:
     examples = distiller.distill_default(n=n)
     print(f"· distilled {len(examples)} teacher example(s) -> {distiller.store_path}")
     return len(examples)
+
+
+def _ingest_datasets(args: argparse.Namespace, settings: Any) -> int:
+    """Ingest every ``--dataset`` path into her durable corpus. Returns the records taken.
+
+    Mirrors :func:`_maybe_distill` — it reports and returns a count, and a failure is printed
+    rather than raised, so a bad path never costs the forge that follows."""
+    if not args.dataset:
+        return 0
+    from nyxara.growth.dataset import ingest_dataset
+
+    total = 0
+    for path in args.dataset:
+        report = ingest_dataset(path, settings=settings, screen=args.dataset_screen)
+        print(report.summary())
+        total += report.records
+    if total:
+        print("· dataset corpus is durable: every later forge trains on it, not just this one.")
+    return total
+
+
+def _learn_causal(args: argparse.Namespace, foundry: Any) -> None:
+    """Learn a causal graph from the ingested dataset — numeric columns and/or prose claims.
+
+    Prints what was learned AND what was refused: a direction it could not establish, a pair the
+    multivariate fit found no residual effect for, a claim that contradicts an earlier one."""
+    if not (args.causal or args.causal_text):
+        return
+    from nyxara.mind.causal_world_model import CausalWorldModel
+
+    model = CausalWorldModel()
+    store = foundry.dataset_path
+    if args.causal:
+        from nyxara.growth.dataset_causal import learn_from_dataset_store
+        order = [c.strip() for c in args.order.split(",")] if args.order else None
+        print(learn_from_dataset_store(store, model=model, order=order).summary())
+    if args.causal_text:
+        from nyxara.growth.text_causal import learn_from_dataset_store as learn_text
+        print(learn_text(store, model=model).summary())
+
+    try:    # persist so the graph outlives this command and the live kernel can load it
+        path = Path(str(store)).with_name("causal_graph.json")
+        model.save(str(path))
+        print(f"· causal graph saved to {path}")
+    except Exception as exc:  # noqa: BLE001 — persistence is a convenience, never the deliverable
+        print(f"· could not save the causal graph: {exc}")
+
+
+def _build_hyperspace(args: argparse.Namespace, foundry: Any) -> None:
+    """Fit a Poincaré concept space from the ingested dataset's taxonomic relations.
+
+    The space is loaded from disk first when one exists, so a later dataset *refines* the geometry
+    instead of starting over — the same accumulate-then-refit discipline ConceptHyperspace.fit
+    uses internally across domains."""
+    if not args.hyperspace:
+        return
+    from nyxara.growth.dataset_hyperspace import build_from_dataset_store
+    from nyxara.mind.concept_hyperspace import ConceptHyperspace
+
+    store = foundry.dataset_path
+    path = Path(str(store)).with_name("hyperspace.json")
+    space = ConceptHyperspace(dim=int(args.hyperspace_dim), seed=0, lr=0.1)
+    space.load(path)                      # a missing/corrupt file simply leaves it unfitted
+
+    report = build_from_dataset_store(store, space=space, domain=args.domain or "")
+    print(report.summary())
+    if report.fit is not None and space.save(path):
+        print(f"· concept hyperspace saved to {path}")
+
+
+def _acquire_topics(args: argparse.Namespace, foundry: Any) -> int:
+    """Harvest screened web text for each ``--acquire`` topic (keyless DuckDuckGo by default)."""
+    if not args.acquire:
+        return 0
+    # The acquirer is gated by foundry.acquire_data; an explicit --acquire IS the Master asking,
+    # so open the gate for this process only (the settings copy is already process-local).
+    foundry.cfg.acquire_data = True
+    report = foundry.acquire(list(args.acquire))
+    if report is None:
+        print("· web acquisition unavailable (needs .[llm] for httpx) — skipping.")
+        return 0
+    print(f"· acquired: searched {report.get('searched', 0)}, fetched {report.get('fetched', 0)}, "
+          f"kept {report.get('kept', 0)}, dropped {report.get('dropped_suspicious', 0)} suspicious")
+    return int(report.get("kept", 0))
+
+
+def _gaps_report(args: argparse.Namespace, settings: Any) -> None:
+    """Show her measured ignorance — what she would go learn, and why."""
+    if not args.gaps:
+        return
+    try:
+        from nyxara.growth.epistemic_drive import EpistemicDrive
+        drive = EpistemicDrive(settings=settings)
+        print(drive.summary(k=8))
+        searchable = drive.topics(limit=8)
+        print(f"· would acquire: {', '.join(searchable) if searchable else '(nothing searchable)'}")
+    except Exception as exc:  # noqa: BLE001 — a report never breaks the command
+        print(f"· epistemic drive unavailable: {exc}")
+
+
+def _flywheel_report(settings: Any) -> None:
+    """Show what she has verified and kept from her OWN lived turns (self-generated data)."""
+    try:
+        from nyxara.growth.flywheel import DataFlywheel
+        wheel = DataFlywheel.from_settings(settings)
+        examples = wheel.examples(limit=5)
+    except Exception as exc:  # noqa: BLE001 — a report never breaks the command
+        print(f"· flywheel unavailable: {exc}")
+        return
+    print(f"· flywheel: {wheel.count()} verified example(s) of her own — first-class supervision "
+          f"in the same corpus as the Master's datasets")
+    for ex in examples:
+        prompt = (ex.prompt or "").replace("\n", " ")[:70]
+        print(f"    · [{ex.source}] {prompt}")
 
 
 def _report_handoff(settings: Any) -> None:
@@ -114,6 +234,69 @@ def _forge_brain(args: argparse.Namespace) -> int:
               f"({rep.champion_kind}, {rep.params} params) — verified smarter through the gauntlet.")
     elif rep.rolled_back:
         print("· kept on the bench: the designed brain did not clear the gauntlet; live brain unchanged.")
+    return 0
+
+
+def _forge_operator() -> int:
+    """Render searched mixer genomes into source and verify each against the interpreter."""
+    from nyxara.growth.genesis import MixerProgram
+    from nyxara.growth.operator_source import render_operator, verify_equivalence
+
+    genomes = [["proj", "gate", "norm"], ["shift", "ssm", "proj"], ["conv:5", "gate"],
+               ["lowrank:4", "norm"]]
+    print("· rendering searched mixer genomes into source, then checking each against the "
+          "interpreted path…")
+    failures = 0
+    for steps in genomes:
+        rendered = render_operator(MixerProgram(steps=list(steps)))
+        ok, detail = verify_equivalence(rendered)
+        print(f"  {rendered.fingerprint:26s} {'OK ' if ok else 'FAIL'} {detail}")
+        failures += int(not ok)
+    print(f"· {len(genomes) - failures}/{len(genomes)} rendered operator(s) match the interpreter "
+          f"bit-for-bit.")
+    return 1 if failures else 0
+
+
+def _validate_causal() -> int:
+    """Check the causal learner against worlds whose laws are true by construction."""
+    from nyxara.growth.causal_validation import validate_all
+
+    print("· validating the causal graph against sim/ ground truth "
+          "(laws true by construction, not by anything she inferred)…")
+    try:
+        reports = validate_all()
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· validation failed: {exc}")
+        return 1
+    for report in reports:
+        print(report.summary())
+    invented = [r for r in reports if not r.invented_nothing]
+    exact = sum(1 for r in reports if r.recovered)
+    print(f"· {exact}/{len(reports)} world(s) recovered exactly; "
+          f"{len(invented)} invented an edge that does not exist.")
+    return 1 if invented else 0
+
+
+def _ouroboros(args: argparse.Namespace) -> int:
+    """Scan → propose → (with --enact) rewrite her own source under the existing gauntlet."""
+    from nyxara.growth.ouroboros import Ouroboros
+    from nyxara.kernel.config import get_settings
+
+    settings = get_settings().model_copy(deep=True)
+    if args.enact:
+        settings.self_improvement.ouroboros_enabled = True
+    if not settings.self_improvement.ouroboros_enabled and args.enact:
+        print("· ouroboros is disabled (self_improvement.ouroboros_enabled) — nothing enacted.")
+        return 1
+
+    print(f"· ouroboros: scanning her own source"
+          f"{' — ENACTING (gauntleted, reversible)' if args.enact else ' (measure-only)'}…")
+    try:
+        report = Ouroboros(settings=settings).metamorphose(enact=bool(args.enact))
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· ouroboros failed: {exc}")
+        return 1
+    print(report.summary())
     return 0
 
 
@@ -168,6 +351,49 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="where the foundry/ state (corpus, versions, active) lives")
     parser.add_argument("--bench", action="store_true",
                         help="report the handoff rate + benchmark accuracy afterwards")
+    parser.add_argument("--dataset", action="append", metavar="PATH", default=None,
+                        help="ingest a dataset file OR folder (.txt/.md, .jsonl/.json, .csv/.tsv, "
+                             ".pdf/.docx) into her corpus before forging. Repeatable. Ingested "
+                             "once, trained on by every later forge")
+    parser.add_argument("--dataset-only", action="store_true",
+                        help="with --dataset: ingest and report what she WOULD learn, train nothing")
+    parser.add_argument("--dataset-screen", choices=["warn", "drop", "off"], default=None,
+                        help="injection posture for --dataset (default warn: flagged but kept — a "
+                             "file the Master hands over is not untrusted web text)")
+    parser.add_argument("--causal", action="store_true",
+                        help="learn a causal graph from the dataset's numeric columns "
+                             "(NOTEARS for direction, multivariate least squares for effect sizes)")
+    parser.add_argument("--causal-text", action="store_true",
+                        help="mine causal CLAIMS from the dataset's prose (cue grammar, no LLM); "
+                             "contradictions are refused, not absorbed")
+    parser.add_argument("--order", default=None, metavar="COLS",
+                        help="with --causal: declare the causal ordering, e.g. \"x,m,y\". Without "
+                             "it direction comes from NOTEARS, and without numpy she abstains")
+    parser.add_argument("--hyperspace", action="store_true",
+                        help="fit a Poincaré concept space from the dataset's is-a relations "
+                             "(hierarchy ends up in the geometry, so cross-domain analogy works)")
+    parser.add_argument("--hyperspace-dim", type=int, default=64, metavar="D",
+                        help="dimension of the concept hyperspace (default 64)")
+    parser.add_argument("--domain", default=None,
+                        help="with --hyperspace: tag these concepts as a named domain, so "
+                             "/analogy can align it against another")
+    parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
+                        help="harvest screened web text for a topic into the corpus (keyless "
+                             "DuckDuckGo). Repeatable")
+    parser.add_argument("--forge-operator", action="store_true",
+                        help="render a searched mixer genome into real Python source and check\n"
+                             "it computes exactly what the interpreted genome does")
+    parser.add_argument("--validate-causal", action="store_true",
+                        help="check her causal learner against sim/ worlds whose laws are true\n"
+                             "by construction — the one place she cannot grade her own homework")
+    parser.add_argument("--ouroboros", action="store_true",
+                        help="scan her own source for hot code and propose semantics-preserving\n"
+                             "algorithmic rewrites. Writes nothing without --enact")
+    parser.add_argument("--gaps", action="store_true",
+                        help="show her measured ignorance: the ranked epistemic gaps that "
+                             "drive what she goes and learns")
+    parser.add_argument("--flywheel-report", action="store_true",
+                        help="show the self-generated corpus: what she verified from her own turns")
     parser.add_argument("--forge-brain", type=int, nargs="?", const=0, default=None, metavar="GENS",
                         help="design → forge → gauntlet → PROMOTE a smarter brain on the NumPy "
                              "substrate (verifiable weights/architecture self-improvement). Add "
@@ -183,6 +409,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                              "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
 
+    if args.forge_operator:
+        return _forge_operator()
+
+    if args.validate_causal:
+        return _validate_causal()
+
+    if args.ouroboros:
+        return _ouroboros(args)
+
     if args.forge_brain is not None:
         return _forge_brain(args)
 
@@ -191,6 +426,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     foundry, settings = _build_foundry(args)
     _maybe_distill(args, settings)
+    _ingest_datasets(args, settings)
+    _acquire_topics(args, foundry)
+    _learn_causal(args, foundry)
+    _build_hyperspace(args, foundry)
+    _gaps_report(args, settings)
+    if args.flywheel_report:
+        _flywheel_report(settings)
+
+    if args.dataset_only:
+        print("· --dataset-only: ingested and reported; nothing trained.")
+        return 0
 
     print(f"· training own-model ({settings.foundry.backend} backend), "
           f"{args.generations} generation(s)…")

@@ -756,6 +756,20 @@ class NativeReasoner:
                 self._step(steps, StepKind.REASON,
                            "traced the causal chain " + " → ".join(chain))
                 answer += " Full chain: " + " → ".join(chain) + "."
+            # A link mined from prose is a claim someone wrote down, not something she measured.
+            # Answering from one at the same confidence as a fitted mechanism is precisely how a
+            # corpus's false causal folklore becomes her confident opinion, so it is said out loud
+            # and the confidence is capped.
+            if not top.measured:
+                self._step(steps, StepKind.REASON,
+                           f"the strongest link to {label!r} is an ASSERTION read from text, "
+                           f"not a measurement",
+                           detail=str(top.evidence.get("quote", ""))[:120], confidence=0.3)
+                answer += (" Note: this rests on a claim asserted in text I read, not on anything "
+                           "I measured — treat it as reported, not established.")
+                return answer, min(top.confidence, 0.35), True, \
+                    f"UNVERIFIED text claim {top.cause}→{label} (cue " \
+                    f"{top.evidence.get('cue', '?')})"
             return answer, top.confidence, True, \
                 f"causal link {top.cause}→{label} (conf {top.confidence:.0%})"
 

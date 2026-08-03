@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, Optional
 
 __all__ = ["LearningEvent", "LearningJournal"]
 
@@ -164,7 +164,6 @@ class LearningJournal:
             with open(self.path, "r", encoding="utf-8") as fh:
                 lines = [ln for ln in fh if ln.strip() and not ln.startswith("#")]
             keep = lines[-self.rotate_keep:]
-            dropped = len(lines) - len(keep)
             base = self._seq - len(keep)
             tmp = f"{self.path}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:

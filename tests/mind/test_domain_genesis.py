@@ -10,7 +10,7 @@ that a modelled field is learned so it is recognised next time.
 
 from __future__ import annotations
 
-from nyxara.mind.domain_genesis import DomainGenesisEngine, DomainLaw, DomainTheory
+from nyxara.mind.domain_genesis import DomainGenesisEngine, DomainLaw
 from nyxara.mind.transfer import RelationalTransferEngine
 
 

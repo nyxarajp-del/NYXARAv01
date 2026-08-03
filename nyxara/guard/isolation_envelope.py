@@ -24,7 +24,7 @@ the first one written.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from nyxara.kernel.config import OWNER, NyxaraSettings, get_settings
 

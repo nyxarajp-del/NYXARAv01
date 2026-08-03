@@ -89,6 +89,34 @@ class SelfImproveRequest(BaseModel):
     enact: bool = False
 
 
+class TrainDatasetRequest(BaseModel):
+    # A server-side path to a dataset file or folder (.txt/.md, .jsonl/.json, .csv/.tsv,
+    # .pdf/.docx). Not an upload — the same posture as every other route here.
+    path: str = Field(..., min_length=1)
+    # Forge generations to run after ingesting. Bounded — never an unattended marathon.
+    generations: int = Field(default=1, ge=1, le=10)
+    # Ingest and report what she WOULD learn without training anything.
+    ingest_only: bool = False
+    # Injection posture: a Master-supplied file is not untrusted web text, so "warn" keeps a
+    # flagged record and counts it; "drop" enforces the stricter acquire.py stance.
+    screen: Optional[str] = Field(default=None, pattern="^(warn|drop|off)$")
+
+
+class CausalQueryRequest(BaseModel):
+    # "why": causes of `target`. "do": effects of setting `cause` to `value`.
+    # "counterfactual": would `target` still have happened without `cause`?
+    cause: Optional[str] = None
+    target: Optional[str] = None
+    value: float = 1.0
+
+
+class HyperspaceRequest(BaseModel):
+    term: Optional[str] = None                  # for /embed and /nearest
+    source_domain: Optional[str] = None         # for /analogy
+    target_domain: Optional[str] = None
+    k: int = Field(default=5, ge=1, le=50)
+
+
 class DelegateRequest(BaseModel):
     name: str = Field(..., min_length=1)
     subgoal: str = Field(..., min_length=1)
@@ -493,6 +521,154 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         summary = RecursiveSelfImprovement.from_core(core).run_continuous(
             int(req.cycles), enact=bool(req.enact))
         return {k: v for k, v in summary.items() if k != "reports"}
+
+    @app.post("/v1/train", dependencies=auth)
+    def train_dataset(req: TrainDatasetRequest) -> dict:
+        # Hand NYXARA a dataset and let her OWN brain train on it (growth/dataset.py →
+        # growth/foundry.py). Ingestion is durable: the records land in her corpus store, so every
+        # later forge trains on them too, not just this call. The forge backend is pinned to
+        # "auto" — a from-scratch net (the NumPy transformer on a torch-less box), never an
+        # adapter over someone else's pretrained base. Every promotion still clears the full
+        # gauntlet, so a bad dataset can only produce a candidate that is refused, never a
+        # disloyal live brain.
+        from nyxara.growth.dataset import ingest_dataset
+        from nyxara.growth.foundry import Foundry
+
+        # a process-local copy so the route never mutates the app's live configuration
+        train_settings = settings.model_copy(deep=True)
+        train_settings.foundry.enabled = True
+        train_settings.foundry.backend = "auto"
+        report = ingest_dataset(req.path, settings=train_settings, screen=req.screen)
+        out: dict = {"ingest": report.to_dict()}
+        if req.ingest_only:
+            return out
+        try:
+            from nyxara.growth.bootstrap import IDENTITY_SEED
+            results = Foundry(settings=train_settings,
+                              seed_corpus=IDENTITY_SEED).self_improve(generations=req.generations)
+        except Exception as exc:  # noqa: BLE001 — a starved forge is a reported fact, not a 500
+            out["error"] = str(exc)
+            return out
+        out["generations"] = [r.to_dict() for r in results]
+        out["promoted"] = sum(1 for r in results if r.promoted)
+        return out
+
+    def _causal_graph() -> Any:
+        """The persisted causal graph beside her dataset corpus, or a fresh empty one."""
+        from nyxara.growth.dataset import _default_store_path
+        from nyxara.mind.causal_world_model import CausalWorldModel
+
+        try:
+            path = _default_store_path(settings).with_name("causal_graph.json")
+            if path.exists():
+                # ``load`` is a CLASSMETHOD returning a new instance — calling it on an object
+                # silently discards the restored graph and leaves you with an empty one.
+                return CausalWorldModel.load(str(path))
+        except Exception:  # noqa: BLE001 — a missing/corrupt graph is simply an empty one
+            pass
+        return CausalWorldModel()
+
+    def _concept_space() -> Any:
+        from nyxara.growth.dataset import _default_store_path
+        from nyxara.mind.concept_hyperspace import ConceptHyperspace
+
+        space = ConceptHyperspace(dim=64, seed=0, lr=0.1)
+        try:
+            space.load(_default_store_path(settings).with_name("hyperspace.json"))
+        except Exception:  # noqa: BLE001
+            pass
+        return space
+
+    @app.post("/v1/causal/{action}", dependencies=auth)
+    def causal(action: str, req: CausalQueryRequest) -> dict:
+        # Pearl's ladder over the graph she learned from the Master's data (and, at lower and
+        # clearly-labelled confidence, from prose). Every link reports whether it was MEASURED or
+        # merely asserted in text — a sentence someone wrote must never read like a measurement.
+        model = _causal_graph()
+        if action == "why":
+            if not req.target:
+                raise HTTPException(status_code=400, detail="target required")
+            label = model.match_label(req.target) or req.target
+            links = model.why(label)
+            return {"target": label,
+                    "causes": [{"cause": link.cause, "confidence": link.confidence,
+                                "strength": link.strength, "measured": link.measured,
+                                "describe": link.describe()} for link in links[:10]]}
+        if action == "do":
+            if not req.cause:
+                raise HTTPException(status_code=400, detail="cause required")
+            label = model.match_label(req.cause) or req.cause
+            effects = model.do({label: float(req.value)})
+            return {"intervention": {label: req.value},
+                    "effects": effects if isinstance(effects, dict) else {}}
+        if action == "counterfactual":
+            if not (req.cause and req.target):
+                raise HTTPException(status_code=400, detail="cause and target required")
+            cause = model.match_label(req.cause) or req.cause
+            target = model.match_label(req.target) or req.target
+            result = model.counterfactual(cause, target, factual=1.0, counter=0.0,
+                                          evidence=model.latest_evidence(model.labels()))
+            return {"describe": result.describe(), "delta": result.delta,
+                    "abducted": result.abducted}
+        if action == "validate":
+            # the honest one: check the learner against sim/ worlds whose laws are true by
+            # construction, so the answer is not another thing she inferred
+            from nyxara.growth.causal_validation import validate_all
+            return {"reports": [r.to_dict() for r in validate_all()]}
+        raise HTTPException(status_code=404, detail=f"unknown causal action {action!r}")
+
+    @app.post("/v1/hyperspace/{action}", dependencies=auth)
+    def hyperspace(action: str, req: HyperspaceRequest) -> dict:
+        space = _concept_space()
+        if not space.concepts:
+            return {"error": "no fitted concept space yet — run nyxara-grow --hyperspace"}
+        if action == "embed":
+            if not req.term:
+                raise HTTPException(status_code=400, detail="term required")
+            concept = space.concepts.get(req.term.lower())
+            if concept is None:
+                return {"term": req.term, "known": False}
+            return {"term": req.term, "known": True, "point": concept.point,
+                    "radius": concept.radius}
+        if action == "nearest":
+            if not req.term:
+                raise HTTPException(status_code=400, detail="term required")
+            return {"term": req.term,
+                    "nearest": [{"name": n, "distance": d}
+                                for n, d in space.nearest(req.term.lower(), req.k)]}
+        if action == "analogy":
+            if not (req.source_domain and req.target_domain):
+                raise HTTPException(status_code=400,
+                                    detail="source_domain and target_domain required")
+            found = space.find_correspondences(req.source_domain, req.target_domain)
+            # an empty list is a real answer: a correspondence below the bar is not returned,
+            # because an analogy asserted without support is worse than none
+            return {"correspondences": [c.to_dict() for c in found]}
+        raise HTTPException(status_code=404, detail=f"unknown hyperspace action {action!r}")
+
+    @app.post("/v1/qualia/{action}", dependencies=auth)
+    def qualia(action: str, req: HyperspaceRequest) -> dict:
+        space = _concept_space()
+        if not space.concepts:
+            return {"error": "no fitted concept space yet — run nyxara-grow --hyperspace"}
+        from nyxara.qualia import BabelCodec, QualiaWorkspace
+
+        workspace = QualiaWorkspace(space, min_cluster=2)
+        report = workspace.synthesise()
+        codec = BabelCodec(workspace)
+        if action == "concepts":
+            # `usable` is gated on certification: an unnamed cluster is not automatically a truth,
+            # so it may sit in the workspace and still be withheld from an answer.
+            return {"report": report.to_dict(),
+                    "alien": [c.to_dict() for c in workspace.alien_concepts()],
+                    "usable": [c.to_dict() for c in workspace.usable()]}
+        if action == "decode":
+            return {"described": codec.describe_all(certified_only=False)}
+        if action == "encode":
+            if not req.term:
+                raise HTTPException(status_code=400, detail="term required")
+            return {"term": req.term, "point": codec.encode(req.term.lower())}
+        raise HTTPException(status_code=404, detail=f"unknown qualia action {action!r}")
 
     @app.post("/v1/delegate", dependencies=auth)
     def delegate(req: DelegateRequest) -> dict:

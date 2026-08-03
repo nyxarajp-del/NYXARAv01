@@ -1879,7 +1879,13 @@ class CapabilityFoundry:
     # Internals — static safety scan
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _scan_source(source: str) -> Tuple[bool, str]:
+    def _scan_source(source: str, *, require_handle: bool = True) -> Tuple[bool, str]:
+        """Screen generated source against the shared safety policy.
+
+        ``require_handle`` is the *tool* contract (a forged tool must expose ``handle()``), not a
+        safety rule. :mod:`~nyxara.growth.module_loader` screens whole modules that legitimately
+        have no ``handle`` — it turns this off so both callers share one policy rather than
+        growing a second, subtly-divergent copy of the import allowlist."""
         if not source or not source.strip():
             return False, "empty source"
         for bad in _FORBIDDEN_SUBSTRINGS:
@@ -1907,7 +1913,8 @@ class CapabilityFoundry:
                     rootn = rootn.value
                 if isinstance(rootn, ast.Name) and rootn.id in _FORBIDDEN_ATTR_ROOTS:
                     return False, f"forbidden module access {rootn.id!r}"
-        if not any(isinstance(n, ast.FunctionDef) and n.name == "handle" for n in tree.body):
+        if require_handle and not any(
+                isinstance(n, ast.FunctionDef) and n.name == "handle" for n in tree.body):
             return False, "no top-level handle() function defined"
         return True, "clean"
 

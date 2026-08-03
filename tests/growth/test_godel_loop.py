@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from nyxara.growth.godel_loop import (
-    Contradiction,
     Dimension,
     ReflectionTower,
     Statement,

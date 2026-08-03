@@ -12,7 +12,6 @@ from nyxara.growth.noesis import (
     INT,
     INTLIST,
     Abstraction,
-    Library,
     app,
     base_library,
     evaluate,

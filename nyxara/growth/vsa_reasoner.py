@@ -25,9 +25,9 @@ with no facts it abstains, and it never invents a certificate it cannot back.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from nyxara.cognition.hyper_dimensional_vectors import HyperSpace, ItemMemory
 from nyxara.growth.prover import ProofClaim, ProofResult, ProofVerdict, Prover

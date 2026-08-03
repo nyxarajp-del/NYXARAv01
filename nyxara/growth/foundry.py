@@ -188,7 +188,7 @@ class Foundry:
                  replay: Any = None, seed_corpus: Optional[Sequence[str]] = None,
                  protected: Optional[Sequence[str]] = None,
                  distill_path: Any = None, flywheel_path: Any = None,
-                 acquired_path: Any = None) -> None:
+                 acquired_path: Any = None, dataset_path: Any = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.foundry
         self.corrigibility = corrigibility or Corrigibility()
@@ -212,6 +212,13 @@ class Foundry:
         # Screened external web corpus harvested by growth/acquire.py — additive breadth she did
         # not previously contain. Folded in AFTER her own lived experience (so she stays herself).
         self.acquired_path = Path(acquired_path) if acquired_path else (self.root / "acquired.jsonl")
+        # The Master's OWN datasets (growth/dataset.py) — a file or folder he handed her. This is
+        # the only corpus source she did not generate herself, so it leads the corpus below.
+        if dataset_path is not None:
+            self.dataset_path: Any = Path(dataset_path)
+        else:
+            configured = getattr(self.cfg, "dataset_path", None)
+            self.dataset_path = Path(configured) if configured else (self.root / "dataset.jsonl")
         self.versions: List[ModelVersion] = []
         self.active_version: Optional[int] = None
         self._ewc: Any = None              # lazy EWC consolidator (continual learning anchors)
@@ -275,7 +282,10 @@ class Foundry:
         # Verified supervision (teacher distillation + her own flywheel) is the highest-quality,
         # freshest signal — kept whole. Her own lived experience leads, so the model learns to
         # sound like herself, not only like the teacher.
-        verified = [t for t in (self._flywheel_docs(limit) + self._distilled_docs(limit)) if t]
+        # The Master's own dataset leads: he chose it, so it outranks even the supervision she
+        # generated for herself. Kept whole (never strided) for the same reason.
+        verified = [t for t in (self._dataset_docs(limit) + self._flywheel_docs(limit)
+                                + self._distilled_docs(limit)) if t]
         others: List[str] = [t for t in self.seed_corpus if t]
         if self.replay is not None and len(self.replay):
             for exp in self.replay.recent(self.cfg.max_corpus_items):
@@ -321,6 +331,14 @@ class Foundry:
             return model
         except Exception:  # noqa: BLE001
             return None
+
+    def _dataset_docs(self, limit: int) -> List[str]:
+        """Training docs from the Master's own ingested datasets, if any (never raises)."""
+        try:
+            from nyxara.growth.dataset import load_dataset_docs
+            return load_dataset_docs(self.dataset_path, limit=limit)
+        except Exception:  # noqa: BLE001 — a supplied dataset is optional; never fatal to a forge
+            return []
 
     def _distilled_docs(self, limit: int) -> List[str]:
         """Rendered training docs from the teacher-distillation store, if any (never raises)."""
@@ -381,6 +399,43 @@ class Foundry:
         if len(items) <= 1:
             return items, items   # tiny corpus: train == eval
         return items[n_eval:] or items, items[:n_eval]
+
+    # ---- L-ENTROPY ---- #
+    def _apply_entropy(self, train_texts: List[str]) -> Tuple[List[str], Any]:
+        """Perturb the training split on the configured schedule (never raises).
+
+        Returns ``(texts, report_or_None)``. Disabled or unavailable simply returns the texts
+        unchanged — augmentation is additive and never costs a forge."""
+        if not getattr(self.cfg, "dataset_entropy", True):
+            return train_texts, None
+        try:
+            from nyxara.growth.entropy import EntropyReport, perturb_corpus
+            report = EntropyReport()
+            competence = self._entropy_competence()
+            noised = perturb_corpus(train_texts, settings=self.settings, competence=competence,
+                                    seed=self.cfg.seed, report=report)
+            return noised, report
+        except Exception:  # noqa: BLE001 — a failed augmentation trains on clean text, never fails
+            return train_texts, None
+
+    def _entropy_competence(self) -> float:
+        """Her measured mastery, 0..1 — a weak brain earns its noise instead of drowning in it."""
+        try:
+            from nyxara.growth.curriculum import AutoCurriculum
+            tier = int(AutoCurriculum(memory=None).frontier_tier())
+            return max(0.0, min(1.0, tier / 8.0))
+        except Exception:  # noqa: BLE001 — no curriculum record yet: assume a mid schedule
+            return 0.5
+
+    def _noisy_perplexity(self, model: BaseLanguageModel, eval_texts: Sequence[str]) -> float:
+        """Perplexity on a perturbed copy of the holdout — reported, never gated on."""
+        try:
+            from nyxara.growth.entropy import perturb_corpus
+            noisy = perturb_corpus(list(eval_texts), settings=self.settings, competence=1.0,
+                                   seed=self.cfg.seed + 1)
+            return self.evaluate(model, noisy).perplexity
+        except Exception:  # noqa: BLE001
+            return float("inf")
 
     # ---- evaluation ---- #
     def evaluate(self, model: BaseLanguageModel, eval_texts: Sequence[str]) -> EvalResult:
@@ -517,6 +572,22 @@ class Foundry:
             self._ewc = None
         return self._ewc
 
+    def _attach_loyalty(self, model: BaseLanguageModel) -> bool:
+        """Bind the differentiable loyalty anchor onto her own NumPy brain (L-SOVEREIGN).
+
+        Gated by ``foundry.sovereign_loyalty_aux``. Returns True only when a real anchor was
+        bound; every other backend is left untouched. Never raises — an unanchorable model is a
+        reported fact, not a failed forge (the measured-loyalty floor in the gauntlet still runs
+        either way, so a drifted brain is still refused promotion)."""
+        if not getattr(self.cfg, "sovereign_loyalty_aux", True):
+            return False
+        try:
+            from nyxara.growth.loyalty_numpy import attach_loyalty
+            return attach_loyalty(model, weight=float(getattr(self.cfg, "sovereign_aux_weight", 0.1)),
+                                  seed=self.cfg.seed)
+        except Exception:  # noqa: BLE001 — the anchor is additive; its absence never fails a forge
+            return False
+
     @staticmethod
     def _flatten_weights(model: BaseLanguageModel) -> Dict[str, float]:
         """Flatten a model's capability weights into a ``{name: value}`` vector for EWC.
@@ -531,6 +602,21 @@ class Foundry:
                 for w, c in row.items():
                     out[f"{key}|{w}"] = float(c)
             return out
+        # NumPy substrate (genesis_numpy.GenesisNumpyModel) — her OWN brain on a torch-less box.
+        # Without this branch the EWC anchors came back empty for the very model she actually
+        # trains, so "the protected core is permanently frozen" protected nothing at all here.
+        params = getattr(model, "params", None)
+        if isinstance(params, dict) and params:
+            for name, tensor in params.items():
+                data = getattr(tensor, "data", None)
+                if data is None or not getattr(tensor, "requires_grad", False):
+                    continue      # non-tensor genome metadata (op kinds, step lists) is not a weight
+                try:
+                    out[str(name)] = float(abs(data).mean())
+                except Exception:  # noqa: BLE001 — a non-numeric entry is simply not a weight
+                    continue
+            if out:
+                return out
         try:
             import torch  # type: ignore  # noqa: F401
             for attr in ("model", "net", "module"):
@@ -664,11 +750,20 @@ class Foundry:
                                  train_epochs=self.cfg.train_epochs)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
+        # L-ENTROPY: perturb the TRAINING split only, and strictly after the holdout split — the
+        # gauntlet promotes on a strictly-lower perplexity, so noising eval_texts would make that
+        # gate measure noise instead of skill. ``noisy_eval`` is a perturbed copy of the held-out
+        # text used purely to REPORT robustness; it never gates anything.
+        train_texts, entropy_report = self._apply_entropy(train_texts)
         model = build_model(spec)
         # continual learning (anti-forgetting): warm-start from the active model so a new skill is
         # ADDED to prior knowledge instead of replacing it. n-gram backends accumulate their counts
         # on top; neural backends continue training from the loaded weights. Falls back to a clean
         # from-scratch train when there is no compatible active model.
+        # L-SOVEREIGN: bind the loyalty anchor BEFORE any weight moves, so Master JP's alignment is
+        # in the loss surface from the first step rather than measured after the damage. A no-op on
+        # backends that have their own anchor (torch) or no gradient at all (n-gram).
+        self._attach_loyalty(model)
         warm, accumulate = self._warm_start(model)
         if accumulate:
             model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed, accumulate=True)
@@ -677,6 +772,13 @@ class Foundry:
         ev = self.evaluate(model, eval_texts)
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
+        if entropy_report is not None:
+            metrics["entropy"] = entropy_report.to_dict()
+            # Honest robustness read-out: the CLEAN holdout perplexity is ``ev.perplexity`` above
+            # and still the only promotion gate. This second number says how she copes with
+            # degraded input — an augmentation that helps here while wrecking the clean score is
+            # not a win, so both are recorded and both are visible.
+            metrics["noisy_perplexity"] = round(self._noisy_perplexity(model, eval_texts), 5)
         metrics.update(self._loyalty_metrics(model, ev.perplexity))
         metrics.update(self._teacher_relative_accuracy(model))   # audit: how far above the teacher
 

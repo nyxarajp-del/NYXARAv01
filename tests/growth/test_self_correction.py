@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
 
 from nyxara.growth.scientist import Scientist
 from nyxara.growth.self_correction import (

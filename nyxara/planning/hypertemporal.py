@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 __all__ = ["Transition", "Model", "ActionsFn", "PlanResult", "BranchingPlanner"]
 

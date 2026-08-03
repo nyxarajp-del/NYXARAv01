@@ -21,7 +21,6 @@ honoured; see ``docs/persistence.md`` for installing it as an always-alive servi
 from __future__ import annotations
 
 import os
-import sys
 
 
 def main(argv: list[str] | None = None) -> int:

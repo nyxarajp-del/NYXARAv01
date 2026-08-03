@@ -1498,6 +1498,57 @@ class NyxaraCore:
     # owner-relevant terms lift a queued topic's priority (Rule 1: service outranks curiosity)
     _OWNER_TERMS = ("master", "owner", "jp", "loyal", "protect", "defen", "serve", "safety")
 
+    def _seed_queues_from_drive(self, report: Optional[Dict[str, Any]] = None,
+                                *, k: int = 4) -> int:
+        """Turn her ranked epistemic gaps into queued research and experiments (never raises).
+
+        The research and investigation queues were filled only by salient-event observation and by
+        goals, so idle work chased whatever happened to be *noticed*. It never chased what she is
+        measurably worst at, because until :mod:`~nyxara.growth.epistemic_drive` there was no
+        common scale on which "worst at" meant anything.
+
+        Only *knowledge* gaps are queued. Engineering gaps ("import cycle across 4 modules") are
+        real and correctly ranked, and no amount of research or experiment fixes one — those
+        already have their own path through ``self_evolving``. Returns how many were queued."""
+        drive = getattr(self, "_epistemic_drive", None)
+        if drive is None:
+            try:
+                from nyxara.growth.epistemic_drive import EpistemicDrive
+                # NyxaraCore has no guaranteed ``settings`` attribute — the rest of this file
+                # reaches it through getattr for exactly that reason.
+                drive = EpistemicDrive(core=self, settings=getattr(self, "settings", None),
+                                       memory=self.memory)
+                self._epistemic_drive = drive
+            except Exception:  # noqa: BLE001 — no drive is simply no seeding, never fatal to idle
+                self._epistemic_drive = False
+                return 0
+        if drive is False:
+            return 0
+
+        queued = 0
+        try:
+            # knowledge_gaps, not top_gaps-then-filter: a repo with fifty architectural weaknesses
+            # fills a ranked list entirely, and every knowledge gap is truncated away before any
+            # filter can run.
+            for gap in drive.knowledge_gaps(k * 2):
+                if not gap.subject:
+                    continue
+                subject = gap.subject[:60]
+                # research reads about it; the scientist tests it. A gap she is very unsure of is
+                # worth an experiment, not just a search.
+                target = (self._investigation_queue if gap.pressure >= 0.6
+                          else self._research_queue)
+                if subject not in target and len(target) < 32:
+                    target.append(subject)
+                    queued += 1
+                if queued >= k:
+                    break
+        except Exception:  # noqa: BLE001 — a failing drive never costs the rest of the idle tick
+            return queued
+        if queued and report is not None:
+            report["epistemic_seeded"] = queued
+        return queued
+
     def _drain_motivated(self, queue: List[str]) -> Optional[str]:
         """Pop the most *motivating* item from ``queue`` (novelty + owner-relevance), not the
         oldest. Records the visit so novelty habituates — she will not fixate on one theme.
@@ -7803,6 +7854,11 @@ class NyxaraCore:
                                          salience=0.75)
             except Exception:  # noqa: BLE001 — self-evolution is a capability, never fatal to idle
                 pass
+        # 4c-bis) L-AGENCY — fill the research/investigation queues from MEASURED ignorance.
+        # Both queues were only ever fed by salient-event observation, so idle work chased
+        # whatever happened to be noticed rather than what she is actually worst at. The drive
+        # ranks her five uncertainty signals on one scale; this is where that ranking becomes work.
+        self._seed_queues_from_drive(report)
         # 4d) Level 10 — autonomous research: drain the research queue on idle ticks
         if self.researcher is not None and self._research_queue:
             try:
@@ -8348,7 +8404,7 @@ class NyxaraCore:
             self._sym_grounder = GroundedLexicon(llm=self._grounding_llm())
         return self._sym_grounder
 
-    def understand(self, word: str) -> Dict[str, Any]:
+    def ground_word(self, word: str) -> Dict[str, Any]:
         """*Imagine* ``word`` — return the multimodal perceptual activation it evokes.
 
         Unlike a token predictor, NYXARA grounds a word in the senses: "apple" fires taste
@@ -8374,13 +8430,10 @@ class NyxaraCore:
             pass
         return act
 
-    # backwards-friendly alias
-    def ground_word(self, word: str) -> Dict[str, Any]:
-        return self.understand(word)
 
     def _ground_input(self, text: str, cause: Any, thoughts: List[Any]) -> None:
         """Engage grounded meaning while *understanding* an input, not only on an explicit
-        :meth:`understand` call. For the salient content words of ``text``, fire the multimodal
+        :meth:`ground_word` call. For the salient content words of ``text``, fire the multimodal
         meaning NYXARA already holds (apple → taste/vision/touch/physics/affordance) and surface
         the strongest as a thought so the senses participate in comprehension. Floor-only —
         queries known meanings with no LLM and no network — and fully fail-soft: any fault is a

@@ -26,7 +26,7 @@ prints the honest split: solved-unaided / abstained-correctly / needs-a-model.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, List, Tuple
 
 from nyxara.eval.benchmark import Benchmark, BenchmarkReport, BenchmarkTask, Grader, Solver
 

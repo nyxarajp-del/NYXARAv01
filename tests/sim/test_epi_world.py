@@ -7,7 +7,6 @@ the final size — emerge from the dynamics rather than being written down. All 
 
 from __future__ import annotations
 
-import math
 
 from nyxara.sim.epi_world import EpidemicWorld, Outbreak
 

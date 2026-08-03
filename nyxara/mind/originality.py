@@ -675,7 +675,7 @@ class OriginalityEngine:
                 + "\n".join(lines) + "\n"
                 + f"Mechanism trace: {sketch.trace()}.\n"
                 + f"Energy ledger: input 1.00 → output {eff:.2f} "
-                + f"(each stage pays its cost; nothing is free).\n"
+                + "(each stage pays its cost; nothing is free).\n"
                 + f"The constraint it removes: {constraint}.")
         info = {"ops": ops, "causal": sketch.viability(), "reality": None,
                 "sketch": sketch}

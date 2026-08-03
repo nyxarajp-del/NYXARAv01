@@ -21,9 +21,9 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List
 
-from nyxara.growth.noesis import Library, Prog
+from nyxara.growth.noesis import Library
 
 __all__ = ["Neuromodulators", "UtilityLedger", "REMPruner", "PruneReport"]
 

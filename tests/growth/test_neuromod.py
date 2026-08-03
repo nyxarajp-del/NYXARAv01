@@ -10,13 +10,11 @@ from __future__ import annotations
 from nyxara.growth.neuromod import Neuromodulators, REMPruner, UtilityLedger
 from nyxara.growth.noesis import (
     INT,
-    INTLIST,
     Abstraction,
     NoesisEngine,
     app,
     base_library,
     hole,
-    var,
 )
 from nyxara.growth.redteam import RedTeam
 

@@ -20,7 +20,7 @@ candidates compete*, never the adoption rule. Pure standard library; **no LLM**;
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Dict, List, Sequence
 
 from nyxara.growth.formal_proof import typecheck
 from nyxara.growth.noesis import (

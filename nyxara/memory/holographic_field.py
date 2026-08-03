@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from nyxara.cognition.hyper_dimensional_vectors import HyperSpace, ItemMemory
 
@@ -121,6 +121,77 @@ class HolographicMemoryField:
         self.field = self.space.bundle(self.field, self.space.bind(key_hv, val_hv))
         self._count += 1
         self._enforce_capacity()
+
+    # ---- persistence (recipes, not the field) ---------------------------- #
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise as the construction parameters plus the ``(key, text)`` pairs it holds.
+
+        The field itself is a 10,000-dimensional real vector and is *not* stored: it is exactly
+        the bundle of these bindings, so replaying them rebuilds it bit-for-bit — the encoders are
+        deterministic given ``(dim, seed)``. Storing the vector would be megabytes and would go
+        stale against any change in the encoding; storing the recipe cannot."""
+        pairs = []
+        for vid in self._order:
+            text = self._texts.get(vid)
+            key = next((k for k, v in self._key_to_vid.items() if v == vid), None)
+            if key is not None and text is not None:
+                pairs.append([key, text])
+        return {"dim": self.space.dim, "seed": self.space.seed, "capacity": self.capacity,
+                "recall_threshold": self.recall_threshold, "pairs": pairs}
+
+    def load_dict(self, data: Mapping[str, Any]) -> bool:
+        """Rebuild the field by replaying its bindings, oldest first. Never raises.
+
+        Refuses a sidecar written at a different ``(dim, seed)`` rather than rebuilding a
+        different field that would look valid and recall wrongly."""
+        try:
+            if int(data.get("dim", self.space.dim)) != self.space.dim:
+                return False
+            if int(data.get("seed", self.space.seed)) != self.space.seed:
+                return False
+            self.capacity = max(1, int(data.get("capacity", self.capacity)))
+            self.recall_threshold = float(data.get("recall_threshold", self.recall_threshold))
+            # Reset the space itself as well as the three vocabularies. ItemMemory draws a fresh
+            # random vector the first time a symbol is asked for, so the *order* of first requests
+            # determines every vector — loading into an already-populated field without this would
+            # replay the same pairs onto different vectors and recall the wrong things.
+            self.space = HyperSpace(self.space.dim, seed=self.space.seed)
+            self.field = self.space.zero()
+            self.keys = ItemMemory(self.space)
+            self.values = ItemMemory(self.space)
+            self.tokens = ItemMemory(self.space)
+            self._texts, self._key_to_vid, self._order = {}, {}, []
+            self._count = 0
+            self.spilled = []
+            for pair in data.get("pairs", []):
+                if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                    self.remember(str(pair[0]), str(pair[1]))
+            return True
+        except Exception:  # noqa: BLE001 — a corrupt sidecar is an empty field, never a crash
+            return False
+
+    def save(self, path: Any) -> bool:
+        """Atomically persist the bindings (tmp file → ``os.replace``)."""
+        import json
+        import os
+        from pathlib import Path
+        try:
+            target = Path(str(path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.to_dict()), encoding="utf-8")
+            os.replace(tmp, target)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def load(self, path: Any) -> bool:
+        import json
+        from pathlib import Path
+        try:
+            return self.load_dict(json.loads(Path(str(path)).read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001 — a missing/corrupt file is simply an empty field
+            return False
 
     def _enforce_capacity(self) -> None:
         while len(self._order) > self.capacity:

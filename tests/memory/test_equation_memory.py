@@ -11,7 +11,6 @@ import os
 import tempfile
 
 import numpy as np
-import pytest
 
 from nyxara.memory.equation_memory import (
     EquationCode,

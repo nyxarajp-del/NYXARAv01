@@ -171,7 +171,7 @@ class GrammarEvolver:
 # --------------------------------------------------------------------------- #
 def meta_tasks(rnd, n: int) -> List[Task]:
     """Fantasise tasks that the base first-order grammar cannot express (they need ``pair``)."""
-    from nyxara.growth.noesis import app, evaluate, lit, var, base_library
+    from nyxara.growth.noesis import app, evaluate, var, base_library
     lib = base_library()
     install_extension(lib, _pair_extension())
     tasks: List[Task] = []

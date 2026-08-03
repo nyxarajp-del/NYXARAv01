@@ -394,7 +394,8 @@ def test_unify_laws_merges_shared_structure(tmp_path):
 # the lab notebook — auditable, append-only record of her science
 # --------------------------------------------------------------------------- #
 def test_lab_notebook_records_discoveries(tmp_path):
-    import json, os
+    import json
+    import os
     eng = _eng(path=str(tmp_path / "laws.json"))
     eng.discover_cycle()
     nb = str(tmp_path / "law_notebook.jsonl")

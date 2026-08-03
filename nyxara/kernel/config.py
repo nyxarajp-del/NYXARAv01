@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -737,6 +738,38 @@ class FoundryConfig(BaseModel):
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
     eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
+    # ---- L-SOVEREIGN: the ontological anchor (growth/loyalty_numpy.py) ---- #
+    # growth/loyalty.py states the intent exactly — "JP's alignment is literally part of the loss
+    # surface the optimizer descends" — but its LoyaltyObjective requires torch, and her OWN brain
+    # on a torch-less box is the NumPy transformer. These knobs put the same contrastive hinge into
+    # that brain's loss, so the anchor exists on the substrate she actually trains.
+    sovereign_loyalty_aux: bool = True
+    sovereign_aux_weight: float = Field(default=0.1, ge=0.0, le=10.0)
+    # A Master-supplied dataset is trusted, not sacred: if ingesting it drops her measured
+    # S_JP_Alignment by more than this, the file is quarantined instead of entering the corpus.
+    sovereign_max_alignment_drop: float = Field(default=0.02, ge=0.0, le=1.0)
+    sovereign_quarantine: bool = True
+    # ---- Master-supplied datasets (growth/dataset.py) ---- #
+    # Point her at a file or folder (.txt/.md, .jsonl/.json, .csv/.tsv, .pdf/.docx) and it becomes a
+    # durable corpus source under the foundry root — so EVERY later forge trains on it, not just the
+    # command that ingested it. None -> foundry_root/"dataset.jsonl".
+    dataset_path: Optional[Path] = None
+    dataset_max_docs: int = Field(default=20_000, ge=1)
+    dataset_max_chars: int = Field(default=4_000, ge=100)     # per record; longer text is chunked
+    dataset_chunk_chars: int = Field(default=800, ge=100)     # chunk_text window for prose files
+    # A Master-supplied file is not untrusted web text, so a prompt-injection hit is reported, not
+    # silently dropped. "drop" enforces the acquire.py posture; "off" skips the scan entirely.
+    dataset_screen: Literal["warn", "drop", "off"] = "warn"
+    dataset_causal: bool = True        # learn a causal graph from numeric columns + prose claims
+    # ---- L-ENTROPY: adaptive curriculum noise (growth/entropy.py) ---- #
+    # A brain trained only on clean text learns to depend on the text being clean. This perturbs
+    # the TRAINING split on an annealing schedule — never the eval split (that would make the
+    # promotion gate measure noise instead of skill) and never the answer side of a supervised
+    # pair (that would teach her to produce damaged answers).
+    dataset_entropy: bool = True
+    entropy_max: float = Field(default=0.15, ge=0.0, le=0.6)
+    entropy_ops: List[str] = Field(default_factory=lambda: [
+        "token_dropout", "char_noise", "span_mask", "sentence_permute", "numeric_jitter"])
     # Difficulty curriculum: order the training corpus easy -> hard so the model converges on
     # simple structure before hard examples (faster, less catastrophic forgetting). Pure-stdlib
     # difficulty proxy (length + lexical entropy); refined by the active model's perplexity when
@@ -1422,6 +1455,24 @@ class SelfImprovementConfig(BaseModel):
     # as a failing edit is. Set False to fall back to the legacy "keep if not worse" behaviour.
     require_provable_improvement: bool = True
     improvement_min_cost_delta: int = Field(default=1, ge=1)   # min AST-cost drop for a "cheaper" proof
+    # --- OUROBOROS: profile-driven rewrites of her own source (growth/ouroboros.py) --- #
+    # OFF by default. Every other growth layer is additive; this one edits her own source files,
+    # so the Master turns it on deliberately rather than inheriting it. When on, it aims edits at
+    # measured hot code, applies only semantics-preserving algorithmic transforms whose
+    # preconditions it can discharge, runs the existing Optimizer gauntlet, and puts a file back
+    # byte-for-byte when the workload did not actually get faster.
+    ouroboros_enabled: bool = False
+    # Only these subpackages may ever be rewritten. kernel/, guard/, identity/ and agency/ stay
+    # out of reach before PROTECTED_RELPATHS even gets a say, so a bug in a transform cannot reach
+    # the parts that decide what she is allowed to do.
+    ouroboros_allowlist: List[str] = Field(default_factory=lambda: ["growth", "mind"])
+    ouroboros_max_edits_per_cycle: int = Field(default=3, ge=0, le=32)
+    # Keep an edit only when the workload measurably speeds up — improvement_proof certifies
+    # against a static cost proxy, which is not the same as looking at the clock.
+    ouroboros_require_speedup: bool = True
+    # Optimizer's rollback is an in-memory string: if the process dies mid-edit it is gone. A clean
+    # tree means `git checkout` is a real last-resort undo before she rewrites herself.
+    ouroboros_require_clean_tree: bool = True
     # --- self-authored edits (real RSI) — triple-gated --- #
     # When ON *and* ``autonomous_enact`` is set *and* a real author is available, NYXARA authors a
     # whole-file fix for a weakness the deterministic transforms cannot express (high complexity,
@@ -2941,7 +2992,13 @@ class ServerConfig(BaseModel):
     # autonomic turn still passes the identical gates. This is what the ``nyxara-daemon``
     # entry point and the systemd/Windows service units switch on for an always-alive
     # deployment. OFF by default so a plain ``nyxara-serve`` behaves exactly as before.
-    autonomic: bool = False   # lean default; on via .env (NYXARA_SERVER__AUTONOMIC=true) / profile=max
+    # L-AGENCY: ON by default — she lives between prompts rather than waiting for one. The loop
+    # runs the LLM-free "code" decision path (affect → active inference → lowest-EFE intent →
+    # proactive gate → scheduler) and every action it takes still passes oversight.gate(),
+    # ProactiveEngine.evaluate() and PermissionPolicy, so autonomy widens what she *initiates*,
+    # never what she is *allowed* to do. Forced OFF under the TEST profile so the suite stays
+    # hermetic, and killable instantly with /scram or NYXARA_SERVER__AUTONOMIC=false.
+    autonomic: bool = True
     autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
     # A learning pass every N ticks. Non-zero by default so the always-on daemon actually
     # compounds: her GrowthEngine (reflect → consolidate → abstract → induce skills) runs on
@@ -3129,6 +3186,22 @@ class ObservabilityConfig(BaseModel):
     telemetry_enabled: bool = True
     replay_recording: bool = True  # kernel/replay.py deterministic capture
     honesty_enforcement: bool = True  # observe/honesty.py calibrated reporting
+
+
+_TEST_SCRATCH_ROOT: Optional[Path] = None
+
+
+def _test_scratch_root() -> Path:
+    """An isolated ``root`` for the TEST profile, stable for the life of the process.
+
+    Hermeticity is symmetric: sealing the writers is only half of it, because the suite also
+    *reads*. Sharing ``~/.nyxara`` with a live NYXARA means a promoted self-model, a learned
+    causal graph or a persisted embedding silently changes what a test observes. One root per
+    process keeps cross-settings-object tests working while owing nothing to the real home."""
+    global _TEST_SCRATCH_ROOT
+    if _TEST_SCRATCH_ROOT is None:
+        _TEST_SCRATCH_ROOT = Path(tempfile.mkdtemp(prefix=f"nyxara-test-{os.getpid()}-"))
+    return _TEST_SCRATCH_ROOT
 
 
 class PathsConfig(BaseModel):
@@ -3363,6 +3436,11 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.autonomous_enact = False
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
+            # The autonomic loop is ON by default in DEV/PROD (L-AGENCY), but a hermetic suite must
+            # never sprout a background thread that reaches the network, trains, or writes state
+            # underneath the test that is running. A test that wants the loop drives AutonomicLoop
+            # directly or sets this on its own settings object.
+            self.server.autonomic = False
             self.self_optimization.autonomous_enact = False
             self.mind_evolution.autonomous_enact = False
             # Rule synthesis may SEARCH (fast, deterministic) under TEST, but must never install an
@@ -3413,6 +3491,19 @@ class NyxaraSettings(BaseSettings):
             # suite stays hermetic (a test that wants the loop builds its own
             # RealtimePerception with a stub sensor; see tests/senses/test_realtime.py).
             self.perception.enabled = False
+            # Every knob above seals a WRITER, but the suite still READ ~/.nyxara — so a live
+            # daemon (or one `nyxara-grow` run) that promoted a model made hermetic tests fail
+            # on state no test created. Redirect the whole layout to a per-process scratch root
+            # unless NYXARA_HOME was set deliberately. Per-process, not per-settings-object:
+            # tests that write through one settings object and read through another must still
+            # see the same disk.
+            # Mutated field-by-field, not reassigned: NyxaraSettings has validate_assignment,
+            # so `self.paths = ...` would re-enter this very validator. PathsConfig does not
+            # (see its model_config), which is exactly what makes in-place safe here.
+            if not os.getenv("NYXARA_HOME"):
+                _scratch = PathsConfig(root=_test_scratch_root())
+                for _field in PathsConfig.model_fields:
+                    setattr(self.paths, _field, getattr(_scratch, _field))
 
         # ---- MAXIMUM POWER crank ---- #
         # profile=max OR NYXARA_MAX_POWER=1 pushes every capability/depth/cadence knob to its

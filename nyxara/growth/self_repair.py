@@ -24,7 +24,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 __all__ = ["BUNDLE_FORMAT", "pack_bundle", "verify_bundle", "unpack_bundle",
            "HealOutcome", "SelfRepair"]

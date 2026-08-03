@@ -19,7 +19,7 @@ from __future__ import annotations
 import itertools
 import random
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 __all__ = ["Expr", "RecombinationResult", "GenomicRecombiner"]
 

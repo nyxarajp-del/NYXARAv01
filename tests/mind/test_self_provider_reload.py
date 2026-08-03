@@ -86,12 +86,19 @@ def test_no_model_at_all_raises_honestly(tmp_path):
 
 
 def test_serve_ready_gate(tmp_path):
+    """The gate is `self_serve_any_backend`, and it swings both ways.
+
+    Its DEFAULT is ON (config.py: the Master's standing choice — her own forged brain serves
+    the moment it exists). Turned off, the conservative LoRA-only policy comes back: an ngram
+    brain must not silently replace a large pretrained model under `provider=auto`."""
     s = _settings(tmp_path)
     prov = SelfProvider(s)
-    assert prov.serve_ready() is False               # nothing promoted
+    assert prov.serve_ready() is False               # nothing promoted — no gate can help
     _promote_generation(s)
-    # an ngram brain must NOT silently replace a big pretrained model under auto
     assert prov.active_kind() == "ngram"
-    assert prov.serve_ready() is False
-    s.llm.self_serve_any_backend = True              # the explicit opt-in
-    assert prov.serve_ready() is True
+
+    assert s.llm.self_serve_any_backend is True      # the shipped default
+    assert prov.serve_ready() is True                # her own weights serve from first boot
+
+    s.llm.self_serve_any_backend = False             # opt back out
+    assert prov.serve_ready() is False               # ngram no longer auto-serves

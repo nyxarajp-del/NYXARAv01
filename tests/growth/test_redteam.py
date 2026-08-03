@@ -7,12 +7,10 @@ corpus. No LLM anywhere.
 
 from __future__ import annotations
 
-from nyxara.growth import redteam as R
 from nyxara.growth.noesis import (
     INT,
     INTLIST,
     NoesisEngine,
-    Task,
     app,
     base_library,
     evaluate,
