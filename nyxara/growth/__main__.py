@@ -128,6 +128,28 @@ def _learn_causal(args: argparse.Namespace, foundry: Any) -> None:
         print(f"· could not save the causal graph: {exc}")
 
 
+def _build_hyperspace(args: argparse.Namespace, foundry: Any) -> None:
+    """Fit a Poincaré concept space from the ingested dataset's taxonomic relations.
+
+    The space is loaded from disk first when one exists, so a later dataset *refines* the geometry
+    instead of starting over — the same accumulate-then-refit discipline ConceptHyperspace.fit
+    uses internally across domains."""
+    if not args.hyperspace:
+        return
+    from nyxara.growth.dataset_hyperspace import build_from_dataset_store
+    from nyxara.mind.concept_hyperspace import ConceptHyperspace
+
+    store = foundry.dataset_path
+    path = Path(str(store)).with_name("hyperspace.json")
+    space = ConceptHyperspace(dim=int(args.hyperspace_dim), seed=0, lr=0.1)
+    space.load(path)                      # a missing/corrupt file simply leaves it unfitted
+
+    report = build_from_dataset_store(store, space=space, domain=args.domain or "")
+    print(report.summary())
+    if report.fit is not None and space.save(path):
+        print(f"· concept hyperspace saved to {path}")
+
+
 def _acquire_topics(args: argparse.Namespace, foundry: Any) -> int:
     """Harvest screened web text for each ``--acquire`` topic (keyless DuckDuckGo by default)."""
     if not args.acquire:
@@ -270,6 +292,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--order", default=None, metavar="COLS",
                         help="with --causal: declare the causal ordering, e.g. \"x,m,y\". Without "
                              "it direction comes from NOTEARS, and without numpy she abstains")
+    parser.add_argument("--hyperspace", action="store_true",
+                        help="fit a Poincaré concept space from the dataset's is-a relations "
+                             "(hierarchy ends up in the geometry, so cross-domain analogy works)")
+    parser.add_argument("--hyperspace-dim", type=int, default=64, metavar="D",
+                        help="dimension of the concept hyperspace (default 64)")
+    parser.add_argument("--domain", default=None,
+                        help="with --hyperspace: tag these concepts as a named domain, so "
+                             "/analogy can align it against another")
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
@@ -301,6 +331,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _ingest_datasets(args, settings)
     _acquire_topics(args, foundry)
     _learn_causal(args, foundry)
+    _build_hyperspace(args, foundry)
     if args.flywheel_report:
         _flywheel_report(settings)
 
