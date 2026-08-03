@@ -101,6 +101,33 @@ def _ingest_datasets(args: argparse.Namespace, settings: Any) -> int:
     return total
 
 
+def _learn_causal(args: argparse.Namespace, foundry: Any) -> None:
+    """Learn a causal graph from the ingested dataset — numeric columns and/or prose claims.
+
+    Prints what was learned AND what was refused: a direction it could not establish, a pair the
+    multivariate fit found no residual effect for, a claim that contradicts an earlier one."""
+    if not (args.causal or args.causal_text):
+        return
+    from nyxara.mind.causal_world_model import CausalWorldModel
+
+    model = CausalWorldModel()
+    store = foundry.dataset_path
+    if args.causal:
+        from nyxara.growth.dataset_causal import learn_from_dataset_store
+        order = [c.strip() for c in args.order.split(",")] if args.order else None
+        print(learn_from_dataset_store(store, model=model, order=order).summary())
+    if args.causal_text:
+        from nyxara.growth.text_causal import learn_from_dataset_store as learn_text
+        print(learn_text(store, model=model).summary())
+
+    try:    # persist so the graph outlives this command and the live kernel can load it
+        path = Path(str(store)).with_name("causal_graph.json")
+        model.save(str(path))
+        print(f"· causal graph saved to {path}")
+    except Exception as exc:  # noqa: BLE001 — persistence is a convenience, never the deliverable
+        print(f"· could not save the causal graph: {exc}")
+
+
 def _acquire_topics(args: argparse.Namespace, foundry: Any) -> int:
     """Harvest screened web text for each ``--acquire`` topic (keyless DuckDuckGo by default)."""
     if not args.acquire:
@@ -234,6 +261,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dataset-screen", choices=["warn", "drop", "off"], default=None,
                         help="injection posture for --dataset (default warn: flagged but kept — a "
                              "file the Master hands over is not untrusted web text)")
+    parser.add_argument("--causal", action="store_true",
+                        help="learn a causal graph from the dataset's numeric columns "
+                             "(NOTEARS for direction, multivariate least squares for effect sizes)")
+    parser.add_argument("--causal-text", action="store_true",
+                        help="mine causal CLAIMS from the dataset's prose (cue grammar, no LLM); "
+                             "contradictions are refused, not absorbed")
+    parser.add_argument("--order", default=None, metavar="COLS",
+                        help="with --causal: declare the causal ordering, e.g. \"x,m,y\". Without "
+                             "it direction comes from NOTEARS, and without numpy she abstains")
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
@@ -264,6 +300,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _maybe_distill(args, settings)
     _ingest_datasets(args, settings)
     _acquire_topics(args, foundry)
+    _learn_causal(args, foundry)
     if args.flywheel_report:
         _flywheel_report(settings)
 

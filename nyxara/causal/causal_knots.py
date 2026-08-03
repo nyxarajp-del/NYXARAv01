@@ -45,6 +45,11 @@ TRUTH_ANCHOR = "⊤"  # the fixed "TRUE" node; a proposition links to it to beco
 
 def _norm_sign(sign: Any) -> int:
     """Coerce a sign or relation word to +1 / -1."""
+    # bool must be tested BEFORE int: in Python ``bool`` subclasses ``int``, so ``False`` would
+    # otherwise reach the numeric branch as 0, satisfy ``0 >= 0`` and come back CONCORDANT —
+    # silently turning "A prevents B" into "A causes B" and letting a contradiction through.
+    if isinstance(sign, bool):
+        return CONCORDANT if sign else DISCORDANT
     if isinstance(sign, (int, float)):
         return CONCORDANT if sign >= 0 else DISCORDANT
     s = str(sign).strip().lower()
