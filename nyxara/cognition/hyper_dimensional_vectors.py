@@ -93,6 +93,21 @@ def _cosine(a: Any, b: Any) -> float:
 # --------------------------------------------------------------------------- #
 # Hypervector
 # --------------------------------------------------------------------------- #
+def _json_safe(value: Any) -> bool:
+    """Can this input be persisted and replayed verbatim?
+
+    A recipe is only useful if it round-trips through JSON unchanged. A raw Hypervector or a numpy
+    array handed straight to ``add`` cannot, so it is left out of the sidecar rather than persisted
+    as something that would restore as a different vector."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return True
+    if isinstance(value, Mapping):
+        return all(isinstance(k, str) and _json_safe(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return all(_json_safe(v) for v in value)
+    return False
+
+
 @dataclass
 class Hypervector:
     """A single point in hyperdimensional space.
@@ -421,6 +436,12 @@ class LatentSpaceMap:
         self.max_corpus = int(max_corpus) if max_corpus else None
         self.num_levels = int(num_levels)
         self._corpus: Dict[str, Hypervector] = {}  # ingested datapoints
+        # The *recipe* for each corpus entry — the original input that produced it. Persisting
+        # 10,000-dimensional vectors would be tens of megabytes and, since bundled vectors are
+        # real-valued rather than bipolar, could not be bit-packed without loss. The encoders are
+        # deterministic given (dim, seed), so replaying the input rebuilds the vector exactly.
+        # This is the pattern nyx5/hd_memory.py already uses: store recipes, not vectors.
+        self._sources: Dict[str, Any] = {}
         self._levels: Optional[List[Hypervector]] = None
         self._num_range: Dict[str, Tuple[float, float]] = {}
         self._projectors: Dict[int, RandomProjector] = {}  # one per source width
@@ -544,16 +565,94 @@ class LatentSpaceMap:
         vec = self.encode(data)
         if name in self._corpus:
             del self._corpus[name]  # re-insert so refresh moves it to newest
+            self._sources.pop(name, None)
         self._corpus[name] = vec
+        if _json_safe(data):
+            self._sources[name] = data      # the recipe, so this entry can be rebuilt on load
         if self.max_corpus is not None:
             while len(self._corpus) > self.max_corpus:
                 oldest = next(iter(self._corpus))
                 del self._corpus[oldest]
+                self._sources.pop(oldest, None)
         return vec
 
     def forget(self, name: str) -> bool:
         """Drop a corpus item; returns True if it was present."""
+        self._sources.pop(name, None)
         return self._corpus.pop(name, None) is not None
+
+    # ---- persistence (recipes, not vectors) ---- #
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise the space as its construction parameters plus the corpus recipes.
+
+        Only entries whose input was JSON-safe are carried: a vector handed in directly cannot be
+        replayed, and silently dropping it is better than persisting something that would restore
+        as a different vector."""
+        return {"dim": self.space.dim, "seed": self.space.seed,
+                "novelty_threshold": self.novelty_threshold, "num_levels": self.num_levels,
+                "max_corpus": self.max_corpus,
+                "num_range": {k: list(v) for k, v in self._num_range.items()},
+                "sources": dict(self._sources)}
+
+    def load_dict(self, data: Mapping[str, Any]) -> bool:
+        """Rebuild the corpus by replaying its recipes. Never raises.
+
+        The vectors are *recomputed*, not restored, which is only sound because the encoders are
+        deterministic given ``(dim, seed)`` — so this asserts those match rather than quietly
+        rebuilding a different space."""
+        try:
+            if int(data.get("dim", self.space.dim)) != self.space.dim:
+                return False
+            if int(data.get("seed", self.space.seed)) != self.space.seed:
+                return False
+            self.novelty_threshold = float(data.get("novelty_threshold", self.novelty_threshold))
+            self.num_levels = int(data.get("num_levels", self.num_levels))
+            cap = data.get("max_corpus")
+            self.max_corpus = int(cap) if cap else None
+            self._num_range = {str(k): (float(v[0]), float(v[1]))
+                               for k, v in (data.get("num_range") or {}).items()
+                               if isinstance(v, (list, tuple)) and len(v) == 2}
+            # Reset the space and vocabulary too: ItemMemory draws a fresh random vector the
+            # first time a symbol is requested, so first-request ORDER determines every vector.
+            # Loading into an already-populated map without this replays the same recipes onto
+            # different vectors — the corpus would look restored and recall the wrong things.
+            self.space = HyperSpace(self.space.dim, seed=self.space.seed)
+            self.items = ItemMemory(self.space)
+            self._levels = None
+            self._projectors = {}
+            self._corpus = {}
+            self._sources = {}
+            for name, source in (data.get("sources") or {}).items():
+                try:
+                    self.add(str(name), source)
+                except Exception:  # noqa: BLE001 — one unreplayable recipe never costs the rest
+                    continue
+            return True
+        except Exception:  # noqa: BLE001 — a corrupt sidecar is an empty corpus, never a crash
+            return False
+
+    def save(self, path: Any) -> bool:
+        """Atomically persist the corpus recipes (tmp file → ``os.replace``)."""
+        import json
+        import os
+        from pathlib import Path
+        try:
+            target = Path(str(path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.to_dict()), encoding="utf-8")
+            os.replace(tmp, target)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def load(self, path: Any) -> bool:
+        import json
+        from pathlib import Path
+        try:
+            return self.load_dict(json.loads(Path(str(path)).read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001 — a missing/corrupt file is simply an empty corpus
+            return False
 
     def __len__(self) -> int:
         return len(self._corpus)
