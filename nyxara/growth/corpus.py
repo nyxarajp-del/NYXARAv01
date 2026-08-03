@@ -378,11 +378,19 @@ class ShardDataset:
         domain = domain or self._pick_domain()
         arrays = self._maps[domain]
         arr = arrays[self._rng.randrange(len(arrays))]
-        if len(arr) <= self.block_size + 1:
+        need = self.block_size + 1
+        if len(arr) <= need:
+            # A shard shorter than one window — which happens whenever a domain is
+            # underrepresented, and a real corpus always has one. Tile until the window is full
+            # rather than wrapping once: a single wrap still leaves the array short when the
+            # shard is less than half a window, and np.stack then fails on ragged rows only
+            # once that domain is first sampled, deep into a run.
             ids = np.asarray(arr, dtype=np.int64)
-            pad = self.block_size + 1 - len(ids)
-            ids = np.concatenate([ids, ids[:pad]]) if len(ids) else np.zeros(
-                self.block_size + 1, dtype=np.int64)
+            if len(ids) == 0:
+                ids = np.zeros(need, dtype=np.int64)
+            elif len(ids) < need:
+                reps = -(-need // len(ids))          # ceiling division
+                ids = np.tile(ids, reps)[:need]
         else:
             start = self._rng.randrange(len(arr) - self.block_size - 1)
             ids = np.asarray(arr[start:start + self.block_size + 1], dtype=np.int64)
