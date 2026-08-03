@@ -253,6 +253,13 @@ def learn_causal_graph(columns: Sequence[str], rows: Sequence[Dict[str, float]],
             report.note("NOTEARS returned a cyclic graph; no acyclic ordering — abstaining")
             return report
         report.orientation = "notears"
+        # NOTEARS minimises ‖X − XW‖² — a LINEAR structural model. On a nonlinear law the reverse
+        # direction can fit better than the true one, and the arrows come back inverted with full
+        # confidence. Measured against sim/ ground truth (growth/causal_validation.py): it recovers
+        # F ~ n·T exactly, abstains on τ = R·C, and gets v = √(T/μ) backwards. So a gradient-derived
+        # direction is reported as what it is, and `order=` remains the reliable path.
+        report.note("direction inferred by NOTEARS (linear structural fit) — it can invert on a "
+                    "nonlinear law; pass order= when the ordering is known")
         allowed = {c: set() for c in cols}
         for cause, effect, _w in report.notears_edges:
             allowed[effect].add(cause)

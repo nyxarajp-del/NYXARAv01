@@ -137,6 +137,17 @@ class CausalLink:
     def is_causal(self) -> bool:
         return self.verdict == CAUSAL
 
+    @property
+    def measured(self) -> bool:
+        """Did this edge come from evidence, or from a sentence that asserted it?
+
+        Edges learned from the event stream or from a dataset's numbers are *measured*. Edges
+        mined from prose by :mod:`~nyxara.growth.text_causal` are **claims** — someone wrote them
+        down, which is not the same thing, and text is exactly the medium in which false causal
+        claims travel. Anything that reports a link to the Master has to be able to tell the
+        difference, so it is exposed here rather than buried in ``evidence``."""
+        return str(self.evidence.get("source", "")) != "text_claim"
+
     def describe(self) -> str:
         if self.verdict == CAUSAL:
             head = f"{self.cause!r} causes {self.effect!r}"
@@ -149,7 +160,15 @@ class CausalLink:
             head = f"{self.cause!r} & {self.effect!r} co-occur by coincidence"
         else:
             head = f"{self.cause!r} & {self.effect!r} correlate (cause unproven)"
-        return f"{head} [conf {self.confidence:.0%}, strength {self.strength:+.2f}]"
+        tail = f"[conf {self.confidence:.0%}, strength {self.strength:+.2f}]"
+        if not self.measured:
+            # Never let an assertion read like a measurement. Whoever renders this — the reasoner,
+            # a report, the Master — sees the provenance in the same breath as the claim.
+            quote = str(self.evidence.get("quote", "")).strip()
+            tail += " — ASSERTED IN TEXT, not measured"
+            if quote:
+                tail += f' (source: "{quote[:80]}")'
+        return f"{head} {tail}"
 
     def to_dict(self) -> Dict[str, Any]:
         return {"cause": self.cause, "effect": self.effect,

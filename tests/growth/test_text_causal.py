@@ -145,3 +145,34 @@ def test_claims_to_graph_without_a_lattice_still_reports(monkeypatch):
     claims, _n, _d = extract_claims("Rain causes flooding.")
     report = claims_to_graph(claims, model=CausalWorldModel(), lattice=None)
     assert len(report.claims) == 1
+
+
+# -------------------- provenance must survive into the answer -------------------- #
+def test_an_asserted_link_never_reads_like_a_measured_one():
+    """Text is the medium in which false causal claims travel. Once prose can register edges,
+    anything that reports one has to say which kind it is — otherwise a corpus's folklore becomes
+    her confident opinion."""
+    model = CausalWorldModel()
+    learn_from_text("Vaccines cause autism.", model=model)
+
+    link = model.why("autism")[0]
+    assert link.measured is False
+    described = link.describe()
+    assert "ASSERTED IN TEXT, not measured" in described
+    assert "Vaccines cause autism." in described
+
+
+def test_a_measured_link_carries_no_such_warning():
+    import random
+
+    rng = random.Random(0)
+    rows = []
+    for _ in range(60):
+        rain = rng.gauss(0, 1)
+        rows.append({"rain": rain, "flood": 2.0 * rain + rng.gauss(0, 0.2)})
+    model = CausalWorldModel()
+    learn_causal_graph(["rain", "flood"], rows, model=model, order=["rain", "flood"])
+
+    link = model.why("flood")[0]
+    assert link.measured is True
+    assert "ASSERTED" not in link.describe()

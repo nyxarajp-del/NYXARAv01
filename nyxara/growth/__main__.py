@@ -237,6 +237,26 @@ def _forge_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validate_causal() -> int:
+    """Check the causal learner against worlds whose laws are true by construction."""
+    from nyxara.growth.causal_validation import validate_all
+
+    print("· validating the causal graph against sim/ ground truth "
+          "(laws true by construction, not by anything she inferred)…")
+    try:
+        reports = validate_all()
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· validation failed: {exc}")
+        return 1
+    for report in reports:
+        print(report.summary())
+    invented = [r for r in reports if not r.invented_nothing]
+    exact = sum(1 for r in reports if r.recovered)
+    print(f"· {exact}/{len(reports)} world(s) recovered exactly; "
+          f"{len(invented)} invented an edge that does not exist.")
+    return 1 if invented else 0
+
+
 def _ouroboros(args: argparse.Namespace) -> int:
     """Scan → propose → (with --enact) rewrite her own source under the existing gauntlet."""
     from nyxara.growth.ouroboros import Ouroboros
@@ -340,6 +360,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
+    parser.add_argument("--validate-causal", action="store_true",
+                        help="check her causal learner against sim/ worlds whose laws are true\n"
+                             "by construction — the one place she cannot grade her own homework")
     parser.add_argument("--ouroboros", action="store_true",
                         help="scan her own source for hot code and propose semantics-preserving\n"
                              "algorithmic rewrites. Writes nothing without --enact")
@@ -362,6 +385,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="with --evolve-mind: on a plateau, escalate to one index-steered "
                              "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
+
+    if args.validate_causal:
+        return _validate_causal()
 
     if args.ouroboros:
         return _ouroboros(args)
