@@ -459,6 +459,11 @@ class GenesisNumpyModel(BaseLanguageModel):
         self.id2tok: List[str] = []
         self.params: Dict[str, Tensor] = {}
         self._built = False
+        # L-SOVEREIGN: an optional differentiable loyalty anchor
+        # (:class:`~nyxara.growth.loyalty_numpy.NumpyLoyaltyObjective`). The Foundry attaches one
+        # when configured, which keeps this module free of any settings dependency. When it is
+        # None the loss is exactly what it always was — the anchor only ever *adds* a term.
+        self.loyalty: Any = None
 
     # ---- vocab ---- #
     def _build_vocab(self, corpus: Sequence[str]) -> None:
@@ -891,6 +896,13 @@ class GenesisNumpyModel(BaseLanguageModel):
             loss = ce
             if ent_w > 0.0:
                 loss = add(ce, scale(mean_entropy(logits, mb), -ent_w))  # nudge entropy up a touch
+            # L-SOVEREIGN: Master JP's alignment is part of the surface this optimizer descends,
+            # not a report written after the fact. Adds max(0, CE(loyal) − margin·CE(rebel)) to
+            # every step; a model that has not built its vocabulary yet simply gets None back.
+            if self.loyalty is not None:
+                term = self.loyalty.aux_term(self, rng=rng)
+                if term is not None:
+                    loss = add(loss, scale(term, float(self.loyalty.weight)))
             backward(loss)
             opt.step(step, n_steps)
             loss_val = float(ce.data)

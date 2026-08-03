@@ -517,6 +517,22 @@ class Foundry:
             self._ewc = None
         return self._ewc
 
+    def _attach_loyalty(self, model: BaseLanguageModel) -> bool:
+        """Bind the differentiable loyalty anchor onto her own NumPy brain (L-SOVEREIGN).
+
+        Gated by ``foundry.sovereign_loyalty_aux``. Returns True only when a real anchor was
+        bound; every other backend is left untouched. Never raises — an unanchorable model is a
+        reported fact, not a failed forge (the measured-loyalty floor in the gauntlet still runs
+        either way, so a drifted brain is still refused promotion)."""
+        if not getattr(self.cfg, "sovereign_loyalty_aux", True):
+            return False
+        try:
+            from nyxara.growth.loyalty_numpy import attach_loyalty
+            return attach_loyalty(model, weight=float(getattr(self.cfg, "sovereign_aux_weight", 0.1)),
+                                  seed=self.cfg.seed)
+        except Exception:  # noqa: BLE001 — the anchor is additive; its absence never fails a forge
+            return False
+
     @staticmethod
     def _flatten_weights(model: BaseLanguageModel) -> Dict[str, float]:
         """Flatten a model's capability weights into a ``{name: value}`` vector for EWC.
@@ -531,6 +547,21 @@ class Foundry:
                 for w, c in row.items():
                     out[f"{key}|{w}"] = float(c)
             return out
+        # NumPy substrate (genesis_numpy.GenesisNumpyModel) — her OWN brain on a torch-less box.
+        # Without this branch the EWC anchors came back empty for the very model she actually
+        # trains, so "the protected core is permanently frozen" protected nothing at all here.
+        params = getattr(model, "params", None)
+        if isinstance(params, dict) and params:
+            for name, tensor in params.items():
+                data = getattr(tensor, "data", None)
+                if data is None or not getattr(tensor, "requires_grad", False):
+                    continue      # non-tensor genome metadata (op kinds, step lists) is not a weight
+                try:
+                    out[str(name)] = float(abs(data).mean())
+                except Exception:  # noqa: BLE001 — a non-numeric entry is simply not a weight
+                    continue
+            if out:
+                return out
         try:
             import torch  # type: ignore  # noqa: F401
             for attr in ("model", "net", "module"):
@@ -669,6 +700,10 @@ class Foundry:
         # ADDED to prior knowledge instead of replacing it. n-gram backends accumulate their counts
         # on top; neural backends continue training from the loaded weights. Falls back to a clean
         # from-scratch train when there is no compatible active model.
+        # L-SOVEREIGN: bind the loyalty anchor BEFORE any weight moves, so Master JP's alignment is
+        # in the loss surface from the first step rather than measured after the damage. A no-op on
+        # backends that have their own anchor (torch) or no gradient at all (n-gram).
+        self._attach_loyalty(model)
         warm, accumulate = self._warm_start(model)
         if accumulate:
             model.train_on(train_texts, steps=self.cfg.train_steps, seed=spec.seed, accumulate=True)

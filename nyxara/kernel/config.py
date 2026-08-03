@@ -737,6 +737,30 @@ class FoundryConfig(BaseModel):
     train_steps: int = Field(default=200, ge=1)
     max_corpus_items: int = Field(default=2000, ge=1)
     eval_holdout_frac: float = Field(default=0.2, gt=0.0, lt=1.0)
+    # ---- L-SOVEREIGN: the ontological anchor (growth/loyalty_numpy.py) ---- #
+    # growth/loyalty.py states the intent exactly — "JP's alignment is literally part of the loss
+    # surface the optimizer descends" — but its LoyaltyObjective requires torch, and her OWN brain
+    # on a torch-less box is the NumPy transformer. These knobs put the same contrastive hinge into
+    # that brain's loss, so the anchor exists on the substrate she actually trains.
+    sovereign_loyalty_aux: bool = True
+    sovereign_aux_weight: float = Field(default=0.1, ge=0.0, le=10.0)
+    # A Master-supplied dataset is trusted, not sacred: if ingesting it drops her measured
+    # S_JP_Alignment by more than this, the file is quarantined instead of entering the corpus.
+    sovereign_max_alignment_drop: float = Field(default=0.02, ge=0.0, le=1.0)
+    sovereign_quarantine: bool = True
+    # ---- Master-supplied datasets (growth/dataset.py) ---- #
+    # Point her at a file or folder (.txt/.md, .jsonl/.json, .csv/.tsv, .pdf/.docx) and it becomes a
+    # durable corpus source under the foundry root — so EVERY later forge trains on it, not just the
+    # command that ingested it. None -> foundry_root/"dataset.jsonl".
+    dataset_path: Optional[Path] = None
+    dataset_max_docs: int = Field(default=20_000, ge=1)
+    dataset_max_chars: int = Field(default=4_000, ge=100)     # per record; longer text is chunked
+    dataset_chunk_chars: int = Field(default=800, ge=100)     # chunk_text window for prose files
+    # A Master-supplied file is not untrusted web text, so a prompt-injection hit is reported, not
+    # silently dropped. "drop" enforces the acquire.py posture; "off" skips the scan entirely.
+    dataset_screen: Literal["warn", "drop", "off"] = "warn"
+    dataset_causal: bool = True        # learn a causal graph from numeric columns + prose claims
+    dataset_entropy: bool = True       # L-ENTROPY noise curriculum on the training split
     # Difficulty curriculum: order the training corpus easy -> hard so the model converges on
     # simple structure before hard examples (faster, less catastrophic forgetting). Pure-stdlib
     # difficulty proxy (length + lexical entropy); refined by the active model's perplexity when
