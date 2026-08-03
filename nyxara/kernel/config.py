@@ -2973,7 +2973,13 @@ class ServerConfig(BaseModel):
     # autonomic turn still passes the identical gates. This is what the ``nyxara-daemon``
     # entry point and the systemd/Windows service units switch on for an always-alive
     # deployment. OFF by default so a plain ``nyxara-serve`` behaves exactly as before.
-    autonomic: bool = False   # lean default; on via .env (NYXARA_SERVER__AUTONOMIC=true) / profile=max
+    # L-AGENCY: ON by default — she lives between prompts rather than waiting for one. The loop
+    # runs the LLM-free "code" decision path (affect → active inference → lowest-EFE intent →
+    # proactive gate → scheduler) and every action it takes still passes oversight.gate(),
+    # ProactiveEngine.evaluate() and PermissionPolicy, so autonomy widens what she *initiates*,
+    # never what she is *allowed* to do. Forced OFF under the TEST profile so the suite stays
+    # hermetic, and killable instantly with /scram or NYXARA_SERVER__AUTONOMIC=false.
+    autonomic: bool = True
     autonomic_interval_s: float = Field(default=30.0, gt=0)   # background loop cadence
     # A learning pass every N ticks. Non-zero by default so the always-on daemon actually
     # compounds: her GrowthEngine (reflect → consolidate → abstract → induce skills) runs on
@@ -3395,6 +3401,11 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.autonomous_enact = False
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
+            # The autonomic loop is ON by default in DEV/PROD (L-AGENCY), but a hermetic suite must
+            # never sprout a background thread that reaches the network, trains, or writes state
+            # underneath the test that is running. A test that wants the loop drives AutonomicLoop
+            # directly or sets this on its own settings object.
+            self.server.autonomic = False
             self.self_optimization.autonomous_enact = False
             self.mind_evolution.autonomous_enact = False
             # Rule synthesis may SEARCH (fast, deterministic) under TEST, but must never install an

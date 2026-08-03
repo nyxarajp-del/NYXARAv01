@@ -166,6 +166,20 @@ def _acquire_topics(args: argparse.Namespace, foundry: Any) -> int:
     return int(report.get("kept", 0))
 
 
+def _gaps_report(args: argparse.Namespace, settings: Any) -> None:
+    """Show her measured ignorance — what she would go learn, and why."""
+    if not args.gaps:
+        return
+    try:
+        from nyxara.growth.epistemic_drive import EpistemicDrive
+        drive = EpistemicDrive(settings=settings)
+        print(drive.summary(k=8))
+        searchable = drive.topics(limit=8)
+        print(f"· would acquire: {', '.join(searchable) if searchable else '(nothing searchable)'}")
+    except Exception as exc:  # noqa: BLE001 — a report never breaks the command
+        print(f"· epistemic drive unavailable: {exc}")
+
+
 def _flywheel_report(settings: Any) -> None:
     """Show what she has verified and kept from her OWN lived turns (self-generated data)."""
     try:
@@ -303,6 +317,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
+    parser.add_argument("--gaps", action="store_true",
+                        help="show her measured ignorance: the ranked epistemic gaps that "
+                             "drive what she goes and learns")
     parser.add_argument("--flywheel-report", action="store_true",
                         help="show the self-generated corpus: what she verified from her own turns")
     parser.add_argument("--forge-brain", type=int, nargs="?", const=0, default=None, metavar="GENS",
@@ -332,6 +349,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _acquire_topics(args, foundry)
     _learn_causal(args, foundry)
     _build_hyperspace(args, foundry)
+    _gaps_report(args, settings)
     if args.flywheel_report:
         _flywheel_report(settings)
 

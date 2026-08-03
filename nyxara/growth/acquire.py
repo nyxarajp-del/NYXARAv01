@@ -142,13 +142,21 @@ def _lesson_subjects(memory: Any, limit: int) -> List[str]:
 
 
 def gap_topics(*, memory: Any = None, weakness_report: Any = None,
-               settings: Any = None, limit: int = 8) -> List[str]:
-    """Derive what NYXARA should go *learn* — from weaknesses, lessons, and configured seeds.
+               settings: Any = None, limit: int = 8, drive: Any = None,
+               use_drive: bool = True) -> List[str]:
+    """Derive what NYXARA should go *learn* — from measured ignorance, lessons, and seeds.
 
-    Order of preference: concrete weakness titles (what she is measurably worst at) →
-    recent lesson subjects (what she just learned matters) → Master-configured
-    ``foundry.acquire_topics`` → a broad default battery. Deduped (case-insensitive),
-    order-preserving, capped at ``limit``. Never raises.
+    Order of preference: her ranked epistemic gaps (what she is measurably worst at and most
+    uncertain about) → recent lesson subjects (what she just learned matters) →
+    Master-configured ``foundry.acquire_topics`` → a broad default battery. Deduped
+    (case-insensitive), order-preserving, capped at ``limit``. Never raises.
+
+    ``weakness_report`` was always this function's highest-priority input and **no caller ever
+    passed one**, so the strongest signal she had was dead and selection fell through to memory
+    regexes and a static battery. When one is not supplied, an
+    :class:`~nyxara.growth.epistemic_drive.EpistemicDrive` is built to supply it — along with the
+    other four uncertainty signals, fused and ranked on a common scale. Pass ``use_drive=False``
+    for the old behaviour.
     """
     candidates: List[str] = []
     try:
@@ -157,7 +165,12 @@ def gap_topics(*, memory: Any = None, weakness_report: Any = None,
                 title = (getattr(w, "title", "") or "").strip()
                 if title:
                     candidates.append(title)
-    except Exception:  # noqa: BLE001
+        elif use_drive:
+            if drive is None:
+                from nyxara.growth.epistemic_drive import EpistemicDrive
+                drive = EpistemicDrive(settings=settings, memory=memory)
+            candidates.extend(t for t in drive.topics(limit=limit) if t)
+    except Exception:  # noqa: BLE001 — an unavailable drive falls through to the older sources
         pass
     candidates.extend(_lesson_subjects(memory, limit))
     try:

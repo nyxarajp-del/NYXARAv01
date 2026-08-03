@@ -540,10 +540,17 @@ class GrowthEngine:
             return []
 
     def _acquire_topics(self) -> List[str]:
-        """Derive what to go learn from her gaps — weaknesses + lessons + configured seeds."""
+        """Derive what to go learn from her measured ignorance, not from a fallback list.
+
+        The drive fuses her five uncertainty signals (weakness severity, open-question
+        uncertainty, world-model epistemic error, signal-bus focus, RND novelty) onto one scale
+        and ranks them, so acquisition is finally aimed at what she is actually worst at."""
         try:
             from nyxara.growth.acquire import gap_topics
-            return gap_topics(memory=self.memory, settings=self.settings)
+            from nyxara.growth.epistemic_drive import EpistemicDrive
+            drive = EpistemicDrive(core=getattr(self, "core", None), settings=self.settings,
+                                   memory=self.memory)
+            return gap_topics(memory=self.memory, settings=self.settings, drive=drive)
         except Exception:  # noqa: BLE001 — topic derivation is best-effort
             return []
 
