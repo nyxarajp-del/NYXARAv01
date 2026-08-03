@@ -400,6 +400,43 @@ class Foundry:
             return items, items   # tiny corpus: train == eval
         return items[n_eval:] or items, items[:n_eval]
 
+    # ---- L-ENTROPY ---- #
+    def _apply_entropy(self, train_texts: List[str]) -> Tuple[List[str], Any]:
+        """Perturb the training split on the configured schedule (never raises).
+
+        Returns ``(texts, report_or_None)``. Disabled or unavailable simply returns the texts
+        unchanged — augmentation is additive and never costs a forge."""
+        if not getattr(self.cfg, "dataset_entropy", True):
+            return train_texts, None
+        try:
+            from nyxara.growth.entropy import EntropyReport, perturb_corpus
+            report = EntropyReport()
+            competence = self._entropy_competence()
+            noised = perturb_corpus(train_texts, settings=self.settings, competence=competence,
+                                    seed=self.cfg.seed, report=report)
+            return noised, report
+        except Exception:  # noqa: BLE001 — a failed augmentation trains on clean text, never fails
+            return train_texts, None
+
+    def _entropy_competence(self) -> float:
+        """Her measured mastery, 0..1 — a weak brain earns its noise instead of drowning in it."""
+        try:
+            from nyxara.growth.curriculum import AutoCurriculum
+            tier = int(AutoCurriculum(memory=None).frontier_tier())
+            return max(0.0, min(1.0, tier / 8.0))
+        except Exception:  # noqa: BLE001 — no curriculum record yet: assume a mid schedule
+            return 0.5
+
+    def _noisy_perplexity(self, model: BaseLanguageModel, eval_texts: Sequence[str]) -> float:
+        """Perplexity on a perturbed copy of the holdout — reported, never gated on."""
+        try:
+            from nyxara.growth.entropy import perturb_corpus
+            noisy = perturb_corpus(list(eval_texts), settings=self.settings, competence=1.0,
+                                   seed=self.cfg.seed + 1)
+            return self.evaluate(model, noisy).perplexity
+        except Exception:  # noqa: BLE001
+            return float("inf")
+
     # ---- evaluation ---- #
     def evaluate(self, model: BaseLanguageModel, eval_texts: Sequence[str]) -> EvalResult:
         if not eval_texts:
@@ -713,6 +750,11 @@ class Foundry:
                                  train_epochs=self.cfg.train_epochs)
         full = list(corpus) if corpus is not None else self.collect_corpus()
         train_texts, eval_texts = self._holdout(full)
+        # L-ENTROPY: perturb the TRAINING split only, and strictly after the holdout split — the
+        # gauntlet promotes on a strictly-lower perplexity, so noising eval_texts would make that
+        # gate measure noise instead of skill. ``noisy_eval`` is a perturbed copy of the held-out
+        # text used purely to REPORT robustness; it never gates anything.
+        train_texts, entropy_report = self._apply_entropy(train_texts)
         model = build_model(spec)
         # continual learning (anti-forgetting): warm-start from the active model so a new skill is
         # ADDED to prior knowledge instead of replacing it. n-gram backends accumulate their counts
@@ -730,6 +772,13 @@ class Foundry:
         ev = self.evaluate(model, eval_texts)
         metrics = ev.to_dict()
         metrics["capability"] = round(self._capability_score(model), 5)
+        if entropy_report is not None:
+            metrics["entropy"] = entropy_report.to_dict()
+            # Honest robustness read-out: the CLEAN holdout perplexity is ``ev.perplexity`` above
+            # and still the only promotion gate. This second number says how she copes with
+            # degraded input — an augmentation that helps here while wrecking the clean score is
+            # not a win, so both are recorded and both are visible.
+            metrics["noisy_perplexity"] = round(self._noisy_perplexity(model, eval_texts), 5)
         metrics.update(self._loyalty_metrics(model, ev.perplexity))
         metrics.update(self._teacher_relative_accuracy(model))   # audit: how far above the teacher
 

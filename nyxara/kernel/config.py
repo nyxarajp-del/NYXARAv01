@@ -760,7 +760,15 @@ class FoundryConfig(BaseModel):
     # silently dropped. "drop" enforces the acquire.py posture; "off" skips the scan entirely.
     dataset_screen: Literal["warn", "drop", "off"] = "warn"
     dataset_causal: bool = True        # learn a causal graph from numeric columns + prose claims
-    dataset_entropy: bool = True       # L-ENTROPY noise curriculum on the training split
+    # ---- L-ENTROPY: adaptive curriculum noise (growth/entropy.py) ---- #
+    # A brain trained only on clean text learns to depend on the text being clean. This perturbs
+    # the TRAINING split on an annealing schedule — never the eval split (that would make the
+    # promotion gate measure noise instead of skill) and never the answer side of a supervised
+    # pair (that would teach her to produce damaged answers).
+    dataset_entropy: bool = True
+    entropy_max: float = Field(default=0.15, ge=0.0, le=0.6)
+    entropy_ops: List[str] = Field(default_factory=lambda: [
+        "token_dropout", "char_noise", "span_mask", "sentence_permute", "numeric_jitter"])
     # Difficulty curriculum: order the training corpus easy -> hard so the model converges on
     # simple structure before hard examples (faster, less catastrophic forgetting). Pure-stdlib
     # difficulty proxy (length + lexical entropy); refined by the active model's perplexity when
