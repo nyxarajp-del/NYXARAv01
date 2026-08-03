@@ -237,6 +237,26 @@ def _forge_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _forge_operator() -> int:
+    """Render searched mixer genomes into source and verify each against the interpreter."""
+    from nyxara.growth.genesis import MixerProgram
+    from nyxara.growth.operator_source import render_operator, verify_equivalence
+
+    genomes = [["proj", "gate", "norm"], ["shift", "ssm", "proj"], ["conv:5", "gate"],
+               ["lowrank:4", "norm"]]
+    print("· rendering searched mixer genomes into source, then checking each against the "
+          "interpreted path…")
+    failures = 0
+    for steps in genomes:
+        rendered = render_operator(MixerProgram(steps=list(steps)))
+        ok, detail = verify_equivalence(rendered)
+        print(f"  {rendered.fingerprint:26s} {'OK ' if ok else 'FAIL'} {detail}")
+        failures += int(not ok)
+    print(f"· {len(genomes) - failures}/{len(genomes)} rendered operator(s) match the interpreter "
+          f"bit-for-bit.")
+    return 1 if failures else 0
+
+
 def _validate_causal() -> int:
     """Check the causal learner against worlds whose laws are true by construction."""
     from nyxara.growth.causal_validation import validate_all
@@ -360,6 +380,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
+    parser.add_argument("--forge-operator", action="store_true",
+                        help="render a searched mixer genome into real Python source and check\n"
+                             "it computes exactly what the interpreted genome does")
     parser.add_argument("--validate-causal", action="store_true",
                         help="check her causal learner against sim/ worlds whose laws are true\n"
                              "by construction — the one place she cannot grade her own homework")
@@ -385,6 +408,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="with --evolve-mind: on a plateau, escalate to one index-steered "
                              "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
+
+    if args.forge_operator:
+        return _forge_operator()
 
     if args.validate_causal:
         return _validate_causal()
