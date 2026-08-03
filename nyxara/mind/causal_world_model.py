@@ -407,6 +407,11 @@ class CausalWorldModel:
         self.structure_learning = bool(structure_learning)
         self.structure_min_samples = max(4, int(structure_min_samples))
         self._structure: Any = None                       # DifferentiableCausalStructure, lazily fit
+        # How much to damp a symbolic edge the gradient fit actively contradicts. Damping,
+        # not flipping: NOTEARS inverts arrows on nonlinear laws (measured in
+        # growth/causal_validation.py), so its disagreement is a reason for less confidence
+        # rather than a reason to trust it over the symbolic verdict.
+        self.structure_disagreement_damping: float = 0.5
         self._last_struct_n = 0                            # events seen at the last structure fit
 
         self._n = 0                                       # total events seen
@@ -1171,7 +1176,8 @@ class CausalWorldModel:
                 f"(confidence {top.confidence:.0%}){tail}.")
 
     def as_causal_graph(self, *, min_confidence: Optional[float] = None,
-                        prune_mediated: bool = True) -> List[Tuple[str, str, float]]:
+                        prune_mediated: bool = True,
+                        corroborate: bool = True) -> List[Tuple[str, str, float]]:
         """Export the *causal* edges as ``[(cause, effect, weight)]`` for the structural
         propagation engine in :mod:`mind.strategies`.
 
@@ -1217,7 +1223,43 @@ class CausalWorldModel:
                         del raw[(a, c)]
                         break
 
+        if corroborate:
+            raw = self._corroborate_with_structure(raw)
         return [(c, e, w) for (c, e), w in raw.items()]
+
+    def _corroborate_with_structure(self, raw: Dict[Tuple[str, str], float]
+                                    ) -> Dict[Tuple[str, str], float]:
+        """Let the gradient-fitted structure *corroborate* the symbolic edges — never create them.
+
+        NOTEARS was fitted by :meth:`learn_structure` and then went nowhere: it surfaced in
+        ``stats()`` and nothing in ``do()`` or ``counterfactual()`` ever saw it. Merging it is
+        worth doing, but only in one direction, and there is measured evidence for why.
+
+        :mod:`~nyxara.growth.causal_validation` runs the learner against ``sim/`` worlds whose laws
+        are true by construction. Unaided, NOTEARS recovers ``F ~ n·T`` exactly, correctly abstains
+        on ``τ = R·C`` — and gets ``v = √(T/μ)`` **backwards**, inverting both arrows with full
+        confidence and inventing a third edge. It minimises a *linear* reconstruction, so on a
+        nonlinear law the reverse direction genuinely fits better.
+
+        So: an edge the symbolic layer accepted and the gradient agrees with is left alone; an edge
+        the gradient **actively contradicts** — it learned the reverse far more strongly — is
+        *damped*, not flipped, because a disagreement is a reason for less confidence rather than
+        for trusting the fit that just failed a ground-truth check. And an edge only the gradient
+        believes in is **not added at all**. Never raises."""
+        structure = self._structure
+        if structure is None or not getattr(structure, "fitted", False):
+            return raw
+        out = dict(raw)
+        for (cause, effect), weight in raw.items():
+            try:
+                forward = abs(float(structure.weight(cause, effect)))
+                reverse = abs(float(structure.weight(effect, cause)))
+            except Exception:  # noqa: BLE001 — an unscorable pair is simply uncorroborated
+                continue
+            # only a clear reversal counts as contradiction, not ordinary gradient noise
+            if reverse > 0.05 and reverse > forward * 3.0:
+                out[(cause, effect)] = weight * self.structure_disagreement_damping
+        return out
 
     def _structural_model(self) -> Any:
         from nyxara.mind.strategies import CausalModel
