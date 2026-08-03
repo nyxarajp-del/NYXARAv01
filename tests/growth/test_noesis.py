@@ -11,7 +11,6 @@ These lock in the properties that make Noēsis honest:
 
 from __future__ import annotations
 
-import random
 
 from nyxara.growth import noesis as N
 from nyxara.growth.noesis import (

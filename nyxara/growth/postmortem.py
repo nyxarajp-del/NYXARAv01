@@ -24,9 +24,9 @@ values*. Pure standard library; no LLM.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from nyxara.growth.noesis import _FORBIDDEN
 from nyxara.mind.uncertainty import BetaBelief

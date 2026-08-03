@@ -8,7 +8,6 @@ tests assert the real end-to-end forge AND the gates around it (measure-only, be
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 

@@ -46,10 +46,13 @@ import math
 import random
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from nyxara.identity.motivation import MotivationSystem, Option
 from nyxara.senses.predictive import SensoryPredictor
+
+if TYPE_CHECKING:  # the return annotation names it; the runtime import stays lazy
+    from nyxara.mind.world_model import Transition
 
 __all__ = [
     "Body", "PhysicsWorld", "PhysicsTransition", "PhysicsAgent",

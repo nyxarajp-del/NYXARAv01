@@ -8404,7 +8404,7 @@ class NyxaraCore:
             self._sym_grounder = GroundedLexicon(llm=self._grounding_llm())
         return self._sym_grounder
 
-    def understand(self, word: str) -> Dict[str, Any]:
+    def ground_word(self, word: str) -> Dict[str, Any]:
         """*Imagine* ``word`` — return the multimodal perceptual activation it evokes.
 
         Unlike a token predictor, NYXARA grounds a word in the senses: "apple" fires taste
@@ -8430,13 +8430,10 @@ class NyxaraCore:
             pass
         return act
 
-    # backwards-friendly alias
-    def ground_word(self, word: str) -> Dict[str, Any]:
-        return self.understand(word)
 
     def _ground_input(self, text: str, cause: Any, thoughts: List[Any]) -> None:
         """Engage grounded meaning while *understanding* an input, not only on an explicit
-        :meth:`understand` call. For the salient content words of ``text``, fire the multimodal
+        :meth:`ground_word` call. For the salient content words of ``text``, fire the multimodal
         meaning NYXARA already holds (apple → taste/vision/touch/physics/affordance) and surface
         the strongest as a thought so the senses participate in comprehension. Floor-only —
         queries known meanings with no LLM and no network — and fully fail-soft: any fault is a

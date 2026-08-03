@@ -31,7 +31,6 @@ and every operation is best-effort. Learned skills persist through the
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple

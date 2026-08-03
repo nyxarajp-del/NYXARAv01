@@ -6,7 +6,6 @@ causal engine (6), CA physics sandbox (9), reality anchor (11), dialectic gating
 benchmark-gated strategy evolution (3), and the dream consolidation phase (8)."""
 
 import random
-import sys
 import xml.etree.ElementTree as ET
 
 import pytest

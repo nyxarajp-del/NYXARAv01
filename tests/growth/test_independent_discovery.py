@@ -9,7 +9,6 @@ into her belief model as created information — physics, epidemiology and chemi
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.growth.autonomous_scientist import AutonomousScientist, QuestionOrigin
 from nyxara.growth.law_discovery import LawDiscoveryEngine

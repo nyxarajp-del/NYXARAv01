@@ -11,7 +11,6 @@ permission under the standing full_control grant — while staying honest and fa
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.kernel.autonomic import AutonomicLoop
 from nyxara.kernel.orchestrator import NyxaraCore

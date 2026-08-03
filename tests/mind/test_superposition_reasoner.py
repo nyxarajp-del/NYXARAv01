@@ -12,7 +12,6 @@ from __future__ import annotations
 from nyxara.mind.superposition_reasoner import (
     SuperpositionReasoner,
     SuperpositionResult,
-    ThoughtPath,
 )
 
 

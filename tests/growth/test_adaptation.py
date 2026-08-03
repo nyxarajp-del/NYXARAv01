@@ -11,11 +11,9 @@ from __future__ import annotations
 import math
 import random
 
-import pytest
 
 from nyxara.growth.adaptation import AdaptationReport, EnvironmentAdapter
 from nyxara.growth.env_registry import EnvironmentRegistry
-from nyxara.growth.open_world import DomainSpec, Verdict
 
 
 def _env():

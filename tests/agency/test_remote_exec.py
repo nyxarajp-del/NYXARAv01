@@ -8,10 +8,8 @@ paramiko so no real network is touched.
 
 from __future__ import annotations
 
-import sys
 import types
 
-import pytest
 
 from nyxara.agency import remote_exec
 from nyxara.agency.permissions import Capability, RiskTier

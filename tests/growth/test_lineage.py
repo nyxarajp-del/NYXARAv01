@@ -1,7 +1,7 @@
 """Tests for the signed evolution ledger — growth/lineage.py (Part H)."""
 from __future__ import annotations
 
-from nyxara.growth.lineage import GenerationRecord, LineageLedger
+from nyxara.growth.lineage import LineageLedger
 
 
 def test_records_chain_and_verify():

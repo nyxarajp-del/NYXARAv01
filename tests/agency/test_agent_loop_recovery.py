@@ -9,7 +9,6 @@ low-confidence final answer is gated to an honest abstention.
 """
 from __future__ import annotations
 
-import pytest
 
 from nyxara.agency.agent_loop import AgentLoop
 from nyxara.agency.permissions import Capability, RiskTier

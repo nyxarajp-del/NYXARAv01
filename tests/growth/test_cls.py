@@ -21,7 +21,7 @@ from nyxara.growth.cls import (
     SparseProjector,
     _cosine_sparse,
 )
-from nyxara.growth.learn import Experience, Learner
+from nyxara.growth.learn import Experience
 from nyxara.guard.value_learning import IMMUTABLE_VALUES
 from nyxara.kernel.errors import ValidationError
 

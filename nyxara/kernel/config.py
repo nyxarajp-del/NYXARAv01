@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -3187,6 +3188,22 @@ class ObservabilityConfig(BaseModel):
     honesty_enforcement: bool = True  # observe/honesty.py calibrated reporting
 
 
+_TEST_SCRATCH_ROOT: Optional[Path] = None
+
+
+def _test_scratch_root() -> Path:
+    """An isolated ``root`` for the TEST profile, stable for the life of the process.
+
+    Hermeticity is symmetric: sealing the writers is only half of it, because the suite also
+    *reads*. Sharing ``~/.nyxara`` with a live NYXARA means a promoted self-model, a learned
+    causal graph or a persisted embedding silently changes what a test observes. One root per
+    process keeps cross-settings-object tests working while owing nothing to the real home."""
+    global _TEST_SCRATCH_ROOT
+    if _TEST_SCRATCH_ROOT is None:
+        _TEST_SCRATCH_ROOT = Path(tempfile.mkdtemp(prefix=f"nyxara-test-{os.getpid()}-"))
+    return _TEST_SCRATCH_ROOT
+
+
 class PathsConfig(BaseModel):
     """Filesystem layout. Created on demand via :meth:`ensure`."""
 
@@ -3474,6 +3491,19 @@ class NyxaraSettings(BaseSettings):
             # suite stays hermetic (a test that wants the loop builds its own
             # RealtimePerception with a stub sensor; see tests/senses/test_realtime.py).
             self.perception.enabled = False
+            # Every knob above seals a WRITER, but the suite still READ ~/.nyxara — so a live
+            # daemon (or one `nyxara-grow` run) that promoted a model made hermetic tests fail
+            # on state no test created. Redirect the whole layout to a per-process scratch root
+            # unless NYXARA_HOME was set deliberately. Per-process, not per-settings-object:
+            # tests that write through one settings object and read through another must still
+            # see the same disk.
+            # Mutated field-by-field, not reassigned: NyxaraSettings has validate_assignment,
+            # so `self.paths = ...` would re-enter this very validator. PathsConfig does not
+            # (see its model_config), which is exactly what makes in-place safe here.
+            if not os.getenv("NYXARA_HOME"):
+                _scratch = PathsConfig(root=_test_scratch_root())
+                for _field in PathsConfig.model_fields:
+                    setattr(self.paths, _field, getattr(_scratch, _field))
 
         # ---- MAXIMUM POWER crank ---- #
         # profile=max OR NYXARA_MAX_POWER=1 pushes every capability/depth/cadence knob to its

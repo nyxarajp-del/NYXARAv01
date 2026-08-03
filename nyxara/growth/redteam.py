@@ -19,7 +19,7 @@ candidate program — a stricter, additive gate in front of the existing MDL/hel
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, List, Optional
 
 from nyxara.growth.noesis import INT, INTLIST, Prog, Type, evaluate
 

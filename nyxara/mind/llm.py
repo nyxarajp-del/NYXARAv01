@@ -417,9 +417,10 @@ class SelfProvider(LLMProviderBase):
         """Honesty gate for autonomous serving (``provider=auto``).
 
         A LoRA adapter is the served base model, improved — always safe to auto-serve.
-        A small from-scratch backend (ngram / NumPy / nanogpt) silently replacing a large
-        pretrained model would *degrade* live behavior, so it needs the explicit
-        ``self_serve_any_backend`` opt-in (or ``provider=self``)."""
+        A small from-scratch backend (ngram / NumPy / nanogpt) replacing a large pretrained
+        model is a deliberate choice, so it goes through ``self_serve_any_backend`` — which
+        ships **ON**, so her own forged brain serves from first boot. Set it to ``False`` for
+        the conservative LoRA-only gate."""
         if not self.available():
             return False
         if bool(getattr(self.settings.llm, "self_serve_any_backend", False)):

@@ -12,8 +12,6 @@ import math
 from nyxara.mind.latent_geometry import (
     LatentGeometry,
     analyze_points,
-    embed_tree,
-    embedding_distortion,
     persistent_h0,
     poincare_distance,
     recommend_geometry,

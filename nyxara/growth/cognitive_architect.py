@@ -50,7 +50,7 @@ import os
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.mind.faculties import Task, TaskType
 from nyxara.mind.reasoner import Conclusion, ReasoningQuery, ReasoningStrategy

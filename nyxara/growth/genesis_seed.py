@@ -27,7 +27,7 @@ import time
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 __all__ = ["Seed", "GenesisSeed"]
 

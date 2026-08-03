@@ -414,10 +414,10 @@ class MandelbrotIFSCoder:
             for ci in (0.0, 0.156, 0.35, -0.2):
                 candidates.append(("julia", complex(cr, ci)))
         for mode, cparam in candidates:
-            field = self._render_field(mode, cparam, h, w, iters=64)
-            err = float(_np.linalg.norm(field - target)) / (float(_np.linalg.norm(target)) + _EPS)
+            rendered = self._render_field(mode, cparam, h, w, iters=64)
+            err = float(_np.linalg.norm(rendered - target)) / (float(_np.linalg.norm(target)) + _EPS)
             if err < best_err:
-                best_err, best_field, best_params = err, field, (mode, cparam)
+                best_err, best_field, best_params = err, rendered, (mode, cparam)
 
         mode, cparam = best_params  # type: ignore[misc]
         residual = target - best_field                 # what the map cannot explain
@@ -465,11 +465,11 @@ class MandelbrotIFSCoder:
     def decode(self, code: EquationCode) -> "Any":
         p = code.params
         h, w = int(p["h"]), int(p["w"])
-        field = self._render_field(p["mode"], complex(p["cr"], p["ci"]), h, w, int(p["iters"]))
+        rendered = self._render_field(p["mode"], complex(p["cr"], p["ci"]), h, w, int(p["iters"]))
         if p.get("res"):
             raw = base64.b64decode(p["res"].encode("ascii"))
             q = _np.frombuffer(raw, dtype="int8").astype("float64").reshape(h, w)
-            field = field + q * float(p["res_scale"])
+            rendered = rendered + q * float(p["res_scale"])
         return (field * float(p["span"]) + float(p["amin"])).reshape(code.shape)
 
 

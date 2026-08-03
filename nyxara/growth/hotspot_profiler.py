@@ -14,7 +14,7 @@ from __future__ import annotations
 import cProfile
 import pstats
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List
 
 __all__ = ["Hotspot", "HotspotProfiler"]
 

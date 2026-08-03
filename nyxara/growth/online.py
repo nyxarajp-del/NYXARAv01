@@ -25,7 +25,7 @@ Pure standard library; **no LLM** (and never a *dependency* on a cloud LLM — s
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from nyxara.growth.integrity import HibernateAndDream, IntegritySeal

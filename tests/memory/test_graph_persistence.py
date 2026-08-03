@@ -9,7 +9,6 @@ back to its 2 seed triples. These tests prove the round-trip is now lossless
 
 from __future__ import annotations
 
-import time
 
 from nyxara.memory.graph import KnowledgeGraph, _configure_standard_relations
 from nyxara.memory.provenance import Provenance, SourceType

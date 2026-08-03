@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Sequence, Tuple
 
 __all__ = ["PromptGrammar", "PromptGrammarEvolver"]
 
