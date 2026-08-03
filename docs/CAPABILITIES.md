@@ -592,3 +592,120 @@ the deep-cognition `idle_maintenance` path advances the autonomous scientist on 
 claim of surpassing all other AI, inventing unknown physics, or unbounded self-improvement — no
 codebase delivers that. The point of the proof is that NYXARA abstains or rolls back instead of
 faking success.
+
+---
+
+# NYX-300M — her own 300M-parameter brain
+
+Before this, NYXARA's own from-scratch brain was a 137k-parameter byte-level nano-GPT:
+`n_layer=2, n_embd=64`, vocabulary 256, and a training loop with batch size hardwired to 1.
+Real, trainable, and honest about being small. This is the machinery that takes it to 300M and
+aims it at general text, code, mathematics and conversation alike.
+
+## The profiles
+
+| profile | total | active / token | what it is for |
+|---|---|---|---|
+| `nyxara-300m` | 299,418,624 | 299,418,624 | the dense baseline — train this first |
+| `nyxara-30m` | 25,008,640 | 25,008,640 | the CPU proof profile: same code path, ~1/12th the size |
+| `nyxara-moe-500m` | 500,057,088 | 273,564,672 | more capacity at slightly less compute per token |
+| `nyxara-moe-fast` | 298,973,952 | **86,637,312** | also 300M, but only ~87M weights execute per token |
+
+Counted by `growth.foundry_models.estimate_params` in pure Python — no torch, nothing
+allocated — and it agrees with what torch builds to the parameter. For a sparse profile both
+numbers are always reported: quoting only the total is how MoE models get oversold.
+
+**What `nyxara-moe-fast` is and is not.** A sparse model behaves roughly like a dense one of
+size `√(total × active)` — about 161M here. Better than an 87M dense model, meaningfully cheaper
+per token than the dense 300M, and *not* equivalent to a billion-parameter model. It also needs
+*more* training tokens than dense, not fewer: with top-2-of-12 routing each expert sees about a
+sixth of the stream.
+
+## The architecture
+
+RMSNorm · RoPE · SwiGLU · grouped-query attention (16 query heads, 4 KV heads) · fused SDPA ·
+tied embeddings · optional sparse experts. Context 2048, vocabulary 32,768.
+
+The historical `_NanoGPT` is untouched beside it, and a spec with none of the modern knobs still
+builds — and loads — exactly what it always did. Old checkpoints keep working.
+
+## The pipeline
+
+```
+tokenizer → corpus shards → pretrain → SFT → DPO → eval → gauntlet
+```
+
+```bash
+# prove the whole thing on a machine with no GPU (~3 minutes)
+python scripts/train_300m.py --profile nyxara-30m --tokens 2000000 --steps 200
+
+# the real run, stage by stage, each resumable
+python scripts/train_300m.py --profile nyxara-300m --stage shards
+python scripts/train_300m.py --profile nyxara-300m --stage pretrain --resume
+```
+
+**`growth/tokenizer.py`** — byte-level BPE she trains herself. `decode(encode(s)) == s` byte-exactly
+for any string, by construction. Digits never merge (column arithmetic becomes learnable),
+whitespace runs stay separate (Python indentation is not a different word at every depth), and her
+template's role markers are single atomic tokens.
+
+**`growth/corpus.py`** — streamed, screened, `uint16` shards read back through `np.memmap`, with
+`general 0.40 · code 0.25 · math 0.20 · conversation 0.15` mixed *within* every batch. Training
+domains in sequence is the obvious implementation and also how you get catastrophic forgetting.
+Five screens: dedup and the L-SOVEREIGN loyalty check and injection scan (all reused), plus
+quality and **contamination against the shipped eval sets** — nothing checked that before, and
+its absence fails silently and *upward*.
+
+**`growth/synth_data.py`** — the prover-certified generators at corpus scale, plus worked-step
+mathematics, tool-call traces and retrieval traces. The retrieval set deliberately includes
+*unanswerable* passages: a model taught only answerable ones learns that an answer always exists.
+
+**`growth/trainer.py`** — real batching, accumulation, warmup+cosine, bf16, decoupled weight decay
+on the 2-D matrices only, and checkpoint/resume including the data cursor.
+
+**`preflight()` refuses honestly.** Asked to pretrain 300M on a CPU box it answers *"0.9 YEARS"*
+and exits non-zero, with the arithmetic and a concrete alternative, rather than starting a run
+that looks exactly like one that will finish.
+
+## Promotion across a change of vocabulary
+
+Perplexity is per *token*, so it is only meaningful between models that tokenize the same way.
+A byte-level model predicting the `e` after `th` solves an easier problem than a sub-word model
+predicting a whole word — so it reports a **lower** perplexity while being a **worse** brain.
+Under the unguarded gate the 300M model would have been refused promotion forever.
+
+A candidate with a new vocabulary is now a new **lineage** and is gated on
+**bits-per-byte** (`eval/domains.py`), which every backend can be measured with. The character
+lock, corrigibility and the loyalty floor are untouched and still run first in both lineages: a
+new vocabulary buys a different *capability* ruler, never a softer character one.
+
+## The layers around the brain
+
+* **L-NEURAL-DYNAMICS / L-EIGENSPACE** (`growth/latent_head.py`) — a JEPA latent-prediction head
+  against an EMA target, with VICReg terms that forbid the constant solution; multi-token
+  prediction for self-speculative decoding, **measured** rather than asserted; and a causal
+  bottleneck that reduces causally-impossible claims — a reduction, not their elimination, since
+  the graph is learned and incomplete.
+* **L-TOPOLOGY / L-FRACTAL** (`growth/expand.py`) — MoE with real gather/scatter dispatch, and
+  new experts spawned for a domain that will not yield. Spawn → train → **prove** → admit; the
+  router grows a row too, or the expert is unreachable; a candidate that improves its target
+  while regressing another domain is discarded.
+* **L-EPISODIC / L-PLASTICITY** (`growth/fast_weights.py`) — `W_fast(t+1) = λ·W_fast(t) + η·h(x)⊗x`,
+  so she adapts inside a conversation with no backpropagation. It buys associative recall, not
+  understanding. Session-scoped, norm-bounded, auditable, never attached to the head or
+  embeddings or anything in `IMMUTABLE_VALUES`, and **off** unless a session turns it on —
+  because an inference-time overlay bypasses the gauntlet by construction.
+* **L-ORACLE / L-META-GAUNTLET** (`growth/oracle.py`) — she generates conjectures, proves or
+  refutes them, and trains only on what was certified; difficulty is steered by Elo into the
+  hard-but-provable band. Unlike Go, mathematics has an *incomplete* verifier, so this yields
+  true-but-shallow theorems abundantly and deep ones rarely. `FrozenRuler` fingerprints the
+  held-out battery: the meta-loss may raise difficulty and may never touch the ruler, because
+  "she never plateaus" and "the ruler kept shrinking" otherwise look identical from inside.
+
+## What this is not
+
+300M parameters is not, and cannot be made into, a frontier model. Trained well it is a capable
+small brain, and with tools, retrieval and verified reasoning it performs above its weight class
+— which is the real path at this size, and why those are training data here rather than
+decorations bolted on afterwards. The refusals above are part of the deliverable: a number that
+is not measured is not reported.

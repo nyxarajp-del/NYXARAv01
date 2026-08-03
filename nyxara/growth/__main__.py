@@ -237,6 +237,60 @@ def _forge_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _nyx_profile(args) -> int:
+    """Cost a NYX-300M profile against this machine, honestly.
+
+    Prints total AND active parameters (quoting only the total is how sparse models get
+    oversold), the memory the run needs, and the wall-clock it would take *here*. Exits
+    non-zero when this machine cannot do it — the same verdict ``scripts/train_300m.py``
+    acts on, so nobody starts a run that cannot finish.
+    """
+    from nyxara.growth.foundry_models import ModelSpec, estimate_params
+    from nyxara.growth.trainer import preflight
+    from nyxara.kernel.config import _FOUNDRY_PROFILES
+
+    name = args.nyx_profile
+    if name not in _FOUNDRY_PROFILES:
+        print(f"unknown profile '{name}'. Available: "
+              f"{', '.join(sorted(_FOUNDRY_PROFILES))}")
+        return 2
+
+    dims = _FOUNDRY_PROFILES[name]
+    spec = ModelSpec(kind="nanogpt",
+                     **{k: v for k, v in dims.items() if k in ModelSpec.__dataclass_fields__})
+    spec.tie_embeddings = bool(dims.get("tie_embeddings"))
+    estimate = estimate_params(spec)
+
+    print(f"\nprofile: {name}")
+    print(f"  {estimate.summary()}")
+    print(f"  {spec.n_layer} layers x {spec.n_embd} wide, "
+          f"{spec.n_head} heads ({spec.n_kv_head or spec.n_head} KV), "
+          f"context {spec.block_size}, vocab {spec.vocab_size}")
+    verdict = preflight(spec, tokens=args.nyx_tokens)
+    print()
+    print(verdict.summary())
+    if not verdict.ok:
+        print("\nThis machine cannot finish that run. That is the honest answer, not a failure.")
+    return 0 if verdict.ok else 1
+
+
+def _oracle(args) -> int:
+    """Run the self-play oracle and report what survived verification."""
+    from nyxara.growth.oracle import OracleConfig, SelfPlayOracle
+
+    oracle = SelfPlayOracle(config=OracleConfig(max_rounds=max(1, args.oracle)))
+    items, report = oracle.run()
+    print()
+    print(report.summary())
+    for item in items[:5]:
+        print(f"\n  [{item.domain}] {item.prompt[:100]}")
+        print(f"    -> {item.answer[:100]}")
+        print(f"    certificate: {item.certificate[:100]}")
+    if len(items) > 5:
+        print(f"\n  ... and {len(items) - 5} more")
+    return 0
+
+
 def _forge_operator() -> int:
     """Render searched mixer genomes into source and verify each against the interpreter."""
     from nyxara.growth.genesis import MixerProgram
@@ -407,7 +461,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--escalate-arch", action="store_true",
                         help="with --evolve-mind: on a plateau, escalate to one index-steered "
                              "Genesis architecture search (redesign the substrate)")
+    parser.add_argument("--nyx-profile", default=None, metavar="PROFILE",
+                        help="report what a NYX-300M profile would cost to build and train on "
+                             "THIS machine — total and active parameters, memory, and honest "
+                             "wall-clock. Use scripts/train_300m.py to actually run it")
+    parser.add_argument("--nyx-tokens", type=int, default=6_000_000_000, metavar="N",
+                        help="with --nyx-profile: the token budget to cost (default: the "
+                             "Chinchilla-optimal 6B for a 300M model)")
+    parser.add_argument("--oracle", type=int, nargs="?", const=2, default=None, metavar="ROUNDS",
+                        help="run the zero-player self-play oracle: she poses her own "
+                             "conjectures, proves or refutes them, and keeps ONLY what was "
+                             "certified")
     args = parser.parse_args(argv)
+
+    if args.nyx_profile:
+        return _nyx_profile(args)
+
+    if args.oracle is not None:
+        return _oracle(args)
 
     if args.forge_operator:
         return _forge_operator()

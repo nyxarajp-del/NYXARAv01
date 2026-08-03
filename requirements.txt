@@ -8,12 +8,14 @@ sympy>=1.12
 numpy>=1.26
 networkx>=3.2
 scikit-learn>=1.4
-# LLM — Qwen2.5-0.5B-Instruct runs fully local & in-process via HuggingFace (no API keys).
+# LLM — a local HuggingFace causal-LM runs fully in-process (no API keys). The base the code
+# actually names everywhere is distilgpt2 (~82M); these comments used to say Qwen2.5-0.5B, which
+# no longer appears anywhere in nyxara/.
 # Import-guarded in code: without these the LLM facade degrades to the deterministic mock.
 transformers>=4.40
 accelerate>=0.30
-# LoRA fine-tuning of the Qwen2.5-0.5B foundry base (its lora backend; see pyproject [foundry]
-# extra). At 0.5B it fine-tunes in full precision on a CPU or a modest GPU — no QLoRA needed.
+# LoRA fine-tuning of the distilgpt2 foundry base (its lora backend; see pyproject [foundry]
+# extra). At ~82M it fine-tunes in full precision on a CPU or a modest GPU — no QLoRA needed.
 peft>=0.10
 # HTTP client (senses/web.py and friends)
 httpx>=0.27
