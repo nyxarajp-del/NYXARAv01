@@ -223,20 +223,26 @@ def test_manifest_ignores_a_key_from_a_newer_build() -> None:
 # --------------------------------------------------------------------------- #
 # Autoscale must not veto a deliberate choice, and must never reach 300M on CPU
 # --------------------------------------------------------------------------- #
-def test_autoscale_never_recommends_a_nyx_profile_without_cuda() -> None:
-    """A CPU run of nyxara-300m is roughly a YEAR; autoscaling into it would start exactly
-    the run that trainer.preflight exists to prevent."""
+def test_autoscale_never_recommends_a_nyx_profile() -> None:
+    """Autoscale answers "how big a model can this box *adapt*?" — every rung is LoRA over a
+    pretrained base, which is hours. Training her own 300M from scratch is days of GPU time and
+    a decision someone has to make deliberately; nobody should land in it for merely owning a
+    good GPU. And on CPU it is roughly a YEAR — exactly the run trainer.preflight exists to stop.
+    """
     from nyxara.growth.compute_scale import recommend_foundry_profile
 
     class _Compute:
-        cpu_count, ram_gb, gpu_count = 128, 512, 0
+        cpu_count, ram_gb, gpu_count = 128, 512, 8
+        gpu_total_gb = 640
 
         def recommend_device(self):
-            return "cpu"
+            return "cuda"
 
-    for has_torch in (True, False):
-        rec = recommend_foundry_profile(_Compute(), has_torch=has_torch, has_cuda=False)
-        assert not rec.profile.startswith("nyxara-"), rec.profile
+    for has_cuda in (True, False):
+        for has_torch in (True, False):
+            rec = recommend_foundry_profile(_Compute(), has_torch=has_torch,
+                                            has_cuda=has_cuda)
+            assert not rec.profile.startswith("nyxara-"), rec.profile
 
 
 def test_autoscale_does_not_downgrade_an_explicit_nyx_profile(tmp_path) -> None:
