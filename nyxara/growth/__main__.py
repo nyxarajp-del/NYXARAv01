@@ -237,6 +237,29 @@ def _forge_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ouroboros(args: argparse.Namespace) -> int:
+    """Scan → propose → (with --enact) rewrite her own source under the existing gauntlet."""
+    from nyxara.growth.ouroboros import Ouroboros
+    from nyxara.kernel.config import get_settings
+
+    settings = get_settings().model_copy(deep=True)
+    if args.enact:
+        settings.self_improvement.ouroboros_enabled = True
+    if not settings.self_improvement.ouroboros_enabled and args.enact:
+        print("· ouroboros is disabled (self_improvement.ouroboros_enabled) — nothing enacted.")
+        return 1
+
+    print(f"· ouroboros: scanning her own source"
+          f"{' — ENACTING (gauntleted, reversible)' if args.enact else ' (measure-only)'}…")
+    try:
+        report = Ouroboros(settings=settings).metamorphose(enact=bool(args.enact))
+    except Exception as exc:  # noqa: BLE001 — report, never traceback
+        print(f"· ouroboros failed: {exc}")
+        return 1
+    print(report.summary())
+    return 0
+
+
 def _evolve_mind(args: argparse.Namespace) -> int:
     """Run the recursive mind-evolution loop and print the generational lineage."""
     from nyxara.growth.mind_evolution import MindEvolutionEngine
@@ -317,6 +340,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--acquire", action="append", metavar="TOPIC", default=None,
                         help="harvest screened web text for a topic into the corpus (keyless "
                              "DuckDuckGo). Repeatable")
+    parser.add_argument("--ouroboros", action="store_true",
+                        help="scan her own source for hot code and propose semantics-preserving\n"
+                             "algorithmic rewrites. Writes nothing without --enact")
     parser.add_argument("--gaps", action="store_true",
                         help="show her measured ignorance: the ranked epistemic gaps that "
                              "drive what she goes and learns")
@@ -336,6 +362,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="with --evolve-mind: on a plateau, escalate to one index-steered "
                              "Genesis architecture search (redesign the substrate)")
     args = parser.parse_args(argv)
+
+    if args.ouroboros:
+        return _ouroboros(args)
 
     if args.forge_brain is not None:
         return _forge_brain(args)

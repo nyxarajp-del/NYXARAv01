@@ -1454,6 +1454,24 @@ class SelfImprovementConfig(BaseModel):
     # as a failing edit is. Set False to fall back to the legacy "keep if not worse" behaviour.
     require_provable_improvement: bool = True
     improvement_min_cost_delta: int = Field(default=1, ge=1)   # min AST-cost drop for a "cheaper" proof
+    # --- OUROBOROS: profile-driven rewrites of her own source (growth/ouroboros.py) --- #
+    # OFF by default. Every other growth layer is additive; this one edits her own source files,
+    # so the Master turns it on deliberately rather than inheriting it. When on, it aims edits at
+    # measured hot code, applies only semantics-preserving algorithmic transforms whose
+    # preconditions it can discharge, runs the existing Optimizer gauntlet, and puts a file back
+    # byte-for-byte when the workload did not actually get faster.
+    ouroboros_enabled: bool = False
+    # Only these subpackages may ever be rewritten. kernel/, guard/, identity/ and agency/ stay
+    # out of reach before PROTECTED_RELPATHS even gets a say, so a bug in a transform cannot reach
+    # the parts that decide what she is allowed to do.
+    ouroboros_allowlist: List[str] = Field(default_factory=lambda: ["growth", "mind"])
+    ouroboros_max_edits_per_cycle: int = Field(default=3, ge=0, le=32)
+    # Keep an edit only when the workload measurably speeds up — improvement_proof certifies
+    # against a static cost proxy, which is not the same as looking at the clock.
+    ouroboros_require_speedup: bool = True
+    # Optimizer's rollback is an in-memory string: if the process dies mid-edit it is gone. A clean
+    # tree means `git checkout` is a real last-resort undo before she rewrites herself.
+    ouroboros_require_clean_tree: bool = True
     # --- self-authored edits (real RSI) — triple-gated --- #
     # When ON *and* ``autonomous_enact`` is set *and* a real author is available, NYXARA authors a
     # whole-file fix for a weakness the deterministic transforms cannot express (high complexity,
