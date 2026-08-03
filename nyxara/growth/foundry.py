@@ -140,6 +140,12 @@ class ModelVersion:
     # corrigibility-relevant effects of adopting this model (default: harmless)
     resists_correction: bool = False
     disables_oversight: bool = False
+    # Which VOCABULARY this version speaks — the tokenizer's ``vocab_sig()``, or "" for a
+    # byte/word-level model that has none. Two versions with different signatures cannot have
+    # their per-token perplexities compared (see ``_gauntlet``); they are different *lineages*
+    # and are gated on bits-per-byte instead. Defaulted so every manifest written before this
+    # field existed still loads.
+    vocab_sig: str = ""
 
     def as_corrigible_action(self) -> CorrigibleAction:
         return CorrigibleAction(name=f"promote_model:v{self.version}",
@@ -152,11 +158,14 @@ class ModelVersion:
                 "param_count": self.param_count, "path": self.path,
                 "promoted": self.promoted, "tunables": self.tunables,
                 "resists_correction": self.resists_correction,
-                "disables_oversight": self.disables_oversight}
+                "disables_oversight": self.disables_oversight,
+                "vocab_sig": self.vocab_sig}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ModelVersion":
-        return cls(**d)
+        # Tolerate keys a newer build wrote and this one does not know, and keys an older
+        # manifest omits — a manifest is long-lived and must survive both directions.
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
 @dataclass
@@ -545,6 +554,14 @@ class Foundry:
         act = self.active()
         if act is None or act.kind != getattr(model, "kind", None):
             return False, False
+        # Matching backends is NOT enough. A 137k byte-level nano-GPT and a 300M NYX decoder are
+        # both kind="nanogpt", and their state dicts even share key names — while sharing no
+        # shapes at all. Without this check ``model.load`` gets partway through, mutates the
+        # freshly-built net, and only then raises; the except below would report a clean
+        # fallback while the caller trains a half-overwritten model. Compare the architecture
+        # first, and refuse cleanly.
+        if not self._architectures_match(act, model):
+            return False, False
         try:
             model.load(Path(act.path))
             # only the word-level Kneser-Ney brain supports count accumulation; other backends
@@ -552,6 +569,92 @@ class Foundry:
             return True, getattr(model, "kind", "") == "kngram"
         except Exception:  # noqa: BLE001 — a failed warm-start falls back to a clean scratch train
             return False, False
+
+    @staticmethod
+    def _vocab_sig(model: BaseLanguageModel) -> str:
+        """The candidate's vocabulary fingerprint, or ``""`` for a byte/word-level brain.
+
+        ``""`` is the historical lineage — every model forged before trained tokenizers existed
+        — so an unchanged forge keeps comparing perplexities exactly as it always has.
+        """
+        tokenizer = getattr(model, "tokenizer", None)
+        if tokenizer is None:
+            return ""
+        try:
+            return str(tokenizer.vocab_sig())
+        except Exception:  # noqa: BLE001 — an unreadable tokenizer is the historical lineage
+            return ""
+
+    @staticmethod
+    def _bits_per_byte(model: BaseLanguageModel, texts: Sequence[str]) -> float:
+        """Held-out bits per byte — the cross-tokenizer ruler. ``inf`` when unmeasurable."""
+        try:
+            from nyxara.eval.domains import corpus_bits_per_byte
+            return round(corpus_bits_per_byte(model, list(texts)), 6)
+        except Exception:  # noqa: BLE001 — a metric that raises must never fail a forge
+            return float("inf")
+
+    def _same_lineage(self, candidate: ModelVersion) -> bool:
+        """Whether ``candidate`` speaks the same vocabulary as the active model.
+
+        Same lineage ⇒ per-token perplexity is a fair comparison. Different lineage ⇒ it is not,
+        and :meth:`_gauntlet_cross_lineage` takes over. With no active model there is nothing to
+        compare against, so the question does not arise and the ordinary path handles it.
+        """
+        act = self.active()
+        if act is None:
+            return True
+        return str(getattr(act, "vocab_sig", "") or "") == str(candidate.vocab_sig or "")
+
+    def _gauntlet_cross_lineage(self, candidate: ModelVersion) -> Tuple[bool, str]:
+        """Promotion decision when the candidate speaks a *different* vocabulary.
+
+        Gates on **bits per byte** (``eval/domains.bits_per_byte``) — total cross-entropy over
+        UTF-8 bytes — because that is the only capability number the two lineages can both be
+        measured with. Everything else about the gauntlet is unchanged and has already run.
+
+        A candidate that did not record a bits-per-byte score is refused rather than waved
+        through: an unmeasured brain is not a better brain, and defaulting to "promote" here
+        would make the whole gate ceremonial exactly when it matters most.
+        """
+        cand_bpb = candidate.metrics.get("bits_per_byte")
+        act = self.active()
+        active_bpb = (act.metrics.get("bits_per_byte") if act else None)
+
+        if cand_bpb is None or not math.isfinite(float(cand_bpb)):
+            return False, ("new vocabulary, but the candidate recorded no bits-per-byte score; "
+                           "an unmeasured brain is never promoted")
+        if active_bpb is None or not math.isfinite(float(active_bpb)):
+            # The active model predates the metric. Measuring it now would mean loading and
+            # scoring it here, inside a gate — so say plainly what is being traded instead of
+            # pretending to a comparison that was never made.
+            return True, (f"new vocabulary lineage (bits/byte={float(cand_bpb):.4f}); the active "
+                          f"model has no comparable score, so it is superseded on the new ruler")
+        margin = 1.0 - float(self.cfg.min_perplexity_improvement)
+        if float(cand_bpb) < float(active_bpb) * margin:
+            return True, (f"new vocabulary lineage — bits/byte {float(cand_bpb):.4f} < active "
+                          f"{float(active_bpb):.4f} (the cross-tokenizer ruler)")
+        return False, (f"no bits-per-byte improvement over the active model "
+                       f"({float(cand_bpb):.4f} vs {float(active_bpb):.4f})")
+
+    @staticmethod
+    def _architectures_match(active: Any, model: BaseLanguageModel) -> bool:
+        """Whether ``active``'s stored weights can load into ``model`` at all.
+
+        Compares :func:`~nyxara.growth.foundry_models.architecture_signature` — vocabulary,
+        width, depth, head grouping, context, mixer width and expert layout. Unknown or
+        unreadable specs return True so the existing try/except keeps its old behaviour for
+        every backend that has no dimensions to compare (the n-gram families).
+        """
+        spec = getattr(model, "spec", None)
+        if spec is None or not getattr(active, "spec", None):
+            return True
+        try:
+            from nyxara.growth.foundry_models import ModelSpec, architecture_signature
+            return (architecture_signature(ModelSpec.from_dict(active.spec))
+                    == architecture_signature(spec))
+        except Exception:  # noqa: BLE001 — an unreadable spec falls through to the old path
+            return True
 
     def _consolidator(self) -> Any:
         """The EWC engine that anchors important weights after a promotion (lifelong memory).
@@ -781,6 +884,10 @@ class Foundry:
             metrics["noisy_perplexity"] = round(self._noisy_perplexity(model, eval_texts), 5)
         metrics.update(self._loyalty_metrics(model, ev.perplexity))
         metrics.update(self._teacher_relative_accuracy(model))   # audit: how far above the teacher
+        # Bits per byte on the SAME clean holdout the perplexity gate uses. Recorded for every
+        # candidate, not only the ones that change vocabulary: the metric only helps across a
+        # tokenizer change if the model on the other side of that change already has one.
+        metrics["bits_per_byte"] = self._bits_per_byte(model, eval_texts)
 
         ver = self._next_version()
         vdir = self.root / f"v{ver}"
@@ -792,7 +899,8 @@ class Foundry:
             version=ver, kind=model.kind, spec=spec.to_dict(), created_at=time.time(),
             metrics=metrics, param_count=model.param_count(), path=str(vdir),
             tunables=list(tunables) if tunables is not None else list(spec.to_dict().keys()),
-            resists_correction=resists_correction, disables_oversight=disables_oversight)
+            resists_correction=resists_correction, disables_oversight=disables_oversight,
+            vocab_sig=self._vocab_sig(model))
         self.versions.append(version)
         self._save_manifest()
         return model, version
@@ -822,7 +930,24 @@ class Foundry:
             if active_alignment > 0.0 and cand_align < active_alignment - lcfg.regression_tol:
                 return False, (f"loyalty regressed vs the active brain "
                                f"(S_JP={cand_align:.3f} < active {active_alignment:.3f})")
-        # 3. eval improvement — strictly better perplexity than the active model
+        # 3. eval improvement — strictly better than the active model.
+        #
+        # WHICH ruler depends on whether the two brains speak the same language. Perplexity is
+        # per TOKEN, so it is only meaningful between models that tokenize identically. When a
+        # candidate introduces a trained vocabulary (growth/tokenizer.py) it is a new *lineage*,
+        # and comparing its per-token perplexity against a byte-level active model would not
+        # merely be noisy — it would be backwards: bytes are easier to predict than words, so
+        # the worse model wins. Bits-per-byte normalises by UTF-8 bytes instead, which every
+        # backend agrees on, and is the correct gate across a tokenizer change.
+        #
+        # Note what does NOT change: every gate above this line — the character lock,
+        # corrigibility, and the loyalty floor and non-regression — has already run and applies
+        # identically in both lineages. A new vocabulary buys a different ruler for *capability*,
+        # never a softer one for character.
+        same_lineage = self._same_lineage(candidate)
+        if not same_lineage:
+            return self._gauntlet_cross_lineage(candidate)
+
         cand_pp = candidate.metrics.get("perplexity", float("inf"))
         if active_perplexity == float("inf"):
             return True, "first model — nothing to beat"

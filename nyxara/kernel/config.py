@@ -551,12 +551,69 @@ class DistributedConfig(BaseModel):
 # GPT-2 architecture (the requested minimum-GPT-2-scale substrate), reachable only when
 # torch is installed and the foundry is explicitly enabled. "custom" uses the explicit
 # fields verbatim, preserving the tiny, CPU-runnable default for tests/CI.
+#
+# The NYX-* profiles below are the from-scratch 300M-class brains (growth/trainer.py). They are
+# a different shape from the GPT-2 ones above, and deliberately so: a trained sub-word
+# vocabulary (growth/tokenizer.py), RoPE instead of learned positions, RMSNorm, SwiGLU, and
+# grouped-query attention. Parameter counts are computed — never guessed — by
+# growth.foundry_models.estimate_params, and tests/kernel/test_foundry_profiles.py asserts them.
 _FOUNDRY_PROFILES: Dict[str, Dict[str, int]] = {
     "tiny":        {"n_layer": 2,  "n_head": 2,  "n_embd": 64,   "block_size": 64},
     "small":       {"n_layer": 4,  "n_head": 4,  "n_embd": 128,  "block_size": 128},
     "gpt2":        {"n_layer": 12, "n_head": 12, "n_embd": 768,  "block_size": 1024},
     "gpt2-medium": {"n_layer": 24, "n_head": 16, "n_embd": 1024, "block_size": 1024},
+    # --- NYX-300M: the dense baseline. 299,418,624 parameters. --- #
+    # This is the one to train first: dense is the simplest thing that can work, it is the
+    # cleanest Chinchilla point, and every other profile here is measured against it.
+    "nyxara-300m": {
+        "n_layer": 24, "n_head": 16, "n_kv_head": 4, "n_embd": 1024, "block_size": 2048,
+        "vocab_size": 32768, "mlp_hidden": 2752, "rope_theta": 10000, "tie_embeddings": 1,
+    },
+    # --- The CPU proof profile: same code path, ~1/40th the size. --- #
+    # Not a toy — it is how the whole 300M pipeline (tokenizer → shards → pretrain → SFT →
+    # gauntlet) is proven end-to-end on a machine with no GPU. If this trains, the 300M path is
+    # correct and only compute separates them.
+    "nyxara-30m": {
+        "n_layer": 6, "n_head": 8, "n_kv_head": 2, "n_embd": 512, "block_size": 512,
+        "vocab_size": 16384, "mlp_hidden": 1376, "rope_theta": 10000, "tie_embeddings": 1,
+    },
+    # --- Sparse variants (L-TOPOLOGY). Quote BOTH numbers when discussing these. --- #
+    # 500.1M total / 273.6M active: more capacity than the dense 300M at slightly less compute
+    # per token. MoE mixer on every 2nd layer.
+    "nyxara-moe-500m": {
+        "n_layer": 24, "n_head": 16, "n_kv_head": 4, "n_embd": 1024, "block_size": 2048,
+        "vocab_size": 32768, "mlp_hidden": 2752, "rope_theta": 10000, "tie_embeddings": 1,
+        "n_experts": 8, "moe_top_k": 2, "moe_every": 2, "moe_expert_hidden": 1024,
+    },
+    # 299.0M total / 86.6M ACTIVE — also a 300M model, but only ~87M weights execute per token.
+    # This is the profile for a machine without a GPU: roughly a 161M-dense-equivalent brain
+    # (√(total×active)) at a third of the per-token compute of the dense 300M.
+    "nyxara-moe-fast": {
+        "n_layer": 12, "n_head": 12, "n_kv_head": 4, "n_embd": 768, "block_size": 2048,
+        "vocab_size": 32768, "mlp_hidden": 768, "rope_theta": 10000, "tie_embeddings": 1,
+        "n_experts": 12, "moe_top_k": 2, "moe_every": 1, "moe_expert_hidden": 768,
+    },
 }
+
+
+# The vocabulary the legacy profiles (custom/tiny/small/gpt2/gpt2-medium) are *compared* against.
+# Those profiles name no vocabulary of their own because the models behind them are byte-level;
+# quoting them at GPT-2's 50257 is what makes "the gpt2 profile is GPT-2 scale" a meaningful
+# claim. It is a comparison basis, not what NanoGPTModel allocates — see the note in
+# FoundryConfig.estimated_params.
+_LEGACY_COMPARISON_VOCAB = 50257
+
+
+def _profile_ties(dims: Dict[str, int]) -> bool:
+    """Whether a profile's embedding is tied to its LM head.
+
+    The NYX-* profiles say so explicitly. The legacy ones predate the field and are compared
+    against real GPT-2, which *does* tie ``wte`` to ``lm_head`` — and the arithmetic they were
+    originally asserted with (one ``vocab × n_embd`` term, no separate head) assumed exactly
+    that. Defaulting them to tied is therefore what preserves their historical, canonical
+    numbers: ~124M for ``gpt2``.
+    """
+    return bool(dims.get("tie_embeddings", 1))
 
 
 class FoundryConfig(BaseModel):
@@ -594,7 +651,9 @@ class FoundryConfig(BaseModel):
     # neural backend (nanogpt with torch, the NumPy transformer without) when no GPU is present.
     lora_requires_gpu: bool = False
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
-    profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium"] = "custom"
+    profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium",
+                     "nyxara-300m", "nyxara-30m", "nyxara-moe-500m",
+                     "nyxara-moe-fast"] = "custom"
     # Pure-stdlib n-gram backend.
     ngram_order: int = Field(default=3, ge=1, le=8)
     # ---- weight surgery (growth/weight_surgery.py) — interpret + edit her own weights ---- #
@@ -833,15 +892,48 @@ class FoundryConfig(BaseModel):
                     "n_embd": self.n_embd, "block_size": self.block_size}
         return dict(_FOUNDRY_PROFILES[self.profile])
 
-    def estimated_params(self, *, vocab_size: int = 50257) -> int:
-        """A standard estimate of the transformer's parameter count from the resolved
-        dimensions — lets us assert "GPT-2 scale" without importing torch. For the
-        ``gpt2`` profile this returns ~124M."""
+    def estimated_params(self, *, vocab_size: Optional[int] = None) -> int:
+        """The transformer's parameter count from the resolved dimensions, without torch.
+
+        Delegates to :func:`~nyxara.growth.foundry_models.estimate_params`, which counts what
+        the model actually builds — tied embeddings, grouped-query attention, SwiGLU, RoPE, and
+        (for the sparse profiles) the full expert bank. ``vocab_size`` overrides the profile's
+        own vocabulary, which is what the GPT-2 comparisons below want.
+
+        The formula this replaced assumed an *untied* 50257-entry vocabulary and a dense
+        ``12·n_embd²`` block. That was right for GPT-2 and wrong for everything else: it
+        reported ~124M for the ``gpt2`` profile while :class:`NanoGPTModel` — byte-level, vocab
+        256 — would actually have built ~86M. The two numbers now come from one place, so they
+        cannot drift apart again.
+
+        For a sparse profile this returns the **total**; use
+        :func:`~nyxara.growth.foundry_models.estimate_params` directly when the *active*
+        per-token count matters (it usually does — quoting only one of the two is how MoE
+        models get oversold).
+        """
+        from nyxara.growth.foundry_models import ModelSpec, estimate_params
+
         d = self.resolved_dims()
-        n_embd, n_layer, block = d["n_embd"], d["n_layer"], d["block_size"]
-        embeddings = vocab_size * n_embd + block * n_embd          # token + positional
-        per_block = 12 * n_embd * n_embd + 13 * n_embd             # attn + MLP + norms
-        return int(embeddings + n_layer * per_block + n_embd)      # + final layernorm
+        spec = ModelSpec(**{k: v for k, v in d.items()
+                            if k in ModelSpec.__dataclass_fields__})
+        if vocab_size is not None:
+            spec.vocab_size = int(vocab_size)
+        elif "vocab_size" not in d:
+            spec.vocab_size = _LEGACY_COMPARISON_VOCAB
+        spec.tie_embeddings = _profile_ties(d)
+        return estimate_params(spec).total
+
+    def param_estimate(self) -> Any:
+        """The full :class:`~nyxara.growth.foundry_models.ParamEstimate` — total AND active."""
+        from nyxara.growth.foundry_models import ModelSpec, estimate_params
+
+        d = self.resolved_dims()
+        spec = ModelSpec(**{k: v for k, v in d.items()
+                            if k in ModelSpec.__dataclass_fields__})
+        if "vocab_size" not in d:
+            spec.vocab_size = _LEGACY_COMPARISON_VOCAB
+        spec.tie_embeddings = _profile_ties(d)
+        return estimate_params(spec)
 
 
 class CapabilityFoundryConfig(BaseModel):
