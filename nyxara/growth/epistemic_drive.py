@@ -318,6 +318,15 @@ class EpistemicDrive:
         :meth:`top_gaps` when you want both kinds."""
         return [g.subject for g in self._ranked_gaps() if g.searchable][:max(0, limit)]
 
+    def knowledge_gaps(self, k: int = 8) -> List[Gap]:
+        """The readable half, ranked — what research and experiments should aim at.
+
+        The symmetric partner of :meth:`engineering_gaps`, and it exists because taking
+        :meth:`top_gaps` and filtering afterwards is a trap: a repo with fifty architectural
+        weaknesses fills the ranked list entirely and every knowledge gap is truncated away before
+        the filter ever runs. Filtering happens before the cap here, as it does there."""
+        return [g for g in self._ranked_gaps() if g.searchable][:max(0, k)]
+
     def engineering_gaps(self, k: int = 8) -> List[Gap]:
         """The repair-shaped half — what the self-improvement loop should aim at."""
         return [g for g in self._ranked_gaps() if not g.searchable][:max(0, k)]
