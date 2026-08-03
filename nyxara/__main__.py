@@ -24,6 +24,14 @@ methods the Master would call programmatically:
     /dataset <path>    ingest a dataset only — report what she would learn, train nothing
     /flywheel          the self-generated corpus she verified from her own lived turns
     /scrape <topic>    harvest screened web text into her training corpus
+    /why <effect>      her established causes for something, with provenance on each link
+    /whatif <v>=<x>    do(v=x) propagated through her learned causal graph
+    /counterfactual <cause> <target>   would the target still have happened?
+    /concepts <term>   nearest concepts by geodesic distance in her fitted space
+    /analogy <a> <b>   structural correspondence between two domains, read off the geometry
+    /qualia            regions of her latent space that no word covers
+    /gaps              her measured ignorance, and what she would go and read
+    /evolve-source [enact]   scan her own source for provable rewrites
     /wander [n]        let the idle mind wander n ticks and show the thoughts
     /proactive         detect & govern self-initiated actions (one initiative pass)
     /save              persist long-term memory to disk now
@@ -156,6 +164,154 @@ def _scrape_command(topic: str) -> str:
         return "· web acquisition unavailable (needs .[llm] for httpx)."
     return (f"· acquired '{topic}': fetched {report.get('fetched', 0)}, kept {report.get('kept', 0)}, "
             f"dropped {report.get('dropped_suspicious', 0)} suspicious")
+
+
+def _causal_store():
+    """The persisted causal graph beside her dataset corpus, or a fresh empty one."""
+    from nyxara.growth.dataset import _default_store_path
+    from nyxara.mind.causal_world_model import CausalWorldModel
+
+    try:
+        path = _default_store_path().with_name("causal_graph.json")
+        if path.exists():
+            # ``load`` is a CLASSMETHOD returning a new instance — calling it on an object
+            # silently discards the restored graph and leaves you with an empty one.
+            return CausalWorldModel.load(str(path))
+    except Exception:  # noqa: BLE001 — a missing/corrupt graph is simply an empty one
+        pass
+    return CausalWorldModel()
+
+
+def _why_command(arg: str) -> str:
+    """``/why <effect>`` — her causes for something, with provenance on every link."""
+    try:
+        model = _causal_store()
+        links = model.why(model.match_label(arg.strip()) or arg.strip())
+    except Exception as exc:  # noqa: BLE001
+        return f"· could not query the causal graph: {exc}"
+    if not links:
+        return f"· I have no established cause for {arg.strip()!r} yet."
+    return "\n".join(f"  {link.describe()}" for link in links[:5])
+
+
+def _whatif_command(arg: str) -> str:
+    """``/whatif <var>=<value>`` — do(var=value) propagated through the learned graph."""
+    if "=" not in arg:
+        return "usage: /whatif <variable>=<value>"
+    name, _, raw = arg.partition("=")
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        return f"· {raw.strip()!r} is not a number"
+    try:
+        effects = _causal_store().do({name.strip(): value})
+    except Exception as exc:  # noqa: BLE001
+        return f"· could not simulate: {exc}"
+    if not isinstance(effects, dict) or not effects:
+        return f"· nothing downstream of {name.strip()!r} is established yet."
+    ranked = sorted(effects.items(), key=lambda kv: abs(kv[1]), reverse=True)
+    return "\n".join(f"  {effect}: {size:+.4g}" for effect, size in ranked[:8])
+
+
+def _counterfactual_command(arg: str) -> str:
+    """``/counterfactual <cause> <target>`` — would the target still have happened?"""
+    parts = arg.split()
+    if len(parts) < 2:
+        return "usage: /counterfactual <cause> <target>"
+    try:
+        model = _causal_store()
+        cause = model.match_label(parts[0]) or parts[0]
+        target = model.match_label(parts[1]) or parts[1]
+        result = model.counterfactual(cause, target, factual=1.0, counter=0.0,
+                                      evidence=model.latest_evidence(model.labels()))
+    except Exception as exc:  # noqa: BLE001
+        return f"· could not run the counterfactual: {exc}"
+    kind = ("structural (abduction → action → prediction)" if result.abducted
+            else "population-average — no fitted mechanism to abduct from yet")
+    return f"  {result.describe()}\n  [{kind}]"
+
+
+def _hyperspace():
+    """Her fitted concept space, loaded from beside the dataset corpus."""
+    from nyxara.growth.dataset import _default_store_path
+    from nyxara.mind.concept_hyperspace import ConceptHyperspace
+
+    space = ConceptHyperspace(dim=64, seed=0, lr=0.1)
+    try:
+        space.load(_default_store_path().with_name("hyperspace.json"))
+    except Exception:  # noqa: BLE001
+        pass
+    return space
+
+
+def _concepts_command(arg: str) -> str:
+    """``/concepts <term>`` — nearest concepts by geodesic distance in the fitted space."""
+    space = _hyperspace()
+    if not space.concepts:
+        return "· no fitted concept space yet (run: nyxara-grow --dataset PATH --hyperspace)"
+    term = arg.strip().lower()
+    if term not in space.concepts:
+        return f"· {term!r} is not in the space ({len(space.concepts)} concept(s) fitted)"
+    near = space.nearest(term, 6)
+    head = f"· {term} (radius {space.concepts[term].radius:.3f} — larger means more specific)"
+    return "\n".join([head] + [f"    {n}  d={d:.3f}" for n, d in near])
+
+
+def _analogy_command(arg: str) -> str:
+    """``/analogy <domain-a> <domain-b>`` — structural correspondence read off the geometry."""
+    parts = arg.split()
+    if len(parts) < 2:
+        return "usage: /analogy <domain-a> <domain-b>"
+    space = _hyperspace()
+    found = space.find_correspondences(parts[0], parts[1])
+    if not found:
+        return (f"· no correspondence between {parts[0]!r} and {parts[1]!r} clears the bar — "
+                f"an analogy asserted without support is worse than none")
+    return "\n".join(f"  {c.describe()}" for c in found)
+
+
+def _qualia_command() -> str:
+    """``/qualia`` — regions of her latent space that no word covers."""
+    space = _hyperspace()
+    if not space.concepts:
+        return "· no fitted concept space yet (run: nyxara-grow --dataset PATH --hyperspace)"
+    from nyxara.qualia import BabelCodec, QualiaWorkspace
+
+    workspace = QualiaWorkspace(space, min_cluster=2)
+    report = workspace.synthesise()
+    codec = BabelCodec(workspace)
+    lines = [report.summary()]
+    for concept in workspace.alien_concepts():
+        lines.append("  " + codec.decode(concept.key))
+    return "\n".join(lines)
+
+
+def _gaps_command() -> str:
+    """``/gaps`` — her measured ignorance, and what she would go and read."""
+    try:
+        from nyxara.growth.epistemic_drive import EpistemicDrive
+        drive = EpistemicDrive()
+        topics = drive.topics(limit=6)
+    except Exception as exc:  # noqa: BLE001
+        return f"· epistemic drive unavailable: {exc}"
+    tail = ", ".join(topics) if topics else "(nothing searchable)"
+    return drive.summary(k=6) + f"\n· would acquire: {tail}"
+
+
+def _evolve_source_command(arg: str) -> str:
+    """``/evolve-source [enact]`` — scan her own source for provable rewrites."""
+    try:
+        from nyxara.growth.ouroboros import Ouroboros
+        from nyxara.kernel.config import get_settings
+
+        settings = get_settings().model_copy(deep=True)
+        enact = arg.strip().lower() in ("enact", "yes", "go")
+        if enact:
+            settings.self_improvement.ouroboros_enabled = True
+        report = Ouroboros(settings=settings).metamorphose(enact=enact)
+    except Exception as exc:  # noqa: BLE001
+        return f"· ouroboros failed: {exc}"
+    return report.summary()
 
 
 _BANNER = """\
@@ -392,6 +548,37 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("usage: /scrape <topic>")
         else:
             print(_scrape_command(arg))
+    elif cmd == "why":
+        if not arg:
+            print("usage: /why <effect>")
+        else:
+            print(_why_command(arg))
+    elif cmd == "whatif":
+        if not arg:
+            print("usage: /whatif <variable>=<value>")
+        else:
+            print(_whatif_command(arg))
+    elif cmd in ("counterfactual", "cf"):
+        if not arg:
+            print("usage: /counterfactual <cause> <target>")
+        else:
+            print(_counterfactual_command(arg))
+    elif cmd == "concepts":
+        if not arg:
+            print("usage: /concepts <term>")
+        else:
+            print(_concepts_command(arg))
+    elif cmd == "analogy":
+        if not arg:
+            print("usage: /analogy <domain-a> <domain-b>")
+        else:
+            print(_analogy_command(arg))
+    elif cmd == "qualia":
+        print(_qualia_command())
+    elif cmd == "gaps":
+        print(_gaps_command())
+    elif cmd in ("evolve-source", "evolve_source", "ouroboros"):
+        print(_evolve_source_command(arg))
     elif cmd == "research":
         if not arg:
             print("usage: /research <topic>")
