@@ -50,10 +50,14 @@ imports back.
 
 from __future__ import annotations
 
+import array
+import hashlib
 import json
+import os
 import random
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
@@ -101,7 +105,11 @@ DEFAULT_STREAM_SOURCES: Dict[str, List[Dict[str, Any]]] = {
 # half the disk of uint32. Guarded at write time rather than assumed.
 _SHARD_DTYPE = "uint16"
 _MAX_ID = 65_535
-_SHARD_TOKENS = 100_000_000        # ~200 MB per shard file
+# 25M tokens ≈ 50 MB per shard. The previous 100M buffered a hundred million *Python ints* per
+# domain — ~800 MB each, ~3.2 GB across four — which is the OOM on a 16 GB box. The buffer is an
+# array("H") now, so a shard costs 50 MB of RAM rather than 800, and a crash loses at most 50 MB
+# of tokenization instead of 200.
+_SHARD_TOKENS = 25_000_000
 
 _WS_RE = re.compile(r"\s+")
 
@@ -144,8 +152,11 @@ class QualityFilter:
                 return False, "low_diversity"
 
         # One token repeated over and over — the signature of a link farm or a broken scrape.
-        most_common = max((words.count(w) for w in set(words[:200])), default=0)
-        if len(words) >= 20 and most_common / len(words) > self.max_repeat_ratio:
+        # Counter, not `words.count(w)` in a comprehension: that was O(200 · len(words)) per
+        # document, and this screen runs on every document of a multi-billion-token stream.
+        window = words[:2000]
+        most_common = max(Counter(window).values(), default=0)
+        if len(window) >= 20 and most_common / len(window) > self.max_repeat_ratio:
             return False, "repetitive"
 
         return True, ""
@@ -164,15 +175,49 @@ class ContaminationFilter:
     the corpus build must not die because a benchmark file moved.
     """
 
-    def __init__(self, *, n: int = 13) -> None:
+    def __init__(self, *, n: int = 13, stride: int = 1) -> None:
         self.n = max(4, int(n))
+        # Index every `stride`-th n-gram. With n=13 and stride=4, any overlap of 16+ consecutive
+        # words is still certain to be caught, at a quarter of the hashing cost.
+        self.stride = max(1, int(stride))
         self._hashes: Set[int] = set()
         self.loaded = False
 
-    def _ngrams(self, text: str) -> Iterator[int]:
+    @staticmethod
+    def _hash_gram(gram: str) -> int:
+        """blake2b, not the builtin ``hash()``.
+
+        ``hash(str)`` is salted per process by PYTHONHASHSEED, so an index built in the parent
+        means nothing in a ``spawn``ed worker and cannot be cached to disk between runs. That
+        makes the whole screen unreproducible *and* blocks the multiprocessing build — the
+        contamination index has to survive crossing a process boundary.
+        """
+        return int.from_bytes(hashlib.blake2b(gram.encode("utf-8", "replace"),
+                                              digest_size=8).digest(), "big")
+
+    def _ngrams(self, text: str, *, stride: Optional[int] = None) -> Iterator[int]:
+        step = self.stride if stride is None else max(1, int(stride))
         words = _WS_RE.sub(" ", (text or "").lower()).strip().split()
-        for i in range(0, max(0, len(words) - self.n + 1)):
-            yield hash(" ".join(words[i:i + self.n]))
+        for i in range(0, max(0, len(words) - self.n + 1), step):
+            yield self._hash_gram(" ".join(words[i:i + self.n]))
+
+    def save(self, path: Any) -> Path:
+        """Persist the index so a multi-hour build need not rebuild it, and workers can load it."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        blob = array.array("Q", sorted(self._hashes))
+        out.write_bytes(blob.tobytes())
+        return out
+
+    @classmethod
+    def load(cls, path: Any, *, n: int = 13, stride: int = 1) -> "ContaminationFilter":
+        f = cls(n=n, stride=stride)
+        raw = Path(path).read_bytes()
+        blob = array.array("Q")
+        blob.frombytes(raw)
+        f._hashes = set(blob)
+        f.loaded = bool(f._hashes)
+        return f
 
     def load_eval_sets(self, settings: Any = None) -> "ContaminationFilter":
         """Index every shipped benchmark so training text overlapping them can be dropped."""
@@ -202,9 +247,17 @@ class ContaminationFilter:
         return out
 
     def is_contaminated(self, text: str) -> bool:
+        """``True`` when ``text`` shares an indexed n-gram with a shipped eval set.
+
+        The query side always walks **every** n-gram (stride 1) even when the index was built
+        with a stride. That asymmetry is what makes striding safe rather than lossy: with n=13
+        and stride 4, any 16-word overlap contains four consecutive eval n-gram start positions,
+        one of which is necessarily ≡ 0 (mod 4) and therefore indexed. Striding the query too
+        would let an overlap slip through on an unlucky alignment.
+        """
         if not self._hashes:
             return False
-        return any(h in self._hashes for h in self._ngrams(text))
+        return any(h in self._hashes for h in self._ngrams(text, stride=1))
 
 
 # --------------------------------------------------------------------------- #
@@ -219,15 +272,27 @@ class ShardIndex:
     vocab_size: int = 0
     created_at: float = field(default_factory=time.time)
 
-    def domains(self) -> List[str]:
-        return sorted({s["domain"] for s in self.shards})
+    # ``.get("split", "train")`` throughout: every index written before splits existed is a
+    # train-only index, and must keep loading unchanged.
+    @staticmethod
+    def _split_of(shard: Dict[str, Any]) -> str:
+        return str(shard.get("split", "train"))
 
-    def tokens(self, domain: Optional[str] = None) -> int:
+    def domains(self, split: Optional[str] = "train") -> List[str]:
+        return sorted({s["domain"] for s in self.shards
+                       if split is None or self._split_of(s) == split})
+
+    def splits(self) -> List[str]:
+        return sorted({self._split_of(s) for s in self.shards})
+
+    def tokens(self, domain: Optional[str] = None, *, split: Optional[str] = None) -> int:
         return sum(s["n_tokens"] for s in self.shards
-                   if domain is None or s["domain"] == domain)
+                   if (domain is None or s["domain"] == domain)
+                   and (split is None or self._split_of(s) == split))
 
-    def for_domain(self, domain: str) -> List[Dict[str, Any]]:
-        return [s for s in self.shards if s["domain"] == domain]
+    def for_domain(self, domain: str, *, split: Optional[str] = "train") -> List[Dict[str, Any]]:
+        return [s for s in self.shards if s["domain"] == domain
+                and (split is None or self._split_of(s) == split)]
 
     def to_dict(self) -> Dict[str, Any]:
         return {"shards": list(self.shards), "vocab_sig": self.vocab_sig,
@@ -240,9 +305,16 @@ class ShardIndex:
                    created_at=float(d.get("created_at", 0.0)))
 
     def save(self, directory: Any) -> Path:
+        """Write ``index.json`` atomically — tmp file, then ``os.replace``.
+
+        A plain ``write_text`` that dies midway leaves a truncated index, which is worse than no
+        index at all: it makes a resumable build look resumable while pointing at nothing.
+        """
         path = Path(directory) / "index.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict()), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.to_dict()), encoding="utf-8")
+        os.replace(tmp, path)
         return path
 
     @classmethod
@@ -265,52 +337,100 @@ class ShardWriter:
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.shard_tokens = max(1024, int(shard_tokens))
-        self._buffers: Dict[str, List[int]] = {}
+        # array("H") — two bytes per token, not a 28-byte Python int plus an 8-byte pointer.
+        self._buffers: Dict[Tuple[str, str], array.array] = {}
         self._counts: Dict[str, int] = {}
         self.index = ShardIndex.load(self.dir) or ShardIndex()
+        self.orphans_removed = 0
+        self.reconcile()
 
-    def existing_tokens(self, domain: str) -> int:
-        return self.index.tokens(domain)
+    def reconcile(self) -> int:
+        """Delete ``.bin`` files on disk that no index entry claims, and drop entries with no file.
 
-    def add(self, domain: str, ids: Sequence[int]) -> None:
-        if not ids:
+        A build killed between writing a shard and writing the index leaves an orphan. Without
+        this, the shard counter restarts from the index's (shorter) length and the next flush
+        **overwrites** a shard that already holds real tokens — the corpus then silently contains
+        one shard's worth of duplicated text and is short by another.
+        """
+        known = {s["path"] for s in self.index.shards}
+        for path in sorted(self.dir.glob("*.bin")):
+            if path.name not in known:
+                path.unlink()
+                self.orphans_removed += 1
+        kept = [s for s in self.index.shards if (self.dir / s["path"]).exists()]
+        if len(kept) != len(self.index.shards):
+            self.index.shards = kept
+        # Resume the per-domain counter past the highest index actually on disk, so a new shard
+        # can never collide with a survivor even if numbering has gaps.
+        for shard in self.index.shards:
+            stem = Path(shard["path"]).stem
+            try:
+                n = int(stem.rsplit("-", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            self._counts[shard["domain"]] = max(self._counts.get(shard["domain"], 0), n + 1)
+        return self.orphans_removed
+
+    def existing_tokens(self, domain: str, *, split: str = "train") -> int:
+        return self.index.tokens(domain, split=split)
+
+    def add(self, domain: str, ids: Sequence[int], *, split: str = "train") -> None:
+        if len(ids) == 0:
             return
         # Validate on the way IN, not at flush time. The buffer holds up to a shard's worth of
         # tokens, so deferring this means a vocabulary that overflows uint16 is only discovered
-        # after a hundred million tokens have been accepted — and the ids would silently wrap to
+        # after millions of tokens have been accepted — and the ids would silently wrap to
         # different tokens if the check were missed entirely.
-        widened = [int(i) for i in ids]
-        peak = max(widened)
+        peak = max(ids)
         if peak > _MAX_ID:
             raise ValueError(
                 f"token id {peak} exceeds the uint16 shard range ({_MAX_ID}); "
                 f"a vocabulary this large needs a wider shard dtype")
-        buf = self._buffers.setdefault(domain, [])
-        buf.extend(widened)
+        if min(ids) < 0:
+            raise ValueError("negative token id cannot be stored in a uint16 shard")
+        buf = self._buffers.setdefault((domain, split), array.array("H"))
+        buf.extend(int(i) for i in ids)
         while len(buf) >= self.shard_tokens:
-            self._flush(domain, buf[:self.shard_tokens])
+            self._flush(domain, buf[:self.shard_tokens], split=split)
             del buf[:self.shard_tokens]
 
-    def _flush(self, domain: str, ids: Sequence[int]) -> None:
-        if not ids:
+    def add_bytes(self, domain: str, blob: bytes, *, split: str = "train") -> None:
+        """Append already-packed little-endian ``uint16`` bytes — the multiprocessing path.
+
+        Workers pack their own tokens, so the parent never rebuilds a Python list from them.
+        """
+        if not blob:
             return
-        n = self._counts.get(domain, len(self.index.for_domain(domain)))
+        buf = self._buffers.setdefault((domain, split), array.array("H"))
+        buf.frombytes(blob)
+        while len(buf) >= self.shard_tokens:
+            self._flush(domain, buf[:self.shard_tokens], split=split)
+            del buf[:self.shard_tokens]
+
+    def _flush(self, domain: str, ids: Sequence[int], *, split: str = "train") -> None:
+        if len(ids) == 0:
+            return
+        n = self._counts.get(domain, 0)
         self._counts[domain] = n + 1
-        path = self.dir / f"{domain}-{n:05d}.bin"
-        if _HAS_NUMPY:
-            np.asarray(ids, dtype=_SHARD_DTYPE).tofile(path)
-        else:
-            import array
-            array.array("H", ids).tofile(path.open("wb"))
+        prefix = "" if split == "train" else f"{split}-"
+        path = self.dir / f"{prefix}{domain}-{n:05d}.bin"
+        blob = ids if isinstance(ids, array.array) else array.array("H", ids)
+        with path.open("wb") as fh:
+            blob.tofile(fh)
         self.index.shards.append({"domain": domain, "path": path.name,
-                                  "n_tokens": len(ids), "dtype": _SHARD_DTYPE})
+                                  "n_tokens": len(ids), "dtype": _SHARD_DTYPE,
+                                  "split": split})
+        # Persist NOW, not at close(). A finished shard must be a finished file that the index
+        # already knows about, or "resumable by construction" is only true for clean exits — and
+        # a multi-hour build is precisely the one that does not get a clean exit.
+        self.index.save(self.dir)
 
     def close(self, *, vocab_sig: str = "", vocab_size: int = 0) -> ShardIndex:
         """Flush every partial shard and write the index."""
-        for domain, buf in list(self._buffers.items()):
-            if buf:
-                self._flush(domain, buf)
-                buf.clear()
+        for (domain, split), buf in list(self._buffers.items()):
+            if len(buf):
+                self._flush(domain, buf, split=split)
+                del buf[:]
         self.index.vocab_sig = vocab_sig or self.index.vocab_sig
         self.index.vocab_size = vocab_size or self.index.vocab_size
         self.index.save(self.dir)
@@ -329,7 +449,8 @@ class ShardDataset:
     """
 
     def __init__(self, directory: Any, *, block_size: int = 1024,
-                 weights: Optional[Dict[str, float]] = None, seed: int = 0) -> None:
+                 weights: Optional[Dict[str, float]] = None, seed: int = 0,
+                 split: str = "train") -> None:
         if not _HAS_NUMPY:
             raise RuntimeError("ShardDataset requires numpy")
         self.dir = Path(directory)
@@ -337,6 +458,7 @@ class ShardDataset:
         if index is None or not index.shards:
             raise FileNotFoundError(f"no shard index under {self.dir} — build the corpus first")
         self.index = index
+        self.split = str(split)
         self.block_size = max(8, int(block_size))
         self.seed = int(seed)
         self._rng = random.Random(seed)
@@ -344,9 +466,23 @@ class ShardDataset:
 
         self._maps: Dict[str, List[Any]] = {}
         for shard in index.shards:
+            if ShardIndex._split_of(shard) != self.split:
+                continue
             arr = np.memmap(self.dir / shard["path"], dtype=shard.get("dtype", _SHARD_DTYPE),
                             mode="r")
             self._maps.setdefault(shard["domain"], []).append(arr)
+        if not self._maps:
+            raise FileNotFoundError(
+                f"no '{self.split}' shards under {self.dir} "
+                f"(splits present: {', '.join(index.splits()) or 'none'})")
+
+        # Cumulative lengths per domain, so a shard is chosen in proportion to how many tokens it
+        # holds. Choosing uniformly gives a 5M-token tail shard the same weight as a 25M one —
+        # a 5x oversample of whatever happens to be at the end of the corpus.
+        self._cum: Dict[str, Any] = {
+            domain: np.cumsum([len(a) for a in arrays], dtype=np.int64)
+            for domain, arrays in self._maps.items()
+        }
 
         requested = dict(weights or DEFAULT_DOMAIN_WEIGHTS)
         # Renormalise over the domains that actually have data. A weight for a domain that
@@ -361,7 +497,15 @@ class ShardDataset:
         return sorted(self._maps)
 
     def total_tokens(self) -> int:
-        return self.index.tokens()
+        return self.index.tokens(split=self.split)
+
+    def _pick_shard(self, domain: str) -> int:
+        """Choose a shard in proportion to its token count, not uniformly."""
+        cum = self._cum[domain]
+        total = int(cum[-1])
+        if total <= 0:
+            return self._rng.randrange(len(self._maps[domain]))
+        return int(np.searchsorted(cum, self._rng.randrange(total), side="right"))
 
     def _pick_domain(self) -> str:
         r = self._rng.random()
@@ -376,7 +520,7 @@ class ShardDataset:
         """One ``(x, y)`` training window as numpy int64 arrays, next-token shifted."""
         domain = domain or self._pick_domain()
         arrays = self._maps[domain]
-        arr = arrays[self._rng.randrange(len(arrays))]
+        arr = arrays[self._pick_shard(domain)]
         need = self.block_size + 1
         if len(arr) <= need:
             # A shard shorter than one window — which happens whenever a domain is
@@ -681,6 +825,38 @@ class CorpusBuilder:
         return index, report
 
 
+def _render_transcript(messages: Sequence[Any]) -> str:
+    """Render **every** turn of a chat transcript, in order.
+
+    The previous version looped the list assigning to one ``user`` and one ``assistant``
+    variable, so a 10-turn UltraChat conversation arrived as the *last* user message plus the
+    *last* assistant message — which are usually not even the same exchange. That silently threw
+    away the multi-turn structure, which is the only reason to stream a conversation dataset at
+    all: what survived was a corpus of disconnected single turns wearing a conversation's name.
+    """
+    from nyxara.mind.llm import format_self_training_doc
+
+    parts: List[str] = []
+    pending_user: Optional[str] = None
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "")).lower()
+        content = str(msg.get("content", "") or "").strip()
+        if not content:
+            continue
+        if role in ("user", "human"):
+            # Two user turns in a row: keep the later one rather than pairing the wrong halves.
+            pending_user = content if pending_user is None else f"{pending_user}\n\n{content}"
+        elif role in ("assistant", "ai", "bot"):
+            if pending_user:
+                parts.append(format_self_training_doc(pending_user, content))
+                pending_user = None
+        # `system` turns are dropped: her template carries its own system framing, and splicing
+        # a foreign one in would teach the model to expect instructions it will never receive.
+    return "".join(parts)
+
+
 def _row_text(row: Any, key: str) -> str:
     """Extract training text from one streamed row, including chat-shaped rows."""
     if not isinstance(row, dict):
@@ -690,18 +866,7 @@ def _row_text(row: Any, key: str) -> str:
         return value
     if isinstance(value, list):           # a `messages` transcript — render it in her template
         try:
-            from nyxara.mind.llm import format_self_training_doc
-            user = assistant = ""
-            for msg in value:
-                if not isinstance(msg, dict):
-                    continue
-                role = str(msg.get("role", "")).lower()
-                if role in ("user", "human"):
-                    user = str(msg.get("content", "") or "")
-                elif role in ("assistant", "ai", "bot"):
-                    assistant = str(msg.get("content", "") or "")
-            if user and assistant:
-                return format_self_training_doc(user, assistant)
+            return _render_transcript(value)
         except Exception:  # noqa: BLE001
             pass
     for fallback in ("text", "content", "body"):

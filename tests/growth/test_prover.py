@@ -76,10 +76,55 @@ def test_logic_implication_tautology():
     r = _p().prove(ProofClaim("logic", "((A -> B) and A) -> B"))
     assert r.verdict is ProofVerdict.PROVEN
 
-def test_logic_contingent_is_not_valid():
+def test_logic_contingent_is_abstained_not_refuted():
+    """Satisfiable-but-not-valid is NOT a refutation, and the difference is load-bearing.
+
+    `A and B` is true whenever both hold — calling that REFUTED conflates "I could not prove
+    this" with "this is false". godel_loop.ReflectionTower.detect_contradictions treats every
+    REFUTED belief as a contradiction in her own logic and retracts it, so the old verdict
+    silently deleted every contingent propositional belief she held.
+    """
     r = _p().prove(ProofClaim("logic", "A and B"))
-    assert r.verdict is ProofVerdict.REFUTED        # not valid; a falsifier exists
-    assert "falsified" in r.certificate
+    assert r.verdict is ProofVerdict.UNPROVABLE
+    assert "contingent" in r.certificate
+
+
+def test_a_real_contradiction_is_still_refuted():
+    """The other half: an unsatisfiable formula must stay REFUTED, so retraction still works."""
+    r = _p().prove(ProofClaim("logic", "A and not A"))
+    assert r.verdict is ProofVerdict.REFUTED
+    assert "contradiction" in r.certificate
+
+
+def test_a_bare_expression_asserts_nothing_and_proves_nothing():
+    """`2+2` makes no claim, so PROVEN was certifying a claim that was never made."""
+    r = _p().prove(ProofClaim("arithmetic", "2+2"))
+    assert r.verdict is ProofVerdict.UNPROVABLE
+    assert _p().prove(ProofClaim("arithmetic", "2+2 = 4")).verdict is ProofVerdict.PROVEN
+    assert _p().prove(ProofClaim("arithmetic", "2+2 = 5")).verdict is ProofVerdict.REFUTED
+
+
+def test_sampled_agreement_is_not_certifiable_even_though_it_is_proven():
+    """Schwartz–Zippel is overwhelming evidence, not a decision procedure.
+
+    It keeps the PROVEN verdict (it IS strong), but must not be embeddable in training data as
+    a certificate — `exact` is the flag that separates the two.
+    """
+    from nyxara.growth.prover import Prover
+
+    prover = Prover()
+    r = prover._pit_identity("(x+1)*(x+1)", "x*x + 2*x + 1", "x",
+                             ProofClaim("algebra", "(x+1)*(x+1) = x*x + 2*x + 1"))
+    assert r.verdict is ProofVerdict.PROVEN
+    assert r.exact is False
+    assert r.certifiable is False
+
+
+def test_an_exact_symbolic_proof_is_certifiable():
+    r = _p().prove(ProofClaim("algebra", "(x+1)^2 = x^2+2*x+1"))
+    assert r.verdict is ProofVerdict.PROVEN
+    if "sympy" in r.method:                 # the exact path; PIT fallback is checked above
+        assert r.exact is True and r.certifiable is True
 
 
 # --------------------------------------------------------------------------- #

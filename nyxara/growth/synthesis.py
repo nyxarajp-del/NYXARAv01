@@ -299,6 +299,10 @@ def _safe_builtins() -> Dict[str, Any]:
     return {name: getattr(builtins, name) for name in _SAFE_BUILTIN_NAMES if hasattr(builtins, name)}
 
 
+#: Sentinel for "the guarded executor has not been built yet", distinct from "unavailable here".
+_UNSET: Any = object()
+
+
 def _sandbox_compile(src: str, fn_name: str) -> Optional[Callable[..., Any]]:
     """Compile + exec ``src`` in a restricted namespace and return its ``fn_name`` callable.
 
@@ -326,6 +330,9 @@ class RivalVerifier:
         self.prover = prover or Prover()
         self.llm = llm
         self.code_sandbox = bool(code_sandbox)
+        # Lazily built on first code verification: a verifier used only for maths should not
+        # pay for a subprocess it never talks to.
+        self._guarded: Any = _UNSET
 
     def verify(self, item: SyntheticItem) -> Tuple[bool, str]:
         """Return ``(accepted, reason)`` — a machine-checkable certificate or the refutation."""
@@ -348,18 +355,64 @@ class RivalVerifier:
         spec = item.code_spec or {}
         if not self.code_sandbox:
             return False, "code sandbox disabled"
-        ref = _sandbox_compile(spec.get("reference", ""), spec.get("fn", "f"))
-        cand = _sandbox_compile(spec.get("candidate", ""), spec.get("fn", "f"))
-        if ref is None or cand is None:
+        tests = [list(a) for a in (spec.get("tests") or [])]
+        fn_name = spec.get("fn", "f")
+
+        # In-process exec has no timeout, no recursion cap and no memory cap, so a candidate
+        # that does not terminate takes the whole process with it. That was survivable only
+        # while `candidate` was always the trusted reference; a real proposer emits mutants,
+        # and non-terminating mutants are not rare. Run both sides under the guarded executor.
+        executor = self._executor()
+        if executor is not None:
+            ref = executor.call(spec.get("reference", ""), fn_name, tests)
+            if not ref.ok:
+                return False, f"reference failed in the sandbox: {ref.error or 'timeout'}"
+            cand = executor.call(spec.get("candidate", ""), fn_name, tests)
+            if not cand.ok:
+                reason = "timed out" if cand.timed_out else (cand.error or "failed")
+                return False, f"candidate {reason} in the sandbox"
+            for args, (ref_ok, ref_val), (cand_ok, cand_val) in zip(tests, ref.results,
+                                                                    cand.results):
+                if not ref_ok:
+                    return False, f"the reference itself raised at {args}: {ref_val}"
+                if not cand_ok:
+                    return False, f"runtime error at {args}: {cand_val}"
+                if cand_val != ref_val:
+                    return False, f"output mismatch at {args}"
+            return True, f"matched the reference oracle on {len(tests)} inputs"
+
+        # Fallback: no POSIX resource limits (Windows). Same semantics, no protection — and it
+        # says so, rather than quietly presenting an unguarded run as a guarded one.
+        ref_fn = _sandbox_compile(spec.get("reference", ""), fn_name)
+        cand_fn = _sandbox_compile(spec.get("candidate", ""), fn_name)
+        if ref_fn is None or cand_fn is None:
             return False, "candidate or reference failed to compile in the sandbox"
-        tests = spec.get("tests") or []
         for args in tests:
             try:
-                if cand(*args) != ref(*args):
+                if cand_fn(*args) != ref_fn(*args):
                     return False, f"output mismatch at {args}"
             except Exception as exc:  # noqa: BLE001 — a crashing candidate is refuted
                 return False, f"runtime error at {args}: {exc}"
-        return True, f"matched the reference oracle on {len(tests)} inputs"
+        return True, (f"matched the reference oracle on {len(tests)} inputs "
+                      f"(UNGUARDED: no resource limits on this platform)")
+
+    def _executor(self) -> Any:
+        """The shared guarded executor, or ``None`` where resource limits are unavailable."""
+        if self._guarded is _UNSET:
+            try:
+                from nyxara.growth.sandbox_exec import GuardedExecutor, SandboxLimits
+
+                self._guarded = GuardedExecutor(SandboxLimits())
+            except Exception:  # noqa: BLE001 — no rlimits here; fall back and say so
+                self._guarded = None
+        return self._guarded
+
+    def close(self) -> None:
+        """Release the sandbox child. Safe to call more than once."""
+        guarded = getattr(self, "_guarded", None)
+        if guarded not in (None, _UNSET):
+            guarded.close()
+        self._guarded = _UNSET
 
     def _llm_second_opinion(self, item: SyntheticItem) -> Optional[bool]:
         """Best-effort: ask the LLM to agree/disagree. Never required; failures are 'unknown'."""

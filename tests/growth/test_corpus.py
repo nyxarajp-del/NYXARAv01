@@ -10,7 +10,12 @@ The properties worth guarding here are the ones whose failure is *silent*:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 from nyxara.growth.corpus import (
     DEFAULT_DOMAIN_WEIGHTS,
@@ -233,3 +238,146 @@ def test_report_notes_when_streaming_is_unavailable(built) -> None:
 def test_default_weights_cover_every_domain_and_sum_to_one() -> None:
     assert set(DEFAULT_DOMAIN_WEIGHTS) == set(DOMAINS)
     assert abs(sum(DEFAULT_DOMAIN_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# Resume — the bug that made a crash at 80% cost 100% AND corrupt the rest
+# --------------------------------------------------------------------------- #
+def test_index_is_on_disk_after_every_shard_not_only_at_close(tmp_path) -> None:
+    """A finished shard must be a finished file the index already knows about.
+
+    `close()` was the only writer of index.json, so a build killed partway left orphaned .bin
+    files and a stale index — and the next run restarted the shard counter and overwrote them.
+    """
+    writer = ShardWriter(tmp_path, shard_tokens=1024)
+    writer.add("general", list(range(2048)))        # forces two full shards, no close()
+    index = ShardIndex.load(tmp_path)
+    assert index is not None, "index.json was not written until close()"
+    assert index.tokens("general") == 2048
+    for shard in index.shards:
+        assert (tmp_path / shard["path"]).exists()
+
+
+def test_a_crashed_build_does_not_overwrite_its_own_shards(tmp_path) -> None:
+    """The regression: orphan reconciliation must not renumber onto a surviving shard."""
+    first = ShardWriter(tmp_path, shard_tokens=1024)
+    first.add("general", [7] * 2048)                 # two shards on disk + in the index
+    del first                                        # simulate a kill: no close()
+
+    second = ShardWriter(tmp_path, shard_tokens=1024)
+    assert second.existing_tokens("general") == 2048, "resume lost the finished shards"
+    second.add("general", [9] * 1024)
+    second.close()
+
+    index = ShardIndex.load(tmp_path)
+    assert index.tokens("general") == 3072, "a new shard overwrote an existing one"
+    names = [s["path"] for s in index.shards]
+    assert len(names) == len(set(names)), f"duplicate shard names: {names}"
+
+
+def test_orphaned_shards_with_no_index_entry_are_removed(tmp_path) -> None:
+    """A .bin written but never indexed is unreferenced data — it must not linger and collide."""
+    writer = ShardWriter(tmp_path, shard_tokens=1024)
+    writer.add("general", list(range(1024)))
+    writer.close()
+    (tmp_path / "general-09999.bin").write_bytes(b"\x00\x01" * 8)   # orphan from a crash
+
+    reopened = ShardWriter(tmp_path, shard_tokens=1024)
+    assert reopened.orphans_removed == 1
+    assert not (tmp_path / "general-09999.bin").exists()
+    assert reopened.existing_tokens("general") == 1024
+
+
+def test_writer_refuses_negative_ids(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        ShardWriter(tmp_path, shard_tokens=8).add("general", [-1] * 8)
+
+
+# --------------------------------------------------------------------------- #
+# Contamination hashing must survive a process boundary
+# --------------------------------------------------------------------------- #
+def test_contamination_hash_is_stable_across_processes() -> None:
+    """`hash(str)` is salted per process, so an index built in the parent means nothing in a
+    spawned worker — which silently disables the screen in the multiprocessing build."""
+    import subprocess
+    import sys
+
+    code = ("from nyxara.growth.corpus import ContaminationFilter;"
+            "print(ContaminationFilter._hash_gram('the quick brown fox jumps'))")
+    outs = set()
+    for seed in ("0", "1", "12345"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        outs.add(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                env=env, cwd=str(REPO_ROOT)).stdout.strip())
+    assert len(outs) == 1, f"hash differs across PYTHONHASHSEED: {outs}"
+
+
+def test_contamination_index_round_trips_through_disk(tmp_path) -> None:
+    f = ContaminationFilter().load_eval_sets()
+    path = f.save(tmp_path / "decontam.bin")
+    back = ContaminationFilter.load(path)
+    assert back.loaded and back._hashes == f._hashes
+
+
+def test_strided_index_still_catches_a_long_overlap() -> None:
+    """Striding the INDEX is safe only because the QUERY still walks every n-gram."""
+    text = " ".join(f"w{i}" for i in range(60))
+    dense, strided = ContaminationFilter(n=13), ContaminationFilter(n=13, stride=4)
+    for f in (dense, strided):
+        f._hashes.update(f._ngrams(text))
+        f.loaded = True
+    probe = "zzz " + " ".join(f"w{i}" for i in range(20, 40)) + " qqq"
+    assert dense.is_contaminated(probe)
+    assert strided.is_contaminated(probe), "a strided index missed a 20-word overlap"
+
+
+# --------------------------------------------------------------------------- #
+# Multi-turn conversations must survive the door
+# --------------------------------------------------------------------------- #
+def test_every_turn_of_a_transcript_is_rendered() -> None:
+    """The conversation domain's whole reason for existing is the multi-turn structure."""
+    from nyxara.growth.corpus import _row_text
+
+    msgs = [{"role": "user", "content": f"question number {i} about apples"} for i in range(4)]
+    turns = []
+    for i in range(4):
+        turns.append({"role": "user", "content": f"question number {i} about apples"})
+        turns.append({"role": "assistant", "content": f"answer number {i} concerning pears"})
+
+    text = _row_text({"messages": turns}, "messages")
+    for i in range(4):
+        assert f"question number {i}" in text, f"user turn {i} was dropped"
+        assert f"answer number {i}" in text, f"assistant turn {i} was dropped"
+    assert len(msgs) == 4      # guard against the fixture being edited into meaninglessness
+
+
+def test_a_dangling_user_turn_is_not_paired_with_the_wrong_answer() -> None:
+    from nyxara.growth.corpus import _row_text
+
+    turns = [{"role": "user", "content": "first thing I asked about"},
+             {"role": "user", "content": "second thing I asked about"},
+             {"role": "assistant", "content": "the single reply given"}]
+    text = _row_text({"messages": turns}, "messages")
+    assert text.count("the single reply given") == 1
+
+
+# --------------------------------------------------------------------------- #
+# Shard sampling must follow token mass, not shard count
+# --------------------------------------------------------------------------- #
+def test_shards_are_sampled_in_proportion_to_length(tmp_path) -> None:
+    """A short tail shard beside long ones must not be oversampled into prominence."""
+    writer = ShardWriter(tmp_path, shard_tokens=4096)
+    writer.add("general", [1] * 4096)          # one full shard of 1s
+    writer.add("general", [2] * 4096)          # a second full shard of 1s
+    writer.close(vocab_size=8)
+    # A deliberately tiny tail shard of 2s.
+    ShardWriter(tmp_path, shard_tokens=4096).add("general", [2] * 64)
+    ShardWriter(tmp_path, shard_tokens=4096).close(vocab_size=8)
+
+    ds = ShardDataset(tmp_path, block_size=8, seed=0)
+    picks = [ds._pick_shard("general") for _ in range(4000)]
+    tail = sum(1 for p in picks if p == 2) / len(picks)
+    expected = 64 / (4096 + 4096 + 64)
+    assert tail < 0.05, (
+        f"the 64-token tail shard took {tail:.1%} of draws (mass share is {expected:.2%}) — "
+        "shards are being chosen uniformly rather than by length")
