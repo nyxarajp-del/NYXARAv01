@@ -74,8 +74,12 @@ _HAS_BNB = _has_bnb()
 
 __all__ = [
     "ModelSpec",
+    "ParamEstimate",
     "TrainStats",
     "BaseLanguageModel",
+    "estimate_params",
+    "resolved_dims",
+    "architecture_signature",
     "NgramByteLM",
     "NanoGPTModel",
     "LoRAModel",
@@ -112,6 +116,34 @@ class ModelSpec:
     n_head: int = 2
     n_embd: int = 64
     seed: int = 0
+    # ---- Scale-up knobs (NYX-300M). Every default below reproduces the historical byte-level
+    # nano-GPT exactly, so an old spec.json loads and builds the same model it always did. ---- #
+    # The output vocabulary. 256 is the byte-level default every backend spoke before a trained
+    # tokenizer existed (growth/tokenizer.py); a real sub-word vocabulary sets this to its size.
+    vocab_size: int = 256
+    # Grouped-query attention: how many KEY/VALUE heads to share across the n_head query heads.
+    # 0 -> multi-head attention (n_kv_head == n_head), which is the historical behaviour. At
+    # 300M this is what keeps the KV cache small enough to decode a 2048 context cheaply.
+    n_kv_head: int = 0
+    # SwiGLU hidden width. 0 -> the classic 4*n_embd GELU MLP. A positive value selects the
+    # gated SwiGLU mixer at that width (three matrices of n_embd × mlp_hidden, not two).
+    mlp_hidden: int = 0
+    # Rotary position embeddings. 0.0 -> learned absolute positions (the historical path).
+    # A positive theta selects RoPE, which is what lets the context be extended after training.
+    rope_theta: float = 0.0
+    dropout: float = 0.0
+    # Tie the token embedding to the LM head. At vocab 32768 × 1024 this is 33.5M parameters
+    # that would otherwise be spent twice on the same information.
+    tie_embeddings: bool = False
+    # Where the trained tokenizer lives, when this model speaks one. Persisted with the spec so
+    # a checkpoint is self-describing: a model that cannot say which language it speaks cannot
+    # be served (see mind/llm.SelfProvider).
+    tokenizer_dir: str = ""
+    # ---- Mixture of Experts (L-TOPOLOGY). 0 experts -> a dense model, the default. ---- #
+    n_experts: int = 0
+    moe_top_k: int = 2
+    moe_every: int = 2          # place an MoE mixer every Nth layer (1 = every layer)
+    moe_expert_hidden: int = 0  # 0 -> reuse mlp_hidden for each expert
     # ---- Genesis architecture (kind="genesis"; the searched topology, growth/genesis.py) ---- #
     # The serialized ArchitectureGenome the Genesis Protocol crowned. When present, build_model
     # assembles a brand-new neural net from it: a torch GenesisModel when torch is installed, else
@@ -175,6 +207,12 @@ class ModelSpec:
                 "ngram_k": self.ngram_k, "block_size": self.block_size,
                 "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd,
                 "seed": self.seed, "genome": self.genome, "substrate": self.substrate,
+                "vocab_size": self.vocab_size, "n_kv_head": self.n_kv_head,
+                "mlp_hidden": self.mlp_hidden, "rope_theta": self.rope_theta,
+                "dropout": self.dropout, "tie_embeddings": self.tie_embeddings,
+                "tokenizer_dir": self.tokenizer_dir,
+                "n_experts": self.n_experts, "moe_top_k": self.moe_top_k,
+                "moe_every": self.moe_every, "moe_expert_hidden": self.moe_expert_hidden,
                 "base_model": self.base_model,
                 "trust_remote_code": self.trust_remote_code, "lora_r": self.lora_r,
                 "lora_r_auto": self.lora_r_auto,
@@ -212,6 +250,134 @@ class ModelSpec:
 
 
 @dataclass
+class ParamEstimate:
+    """The parameter budget of a transformer spec, counted without building it.
+
+    ``total`` is every weight that must be stored and trained; ``active`` is the subset that
+    executes for one token. They differ only for a Mixture of Experts, where the whole point is
+    that ``active`` stays small while ``total`` grows — and where quoting only one of the two
+    numbers is how MoE models get oversold. Both are always reported together.
+    """
+
+    total: int = 0
+    active: int = 0
+    embedding: int = 0
+    per_layer: int = 0
+    n_layer: int = 0
+    moe_layers: int = 0
+
+    @property
+    def sparse(self) -> bool:
+        return self.active < self.total
+
+    def summary(self) -> str:
+        head = f"{self.total:,} parameters"
+        if self.sparse:
+            head += (f" total / {self.active:,} active per token "
+                     f"({self.moe_layers} of {self.n_layer} layers are MoE)")
+        return head
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"total": self.total, "active": self.active, "embedding": self.embedding,
+                "per_layer": self.per_layer, "n_layer": self.n_layer,
+                "moe_layers": self.moe_layers}
+
+
+def resolved_dims(spec: "ModelSpec") -> Dict[str, int]:
+    """Normalise a spec's optional dimensions into the concrete ones the model is built from.
+
+    One place decides what ``n_kv_head=0`` or ``mlp_hidden=0`` mean, so :func:`estimate_params`
+    and :class:`NanoGPTModel` can never disagree about the model they are describing.
+    """
+    n_embd = int(spec.n_embd)
+    n_head = max(1, int(spec.n_head))
+    n_kv = int(spec.n_kv_head) or n_head
+    n_kv = max(1, min(n_kv, n_head))
+    while n_head % n_kv:              # query heads must divide evenly into KV groups
+        n_kv -= 1
+    hidden = int(spec.mlp_hidden) or 0
+    experts = max(0, int(spec.n_experts))
+    return {
+        "n_embd": n_embd,
+        "n_head": n_head,
+        "n_kv_head": n_kv,
+        "head_dim": n_embd // n_head if n_head else n_embd,
+        "n_layer": max(1, int(spec.n_layer)),
+        "block_size": max(1, int(spec.block_size)),
+        "vocab_size": max(1, int(spec.vocab_size)),
+        "mlp_hidden": hidden,
+        "swiglu": 1 if hidden else 0,
+        "n_experts": experts,
+        "moe_top_k": max(1, min(int(spec.moe_top_k), experts)) if experts else 0,
+        "moe_every": max(1, int(spec.moe_every)),
+        "moe_expert_hidden": int(spec.moe_expert_hidden) or hidden or 4 * n_embd,
+        "rope": 1 if float(spec.rope_theta) > 0 else 0,
+        "tied": 1 if spec.tie_embeddings else 0,
+    }
+
+
+def estimate_params(spec: "ModelSpec") -> ParamEstimate:
+    """Count a spec's parameters exactly, in pure Python — no torch, nothing allocated.
+
+    This mirrors what :class:`NanoGPTModel` actually builds, term for term, and is the number
+    the config profiles and the CLI quote. It is deliberately *not* the old
+    ``FoundryConfig.estimated_params`` formula, which assumed an untied 50257-entry vocabulary
+    and a 12·d² dense block — neither of which describes a tied, GQA, SwiGLU model, and which
+    therefore reported a GPT-2 figure for a byte-level net that had nothing like that many
+    weights.
+    """
+    d = resolved_dims(spec)
+    n_embd, n_layer = d["n_embd"], d["n_layer"]
+    norm = n_embd if d["rope"] or d["swiglu"] else 2 * n_embd   # RMSNorm has no bias; LN has
+
+    # Embeddings: token table, plus a learned positional table only when RoPE is off. Tying
+    # means the LM head reuses the token table rather than owning a second copy of it.
+    embedding = d["vocab_size"] * n_embd
+    if not d["rope"]:
+        embedding += d["block_size"] * n_embd
+    head = 0 if d["tied"] else d["vocab_size"] * n_embd
+
+    # Attention: Q and O are always d×d; K and V shrink with grouped-query attention.
+    kv_dim = d["n_kv_head"] * d["head_dim"]
+    attn = 2 * n_embd * n_embd + 2 * n_embd * kv_dim
+
+    def mixer(hidden: int) -> int:
+        """A channel mixer: three matrices for gated SwiGLU, two for the classic MLP."""
+        return (3 if d["swiglu"] else 2) * n_embd * hidden
+
+    dense_mixer = mixer(d["mlp_hidden"] or 4 * n_embd)
+    per_layer_dense = attn + dense_mixer + 2 * norm
+
+    moe_layers = 0
+    total_layers = 0
+    active_layers = 0
+    if d["n_experts"]:
+        expert = mixer(d["moe_expert_hidden"])
+        router = n_embd * d["n_experts"]
+        for i in range(n_layer):
+            if (i + 1) % d["moe_every"] == 0:
+                moe_layers += 1
+                total_layers += attn + 2 * norm + router + d["n_experts"] * expert
+                # Only top_k experts execute for any given token — that is the whole point.
+                active_layers += attn + 2 * norm + router + d["moe_top_k"] * expert
+            else:
+                total_layers += per_layer_dense
+                active_layers += per_layer_dense
+    else:
+        total_layers = active_layers = n_layer * per_layer_dense
+
+    tail = norm + head
+    return ParamEstimate(
+        total=embedding + total_layers + tail,
+        active=embedding + active_layers + tail,
+        embedding=embedding,
+        per_layer=per_layer_dense,
+        n_layer=n_layer,
+        moe_layers=moe_layers,
+    )
+
+
+@dataclass
 class TrainStats:
     steps: int = 0
     final_loss: float = 0.0     # cross-entropy (nats) on the training corpus
@@ -242,6 +408,38 @@ class BaseLanguageModel(ABC):
 
     @abstractmethod
     def param_count(self) -> int: ...
+
+    # ---- cross-backend comparability (NOT abstract: every backend inherits a correct one) ---- #
+    def token_count(self, text: str) -> int:
+        """How many tokens this backend sees in ``text``. Bytes by default.
+
+        Overridden by the word-level and sub-word backends. Only used to un-normalise
+        :meth:`perplexity`, so an override that is merely *consistent* with the model's own
+        tokenisation is enough — it does not have to match any other backend's idea of a token.
+        """
+        return len(text.encode("utf-8", "replace"))
+
+    def cross_entropy_nats(self, text: str) -> Tuple[float, int]:
+        """``(total nats, n_tokens)`` for ``text``.
+
+        The default reconstructs the total from :meth:`perplexity`, which is defined as
+        ``exp(total / n_tokens)`` for every backend here. A backend that can measure the total
+        directly (:class:`NanoGPTModel`) overrides this and skips the round trip through a
+        logarithm.
+
+        This exists because **per-token perplexity is not comparable across vocabularies.** A
+        byte-level model predicting ``e`` after ``th`` is solving an easier problem than a
+        sub-word model predicting a whole word, so the byte model reports a much lower
+        perplexity while being a far worse model. The foundry's promotion gate compares
+        candidates against the active model, and at the moment a trained tokenizer arrives those
+        two stop speaking the same language. ``eval/domains.bits_per_byte`` divides this total
+        by UTF-8 *bytes* instead, which every backend agrees on.
+        """
+        ppl = self.perplexity(text)
+        n = self.token_count(text)
+        if not n or not math.isfinite(ppl) or ppl <= 0:
+            return float("inf"), 0
+        return math.log(ppl) * n, n
 
     @abstractmethod
     def save(self, directory: Path) -> None: ...
@@ -656,6 +854,10 @@ class WordKNGramLM(BaseLanguageModel):
         ce = self._corpus_cross_entropy([text])
         return math.exp(ce) if ce < 700 else float("inf")
 
+    def token_count(self, text: str) -> int:
+        """Words, not bytes — this backend's perplexity is per word, so the total must be too."""
+        return len(_word_tokenize(text)) + 1        # + the <eos> every sequence is scored with
+
     # ---- generation ---- #
     def _candidates(self, ctx_full: Tuple[int, ...]) -> List[int]:
         cands: set = set()
@@ -820,9 +1022,369 @@ if _HAS_TORCH:
                 x = blk(x)
             return self.head(self.ln_f(x))
 
+    # ----------------------------------------------------------------------- #
+    # NYX-300M: the modern decoder
+    # ----------------------------------------------------------------------- #
+    # Built when a spec asks for any of RoPE / SwiGLU / GQA / MoE / a trained vocabulary — see
+    # `_is_modern`. The legacy `_NanoGPT` above is left exactly as it was, so a checkpoint
+    # trained before this existed still loads into the module it was saved from. Two small
+    # implementations beat one that has to be both.
+    #
+    # The differences from the legacy block are all load-bearing at 300M:
+    #   RMSNorm       — no mean subtraction, no bias; cheaper and the standard at this scale
+    #   RoPE          — position enters attention as a rotation, so context can be extended
+    #                   after training instead of being frozen by a learned table
+    #   SwiGLU        — a gated mixer, materially better per parameter than GELU-MLP
+    #   GQA           — 4 KV heads instead of 16 shrinks the decode-time KV cache 4×
+    #   SDPA          — F.scaled_dot_product_attention(is_causal=True) dispatches to the fused
+    #                   FlashAttention kernel AND removes the per-layer (block × block) mask
+    #                   buffer the legacy block registers. At block=2048 × 24 layers those
+    #                   buffers alone are ~100M booleans of pure waste.
+
+    class _RMSNorm(nn.Module):
+        def __init__(self, dim: int, eps: float = 1e-6) -> None:
+            super().__init__()
+            self.eps = eps
+            self.weight = nn.Parameter(torch.ones(dim))
+
+        def forward(self, x):  # type: ignore[override]
+            dtype = x.dtype
+            x = x.float()
+            x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+            return (x.to(dtype) * self.weight)
+
+    def _rope_tables(head_dim: int, seq: int, theta: float, device, dtype):
+        """Cosine/sine tables for rotary embeddings, shaped to broadcast over (B, H, T, D)."""
+        inv = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+        t = torch.arange(seq, device=device).float()
+        freqs = torch.outer(t, inv)                     # (T, D/2)
+        emb = torch.cat((freqs, freqs), dim=-1)         # (T, D)
+        return emb.cos().to(dtype)[None, None], emb.sin().to(dtype)[None, None]
+
+    def _rotate_half(x):
+        half = x.shape[-1] // 2
+        return torch.cat((-x[..., half:], x[..., :half]), dim=-1)
+
+    def _apply_rope(q, k, cos, sin):
+        t = q.shape[-2]
+        cos, sin = cos[..., :t, :], sin[..., :t, :]
+        return q * cos + _rotate_half(q) * sin, k * cos + _rotate_half(k) * sin
+
+    class _NyxAttention(nn.Module):
+        """Causal grouped-query attention with rotary positions, via fused SDPA."""
+
+        def __init__(self, *, n_embd: int, n_head: int, n_kv_head: int, dropout: float) -> None:
+            super().__init__()
+            self.n_head = n_head
+            self.n_kv_head = n_kv_head
+            self.head_dim = n_embd // n_head
+            self.dropout = dropout
+            self.q_proj = nn.Linear(n_embd, n_head * self.head_dim, bias=False)
+            self.k_proj = nn.Linear(n_embd, n_kv_head * self.head_dim, bias=False)
+            self.v_proj = nn.Linear(n_embd, n_kv_head * self.head_dim, bias=False)
+            self.o_proj = nn.Linear(n_head * self.head_dim, n_embd, bias=False)
+
+        def forward(self, x, cos, sin, cache=None):  # type: ignore[override]
+            b, t, _ = x.shape
+            q = self.q_proj(x).view(b, t, self.n_head, self.head_dim).transpose(1, 2)
+            k = self.k_proj(x).view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
+            v = self.v_proj(x).view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
+
+            if cos is not None:
+                # With a KV cache the new token sits at position `offset`, not 0 — rotating it
+                # as if it were the first token would silently destroy the position signal.
+                offset = 0 if cache is None else cache[0].shape[-2]
+                q, k = _apply_rope(q, k, cos[..., offset:offset + t, :],
+                                   sin[..., offset:offset + t, :])
+
+            if cache is not None:
+                k = torch.cat((cache[0], k), dim=-2)
+                v = torch.cat((cache[1], v), dim=-2)
+            new_cache = (k, v)
+
+            if self.n_kv_head != self.n_head:      # GQA: broadcast each KV head to its group
+                repeat = self.n_head // self.n_kv_head
+                k = k.repeat_interleave(repeat, dim=1)
+                v = v.repeat_interleave(repeat, dim=1)
+
+            # is_causal is only correct when q and k are the same length. During cached decode
+            # the single query attends to the whole prefix, which needs no mask at all.
+            causal = cache is None or k.shape[-2] == q.shape[-2]
+            out = nn.functional.scaled_dot_product_attention(
+                q, k, v, is_causal=causal,
+                dropout_p=self.dropout if self.training else 0.0)
+            out = out.transpose(1, 2).contiguous().view(b, t, -1)
+            return self.o_proj(out), new_cache
+
+    class _SwiGLU(nn.Module):
+        def __init__(self, n_embd: int, hidden: int, dropout: float = 0.0) -> None:
+            super().__init__()
+            self.gate = nn.Linear(n_embd, hidden, bias=False)
+            self.up = nn.Linear(n_embd, hidden, bias=False)
+            self.down = nn.Linear(hidden, n_embd, bias=False)
+            self.drop = nn.Dropout(dropout) if dropout else None
+
+        def forward(self, x):  # type: ignore[override]
+            h = self.down(nn.functional.silu(self.gate(x)) * self.up(x))
+            return self.drop(h) if self.drop is not None else h
+
+    class _SparseMoE(nn.Module):
+        """Top-k routed experts with **real** sparse dispatch.
+
+        The existing MoE in ``growth/genesis.py`` computes *every* expert on *every* token and
+        then masks the ones it did not want. That is correct, and it is what an architecture
+        search needs, but it means the sparsity is a fiction: an 8-expert top-2 layer costs 8
+        experts of compute, so it is strictly worse than the dense layer it replaced.
+
+        This one gathers the tokens routed to each expert, runs that expert on just those
+        tokens, and scatters the results back — so a top-2-of-12 layer really does cost 2
+        experts. That is the entire reason to build an MoE, and
+        ``tests/growth/test_moe_sparsity.py`` measures it rather than trusting it.
+        """
+
+        def __init__(self, *, n_embd: int, hidden: int, n_experts: int, top_k: int,
+                     dropout: float = 0.0) -> None:
+            super().__init__()
+            self.n_experts = n_experts
+            self.top_k = max(1, min(top_k, n_experts))
+            self.router = nn.Linear(n_embd, n_experts, bias=False)
+            self.experts = nn.ModuleList(
+                [_SwiGLU(n_embd, hidden, dropout) for _ in range(n_experts)])
+
+        def forward(self, x):  # type: ignore[override]
+            b, t, c = x.shape
+            flat = x.reshape(-1, c)                                  # (N, C)
+            logits = self.router(flat)
+            probs = torch.softmax(logits.float(), dim=-1)
+            weights, picks = probs.topk(self.top_k, dim=-1)           # (N, k)
+            weights = (weights / weights.sum(-1, keepdim=True)).to(x.dtype)
+
+            out = torch.zeros_like(flat)
+            for e, expert in enumerate(self.experts):
+                # Which (token, slot) pairs chose expert e. `rows` may be empty, in which case
+                # this expert genuinely does no work for this batch.
+                rows, slots = (picks == e).nonzero(as_tuple=True)
+                if rows.numel() == 0:
+                    continue
+                out.index_add_(0, rows,
+                               expert(flat[rows]) * weights[rows, slots].unsqueeze(-1))
+
+            # Switch-Transformer load balance: E · Σ_e (fraction routed to e)·(mean prob of e).
+            # Without it the router collapses onto one expert and the bank is wasted.
+            importance = probs.mean(0)
+            routed = torch.zeros_like(importance)
+            routed.index_add_(0, picks.reshape(-1),
+                              torch.ones(picks.numel(), device=x.device, dtype=probs.dtype))
+            routed = routed / max(1, picks.numel())
+            aux = self.n_experts * (importance * routed).sum()
+            return out.view(b, t, c), aux
+
+    class _NyxBlock(nn.Module):
+        def __init__(self, *, n_embd: int, n_head: int, n_kv_head: int, hidden: int,
+                     dropout: float, n_experts: int = 0, top_k: int = 2,
+                     expert_hidden: int = 0) -> None:
+            super().__init__()
+            self.norm1 = _RMSNorm(n_embd)
+            self.attn = _NyxAttention(n_embd=n_embd, n_head=n_head, n_kv_head=n_kv_head,
+                                      dropout=dropout)
+            self.norm2 = _RMSNorm(n_embd)
+            self.is_moe = bool(n_experts)
+            if self.is_moe:
+                self.mlp = _SparseMoE(n_embd=n_embd, hidden=expert_hidden or hidden,
+                                      n_experts=n_experts, top_k=top_k, dropout=dropout)
+            else:
+                self.mlp = _SwiGLU(n_embd, hidden, dropout)
+
+        def forward(self, x, cos, sin, cache=None):  # type: ignore[override]
+            attn_out, new_cache = self.attn(self.norm1(x), cos, sin, cache)
+            x = x + attn_out
+            if self.is_moe:
+                mixed, aux = self.mlp(self.norm2(x))
+            else:
+                mixed, aux = self.mlp(self.norm2(x)), None
+            return x + mixed, new_cache, aux
+
+    class _NyxGPT(nn.Module):
+        """The NYX-300M decoder. Dense or sparse, RoPE or learned, from one spec."""
+
+        def __init__(self, spec: "ModelSpec") -> None:
+            super().__init__()
+            d = resolved_dims(spec)
+            self.dims = d
+            self.block_size = d["block_size"]
+            self.vocab_size = d["vocab_size"]
+            self.rope_theta = float(spec.rope_theta)
+            hidden = d["mlp_hidden"] or 4 * d["n_embd"]
+
+            self.tok = nn.Embedding(d["vocab_size"], d["n_embd"])
+            self.pos = (None if d["rope"]
+                        else nn.Embedding(d["block_size"], d["n_embd"]))
+            self.layers = nn.ModuleList([
+                _NyxBlock(
+                    n_embd=d["n_embd"], n_head=d["n_head"], n_kv_head=d["n_kv_head"],
+                    hidden=hidden, dropout=float(spec.dropout),
+                    n_experts=(d["n_experts"] if d["n_experts"]
+                               and (i + 1) % d["moe_every"] == 0 else 0),
+                    top_k=d["moe_top_k"], expert_hidden=d["moe_expert_hidden"],
+                )
+                for i in range(d["n_layer"])
+            ])
+            self.norm_f = _RMSNorm(d["n_embd"])
+            self.head = nn.Linear(d["n_embd"], d["vocab_size"], bias=False)
+            if d["tied"]:
+                self.head.weight = self.tok.weight
+
+            self._cos = self._sin = None
+            self.apply(self._init_weights)
+            # Residual-stream init: with N layers each adding to the residual, projections are
+            # scaled by 1/sqrt(2N) so the stream's variance does not grow with depth. Skipping
+            # this is a common reason deep from-scratch runs diverge in the first thousand steps.
+            scale = (2 * d["n_layer"]) ** -0.5
+            for name, p in self.named_parameters():
+                if name.endswith(("o_proj.weight", "down.weight")):
+                    torch.nn.init.normal_(p, mean=0.0, std=0.02 * scale)
+
+        @staticmethod
+        def _init_weights(module) -> None:
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+        def _rope(self, t: int, device, dtype):
+            if not self.rope_theta:
+                return None, None
+            need = max(t, self.block_size)
+            if (self._cos is None or self._cos.shape[-2] < need
+                    or self._cos.device != device or self._cos.dtype != dtype):
+                self._cos, self._sin = _rope_tables(
+                    self.dims["head_dim"], need, self.rope_theta, device, dtype)
+            return self._cos, self._sin
+
+        def forward(self, idx, caches=None, return_aux: bool = False):  # type: ignore[override]
+            b, t = idx.shape
+            x = self.tok(idx)
+            if self.pos is not None:
+                offset = 0 if not caches or caches[0] is None else caches[0][0].shape[-2]
+                x = x + self.pos(torch.arange(offset, offset + t, device=idx.device))[None]
+            cos, sin = self._rope(t + (0 if not caches or caches[0] is None
+                                       else caches[0][0].shape[-2]), idx.device, x.dtype)
+
+            new_caches: List[Any] = []
+            aux_total = None
+            for i, layer in enumerate(self.layers):
+                cache = caches[i] if caches else None
+                x, new_cache, aux = layer(x, cos, sin, cache)
+                new_caches.append(new_cache)
+                if aux is not None:
+                    aux_total = aux if aux_total is None else aux_total + aux
+
+            logits = self.head(self.norm_f(x))
+            if return_aux:
+                return logits, new_caches, aux_total
+            return logits
+
+
+def _is_modern(spec: "ModelSpec") -> bool:
+    """Whether ``spec`` asks for the NYX decoder rather than the historical nano-GPT.
+
+    Any one of a trained vocabulary, RoPE, SwiGLU, grouped-query attention or an expert bank
+    means the legacy module cannot represent this model. A spec with none of them is a spec
+    written before those knobs existed, and must keep building — and loading — exactly what it
+    always did.
+    """
+    return bool(spec.vocab_size != 256 or spec.rope_theta or spec.mlp_hidden
+                or spec.n_kv_head or spec.n_experts or spec.tie_embeddings)
+
+
+# Weight on the MoE load-balancing auxiliary loss. Switch Transformer's value; without it the
+# router collapses onto a single expert and the whole bank becomes dead weight.
+_MOE_AUX_WEIGHT = 0.01
+
+
+def _sample_next(logits: Any, history: Sequence[int], *, temperature: float = 1.0,
+                 top_k: int = 0, top_p: float = 1.0, repetition_penalty: float = 1.0,
+                 greedy: bool = False) -> int:
+    """Pick the next token id from ``logits`` (shape ``(1, vocab)``).
+
+    Mirrors the decoding controls ``growth/genesis.py`` already offers, so the two neural
+    backends sample the same way rather than each having its own dialect of "temperature".
+    """
+    logits = logits.float()
+    if repetition_penalty and repetition_penalty != 1.0 and len(history):
+        seen = torch.tensor(sorted(set(int(i) for i in history)),
+                            dtype=torch.long, device=logits.device)
+        seen = seen[seen < logits.shape[-1]]
+        if seen.numel():
+            picked = logits[0, seen]
+            # The standard formulation: divide positive logits, multiply negative ones, so the
+            # penalty always pushes *away* from a repeat regardless of sign.
+            logits[0, seen] = torch.where(picked > 0, picked / repetition_penalty,
+                                          picked * repetition_penalty)
+    if greedy or temperature <= 0:
+        return int(torch.argmax(logits, dim=-1).item())
+
+    logits = logits / max(1e-6, temperature)
+    if top_k and top_k > 0:
+        k = min(int(top_k), logits.shape[-1])
+        kth = torch.topk(logits, k, dim=-1).values[..., -1, None]
+        logits = logits.masked_fill(logits < kth, float("-inf"))
+    if top_p and 0.0 < top_p < 1.0:
+        ordered, order = torch.sort(logits, descending=True, dim=-1)
+        cumulative = torch.cumsum(torch.softmax(ordered, dim=-1), dim=-1)
+        drop = cumulative - torch.softmax(ordered, dim=-1) > top_p
+        ordered = ordered.masked_fill(drop, float("-inf"))
+        logits = torch.full_like(logits, float("-inf")).scatter(-1, order, ordered)
+    probs = torch.softmax(logits, dim=-1)
+    return int(torch.multinomial(probs, 1).item())
+
+
+def _build_net(spec: "ModelSpec") -> Any:
+    """Build the module a spec describes — the NYX decoder, or the historical nano-GPT."""
+    if _is_modern(spec):
+        return _NyxGPT(spec)
+    return _NanoGPT(n_embd=spec.n_embd, n_head=spec.n_head,
+                    n_layer=spec.n_layer, block_size=spec.block_size)
+
+
+def _load_spec_tokenizer(spec: "ModelSpec") -> Any:
+    """Load ``spec.tokenizer_dir``'s tokenizer, or ``None`` for a byte-level model.
+
+    Never raises for an absent directory — that is simply a byte-level model. A *corrupt*
+    tokenizer does raise, because serving a model with the wrong vocabulary produces confident
+    nonsense, which is far worse than failing to start.
+    """
+    if not spec.tokenizer_dir:
+        return None
+    from nyxara.growth.tokenizer import load_tokenizer
+    return load_tokenizer(spec.tokenizer_dir)
+
+
+def architecture_signature(spec: "ModelSpec") -> Tuple[Any, ...]:
+    """The dimensions that must match for one model's weights to load into another.
+
+    ``growth/foundry.py`` warm-starts a new generation from the active model's weights when the
+    backends agree. Backend equality is not enough: a 300M candidate and a 137k active model are
+    both ``kind="nanogpt"`` and their state dicts share key names while sharing no shapes at
+    all. Comparing this tuple first is what turns that from a half-loaded model into a clean
+    "start fresh".
+    """
+    d = resolved_dims(spec)
+    return (_is_modern(spec), d["vocab_size"], d["n_embd"], d["n_layer"], d["n_head"],
+            d["n_kv_head"], d["block_size"], d["mlp_hidden"], d["n_experts"],
+            d["moe_every"], d["moe_expert_hidden"], d["tied"])
+
 
 class NanoGPTModel(BaseLanguageModel):
-    """A from-scratch byte-level GPT. Optional: requires ``torch`` (install ``.[foundry]``)."""
+    """A from-scratch GPT trained from zero. Optional: requires ``torch`` (``.[foundry]``).
+
+    Two architectures live behind this one class, chosen by the spec (:func:`_is_modern`):
+    the historical byte-level nano-GPT, unchanged so its checkpoints still load, and the
+    NYX-300M decoder (RoPE · RMSNorm · SwiGLU · grouped-query attention · optional sparse
+    experts) that a trained vocabulary and real scale require.
+    """
 
     kind = "nanogpt"
 
@@ -831,18 +1393,43 @@ class NanoGPTModel(BaseLanguageModel):
             raise RuntimeError("NanoGPTModel requires torch (pip install -e .[foundry])")
         self.spec = spec or ModelSpec(kind="nanogpt")
         torch.manual_seed(self.spec.seed)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.net = _NanoGPT(n_embd=self.spec.n_embd, n_head=self.spec.n_head,
-                            n_layer=self.spec.n_layer, block_size=self.spec.block_size
-                            ).to(self.device)
+        self.device = self.spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.net = _build_net(self.spec).to(self.device)
+        # The trained sub-word tokenizer, when this model speaks one. None ⇒ raw bytes, which
+        # is what every model built before growth/tokenizer.py existed does.
+        self.tokenizer = _load_spec_tokenizer(self.spec)
         # Optional Elastic Weight Consolidation: when set, the EWC penalty over previously
         # consolidated weights is added to the training loss, so retraining a new generation
         # does not catastrophically forget the last (memory/elastic_synapses.py). None ⇒
         # behaviour is exactly as before.
         self.synapses: Any = None
 
+    @property
+    def vocab_size(self) -> int:
+        return int(self.spec.vocab_size)
+
+    def attach_tokenizer(self, tokenizer: Any) -> None:
+        """Bind a trained tokenizer, keeping ``spec.vocab_size`` honest about the vocabulary.
+
+        Called by the trainer once the tokenizer for a run exists. Raises on a size mismatch
+        rather than silently truncating: a model whose head is narrower than its vocabulary
+        would emit ids it can never produce and decode to the wrong text.
+        """
+        if tokenizer is not None and tokenizer.vocab_size != self.spec.vocab_size:
+            raise ValueError(
+                f"tokenizer vocab ({tokenizer.vocab_size}) does not match the model's "
+                f"vocab_size ({self.spec.vocab_size}) — rebuild the model from a matching spec")
+        self.tokenizer = tokenizer
+
     def _encode(self, text: str) -> List[int]:
+        if self.tokenizer is not None:
+            return self.tokenizer.encode(text)
         return list(text.encode("utf-8", errors="replace"))
+
+    def _decode(self, ids: Sequence[int]) -> str:
+        if self.tokenizer is not None:
+            return self.tokenizer.decode(ids)
+        return bytes(int(i) & 0xFF for i in ids).decode("utf-8", errors="replace")
 
     def train_on(self, corpus: Sequence[str], *, steps: int = 200, seed: int = 0) -> TrainStats:
         import time
@@ -860,8 +1447,11 @@ class NanoGPTModel(BaseLanguageModel):
             i = rng.randint(0, len(data) - bs - 1)
             x = t[i:i + bs].unsqueeze(0)
             y = t[i + 1:i + 1 + bs].unsqueeze(0)
-            logits = self.net(x)
-            loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.view(-1))
+            logits, aux = self._forward_with_aux(x)
+            loss = nn.functional.cross_entropy(
+                logits.view(-1, self.vocab_size), y.view(-1))
+            if aux is not None:      # MoE load balance — without it the router collapses
+                loss = loss + _MOE_AUX_WEIGHT * aux
             if self.synapses is not None:   # Elastic Weight Consolidation: protect old skills
                 loss = loss + self.synapses.penalty()
             opt.zero_grad(); loss.backward(); opt.step()
@@ -891,24 +1481,95 @@ class NanoGPTModel(BaseLanguageModel):
                 x = torch.tensor(chunk[:-1], dtype=torch.long, device=self.device).unsqueeze(0)
                 y = torch.tensor(chunk[1:], dtype=torch.long, device=self.device).unsqueeze(0)
                 logits = self.net(x)
-                loss = nn.functional.cross_entropy(logits.view(-1, _VOCAB), y.view(-1))
+                loss = nn.functional.cross_entropy(
+                    logits.view(-1, self.vocab_size), y.view(-1))
                 total += float(loss.item()) * y.numel(); n += y.numel()
         ce = total / n if n else float("inf")
         return math.exp(ce) if ce < 700 else float("inf")
 
-    def generate(self, prompt: str, *, max_tokens: int = 128) -> str:
+    def cross_entropy_nats(self, text: str) -> Tuple[float, int]:
+        """``(total nats, n_tokens)`` over ``text`` — the raw material for bits-per-byte.
+
+        :meth:`perplexity` is per *token* and therefore incomparable across vocabularies; a
+        BPE model and a byte model can be equally good and report wildly different numbers.
+        Returning the unnormalised total lets ``eval/domains.bits_per_byte`` divide by UTF-8
+        bytes instead, which is comparable across every backend.
+        """
+        self.net.eval()
+        data = self._encode(text)
+        bs = self.spec.block_size
+        if len(data) < 2:
+            return 0.0, 0
+        total, n = 0.0, 0
+        with torch.no_grad():
+            for i in range(0, max(1, len(data) - 1), bs):
+                chunk = data[i:i + bs + 1]
+                if len(chunk) < 2:
+                    break
+                x = torch.tensor(chunk[:-1], dtype=torch.long, device=self.device).unsqueeze(0)
+                y = torch.tensor(chunk[1:], dtype=torch.long, device=self.device).unsqueeze(0)
+                logits = self.net(x)
+                loss = nn.functional.cross_entropy(
+                    logits.view(-1, self.vocab_size), y.view(-1))
+                total += float(loss.item()) * y.numel(); n += y.numel()
+        return total, n
+
+    def _forward_with_aux(self, x) -> Tuple[Any, Any]:
+        """Forward pass returning ``(logits, moe_aux)``; aux is ``None`` for a dense model."""
+        if isinstance(self.net, _NyxGPT):
+            logits, _caches, aux = self.net(x, return_aux=True)
+            return logits, aux
+        return self.net(x), None
+
+    def generate(self, prompt: str, *, max_tokens: int = 128, temperature: float = 1.0,
+                 top_k: int = 0, top_p: float = 1.0, repetition_penalty: float = 1.0,
+                 greedy: bool = False, use_cache: bool = True) -> str:
+        """Sample a continuation of ``prompt``.
+
+        The NYX decoder decodes with a **KV cache**: the prefix is encoded once and each new
+        token attends to the stored keys/values instead of re-running the whole context. That
+        turns generation from O(n²) recomputation into O(n) and is what makes a 2048-token
+        context usable at all. The legacy nano-GPT keeps its original sliding-window path.
+        """
         self.net.eval()
         torch.manual_seed(self.spec.seed)
-        idx = self._encode(prompt) or [ord("\n")]
+        prompt_ids = self._encode(prompt)
+        idx = list(prompt_ids) or [self._newline_id()]
         bs = self.spec.block_size
+        cached = use_cache and isinstance(self.net, _NyxGPT)
+        caches: Optional[List[Any]] = None
+        out: List[int] = []
+
         with torch.no_grad():
-            for _ in range(max_tokens):
-                ctx = torch.tensor(idx[-bs:], dtype=torch.long, device=self.device).unsqueeze(0)
-                logits = self.net(ctx)[:, -1, :]
-                probs = torch.softmax(logits, dim=-1)
-                nxt = int(torch.multinomial(probs, 1).item())
+            for step in range(max_tokens):
+                if cached:
+                    # First pass feeds the whole prompt; every later pass feeds one token.
+                    feed = idx[-bs:] if step == 0 else [idx[-1]]
+                    ctx = torch.tensor(feed, dtype=torch.long,
+                                       device=self.device).unsqueeze(0)
+                    logits, caches, _aux = self.net(ctx, caches=caches, return_aux=True)
+                    logits = logits[:, -1, :]
+                else:
+                    ctx = torch.tensor(idx[-bs:], dtype=torch.long,
+                                       device=self.device).unsqueeze(0)
+                    logits = self.net(ctx)[:, -1, :]
+
+                nxt = _sample_next(logits, idx, temperature=temperature, top_k=top_k,
+                                   top_p=top_p, repetition_penalty=repetition_penalty,
+                                   greedy=greedy)
                 idx.append(nxt)
-        return bytes(idx[len(self._encode(prompt)):]).decode("utf-8", errors="replace")
+                out.append(nxt)
+                if self.tokenizer is not None and nxt == self.tokenizer.eos_id:
+                    break
+
+        return self._decode(out)
+
+    def _newline_id(self) -> int:
+        """The id to seed an empty prompt with — a newline in whatever vocabulary this speaks."""
+        if self.tokenizer is not None:
+            ids = self.tokenizer.encode("\n")
+            return ids[0] if ids else self.tokenizer.bos_id
+        return ord("\n")
 
     def param_count(self) -> int:
         return sum(p.numel() for p in self.net.parameters())
@@ -918,6 +1579,14 @@ class NanoGPTModel(BaseLanguageModel):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "spec.json").write_text(json.dumps(self.spec.to_dict()), encoding="utf-8")
         torch.save(self.net.state_dict(), directory / "model.pt")
+        # The tokenizer travels WITH the weights. A checkpoint that cannot say which language
+        # it speaks cannot be served, and pointing at a tokenizer_dir that may later move or be
+        # retrained is exactly how a model ends up decoding to confident nonsense.
+        if self.tokenizer is not None:
+            try:
+                self.tokenizer.save(directory)
+            except Exception:  # noqa: BLE001 — the spec still records tokenizer_dir as a fallback
+                pass
         # Persist the elastic-synapse anchors so forging generations keep their memory.
         if self.synapses is not None:
             try:
@@ -930,10 +1599,13 @@ class NanoGPTModel(BaseLanguageModel):
         directory = Path(directory)
         self.spec = ModelSpec.from_dict(
             json.loads((directory / "spec.json").read_text(encoding="utf-8")))
-        self.net = _NanoGPT(n_embd=self.spec.n_embd, n_head=self.spec.n_head,
-                            n_layer=self.spec.n_layer, block_size=self.spec.block_size
-                            ).to(self.device)
+        self.net = _build_net(self.spec).to(self.device)
         self.net.load_state_dict(torch.load(directory / "model.pt", map_location=self.device))
+        # Prefer the tokenizer stored beside these weights over whatever the spec's recorded
+        # path points at now: the checkpoint's own vocabulary is the one its head was trained
+        # for, and a moved or replaced tokenizer_dir would decode it to the wrong text.
+        from nyxara.growth.tokenizer import load_tokenizer
+        self.tokenizer = load_tokenizer(directory) or _load_spec_tokenizer(self.spec)
         syn_path = directory / "synapses.json"
         if self.synapses is not None and syn_path.exists():
             try:

@@ -126,7 +126,15 @@ def recommend_foundry_profile(compute: Any, *,
         prof = "small" if cap >= 0.6 else "tiny"
         return ProfileRecommendation(prof, False, cap, device,
                                      f"torch on CPU — {prof} nano-GPT (GPT-2 needs a GPU)")
-    # CUDA present: scale to capacity, unlock QLoRA for the large tiers
+    # CUDA present: scale to capacity, unlock QLoRA for the large tiers.
+    #
+    # The NYX-* profiles are deliberately NOT on this ladder. Autoscale answers "how big a model
+    # can this box adapt?" — and every rung here is LoRA over a pretrained base, which is hours.
+    # Training her own 300M decoder from scratch is *days* of GPU time and a different decision
+    # entirely. Putting it here would start that run for anyone who merely happens to own a good
+    # GPU, without them ever asking for it. It is selected explicitly
+    # (``foundry.profile = "nyxara-300m"``, or ``scripts/train_300m.py``), and
+    # ``Foundry._scaled_dims`` then leaves that choice alone.
     if cap >= 0.85:
         return ProfileRecommendation("gpt2-medium", True, cap, "cuda",
                                      "strong CUDA GPU — GPT-2-medium + 4-bit QLoRA")
