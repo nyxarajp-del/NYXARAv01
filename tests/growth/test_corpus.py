@@ -44,8 +44,15 @@ def tokenizer():
 
 @pytest.fixture
 def built(tmp_path, tokenizer):
+    """A corpus built with NO network access.
+
+    `stream_sources={}` is not optional here. Once the `datasets` package is installed the
+    default source list reaches HuggingFace, and the suite would depend on the network being up,
+    on several datasets staying un-gated, and on minutes of download per test. Hermetic by
+    construction beats hermetic by "the optional dependency happens to be missing".
+    """
     index, report = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "shards",
-                                 tokens_budget=300_000, seed=3)
+                                 tokens_budget=300_000, seed=3, stream_sources={})
     return tmp_path / "shards", index, report
 
 
@@ -162,7 +169,11 @@ def test_absent_domain_weight_is_redistributed_not_sampled(built) -> None:
 
 
 def test_absent_domain_is_reported_not_hidden(built) -> None:
-    """`general` has no offline source, and the report must say so rather than look complete."""
+    """`general` has no offline source — it is streamed or it is absent, never fabricated.
+
+    A synthetic general corpus would teach fluent nonsense, so `DEFAULT_SYNTHETIC_SHARE` sets it
+    to zero on purpose. The report has to SAY the domain is missing rather than look complete.
+    """
     _shard_dir, _index, report = built
     assert any("ABSENT" in note for note in report.notes)
 
@@ -172,8 +183,10 @@ def test_absent_domain_is_reported_not_hidden(built) -> None:
 # --------------------------------------------------------------------------- #
 def test_build_resumes_instead_of_restarting(tmp_path, tokenizer) -> None:
     out = tmp_path / "shards"
-    _index, first = build_corpus(tokenizer=tokenizer, out_dir=out, tokens_budget=40_000, seed=3)
-    index2, second = build_corpus(tokenizer=tokenizer, out_dir=out, tokens_budget=80_000, seed=3)
+    _index, first = build_corpus(tokenizer=tokenizer, out_dir=out, tokens_budget=40_000, seed=3,
+                                 stream_sources={})
+    index2, second = build_corpus(tokenizer=tokenizer, out_dir=out, tokens_budget=80_000, seed=3,
+                                  stream_sources={})
     assert any("resuming" in note for note in second.notes)
     assert index2.tokens() >= first.total_tokens
 
@@ -233,6 +246,64 @@ def test_report_notes_when_streaming_is_unavailable(built) -> None:
         import datasets  # noqa: F401
     except Exception:
         assert any("datasets" in note for note in report.notes)
+
+
+def test_an_empty_source_dict_really_disables_streaming(tmp_path, tokenizer) -> None:
+    """`{}` means "no sources", not "use the defaults".
+
+    `dict(stream_sources or DEFAULT)` treats an empty dict as falsy and silently restored the
+    default source list — so `--no-stream` reached HuggingFace anyway and this suite depended on
+    the network being up. Measured, the same build went from 18.6s (streaming) to 0.9s once the
+    check became `is not None`.
+    """
+    from nyxara.growth.corpus import CorpusBuilder
+
+    builder = CorpusBuilder(tokenizer=tokenizer, out_dir=tmp_path, stream_sources={})
+    assert builder.stream_sources == {}, "an explicitly empty source list was overridden"
+
+    default = CorpusBuilder(tokenizer=tokenizer, out_dir=tmp_path)
+    assert default.stream_sources, "omitting the argument must still give the defaults"
+
+
+def test_an_empty_weight_dict_is_not_silently_replaced(tmp_path, tokenizer) -> None:
+    from nyxara.growth.corpus import CorpusBuilder
+
+    builder = CorpusBuilder(tokenizer=tokenizer, out_dir=tmp_path, weights={},
+                            synthetic_share={})
+    assert builder.weights == {} and builder.synthetic_share == {}
+
+
+def test_the_synthetic_share_scales_with_the_budget(tmp_path, tokenizer) -> None:
+    """Synthetic data must be a designed fraction of the budget, not a fixed document count.
+
+    The fixed count produced ~1.8M tokens against a 6B budget — 0.03% of the corpus — so the one
+    source that is correct by construction was rounding error.
+    """
+    small, _ = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "a",
+                            tokens_budget=40_000, seed=1, stream_sources={})
+    large, _ = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "b",
+                            tokens_budget=400_000, seed=1, stream_sources={})
+    assert large.tokens("math") > small.tokens("math") * 3, (
+        "a 10x budget produced barely more synthetic maths — the share is not scaling")
+
+
+def test_the_validation_split_is_disjoint_and_content_keyed(tmp_path, tokenizer) -> None:
+    """Two builds of the same corpus must put each document on the same side of the split."""
+    first, _ = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "a",
+                            tokens_budget=120_000, seed=7, stream_sources={})
+    second, _ = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "b",
+                             tokens_budget=120_000, seed=7, stream_sources={})
+    assert first.tokens(split="val") > 0, "no validation split was produced"
+    assert first.tokens(split="val") == second.tokens(split="val")
+    assert first.tokens(split="train") == second.tokens(split="train")
+
+
+def test_val_shards_are_not_served_to_the_training_reader(tmp_path, tokenizer) -> None:
+    index, _ = build_corpus(tokenizer=tokenizer, out_dir=tmp_path / "s",
+                            tokens_budget=120_000, seed=7, stream_sources={})
+    train = ShardDataset(tmp_path / "s", block_size=16, seed=0)
+    assert train.total_tokens() == index.tokens(split="train")
+    assert train.total_tokens() < index.tokens(), "the reader is serving validation data"
 
 
 def test_default_weights_cover_every_domain_and_sum_to_one() -> None:

@@ -95,15 +95,50 @@ DEFAULT_DOMAIN_WEIGHTS: Dict[str, float] = {
     "causal": 0.05,
 }
 
+# What share of each domain's token budget comes from verified synthetic generation rather than
+# streamed text. `general` is ~zero on purpose: synthetic data makes her reliable at procedures
+# that can be checked, and cannot make her knowledgeable about the world — a fabricated general
+# corpus would teach fluent nonsense. `causal` is 1.0 because there is no streamed source for it.
+DEFAULT_SYNTHETIC_SHARE: Dict[str, float] = {
+    "general": 0.0,
+    "code": 0.20,
+    "math": 0.45,
+    "conversation": 0.35,
+    "causal": 1.0,
+}
+
 # Streamed sources, per domain. Deliberately DATA, not code: dataset names, configs and gating
 # change often enough that hard-coding them here would rot. Every one is optional — a name that
 # cannot be resolved is a note in the report, never a failure.
+#
+# Several sources per domain, interleaved by `weight` rather than drained in order. A gated or
+# renamed source degrades to a note and the rest carry the domain — `bigcode/the-stack-smol` is
+# gated behind an access request, so a single-source code domain would silently arrive empty.
 DEFAULT_STREAM_SOURCES: Dict[str, List[Dict[str, Any]]] = {
-    "general": [{"path": "HuggingFaceFW/fineweb-edu", "name": "sample-10BT", "text_key": "text"}],
-    "code": [{"path": "bigcode/the-stack-smol", "text_key": "content"}],
-    "math": [{"path": "open-web-math/open-web-math", "text_key": "text"}],
-    "conversation": [{"path": "HuggingFaceH4/ultrachat_200k", "split": "train_sft",
-                      "text_key": "messages"}],
+    "general": [
+        {"path": "HuggingFaceFW/fineweb-edu", "name": "sample-10BT", "text_key": "text",
+         "weight": 3.0, "license": "ODC-By-1.0"},
+        {"path": "HuggingFaceTB/cosmopedia-v2", "text_key": "text", "weight": 1.0,
+         "license": "Apache-2.0"},
+    ],
+    "code": [
+        {"path": "bigcode/the-stack-smol", "text_key": "content", "weight": 2.0,
+         "license": "per-file; developer opt-out applies"},
+        {"path": "nampdn-ai/tiny-codes", "text_key": "response", "weight": 1.0,
+         "license": "Apache-2.0"},
+    ],
+    "math": [
+        {"path": "open-web-math/open-web-math", "text_key": "text", "weight": 2.0,
+         "license": "ODC-By-1.0"},
+        {"path": "HuggingFaceTB/finemath", "name": "finemath-4plus", "text_key": "text",
+         "weight": 1.0, "license": "ODC-By-1.0"},
+    ],
+    "conversation": [
+        {"path": "HuggingFaceH4/ultrachat_200k", "split": "train_sft", "text_key": "messages",
+         "weight": 2.0, "license": "MIT"},
+        {"path": "Open-Orca/SlimOrca", "text_key": "conversations", "weight": 1.0,
+         "license": "MIT"},
+    ],
 }
 
 # uint16 shards: 65,536 ids. Every profile here tops out at 32,768, so this is half the range and
@@ -577,8 +612,11 @@ class CorpusReport:
     documents: Dict[str, int] = field(default_factory=dict)
     sources: Dict[str, int] = field(default_factory=dict)
     duplicates: int = 0
+    near_duplicates: int = 0
+    wrong_language: int = 0
     low_quality: int = 0
     contaminated: int = 0
+    val_tokens: int = 0
     quarantined: int = 0        # L-SOVEREIGN — identity-hostile, never trained on
     injection_flagged: int = 0
     notes: List[str] = field(default_factory=list)
@@ -596,7 +634,10 @@ class CorpusReport:
         mix = ", ".join(f"{d} {self.tokens.get(d, 0):,}" for d in DOMAINS
                         if self.tokens.get(d))
         screens = []
-        for label, n in (("duplicate", self.duplicates), ("low-quality", self.low_quality),
+        for label, n in (("duplicate", self.duplicates),
+                         ("near-duplicate", self.near_duplicates),
+                         ("wrong-language", self.wrong_language),
+                         ("low-quality", self.low_quality),
                          ("CONTAMINATED", self.contaminated),
                          ("QUARANTINED", self.quarantined),
                          ("injection-flagged", self.injection_flagged)):
@@ -609,6 +650,8 @@ class CorpusReport:
     def to_dict(self) -> Dict[str, Any]:
         return {"tokens": dict(self.tokens), "documents": dict(self.documents),
                 "sources": dict(self.sources), "duplicates": self.duplicates,
+                "near_duplicates": self.near_duplicates, "val_tokens": self.val_tokens,
+                "wrong_language": self.wrong_language,
                 "low_quality": self.low_quality, "contaminated": self.contaminated,
                 "quarantined": self.quarantined,
                 "injection_flagged": self.injection_flagged, "notes": list(self.notes)}
@@ -621,21 +664,42 @@ class CorpusBuilder:
                  weights: Optional[Dict[str, float]] = None,
                  tokens_budget: int = 6_000_000_000,
                  stream_sources: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+                 synthetic_share: Optional[Dict[str, float]] = None,
                  quality: Optional[QualityFilter] = None,
                  contamination: Optional[ContaminationFilter] = None,
+                 val_permille: int = 5, dedup_bits: int = 22,
                  shard_tokens: int = _SHARD_TOKENS, seed: int = 0) -> None:
         self.tokenizer = tokenizer
         self.out_dir = Path(out_dir)
         self.settings = settings
-        self.weights = dict(weights or DEFAULT_DOMAIN_WEIGHTS)
+        # `is not None`, never `or`. An empty dict is falsy, so `stream_sources or DEFAULT`
+        # silently restored the default source list when a caller passed `{}` to mean "no
+        # streaming at all" — which made `--no-stream` reach the network anyway and made the
+        # test suite depend on HuggingFace being up. "Explicitly empty" and "not specified" are
+        # different requests and must stay different.
+        self.weights = dict(weights if weights is not None else DEFAULT_DOMAIN_WEIGHTS)
+        self.synthetic_share = dict(
+            synthetic_share if synthetic_share is not None else DEFAULT_SYNTHETIC_SHARE)
         self.tokens_budget = max(1, int(tokens_budget))
-        self.stream_sources = dict(stream_sources or DEFAULT_STREAM_SOURCES)
+        self.stream_sources = dict(
+            stream_sources if stream_sources is not None else DEFAULT_STREAM_SOURCES)
         self.quality = quality or QualityFilter()
         self.contamination = contamination
+        self.val_permille = max(0, int(val_permille))
         self.shard_tokens = shard_tokens
         self.seed = seed
-        self._seen: Set[str] = set()
         self._scanner: Any = None
+        # Bounded-memory screens from growth/screen. The `Set[str]` these replace held 64-char
+        # hex digests and grew without limit — 3-5 GB at 6B tokens, and gone on restart.
+        try:
+            from nyxara.growth.screen import ExactDedup, MinHashLSH
+
+            self._exact = ExactDedup(capacity_bits=max(16, int(dedup_bits) + 3))
+            self._near = MinHashLSH(capacity_bits=max(14, int(dedup_bits)))
+        except Exception:  # noqa: BLE001 — no numpy: fall back to the unbounded set
+            self._exact = None
+            self._near = None
+        self._seen: Set[str] = set()
 
     # ---- screens (reused, not reimplemented) ---- #
     def _screen(self, text: str, report: CorpusReport, *, domain: str,
@@ -643,11 +707,18 @@ class CorpusBuilder:
         """Run all five screens. ``True`` keeps the document."""
         from nyxara.growth.dataset import _content_hash, _loyalty_hostility
 
-        sha = _content_hash(text)
-        if sha in self._seen:
-            report.duplicates += 1
-            return False
-        self._seen.add(sha)
+        if self._exact is not None:
+            from nyxara.growth.screen import fingerprint
+
+            if not self._exact.add_if_new(fingerprint(text)):
+                report.duplicates += 1
+                return False
+        else:
+            sha = _content_hash(text)
+            if sha in self._seen:
+                report.duplicates += 1
+                return False
+            self._seen.add(sha)
 
         severity, _pattern = _loyalty_hostility(text)
         if severity > 0.0:
@@ -663,6 +734,15 @@ class CorpusBuilder:
             keep, _reason = self.quality.check(text, domain=domain)
             if not keep:
                 report.low_quality += 1
+                return False
+            # Near-duplicates, on scraped text only. Her own generated data is distinct by
+            # construction, and MinHash over it would be pure cost. Web text is the opposite:
+            # heavily boilerplate-republished, and an exact hash catches none of it.
+            if self._near is not None and self._near.seen_or_add(text):
+                report.near_duplicates += 1
+                return False
+            if domain == "general" and not _language_ok(text):
+                report.wrong_language += 1
                 return False
 
         if self.contamination is not None and self.contamination.is_contaminated(text):
@@ -705,19 +785,54 @@ class CorpusBuilder:
         for doc in docs:
             yield doc, "general", True
 
-    def _synthetic_docs(self, report: CorpusReport, per_domain: int
+    def _synthetic_docs(self, report: CorpusReport, budget: Dict[str, int]
                         ) -> Iterator[Tuple[str, str, bool]]:
-        """Verified synthetic math/code/tool/reasoning data — always available, no network."""
+        """Verified synthetic data, sized as a **share of each domain's token budget**.
+
+        This used to take a fixed document count — ``max(100, min(20_000, budget // 400_000))``
+        — which at a 6B budget is ~15k documents per domain. Measured, those average ~40 tokens,
+        so the one source that is correct *by construction* contributed **1.8M tokens against
+        6B: 0.03% of the corpus**. It was an incidental sprinkle rather than a designed
+        fraction, and no amount of improving the generators would have changed that.
+
+        Now each domain gets ``DEFAULT_SYNTHETIC_SHARE`` of its own budget. Documents are
+        requested in batches sized from the running average, so the target is met without
+        generating far past it.
+        """
         try:
             from nyxara.growth.synth_data import generate_domain_docs
         except Exception as exc:  # noqa: BLE001
             report.note(f"synthetic generators unavailable ({exc})")
             return
+
         n = 0
         for domain in ("math", "code", "conversation", "causal"):
-            for doc in generate_domain_docs(domain, per_domain, seed=self.seed):
-                n += 1
-                yield doc, domain, True
+            share = self.synthetic_share.get(domain, 0.0)
+            target = int(budget.get(domain, 0) * share)
+            if target <= 0:
+                continue
+            produced_tokens = 0
+            # Estimate documents from a per-domain default, then correct from what we actually
+            # see. Asking for a token count and getting documents needs one round of feedback.
+            mean_tokens = 120.0
+            attempts = 0
+            while produced_tokens < target and attempts < 12:
+                attempts += 1
+                want = max(64, int((target - produced_tokens) / max(1.0, mean_tokens) * 1.1))
+                want = min(want, 400_000)
+                emitted = 0
+                for doc in generate_domain_docs(domain, want, seed=self.seed + attempts):
+                    emitted += 1
+                    n += 1
+                    produced_tokens += max(1, len(doc) // 4)   # cheap proxy; exact count is
+                    yield doc, domain, True                    # taken by the caller on write
+                    if produced_tokens >= target:
+                        break
+                if emitted == 0:
+                    report.note(f"{domain}: synthetic generators produced nothing further "
+                                f"({produced_tokens:,}/{target:,} tokens of the target)")
+                    break
+                mean_tokens = max(20.0, produced_tokens / max(1, n))
         report.sources["synthetic"] = n
 
     def _own_docs(self, report: CorpusReport) -> Iterator[Tuple[str, str, bool]]:
@@ -760,26 +875,107 @@ class CorpusBuilder:
                         "synthetic generators only")
             return
 
-        n = 0
+        # Open every source first, then round-robin across them.
+        #
+        # The previous loop drained each source before touching the next: FineWeb-Edu's
+        # sample-10BT would stream ~10B tokens' worth of rows — discarding ~7.6B of them at the
+        # caller's `if budget <= 0: continue` — before maths, code or conversation were reached
+        # at all. Its break condition also tested only the GLOBAL budget, so a domain whose own
+        # budget was long spent kept streaming into a discard. Interleaving fixes both: a
+        # finished source is closed and dropped, and a finished domain stops being scheduled.
+        cursors: List[Dict[str, Any]] = []
         for domain, specs in self.stream_sources.items():
             if budget.get(domain, 0) <= 0:
                 continue
-            for spec in specs:
+            weights = [float(s.get("weight", 1.0)) for s in specs] or [1.0]
+            total = sum(weights) or 1.0
+            for spec, weight in zip(specs, weights):
                 try:
                     stream = load_dataset(spec["path"], spec.get("name"),
                                           split=spec.get("split", "train"), streaming=True)
                 except Exception as exc:  # noqa: BLE001 — gated/renamed/offline: note and move on
                     report.note(f"{domain}: {spec['path']} unavailable ({exc})")
                     continue
-                key = spec.get("text_key", "text")
-                for row in stream:
-                    text = _row_text(row, key)
-                    if text:
-                        n += 1
-                        yield text, domain, False
-                    if n % 512 == 0 and self._budget_spent(budget):
+                cursors.append({
+                    "domain": domain, "id": f"{domain}:{spec['path']}",
+                    "iter": iter(stream), "key": spec.get("text_key", "text"),
+                    # Each source gets its own slice of the domain budget, so one source cannot
+                    # consume the share meant for the others.
+                    "quota": max(1, int(budget.get(domain, 0) * weight / total)),
+                    "taken": 0,
+                })
+        if not cursors:
+            report.sources["streamed"] = 0
+            return
+
+        per_visit = 32          # amortise per-source setup without letting one source run away
+        try:
+            yield from self._drain(cursors, budget, report, per_visit)
+        finally:
+            # Close every iterator we are walking away from, while the interpreter is still
+            # alive. `datasets` streaming runs background prefetch threads; abandoning the
+            # generator leaves them holding GIL state into interpreter finalization, and the
+            # process then dies with "PyGILState_Release: thread state must be current" AFTER
+            # a successful build — a corpus that is fine on disk and a run that looks crashed.
+            for cursor in cursors:
+                try:
+                    cursor["iter"].close()
+                except Exception:  # noqa: BLE001 — best effort; we are already leaving
+                    pass
+            report.sources["streamed"] = report.sources.get("streamed", 0)
+
+    def _drain(self, cursors: List[Dict[str, Any]], budget: Dict[str, int],
+               report: CorpusReport, per_visit: int) -> Iterator[Tuple[str, str, bool]]:
+        """Round-robin across open sources until every one is finished or out of budget."""
+        n = 0
+        while cursors:
+            for cursor in list(cursors):
+                domain = cursor["domain"]
+                if budget.get(domain, 0) <= 0 or cursor["taken"] >= cursor["quota"]:
+                    self._close(cursor, cursors)    # this domain or source is finished
+                    continue
+                emitted = 0
+                while emitted < per_visit:
+                    try:
+                        row = next(cursor["iter"])
+                    except StopIteration:
+                        self._close(cursor, cursors)
+                        report.note(f"{cursor['id']} exhausted after {cursor['taken']:,} rows")
                         break
+                    except Exception as exc:  # noqa: BLE001 — a mid-stream fault ends that source
+                        self._close(cursor, cursors)
+                        report.note(f"{cursor['id']} failed mid-stream ({exc})")
+                        break
+                    text = _row_text(row, cursor["key"])
+                    if not text:
+                        continue
+                    emitted += 1
+                    n += 1
+                    cursor["taken"] += max(1, len(text) // 4)
+                    report.sources[cursor["id"]] = report.sources.get(cursor["id"], 0) + 1
+                    yield text, domain, False
         report.sources["streamed"] = n
+
+    @staticmethod
+    def _close(cursor: Dict[str, Any], cursors: List[Dict[str, Any]]) -> None:
+        """Drop a source AND shut its background prefetch threads down."""
+        if cursor in cursors:
+            cursors.remove(cursor)
+        try:
+            cursor["iter"].close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _split_for(self, text: str) -> str:
+        """Deterministic train/val assignment keyed on the document's own content."""
+        if self.val_permille <= 0:
+            return "train"
+        try:
+            from nyxara.growth.screen import fingerprint, split_for
+
+            return split_for(fingerprint(text), val_permille=self.val_permille)
+        except Exception:  # noqa: BLE001 — no screen module: everything is training data
+            return "train"
 
     @staticmethod
     def _budget_spent(budget: Dict[str, int]) -> bool:
@@ -798,10 +994,9 @@ class CorpusBuilder:
         if writer.index.shards:
             report.note(f"resuming: {writer.index.tokens():,} tokens already on disk")
 
-        per_domain_synth = max(100, min(20_000, self.tokens_budget // 400_000 or 100))
         streams = (
             self._master_docs(report),
-            self._synthetic_docs(report, per_domain_synth),
+            self._synthetic_docs(report, dict(budget)),
             self._own_docs(report),
             self._streamed_docs(report, budget),
         )
@@ -815,10 +1010,18 @@ class CorpusBuilder:
                 ids = self.tokenizer.encode(text, add_eos=True)
                 if not ids:
                     continue
-                writer.add(domain, ids)
-                budget[domain] -= len(ids)
-                report.tokens[domain] = report.tokens.get(domain, 0) + len(ids)
-                report.documents[domain] = report.documents.get(domain, 0) + 1
+                # Held out by CONTENT, never by arrival order: a document always lands on the
+                # same side however often the build is resumed, reordered or re-sharded. An
+                # order-keyed split leaks validation documents into training across a restart,
+                # and the resulting val loss looks good for exactly the wrong reason.
+                split = self._split_for(text)
+                writer.add(domain, ids, split=split)
+                if split == "train":
+                    budget[domain] -= len(ids)
+                    report.tokens[domain] = report.tokens.get(domain, 0) + len(ids)
+                    report.documents[domain] = report.documents.get(domain, 0) + 1
+                else:
+                    report.val_tokens += len(ids)
             if self._budget_spent(budget):
                 break
 
@@ -828,6 +1031,16 @@ class CorpusBuilder:
             if budget.get(domain, 0) > 0 and report.tokens.get(domain, 0) == 0:
                 report.note(f"{domain}: no data found — this domain is ABSENT from the corpus")
         return index, report
+
+
+def _language_ok(text: str) -> bool:
+    """English screen for streamed general text; permissive, and skipped when unavailable."""
+    try:
+        from nyxara.growth.screen import language_ok
+
+        return language_ok(text)
+    except Exception:  # noqa: BLE001 — no screen is better than dropping everything
+        return True
 
 
 def _render_transcript(messages: Sequence[Any]) -> str:
@@ -884,19 +1097,26 @@ def build_corpus(*, tokenizer: Any, out_dir: Any, settings: Any = None,
                  weights: Optional[Dict[str, float]] = None,
                  tokens_budget: int = 6_000_000_000,
                  stream_sources: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+                 synthetic_share: Optional[Dict[str, float]] = None,
                  check_contamination: bool = True,
+                 val_permille: int = 5,
                  shard_tokens: int = _SHARD_TOKENS,
                  seed: int = 0) -> Tuple[ShardIndex, CorpusReport]:
     """Build a sharded, screened, domain-mixed pretraining corpus. Resumable.
 
     ``tokens_budget`` defaults to the Chinchilla-optimal 6B for a 300M model. The real corpus
     will usually be smaller than the budget — that is fine and is reported, not hidden.
+
+    ``synthetic_share`` is the fraction of each domain's budget drawn from verified generation
+    rather than streamed text; ``val_permille`` holds documents out by content hash, so the
+    split survives a resumed build without leaking.
     """
     contamination = (ContaminationFilter().load_eval_sets(settings)
                      if check_contamination else None)
     builder = CorpusBuilder(tokenizer=tokenizer, out_dir=out_dir, settings=settings,
                             weights=weights, tokens_budget=tokens_budget,
-                            stream_sources=stream_sources, contamination=contamination,
+                            stream_sources=stream_sources, synthetic_share=synthetic_share,
+                            contamination=contamination, val_permille=val_permille,
                             shard_tokens=shard_tokens, seed=seed)
     index, report = builder.build()
     if contamination is not None and not contamination.loaded:
