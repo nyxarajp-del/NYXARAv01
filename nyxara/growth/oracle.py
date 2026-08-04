@@ -86,17 +86,28 @@ class ProvenItem:
     certificate: str
     difficulty: int = 1
 
+    #: Was the certificate produced by a decision procedure, or by sampling? Only the former is
+    #: written into training data — see growth/certify.
+    exact: bool = True
+
     def to_doc(self) -> str:
-        """Rendered in her own template — train/inference parity, same as everything else."""
-        try:
-            from nyxara.mind.llm import format_self_training_doc
-            return format_self_training_doc(self.prompt, self.answer)
-        except Exception:  # noqa: BLE001
-            return f"{self.prompt}\n\n{self.answer}\n"
+        """Rendered in her own template, **carrying the certificate**.
+
+        The certificate was in scope here and unused: the training document was built from the
+        prompt and the answer alone, so every witness this oracle proved was discarded at the
+        corpus boundary and the model learned the answer without the reason. Attaching it is
+        the difference between imitating a prover's output and learning to show working.
+        """
+        from nyxara.growth.certify import Certificate, render_certified_doc
+
+        cert = Certificate(statement=self.prompt, witness=self.certificate or "",
+                           method="oracle", exact=bool(self.exact))
+        return render_certified_doc(self.prompt, self.answer, cert)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"domain": self.domain, "prompt": self.prompt, "answer": self.answer,
-                "certificate": self.certificate[:300], "difficulty": self.difficulty}
+                "certificate": self.certificate[:300], "difficulty": self.difficulty,
+                "exact": bool(self.exact)}
 
 
 @dataclass

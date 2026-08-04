@@ -484,7 +484,7 @@ class SyntheticCurator:
                 report.by_domain[item.domain] = report.by_domain.get(item.domain, 0) + 1
                 if feed_kn and self._feed_knowledge(item):
                     report.fed_knowledge += 1
-                if feed_fw and self._feed_flywheel(item):
+                if feed_fw and self._feed_flywheel(item, certificate=why):
                     report.fed_flywheel += 1
                 if len(report.samples) < 8:
                     report.samples.append({"domain": item.domain, "prompt": item.prompt,
@@ -522,10 +522,17 @@ class SyntheticCurator:
         except Exception:  # noqa: BLE001
             return False
 
-    def _feed_flywheel(self, item: SyntheticItem) -> bool:
+    def _feed_flywheel(self, item: SyntheticItem, certificate: str = "") -> bool:
         if self.flywheel is None:
             return False
         try:
+            # `certificate` is the prover's own witness for this item. It used to be computed,
+            # used for one line of a report, and then dropped — so the corpus recorded that the
+            # pair was verified without recording what verified it.
+            decision = self.flywheel.consider(item.prompt, item.answer, verified=True,
+                                              certificate=certificate)
+            return bool(getattr(decision, "collected", False))
+        except TypeError:      # a flywheel predating the certificate parameter
             decision = self.flywheel.consider(item.prompt, item.answer, verified=True)
             return bool(getattr(decision, "collected", False))
         except Exception:  # noqa: BLE001
