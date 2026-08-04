@@ -51,13 +51,12 @@ imports back.
 from __future__ import annotations
 
 import json
-import math
 import random
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 try:
     import numpy as np
@@ -576,7 +575,6 @@ class CorpusBuilder:
         """Her own lived corpus — flywheel, distillation, screened web text."""
         n = 0
         try:
-            from nyxara.growth.foundry import Foundry
             root = Path(getattr(getattr(self.settings, "llm", None), "self_model_dir", None)
                         or (self.out_dir.parent / "foundry"))
             from nyxara.growth.distill import load_distillation_docs

@@ -29,6 +29,10 @@ from nyxara.eval.hard_benchmark import (build_calibration_benchmark, build_code_
                                         build_deduction_benchmark, build_hard_benchmark,
                                         build_math_benchmark, build_reading_benchmark,
                                         build_sequence_benchmark, grade_calibration)
+from nyxara.eval.generalization import (GeneralizationReport, GeneralizationResult,
+                                        TransferTask, build_structure_transfer_suite,
+                                        run_generalization_benchmark, run_law_induction,
+                                        run_structure_transfer)
 from nyxara.eval.harness import (EvalCase, EvalOutcome, EvalReport, EvalResult,
                                  EvalSuite, default_core_factory)
 from nyxara.eval.suites import build_default_suite
@@ -76,4 +80,14 @@ __all__ = [
     "build_calibration_benchmark",
     "build_cross_domain_benchmark",
     "grade_calibration",
+    # does she generalize HERSELF, or only via the LLM? (eval/generalization.py)
+    # Structure transfer and law induction run against her own faculties with the model
+    # removed, so `own_faculty_delta` answers that question with a number instead of a claim.
+    "TransferTask",
+    "GeneralizationResult",
+    "GeneralizationReport",
+    "build_structure_transfer_suite",
+    "run_structure_transfer",
+    "run_law_induction",
+    "run_generalization_benchmark",
 ]

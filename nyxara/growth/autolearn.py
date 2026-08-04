@@ -554,17 +554,34 @@ class GrowthEngine:
         except Exception:  # noqa: BLE001 — topic derivation is best-effort
             return []
 
+    @property
+    def foundry(self) -> Any:
+        """The live :class:`~nyxara.growth.foundry.Foundry`, built on first use and cached.
+
+        Foundry construction is heavy (it seeds a corpus from her real memory), so it stays
+        lazy — but it needs to be reachable by *name* as well as by ``improve_self``, because
+        the governed ``foundry.*`` tools (agency/llm_tool.py) bind to this object. Returns None
+        when the foundry is disabled, or if construction fails."""
+        if not self.enable_foundry:
+            return None
+        if self._foundry is None:
+            try:
+                from nyxara.growth.foundry import Foundry
+                # seed the foundry with her real memory so she trains on lived experience,
+                # not just a static corpus — this is what makes the self-model *hers*
+                self._foundry = Foundry(settings=self.settings,
+                                        seed_corpus=self._memory_corpus())
+            except Exception:  # noqa: BLE001 — the foundry is heavy/optional; never fatal
+                return None
+        return self._foundry
+
     def improve_self(self, *, generations: int = 1) -> List[Any]:
         if not self.enable_foundry:
             return []
         try:
-            foundry = self._foundry
+            foundry = self.foundry
             if foundry is None:
-                from nyxara.growth.foundry import Foundry
-                # seed the foundry with her real memory so she trains on lived experience,
-                # not just a static corpus — this is what makes the self-model *hers*
-                foundry = self._foundry = Foundry(
-                    settings=self.settings, seed_corpus=self._memory_corpus())
+                return []
             # Autonomous data acquisition: before forging, harvest SCREENED external web text for
             # her current knowledge gaps and fold it into the corpus (breadth she did not contain,
             # not just her journal). Best-effort; the AcquireReport is surfaced for audit.

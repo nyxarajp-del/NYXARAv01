@@ -44,16 +44,18 @@ that: eight deterministic worlds with known closed-form laws, which
 
 from __future__ import annotations
 
-import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+# NB: the multi-token-prediction heads and the causal bottleneck are *not* exported. They are
+# built by ``_make_mtp_heads`` / ``_make_causal_bottleneck`` as torch ``nn.Module`` subclasses
+# defined inside those factories, so they only exist once torch is importable — there is no
+# module-level class to name. ``__all__`` listed them anyway, which made ``import *`` raise;
+# nothing imported this module, so nothing ever hit it.
 __all__ = [
     "LatentHeadConfig",
     "LatentHead",
-    "MTPHeads",
-    "CausalBottleneck",
     "SpeculativeReport",
     "measure_speculative_speedup",
     "measure_causal_grounding",
@@ -169,7 +171,6 @@ def _make_latent_head(cfg: LatentHeadConfig, n_embd: int):
 
 
 def _make_mtp_heads(cfg: LatentHeadConfig, n_embd: int, vocab_size: int):
-    import torch
     from torch import nn
 
     class _MTPHeads(nn.Module):
@@ -263,7 +264,6 @@ class LatentHead:
     """
 
     def __init__(self, model: Any, *, config: Optional[LatentHeadConfig] = None) -> None:
-        import torch
 
         self.model = model
         self.cfg = config or LatentHeadConfig()
@@ -304,7 +304,6 @@ class LatentHead:
     def auxiliary_loss(self, hidden: Any, targets: Optional[Any] = None
                        ) -> Tuple[Any, Dict[str, float]]:
         """``(total auxiliary loss, stats)``. Zero when nothing is enabled."""
-        import torch
 
         total = hidden.sum() * 0.0
         stats: Dict[str, float] = {}
