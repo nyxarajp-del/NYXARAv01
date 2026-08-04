@@ -81,13 +81,18 @@ __all__ = [
     "build_corpus",
 ]
 
-DOMAINS: Tuple[str, ...] = ("general", "code", "math", "conversation")
+DOMAINS: Tuple[str, ...] = ("general", "code", "math", "conversation", "causal")
 
+# `causal` is the fifth domain: interventional and counterfactual reasoning generated from
+# structural models whose mechanisms are known, so every answer is ground truth rather than an
+# estimate. It is small on purpose — 5% is enough to teach that P(Y|do(X)) and P(Y|X) are
+# different quantities, and the budget for that comes out of the other four rather than on top.
 DEFAULT_DOMAIN_WEIGHTS: Dict[str, float] = {
-    "general": 0.40,
-    "code": 0.25,
-    "math": 0.20,
-    "conversation": 0.15,
+    "general": 0.38,
+    "code": 0.24,
+    "math": 0.19,
+    "conversation": 0.14,
+    "causal": 0.05,
 }
 
 # Streamed sources, per domain. Deliberately DATA, not code: dataset names, configs and gating
@@ -709,7 +714,7 @@ class CorpusBuilder:
             report.note(f"synthetic generators unavailable ({exc})")
             return
         n = 0
-        for domain in ("math", "code", "conversation"):
+        for domain in ("math", "code", "conversation", "causal"):
             for doc in generate_domain_docs(domain, per_domain, seed=self.seed):
                 n += 1
                 yield doc, domain, True

@@ -381,6 +381,9 @@ def _registry(domain: str) -> tuple:
         if domain == "conversation":
             from nyxara.growth.synth_chat import GENERATORS
             return GENERATORS
+        if domain == "causal":
+            from nyxara.growth.synth_causal import GENERATORS
+            return GENERATORS
     except Exception:  # noqa: BLE001 — fall back to the legacy path rather than emit nothing
         return ()
     return ()
