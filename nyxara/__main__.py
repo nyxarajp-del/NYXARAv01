@@ -383,6 +383,34 @@ commands:
   /rate <1-10>       rate her latest creation — her aesthetic taste learns and persists
   /selfimprove       tune her own reasoner: replay lived outcomes → apply only what PROVES better
   /selfimprove N     run the codebase RSI loop N cycles (add 'enact' to apply real source edits)
+  ── the defensive layer (guard/) ──
+  /guard             the whole defensive posture: watchtower, containment, network, backups, immunity
+  /anomaly           her own vitals against their learned envelope — what broke pattern, and how hard
+  /contain [c] [release]  isolate a component (tools/network/memory/reasoner/perception/growth), or release it
+  /netsec [deny|allow <host>]  policy-level network defence: rules, reputation, egress budget, exposure
+  /survival          backups + integrity + degradation level (and the proof correction outranks survival)
+  ── self-knowledge, provenance & the training stack (growth/) ──
+  /capabilities [x]  what she can ACTUALLY do, calibrated — undemonstrated reports as untested, never claimed
+  /lineage           her chronological DNA: every generation she has been, and whether that chain verifies
+  /forage <topic>    autonomous epistemic foraging against a measured gap
+  /seed              take a signed resurrection seed (one is written beside every /save)
+  /corpus            build a sharded, quality-filtered, contamination-checked pretraining corpus
+  /dpo               preference-train her own brain on pairs her gauntlet already judged
+  /expand            grow a new expert for the domain that will not yield (kept only if it wins)
+  /speculate <p>     measured speculative-decoding speedup from the latent head (measured, not claimed)
+  /loadmodule <path> screen and import a file she forged herself, into the running process
+  ── delegation, the hive, her distributed self (agency/) ──
+  /agents [task]     spawn a least-privilege sub-agent (a strict SUBSET of her own permissions)
+  /hive <problem>    a bounded internal civilization: population sized to difficulty, verifier-gated
+  /cluster           her P2P mesh — single-node until the Master pairs a real peer
+  ── taste, register, conscience, foresight, determinism ──
+  /taste <artifact>  her sense of elegance, dimension by dimension
+  /mode [name]       companion|analyst|teacher|creative register blend (character never moves — Rule 4)
+  /moral <action>    consequentialist + deontological + virtue readings, with the disagreement left visible
+  /functor           well-defined functors between her program shapes (declines when none exists)
+  /foresight [days]  episodic future thinking: who she will be at a horizon, and what she will need
+  /thermal           thermal/compute pressure as something she FEELS, not merely measures
+  /replay [save]     the deterministic tape of this run — /replay save writes it for step-for-step replay
   /save              persist long-term memory to disk now
   /quit              leave the console"""
 
@@ -835,6 +863,229 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
                 print("native reasoning is unavailable (disabled in config).")
             else:
                 print(json.dumps(native.self_improve(), indent=2, default=str))
+    # ---- the defensive layer (guard/*.py) ---- #
+    elif cmd == "guard":
+        print(json.dumps(core.guard_report(), indent=2, default=str))
+    elif cmd == "anomaly":
+        det = getattr(core, "anomaly", None)
+        if det is None:
+            print("the watchtower is disabled (NYXARA_GUARD__ANOMALY_DETECTION=false).")
+        else:
+            recent = det.recent(10)
+            print(json.dumps(det.report(), indent=2, default=str))
+            for a in recent:
+                print(f"  {getattr(a, 'name', '?'):24s} score {getattr(a, 'score', 0.0):+.3f}"
+                      f"  {getattr(getattr(a, 'kind', None), 'value', '')}")
+            if not recent:
+                print("  nothing anomalous — her vitals are inside their learned envelope.")
+    elif cmd == "contain":
+        con = getattr(core, "containment", None)
+        if con is None:
+            print("containment is disabled (NYXARA_GUARD__CONTAINMENT=false).")
+        elif not arg:
+            print(json.dumps(con.report(), indent=2, default=str))
+            known = sorted(con._components)  # noqa: SLF001 — the console lists what it can act on
+            print("usage: /contain <component> [release]   components: "
+                  + (", ".join(known) if known else "-"))
+        else:
+            parts_ = arg.split()
+            cid, action = parts_[0], (parts_[1].lower() if len(parts_) > 1 else "isolate")
+            try:
+                if action in ("release", "free", "off"):
+                    con.release(cid, owner=True)      # /contain is the Master speaking
+                    print(f"{cid} released ✓")
+                else:
+                    act = con.isolate(cid, reason="Master order")
+                    print(json.dumps(act.to_dict(), indent=2, default=str))
+            except Exception as exc:  # noqa: BLE001 — a bad component name is not fatal
+                print(f"could not {action} {cid!r}: {exc}")
+    elif cmd == "netsec":
+        net = getattr(core, "netsec", None)
+        if net is None:
+            print("network defence is disabled (NYXARA_GUARD__NETWORK_DEFENSE=false).")
+        elif arg:
+            # /netsec deny <host> | allow <host> | <host>  → inspect or set policy
+            bits = arg.split()
+            verb, host = (bits[0].lower(), bits[1]) if len(bits) > 1 else ("show", bits[0])
+            try:
+                if verb == "deny":
+                    net.deny_host(host, reason="Master order")
+                    print(f"{host} deny-listed ✓")
+                elif verb == "allow":
+                    net.allow_host(host, owner=True)
+                    print(f"{host} allow-listed ✓")
+                else:
+                    print(f"{host}: reputation {net.reputation.score(host):+.3f}"
+                          f"  hostile={net.reputation.is_hostile(host)}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"could not apply that policy: {exc}")
+        else:
+            print(json.dumps(net.report(), indent=2, default=str))
+            print(json.dumps(net.audit_exposure(), indent=2, default=str))
+    elif cmd == "survival":
+        surv = getattr(core, "survival", None)
+        if surv is None:
+            print("the survival manager is disabled (NYXARA_GUARD__SURVIVAL=false).")
+        else:
+            print(json.dumps(surv.report(), indent=2, default=str))
+            print(f"  backups {len(surv.store.all())}, chain verified: {surv.store.verify_chain()}")
+            print(f"  correction outranks survival: {surv.correction_dominates_survival()}")
+    # ---- self-knowledge, provenance & the training stack (growth/*.py) ---- #
+    elif cmd in ("capabilities", "cando"):
+        if arg:
+            print(json.dumps(core.can_i(arg), indent=2, default=str))
+        else:
+            reg = getattr(core, "capabilities", None)
+            if reg is None:
+                print("the capability registry is disabled (growth faculty off).")
+            else:
+                print(json.dumps(reg.self_report(), indent=2, default=str))
+                print(json.dumps(reg.calibration(), indent=2, default=str))
+    elif cmd == "lineage":
+        led = getattr(core, "lineage", None)
+        if led is None:
+            print("the lineage ledger is disabled (growth faculty off).")
+        else:
+            history = led.history()
+            print(f"{len(history)} generation(s); chain verified: {led.verify_chain()}")
+            for rec in history[-12:]:
+                d = rec.to_dict() if hasattr(rec, "to_dict") else {}
+                print(f"  [{d.get('index')}] {d.get('kind','?'):16s} {d.get('summary','')[:70]}")
+    elif cmd == "forage":
+        forager = getattr(core, "forager", None)
+        if forager is None:
+            print("epistemic foraging is disabled (growth faculty off).")
+        elif not arg:
+            print("usage: /forage <topic>   (harvest + verify knowledge on a measured gap)")
+        else:
+            print(json.dumps(forager.forage(arg).to_dict(), indent=2, default=str))
+    elif cmd == "seed":
+        seeder = getattr(core, "genesis_seed", None)
+        if seeder is None:
+            print("the genesis seed is disabled (growth faculty off).")
+        else:
+            seed = seeder.snapshot_core(core)
+            print(f"resurrection seed {seed.seed[:16]}… ({len(seed.bundle)} bytes)")
+            print("a signed seed is written beside every /save checkpoint (newest 5 kept).")
+    elif cmd == "corpus":
+        print("building a sharded, quality-filtered, contamination-checked corpus …")
+        print(json.dumps(core.build_corpus(), indent=2, default=str))
+    elif cmd == "dpo":
+        print("preference-training on pairs her own gauntlet already judged …")
+        print(json.dumps(core.preference_train(), indent=2, default=str))
+    elif cmd == "expand":
+        print("growing a new expert for the domain that will not yield …")
+        print(json.dumps(core.expand_experts(), indent=2, default=str))
+    elif cmd in ("speculate", "latent"):
+        if not arg:
+            print("usage: /speculate <prompt>   (measured speculative-decoding speedup)")
+        else:
+            print(json.dumps(core.speculative_report(arg), indent=2, default=str))
+    elif cmd in ("loadmodule", "load-module"):
+        if not arg:
+            print("usage: /loadmodule <path>   (screen + import a file she forged herself)")
+        else:
+            print(json.dumps(core.load_forged_module(arg), indent=2, default=str))
+    # ---- delegation, the hive, and her distributed self (agency/*.py) ---- #
+    elif cmd == "agents":
+        orch = getattr(core, "sub_agents", None)
+        if orch is None:
+            print("sub-agents are unavailable (tools faculty off).")
+        elif not arg:
+            print(json.dumps(orch.report(), indent=2, default=str))
+        else:
+            from nyxara.agency.agents import AgentSpec
+            print(f"delegating to a least-privilege sub-agent: {arg!r}")
+            result = orch.delegate(AgentSpec(name="console"), arg)
+            print(json.dumps(result.to_dict(), indent=2, default=str))
+    elif cmd == "hive":
+        hive = getattr(core, "hive", None)
+        if hive is None or not arg:
+            print("usage: /hive <problem>   (a bounded internal civilization solves it)")
+        else:
+            print(json.dumps(hive.solve(arg).to_dict(), indent=2, default=str))
+    elif cmd == "cluster":
+        node = getattr(core, "cluster", None)
+        if node is None:
+            print("the mesh is disabled (NYXARA_DISTRIBUTED__ENABLED=false).")
+        else:
+            print(f"single-node: {node.is_single_node()}  |  replicated entries: {len(node.log())}")
+            print("a real mesh activates only with Master-authorized peers.")
+    # ---- taste, register, conscience, foresight, determinism ---- #
+    elif cmd in ("taste", "aesthetic"):
+        judge = getattr(core, "aesthetic", None)
+        if judge is None or not arg:
+            print("usage: /taste <artifact>   (her sense of elegance, dimension by dimension)")
+        else:
+            print(json.dumps(judge.judge(arg).to_dict(), indent=2, default=str))
+    elif cmd == "mode":
+        modes = getattr(core, "modes", None)
+        if modes is None:
+            print("mode blending is disabled (identity faculty off).")
+        elif arg:
+            from nyxara.identity.modes import Mode
+            try:
+                modes.set_mode(Mode(arg.strip().lower()))
+                print(f"register set to {arg.strip().lower()} ✓ (character is unchanged — Rule 4)")
+            except ValueError:
+                print("modes: " + ", ".join(m.value for m in Mode))
+        else:
+            print(json.dumps(modes.status(), indent=2, default=str))
+    elif cmd == "moral":
+        evaluator = getattr(core, "moral", None)
+        if evaluator is None or not arg:
+            print("usage: /moral <action>   (consequentialist + deontological + virtue readings)")
+        else:
+            from nyxara.mind.moral import MoralAction
+            ev = evaluator.evaluate(MoralAction(description=arg))
+            print(ev.summary())
+            print(json.dumps(ev.to_dict(), indent=2, default=str))
+    elif cmd == "functor":
+        # Discover the well-defined functors between the program shapes she already holds.
+        # A functor that is not well-defined on the library is DROPPED — that refusal is the
+        # point: transfer without one is just a plausible-sounding analogy.
+        ft = getattr(core, "functor_transfer", None)
+        if ft is None:
+            print("functorial transfer is unavailable.")
+        else:
+            from nyxara.mind.category_transfer import discover_functors
+            skills = getattr(core, "skills", None)
+            library = getattr(skills, "programs", None) if skills is not None else None
+            if not library:
+                print("no program library to map between yet — she needs induced skills first.")
+                print("category-theoretic transfer carries a SOLVED STRUCTURE across domains,")
+                print("and declines when no well-defined functor exists (an honest refusal).")
+            else:
+                found = discover_functors(library)
+                print(f"{len(found)} well-defined functor(s) over {len(library)} programs:")
+                for f in found[:12]:
+                    print(f"  {getattr(f, 'name', f)}")
+    elif cmd == "foresight":
+        fs = getattr(core, "foresight", None)
+        if fs is None:
+            print("foresight is disabled (goals faculty off).")
+        else:
+            horizon = int(arg) if arg.isdigit() else 90
+            print(json.dumps(fs.project(horizon).to_dict(), indent=2, default=str))
+    elif cmd == "thermal":
+        mon = getattr(core, "thermal", None)
+        if mon is None:
+            print("the thermal sense is unavailable.")
+        else:
+            telemetry = mon.read()
+            print(f"budget {mon.budget(telemetry):.3f}  |  should defer: {mon.should_defer()}")
+            print(json.dumps(getattr(telemetry, '__dict__', {}), indent=2, default=str))
+    elif cmd == "replay":
+        rec = getattr(core, "recorder", None)
+        if rec is None:
+            print("replay recording is off (NYXARA_OBSERVABILITY__REPLAY_RECORDING=false).")
+        elif arg.lower() in ("save", "write"):
+            path = core.save_replay()
+            print(f"deterministic tape → {path}" if path else "could not write the tape.")
+        else:
+            print(f"recording: {len(rec.entries)} entries this run "
+                  f"(cap {core._REPLAY_MAX_ENTRIES}, then rotated)")
+            print("/replay save   writes the tape so this run can be replayed step-for-step.")
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.

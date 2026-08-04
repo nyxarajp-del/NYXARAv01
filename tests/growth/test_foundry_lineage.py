@@ -13,9 +13,7 @@ Both are in ``growth/foundry.py`` and both fail in a way that looks like success
 
 from __future__ import annotations
 
-import math
 
-import pytest
 
 from nyxara.growth.foundry import Foundry, ModelVersion
 from nyxara.growth.foundry_models import ModelSpec, architecture_signature

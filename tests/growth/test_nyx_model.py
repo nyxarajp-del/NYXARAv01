@@ -29,7 +29,6 @@ from nyxara.growth.foundry_models import (  # noqa: E402  (after the torch guard
     NanoGPTModel,
     _is_modern,
     _NanoGPT,
-    _NyxGPT,
     _SparseMoE,
 )
 

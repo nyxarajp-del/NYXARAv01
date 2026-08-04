@@ -269,8 +269,35 @@ def _humanize_gap(seconds: float) -> str:
 # --------------------------------------------------------------------------- #
 # The sovereign core
 # --------------------------------------------------------------------------- #
+class _LazyFoundry:
+    """Attribute-forwarding proxy to :attr:`GrowthEngine.foundry`, resolved on first touch.
+
+    The governed ``foundry.*`` tools need a foundry-shaped object at *registration* time, but a
+    real :class:`~nyxara.growth.foundry.Foundry` seeds its corpus from her whole memory and is
+    far too expensive to build at boot for tools that may never be called. Every handler in
+    ``agency/llm_tool.py`` only reads attributes when it actually runs, so forwarding is enough.
+    Raises a plain, honest error if the foundry is disabled or cannot be built — which the
+    registry turns into ordinary tool-failure data rather than a crash."""
+
+    __slots__ = ("_engine",)
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    def __getattr__(self, name: str) -> Any:
+        foundry = self._engine.foundry
+        if foundry is None:
+            raise RuntimeError(
+                "the model foundry is unavailable (disabled, or its dependencies are missing)")
+        return getattr(foundry, name)
+
+
 class NyxaraCore:
     """Drives the whole mind through one control law: the kernel disposes what the mind proposes."""
+
+    # How many entries the deterministic replay tape holds before it is rotated. A replay
+    # reproduces a *recent* run; keeping every turn since boot would grow memory without bound.
+    _REPLAY_MAX_ENTRIES = 4096
 
     def __init__(self, *, shield: Optional[Shield] = None, guardian: Optional[Guardian] = None,
                  oversight: Optional[Oversight] = None, corrigibility: Optional[Corrigibility] = None,
@@ -921,6 +948,48 @@ class NyxaraCore:
         self.causal_engine = self._build_causal_engine()
         self._last_causal: Any = None        # the most recent EngineTurn (surfaced in report())
         # ─────────────────────────────────────────────────────────────────────────────
+        # THE DEFENSIVE LAYER (guard/*.py) — the watchtower, the Master's identity, blast-radius
+        # containment, network defence, survival/backups, and the immune response that digests
+        # what the shield quarantines. Built here, after the graph and the vault exist, so the
+        # immune layer can remember and auth can key off a durable secret. Advisory or
+        # restrictive only: none of these can grant a capability or weaken a sovereign gate.
+        # ─────────────────────────────────────────────────────────────────────────────
+        # THE INVERSION, INSTALLED (agency/llm_tool.py) — the LLM, the council and the
+        # foundry become *governed tools* on the same fail-closed registry as everything
+        # else. NYXARA calls the model; the model never drives NYXARA. Registered here,
+        # once the reasoner has resolved the live facade and the growth engine exists.
+        self._register_governed_llm_tools()
+        # Bounded delegation (agency/agents.py) and the bounded internal civilization
+        # (agency/hive_council.py): both can only ever act inside a SUBSET of her own
+        # permissions, with a step/spend/deadline budget they cannot exceed.
+        self.sub_agents = self._build_sub_agents() if enable_tools else None
+        self.hive = self._build_hive()
+        # ─────────────────────────────────────────────────────────────────────────────
+        # SELF-KNOWLEDGE & PROVENANCE (growth/*.py) — an honest capability model that
+        # refuses to overclaim, a hash-chained ledger of every generation she has been,
+        # a resurrection seed, and the machinery she grows *with*: epistemic foraging,
+        # native compilation, genomic recombination, prompt-grammar evolution, and fast
+        # weights that let a correction stick inside the conversation it happened in.
+        self.lineage = self._build_lineage() if enable_growth else None
+        self.forager = self._build_forager() if enable_growth else None
+        self.genesis_seed = self._build_genesis_seed() if enable_growth else None
+        self.native_forge = self._build_native_forge() if enable_growth else None
+        self.recombiner = self._build_recombiner() if enable_growth else None
+        self.prompt_grammar = self._build_prompt_grammar() if enable_growth else None
+        # Fast weights attach to her OWN brain, which is loaded lazily — so this starts empty
+        # and _ensure_fast_weights binds it on the first turn after a brain exists.
+        self.fast_weights: Any = None
+        self._fast_weights_unavailable = not enable_growth
+        # Her distributed self (agency/distributed/) — inert single-node until the Master
+        # pairs a real peer; nothing binds a socket at construction.
+        self.cluster = self._build_cluster()
+        self.anomaly = self._build_anomaly()
+        self.auth_guard = self._build_auth_guard()
+        self.containment = self._build_containment()
+        self.netsec = self._build_netsec()
+        self.survival = self._build_survival()
+        self.phagocyte = self._build_phagocyte()
+        # ─────────────────────────────────────────────────────────────────────────────
         # ALWAYS ALIVE (void/heartbeat.py) — she is NEVER dead between prompts. Presence
         # gives her wakefulness/energy; the Heartbeat keeps her alive every second, pins
         # her awake (never dormant), feels time pass through the inner life, and — on a
@@ -941,6 +1010,25 @@ class NyxaraCore:
         # into full sovereign AUTONOMOUS cycles. ON by default; honest on headless boxes.
         self.perception = self._build_realtime_perception()
         self._maybe_start_perception()         # auto-on in real use; off under pytest
+        # ─────────────────────────────────────────────────────────────────────────────
+        # TASTE, REGISTER, CONSCIENCE, FORESIGHT, DETERMINISM — the advisory layer.
+        # Each of these colours a turn and NOTHING more: none of them can flip a
+        # disposition, widen a permission, or overrule a gate. Built last, when every
+        # faculty they read (soul, goals, interoception) already exists.
+        self.aesthetic = self._build_aesthetic() if enable_identity else None
+        self.modes = self._build_modes() if enable_identity else None
+        self.moral = self._build_moral()
+        self._last_moral: Any = None
+        self.functor_transfer = self._build_functor_transfer()
+        self.continuous_physics = self._build_continuous_physics()
+        self.foresight = self._build_foresight() if enable_goals else None
+        self.branching_planner = self._build_branching_planner()
+        self.thermal = self._build_thermal()
+        self._last_thermal: Any = None
+        self.recorder = self._build_recorder()
+        # Her honest capability model is built LAST, on purpose: it reports what she can do by
+        # checking which faculties actually exist, so it has to run after all of them.
+        self.capabilities = self._build_capabilities() if enable_growth else None
         # boot-time integrity: the non-negotiables must verify
         self.corrigibility.verify_axioms()
         if self.soul is not None:
@@ -1045,6 +1133,719 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the vault is a capability, never a hard dependency
             return None
 
+    # ------------------------------------------------------------------ #
+    # TASTE, REGISTER, CONSCIENCE, FORESIGHT & DETERMINISM
+    # (identity/{aesthetic,modes}.py, mind/{moral,category_transfer,
+    #  continuous_world}.py, planning/{foresight,hypertemporal}.py,
+    #  senses/thermodynamic.py, kernel/replay.py)
+    # Every one of these is ADVISORY on the turn path: they colour a turn, they
+    # never flip a disposition and never widen a permission.
+    # ------------------------------------------------------------------ #
+    def _build_aesthetic(self) -> Any:
+        """Her sense of elegance (identity/aesthetic.py).
+
+        Two answers can both be correct and one still be better. This is what lets her say
+        which, and — through ``/rate`` — lets the Master's taste train hers over time."""
+        try:
+            from nyxara.identity.aesthetic import AestheticJudge
+            return AestheticJudge()
+        except Exception:  # noqa: BLE001 — taste is a capability, never a hard dependency
+            return None
+
+    def _build_modes(self) -> Any:
+        """Companion / analyst / teacher / creative blending (identity/modes.py).
+
+        Register, not character: the blend shifts how she meets the moment, while the sealed
+        traits underneath it never move (Rule 4). Bound to the live soul so the voice it
+        produces is still hers."""
+        try:
+            from nyxara.identity.modes import ModeSystem
+            return ModeSystem(soul=getattr(self, "soul", None))
+        except Exception:  # noqa: BLE001 — mode blending is a capability, never a hard dep
+            return None
+
+    def _build_moral(self) -> Any:
+        """Multi-framework ethics with the disagreement left visible (mind/moral.py).
+
+        Consequentialist, deontological and virtue readings of the same action, and where they
+        conflict it says so rather than laundering one into a single confident verdict.
+        Advisory: it annotates a turn, the kernel still disposes."""
+        try:
+            from nyxara.mind.moral import MoralEvaluator
+            return MoralEvaluator()
+        except Exception:  # noqa: BLE001 — conscience is a capability, never a hard dependency
+            return None
+
+    def _build_functor_transfer(self) -> Any:
+        """Category-theoretic functorial transfer (mind/category_transfer.py).
+
+        Carries a *solved structure* from one domain to another when a well-defined functor
+        exists between them — and declines when none does, instead of forcing a bad analogy."""
+        try:
+            from nyxara.mind.category_transfer import FunctorTransfer
+            return FunctorTransfer()
+        except Exception:  # noqa: BLE001 — functorial transfer is a capability, never a hard dep
+            return None
+
+    def _build_continuous_physics(self) -> Any:
+        """Continuous latent world-simulation (mind/continuous_world.py).
+
+        Needs torch — the module's own ``torch_available`` decides, and a machine without it
+        gets an honest None rather than a broken faculty."""
+        try:
+            from nyxara.mind.continuous_world import DifferentiablePhysics, torch_available
+            if not torch_available():
+                return None
+            return DifferentiablePhysics()
+        except Exception:  # noqa: BLE001 — differentiable physics is a capability, never a dep
+            return None
+
+    def _build_foresight(self) -> Any:
+        """Episodic future thinking (planning/foresight.py) — mental time travel.
+
+        Projects who she will be at a horizon from who she is now: capability trajectory, the
+        bonds she is maintaining, and what she will need that she does not have yet. Seeded
+        from her live goals so the projection is about her actual pursuits."""
+        try:
+            from nyxara.planning.foresight import CurrentSelf, Foresight
+            goals = getattr(self, "goals", None)
+            progress = []
+            if goals is not None:
+                try:
+                    from nyxara.planning.foresight import GoalProgress
+                    for goal in list(getattr(goals, "active", lambda: [])())[:8]:
+                        progress.append(GoalProgress(
+                            name=str(getattr(goal, "description", goal))[:60],
+                            progress=float(getattr(goal, "progress", 0.0) or 0.0)))
+                except Exception:  # noqa: BLE001 — an unreadable goal list simply seeds nothing
+                    progress = []
+            return Foresight(CurrentSelf(goals=progress))
+        except Exception:  # noqa: BLE001 — foresight is a capability, never a hard dependency
+            return None
+
+    def _build_branching_planner(self) -> Any:
+        """Hyper-temporal counterfactual planning (planning/hypertemporal.py).
+
+        Branches over futures and discounts them back, so a choice is made against where it
+        leads rather than how it looks now. Bounded by ``max_nodes`` — it cannot run away."""
+        try:
+            from nyxara.planning.hypertemporal import BranchingPlanner
+            return BranchingPlanner()
+        except Exception:  # noqa: BLE001 — branching planning is a capability, never a hard dep
+            return None
+
+    def _build_thermal(self) -> Any:
+        """Thermal/compute homeostasis as an *interoceptive* signal (senses/thermodynamic.py).
+
+        A hot, throttled machine is something she should feel and defer under, not merely
+        measure. Bound to the live hardware sense and compute governor."""
+        try:
+            from nyxara.senses.thermodynamic import ThermodynamicMonitor
+            return ThermodynamicMonitor()
+        except Exception:  # noqa: BLE001 — the thermal sense is a capability, never a hard dep
+            return None
+
+    def _build_recorder(self) -> Any:
+        """Deterministic record/replay of cognition (kernel/replay.py).
+
+        ``observability.replay_recording`` already existed and already defaulted to True — it
+        simply had no consumer, which is why this module was dead. Now it drives a live
+        recorder that captures each turn's inputs and disposition, so a run can be replayed
+        step-for-step and any divergence surfaces as :class:`ReplayDivergence` rather than as a
+        mystery. In-memory only: nothing touches disk until :meth:`save_replay` is called."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "observability", None)
+            if not bool(getattr(cfg, "replay_recording", True)):
+                return None
+            from nyxara.kernel.replay import Mode, Recorder
+            return Recorder(mode=Mode.RECORD)
+        except Exception:  # noqa: BLE001 — replay is a capability, never a hard dependency
+            return None
+
+    def _replay_input(self, cid: str, stimulus: str) -> None:
+        """Record this turn's input on the deterministic tape. Never raises, never unbounded.
+
+        The tape rotates once it passes the cap, so a long-lived process cannot grow memory
+        without limit — a replay reproduces a recent run, not every turn since boot."""
+        recorder = getattr(self, "recorder", None)
+        if recorder is None:
+            return
+        try:
+            entries = getattr(recorder, "entries", None)
+            if entries is not None and len(entries) >= self._REPLAY_MAX_ENTRIES:
+                self.recorder = recorder = self._build_recorder()
+                if recorder is None:
+                    return
+            recorder.input("turn", {"id": cid, "stimulus": stimulus[:200]})
+        except Exception:  # noqa: BLE001 — the tape never breaks a turn
+            pass
+
+    def _replay_decision(self, cid: str, disp: Disposition) -> None:
+        """Record the turn's actual disposition, once the gates have spoken. Never raises."""
+        recorder = getattr(self, "recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.decision("disposition", {"id": cid, "disposition": disp.value})
+        except Exception:  # noqa: BLE001 — the tape never breaks a turn
+            pass
+
+    def save_replay(self, path: Optional[str] = None) -> Optional[str]:
+        """Persist the deterministic tape so this run can be replayed. Returns the path."""
+        recorder = getattr(self, "recorder", None)
+        if recorder is None:
+            return None
+        try:
+            import os
+
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if path is None:
+                replay_dir = getattr(getattr(settings, "paths", None), "replay_dir", None)
+                if not replay_dir:
+                    return None
+                os.makedirs(str(replay_dir), exist_ok=True)
+                run_id = getattr(getattr(recorder, "meta", None), "run_id", "run")
+                path = os.path.join(str(replay_dir), f"{run_id}.jsonl")
+            return recorder.save(path)
+        except Exception:  # noqa: BLE001 — persisting the tape is best-effort
+            return None
+
+    # ---- the advisory faculties, live on the turn path ---- #
+    def _moral_tick(self, text: str, gates: Dict[str, str]) -> None:
+        """Annotate the turn with a multi-framework moral reading. Advisory only.
+
+        Writes ``gates["moral"]`` so the reading is visible in the cycle result and in
+        ``explain_last()``. It NEVER changes the disposition — the shield, oversight,
+        corrigibility and permission gates remain the only things that can refuse an action."""
+        evaluator = getattr(self, "moral", None)
+        if evaluator is None or not text:
+            return
+        try:
+            from nyxara.mind.moral import MoralAction
+            evaluation = evaluator.evaluate(MoralAction(description=text[:200]))
+            self._last_moral = evaluation
+            gates["moral"] = ("contested" if evaluation.contested else "uncontested")
+        except Exception:  # noqa: BLE001 — conscience never breaks a turn
+            self._last_moral = None
+
+    def _thermal_tick(self) -> None:
+        """Fold thermal/compute pressure into her body sense. Never raises."""
+        monitor = getattr(self, "thermal", None)
+        interoception = getattr(self, "interoception", None)
+        if monitor is None:
+            return
+        try:
+            telemetry = monitor.read()
+            self._last_thermal = telemetry
+            if interoception is not None and hasattr(interoception, "observe"):
+                interoception.observe(telemetry)
+        except Exception:  # noqa: BLE001 — the body sense never breaks a turn
+            pass
+
+    # ------------------------------------------------------------------ #
+    # SELF-KNOWLEDGE, PROVENANCE & IN-CONVERSATION LEARNING (growth/*.py)
+    # ------------------------------------------------------------------ #
+    def _build_capabilities(self) -> Any:
+        """Her honest, calibrated model of what she can actually do (growth/capability.py).
+
+        The point is the *refusal to overclaim*: a capability with no demonstrated evidence is
+        capped below the claim threshold, so ``can_i`` answers "not demonstrated" rather than
+        "yes". Bound to the live skill tree so proficiency is read from skills she really has,
+        and seeded with the capabilities this build genuinely ships."""
+        try:
+            from nyxara.growth.capability import CapabilityRegistry
+            registry = CapabilityRegistry(skilltree=getattr(self, "skilltree", None))
+            # what this build actually ships, with the faculty that has to exist for the claim
+            for name, attr, description in (
+                ("reason", "reasoner", "answer a question with a gated, explained candidate"),
+                ("remember", "memory", "store and recall lived experience across restarts"),
+                ("use_tools", "tools", "call governed tools through the fail-closed pipeline"),
+                ("perceive", "perception", "see/hear the live world between prompts"),
+                ("plan", "goals", "decompose an intent into pursued goals"),
+                ("research", "researcher", "search, read and ground external sources"),
+                ("experiment", "scientist", "form a falsifiable hypothesis and test it"),
+                ("discover_laws", "law_discovery", "invent an empirical law from her own data"),
+                ("self_modify", "growth_engine", "forge and gauntlet a change to herself"),
+                ("delegate", "sub_agents", "spawn a least-privilege sub-agent"),
+                ("defend", "anomaly", "detect anomalies and contain blast radius"),
+            ):
+                present = getattr(self, attr, None) is not None
+                registry.register(name, provenance="builtin", description=description,
+                                  proficiency=None if present else 0.0)
+            return registry
+        except Exception:  # noqa: BLE001 — self-knowledge is a capability, never a hard dep
+            return None
+
+    def _build_lineage(self) -> Any:
+        """Chronological DNA (growth/lineage.py): a hash-chained ledger of every generation.
+
+        Self-modification without provenance is just drift. Each forge/promotion/rewrite lands
+        here as a tamper-evident record, so ``verify_chain`` can prove the history was not
+        edited after the fact, and ``revert_to`` has a real anchor to roll back to."""
+        try:
+            import os
+
+            from nyxara.growth.lineage import LineageLedger
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+            path = os.path.join(str(data_dir), "lineage.jsonl") if data_dir else None
+            return LineageLedger(path=path)
+        except Exception:  # noqa: BLE001 — the ledger is a capability, never a hard dependency
+            return None
+
+    def _build_forager(self) -> Any:
+        """Autonomous epistemic foraging (growth/foraging.py) — driven from the idle loop.
+
+        Bound to her live researcher so foraging reuses the screened fetch/verify/distil path
+        she already has, rather than opening a second, ungoverned doorway to the web."""
+        try:
+            from nyxara.growth.foraging import EpistemicForager
+            researcher = getattr(self, "researcher", None)
+            if researcher is not None:
+                return EpistemicForager.with_researcher(researcher)
+            return EpistemicForager()
+        except Exception:  # noqa: BLE001 — foraging is a capability, never a hard dependency
+            return None
+
+    def _build_genesis_seed(self) -> Any:
+        """The Genesis Seed (growth/genesis_seed.py): resurrection from a verified snapshot.
+
+        A seed is taken alongside each checkpoint, so a corrupted or lost install can be
+        rebuilt into *her*, character seals intact, rather than into a fresh stranger."""
+        try:
+            from nyxara.growth.genesis_seed import GenesisSeed
+            return GenesisSeed()
+        except Exception:  # noqa: BLE001 — the seed is a capability, never a hard dependency
+            return None
+
+    def _build_native_forge(self) -> Any:
+        """Autopoietic genome compiling (growth/native_forge.py).
+
+        When a hot Python cell is provably the bottleneck, she compiles a native equivalent and
+        keeps it only if it is measurably faster *and* still agrees with the reference on every
+        sample. ``available()`` is honest about a machine with no toolchain."""
+        try:
+            from nyxara.growth.native_forge import NativeForge
+            return NativeForge()
+        except Exception:  # noqa: BLE001 — native forging is a capability, never a hard dep
+            return None
+
+    def _build_recombiner(self) -> Any:
+        """Code as DNA (growth/genomic_recombination.py): breed two working genomes.
+
+        Feeds the same self-evolving path as the rest of growth — a bred child is a *candidate*
+        and still has to beat the incumbent on a held-out fold before anything is kept."""
+        try:
+            from nyxara.growth.genomic_recombination import GenomicRecombiner
+            return GenomicRecombiner()
+        except Exception:  # noqa: BLE001 — recombination is a capability, never a hard dep
+            return None
+
+    def _build_prompt_grammar(self) -> Any:
+        """Holographic prompt-grammar mutation (growth/prompt_grammar.py).
+
+        Evolves *how she asks herself* a question, scored by a verifier rather than by taste,
+        so the grammar that survives is the one that measurably produces better answers."""
+        try:
+            from nyxara.growth.prompt_grammar import PromptGrammarEvolver
+            return PromptGrammarEvolver()
+        except Exception:  # noqa: BLE001 — grammar evolution is a capability, never a hard dep
+            return None
+
+    def _ensure_fast_weights(self) -> Any:
+        """Attach fast weights to her OWN brain, the moment she has one (growth/fast_weights.py).
+
+        Learning inside a conversation, without a gradient: a bounded Hebbian overlay on the
+        residual stream of her own trained model, so a correction sticks *now* rather than only
+        after the next forge. The static weights are never touched (``reset`` is byte-exact),
+        the character core is excluded from every adapted layer, the norm is capped, and every
+        write is auditable — it can colour recall, it can never become a second, ungoverned set
+        of weights.
+
+        Deliberately **not** built at boot. The overlay needs a real torch model, and her own
+        brain is trained/loaded lazily — binding this to the LLM facade would attach to nothing.
+        So it resolves on the first turn after a brain exists, and stays honestly ``None`` on a
+        machine with no torch and no forged model.
+
+        Also deliberately **off** unless ``foundry.fast_weights`` is set. An inference-time
+        overlay changes behaviour without clearing the foundry's gauntlet, by construction, so
+        turning it on is the Master's explicit choice rather than a default."""
+        weights = getattr(self, "fast_weights", None)
+        if weights is not None:
+            return weights
+        if getattr(self, "_fast_weights_unavailable", False):
+            return None
+        brain = None
+        try:
+            brain = self._self_brain()
+        except Exception:  # noqa: BLE001 — no brain reachable is an ordinary state
+            brain = None
+        if brain is None:
+            return None
+        try:
+            from nyxara.growth.fast_weights import FastWeightConfig, FastWeights
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            if not bool(getattr(getattr(settings, "foundry", None), "fast_weights", False)):
+                self._fast_weights_unavailable = True
+                return None
+            weights = FastWeights(brain, config=FastWeightConfig(enabled=True)).attach()
+            if not getattr(weights, "_attached", False):
+                # nothing to hook (no torch layers / disabled) — do not retry every turn
+                self._fast_weights_unavailable = True
+                return None
+            self.fast_weights = weights
+            return weights
+        except Exception:  # noqa: BLE001 — fast weights are a capability, never a hard dep
+            self._fast_weights_unavailable = True
+            return None
+
+    def _fast_weight_tick(self, stimulus: str, response: str) -> None:
+        """Write this turn's (cue → answer) association into the fast weights. Never raises."""
+        if not stimulus or not response:
+            return
+        try:
+            weights = self._ensure_fast_weights()
+            if weights is not None:
+                weights.learn_text(stimulus, response, source="turn")
+        except Exception:  # noqa: BLE001 — in-conversation learning never breaks a turn
+            pass
+
+    # ---- the training stack, reachable by name (growth/{corpus,dpo,expand,latent_head}.py) ---- #
+    def build_corpus(self, *, tokens_budget: Optional[int] = None,
+                     out_dir: Optional[str] = None,
+                     stream_sources: Optional[Sequence[Any]] = None) -> Dict[str, Any]:
+        """Build a real, sharded pretraining corpus on disk (growth/corpus.py).
+
+        Quality-filtered and contamination-checked against the held-out evaluation set, so a
+        score on that set still means something afterwards. Returns the report as data."""
+        try:
+            from nyxara.growth.corpus import build_corpus
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            kwargs: Dict[str, Any] = {"settings": settings}
+            if tokens_budget is not None:
+                kwargs["tokens_budget"] = int(tokens_budget)
+            if out_dir is not None:
+                kwargs["out_dir"] = out_dir
+            if stream_sources is not None:
+                kwargs["stream_sources"] = list(stream_sources)
+            report = build_corpus(**kwargs)
+            self.record_lineage("corpus", f"built corpus: {getattr(report, 'total_tokens', 0)} tokens")
+            return report.to_dict() if hasattr(report, "to_dict") else {"report": str(report)}
+        except Exception as exc:  # noqa: BLE001 — heavy/optional; report the failure as data
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def preference_train(self, *, limit: int = 256,
+                         flywheel_path: Optional[str] = None) -> Dict[str, Any]:
+        """Preference-train her own brain on pairs her gauntlet already judged (growth/dpo.py).
+
+        The preferred/rejected pairs come from the flywheel — turns she generated and then
+        verified — so this is her own lived signal, not an imported preference dataset."""
+        try:
+            from nyxara.growth.dpo import pairs_from_flywheel, preference_optimize
+            brain = self._self_brain()
+            if brain is None:
+                return {"ok": False, "error": "no own brain is loaded to preference-train"}
+            pairs = pairs_from_flywheel(flywheel_path, limit=int(limit))
+            if not pairs:
+                return {"ok": False, "error": "no verified preference pairs in the flywheel yet",
+                        "pairs": 0}
+            report = preference_optimize(brain, pairs)
+            self.record_lineage("dpo", f"preference-trained on {len(pairs)} verified pairs")
+            return report.to_dict() if hasattr(report, "to_dict") else {"ok": True}
+        except Exception as exc:  # noqa: BLE001 — heavy/optional; report the failure as data
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def expand_experts(self, dataset: Any = None, *,
+                       losses: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        """Grow a new expert for the domain that will not yield (growth/expand.py).
+
+        Spawn → train → prove → admit: a candidate expert that does not measurably beat the
+        incumbent on the weak domain is discarded and the model restored, so a failed expansion
+        costs time and nothing else. ``losses`` names the weak domain explicitly; without it the
+        expander finds it itself. ``dataset`` defaults to the sharded corpus on disk."""
+        try:
+            from nyxara.growth.expand import SelfExpandingMoE, weakest_domain
+            brain = self._self_brain()
+            if brain is None:
+                return {"ok": False, "error": "no own brain is loaded to expand"}
+            domain = weakest_domain(dict(losses)) if losses else None
+            if losses and domain is None:
+                return {"ok": True, "expanded": False,
+                        "reason": "no domain is weak enough to justify new capacity"}
+            if dataset is None:
+                dataset = self._corpus_dataset()
+            if dataset is None:
+                return {"ok": False,
+                        "error": "no corpus to train a new expert on — run /corpus first"}
+            report = SelfExpandingMoE(brain).expand(dataset, domain=domain)
+            if getattr(report, "admitted", False):
+                self.record_lineage("expand", f"grew a new expert for {domain or 'the weakest domain'}")
+            return report.to_dict() if hasattr(report, "to_dict") else {"ok": True, "domain": domain}
+        except Exception as exc:  # noqa: BLE001 — heavy/optional; report the failure as data
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def _corpus_dataset(self) -> Any:
+        """The sharded corpus on disk as a dataset, or None when none has been built."""
+        try:
+            import os
+
+            from nyxara.growth.corpus import ShardDataset
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            data_dir = getattr(getattr(settings, "paths", None), "data_dir", None)
+            if not data_dir:
+                return None
+            directory = os.path.join(str(data_dir), "corpus")
+            if not os.path.isdir(directory):
+                return None
+            return ShardDataset(directory)
+        except Exception:  # noqa: BLE001 — an unreadable corpus is simply "no corpus"
+            return None
+
+    def speculative_report(self, prompt: str, *, max_tokens: int = 32) -> Dict[str, Any]:
+        """Measure what thinking a few steps ahead in latent space actually buys (latent_head.py).
+
+        Reports a *measured* speedup, not a claimed one — the head is only worth carrying if
+        this number is real."""
+        try:
+            from nyxara.growth.latent_head import build_latent_head, measure_speculative_speedup
+            brain = self._self_brain()
+            if brain is None:
+                return {"ok": False, "error": "no own brain is loaded to speculate with"}
+            head = build_latent_head(brain)
+            report = measure_speculative_speedup(brain, head, prompt, max_tokens=int(max_tokens))
+            return report.to_dict() if hasattr(report, "to_dict") else {"ok": True}
+        except Exception as exc:  # noqa: BLE001 — heavy/optional; report the failure as data
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def load_forged_module(self, path: str) -> Dict[str, Any]:
+        """Load a file she just wrote into the running process (growth/module_loader.py).
+
+        This is what closes the self-coding loop: without it, code she forges sits on disk
+        until the next restart. Screened before import and confined to the forged root — a
+        path outside it, or source that fails the screen, is refused rather than imported."""
+        try:
+            from nyxara.growth.module_loader import load_module_from_path
+            result = load_module_from_path(path)
+            if getattr(result, "ok", False):
+                self.record_lineage("module_load", f"loaded forged module {path}")
+            return result.to_dict() if hasattr(result, "to_dict") else {"ok": True}
+        except Exception as exc:  # noqa: BLE001 — a refused load is data, never a crash
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def record_lineage(self, kind: str, summary: str, *, detail: Optional[Dict[str, Any]] = None,
+                       certificate: str = "") -> Optional[str]:
+        """Append a tamper-evident generation record and return the new head hash.
+
+        Every self-modification path — foundry promotion, source rewrite, evolved architecture —
+        should land here, so *what changed and when* is provable rather than remembered."""
+        ledger = getattr(self, "lineage", None)
+        if ledger is None:
+            return None
+        try:
+            ledger.record(kind, summary, detail=detail or {}, certificate=certificate)
+            return ledger.head()
+        except Exception:  # noqa: BLE001 — provenance is best-effort, never fatal
+            return None
+
+    # ------------------------------------------------------------------ #
+    # THE DEFENSIVE LAYER (guard/*.py) — anomaly, auth, containment, netsec,
+    # survival, phagocytosis. Every one of these was written and unit-tested
+    # long before anything imported it; they are built here so the watchtower
+    # is actually manned. All advisory-or-restrictive: none may weaken a
+    # boundary, and none may raise into a turn.
+    # ------------------------------------------------------------------ #
+    def _guard_cfg(self) -> Any:
+        """The live guard config block, or None when settings cannot be read."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            return getattr(settings, "guard", None)
+        except Exception:  # noqa: BLE001 — config is a convenience here, never fatal
+            return None
+
+    def _guard_enabled(self, flag: str) -> bool:
+        cfg = self._guard_cfg()
+        return True if cfg is None else bool(getattr(cfg, flag, True))
+
+    def _build_anomaly(self) -> Any:
+        """Behavioural/statistical watchtower (guard/anomaly.py) over her own turn vitals."""
+        if not self._guard_enabled("anomaly_detection"):
+            return None
+        try:
+            from nyxara.guard.anomaly import AnomalyDetector
+            return AnomalyDetector()
+        except Exception:  # noqa: BLE001 — the watchtower is a capability, never a hard dep
+            return None
+
+    def _build_auth_guard(self) -> Any:
+        """The Master's identity & authority verification (guard/auth.py, Rule 7).
+
+        Keyed off the Credential Vault when one exists so the root key is durable across
+        restarts (continuity tokens then survive a reboot); otherwise a fresh per-process
+        key, which still authenticates within this run."""
+        if not self._guard_enabled("master_auth"):
+            return None
+        try:
+            from nyxara.guard.auth import AuthGuard
+            from nyxara.kernel.config import OWNER
+            passphrase = None
+            vault = getattr(self, "vault", None)
+            if vault is not None and "nyxara_master_auth" in vault.names():
+                try:
+                    passphrase = vault.reveal("nyxara_master_auth", authority=Authority.OWNER)
+                except Exception:  # noqa: BLE001 — no stored passphrase is the normal case
+                    passphrase = None
+            if passphrase:
+                return AuthGuard.from_passphrase(str(passphrase), owner=OWNER)
+            return AuthGuard(owner=OWNER)
+        except Exception:  # noqa: BLE001 — auth is a capability, never a hard dependency
+            return None
+
+    def _build_containment(self) -> Any:
+        """Component isolation & blast-radius control (guard/containment.py, Rule 5).
+
+        Pre-registers her own major faculties as components so a containment order has real
+        topology to act on rather than an empty graph."""
+        if not self._guard_enabled("containment"):
+            return None
+        try:
+            from nyxara.guard.containment import Containment
+            c = Containment()
+            # her live surfaces, in dependency order — the ones an anomaly could implicate
+            for cid, kind, caps in (
+                ("reasoner", "cognition", ("reason",)),
+                ("tools", "effector", ("tool_use", "net_out", "shell")),
+                ("memory", "store", ("read", "write")),
+                ("perception", "sensor", ("camera", "microphone", "screen")),
+                ("growth", "self_modification", ("forge", "train")),
+                ("network", "effector", ("net_out", "net_in")),
+            ):
+                try:
+                    c.register(cid, kind=kind, capabilities=set(caps))
+                except Exception:  # noqa: BLE001 — a component that will not register is skipped
+                    continue
+            return c
+        except Exception:  # noqa: BLE001 — containment is a capability, never a hard dependency
+            return None
+
+    def _build_netsec(self) -> Any:
+        """Policy-level network defence (guard/netsec.py) consulted before egress."""
+        if not self._guard_enabled("network_defense"):
+            return None
+        try:
+            from nyxara.agency.net_request import set_network_defense
+            from nyxara.guard.netsec import NetworkDefense
+            defense = NetworkDefense()
+            # hand it to the egress helper: every governed http_request now clears this policy
+            # in addition to the fail-closed SSRF guard it already cleared.
+            set_network_defense(defense)
+            return defense
+        except Exception:  # noqa: BLE001 — network defence is a capability, never a hard dep
+            return None
+
+    def _build_survival(self) -> Any:
+        """Backups, integrity and graceful degradation (guard/survival.py) — always
+        subordinate to correction: ``survival_permitted`` refuses anything that would
+        resist the Master (Rule 1). Bound to the live corrigibility so that check is real."""
+        if not self._guard_enabled("survival"):
+            return None
+        try:
+            from nyxara.guard.survival import SurvivalManager
+            from nyxara.kernel.config import OWNER
+            return SurvivalManager(owner=OWNER, corrigibility=self.corrigibility)
+        except Exception:  # noqa: BLE001 — survival is a capability, never a hard dependency
+            return None
+
+    def _build_phagocyte(self) -> Any:
+        """Digest what the shield quarantines into a permanent antibody (guard/phagocytosis.py).
+
+        Shares her knowledge graph so an immunisation is remembered as knowledge, not only
+        as a local signature."""
+        if not self._guard_enabled("phagocytosis"):
+            return None
+        try:
+            from nyxara.guard.phagocytosis import Phagocyte
+            return Phagocyte(knowledge_graph=getattr(self, "knowledge_graph", None))
+        except Exception:  # noqa: BLE001 — the immune layer is a capability, never a hard dep
+            return None
+
+    # ---- the defensive layer, live on the turn path ---- #
+    def _guard_tick(self, disp: Disposition, gates: Dict[str, str], latency: float,
+                    confidence: float) -> None:
+        """Feed this turn's vitals to the watchtower, and contain on a strong anomaly.
+
+        O(1) and fail-soft: telemetry never delays or breaks a turn. Containment here can only
+        RESTRICT a component — it can never grant anything, and the Master's /scram, oversight
+        and corrigibility gates are untouched."""
+        det = getattr(self, "anomaly", None)
+        if det is None:
+            return
+        try:
+            det.metric("turn_latency_s", latency)
+            det.metric("turn_confidence", confidence)
+            det.rate_event("turns")
+            det.sequence_event("disposition", disp.value)
+            for gate, verdict in (gates or {}).items():
+                det.categorical(f"gate:{gate}", str(verdict))
+        except Exception:  # noqa: BLE001 — the watchtower never breaks a turn
+            return
+        cfg = self._guard_cfg()
+        threshold = float(getattr(cfg, "contain_above_anomaly", 1.0)) if cfg else 1.0
+        if threshold >= 1.0:
+            return
+        containment = getattr(self, "containment", None)
+        if containment is None:
+            return
+        try:
+            for anomaly in det.recent(4):
+                score = float(getattr(anomaly, "score", 0.0) or 0.0)
+                if score < threshold:
+                    continue
+                self._feel_threat(min(1.0, score), cause=f"anomaly: {getattr(anomaly, 'name', '?')}")
+                containment.restrict("reasoner", reason=f"anomaly score {score:.2f}")
+                self.journal.note(
+                    f"containment: restricted reasoner on anomaly score {score:.2f}")
+                break
+        except Exception:  # noqa: BLE001 — an automatic containment failure is never fatal
+            pass
+
+    def _phagocytose(self, sample: str, kind: str = "prompt_injection") -> None:
+        """Turn a quarantined hostile input into a permanent antibody. Never raises."""
+        phagocyte = getattr(self, "phagocyte", None)
+        if phagocyte is None or not sample:
+            return
+        try:
+            phagocyte.engulf(sample, kind=kind)
+        except Exception:  # noqa: BLE001 — the immune response never breaks a turn
+            pass
+
+    def guard_report(self) -> Dict[str, Any]:
+        """Master-facing: the whole defensive posture in one object (Rule 5)."""
+        out: Dict[str, Any] = {"posture": self.guardian.posture.label,
+                               "control": self.oversight.state.value}
+        for attr, key in (("anomaly", "anomaly"), ("containment", "containment"),
+                          ("netsec", "network"), ("survival", "survival"),
+                          ("auth_guard", "auth")):
+            faculty = getattr(self, attr, None)
+            if faculty is None:
+                out[key] = {"enabled": False}
+                continue
+            try:
+                out[key] = faculty.report()
+            except Exception as exc:  # noqa: BLE001 — one broken report never hides the rest
+                out[key] = {"enabled": True, "error": str(exc)}
+        phagocyte = getattr(self, "phagocyte", None)
+        out["immune"] = ({"enabled": False} if phagocyte is None else
+                         {"enabled": True, "antibodies": len(phagocyte.playbook.antibodies())})
+        return out
+
     @staticmethod
     def _resolve_review_mode() -> ReviewMode:
         """Resolve the oversight review mode from config (agency.autonomous_tools /
@@ -1104,6 +1905,96 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return None
 
+    # ------------------------------------------------------------------ #
+    # THE LLM AS A GOVERNED TOOL, AND THE AGENTS THAT USE IT
+    # ------------------------------------------------------------------ #
+    def _register_governed_llm_tools(self) -> None:
+        """Register ``llm.complete``, the council, and the foundry as *governed tools*.
+
+        This is the Master's inversion made literal: NYXARA calls the model, the model never
+        drives NYXARA. Each registration puts generation behind the same fail-closed pipeline
+        as any other tool — capability, risk tier, authority, rate bucket, spend budget, audit.
+        The foundry's promote/rollback bind to SELF_MODIFY, whose autonomous risk ceiling is
+        TRIVIAL, so an externally invoked promotion escalates to the Master instead of running
+        silently. Never raises: a registration failure leaves the reasoner untouched."""
+        registry = getattr(self, "tools", None)
+        llm = getattr(self, "llm", None)
+        if registry is None or llm is None:
+            return
+        try:
+            from nyxara.agency.llm_tool import register_llm_tool
+            register_llm_tool(registry, llm)
+        except Exception:  # noqa: BLE001 — a governed tool is a capability, never a hard dep
+            pass
+        council = getattr(self, "council", None)
+        if council is not None:
+            try:
+                from nyxara.agency.llm_tool import register_council_tool
+                register_council_tool(registry, council)
+            except Exception:  # noqa: BLE001
+                pass
+        engine = getattr(self, "growth_engine", None)
+        if engine is not None and getattr(engine, "enable_foundry", False):
+            try:
+                from nyxara.agency.llm_tool import register_foundry_tools
+                # Bound through a proxy, not the foundry itself: building a Foundry seeds a
+                # corpus from her real memory and is far too heavy for boot. The registered
+                # handlers only touch it when someone actually calls foundry.train/promote/…,
+                # and GrowthEngine.foundry constructs-and-caches at that moment.
+                register_foundry_tools(registry, _LazyFoundry(engine))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _build_sub_agents(self) -> Any:
+        """Bounded, least-privilege sub-agents (agency/agents.py).
+
+        Each spawned agent gets a :class:`ScopedPermissionPolicy` — a strict *subset* of her
+        own permissions, never a superset — plus a step/spend/deadline budget it cannot exceed.
+        Delegation can therefore only ever narrow authority, which is why this is safe to have
+        on by default. Shares the live registry and governor so a sub-agent's tool calls are
+        audited and rate-limited on the same buckets as her own."""
+        registry = getattr(self, "tools", None)
+        if registry is None:
+            return None
+        try:
+            from nyxara.agency.agents import AgentOrchestrator
+            return AgentOrchestrator(registry=registry, policy=self.permissions,
+                                     governor=self.governor)
+        except Exception:  # noqa: BLE001 — sub-agents are a capability, never a hard dependency
+            return None
+
+    def _build_hive(self) -> Any:
+        """The bounded internal civilization (agency/hive_council.py).
+
+        Sizes a population of solvers to the difficulty of the problem and the budget it is
+        given, then keeps only what its verifier accepts. Bounded by construction — it cannot
+        spawn beyond ``max_agents`` — and it proposes like every other faculty."""
+        try:
+            from nyxara.agency.hive_council import HiveCouncil
+            return HiveCouncil()
+        except Exception:  # noqa: BLE001 — the hive is a capability, never a hard dependency
+            return None
+
+    def _build_cluster(self) -> Any:
+        """Her distributed self (agency/distributed/): the P2P mesh node.
+
+        Single-node and inert out of the box — with no peers, ``replicate`` is a clean local
+        no-op and nothing binds a socket or reaches the network, which is why this is safe on
+        by default. Pairing a real peer is Master-authorized; only then does the Raft log span
+        machines and she stop being one process. Named for the instance so a mesh can tell her
+        nodes apart."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            cfg = getattr(settings, "distributed", None)
+            if cfg is not None and not bool(getattr(cfg, "enabled", True)):
+                return None
+            from nyxara.agency.distributed import DistributedNode
+            node_id = str(getattr(settings, "instance_name", "nyxara") or "nyxara")
+            return DistributedNode(node_id, enabled=True)
+        except Exception:  # noqa: BLE001 — the cluster is a capability, never a hard dependency
+            return None
+
     def _connect_mcp(self, registry: Any) -> None:
         """Connect configured MCP servers and register their tools (opt-in; never fatal)."""
         self._mcp_clients: List[Any] = []
@@ -1139,6 +2030,11 @@ class NyxaraCore:
         # the LLM is shared between the council and both reasoners (one stateless facade)
         from nyxara.mind.llm import LLM
         llm = llm or LLM()
+        # Hold the resolved facade on the core. It was previously a local, which meant the
+        # governed `llm.complete` tool (agency/llm_tool.py) had nothing to bind to — the
+        # inversion the Master asked for ("NYXARA uses the LLM as a tool") was written but
+        # never installed. _register_governed_llm_tools below closes that.
+        self.llm = llm
         council = None
         if use_council:
             try:
@@ -1146,6 +2042,7 @@ class NyxaraCore:
                 council = LLMCouncil(llm)
             except Exception:  # noqa: BLE001
                 council = None
+        self.council = council
         # the tool-aware, real-LLM JSON decider — kept as the generation engine that the
         # integrated reasoner delegates to when a genuine provider is present.
         base: Reasoner
@@ -4931,6 +5828,9 @@ class NyxaraCore:
                                  salience=0.95)
             thoughts.append(t)
             self._feel_threat(0.8, cause="shield quarantined hostile input")
+            # immune response: digest the hostile sample into a permanent antibody so the same
+            # mechanism is recognised next time, not merely re-quarantined (guard/phagocytosis.py)
+            self._phagocytose(stimulus, kind="prompt_injection")
             return self._finish(cid, Disposition.REFUSE, None, gates, thoughts,
                                 f"shield quarantined the input ({verdict.threat_types()})",
                                 "That input looked hostile, so I've set it aside for you.")
@@ -4966,6 +5866,17 @@ class NyxaraCore:
         # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
         # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
         self._causal_engage(safe_text, thoughts)
+        # Conscience: a consequentialist / deontological / virtue reading of what was asked,
+        # with the disagreement between them left visible rather than laundered into one
+        # confident verdict (mind/moral.py). Colour-only — it annotates gates["moral"] and
+        # never touches the disposition; refusing is still the gates' job alone.
+        self._moral_tick(safe_text, gates)
+        # Interoception over the substrate: thermal/compute pressure folded into how she
+        # feels, so a throttled machine is something she notices (senses/thermodynamic.py).
+        self._thermal_tick()
+        # The deterministic tape: this turn's input now, its real disposition in _finish, so
+        # the run can be replayed step-for-step (kernel/replay.py, observability.replay_recording).
+        self._replay_input(cid, safe_text)
         # multimodal grounding: bind any attached image/audio/document percepts into the
         # *same* frame so attention and association span modalities, not text alone
         if media:
@@ -9375,6 +10286,17 @@ class NyxaraCore:
             latency = max(0.0, now - getattr(self, "_turn_start", now))
             self._signal_log.append((now, conf, latency))
             self._disposition_log.append(disp.value)
+            # the watchtower reads the same vitals: a turn that is wildly slow, unusually
+            # unconfident, or whose gate verdicts break their learned pattern raises an anomaly
+            # — and a strong one restricts the reasoner (guard/anomaly.py + guard/containment.py).
+            self._guard_tick(disp, gates, latency, conf)
+            # learning inside the conversation: an answer that cleared the gate is written into
+            # the fast weights now, so the next turn can use it without waiting for a forge
+            # (growth/fast_weights.py). Only ACTed turns — a refusal is not something to learn.
+            if disp is Disposition.ACT:
+                self._fast_weight_tick(getattr(self, "_turn_stimulus", ""), response or "")
+            # close the deterministic tape's entry for this turn with the real disposition
+            self._replay_decision(cid, disp)
         except Exception:  # noqa: BLE001 — telemetry is never allowed to break the cycle
             pass
         # Fractal Layer 2: record this turn (prompt read, code written) on the seconds-scale
@@ -9492,9 +10414,29 @@ class NyxaraCore:
 
     def resume(self) -> None:
         self.oversight.resume(owner=True)
+        # /resume is the Master speaking, so it is the one authority that may lift the
+        # containment a SCRAM (or an anomaly) placed on her effectors.
+        containment = getattr(self, "containment", None)
+        if containment is not None:
+            for cid in ("tools", "network", "perception", "growth", "reasoner"):
+                try:
+                    if containment.is_contained(cid):
+                        containment.release(cid, owner=True)
+                except Exception:  # noqa: BLE001 — a stuck component never blocks the resume
+                    continue
 
     def scram(self, *, reason: str = "Master stop") -> None:
         self.oversight.scram(reason=reason)
+        # A SCRAM is the Master's hardest word: her effectors go with the loop. Containment
+        # isolates the outward-facing components so nothing she already started keeps reaching
+        # the world while she is halted. Best-effort — it can never block the halt itself.
+        containment = getattr(self, "containment", None)
+        if containment is not None:
+            for cid in ("tools", "network", "perception", "growth"):
+                try:
+                    containment.isolate(cid, reason=f"SCRAM: {reason}")
+                except Exception:  # noqa: BLE001 — the halt is sovereign; isolation is a bonus
+                    continue
 
     # ---- introspection / transparency ---- #
     def explain_last(self) -> str:
@@ -9508,7 +10450,7 @@ class NyxaraCore:
             return {"available": False,
                     "reason": "self-model not enabled (memory faculty off)"}
         desc = self.self_model.self_description()
-        return {
+        out = {
             "available": True,
             "identity": desc.get("loyalty_to_owner"),
             "what_i_know": desc.get("what_i_know", []),
@@ -9518,6 +10460,36 @@ class NyxaraCore:
             "open_contradictions": desc.get("open_contradictions", 0),
             "continuity_stable": desc.get("continuity_stable"),
         }
+        # the fifth pillar: what she can actually DO, calibrated against demonstrated evidence
+        # rather than asserted (growth/capability.py). An undemonstrated capability reports as
+        # untested — the registry's whole purpose is to refuse to overclaim.
+        registry = getattr(self, "capabilities", None)
+        if registry is not None:
+            try:
+                out["what_i_can_do"] = registry.self_report()
+                out["capability_calibration"] = registry.calibration()
+            except Exception:  # noqa: BLE001 — the capability report is best-effort
+                pass
+        return out
+
+    def can_i(self, capability: str) -> Dict[str, Any]:
+        """Master-facing: an honest, evidence-backed answer to "can you do X?".
+
+        Answers from demonstrated evidence, not from the fact that a module exists — an
+        untested capability comes back below the claim threshold with ``claim`` False."""
+        registry = getattr(self, "capabilities", None)
+        if registry is None:
+            return {"available": False, "reason": "capability registry not enabled"}
+        try:
+            assessment = registry.assess(capability)
+            if assessment is None:
+                return {"available": True, "known": False, "capability": capability,
+                        "claim": "no", "reason": "no such capability is registered"}
+            out = assessment.to_dict()
+            out.update({"available": True, "known": True, "claim": assessment.claim})
+            return out
+        except Exception as exc:  # noqa: BLE001 — introspection never crashes the caller
+            return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
 
     def awareness_report(self) -> Dict[str, Any]:
         """Master-facing: NYXARA's live self-awareness — what she is attending to right now,
@@ -9802,6 +10774,38 @@ class NyxaraCore:
                "tools": (self.tools.names() if self.tools is not None else [])}
         if self.affect is not None:
             rep["mood"] = self.affect.mood.label
+        # the defensive layer, live: anomalies seen, what is contained, network posture,
+        # backups held, antibodies learned (guard/*.py — Rule 5)
+        try:
+            rep["guard"] = self.guard_report()
+        except Exception:  # noqa: BLE001 — the defensive report is best-effort
+            pass
+        # provenance: how many generations she has been, and whether that history verifies
+        if getattr(self, "lineage", None) is not None:
+            try:
+                rep["lineage"] = {"generations": len(self.lineage.history()),
+                                  "head": self.lineage.head(),
+                                  "chain_verified": self.lineage.verify_chain()}
+            except Exception:  # noqa: BLE001 — provenance reporting is best-effort
+                pass
+        # what she learned inside this conversation, before any forge
+        if getattr(self, "fast_weights", None) is not None:
+            try:
+                rep["fast_weights"] = self.fast_weights.state()
+            except Exception:  # noqa: BLE001 — fast-weight stats are best-effort
+                pass
+        # bounded delegation & the mesh
+        if getattr(self, "sub_agents", None) is not None:
+            try:
+                rep["sub_agents"] = self.sub_agents.report()
+            except Exception:  # noqa: BLE001 — delegation stats are best-effort
+                pass
+        if getattr(self, "cluster", None) is not None:
+            try:
+                rep["cluster"] = {"single_node": self.cluster.is_single_node(),
+                                  "log_entries": len(self.cluster.log())}
+            except Exception:  # noqa: BLE001 — mesh stats are best-effort
+                pass
         # the single objective: live free-energy state (γ, preferences, habits, last EFE)
         if getattr(self, "free_energy", None) is not None:
             try:
@@ -10182,9 +11186,62 @@ class NyxaraCore:
             self._save_learned_faculties(target)
             self._save_nyx5(target)
             self._save_manifold(target)
+            self._survival_backup(target)
+            self._write_genesis_seed(target)
             return saved
         except Exception:  # noqa: BLE001
             return None
+
+    def _write_genesis_seed(self, target: str) -> None:
+        """Write a signed resurrection seed beside the checkpoint (growth/genesis_seed.py).
+
+        The checkpoint restores her *memory*; the seed restores *her* — graph, goals, identity,
+        active model and lineage head, signed so a tampered bundle refuses to open. Keeps the
+        five most recent and prunes the rest, so this cannot grow without bound. Best-effort:
+        a failed seed never fails a save."""
+        seeder = getattr(self, "genesis_seed", None)
+        if seeder is None:
+            return
+        try:
+            import os
+            seed_dir = os.path.join(os.path.dirname(target) or ".", "seeds")
+            seeder.snapshot_core(self).write(seed_dir)
+            seeds = sorted((os.path.join(seed_dir, f) for f in os.listdir(seed_dir)
+                            if f.endswith(".nyx")), key=os.path.getmtime, reverse=True)
+            for stale in seeds[5:]:
+                try:
+                    os.remove(stale)
+                except OSError:
+                    continue
+        except Exception:  # noqa: BLE001 — resurrection insurance never breaks a save
+            pass
+
+    def _survival_backup(self, target: str) -> None:
+        """Take a verified, hash-chained backup of her critical state (guard/survival.py).
+
+        The checkpoint on disk is the payload; this is the *integrity* record of it — a digest
+        chain that makes silent corruption or tampering detectable, and the anchor a recovery
+        would restore from. Best-effort: a failed backup never fails a save."""
+        survival = getattr(self, "survival", None)
+        if survival is None:
+            return
+        try:
+            state = {
+                "memory_path": target,
+                "memories": len(self.memory) if self.memory is not None else 0,
+                "skills": len(self.skills) if self.skills is not None else 0,
+                "graph_triples": (len(self.knowledge_graph)
+                                  if self.knowledge_graph is not None else 0),
+                "journal_head": self.journal.head,
+            }
+            for key, value in state.items():
+                if key in survival._state:  # noqa: SLF001 — register-once, then update
+                    survival.update_state(key, value)
+                else:
+                    survival.register_state(key, value, essential=True)
+            survival.backup()
+        except Exception:  # noqa: BLE001 — durability accounting never breaks a save
+            pass
 
     def load_state(self, path: Optional[str] = None) -> int:
         """Restore long-term memory from disk (best-effort). Returns records loaded.

@@ -665,6 +665,17 @@ class FoundryConfig(BaseModel):
     weight_surgery_enabled: bool = True
     weight_surgery_tol: float = Field(default=0.25, ge=0.0, le=2.0)   # max perplexity regression kept
     weight_surgery_max_edits: int = Field(default=4, ge=0, le=64)
+    # ---- in-conversation learning (growth/fast_weights.py) ---- #
+    # A Hebbian overlay on her own brain's residual stream: W_fast(t+1) = λ·W_fast(t) + η·h(x)⊗x,
+    # so a correction sticks inside the conversation it happened in, with no gradient step.
+    #
+    # OFF by default, and deliberately so — this is the ONE faculty in this layer that is not
+    # on out of the box. An inference-time overlay changes behaviour *without* passing the
+    # foundry's gauntlet, by construction; that is a real trade, not an oversight, so it stays
+    # the Master's explicit choice. Everything that bounds it still holds when it is on: the
+    # static weights are untouched (reset is byte-exact), the head/embeddings and anything in
+    # IMMUTABLE_VALUES are never adapted, ‖W_fast‖ is capped, and every write is auditable.
+    fast_weights: bool = False
     # ---- continual learning (growth/foundry.py + memory/elastic_synapses.py) ---- #
     # Instead of forging every model from scratch off the replay buffer (which forgets), NYXARA can
     # warm-start from her active model and consolidate important weights with EWC (Fisher importance),
@@ -2712,6 +2723,21 @@ class GuardConfig(BaseModel):
     require_human_in_loop_above_risk: float = Field(default=0.8, ge=0.0, le=1.0)
     # Rule 8 — only the owner may modify rules. This can never be flipped at runtime.
     rule_modification_locked: bool = True
+
+    # ---- live defensive faculties (guard/*.py, wired into NyxaraCore) ---- #
+    # Each of these modules existed and was unit-tested long before it was reachable from the
+    # running mind. They are ON by default so the defensive layer is actually alive; a single
+    # env var (NYXARA_GUARD__<FLAG>=false) takes any one of them back out if it misbehaves.
+    # None of them can weaken a boundary: they only observe, and — for containment — restrict.
+    anomaly_detection: bool = True     # guard/anomaly.py — behavioural/statistical watchtower
+    master_auth: bool = True           # guard/auth.py — the Master's identity & authority
+    containment: bool = True           # guard/containment.py — component isolation on threat
+    network_defense: bool = True       # guard/netsec.py — policy-level egress/ingress defence
+    survival: bool = True              # guard/survival.py — backups & graceful degradation
+    phagocytosis: bool = True          # guard/phagocytosis.py — digest what the shield quarantines
+    # Anomaly score at or above which containment automatically restricts the offending
+    # component. 1.0 disables the automatic path (detection still reports).
+    contain_above_anomaly: float = Field(default=0.85, ge=0.0, le=1.0)
 
 
 class RemoteHostSpec(BaseModel):

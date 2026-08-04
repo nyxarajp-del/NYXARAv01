@@ -30,7 +30,6 @@ schedule, and ``growth/tokenizer`` for the span boundary. Nothing imports back.
 
 from __future__ import annotations
 
-import json
 import math
 import random
 import time

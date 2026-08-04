@@ -709,3 +709,49 @@ small brain, and with tools, retrieval and verified reasoning it performs above 
 — which is the real path at this size, and why those are training data here rather than
 decorations bolted on afterwards. The refusals above are part of the deliverable: a number that
 is not measured is not reported.
+
+## Reachability — the difference between written and wired
+
+The status column above distinguishes **REAL** from **REAL+WIRED**, and that distinction turned
+out to be doing real work. An audit of the import graph found **32 modules that no running code
+imported at all**. Each was implemented, documented and unit-tested; each passed its own tests
+indefinitely while being, in operational terms, dead code. The whole `guard/` defensive layer was
+in that state — `guard/__init__.py` was a zero-byte file and `NyxaraCore` referenced none of
+its six modules.
+
+Written-but-unreachable is worth naming as its own failure mode, because it is invisible from
+inside the test suite: green tests on a faculty nothing calls look exactly like green tests on a
+faculty everything calls.
+
+All 32 are now built by `NyxaraCore`, exposed on the console and reachable over HTTP:
+
+| Layer | Modules | Where it now runs |
+|---|---|---|
+| Defensive | `guard.anomaly`, `guard.auth`, `guard.containment`, `guard.netsec`, `guard.survival`, `guard.phagocytosis` | watchtower scores every turn's vitals; `/scram` isolates her effectors; every governed `http_request` clears the firewall; a verified backup rides each checkpoint; quarantined input becomes an antibody |
+| Governance | `agency.llm_tool` | `llm.complete` and `foundry.{train,evaluate,promote,rollback}` are now governed tools — the model is something she calls, never something that drives her |
+| Delegation | `agency.agents`, `agency.hive_council`, `agency.distributed` | sub-agents hold a strict *subset* of her permissions; the mesh is a single-node no-op until a peer is paired |
+| Self-knowledge | `growth.capability`, `growth.lineage` | `can_i()` answers from demonstrated evidence and reports *untested* rather than claiming; every generation lands in a hash-chained ledger |
+| Growth machinery | `growth.foraging`, `growth.genesis_seed`, `growth.native_forge`, `growth.genomic_recombination`, `growth.prompt_grammar`, `growth.module_loader` | idle foraging, a signed resurrection seed beside each checkpoint, and — via `module_loader` — code she forges is actually loaded into the running process instead of sitting on disk |
+| Training stack | `growth.corpus`, `growth.dpo`, `growth.expand`, `growth.latent_head`, `growth.fast_weights` | reachable as `build_corpus()`, `preference_train()`, `expand_experts()`, `speculative_report()`; each reports honestly when no trained brain is loaded |
+| Advisory | `identity.aesthetic`, `identity.modes`, `mind.moral`, `mind.category_transfer`, `mind.continuous_world`, `planning.foresight`, `planning.hypertemporal`, `senses.thermodynamic`, `kernel.replay` | conscience annotates `gates["moral"]`, thermal pressure feeds interoception, each turn lands on a deterministic replay tape |
+
+Two properties are asserted rather than assumed, because both are the kind of thing that quietly
+stops being true:
+
+* **The advisory layer stays advisory.** The moral, aesthetic, thermal and manifold readings
+  colour a turn and nothing more. None may change a disposition — refusing remains the sole
+  business of the shield, oversight, corrigibility and permission gates. A test drives an
+  innocuous request through the moral layer and asserts it is not refused.
+* **Survival never outranks correction.** `SurvivalManager.survival_permitted` refuses any
+  self-preserving action that would obstruct the Master (Rule 1), and a test asserts it.
+
+`tests/kernel/test_orphan_wiring.py::test_no_orphan_modules` walks the package's import graph
+with `ast` and fails if any module is reachable only from `tests/`. Adding a new orphan therefore
+breaks the build rather than accumulating quietly. `test_no_empty_package_init` does the same for
+zero-byte package inits, which is the shape `guard/` was hiding in.
+
+One faculty here is deliberately **off** by default. `growth.fast_weights` is an inference-time
+overlay, so it changes behaviour without clearing the foundry's gauntlet by construction — a real
+trade rather than an oversight, and therefore the Master's explicit call
+(`NYXARA_FOUNDRY__FAST_WEIGHTS=true`). Everything else is on out of the box, each behind a flag
+that defaults true.

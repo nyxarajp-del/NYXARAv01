@@ -29,7 +29,53 @@ from typing import Any, Dict, Optional
 
 from nyxara.senses.web import WebFetcher
 
-__all__ = ["http_request"]
+__all__ = ["http_request", "set_network_defense", "network_defense"]
+
+# The live :class:`~nyxara.guard.netsec.NetworkDefense`, installed by NyxaraCore at boot
+# (``_build_netsec``). This module is a plain function called from a governed tool, so it has
+# no core reference of its own — the core hands its defence here once, and every outbound call
+# then clears the same firewall/reputation/egress-budget policy. None (no core constructed,
+# or network_defense disabled) means the SSRF guard below stands alone, exactly as before.
+_NETWORK_DEFENSE: Any = None
+
+
+def set_network_defense(defense: Any) -> None:
+    """Install (or clear, with ``None``) the process-wide network defence."""
+    global _NETWORK_DEFENSE
+    _NETWORK_DEFENSE = defense
+
+
+def network_defense() -> Any:
+    """The installed :class:`~nyxara.guard.netsec.NetworkDefense`, or None."""
+    return _NETWORK_DEFENSE
+
+
+def _netsec_reason(url: str) -> Optional[str]:
+    """Return a rejection reason if the policy layer refuses this egress, else None.
+
+    Consults the live NetworkDefense: deny-listed or reputationally hostile hosts, explicit
+    firewall rules, and the egress budget. Fail-OPEN on an internal error — the SSRF guard is
+    the fail-closed boundary; this is defence in depth layered on top of it, and a bug in the
+    policy layer must not silently sever her reach."""
+    defense = _NETWORK_DEFENSE
+    if defense is None:
+        return None
+    try:
+        from urllib.parse import urlparse
+
+        from nyxara.guard.netsec import Connection, Direction
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if not host:
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        decision = defense.evaluate(
+            Connection(host=host, port=port, direction=Direction.OUTBOUND))
+        if decision.blocked:
+            return f"network defence blocked {host}: {decision.reason}"
+        return None
+    except Exception:  # noqa: BLE001 — a policy-layer fault never severs her reach
+        return None
 
 
 def _redirect_reason(newurl: str, *, allow_private: bool) -> Optional[str]:
@@ -79,6 +125,12 @@ def http_request(url: str, *, method: str = "GET", headers: Optional[Dict[str, s
     reason = WebFetcher(allow_private=allow_private)._vet_url(url)
     if reason:
         return {"ok": False, "status": 0, "headers": {}, "body": "", "error": reason}
+
+    # 1b. policy layer (guard/netsec.py) — deny-lists, hostile reputation, firewall rules and
+    # the egress budget, on top of the SSRF boundary. Only ever refuses; never widens reach.
+    blocked = _netsec_reason(url)
+    if blocked:
+        return {"ok": False, "status": 0, "headers": {}, "body": "", "error": blocked}
 
     # 2. build the request
     data: Optional[bytes] = None

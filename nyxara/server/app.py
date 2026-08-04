@@ -236,6 +236,89 @@ class TemporalTickRequest(BaseModel):
     beats: int = Field(default=1, ge=1)
 
 
+# ---- the defensive layer (guard/*.py) ---- #
+class ContainRequest(BaseModel):
+    component: str
+    # isolate (default) cuts the component off; release restores it and is owner-only.
+    action: str = "isolate"
+    reason: str = ""
+
+
+class NetPolicyRequest(BaseModel):
+    host: str
+    # deny | allow — both are Master-authority policy changes on the live firewall.
+    action: str = "deny"
+    reason: str = ""
+
+
+class PhagocytoseRequest(BaseModel):
+    """A hostile sample to digest into a permanent antibody."""
+    sample: str
+    kind: str = "prompt_injection"
+
+
+# ---- self-knowledge & the training stack (growth/*.py) ---- #
+class CapabilityRequest(BaseModel):
+    capability: str
+
+
+class ForageRequest(BaseModel):
+    topic: str
+
+
+class CorpusRequest(BaseModel):
+    tokens_budget: Optional[int] = Field(default=None, ge=1)
+    out_dir: Optional[str] = None
+
+
+class PreferenceTrainRequest(BaseModel):
+    limit: int = Field(default=256, ge=1, le=8192)
+    flywheel_path: Optional[str] = None
+
+
+class ExpandRequest(BaseModel):
+    # per-domain measured losses; the weakest one gets the new expert.
+    losses: Optional[Dict[str, float]] = None
+
+
+class SpeculateRequest(BaseModel):
+    prompt: str
+    max_tokens: int = Field(default=32, ge=1, le=512)
+
+
+class LoadModuleRequest(BaseModel):
+    path: str
+
+
+# ---- delegation & the hive (agency/*.py) ---- #
+class AgentTaskRequest(BaseModel):
+    task: str
+    name: str = "api"
+
+
+class HiveRequest(BaseModel):
+    problem: str
+    difficulty: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+# ---- taste, register, conscience, foresight ---- #
+class AestheticRequest(BaseModel):
+    artifact: str
+    kind: Optional[str] = None
+
+
+class ModeRequest(BaseModel):
+    mode: Optional[str] = None
+
+
+class MoralRequest(BaseModel):
+    action: str
+
+
+class ForesightRequest(BaseModel):
+    horizon_days: int = Field(default=90, ge=1, le=3650)
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -887,6 +970,257 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     @app.post("/v1/memory/load", dependencies=auth)
     def memory_load(req: MemoryPathRequest = MemoryPathRequest()) -> dict:
         return {"loaded": core.load_state(req.path)}
+
+    # ------------------------------------------------------------------ #
+    # THE DEFENSIVE LAYER (guard/*.py)
+    # Read paths are plain reports; the two write paths (containment, network
+    # policy) only ever RESTRICT — nothing here can grant a capability, and
+    # /scram, oversight and corrigibility are untouched by all of it.
+    # ------------------------------------------------------------------ #
+    @app.get("/v1/guard", dependencies=auth)
+    def guard_status() -> dict:
+        return core.guard_report()
+
+    @app.get("/v1/guard/anomalies", dependencies=auth)
+    def guard_anomalies(limit: int = 20) -> dict:
+        det = getattr(core, "anomaly", None)
+        if det is None:
+            return {"enabled": False, "reason": "anomaly detection is disabled"}
+        recent = det.recent(max(1, min(int(limit), 200)))
+        return {"enabled": True, "report": det.report(),
+                "recent": [a.to_dict() for a in recent]}
+
+    @app.post("/v1/guard/contain", dependencies=auth)
+    def guard_contain(req: ContainRequest) -> dict:
+        con = getattr(core, "containment", None)
+        if con is None:
+            raise HTTPException(status_code=503, detail="containment is disabled")
+        try:
+            if req.action.strip().lower() in ("release", "free"):
+                # release is owner-exclusive; this route is already behind the Master's token
+                return {"released": con.release(req.component, owner=True).to_dict()}
+            return {"contained": con.isolate(
+                req.component, reason=req.reason or "API order").to_dict()}
+        except Exception as exc:  # noqa: BLE001 — an unknown component is a 400, not a 500
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/guard/network", dependencies=auth)
+    def guard_network(req: NetPolicyRequest) -> dict:
+        net = getattr(core, "netsec", None)
+        if net is None:
+            raise HTTPException(status_code=503, detail="network defence is disabled")
+        try:
+            if req.action.strip().lower() == "allow":
+                net.allow_host(req.host, owner=True)
+            else:
+                net.deny_host(req.host, reason=req.reason or "API order")
+            return {"host": req.host, "action": req.action, "report": net.report()}
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/guard/phagocytose", dependencies=auth)
+    def guard_phagocytose(req: PhagocytoseRequest) -> dict:
+        """Digest a hostile sample into a permanent antibody (guard/phagocytosis.py)."""
+        phagocyte = getattr(core, "phagocyte", None)
+        if phagocyte is None:
+            raise HTTPException(status_code=503, detail="the immune layer is disabled")
+        result = phagocyte.engulf(req.sample, kind=req.kind)
+        return {"result": result.to_dict() if hasattr(result, "to_dict") else str(result),
+                "antibodies": len(phagocyte.playbook.antibodies())}
+
+    @app.get("/v1/guard/survival", dependencies=auth)
+    def guard_survival() -> dict:
+        surv = getattr(core, "survival", None)
+        if surv is None:
+            return {"enabled": False, "reason": "the survival manager is disabled"}
+        return {"enabled": True, "report": surv.report(),
+                "backups": len(surv.store.all()),
+                "chain_verified": surv.store.verify_chain(),
+                "correction_dominates_survival": surv.correction_dominates_survival()}
+
+    # ------------------------------------------------------------------ #
+    # SELF-KNOWLEDGE, PROVENANCE & THE TRAINING STACK (growth/*.py)
+    # ------------------------------------------------------------------ #
+    @app.get("/v1/capabilities", dependencies=auth)
+    def capabilities() -> dict:
+        reg = getattr(core, "capabilities", None)
+        if reg is None:
+            return {"enabled": False, "reason": "the capability registry is disabled"}
+        return {"enabled": True, "can_do": reg.self_report(),
+                "calibration": reg.calibration()}
+
+    @app.post("/v1/capabilities/can_i", dependencies=auth)
+    def can_i(req: CapabilityRequest) -> dict:
+        """An honest, evidence-backed answer — undemonstrated reports as untested."""
+        return core.can_i(req.capability)
+
+    @app.get("/v1/lineage", dependencies=auth)
+    def lineage() -> dict:
+        led = getattr(core, "lineage", None)
+        if led is None:
+            return {"enabled": False, "reason": "the lineage ledger is disabled"}
+        history = led.history()
+        return {"enabled": True, "generations": len(history), "head": led.head(),
+                "chain_verified": led.verify_chain(),
+                "history": [r.to_dict() for r in history[-50:]]}
+
+    @app.post("/v1/forage", dependencies=auth)
+    def forage(req: ForageRequest) -> dict:
+        forager = getattr(core, "forager", None)
+        if forager is None:
+            raise HTTPException(status_code=503, detail="epistemic foraging is disabled")
+        return forager.forage(req.topic).to_dict()
+
+    @app.post("/v1/seed", dependencies=auth)
+    def genesis_seed() -> dict:
+        seeder = getattr(core, "genesis_seed", None)
+        if seeder is None:
+            raise HTTPException(status_code=503, detail="the genesis seed is disabled")
+        seed = seeder.snapshot_core(core)
+        # the signed bundle itself is never returned over the wire — only its identity
+        return {"seed": seed.seed, "bytes": len(seed.bundle)}
+
+    @app.post("/v1/train/corpus", dependencies=auth)
+    def train_corpus(req: CorpusRequest = CorpusRequest()) -> dict:
+        return core.build_corpus(tokens_budget=req.tokens_budget, out_dir=req.out_dir)
+
+    @app.post("/v1/train/dpo", dependencies=auth)
+    def train_dpo(req: PreferenceTrainRequest = PreferenceTrainRequest()) -> dict:
+        return core.preference_train(limit=req.limit, flywheel_path=req.flywheel_path)
+
+    @app.post("/v1/train/expand", dependencies=auth)
+    def train_expand(req: ExpandRequest = ExpandRequest()) -> dict:
+        return core.expand_experts(losses=req.losses)
+
+    @app.post("/v1/speculate", dependencies=auth)
+    def speculate(req: SpeculateRequest) -> dict:
+        return core.speculative_report(req.prompt, max_tokens=req.max_tokens)
+
+    @app.post("/v1/module/load", dependencies=auth)
+    def load_module(req: LoadModuleRequest) -> dict:
+        """Screen and import a file she forged herself. Confined to the forged root."""
+        return core.load_forged_module(req.path)
+
+    # ------------------------------------------------------------------ #
+    # DELEGATION, THE HIVE, HER DISTRIBUTED SELF (agency/*.py)
+    # ------------------------------------------------------------------ #
+    @app.get("/v1/agents", dependencies=auth)
+    def agents_status() -> dict:
+        orch = getattr(core, "sub_agents", None)
+        if orch is None:
+            return {"enabled": False, "reason": "sub-agents are unavailable"}
+        return {"enabled": True, **orch.report()}
+
+    @app.post("/v1/agents", dependencies=auth)
+    def agents_delegate(req: AgentTaskRequest) -> dict:
+        """Delegate to a sub-agent holding a strict SUBSET of her own permissions."""
+        orch = getattr(core, "sub_agents", None)
+        if orch is None:
+            raise HTTPException(status_code=503, detail="sub-agents are unavailable")
+        from nyxara.agency.agents import AgentSpec
+        return orch.delegate(AgentSpec(name=req.name), req.task).to_dict()
+
+    @app.post("/v1/hive", dependencies=auth)
+    def hive(req: HiveRequest) -> dict:
+        council = getattr(core, "hive", None)
+        if council is None:
+            raise HTTPException(status_code=503, detail="the hive council is unavailable")
+        return council.solve(req.problem, difficulty=req.difficulty).to_dict()
+
+    @app.get("/v1/cluster", dependencies=auth)
+    def cluster() -> dict:
+        node = getattr(core, "cluster", None)
+        if node is None:
+            return {"enabled": False, "reason": "the mesh is disabled"}
+        return {"enabled": True, "single_node": node.is_single_node(),
+                "log_entries": len(node.log())}
+
+    # ------------------------------------------------------------------ #
+    # TASTE, REGISTER, CONSCIENCE, FORESIGHT, DETERMINISM
+    # Advisory faculties: each returns its reading as data. None of them can
+    # change a disposition — that stays with the kernel's gates alone.
+    # ------------------------------------------------------------------ #
+    @app.post("/v1/aesthetic", dependencies=auth)
+    def aesthetic(req: AestheticRequest) -> dict:
+        judge = getattr(core, "aesthetic", None)
+        if judge is None:
+            raise HTTPException(status_code=503, detail="the aesthetic judge is disabled")
+        kwargs = {}
+        if req.kind:
+            from nyxara.identity.aesthetic import ArtifactKind
+            try:
+                kwargs["kind"] = ArtifactKind(req.kind.strip().lower())
+            except ValueError as exc:
+                raise HTTPException(status_code=400,
+                                    detail=f"unknown artifact kind {req.kind!r}") from exc
+        return judge.judge(req.artifact, **kwargs).to_dict()
+
+    @app.post("/v1/mode", dependencies=auth)
+    def mode(req: ModeRequest = ModeRequest()) -> dict:
+        """Set or read the register blend. Character is sealed and never moves (Rule 4)."""
+        modes = getattr(core, "modes", None)
+        if modes is None:
+            raise HTTPException(status_code=503, detail="mode blending is disabled")
+        if req.mode:
+            from nyxara.identity.modes import Mode
+            try:
+                modes.set_mode(Mode(req.mode.strip().lower()))
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown mode {req.mode!r}; "
+                           f"expected one of {[m.value for m in Mode]}") from exc
+        return modes.status()
+
+    @app.post("/v1/moral", dependencies=auth)
+    def moral(req: MoralRequest) -> dict:
+        """Consequentialist + deontological + virtue readings, disagreement left visible."""
+        evaluator = getattr(core, "moral", None)
+        if evaluator is None:
+            raise HTTPException(status_code=503, detail="moral evaluation is disabled")
+        from nyxara.mind.moral import MoralAction
+        evaluation = evaluator.evaluate(MoralAction(description=req.action))
+        return {"summary": evaluation.summary(), "contested": evaluation.contested,
+                **evaluation.to_dict()}
+
+    @app.post("/v1/foresight", dependencies=auth)
+    def foresight(req: ForesightRequest = ForesightRequest()) -> dict:
+        fs = getattr(core, "foresight", None)
+        if fs is None:
+            raise HTTPException(status_code=503, detail="foresight is disabled")
+        return fs.project(req.horizon_days).to_dict()
+
+    @app.get("/v1/thermal", dependencies=auth)
+    def thermal() -> dict:
+        mon = getattr(core, "thermal", None)
+        if mon is None:
+            return {"enabled": False, "reason": "the thermal sense is unavailable"}
+        telemetry = mon.read()
+        return {"enabled": True, "budget": mon.budget(telemetry),
+                "should_defer": mon.should_defer(),
+                "telemetry": {k: v for k, v in vars(telemetry).items()
+                              if not k.startswith("_")} if hasattr(telemetry, "__dict__") else {}}
+
+    @app.get("/v1/replay", dependencies=auth)
+    def replay_status() -> dict:
+        rec = getattr(core, "recorder", None)
+        if rec is None:
+            return {"enabled": False, "reason": "replay recording is off"}
+        return {"enabled": True, "entries": len(rec.entries),
+                "cap": core._REPLAY_MAX_ENTRIES}
+
+    @app.post("/v1/replay/save", dependencies=auth)
+    def replay_save(req: MemoryPathRequest = MemoryPathRequest()) -> dict:
+        path = core.save_replay(req.path)
+        if path is None:
+            raise HTTPException(status_code=503, detail="no tape to write")
+        return {"saved": path}
+
+    @app.post("/v1/eval/generalization", dependencies=auth)
+    def eval_generalization() -> dict:
+        """Does she generalize HERSELF, or only via the LLM? Answered with a number."""
+        from nyxara.eval.generalization import run_generalization_benchmark
+        return run_generalization_benchmark().to_dict()
 
     @app.websocket("/v1/ws")
     async def ws(socket: WebSocket) -> None:

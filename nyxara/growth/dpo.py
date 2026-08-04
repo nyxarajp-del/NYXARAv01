@@ -40,7 +40,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.growth.sft import IGNORE_INDEX, SFTExample, mask_to_answer
 
