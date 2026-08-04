@@ -369,19 +369,68 @@ def _synthetic_facts(rng: random.Random, n: int) -> List[Tuple[str, str, str]]:
 # --------------------------------------------------------------------------- #
 # The API growth/corpus.py calls
 # --------------------------------------------------------------------------- #
+def _registry(domain: str) -> tuple:
+    """The generator bank for ``domain``, imported lazily so a missing sibling degrades."""
+    try:
+        if domain == "math":
+            from nyxara.growth.synth_math import GENERATORS
+            return GENERATORS
+        if domain == "code":
+            from nyxara.growth.synth_code import GENERATORS
+            return GENERATORS
+        if domain == "conversation":
+            from nyxara.growth.synth_chat import GENERATORS
+            return GENERATORS
+    except Exception:  # noqa: BLE001 — fall back to the legacy path rather than emit nothing
+        return ()
+    return ()
+
+
 def generate_domain_docs(domain: str, n: int, *, seed: int = 0,
-                         report: Optional[SynthReport] = None) -> Iterator[str]:
+                         report: Optional[SynthReport] = None,
+                         certify: bool = False) -> Iterator[str]:
     """Stream ``n`` verified training documents for ``domain``.
 
-    ``math`` blends worked derivations with prover-certified items; ``code`` yields only
-    sandbox-verified items; ``conversation`` yields tool-call and retrieval traces, which are
-    the shapes that make a small model *useful* rather than merely fluent.
+    Dispatches to the generator banks in :mod:`~nyxara.growth.synth_math`,
+    :mod:`~nyxara.growth.synth_code` and :mod:`~nyxara.growth.synth_chat`, each of which
+    declares a state space that :func:`~nyxara.growth.synth_common.draw` enforces.
+
+    That enforcement is the point. This function previously returned, for ``domain="code"``,
+    **six distinct documents no matter how many were asked for** — six templates whose prompt
+    and answer were fully deterministic, sampled three thousand times and collapsed by dedup.
+    Nothing detected it because no generator declared how much it could actually produce.
+
+    The signature is unchanged for every existing caller (``corpus.py``, ``train_300m.py`` and
+    four test modules); ``certify`` is new and opt-in.
     """
     report = report if report is not None else SynthReport()
     n = max(0, int(n))
     if n == 0:
         return
 
+    generators = _registry(domain)
+    if generators:
+        from nyxara.growth.synth_common import SynthReport as CommonReport
+        from nyxara.growth.synth_common import draw
+
+        inner = CommonReport()
+        for text in draw(generators, n, seed=seed, report=inner, certify=certify):
+            yield text
+        # Fold the sibling's accounting back into the caller's report object, whose type the
+        # existing callers depend on.
+        report.generated += inner.generated
+        report.verified += inner.verified
+        report.rejected += inner.rejected
+        for name, count in inner.by_kind.items():
+            report.by_kind[name] = report.by_kind.get(name, 0) + count
+        for note in inner.notes:
+            report.note(note)
+        if inner.capped:
+            report.note("state-space cap reached: "
+                        + ", ".join(sorted(inner.capped)))
+        return
+
+    # ---- legacy fallback: the original inline generators ---- #
     if domain == "math":
         half = n // 2
         yield from worked_math_docs(half, seed=seed, report=report)
