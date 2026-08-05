@@ -42,6 +42,7 @@ from nyxara.growth.corpus import (  # noqa: E402
     ShardIndex,
     build_corpus,
 )
+from nyxara.growth.progress import DEDUP_NAMES, PROGRESS_NAME  # noqa: E402
 
 _TOKEN_ENV = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_TOKEN")
 
@@ -129,7 +130,8 @@ def stage_shards(args, tokenizer) -> ShardIndex:
     started = time.monotonic()
     index, report = build_corpus(
         tokenizer=tokenizer, out_dir=out, tokens_budget=args.tokens, weights=weights,
-        synthetic_share=share, seed=args.seed,
+        synthetic_share=share, seed=args.seed, shard_tokens=args.shard_tokens,
+        val_permille=args.val_permille,
         stream_sources={} if args.no_stream else None,
         check_contamination=not args.no_decontam)
     elapsed = time.monotonic() - started
@@ -387,6 +389,40 @@ generated portion is original to this project.
     return path
 
 
+def _free_pushed_shards(shard_dir: Path, index: ShardIndex) -> int:
+    """Delete shard files that are now on the Hub, keeping the index that describes them.
+
+    6B tokens is ~12 GB of shards against ~23 GB of free disk here. Uploading and unlinking as
+    we go holds peak local disk near one shard, which is what lets the full build run in this
+    container rather than only on a bigger machine. `--verify` needs the files, so this is
+    opt-in and runs after verification, never before it.
+    """
+    freed = 0
+    for shard in index.shards:
+        path = shard_dir / shard["path"]
+        if path.exists():
+            freed += path.stat().st_size
+            path.unlink()
+    return freed
+
+
+def stage_restore(args) -> bool:
+    """Pull a previous build's state down before starting, so a NEW container continues it."""
+    from nyxara.growth.progress import BuildProgress, restore_from_hub
+
+    section(f"restore from {args.push_to_hub}")
+    out = Path(args.out) / "shards"
+    if not restore_from_hub(out, args.push_to_hub, token=_token()):
+        log("· nothing to resume — starting a fresh build")
+        return False
+    index = ShardIndex.load(out)
+    progress = BuildProgress.load(out)
+    log(f"· recovered {index.tokens():,} tokens across {len(index.shards)} shard(s)"
+        if index else "· recovered progress with no index")
+    log(progress.summary())
+    return True
+
+
 def stage_push(args, index: ShardIndex) -> bool:
     section(f"push to {args.push_to_hub}")
     token = _token()
@@ -414,14 +450,27 @@ def stage_push(args, index: ShardIndex) -> bool:
         return False
     log("· repository is private — confirmed with the remote, not assumed")
 
+    # The resume state travels with the shards. Uploading `index.json` without `progress.json`
+    # and the dedup tables gives a repo you can train from but not CONTINUE from — the next
+    # container would re-read every source from row zero and re-admit what it already has.
     api.upload_folder(
         repo_id=args.push_to_hub, repo_type="dataset",
         folder_path=str(Path(args.out) / "shards"),
-        allow_patterns=["*.bin", "index.json", "README.md"],
+        allow_patterns=["*.bin", "index.json", "README.md", PROGRESS_NAME, *DEDUP_NAMES],
         commit_message=f"NYX-300M corpus: {index.tokens():,} tokens")
-    api.upload_file(path_or_fileobj=str(Path(args.out) / "report.json"),
-                    path_in_repo="report.json", repo_id=args.push_to_hub,
-                    repo_type="dataset")
+    # A build interrupted before `stage_shards` returned has shards and progress but no report.
+    # Pushing that partial state is exactly what checkpointing is FOR, so a missing report must
+    # not abort the upload — the whole point is to get the resumable state off this machine.
+    report = Path(args.out) / "report.json"
+    if report.exists():
+        api.upload_file(path_or_fileobj=str(report), path_in_repo="report.json",
+                        repo_id=args.push_to_hub, repo_type="dataset")
+    else:
+        log("· no report.json yet (partial build) — shards and resume state pushed without it")
+
+    if args.free_local:
+        freed = _free_pushed_shards(Path(args.out) / "shards", index)
+        log(f"· freed {freed / 1024 / 1024:.0f} MB locally — the shards live on the Hub now")
     log(f"· uploaded — https://huggingface.co/datasets/{args.push_to_hub}")
     return True
 
@@ -441,18 +490,35 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="offline: synthetic sources only, `general` excluded")
     parser.add_argument("--no-decontam", action="store_true")
     parser.add_argument("--val-permille", type=int, default=5)
+    parser.add_argument("--shard-tokens", type=int, default=25_000_000,
+                        help="tokens per shard file. This is ALSO the resume granularity: a "
+                             "build killed before its first flush keeps nothing, because "
+                             "everything is still in the writer's buffer. Lower it for a short "
+                             "run you expect to interrupt.")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--verify", action="store_true", help="verify after building")
     parser.add_argument("--sample", action="store_true", help="print decoded documents")
     parser.add_argument("--seed-text", default=None)
     parser.add_argument("--tokenizer-synth", type=int, default=4000)
     parser.add_argument("--push-to-hub", default=None, metavar="OWNER/NAME")
+    parser.add_argument("--resume-from-hub", action="store_true",
+                        help="pull index/progress/dedup down before building, so a FRESH "
+                             "container continues an interrupted build instead of restarting")
+    parser.add_argument("--free-local", action="store_true",
+                        help="after a successful push, delete the uploaded shards locally; "
+                             "holds peak disk near one shard for a full 6B build")
     args = parser.parse_args(argv)
 
     Path(args.out).mkdir(parents=True, exist_ok=True)
     section("NYX-300M corpus")
     log(f"· working directory: {Path(args.out).resolve()}")
     log(f"· token budget: {args.tokens:,}")
+
+    if args.resume_from_hub:
+        if not args.push_to_hub:
+            log("· --resume-from-hub needs --push-to-hub to know WHICH build to resume")
+            return 1
+        stage_restore(args)
 
     tokenizer = stage_tokenizer(args)
 

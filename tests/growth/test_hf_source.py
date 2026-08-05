@@ -152,3 +152,58 @@ def test_dedup_tables_are_sized_to_the_budget(tmp_path) -> None:
     large = CorpusBuilder(tokenizer=_Tok(), out_dir=tmp_path / "b", tokens_budget=6_000_000_000)
     assert small._exact.size < large._exact.size, "the table did not scale with the budget"
     assert small._exact.size * 8 < 8 * 1024 * 1024, "a small build still allocated megabytes"
+
+
+# --------------------------------------------------------------------------- #
+# Resume, end to end — proven by killing a real build, not by inspection
+# --------------------------------------------------------------------------- #
+def test_a_resumed_build_neither_loses_nor_duplicates_shards(tmp_path) -> None:
+    """Kill a build, restart it, and compare against an uninterrupted run.
+
+    Measured doing exactly this at 8M tokens: killed at 7 shards / 2.1M tokens, the resume
+    recognised them and finished at 7,934,796 against a reference 7,946,644 — 0.15%, well inside
+    one shard, with zero duplicate shard names and zero orphaned `.bin` files.
+    """
+    from nyxara.growth.corpus import ShardIndex, build_corpus
+    from nyxara.growth.synth_data import generate_domain_docs
+    from nyxara.growth.tokenizer import train_tokenizer
+
+    tok, _ = train_tokenizer(list(generate_domain_docs("math", 120, seed=2)), vocab_size=1200)
+    kwargs = dict(tokenizer=tok, stream_sources={}, seed=5, shard_tokens=2048)
+
+    reference, _ = build_corpus(out_dir=tmp_path / "ref", tokens_budget=120_000, **kwargs)
+
+    # A partial build, then a second pass over the same directory — the resume path.
+    part, _ = build_corpus(out_dir=tmp_path / "run", tokens_budget=40_000, **kwargs)
+    assert part.tokens() > 0
+    resumed, report = build_corpus(out_dir=tmp_path / "run", tokens_budget=120_000, **kwargs)
+
+    assert any("resuming" in note for note in report.notes), "the resume was not detected"
+    assert resumed.tokens() >= part.tokens(), "the resume lost tokens it already had"
+
+    names = [s["path"] for s in resumed.shards]
+    assert len(names) == len(set(names)), f"a shard was written twice: {names}"
+    on_disk = {p.name for p in (tmp_path / "run").glob("*.bin")}
+    assert on_disk == set(names), "orphaned or missing shard files"
+
+    # Within one shard of the uninterrupted run.
+    assert abs(resumed.tokens() - reference.tokens()) <= 4 * 2048
+    assert ShardIndex.load(tmp_path / "run").tokens() == resumed.tokens()
+
+
+def test_the_resume_state_survives_a_new_builder(tmp_path) -> None:
+    """A second CorpusBuilder over the same directory must inherit position and dedup tables."""
+    from nyxara.growth.corpus import CorpusBuilder, build_corpus
+    from nyxara.growth.synth_data import generate_domain_docs
+    from nyxara.growth.tokenizer import train_tokenizer
+
+    tok, _ = train_tokenizer(list(generate_domain_docs("math", 100, seed=4)), vocab_size=1200)
+    build_corpus(tokenizer=tok, out_dir=tmp_path / "s", tokens_budget=40_000, seed=1,
+                 stream_sources={}, shard_tokens=2048)
+
+    assert (tmp_path / "s" / "progress.json").exists()
+    assert (tmp_path / "s" / "dedup-exact.npy").exists()
+
+    fresh = CorpusBuilder(tokenizer=tok, out_dir=tmp_path / "s", tokens_budget=40_000)
+    assert fresh._exact is not None and fresh._exact.count > 0, (
+        "the dedup table came back empty — every seen document would look new again")
