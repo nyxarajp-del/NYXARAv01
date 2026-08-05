@@ -1170,27 +1170,59 @@ class LLM:
         return self._call_with_resilience(prov, req)
 
     # ---- core call (with retry + optional breaker, falling back to her native own-brain) ---- #
+    @staticmethod
+    def _is_silence(resp: LLMResponse) -> bool:
+        """True when a rung 'succeeded' without actually saying anything.
+
+        A rung can fail in two ways, and only one of them raises. A freshly-promoted ``self`` model
+        whose sampler dead-ends, or a local runtime that decodes straight to a stop token, returns a
+        perfectly well-formed response whose ``text`` is empty. That is not an answer — but because
+        it is not an exception either, the ladder used to stop there and hand the caller silence,
+        skipping the rungs (including her guaranteed native floor) that would have spoken.
+        """
+        return not (resp.text or "").strip()
+
     def complete(self, req: LLMRequest) -> LLMResponse:
         if self.settings.llm.provider.value == "auto":
             # walk the ladder honestly: each failed rung falls to the next backend, ending at her
             # always-on native own-brain; the response's ``provider`` field always names who answered.
             last: Optional[LLMError] = None
+            silent: Optional[LLMResponse] = None
             for prov in self._auto_ladder() or [self._native]:
                 try:
-                    return self._call_with_resilience(prov, req)
+                    resp = self._call_with_resilience(prov, req)
                 except LLMError as exc:
                     self._warn_fallback(prov.name, exc)
                     last = exc
+                    continue
+                if self._is_silence(resp):
+                    # an empty answer is a failed rung, not a cheap one — keep walking
+                    self._warn_fallback(prov.name, LLMError(
+                        "provider returned an empty answer",
+                        context={"provider": prov.name, "model": resp.model}))
+                    silent = silent or resp
+                    continue
+                return resp
+            if silent is not None:
+                return silent          # every rung was mute: return one honestly rather than raise
             raise last or LLMError("no provider available on the auto ladder",
                                    context={"provider": "auto"})
         provider = self.chosen_provider()
         try:
-            return self._call_with_resilience(provider, req)
+            resp = self._call_with_resilience(provider, req)
         except LLMError as exc:
             if provider is not self._native:
                 self._warn_fallback(provider.name, exc)
                 return self._native.complete(req)
             raise
+        if self._is_silence(resp) and provider is not self._native:
+            # same treatment for a pinned rung: silence falls to her floor, which never is
+            self._warn_fallback(provider.name, LLMError(
+                "provider returned an empty answer",
+                context={"provider": provider.name, "model": resp.model}))
+            fallback = self._native.complete(req)
+            return fallback if not self._is_silence(fallback) else resp
+        return resp
 
     def _warn_fallback(self, provider_name: str, exc: Exception) -> None:
         """Record + surface a provider failure that forces a fallback — never silently.

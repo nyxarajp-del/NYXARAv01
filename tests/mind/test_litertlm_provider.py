@@ -533,12 +533,11 @@ def test_runtime_errors_are_normalised_to_llm_error(monkeypatch, weights, tmp_pa
 
 
 def test_a_failed_primary_falls_to_her_next_own_brain(monkeypatch, weights):
-    """With the clouds off, a failed primary must land on another rung of HERS — never nowhere.
+    """With the clouds off, a failed primary must land on another rung of HERS — and that rung talks.
 
-    Only the *provider* is asserted. Whether the rung below has anything to say is that rung's
-    business: a promoted-but-degenerate ``self`` model can return an empty string, and the facade
-    accepts it. That is pre-existing behaviour in ``LLM.complete`` (an empty answer is not an error,
-    so the ladder stops there) and is deliberately not re-litigated by this test.
+    The non-empty assertion is the interesting half. A rung below can be promoted yet degenerate and
+    return an empty string; ``LLM.complete`` treats that silence as a failed rung and keeps walking
+    to her native floor, so a failed primary can never leave the caller with nothing.
     """
     _install_fake(monkeypatch)
     llm = LLM(settings=_only_local(_settings(weights)))
@@ -546,3 +545,22 @@ def test_a_failed_primary_falls_to_her_next_own_brain(monkeypatch, weights):
     _Engine.instances[0].raises = RuntimeError("decode failed")
     resp = llm.complete(LLMRequest.from_prompt("and now?"))
     assert resp.provider in OWN_PROVIDERS and resp.provider != "litertlm"
+    assert resp.text.strip(), "a degraded rung must still say something"
+
+
+def test_a_mute_primary_is_treated_as_a_failed_rung(monkeypatch, weights, tmp_path):
+    """The on-device runtime can decode straight to a stop token — well-formed, and empty.
+
+    The foundry is pointed at an empty directory so the ladder is exactly litertlm -> native and
+    ``last_fallback`` still names the primary (a silent ``self`` rung in between would overwrite it).
+    """
+    _install_fake(monkeypatch)
+    empty_foundry = tmp_path / "no-foundry"
+    empty_foundry.mkdir()
+    llm = LLM(settings=_only_local(_settings(weights), foundry_dir=empty_foundry))
+    llm.complete(LLMRequest.from_prompt("warm"))
+    _Engine.instances[0].reply = ""
+    resp = llm.complete(LLMRequest.from_prompt("say something"))
+    assert resp.provider == "native"
+    assert resp.text.strip()
+    assert llm.last_fallback["provider"] == "litertlm" and "empty" in llm.last_fallback["error"]

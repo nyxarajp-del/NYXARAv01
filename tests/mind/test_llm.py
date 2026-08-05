@@ -269,6 +269,94 @@ def test_unavailable_provider_falls_back_to_native():
     assert llm.chosen_provider().name == "native"
 
 
+# -------------------- silence is a failed rung, not a cheap answer -------------------- #
+class _Mute(LLMProviderBase):
+    """Succeeds without saying anything — the failure mode that does NOT raise.
+
+    A promoted-but-degenerate ``self`` model does exactly this: a well-formed response whose text
+    is empty. Nothing throws, so nothing used to stop the ladder handing that silence to the caller.
+    """
+
+    def __init__(self, name="mute", text=""):
+        super().__init__()
+        self.name = name
+        self._text = text
+        self.calls = 0
+
+    def available(self):
+        return True
+
+    def default_model(self):
+        return f"{self.name}-1"
+
+    def _complete(self, req, model):
+        self.calls += 1
+        return (self._text, "stop", Usage(1, 0), None)
+
+
+def _auto(providers):
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.provider = ProviderName.AUTO
+    llm = LLM(settings=settings, providers=providers)
+    llm._AUTO_LADDER = tuple(providers)          # per-instance ladder over the fakes
+    return llm
+
+
+def test_an_empty_answer_falls_through_to_the_next_rung():
+    mute, native = _Mute(), NativeProvider()
+    llm = _auto({"mute": mute, "native": native})
+    resp = llm.complete(LLMRequest.from_prompt("say something"))
+    assert mute.calls == 1, "the mute rung must actually be tried first"
+    assert resp.provider == "native"
+    assert resp.text.strip(), "her floor must speak when the rung above it does not"
+
+
+def test_whitespace_only_counts_as_silence():
+    mute = _Mute(text="   \n\t ")
+    llm = _auto({"mute": mute, "native": NativeProvider()})
+    assert llm.complete(LLMRequest.from_prompt("x")).provider == "native"
+
+
+def test_a_silent_rung_is_recorded_not_hidden():
+    """An operator has to be able to see WHY the primary went quiet — silence included."""
+    llm = _auto({"mute": _Mute(), "native": NativeProvider()})
+    llm.complete(LLMRequest.from_prompt("x"))
+    assert llm.last_fallback and llm.last_fallback["provider"] == "mute"
+    assert "empty" in llm.last_fallback["error"]
+
+
+def test_a_speaking_rung_is_still_preferred():
+    """The fix must not make the ladder skip a rung that had something to say."""
+    talker = _Mute(name="talker", text="a real answer")
+    llm = _auto({"talker": talker, "native": NativeProvider()})
+    resp = llm.complete(LLMRequest.from_prompt("x"))
+    assert resp.provider == "talker" and resp.text == "a real answer"
+    assert llm.last_fallback is None
+
+
+def test_all_rungs_mute_returns_a_response_rather_than_raising():
+    """Degrade, never explode: if literally nothing speaks, the caller still gets a response."""
+    llm = _auto({"mute": _Mute(), "mute2": _Mute(name="mute2")})
+    resp = llm.complete(LLMRequest.from_prompt("x"))
+    assert resp.provider in {"mute", "mute2"} and resp.text == ""
+
+
+def test_a_pinned_rung_that_goes_silent_falls_to_her_floor():
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.provider = ProviderName.AIROUTER
+    llm = LLM(settings=settings, providers={"airouter": _Mute(name="airouter"),
+                                            "native": NativeProvider()})
+    resp = llm.complete(LLMRequest.from_prompt("x"))
+    assert resp.provider == "native" and resp.text.strip()
+
+
+def test_complete_with_still_reports_silence_faithfully():
+    """A council member that says nothing must be recorded as saying nothing, not substituted."""
+    llm = _auto({"mute": _Mute(), "native": NativeProvider()})
+    resp = llm.complete_with("mute", LLMRequest.from_prompt("x"))
+    assert resp.provider == "mute" and resp.text == ""
+
+
 # -------------------- self-model prompt formatting (Phase 0) -------------------- #
 def test_format_self_prompt_renders_system_and_turns():
     from nyxara.mind.llm import (format_self_prompt, _SELF_USER_TAG,
