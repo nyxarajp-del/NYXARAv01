@@ -68,6 +68,41 @@ def _token() -> Optional[str]:
 # --------------------------------------------------------------------------- #
 # Tokenizer
 # --------------------------------------------------------------------------- #
+def _sample_real_text(total: int, *, seed: int = 0) -> List[str]:
+    """Pull a spread of real documents across the configured sources, for tokenizer training.
+
+    Deliberately samples EVERY domain rather than only `general`: a vocabulary trained on prose
+    alone spends its whole budget on English and then tokenizes indentation, operators and LaTeX
+    one byte at a time, which is precisely the case a 300M model cannot afford.
+    """
+    from nyxara.growth.corpus import DEFAULT_STREAM_SOURCES
+    from nyxara.growth.hf_source import open_source
+
+    out: List[str] = []
+    specs = [(d, s) for d, ss in DEFAULT_STREAM_SOURCES.items() for s in ss]
+    per_source = max(1, total // max(1, len(specs)))
+    for domain, spec in specs:
+        try:
+            source = open_source(spec, source_id=f"{domain}:{spec['path']}")
+        except Exception as exc:  # noqa: BLE001 — gated or unreadable: the rest still cover it
+            log(f"  · {spec['path']}: skipped for the tokenizer ({str(exc)[:60]})")
+            continue
+        if source is None:
+            continue
+        taken = 0
+        try:
+            for text, _key in source.rows():
+                if text:
+                    out.append(text)
+                    taken += 1
+                if taken >= per_source:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        log(f"  · {spec['path']}: {taken} document(s)")
+    return out
+
+
 def stage_tokenizer(args) -> Any:
     from nyxara.growth.synth_data import generate_domain_docs
     from nyxara.growth.tokenizer import load_tokenizer, train_tokenizer
@@ -91,11 +126,22 @@ def stage_tokenizer(args) -> Any:
                     continue
         log(f"· {len(docs)} seed document(s) from {root}")
 
+    # Real text from the streamed sources. Without it the vocabulary CANNOT reach 32,768:
+    # synthetic data is correct by construction and lexically narrow, and measured, it exhausts
+    # the BPE at ~2,500 merges. Shards written under a 2,500-token vocabulary are unusable for
+    # `nyxara-300m`, which expects 32,768 — and `--verify` rightly refuses to mix them. So the
+    # tokenizer has to see the corpus it will be used on, before the corpus is built.
+    if args.tokenizer_stream and not args.no_stream:
+        streamed = _sample_real_text(args.tokenizer_stream, seed=args.seed)
+        docs += streamed
+        log(f"· {len(streamed)} streamed document(s) for vocabulary coverage")
+
     # Fold in synthetic text from every domain so the vocabulary covers code, maths, dialogue
     # and causal notation even when the seed text is prose only.
     for domain in ("math", "code", "conversation", "causal"):
         docs += list(generate_domain_docs(domain, args.tokenizer_synth, seed=args.seed))
-    log(f"· training on {len(docs)} documents")
+    log(f"· training on {len(docs)} documents "
+        f"({sum(len(d) for d in docs) / 1024 / 1024:.1f} MB)")
 
     tokenizer, report = train_tokenizer(docs, vocab_size=args.vocab_size, save_to=out)
     log(report.summary())
@@ -500,6 +546,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--sample", action="store_true", help="print decoded documents")
     parser.add_argument("--seed-text", default=None)
     parser.add_argument("--tokenizer-synth", type=int, default=4000)
+    parser.add_argument("--tokenizer-stream", type=int, default=20_000,
+                        help="real documents sampled across every source to train the "
+                             "vocabulary. Synthetic text alone exhausts the BPE at ~2,500 "
+                             "merges, which cannot support the 32,768 vocab nyxara-300m expects.")
     parser.add_argument("--push-to-hub", default=None, metavar="OWNER/NAME")
     parser.add_argument("--resume-from-hub", action="store_true",
                         help="pull index/progress/dedup down before building, so a FRESH "
