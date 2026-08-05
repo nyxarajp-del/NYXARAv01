@@ -154,7 +154,10 @@ def test_provider_status():
     llm = _native_llm()
     status = llm.provider_status()
     assert status["native"] is True
-    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
+    assert set(status) == {"litertlm", "aicredits", "groq", "airouter", "self", "native"}
+    # Under TEST every rung but her native floor is honestly unavailable — including the on-device
+    # primary, which the profile seals so the suite never loads 2.4 GB of weights.
+    assert status["litertlm"] is False
 
 
 def test_async_complete():

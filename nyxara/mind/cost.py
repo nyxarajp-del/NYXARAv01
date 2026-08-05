@@ -49,6 +49,11 @@ PRICES: Dict[str, Tuple[float, float]] = {
     "gpt2": (0.0, 0.0),
     "nyxara-self": (0.0, 0.0),
     "native": (0.0, 0.0),
+    # Her PRIMARY brain: Gemma-4-E2B-it served on-device via LiteRT-LM. Costs electricity and a
+    # one-time 2.4 GB download, and nothing per token — which is the whole point of it leading the
+    # ladder. The bare "gemma" prefix catches any future on-device variant of the same family.
+    "gemma-4-E2B-it-litertlm": (0.0, 0.0),
+    "gemma": (0.0, 0.0),
 }
 
 # Every backend is local now, so an unrecognised model also costs nothing.

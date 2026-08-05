@@ -1170,26 +1170,31 @@ def _author_provider_name(llm: Any, *, self_authored_only: bool = True) -> Optio
     """Name of the provider that may author a self-edit, or None.
 
     NYXARA's OWN ``self`` model (her foundry-trained brain) is always preferred — this is the
-    point of the feature: she redesigns herself, with herself. Under ``self_authored_only`` it is
-    the *only* permitted author, so no external LLM is ever consulted. With that flag off, a real
-    configured external provider may author when ``self`` is not yet available. The ``mock``
-    impersonator is never an author (it would only fake a fix)."""
+    point of the feature: she redesigns herself, with herself. Her on-device ``litertlm`` primary
+    is next: also hers, also offline, and strong enough to author a real edit when the foundry has
+    not promoted anything yet. Under ``self_authored_only`` those are the *only* permitted authors,
+    so no external LLM is ever consulted. With that flag off, a real configured external provider
+    may author when neither of her own brains is available. Her ``native`` n-gram floor is never an
+    author — it cannot write a patch, and pretending otherwise would only fake a fix."""
     if llm is None:
         return None
     try:
         available = set(llm.available_providers())
     except Exception:  # noqa: BLE001 — fall back to the chosen-provider probe below
         available = set()
-    if "self" in available:
-        return "self"                       # NYXARA's own brain answers — always preferred
+    from nyxara.kernel.config import OWN_PROVIDERS
+    # her own brains, strongest-first: the forged weights, then the on-device primary
+    for own in ("self", "litertlm"):
+        if own in available:
+            return own                      # NYXARA's own brain authors — always preferred
     if self_authored_only:
-        return None                         # her own model isn't ready and no LLM is permitted
+        return None                         # her own models aren't ready and no LLM is permitted
     try:
         prov = llm.chosen_provider()
     except Exception:  # noqa: BLE001
         return None
     name = getattr(prov, "name", "")
-    if name not in ("native", "self") and bool(prov.available()):
+    if name not in OWN_PROVIDERS and bool(prov.available()):
         return name
     return None
 

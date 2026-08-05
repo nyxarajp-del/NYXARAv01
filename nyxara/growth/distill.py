@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
-from nyxara.kernel.config import NyxaraSettings, get_settings
+from nyxara.kernel.config import OWN_PROVIDERS, NyxaraSettings, get_settings
 
 __all__ = [
     "DEFAULT_NYXARA_SYSTEM",
@@ -195,10 +195,15 @@ class Distiller:
         return self._llm
 
     def available(self) -> bool:
-        """True only when a *real* teacher is configured — never distil from the mock/self."""
+        """True only when a *real* teacher is configured — never distil from her own brains.
+
+        ``OWN_PROVIDERS`` names the rungs that run in-process (her on-device ``litertlm`` primary,
+        her forged ``self`` weights, her ``native`` n-gram). Distilling from one of those would just
+        be copying her own output back onto herself — a teacher has to be somebody else.
+        """
         try:
             prov = self._teacher().chosen_provider()
-            return getattr(prov, "name", "") not in ("native", "self")
+            return getattr(prov, "name", "") not in OWN_PROVIDERS
         except Exception:  # noqa: BLE001
             return False
 
@@ -253,7 +258,7 @@ class Distiller:
         llm = self._teacher()
         if teachers is None:
             try:
-                teachers = [n for n in llm.available_providers() if n not in ("native", "self")]
+                teachers = [n for n in llm.available_providers() if n not in OWN_PROVIDERS]
             except Exception:  # noqa: BLE001 — facade lacks a provider list → no multi-teacher
                 teachers = []
         try:

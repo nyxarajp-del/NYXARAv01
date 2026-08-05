@@ -13,11 +13,17 @@ belongs to the kernel after the proposal passes guards (mind/proposal.py).
 
 Selected by config, strongest-reachable-first on the ``auto`` ladder:
 
-* :class:`AiCreditsProvider`   — her PRIMARY reachable model: the OpenAI-compatible CLOUD endpoint at
+* :class:`LiteRTLMProvider`    — her PRIMARY brain, and the only strong one that never leaves the
+  machine: Gemma-4-E2B-it in Google's LiteRT-LM on-device format (a single ~2.4 GB INT4
+  ``model.litertlm``), served IN-PROCESS through the ``litert_lm`` binding. No API key, no endpoint,
+  no wire — so there is nothing for the isolation envelope to hide, and no outage can take it away.
+  First rung whenever the weights are on disk, under exactly the same subordinate contract as every
+  other rung: request in → text out, no persona, no state, no callback, output gated as a proposal.
+* :class:`AiCreditsProvider`   — her top CLOUD rung: the OpenAI-compatible CLOUD endpoint at
   aicredits.in (e.g. ``moonshotai/kimi-k2-thinking``), a SUBORDINATE tool she *uses* and *controls*:
   request in → text out, no persona, no state, no callback — the kernel treats its output as a
-  proposal that must pass every guard. Primary, yet never the driver. Its models *think*, and only
-  their ``content`` is ever read: the private reasoning chain is discarded, never obeyed.
+  proposal that must pass every guard. Its models *think*, and only their ``content`` is ever read:
+  the private reasoning chain is discarded, never obeyed.
 * :class:`GroqProvider`        — Groq's OpenAI-compatible CLOUD endpoint (api.groq.com, e.g.
   ``llama-3.3-70b-versatile``): the same subordinate contract, one rung lower — her first cloud
   FALLBACK, so a single provider outage costs her speed rather than a voice.
@@ -31,10 +37,12 @@ Selected by config, strongest-reachable-first on the ``auto`` ladder:
   corpus. Deterministic, needs no torch/numpy/network, so it is the *guaranteed floor* of the
   ladder — a bare machine still answers from her own learned voice, never an echo of the prompt.
 
-No external model ever *speaks as her*: the cloud models are tools she controls, and her own
-``self``/``native`` brains are the sovereign floor. Heavy/optional deps (the ``openai`` SDK,
-``torch``/``peft`` for the foundry) are imported lazily and reported honestly via ``available()``,
-so this module works with zero of them installed (falling back to her native own-brain).
+No external model ever *speaks as her*: every model here is a tool she controls, and her own
+``litertlm``/``self``/``native`` brains — the ones that run in-process, listed in
+``config.OWN_PROVIDERS`` — are the sovereign floor. Heavy/optional deps (the ``litert_lm`` binding,
+the ``openai`` SDK, ``torch``/``peft`` for the foundry) are imported lazily and reported honestly via
+``available()``, so this module works with zero of them installed (falling back to her native
+own-brain).
 
 Depends on :mod:`config` and :mod:`errors`; optionally uses a
 :class:`~nyxara.kernel.runtime.CircuitBreaker`.
@@ -68,6 +76,7 @@ __all__ = [
     "LLMProviderBase",
     "NativeProvider",
     "SelfProvider",
+    "LiteRTLMProvider",
     "OpenAICompatProvider",
     "AiCreditsProvider",
     "GroqProvider",
@@ -513,6 +522,265 @@ class SelfProvider(LLMProviderBase):
 
 
 # --------------------------------------------------------------------------- #
+# LiteRT-LM — her PRIMARY brain, running ON-DEVICE (Gemma-4-E2B-it, INT4)
+# --------------------------------------------------------------------------- #
+_JSON_NUDGE = "Respond with ONLY valid JSON — no prose, no code fences."
+
+# Gemma 4's turn markers (vocabulary ids 105/106 — *not* Gemma 3's ``<start_of_turn>`` pair). A local
+# model has no server to cut it off, so a reply that runs past its own turn keeps going into a
+# hallucinated next one — stop at the first marker that appears in the text.
+_GEMMA_STOPS = ("<turn|>", "<|turn>")
+
+
+class LiteRTLMProvider(LLMProviderBase):
+    """Serve a LiteRT-LM ``.litertlm`` model in-process — NYXARA's PRIMARY brain.
+
+    The ladder's first rung, and the only strong model on it that **never touches the network**:
+    Gemma-4-E2B-it quantized to INT4 and served by Google's LiteRT-LM runtime through the
+    ``litert_lm`` binding. The weights sit on her own disk, inference happens in her own process, and
+    the prompt is never transmitted anywhere.
+
+    Two consequences worth stating plainly, because they are why this rung leads:
+
+    * **No outage can take it.** Cloud rungs answer when reachable; this one answers when the file
+      exists. An air-gapped machine now runs on a real instruct model rather than an n-gram.
+    * **No isolation envelope.** ``guard/isolation_envelope.py`` exists to abstract her identity and
+      the Master's secrets *before they leave for a cloud tool*. Nothing leaves here, so there is
+      nothing to abstract — the envelope is not skipped by oversight, it is inapplicable.
+
+    Nothing about *primary* changes the power relation. This is the same contract as every other
+    provider in this module: stateless, persona-free, callback-free, and its output is a mere proposal
+    the kernel gates (``kernel/orchestrator.py::_gate``). Being local makes it *reachable*, not
+    authoritative — and an unaligned base model is precisely why the guards, not the model, decide
+    what she acts on.
+
+    **Statelessness with a KV cache.** A ``Conversation`` carries the model's attention state, so one
+    is built *and closed* per request from the messages the caller supplied; only the ``Engine`` (a
+    ~7 s, multi-GB load) is cached. Identical requests therefore stay replayable — with a seed pinned,
+    the same request yields the same text, verified against the real weights.
+
+    **Why the chat template is ours.** The template embedded in this model file calls ``.get`` on a
+    map, which the runtime's Jinja engine does not implement; left alone, every ``send_message`` fails
+    with *"Failed to apply template"*. ``settings.llm.litertlm_chat_template`` overrides it with
+    Gemma's own turn format. Its two sharp edges are documented at that config field — the one that
+    matters here is that a **bare string message renders to nothing**, so this provider always hands
+    the runtime ``litert_lm.Message`` objects.
+    """
+
+    name = "litertlm"
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._engine: Any = None
+        self._engine_path: Optional[str] = None
+        self._lock = threading.Lock()
+
+    # ---- honest availability (cheap: never loads the engine, never downloads) ---- #
+    def model_path(self) -> Any:
+        from nyxara.mind.litertlm_assets import model_path
+        return model_path(self.settings)
+
+    def _binding(self) -> Any:
+        """The ``litert_lm`` module, or None when the optional wheel is not installed."""
+        try:
+            import litert_lm
+        except Exception:  # noqa: BLE001 — an unbuilt/ABI-mismatched wheel is just unavailability
+            return None
+        return litert_lm
+
+    def available(self) -> bool:
+        if not bool(getattr(self.settings.llm, "litertlm_enabled", True)):
+            return False
+        if self._binding() is None:
+            return False
+        try:
+            return self.model_path().is_file()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def default_model(self) -> str:
+        return self.settings.llm.litertlm_model
+
+    # ---- the engine (cached; the conversation deliberately is not) ---- #
+    def _backend(self, litert_lm: Any) -> Any:
+        kind = str(getattr(self.settings.llm, "litertlm_backend", "cpu")).lower()
+        if kind == "gpu":
+            return litert_lm.Backend.GPU()
+        if kind == "npu":
+            return litert_lm.Backend.NPU()
+        threads = getattr(self.settings.llm, "litertlm_threads", None)
+        return litert_lm.Backend.CPU(thread_count=threads) if threads else litert_lm.Backend.CPU()
+
+    def _cache_dir(self) -> Optional[str]:
+        from pathlib import Path
+        d = getattr(self.settings.llm, "litertlm_cache_dir", None)
+        if d is None:
+            d = self.model_path().parent / "litertlm-cache"
+        try:
+            Path(d).mkdir(parents=True, exist_ok=True)
+        except Exception:  # noqa: BLE001 — a read-only cache dir only costs recompilation
+            return None
+        return str(d)
+
+    def _get_engine(self, litert_lm: Any) -> Any:
+        """Load once, reuse forever. Multi-GB and ~7 s, so a per-request load is not an option."""
+        path = str(self.model_path())
+        if self._engine is not None and self._engine_path == path:
+            return self._engine
+        with self._lock:
+            if self._engine is not None and self._engine_path == path:
+                return self._engine
+            try:   # the runtime is chatty on stderr; keep her console readable
+                litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
+            except Exception:  # noqa: BLE001
+                pass
+            engine = litert_lm.Engine(path, backend=self._backend(litert_lm),
+                                      cache_dir=self._cache_dir())
+            self._engine, self._engine_path = engine, path
+            log.info("litertlm engine loaded: %s", path)
+            return engine
+
+    def learning_view(self) -> Dict[str, Any]:
+        """Truthful serving state for the learning report — never fabricates.
+
+        The interesting field is ``reason``: when her primary is *not* serving, an operator should be
+        able to see at a glance whether that is a missing wheel, a missing 2.4 GB file, or a switch
+        someone turned off — rather than only noticing that answers got worse.
+        """
+        try:
+            path = self.model_path()
+            weights = path.is_file()
+        except Exception:  # noqa: BLE001
+            path, weights = None, False
+        enabled = bool(getattr(self.settings.llm, "litertlm_enabled", True))
+        binding = self._binding() is not None
+        if not enabled:
+            reason = "disabled by config"
+        elif not binding:
+            reason = "litert_lm not installed (pip install litert-lm-api)"
+        elif not weights:
+            reason = f"weights missing at {path} (python scripts/fetch_litertlm_model.py)"
+        else:
+            reason = None
+        return {"available": enabled and binding and weights, "enabled": enabled,
+                "binding_installed": binding, "weights_present": weights,
+                "model_path": str(path) if path is not None else None,
+                "model": self.settings.llm.litertlm_model,
+                "backend": getattr(self.settings.llm, "litertlm_backend", "cpu"),
+                "engine_loaded": self._engine is not None, "reason_unavailable": reason}
+
+    def close(self) -> None:
+        """Release the engine and its weights (used by the tests and by a lean reload)."""
+        with self._lock:
+            engine, self._engine, self._engine_path = self._engine, None, None
+        if engine is not None:
+            try:
+                engine.close()
+            except Exception:  # noqa: BLE001 — releasing must never raise
+                pass
+
+    # ---- request → litert_lm.Message objects ---- #
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        """Pull the text out of ``{"role": ..., "content": [{"type": "text", "text": ...}]}``.
+
+        Tolerant on purpose: it joins every text part it finds and ignores non-text content, so a
+        future multi-modal part cannot turn a good answer into a crash.
+        """
+        if isinstance(response, str):
+            return response
+        try:
+            parts = response["content"]
+        except Exception:  # noqa: BLE001
+            return ""
+        if isinstance(parts, str):
+            return parts
+        out: List[str] = []
+        for part in parts or ():
+            if isinstance(part, str):
+                out.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                out.append(part["text"])
+        return "".join(out)
+
+    def _history(self, req: LLMRequest, litert_lm: Any) -> Tuple[List[Any], str]:
+        """Split the request into (prior turns, the final user text to send).
+
+        Gemma 4 has a real ``system`` role, so ``req.system`` becomes a genuine system turn rather
+        than being folded into the user's words. Every element is a real ``litert_lm.Message``: a
+        bare string would normalise to a *string* ``content``, the chat template would iterate its
+        characters and render nothing, and the model would answer an empty prompt with a canned
+        self-introduction.
+
+        Note what is NOT here: no "you are NYXARA" persona. The system text is whatever the caller
+        passed — her identity is composed in ``identity/soul.py``, never injected by a provider.
+        """
+        system = (req.system or "").strip()
+        if req.json_mode:
+            system = f"{system}\n\n{_JSON_NUDGE}" if system else _JSON_NUDGE
+
+        turns: List[Tuple[Role, str]] = [(m.role, m.content) for m in req.messages
+                                         if m.role in (Role.USER, Role.ASSISTANT)]
+        if not turns:
+            turns = [(Role.USER, "")]
+
+        # the last user turn is what we SEND; everything before it is conversation history
+        send_at = max((i for i, (r, _) in enumerate(turns) if r is Role.USER), default=len(turns) - 1)
+        history: List[Any] = []
+        if system:
+            history.append(litert_lm.Message.system(system))
+        for role, content in turns[:send_at]:
+            if role is Role.USER:
+                history.append(litert_lm.Message.user(content))
+            else:
+                history.append(litert_lm.Message.model(litert_lm.Contents.of(content)))
+        return history, turns[send_at][1]
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        litert_lm = self._binding()
+        if litert_lm is None:
+            raise LLMError("litert_lm is not installed (pip install litert-lm-api)",
+                           context={"provider": self.name})
+        engine = self._get_engine(litert_lm)
+        history, prompt = self._history(req, litert_lm)
+        cfg = self.settings.llm
+        sampler = litert_lm.SamplerConfig(
+            top_k=int(getattr(cfg, "litertlm_top_k", 40)),
+            top_p=float(req.top_p),
+            temperature=float(req.temperature),
+            seed=req.seed,
+        )
+        # One engine, serialized: the runtime holds a single set of weights, and a 2.4 GB INT4 model
+        # on CPU is the bottleneck anyway — concurrent turns queue rather than corrupt each other.
+        with self._lock:
+            conv = engine.create_conversation(
+                chat_template=cfg.litertlm_chat_template,
+                messages=history or None,
+                sampler_config=sampler,
+            )
+            try:
+                raw = conv.send_message(litert_lm.Message.user(prompt),
+                                        max_output_tokens=int(req.max_tokens))
+            finally:
+                try:
+                    conv.close()          # drop the KV cache: the facade stays stateless
+                except Exception:  # noqa: BLE001
+                    pass
+        text, hit = truncate_at_stops(self._extract_text(raw), tuple(req.stop) + _GEMMA_STOPS)
+        completion = estimate_tokens(text)
+        # Honest finish reason. A stop marker in the text means the model ran past its turn and we
+        # cut it. Otherwise the runtime stopped on EOS *or* on the token cap — and only a reply that
+        # actually reached the cap is a truncation, so don't report one that plainly didn't.
+        if hit:
+            finish = "stop"
+        else:
+            finish = "length" if completion >= int(req.max_tokens) else "stop"
+        usage = Usage(prompt_tokens=estimate_tokens(prompt), completion_tokens=completion)
+        return (text, finish, usage,
+                {"litertlm": True, "model": model, "on_device": True})
+
+
+# --------------------------------------------------------------------------- #
 # OpenAI-compatible CLOUD providers — SUBORDINATE tools she calls (Groq, airouter)
 # --------------------------------------------------------------------------- #
 class OpenAICompatProvider(LLMProviderBase):
@@ -656,14 +924,16 @@ class OpenAICompatProvider(LLMProviderBase):
 # AiCredits — her PRIMARY cloud rung (aicredits.in, e.g. moonshotai/kimi-k2-thinking)
 # --------------------------------------------------------------------------- #
 class AiCreditsProvider(OpenAICompatProvider):
-    """aicredits.in via its OpenAI-compatible endpoint — NYXARA's PRIMARY reachable model, and still a tool.
+    """aicredits.in via its OpenAI-compatible endpoint — NYXARA's TOP CLOUD rung, and still a tool.
 
-    First rung of the ``auto`` ladder: the strongest of her reachable cloud tools, so it drafts every
-    turn it can. Nothing about *primary* changes the power relation — this is the same stateless,
-    persona-free, callback-free contract as every other rung (see :class:`OpenAICompatProvider`), and
-    the kernel still gates its output as a mere proposal (``kernel/orchestrator.py::_gate``). The
-    instant it is unreachable the facade falls to ``groq``, then ``airouter``, then to her OWN weights,
-    then to her native own-brain: she uses this model, she never depends on it.
+    The strongest of her reachable cloud tools, and the second rung of the ``auto`` ladder overall: it
+    drafts when her on-device :class:`LiteRTLMProvider` primary is unavailable (no weights, no
+    binding), which is also the case where a big cloud model genuinely earns its place. This is the
+    same stateless, persona-free, callback-free contract as every other rung (see
+    :class:`OpenAICompatProvider`), and the kernel still gates its output as a mere proposal
+    (``kernel/orchestrator.py::_gate``). The instant it too is unreachable the facade falls to
+    ``groq``, then ``airouter``, then to her OWN weights, then to her native own-brain: she uses this
+    model, she never depends on it.
 
     **Its models think, and she does not take their thoughts as orders.** The endpoint's reasoning
     models return their private chain-of-thought in a *separate* ``message.reasoning`` field rather than
@@ -770,6 +1040,7 @@ class AIRouterProvider(OpenAICompatProvider):
 # The stateless facade the kernel calls
 # --------------------------------------------------------------------------- #
 _PROVIDER_CLASSES = {
+    ProviderName.LITERTLM: LiteRTLMProvider,
     ProviderName.AICREDITS: AiCreditsProvider,
     ProviderName.GROQ: GroqProvider,
     ProviderName.AIROUTER: AIRouterProvider,
@@ -808,13 +1079,14 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # the auto ladder: her strongest reachable TOOL first (aicredits), then her cloud fallbacks (Groq,
-    # then GLM-5 via airouter), then her OWN promoted weights, and finally her always-on
-    # dependency-free native own-brain as the guaranteed floor (never an echo mock). No raw third-party
-    # model answers on this ladder — the cloud rungs are tools she uses when reachable; the moment they
-    # are unavailable she keeps her own voice, never dependent on the cloud. Three cloud rungs means an
-    # outage — or even two — costs her speed, never a voice.
-    _AUTO_LADDER = ("aicredits", "groq", "airouter", "self", "native")
+    # the auto ladder: her PRIMARY on-device brain first (litertlm — Gemma-4-E2B-it served in-process,
+    # no key and no wire), then her cloud tools in strength order (aicredits, Groq, then GLM-5 via
+    # airouter), then her OWN promoted foundry weights, and finally her always-on dependency-free
+    # native own-brain as the guaranteed floor (never an echo mock). No raw third-party model answers
+    # on this ladder — every rung is a tool she uses, and the top and bottom of it both run on her own
+    # hardware, so an offline machine now runs on a real instruct model rather than an n-gram. Three
+    # cloud rungs in the middle means an outage — or even two — costs her speed, never a voice.
+    _AUTO_LADDER = ("litertlm", "aicredits", "groq", "airouter", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -872,12 +1144,13 @@ class LLM:
         view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
                                 "chosen": chosen,
                                 "last_fallback": self.last_fallback}
-        prov = self._providers.get("self")
-        if prov is not None and hasattr(prov, "learning_view"):
-            try:
-                view["self"] = prov.learning_view()
-            except Exception:  # noqa: BLE001
-                view["self"] = None
+        for name in ("litertlm", "self"):
+            prov = self._providers.get(name)
+            if prov is not None and hasattr(prov, "learning_view"):
+                try:
+                    view[name] = prov.learning_view()
+                except Exception:  # noqa: BLE001
+                    view[name] = None
         return view
 
     def available_providers(self) -> List[str]:
@@ -1027,16 +1300,33 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"aicredits", "groq", "airouter", "self", "native"}
-    for p in ("aicredits", "groq", "airouter", "self"):
+    assert set(status) == {"litertlm", "aicredits", "groq", "airouter", "self", "native"}
+    for p in ("litertlm", "aicredits", "groq", "airouter", "self"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
     # TEST profile disables every cloud tool for hermeticity, so all are honestly unavailable here
     assert status["aicredits"] is False
     assert status["groq"] is False
     assert status["airouter"] is False
-    # her strongest reachable TOOL leads the ladder, her own brain is always its floor
-    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
-    print("aicredits/groq/airouter/self/native : registered; degrade honestly on a bare machine ✓")
+    # ...and it seals her on-device primary too: no 2.4 GB load inside a hermetic run
+    assert status["litertlm"] is False
+    # her PRIMARY on-device brain leads the ladder, her own brain is always its floor
+    assert LLM._AUTO_LADDER == ("litertlm", "aicredits", "groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER[0] == "litertlm" and LLM._AUTO_LADDER[-1] == "native"
+    # the rungs that are HERS are the ones that run in-process — top and bottom of the ladder
+    from nyxara.kernel.config import OWN_PROVIDERS
+    assert set(OWN_PROVIDERS) <= set(LLM._AUTO_LADDER)
+    assert "aicredits" not in OWN_PROVIDERS
+    print("litertlm/aicredits/groq/airouter/self/native : registered; degrade honestly on a bare "
+          "machine ✓")
+
+    # a missing weights file is honest unavailability, never a crash (the bare-machine path)
+    probe = LiteRTLMProvider(settings)
+    assert probe.available() is False
+    try:
+        probe.complete(LLMRequest.from_prompt("should not run"))
+        raise SystemExit("ERROR: unavailable provider must raise")
+    except LLMError:
+        print("litertlm unavailable      : raises LLMError, ladder moves on ✓")
 
     print("\nALL SELF-TESTS PASSED ✓")

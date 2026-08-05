@@ -2,6 +2,15 @@
 # Core
 pydantic>=2.6
 pydantic-settings>=2.1
+# HER PRIMARY BRAIN — Gemma-4-E2B-it in Google's LiteRT-LM on-device format, served in-process by
+# this runtime (import name `litert_lm`). It leads the auto ladder in mind/llm.py: no API key, no
+# endpoint, nothing leaves the machine, and no outage can take it. This line installs the RUNTIME;
+# the ~2.4 GB weights come separately and once —
+#     python scripts/fetch_litertlm_model.py
+# (or just boot her: growth/bootstrap.py fetches them unless
+# NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD=false). Import-guarded like every heavy dep: with neither the
+# runtime nor the weights, the rung reports itself unavailable and the ladder starts at the cloud.
+litert-lm-api>=0.15.0
 # Reasoning / math / data
 z3-solver>=4.12
 sympy>=1.12

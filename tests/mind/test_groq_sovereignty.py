@@ -137,12 +137,16 @@ def _bare_machine(tmp_path, **over) -> NyxaraSettings:
 
 
 # --------------------------------------------------------------------------- #
-# 1. Groq's place on the ladder — second, behind her primary aicredits rung
+# 1. Groq's place on the ladder — the second CLOUD rung, behind aicredits
 # --------------------------------------------------------------------------- #
-def test_groq_is_second_on_the_auto_ladder():
-    """Structural guarantee, asserted as the WHOLE tuple so a silent reorder cannot slip through."""
-    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
-    assert LLM._AUTO_LADDER.index("groq") == 1
+def test_groq_is_the_second_cloud_rung_on_the_auto_ladder():
+    """Structural guarantee, asserted as the WHOLE tuple so a silent reorder cannot slip through.
+
+    Groq sits behind aicredits among the clouds, and both sit behind her on-device ``litertlm``
+    primary — so Groq answers only when her own brain and her top cloud tool are both out."""
+    assert LLM._AUTO_LADDER == ("litertlm", "aicredits", "groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER.index("groq") == LLM._AUTO_LADDER.index("aicredits") + 1
+    assert LLM._AUTO_LADDER.index("groq") > LLM._AUTO_LADDER.index("litertlm")
 
 
 def test_auto_is_the_shipped_default_provider():

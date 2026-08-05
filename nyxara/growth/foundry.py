@@ -44,7 +44,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from nyxara.growth.foundry_models import (BaseLanguageModel, ModelSpec, build_model)
 from nyxara.guard.corrigibility import Corrigibility, CorrigibleAction
 from nyxara.guard.value_learning import IMMUTABLE_VALUES
-from nyxara.kernel.config import NyxaraSettings, get_settings
+from nyxara.kernel.config import OWN_PROVIDERS, NyxaraSettings, get_settings
 from nyxara.kernel.errors import CorrigibilityError, ValidationError
 
 __all__ = [
@@ -481,8 +481,8 @@ class Foundry:
             from nyxara.eval.benchmark import build_default_benchmark, llm_solver
             from nyxara.mind.llm import LLM
             llm = LLM(settings=self.settings)
-            if llm.chosen_provider().name in ("native", "self"):
-                return {}   # no real teacher to compare against — stay honest, skip
+            if llm.chosen_provider().name in OWN_PROVIDERS:
+                return {}   # no external teacher to compare against — stay honest, skip
             bench = build_default_benchmark()
             own_acc = bench.run(_model_solver(model)).accuracy
             teacher_acc = bench.run(llm_solver(llm)).accuracy

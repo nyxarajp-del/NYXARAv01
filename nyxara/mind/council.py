@@ -7,8 +7,11 @@ The Master's order has two halves and this module is the second one.
 
 Where :mod:`mind.llm` exposes each provider one at a time, the council convenes them
 *together*. For a single question it asks every available member — the ``aicredits``, ``groq``
-and ``airouter`` cloud tools she governs and most importantly NYXARA's OWN model forged by the
-foundry (``self``) — then aggregates their verdicts into one answer that NYXARA owns.
+and ``airouter`` cloud tools she governs, and most importantly the models that are HERS: the
+on-device ``litertlm`` primary and the OWN model forged by the foundry (``self``) — then
+aggregates their verdicts into one answer that NYXARA owns. Her own models carry
+``prefer_self_weight`` and are preferred as the synthesiser, so the gavel stays on her side of
+the table.
 
 Two ways to decide, both driven by NYXARA's own code (no member is ever handed control):
 
@@ -38,7 +41,7 @@ from enum import Enum
 from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.kernel.config import NyxaraSettings, get_settings
+from nyxara.kernel.config import OWN_PROVIDERS, NyxaraSettings, get_settings
 from nyxara.kernel.errors import LLMError
 from nyxara.mind.llm import LLM, LLMRequest
 
@@ -177,7 +180,10 @@ class LLMCouncil:
         w = self.cfg.weights.get(provider)
         if w is not None:
             return float(w)
-        if provider == "self":          # her own model presides as it improves
+        # Her OWN models preside as they improve — her forged ``self`` weights and her on-device
+        # ``litertlm`` primary alike. ``native`` is excluded on purpose: it is the guaranteed floor,
+        # not a voice that should out-vote a real model just for being hers.
+        if provider in OWN_PROVIDERS and provider != "native":
             return float(self.cfg.prefer_self_weight)
         return 1.0
 
@@ -240,8 +246,14 @@ class LLMCouncil:
 
     # ---- synthesis (NYXARA frames it; a model only holds the pen) ---- #
     def _synthesizer_name(self) -> Optional[str]:
+        """Who holds the pen. The configured choice first, then HER OWN models in ladder order.
+
+        The council may seat cloud tools, but the synthesis — the step that decides what the verdicts
+        add up to — should stay with a model of hers whenever one is up: her forged ``self`` weights,
+        else her on-device ``litertlm`` primary.
+        """
         available = self.llm.available_providers()
-        for cand in (self.cfg.synthesizer, "self"):
+        for cand in (self.cfg.synthesizer, "self", "litertlm"):
             if cand and cand in available:
                 return cand
         return None
