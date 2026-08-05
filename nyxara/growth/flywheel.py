@@ -125,13 +125,20 @@ class DataFlywheel:
 
     # ---- the quality bar ---- #
     def consider(self, prompt: str, answer: str, *, confidence: float = 1.0,
-                 verified: Optional[bool] = None) -> FlywheelDecision:
+                 verified: Optional[bool] = None, certificate: str = "",
+                 exact: bool = True) -> FlywheelDecision:
         """Apply the quality bar to one ``(prompt, answer)`` pair; collect it if it clears.
 
         ``verified`` overrides the configured verifier when given (so a caller that already
         knows a turn was verified — e.g. a math turn checked by the reasoning faculties — can say
         so directly). The bar, in order: non-empty, length bounds, confidence floor, optional
         verifier, novelty. Every rejection returns a reason; nothing is dropped silently.
+
+        ``certificate`` is the machine-checkable witness, when the caller has one. It was
+        previously impossible to pass: callers that had proved the pair — the synthesis curator
+        holds the prover's own certificate — had nowhere to put it, so the corpus recorded only
+        *that* something was verified and never *why*. ``exact`` distinguishes a decision
+        procedure from sampled agreement; only exact witnesses are rendered into the document.
         """
         self._ensure_loaded()
         prompt = (prompt or "").strip()
@@ -160,7 +167,8 @@ class DataFlywheel:
             return FlywheelDecision(False, "duplicate prompt already in corpus")
 
         source = "flywheel-verified" if is_verified else "flywheel"
-        ex = DistillationExample(prompt=prompt, answer=answer, system=self.system, source=source)
+        ex = DistillationExample(prompt=prompt, answer=answer, system=self.system, source=source,
+                                 certificate=(certificate or "").strip(), exact=bool(exact))
         self._append(ex)
         self._seen.add(key)
         return FlywheelDecision(True, f"collected ({source})", example=ex)

@@ -28,7 +28,12 @@ cd "${CLAUDE_PROJECT_DIR:-.}"
 python -m pip install --upgrade pip || true
 
 # Phase 1 — lean profile. Must succeed: tests/console/server depend on it.
-python -m pip install -e ".[dev,reasoning,server]" "httpx>=0.27"
+#
+# `corpus` rides here, NOT with the heavy extras. It is datasets + huggingface_hub + pyarrow —
+# megabytes — and putting it behind torch meant a timeout in phase 2 left `scripts/build_dataset.py`
+# unable to reach a single source. A container reset proved that: the checkout came back with
+# neither package and the corpus path was silently offline-only.
+python -m pip install -e ".[dev,reasoning,server,corpus]" "httpx>=0.27"
 
 # Phase 2 — heavy ML extras. Best-effort: graceful fallbacks cover any gap.
 python -m pip install -e ".[senses,foundry,qlora,tinyllama,vector,qdrant,embeddings,generate,llm,security,observe]" || \

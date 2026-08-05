@@ -70,14 +70,29 @@ class ProofResult:
     confidence: float = 1.0
     claim: Optional[ProofClaim] = None
     at: float = field(default_factory=lambda: __import__("time").time())
+    # Was the verdict reached by a decision procedure, or by sampling?
+    #
+    # Schwartz–Zippel agreement at 24 random points is overwhelming evidence and is NOT a proof.
+    # It shipped as `PROVEN` with confidence 0.99999994, and every consumer in the package
+    # branches on `verdict is PROVEN` and never reads `confidence` — so a sampled result was
+    # indistinguishable from an exact one. The verdict stays PROVEN (a fourth enum value would
+    # KeyError in vsa_reasoner.py's exhaustive lookup, and downgrading loses real information);
+    # this flag is what lets the corpus refuse to embed a sampled result as a certificate.
+    exact: bool = True
 
     @property
     def proven(self) -> bool:
         return self.verdict is ProofVerdict.PROVEN
 
+    @property
+    def certifiable(self) -> bool:
+        """Proven *and* by a decision procedure — the bar for embedding a certificate in data."""
+        return self.proven and self.exact
+
     def to_dict(self) -> Dict[str, Any]:
         return {"verdict": self.verdict.value, "certificate": self.certificate,
                 "method": self.method, "confidence": round(float(self.confidence), 4),
+                "exact": bool(self.exact),
                 "claim": self.claim.to_dict() if self.claim else None, "at": self.at}
 
     def summary(self) -> str:
@@ -186,8 +201,13 @@ class Prover:
                 ProofVerdict.PROVEN if ok else ProofVerdict.REFUTED,
                 certificate=f"{stmt} = {_fmt(val)}; candidate {_fmt(cand)}",
                 method="exact rational evaluation", confidence=1.0, claim=claim)
-        return ProofResult(ProofVerdict.PROVEN, certificate=f"{stmt} = {_fmt(val)}",
-                           method="exact rational evaluation", confidence=1.0, claim=claim)
+        # A bare closed expression with no candidate answer asserts NOTHING, so there is nothing
+        # to prove. Returning PROVEN here meant `prove("arithmetic", "2+2")` certified a claim
+        # that was never made — and every caller branches on `verdict is PROVEN`, so a
+        # well-formed non-claim was indistinguishable from a verified one. Abstain instead: the
+        # evaluated value still travels in the certificate for anyone who wants it.
+        return self._abstain(claim, f"expression evaluates to {_fmt(val)} but asserts nothing "
+                                    f"— supply a candidate answer or an equation to prove")
 
     # ------------------------------------------------------------------ #
     # algebra — identity (sympy / PIT) or candidate-solution check (substitution)
@@ -259,11 +279,12 @@ class Prover:
         if tested == 0:
             return self._abstain(claim, "could not evaluate the identity at any test point")
         # All points agreed: Schwartz–Zippel — overwhelming, but not a closed symbolic proof.
+        # `exact=False` is what stops this being embedded in training data as a certificate.
         return ProofResult(
             ProofVerdict.PROVEN,
             certificate=f"agrees at {tested} random integer points (Schwartz–Zippel)",
             method="polynomial identity testing", confidence=round(1.0 - 0.5 ** tested, 6),
-            claim=claim)
+            claim=claim, exact=False)
 
     # ------------------------------------------------------------------ #
     # logic — propositional validity by truth-table enumeration (exact, stdlib)
@@ -294,8 +315,15 @@ class Prover:
             return ProofResult(ProofVerdict.REFUTED,
                                certificate="contradiction: false under every assignment",
                                method="truth-table enumeration", confidence=1.0, claim=claim)
-        return ProofResult(ProofVerdict.REFUTED,
-                           certificate=f"not valid: falsified by {falsifier}",
+        # CONTINGENT: satisfiable but not valid. This is emphatically NOT a refutation — `A or B`
+        # is true under three of four assignments. Returning REFUTED here conflated "I could not
+        # prove this" with "this is false", and the conflation was load-bearing:
+        # godel_loop.ReflectionTower.detect_contradictions treats any REFUTED belief as a
+        # contradiction in her own logic and *retracts* it, so every contingent propositional
+        # belief she held was silently deleted as though it were `A and not A`.
+        return ProofResult(ProofVerdict.UNPROVABLE,
+                           certificate=(f"contingent: satisfiable but not valid "
+                                        f"(false under {falsifier})"),
                            method="truth-table enumeration", confidence=1.0, claim=claim)
 
     # ------------------------------------------------------------------ #

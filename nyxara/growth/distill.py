@@ -129,21 +129,37 @@ class DistillationExample:
     system: Optional[str] = None
     source: str = "teacher"
     at: float = field(default_factory=time.time)
+    #: The machine-checkable witness, when the pair came from something that proved it. The
+    #: corpus schema had no such field, so a verified item and an unverified one were
+    #: indistinguishable once written to disk — and the proof was gone for good.
+    certificate: str = ""
+    #: Whether that witness came from a decision procedure. Sampled agreement is kept as
+    #: provenance but never rendered into the document as a proof.
+    exact: bool = True
 
     def to_training_doc(self) -> str:
-        """Render this example into NYXARA's own instruction template (train/inference parity)."""
-        from nyxara.mind.llm import format_self_training_doc  # lazy: avoid import cost/cycles
-        return format_self_training_doc(self.prompt, self.answer, system=self.system)
+        """Render into NYXARA's own instruction template, carrying any certificate."""
+        from nyxara.growth.certify import Certificate, render_certified_doc
+
+        cert = (Certificate(statement=self.prompt, witness=self.certificate,
+                            method=self.source, exact=bool(self.exact))
+                if self.certificate else None)
+        return render_certified_doc(self.prompt, self.answer, cert, system=self.system)
 
     def to_dict(self) -> dict:
         return {"prompt": self.prompt, "answer": self.answer, "system": self.system,
-                "source": self.source, "at": self.at}
+                "source": self.source, "at": self.at,
+                "certificate": self.certificate, "exact": bool(self.exact)}
 
     @classmethod
     def from_dict(cls, d: dict) -> "DistillationExample":
         return cls(prompt=d.get("prompt", ""), answer=d.get("answer", ""),
                    system=d.get("system"), source=d.get("source", "teacher"),
-                   at=float(d.get("at", 0.0)))
+                   at=float(d.get("at", 0.0)),
+                   # Records written before the field existed carry no proof, and must not be
+                   # read back as though they did.
+                   certificate=str(d.get("certificate", "") or ""),
+                   exact=bool(d.get("exact", True)))
 
 
 def _foundry_root(settings: NyxaraSettings) -> Path:
