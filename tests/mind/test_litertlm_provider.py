@@ -143,8 +143,12 @@ class _Engine:
         self.closed = True
 
 
-def _install_fake(monkeypatch):
-    """Put a fake ``litert_lm`` on ``sys.modules`` and hand back the module."""
+def _install_fake(monkeypatch, native_error=None):
+    """Put a fake ``litert_lm`` on ``sys.modules`` and hand back the module.
+
+    ``native_error`` makes the fake's ``_ffi._get_lib()`` raise, which is how a host without the
+    Vulkan loader behaves: the Python import succeeds and only the dlopen fails.
+    """
     _Engine.instances = []
     mod = types.ModuleType("litert_lm")
     mod.Engine = _Engine
@@ -155,7 +159,18 @@ def _install_fake(monkeypatch):
     mod.Backend = _Backend
     mod.LogSeverity = types.SimpleNamespace(ERROR=3, SILENT=5)
     mod.set_min_log_severity = lambda severity: None
+
+    ffi = types.ModuleType("litert_lm._ffi")
+
+    def _get_lib():
+        if native_error is not None:
+            raise OSError(native_error)
+        return object()
+
+    ffi._get_lib = _get_lib
+    mod._ffi = ffi
     monkeypatch.setitem(sys.modules, "litert_lm", mod)
+    monkeypatch.setitem(sys.modules, "litert_lm._ffi", ffi)
     return mod
 
 
@@ -214,6 +229,62 @@ def test_unavailable_without_weights(monkeypatch, tmp_path):
     _install_fake(monkeypatch)
     missing = tmp_path / "nope.litertlm"
     assert LiteRTLMProvider(_settings(missing)).available() is False
+
+
+_VULKAN = "libvulkan.so.1: cannot open shared object file: No such file or directory"
+
+
+def test_unavailable_when_the_native_runtime_cannot_load(monkeypatch, weights):
+    """The regression from a real host: import succeeds, the dlopen does not.
+
+    ``liblitert-lm.so`` links the Vulkan loader even for the CPU backend, and the Python package
+    never touches it until an Engine is built — so ``import litert_lm`` proved nothing, the rung
+    advertised itself as available, and every single turn failed with a warning.
+    """
+    _install_fake(monkeypatch, native_error=_VULKAN)
+    prov = LiteRTLMProvider(_settings(weights))
+    assert prov.available() is False
+    assert prov.native_library_error() is not None
+
+
+def test_the_missing_system_library_is_named_with_a_fix(monkeypatch, weights):
+    """'It got quieter' is not a diagnosis — an operator needs the command to type."""
+    _install_fake(monkeypatch, native_error=_VULKAN)
+    view = LiteRTLMProvider(_settings(weights)).learning_view()
+    assert view["available"] is False
+    assert view["runtime_loadable"] is False
+    assert view["binding_installed"] is True, "the wheel IS installed — that is the trap"
+    assert "libvulkan.so.1" in view["reason_unavailable"]
+    assert "apt install libvulkan1" in view["reason_unavailable"]
+
+
+def test_a_broken_runtime_takes_the_rung_off_the_ladder(monkeypatch, weights):
+    """The ladder must skip it, not fail through it once per turn."""
+    _install_fake(monkeypatch, native_error=_VULKAN)
+    llm = LLM(settings=_only_local(_settings(weights)))
+    assert "litertlm" not in [p.name for p in llm._auto_ladder()]
+    resp = llm.complete(LLMRequest.from_prompt("Hii"))
+    assert resp.provider != "litertlm"
+    assert resp.text.strip()
+    assert llm.last_fallback is None or llm.last_fallback["provider"] != "litertlm"
+
+
+def test_an_engine_that_cannot_start_is_latched_not_retried(monkeypatch, weights):
+    """One warning, not one per turn — and the latch clears when the host is fixed."""
+    _install_fake(monkeypatch)
+
+    def _explode(*a, **k):
+        raise RuntimeError("could not allocate the model")
+
+    monkeypatch.setattr(_Engine, "__init__", _explode)
+    prov = LiteRTLMProvider(_settings(weights))
+    assert prov.available() is True, "nothing is known to be wrong until it is tried"
+    with pytest.raises(LLMError):
+        prov.complete(LLMRequest.from_prompt("x"))
+    assert prov.available() is False, "a host that cannot start it will not start it next turn"
+    assert "could not allocate" in prov.learning_view()["reason_unavailable"]
+    prov.reset()
+    assert prov.available() is True, "reset() must let a fixed host back onto the ladder"
 
 
 def test_unavailable_provider_raises_rather_than_answering(monkeypatch, tmp_path):

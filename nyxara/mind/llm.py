@@ -574,6 +574,9 @@ class LiteRTLMProvider(LLMProviderBase):
         self._engine: Any = None
         self._engine_path: Optional[str] = None
         self._lock = threading.Lock()
+        # Latched load failure. Once the runtime has proved it cannot start on this host, the rung
+        # takes itself off the ladder instead of failing — and logging — on every single turn.
+        self._dead: Optional[str] = None
 
     # ---- honest availability (cheap: never loads the engine, never downloads) ---- #
     def model_path(self) -> Any:
@@ -588,10 +591,45 @@ class LiteRTLMProvider(LLMProviderBase):
             return None
         return litert_lm
 
+    @staticmethod
+    def native_library_error() -> Optional[str]:
+        """``None`` if the runtime's shared library loads here, else why it does not.
+
+        Importing ``litert_lm`` proves nothing: the Python package is pure wrapper and does not touch
+        ``liblitert-lm.so`` until an ``Engine`` is constructed. That library is linked against the
+        Vulkan loader — **even for the CPU backend** — so on a host without ``libvulkan.so.1`` the
+        import succeeds, ``available()`` said yes, and every turn then failed with
+        ``libvulkan.so.1: cannot open shared object file``. Checking the actual dlopen is the only
+        honest probe. It costs ~0.15 s once per process (the library, never the 2.4 GB weights) and
+        the result is cached by the binding itself.
+        """
+        try:
+            from litert_lm import _ffi
+        except Exception as exc:  # noqa: BLE001 — no binding at all
+            return f"litert_lm is not installed ({exc})"
+        try:
+            _ffi._get_lib()
+        except OSError as exc:                    # the missing-system-library case
+            missing = str(exc).split(":")[0].strip()
+            hint = ""
+            if "vulkan" in str(exc).lower():
+                # The runtime links the Vulkan loader unconditionally; installing the loader is
+                # enough, no GPU or driver required — the CPU backend still does the work.
+                hint = (" — install the Vulkan loader: `sudo apt install libvulkan1` "
+                        "(Debian/Ubuntu) or `sudo dnf install vulkan-loader` (Fedora/RHEL)")
+            return f"litert_lm runtime cannot load {missing}{hint}"
+        except Exception as exc:  # noqa: BLE001
+            return f"litert_lm runtime failed to load: {exc}"
+        return None
+
     def available(self) -> bool:
         if not bool(getattr(self.settings.llm, "litertlm_enabled", True)):
             return False
+        if self._dead is not None:
+            return False                          # already proved unusable on this host
         if self._binding() is None:
+            return False
+        if self.native_library_error() is not None:
             return False
         try:
             return self.model_path().is_file()
@@ -634,8 +672,18 @@ class LiteRTLMProvider(LLMProviderBase):
                 litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
             except Exception:  # noqa: BLE001
                 pass
-            engine = litert_lm.Engine(path, backend=self._backend(litert_lm),
-                                      cache_dir=self._cache_dir())
+            try:
+                engine = litert_lm.Engine(path, backend=self._backend(litert_lm),
+                                          cache_dir=self._cache_dir())
+            except Exception as exc:  # noqa: BLE001
+                # A host that cannot start the runtime will not start it on the next turn either
+                # (a missing system library, an unsupported backend, too little RAM). Latch it so
+                # the rung leaves the ladder rather than failing — and logging — once per turn,
+                # forever. ``reset()`` clears this after the operator fixes the host.
+                self._dead = str(exc)
+                log.warning("litertlm engine could not start; taking the rung off the ladder "
+                            "until reset: %s", self._dead)
+                raise
             self._engine, self._engine_path = engine, path
             log.info("litertlm engine loaded: %s", path)
             return engine
@@ -654,16 +702,22 @@ class LiteRTLMProvider(LLMProviderBase):
             path, weights = None, False
         enabled = bool(getattr(self.settings.llm, "litertlm_enabled", True))
         binding = self._binding() is not None
+        native = self.native_library_error() if binding else None
         if not enabled:
             reason = "disabled by config"
         elif not binding:
             reason = "litert_lm not installed (pip install litert-lm-api)"
+        elif native is not None:
+            reason = native
+        elif self._dead is not None:
+            reason = f"engine failed to start on this host: {self._dead}"
         elif not weights:
             reason = f"weights missing at {path} (python scripts/fetch_litertlm_model.py)"
         else:
             reason = None
-        return {"available": enabled and binding and weights, "enabled": enabled,
-                "binding_installed": binding, "weights_present": weights,
+        return {"available": reason is None, "enabled": enabled,
+                "binding_installed": binding, "runtime_loadable": binding and native is None,
+                "weights_present": weights,
                 "model_path": str(path) if path is not None else None,
                 "model": self.settings.llm.litertlm_model,
                 "backend": getattr(self.settings.llm, "litertlm_backend", "cpu"),
@@ -678,6 +732,14 @@ class LiteRTLMProvider(LLMProviderBase):
                 engine.close()
             except Exception:  # noqa: BLE001 — releasing must never raise
                 pass
+
+    def reset(self) -> None:
+        """Forget a latched load failure and try the host again.
+
+        The latch exists so a broken host costs one warning instead of one per turn; it must not
+        mean an operator has to restart her after installing the missing library.
+        """
+        self._dead = None
 
     # ---- request → litert_lm.Message objects ---- #
     @staticmethod

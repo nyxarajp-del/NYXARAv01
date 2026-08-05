@@ -13,7 +13,14 @@ metered host, and it works regardless of that flag.
 
 Also needed once, for the runtime itself::
 
+    sudo apt install libvulkan1      # Debian/Ubuntu  (dnf install vulkan-loader on Fedora/RHEL)
     pip install litert-lm-api
+
+The Vulkan loader is required **even for the CPU backend** — ``liblitert-lm.so`` links it
+unconditionally. Skip it and the pip install still succeeds, the weights still download, and every
+turn then fails with ``libvulkan.so.1: cannot open shared object file``. No GPU or driver is
+needed, only the loader. This script reports whether the runtime can actually start, so you find
+out here rather than at her first reply.
 """
 
 from __future__ import annotations
