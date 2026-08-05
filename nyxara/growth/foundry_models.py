@@ -2041,8 +2041,44 @@ def _foundry_root(settings: Any) -> Path:
     return Path(d)
 
 
+def kind_on_disk(vdir: Path) -> Optional[str]:
+    """The backend a saved version ACTUALLY holds, read from its own files. ``None`` if unclear.
+
+    ``spec.json`` records what was *requested*; the directory records what was *built*. Those two
+    disagree whenever a build degraded (a LoRA request with no LoRA stack becomes something else) or
+    whenever the machine that loads differs from the machine that saved. Rebuilding from the request
+    then constructs the wrong class and it fails looking for a file the right class never wrote —
+    reported in the wild as::
+
+        forge failed: [Errno 2] No such file or directory: '.../foundry/v1/model.pt'
+
+    on a version the manifest itself called ``kngram``. Each backend leaves an unambiguous
+    signature, and the n-gram blobs even record their own ``kind``, so the directory can simply be
+    asked.
+    """
+    vdir = Path(vdir)
+    if (vdir / "adapter").is_dir():
+        return "lora"
+    if (vdir / "model.pt").is_file():
+        return "nanogpt"
+    if (vdir / "weights.npz").is_file():
+        return "genesis_np"
+    blob_path = vdir / "model.json"
+    if blob_path.is_file():
+        try:
+            kind = json.loads(blob_path.read_text(encoding="utf-8")).get("kind")
+        except Exception:  # noqa: BLE001 — an unreadable blob tells us nothing, which is fine
+            return None
+        if isinstance(kind, str) and kind:
+            return kind
+    return None
+
+
 def load_active_model(settings: Any, *, tag: Optional[str] = None) -> BaseLanguageModel:
     """Load the currently-promoted model from disk (used by mind/llm.SelfProvider).
+
+    Built from what the version dir HOLDS (:func:`kind_on_disk`), not from what its spec once
+    asked for — see that function for why those differ and what it costs when they do.
 
     ``tag`` (e.g. ``"v3"``) loads that exact version dir instead of following the
     ``active`` pointer — the hot-reload fallback path when a fresh promotion fails to
@@ -2058,6 +2094,9 @@ def load_active_model(settings: Any, *, tag: Optional[str] = None) -> BaseLangua
         vdir = root / f"v{version}"
     spec = ModelSpec.from_dict(
         json.loads((vdir / "spec.json").read_text(encoding="utf-8")))
+    actual = kind_on_disk(vdir)
+    if actual is not None and actual != spec.kind:
+        spec = ModelSpec.from_dict({**spec.to_dict(), "kind": actual})
     model = build_model(spec)
     model.load(vdir)
     return model

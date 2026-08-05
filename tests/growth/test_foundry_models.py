@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from nyxara.growth.foundry_models import (NgramByteLM, ModelSpec, build_model,
@@ -306,3 +308,62 @@ def test_modelspec_trust_remote_code_round_trip():
     assert spec.to_dict()["trust_remote_code"] is True
     assert ModelSpec.from_dict(spec.to_dict()).trust_remote_code is True
     assert ModelSpec().trust_remote_code is False                   # default off for a stock base
+
+
+# --------------------------------------------------------------------------- #
+# A saved version is loaded as what it IS, not as what it once asked to be
+# --------------------------------------------------------------------------- #
+def test_kind_on_disk_reads_each_backend_signature(tmp_path):
+    from nyxara.growth.foundry_models import kind_on_disk
+
+    assert kind_on_disk(tmp_path) is None                      # empty dir tells us nothing
+
+    lora = tmp_path / "lora"; (lora / "adapter").mkdir(parents=True)
+    assert kind_on_disk(lora) == "lora"
+
+    nano = tmp_path / "nano"; nano.mkdir(); (nano / "model.pt").write_bytes(b"x")
+    assert kind_on_disk(nano) == "nanogpt"
+
+    gnp = tmp_path / "gnp"; gnp.mkdir()
+    (gnp / "weights.npz").write_bytes(b"x"); (gnp / "model.json").write_text("{}")
+    assert kind_on_disk(gnp) == "genesis_np", "npz wins over the blob it sits beside"
+
+    kn = tmp_path / "kn"; kn.mkdir()
+    (kn / "model.json").write_text(json.dumps({"kind": "kngram", "order": 3}))
+    assert kind_on_disk(kn) == "kngram"
+
+
+def test_a_degraded_build_still_reloads(tmp_path):
+    """The reported bug: spec.json records the REQUEST, the directory holds what was BUILT.
+
+    A version saved after its request degraded — or reloaded on a machine with different deps —
+    was rebuilt from the request, constructing the wrong class, which then failed looking for a
+    file the right class never wrote:
+
+        forge failed: [Errno 2] No such file or directory: '.../foundry/v1/model.pt'
+
+    ...on a version the manifest itself called kngram. Loading now asks the directory.
+    """
+    from nyxara.growth.foundry_models import (ModelSpec, WordKNGramLM,
+                                              load_active_model)
+    from nyxara.kernel.config import NyxaraSettings, Profile
+
+    root = tmp_path / "foundry"
+    vdir = root / "v1"
+    vdir.mkdir(parents=True)
+
+    model = WordKNGramLM(order=3, seed=0)
+    model.train_on(["the master is jp. nyxara serves the master."] * 6, seed=0)
+    model.save(vdir)
+    # ...but the spec on disk asks for a neural backend, as a degraded build leaves it
+    spec = ModelSpec(kind="lora", seed=0)
+    (vdir / "spec.json").write_text(json.dumps(spec.to_dict()), encoding="utf-8")
+    (root / "active").write_text("v1", encoding="utf-8")
+
+    settings = NyxaraSettings.for_profile(Profile.TEST)
+    settings.llm.self_model_dir = root
+    settings.llm.self_model_version = None
+
+    loaded = load_active_model(settings)          # must not raise looking for model.pt
+    assert loaded.kind == "kngram"
+    assert loaded.generate("the master", max_tokens=8) is not None
