@@ -384,10 +384,30 @@ class SelfProvider(LLMProviderBase):
         d = self.settings.llm.self_model_dir or (self.settings.paths.data_dir / "foundry")
         return Path(d)
 
+    # Files that mean "a real model was saved here". Checked by name only — no parsing, no load —
+    # because available() runs on every ladder walk.
+    _VERSION_ARTIFACTS = ("adapter", "model.pt", "weights.npz", "model.json")
+
     def available(self) -> bool:
+        """True only when the ``active`` pointer names a version that is actually THERE.
+
+        It used to be enough that the pointer file existed. A pointer is not a model: a version dir
+        that was never written, half-written, or cleaned up left this returning True while every
+        load threw — observed live as ``self: available: true`` sitting next to
+
+            self model unavailable: FileNotFoundError: .../foundry/v1/model.pt
+
+        turn after turn. A rung that cannot serve must not advertise itself; the ladder is built to
+        step over it, and it cannot step over a lie.
+        """
         try:
-            return (self._root() / "active").exists()
-        except Exception:
+            root = self._root()
+            tag = (root / "active").read_text(encoding="utf-8").strip()
+            if not tag:
+                return False
+            vdir = root / tag
+            return any((vdir / name).exists() for name in self._VERSION_ARTIFACTS)
+        except Exception:  # noqa: BLE001 — unreadable is unavailable, and never fatal
             return False
 
     def _pointer_tag(self) -> Optional[str]:

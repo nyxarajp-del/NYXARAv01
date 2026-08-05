@@ -473,3 +473,53 @@ def test_a_healthy_turn_clears_the_degradation_flag():
 def _default_candidate():
     from nyxara.kernel.orchestrator import Candidate
     return Candidate(text="a real answer", kind="respond", confidence=0.9, reversible=True)
+
+
+# -------------------- a pointer is not a model -------------------- #
+def _self_provider(root):
+    from nyxara.mind.llm import SelfProvider
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.self_model_dir = root
+    return SelfProvider(settings)
+
+
+def test_self_is_unavailable_when_the_pointer_names_nothing(tmp_path):
+    """Reported live: ``self: available: true`` sitting beside, turn after turn,
+
+        self model unavailable: FileNotFoundError: .../foundry/v1/model.pt
+
+    ``available()`` checked only that the ``active`` pointer file existed. A pointer is not a model.
+    A rung that cannot serve must not advertise itself — the ladder is built to step over it, and
+    it cannot step over a lie.
+    """
+    (tmp_path / "active").write_text("v1", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is False, "a dangling pointer is not a model"
+
+    (tmp_path / "v1").mkdir()
+    assert _self_provider(tmp_path).available() is False, "an empty version dir is not a model"
+
+
+def test_self_is_available_once_a_version_is_actually_there(tmp_path):
+    (tmp_path / "active").write_text("v1", encoding="utf-8")
+    (tmp_path / "v1").mkdir()
+    (tmp_path / "v1" / "model.json").write_text("{}", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is True
+
+
+def test_every_backend_artifact_counts_as_present(tmp_path):
+    """Whatever the backend wrote, that version exists — the check must not favour one of them."""
+    for i, artifact in enumerate(("adapter", "model.pt", "weights.npz", "model.json")):
+        root = tmp_path / f"root{i}"
+        vdir = root / "v1"
+        vdir.mkdir(parents=True)
+        (root / "active").write_text("v1", encoding="utf-8")
+        if artifact == "adapter":
+            (vdir / artifact).mkdir()
+        else:
+            (vdir / artifact).write_bytes(b"x")
+        assert _self_provider(root).available() is True, f"{artifact} should count"
+
+
+def test_an_empty_pointer_is_not_available(tmp_path):
+    (tmp_path / "active").write_text("   \n", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is False
