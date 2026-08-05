@@ -115,6 +115,15 @@ def stage_shards(args, spec: ModelSpec, tokenizer: Any) -> Any:
         log(f"· reusing {existing.tokens():,} tokens already sharded at {out}")
         return existing
 
+    # `--stage pretrain` means "train on the corpus that is there", not "top the corpus up to
+    # --tokens first". The default budget is 6B, so pointing this at any smaller finished corpus
+    # silently started a multi-hour data build instead of training — the opposite of what the
+    # flag says. Only an explicit `--stage shards`/`all` (or --force) may build.
+    if args.stage == "pretrain" and existing is not None and existing.tokens() > 0:
+        log(f"· using the {existing.tokens():,} tokens already on disk "
+            f"(--stage pretrain never builds; use --stage shards to extend the corpus)")
+        return existing
+
     index, report = build_corpus(tokenizer=tokenizer, out_dir=out,
                                  tokens_budget=args.tokens, seed=args.seed)
     log(report.summary())
@@ -208,7 +217,6 @@ def stage_dpo(args, spec: ModelSpec, tokenizer: Any) -> Any:
     model = _load_model(args, spec, tokenizer)
 
     flywheel = Path(args.flywheel) if args.flywheel else Path(args.out) / "flywheel.jsonl"
-    report_holder = None
     pairs = pairs_from_flywheel(flywheel)
     if not pairs:
         log(f"· no preference pairs available from {flywheel}")
