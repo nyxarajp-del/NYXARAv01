@@ -50,23 +50,6 @@ os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__CONTINUOUS", "false")
 # settings (or drive the generic RecursiveMetaController directly — see test_meta_meta.py).
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
-# The CLOUD rungs of the LLM ladder (mind/llm.py) are real network calls. The TEST profile already
-# kills them, but tests that build DEV-profile settings do not go through it — so before this, any
-# such test reached the live endpoint, making the suite non-hermetic, non-reproducible (it failed on
-# a 402/429 rather than on the code) and a silent consumer of the Master's API quota. Same
-# ``setdefault`` posture as the flags above: OFF for the suite, and a test that genuinely wants a
-# cloud rung still opts in by setting ``aicredits_enabled``/``groq_enabled``/``airouter_enabled`` on
-# its own settings object (see tests/mind/test_aicredits_provider.py), which overrides these defaults.
-os.environ.setdefault("NYXARA_LLM__AICREDITS_ENABLED", "false")
-os.environ.setdefault("NYXARA_LLM__GROQ_ENABLED", "false")
-os.environ.setdefault("NYXARA_LLM__AIROUTER_ENABLED", "false")
-# Her PRIMARY rung (mind/llm.py::LiteRTLMProvider) is not a network call, but it is a 2.4 GB
-# on-device model — and on a developer machine where the weights ARE present it answers for real.
-# That is worse than slow: a DEV-profile test that scripts a fake provider would silently get
-# Gemma's actual prose instead (observed in tests/mind/test_deliberate.py), so the suite would be
-# testing the model rather than the code. Same ``setdefault`` posture as the cloud rungs above: OFF
-# for the suite, and the litertlm tests opt in on their own settings object with a fake binding.
-# AUTO_DOWNLOAD is pinned off too, so no test run can ever start a multi-gigabyte download.
 os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
 
