@@ -208,7 +208,6 @@ def stage_dpo(args, spec: ModelSpec, tokenizer: Any) -> Any:
     model = _load_model(args, spec, tokenizer)
 
     flywheel = Path(args.flywheel) if args.flywheel else Path(args.out) / "flywheel.jsonl"
-    report_holder = None
     pairs = pairs_from_flywheel(flywheel)
     if not pairs:
         log(f"· no preference pairs available from {flywheel}")
