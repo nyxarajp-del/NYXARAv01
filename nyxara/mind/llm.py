@@ -217,8 +217,10 @@ class LLMProviderBase:
 
     def complete(self, req: LLMRequest) -> LLMResponse:
         if not self.available():
-            raise LLMError(f"provider '{self.name}' is unavailable",
+            exc = LLMError(f"provider '{self.name}' is unavailable",
                            context={"provider": self.name})
+            self._record_failure(req.model or "unavailable", exc)
+            raise exc
         model = req.model or self.default_model()
         start = time.monotonic()
         try:
@@ -226,12 +228,38 @@ class LLMProviderBase:
         except LLMError:
             raise
         except Exception as exc:  # noqa: BLE001 - normalise any SDK error
+            self._record_failure(model, exc)
             raise LLMError(f"{self.name} generation failed: {exc}",
                            category=classify(exc), cause=exc,
                            context={"provider": self.name, "model": model})
-        return LLMResponse(text=text, provider=self.name, model=model,
+        resp = LLMResponse(text=text, provider=self.name, model=model,
                            finish_reason=finish, usage=usage,
                            latency_s=time.monotonic() - start, raw=raw)
+        self._record(resp)
+        return resp
+
+    def _record(self, resp: "LLMResponse") -> None:
+        """Tell the turn ledger a generation happened. Best-effort; never affects the answer.
+
+        This is the one place every provider's output passes through, which is exactly why the
+        record belongs here: a report built from these events cannot claim a rung spoke unless it
+        did (observe/turn_ledger.py)."""
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            get_ledger().record_generation(
+                resp.provider, resp.model, ok=True,
+                prompt_tokens=resp.usage.prompt_tokens,
+                completion_tokens=resp.usage.completion_tokens,
+                latency_s=resp.latency_s, chars=len((resp.text or "").strip()))
+        except Exception:  # noqa: BLE001 — observability must never break a turn
+            pass
+
+    def _record_failure(self, model: str, exc: Exception) -> None:
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            get_ledger().record_generation(self.name, model, ok=False, error=str(exc))
+        except Exception:  # noqa: BLE001
+            pass
 
     async def acomplete(self, req: LLMRequest) -> LLMResponse:
         import asyncio
@@ -400,6 +428,11 @@ class SelfProvider(LLMProviderBase):
         turn after turn. A rung that cannot serve must not advertise itself; the ladder is built to
         step over it, and it cannot step over a lie.
         """
+        # Already serving: weights in memory can answer regardless of what the pointer now says.
+        # A promotion that lands corrupt must cost the NEW version, never the working one she is
+        # already running (tests/mind/test_self_provider_reload.py pins that resilience).
+        if self._lm is not None:
+            return True
         try:
             root = self._root()
             tag = (root / "active").read_text(encoding="utf-8").strip()
@@ -1028,9 +1061,20 @@ class LLM:
             chosen = self.chosen_provider().name
         except Exception:  # noqa: BLE001
             chosen = None
+        # ``configured`` and ``chosen`` are both statements about INTENT — what is set, and what
+        # the ladder would pick if asked right now. Reading them as an account of what happened is
+        # what let "chosen: litertlm" sit beside "engine_loaded: false" while an n-gram did the
+        # talking. ``actual`` is the answer to the other question, and it comes from recorded
+        # generations only (observe/turn_ledger.py).
         view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
-                                "chosen": chosen,
+                                "would_choose": chosen,
+                                "chosen": chosen,          # kept: existing readers depend on it
                                 "last_fallback": self.last_fallback}
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            view["actual"] = get_ledger().view()
+        except Exception:  # noqa: BLE001 — the honest view degrades, it never breaks the report
+            view["actual"] = None
         for name in ("litertlm", "self"):
             prov = self._providers.get(name)
             if prov is not None and hasattr(prov, "learning_view"):
@@ -1122,6 +1166,11 @@ class LLM:
             reason = str(exc) or exc.__class__.__name__
             self.last_fallback = {"provider": provider_name, "error": reason,
                                   "ts": time.time()}
+            try:
+                from nyxara.observe.turn_ledger import get_ledger
+                get_ledger().record_degradation("mind/llm", f"{provider_name}: {reason}")
+            except Exception:  # noqa: BLE001
+                pass
             key = f"{provider_name}:{reason}"
             now = time.monotonic()
             if now - self._warned_at.get(key, -1e9) >= 60.0:
