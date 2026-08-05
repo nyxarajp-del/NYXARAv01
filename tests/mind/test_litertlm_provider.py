@@ -113,6 +113,10 @@ class _Conversation:
     def send_message(self, message, *, max_output_tokens=None, **kw):
         if self.engine.raises is not None:
             raise self.engine.raises
+        # a build whose Jinja rejects a given template fails HERE, not at create_conversation —
+        # which is exactly why the real reason is so hard to see
+        if self.kwargs.get("chat_template") in self.engine.reject_templates:
+            raise RuntimeError("litert_lm_conversation_send_message failed")
         self.sent.append((message, max_output_tokens))
         self.engine.sent.append((message, max_output_tokens))
         return {"role": "assistant",
@@ -131,6 +135,7 @@ class _Engine:
         self.sent = []
         self.reply = "on-device answer"
         self.raises = None
+        self.reject_templates = set()      # templates this fake build refuses to render
         self.closed = False
         _Engine.instances.append(self)
 
@@ -635,3 +640,84 @@ def test_a_mute_primary_is_treated_as_a_failed_rung(monkeypatch, weights, tmp_pa
     assert resp.provider == "native"
     assert resp.text.strip()
     assert llm.last_fallback["provider"] == "litertlm" and "empty" in llm.last_fallback["error"]
+
+
+# --------------------------------------------------------------------------- #
+# 7. Chat templates — the fragile joint, and the one the runtime hides
+# --------------------------------------------------------------------------- #
+def test_the_default_template_has_no_literal_newline_in_a_string(weights):
+    """Portability guard. A raw newline inside a Jinja string literal renders fine on some builds
+    and is a parse error on others — and the failure surfaces as an opaque
+    ``send_message failed``. The shipped default escapes it instead."""
+    template = _settings(weights).llm.litertlm_chat_template
+    assert '{{ "\\n" }}' in template
+    assert "\n" not in template, "a raw newline inside the template is the portability trap"
+
+
+def test_a_rejected_template_falls_through_to_the_next(monkeypatch, weights):
+    """A build whose Jinja refuses one formulation must not cost her the whole rung."""
+    _install_fake(monkeypatch)
+    s = _settings(weights)
+    prov = LiteRTLMProvider(s)
+    prov.complete(LLMRequest.from_prompt("warm"))
+    prov._template_name = prov._template = None            # forget what warming learned
+    _Engine.instances[0].reject_templates = {s.llm.litertlm_chat_template}
+
+    resp = prov.complete(LLMRequest.from_prompt("still there?"))
+    assert resp.text == "on-device answer"
+    assert prov._template_name == "literal-newline"
+    assert prov.available() is True
+
+
+def test_the_working_template_is_remembered(monkeypatch, weights):
+    """The probe costs one extra attempt once, not on every turn."""
+    _install_fake(monkeypatch)
+    s = _settings(weights)
+    prov = LiteRTLMProvider(s)
+    prov.complete(LLMRequest.from_prompt("warm"))
+    prov._template_name = prov._template = None
+    _Engine.instances[0].reject_templates = {s.llm.litertlm_chat_template}
+    prov.complete(LLMRequest.from_prompt("one"))
+    before = len(_Engine.instances[0].conversations)
+    prov.complete(LLMRequest.from_prompt("two"))
+    after = len(_Engine.instances[0].conversations)
+    assert after - before == 1, "a remembered template must not re-probe"
+
+
+def test_when_no_template_works_the_rung_leaves_the_ladder(monkeypatch, weights):
+    """The reported symptom: one warning per turn, forever, because nothing was ever latched."""
+    _install_fake(monkeypatch)
+    prov = LiteRTLMProvider(_settings(weights))
+    prov.complete(LLMRequest.from_prompt("warm"))
+    prov._template_name = prov._template = None
+    _Engine.instances[0].reject_templates = {t for _, t in prov._templates()}
+
+    with pytest.raises(LLMError):
+        prov.complete(LLMRequest.from_prompt("anything"))
+    assert prov.available() is False, "a structural failure must stop being retried every turn"
+    assert "chat template" in prov.learning_view()["reason_unavailable"]
+    prov.reset()
+    assert prov.available() is True
+
+
+def test_the_error_names_every_template_that_was_tried(monkeypatch, weights):
+    """``send_message failed`` alone is useless; the caller needs to know what was attempted."""
+    _install_fake(monkeypatch)
+    prov = LiteRTLMProvider(_settings(weights))
+    prov.complete(LLMRequest.from_prompt("warm"))
+    prov._template_name = prov._template = None
+    _Engine.instances[0].reject_templates = {t for _, t in prov._templates()}
+    with pytest.raises(LLMError) as caught:
+        prov.complete(LLMRequest.from_prompt("x"))
+    for name, _ in LiteRTLMProvider(_settings(weights))._templates():
+        assert name in str(caught.value)
+
+
+def test_the_embedded_template_is_the_last_resort(weights):
+    """It is correct on any build that implements `.get`, and broken on litert-lm-api 0.15 —
+    so it is worth trying, but only after ours."""
+    names = [name for name, _ in LiteRTLMProvider(_settings(weights))._templates()]
+    assert names[0] == "configured"
+    assert names[-1] == "model-embedded"
+    templates = dict(LiteRTLMProvider(_settings(weights))._templates())
+    assert templates["model-embedded"] is None, "None means: let the model's own template run"

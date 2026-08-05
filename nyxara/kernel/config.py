@@ -438,10 +438,10 @@ class LLMConfig(BaseModel):
     #     objects for exactly this reason.
     litertlm_chat_template: str = (
         "{% for m in messages %}"
-        "<|turn>{% if m.role == 'model' or m.role == 'assistant' %}model"
-        "{% elif m.role == 'system' %}system{% else %}user{% endif %}{{ '\n' }}"
-        "{% for c in m.content %}{{ c.text }}{% endfor %}<turn|>{{ '\n' }}"
-        "{% endfor %}<|turn>model{{ '\n' }}"
+        '<|turn>{% if m.role == "model" or m.role == "assistant" %}model'
+        '{% elif m.role == "system" %}system{% else %}user{% endif %}{{ "\\n" }}'
+        '{% for c in m.content %}{{ c.text }}{% endfor %}<turn|>{{ "\\n" }}'
+        '{% endfor %}<|turn>model{{ "\\n" }}'
     )
 
     # ---- aicredits (OpenAI-compatible cloud tool) — her TOP CLOUD rung, never the driver ---- #

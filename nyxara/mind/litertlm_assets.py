@@ -198,6 +198,86 @@ def _cli_progress(done: int, total: Optional[int]) -> None:  # pragma: no cover
         print(f"\r  {gb:5.2f} GB", end="", flush=True)
 
 
+def _doctor(settings: NyxaraSettings) -> int:  # pragma: no cover
+    """Report exactly which stage of the on-device rung is broken, and with what.
+
+    Exists because the failure that matters most is the least informative: the runtime returns a
+    bare ``litert_lm_conversation_send_message failed`` and keeps the real reason to itself. This
+    walks the stages in order — binding, native library, weights, engine, then each chat template —
+    and prints what happened at each, so a broken host produces a diagnosis instead of a guess.
+    """
+    from nyxara.mind.llm import LiteRTLMProvider, LLMRequest
+    from nyxara.mind.vulkan_shim import loader_present
+
+    print("NYXARA · on-device brain doctor")
+    print("=" * 62)
+    import platform
+    import sys
+    print(f"python       : {sys.version.split()[0]}  ({platform.machine()})")
+    try:
+        import importlib.metadata as md
+        print(f"litert-lm-api: {md.version('litert-lm-api')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"litert-lm-api: NOT INSTALLED ({exc})")
+        print("\n-> pip install litert-lm-api")
+        return 1
+
+    prov = LiteRTLMProvider(settings)
+    print(f"vulkan loader: {'system' if loader_present() else 'absent (shim will cover CPU)'}")
+
+    native = prov.native_library_error()
+    print(f"runtime      : {'OK' if native is None else 'FAILED — ' + native}")
+    if native is not None:
+        return 1
+
+    path = prov.model_path()
+    print(f"weights      : {'OK ' + str(path) if path.is_file() else 'MISSING at ' + str(path)}")
+    if not path.is_file():
+        print("\n-> python scripts/fetch_litertlm_model.py")
+        return 1
+
+    import litert_lm
+    try:
+        engine = prov._get_engine(litert_lm)
+        print("engine       : OK (loaded)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"engine       : FAILED — {exc}")
+        return 1
+
+    print("\nchat templates (the usual culprit — the runtime hides the real reason):")
+    working = None
+    for name, template in prov._templates():
+        try:
+            kwargs = {} if template is None else {"chat_template": template}
+            conv = engine.create_conversation(**kwargs)
+            try:
+                resp = conv.send_message(litert_lm.Message.user("What is 2+2? Number only."),
+                                         max_output_tokens=8)
+            finally:
+                conv.close()
+            text = prov._extract_text(resp).strip()
+            print(f"  {name:16s} OK   -> {text!r}")
+            working = working or name
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {name:16s} FAIL -> {exc}")
+
+    print()
+    if working is None:
+        print("VERDICT: the engine runs but no chat template this build accepts renders a turn.")
+        print("         Please send this output — the template is the thing to change.")
+        return 1
+
+    print(f"VERDICT: working. She will use the '{working}' template.")
+    try:
+        out = prov.complete(LLMRequest.from_prompt("Say hello in one short sentence.",
+                                                   max_tokens=24, seed=7))
+        print(f"         end-to-end: [{out.provider}] {out.text!r}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"         end-to-end FAILED anyway: {exc}")
+        return 1
+    return 0
+
+
 def main() -> int:  # pragma: no cover
     import argparse
 
@@ -205,10 +285,14 @@ def main() -> int:  # pragma: no cover
                                                  "(Gemma-4-E2B-it, LiteRT-LM format).")
     parser.add_argument("--force", action="store_true", help="re-download even if present")
     parser.add_argument("--quiet", action="store_true", help="no progress line")
+    parser.add_argument("--doctor", action="store_true",
+                        help="diagnose a rung that loads but will not answer")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = get_settings()
+    if args.doctor:
+        return _doctor(settings)
     dest = model_path(settings)
     if dest.is_file() and not args.force:
         print(f"already present: {dest} ({dest.stat().st_size / (1024 ** 3):.2f} GB)")
