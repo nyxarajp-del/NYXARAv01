@@ -123,13 +123,23 @@ def _autoforge_view(core: Any) -> Optional[Dict[str, Any]]:
 
 def _serving_view(core: Any) -> Optional[Dict[str, Any]]:
     """Which provider is LIVE right now, and which self-version it serves."""
-    llm = getattr(getattr(core, "reasoner", None), "llm", None) if core is not None else None
+    reasoner = getattr(core, "reasoner", None) if core is not None else None
+    llm = getattr(reasoner, "llm", None)
     if llm is None or not hasattr(llm, "learning_view"):
         return None
     try:
-        return llm.learning_view()
+        view = llm.learning_view()
     except Exception:  # noqa: BLE001
         return None
+    # "chosen: litertlm" answers which rung the ladder WOULD pick, not which brain actually spoke.
+    # When reasoning falls through to her small own brain the ladder is never consulted at all, so
+    # without this the report looks healthy while every reply comes from a 532-parameter n-gram.
+    for owner in (reasoner, getattr(reasoner, "llm_reasoner", None)):
+        degradation = getattr(owner, "last_degradation", None)
+        if degradation:
+            view["reasoning_degraded"] = degradation
+            break
+    return view
 
 
 def _competence_view(core: Any) -> Optional[Dict[str, Any]]:
