@@ -591,8 +591,7 @@ class LiteRTLMProvider(LLMProviderBase):
             return None
         return litert_lm
 
-    @staticmethod
-    def native_library_error() -> Optional[str]:
+    def native_library_error(self) -> Optional[str]:
         """``None`` if the runtime's shared library loads here, else why it does not.
 
         Importing ``litert_lm`` proves nothing: the Python package is pure wrapper and does not touch
@@ -602,19 +601,29 @@ class LiteRTLMProvider(LLMProviderBase):
         ``libvulkan.so.1: cannot open shared object file``. Checking the actual dlopen is the only
         honest probe. It costs ~0.15 s once per process (the library, never the 2.4 GB weights) and
         the result is cached by the binding itself.
+
+        Before giving up, ``mind/vulkan_shim.py`` is given a chance to satisfy that one dependency
+        in-process — the runtime imports no symbols from Vulkan, so on the CPU backend a stub is
+        enough and no system package is needed. It declines for GPU/NPU backends, where a
+        do-nothing Vulkan would be a silent lie.
         """
         try:
             from litert_lm import _ffi
         except Exception as exc:  # noqa: BLE001 — no binding at all
             return f"litert_lm is not installed ({exc})"
         try:
+            from nyxara.mind.vulkan_shim import ensure_vulkan_loader
+            ensure_vulkan_loader(self.settings)
+        except Exception:  # noqa: BLE001 — the shim is an aid, never a requirement
+            pass
+        try:
             _ffi._get_lib()
         except OSError as exc:                    # the missing-system-library case
             missing = str(exc).split(":")[0].strip()
             hint = ""
             if "vulkan" in str(exc).lower():
-                # The runtime links the Vulkan loader unconditionally; installing the loader is
-                # enough, no GPU or driver required — the CPU backend still does the work.
+                # We get here only when the shim declined or could not help (a GPU/NPU backend, an
+                # unknown architecture, a read-only data dir). Installing the loader always works.
                 hint = (" — install the Vulkan loader: `sudo apt install libvulkan1` "
                         "(Debian/Ubuntu) or `sudo dnf install vulkan-loader` (Fedora/RHEL)")
             return f"litert_lm runtime cannot load {missing}{hint}"

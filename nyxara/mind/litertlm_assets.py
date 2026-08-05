@@ -232,19 +232,25 @@ def main() -> int:  # pragma: no cover
     return _report_runtime()
 
 
-def _report_runtime() -> int:  # pragma: no cover
+def _report_runtime(settings: Optional[NyxaraSettings] = None) -> int:  # pragma: no cover
     """Say plainly whether the runtime can actually start here — weights alone are not enough.
 
     The failure this catches is a quiet one: ``pip install litert-lm-api`` succeeds, the weights
     download, and only at the first turn does the shared library fail to dlopen because the host has
-    no Vulkan loader. Better to say so now, with the command to fix it, than to leave a warning on
-    every turn.
+    no Vulkan loader. Better to say so now — and, where the shim can simply remove the problem, to
+    say that instead — than to leave a warning on every turn.
     """
     from nyxara.mind.llm import LiteRTLMProvider
+    from nyxara.mind.vulkan_shim import loader_present
 
-    problem = LiteRTLMProvider.native_library_error()
+    settings = settings or get_settings()
+    had_loader = loader_present()
+    problem = LiteRTLMProvider(settings).native_library_error()
     if problem is None:
         print("runtime: OK — she will draft on this model")
+        if not had_loader:
+            print("         (no system Vulkan loader here; a built-in stub covers the CPU backend "
+                  "— `sudo apt install libvulkan1` if you would rather have the real one)")
         return 0
     print(f"runtime: NOT USABLE YET — {problem}")
     print("         (the weights are fine; until this is fixed her ladder starts at the cloud)")

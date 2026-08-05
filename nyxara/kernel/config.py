@@ -409,6 +409,13 @@ class LLMConfig(BaseModel):
     # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
     litertlm_cache_dir: Optional[Path] = None
     litertlm_top_k: int = Field(default=40, ge=1)
+    # The runtime's shared library declares a hard dependency on the Vulkan LOADER
+    # (``libvulkan.so.1``) even on the CPU backend, yet imports no symbol from it. On a host without
+    # that loader the whole rung is unloadable. mind/vulkan_shim.py generates a 344-byte stub
+    # carrying only the SONAME, which satisfies the linker so the CPU path runs with no system
+    # package at all. It never shadows a real loader, and it refuses to act on a gpu/npu backend
+    # (where a do-nothing Vulkan would be a silent lie). Set False to require the real thing.
+    litertlm_vulkan_shim: bool = True
     # CPU threads for the LiteRT CPU backend. ``None`` -> let the runtime choose.
     litertlm_threads: Optional[int] = Field(default=None, ge=1)
     # THE EMBEDDED CHAT TEMPLATE IN THIS MODEL FILE DOES NOT RUN on litert-lm-api 0.15: it calls
