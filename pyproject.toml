@@ -90,9 +90,20 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-# Ruff's default set (pyflakes F + a subset of pycodestyle E/W) catches the bugs
-# that matter — undefined names, unused imports, redefinitions — without churning
-# the existing, deliberate style.
+# Pyflakes (F) plus the correctness-shaped pycodestyle subset (E4/E7/E9) catches the bugs that
+# matter — undefined names, unused imports, redefinitions — without churning the existing,
+# deliberate style.
+#
+# SELECTED EXPLICITLY, and that is the point. This used to rely on ruff's *implicit* default set,
+# which was exactly this list until ruff 0.16 broadened it to include pyupgrade, bandit, isort,
+# flake8-comprehensions and more. Because the dev extra floats (`ruff>=0.6`), CI installed 0.16 the
+# day it shipped and the lint step went from clean to 14,936 findings across a codebase that had
+# never opted into those rules — red on every branch and on main since. Naming the set here pins the
+# intent to the config instead of to whatever ruff happens to consider default this month.
+#
+# Widening this is a deliberate decision, not an upgrade side-effect: add the rule, fix the fallout,
+# same commit.
+select = ["E4", "E7", "E9", "F"]
 ignore = [
     "E402",  # imports after code: NYXARA guards heavy/optional deps behind runtime checks
     "E741",  # ambiguous names (l/I/O): used deliberately in a few math/loop contexts
