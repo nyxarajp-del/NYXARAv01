@@ -10,6 +10,14 @@ pydantic-settings>=2.1
 # (or just boot her: growth/bootstrap.py fetches them unless
 # NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD=false). Import-guarded like every heavy dep: with neither the
 # runtime nor the weights, the rung reports itself unavailable and the ladder starts at the cloud.
+# SYSTEM DEPENDENCY: this wheel's liblitert-lm.so links the Vulkan LOADER even for the CPU
+# backend, so a host without it imports fine and then fails on every turn with
+# "libvulkan.so.1: cannot open shared object file". Install the loader once (no GPU or driver
+# needed — the CPU backend still does the work):
+#     sudo apt install libvulkan1        # Debian/Ubuntu
+#     sudo dnf install vulkan-loader     # Fedora/RHEL
+# mind/llm.py checks this before advertising the rung, so a host that lacks it degrades quietly
+# to the cloud instead of failing loudly forever; `python scripts/fetch_litertlm_model.py` says so.
 litert-lm-api>=0.15.0
 # Reasoning / math / data
 z3-solver>=4.12

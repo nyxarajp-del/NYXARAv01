@@ -212,7 +212,9 @@ def main() -> int:  # pragma: no cover
     dest = model_path(settings)
     if dest.is_file() and not args.force:
         print(f"already present: {dest} ({dest.stat().st_size / (1024 ** 3):.2f} GB)")
-        return 0
+        # Still report the runtime: "weights present, runtime unusable" is exactly the state that
+        # otherwise only shows up as a warning on every turn.
+        return _report_runtime()
 
     free = shutil.disk_usage(dest.parent if dest.parent.exists() else Path.home()).free
     print(f"repo   : {settings.llm.litertlm_repo_id}")
@@ -227,7 +229,26 @@ def main() -> int:  # pragma: no cover
         print("FAILED — see the log above")
         return 1
     print(f"ready: {out} ({out.stat().st_size / (1024 ** 3):.2f} GB)")
-    return 0
+    return _report_runtime()
+
+
+def _report_runtime() -> int:  # pragma: no cover
+    """Say plainly whether the runtime can actually start here — weights alone are not enough.
+
+    The failure this catches is a quiet one: ``pip install litert-lm-api`` succeeds, the weights
+    download, and only at the first turn does the shared library fail to dlopen because the host has
+    no Vulkan loader. Better to say so now, with the command to fix it, than to leave a warning on
+    every turn.
+    """
+    from nyxara.mind.llm import LiteRTLMProvider
+
+    problem = LiteRTLMProvider.native_library_error()
+    if problem is None:
+        print("runtime: OK — she will draft on this model")
+        return 0
+    print(f"runtime: NOT USABLE YET — {problem}")
+    print("         (the weights are fine; until this is fixed her ladder starts at the cloud)")
+    return 1
 
 
 if __name__ == "__main__":  # pragma: no cover

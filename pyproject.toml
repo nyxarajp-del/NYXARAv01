@@ -31,6 +31,9 @@ nyxara-prove = "nyxara.growth.prove_main:main"
 # only — fetch the ~2.4 GB weights once with `python scripts/fetch_litertlm_model.py`, or just boot
 # her and let growth/bootstrap.py do it. Without either, mind/llm.py reports the rung honestly
 # unavailable and the auto ladder starts at the cloud instead.
+# NOTE the system dependency: the runtime links the Vulkan loader even on CPU, so also
+# `sudo apt install libvulkan1` (or `dnf install vulkan-loader`). Without it the rung is
+# reported unavailable and the ladder starts at the cloud instead.
 litertlm = ["litert-lm-api>=0.15.0"]
 # Reasoning / math / data
 reasoning = ["z3-solver>=4.12", "sympy>=1.12", "numpy>=1.26", "networkx>=3.2", "scikit-learn>=1.4"]
