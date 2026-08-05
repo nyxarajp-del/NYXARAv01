@@ -158,8 +158,12 @@ def test_litertlm_is_primary_and_foundry_base_is_local():
     # nothing above is reachable, keeping her sovereign.
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    # her primary needs no endpoint and no key — that is what makes it un-outage-able
-    assert s.llm.litertlm_enabled is True
+    # her primary needs no endpoint and no key — that is what makes it un-outage-able.
+    # Asserted against the SCHEMA default, not the instance: the suite-wide conftest pins
+    # ``NYXARA_LLM__LITERTLM_ENABLED=false`` for hermeticity, so a live instance here is honestly
+    # off. What ships enabled is the field's default, and that is what this line is about.
+    from nyxara.kernel.config import LLMConfig
+    assert LLMConfig.model_fields["litertlm_enabled"].default is True
     assert s.llm.litertlm_repo_id == "jamarag/gemma-4-E2B-it-ultra-uncensored-heretic-litertlm"
     assert s.llm.litertlm_filename == "model.litertlm"
     assert s.llm.litertlm_backend == "cpu"

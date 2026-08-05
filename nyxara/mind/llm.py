@@ -577,6 +577,9 @@ class LiteRTLMProvider(LLMProviderBase):
         # Latched load failure. Once the runtime has proved it cannot start on this host, the rung
         # takes itself off the ladder instead of failing — and logging — on every single turn.
         self._dead: Optional[str] = None
+        # Which chat template this build actually accepts, learned on the first successful turn.
+        self._template_name: Optional[str] = None
+        self._template: Optional[str] = None
 
     # ---- honest availability (cheap: never loads the engine, never downloads) ---- #
     def model_path(self) -> Any:
@@ -719,7 +722,7 @@ class LiteRTLMProvider(LLMProviderBase):
         elif native is not None:
             reason = native
         elif self._dead is not None:
-            reason = f"engine failed to start on this host: {self._dead}"
+            reason = f"unusable on this host: {self._dead}"
         elif not weights:
             reason = f"weights missing at {path} (python scripts/fetch_litertlm_model.py)"
         else:
@@ -743,12 +746,13 @@ class LiteRTLMProvider(LLMProviderBase):
                 pass
 
     def reset(self) -> None:
-        """Forget a latched load failure and try the host again.
+        """Forget a latched failure and try the host again.
 
         The latch exists so a broken host costs one warning instead of one per turn; it must not
         mean an operator has to restart her after installing the missing library.
         """
         self._dead = None
+        self._template_name = self._template = None
 
     # ---- request → litert_lm.Message objects ---- #
     @staticmethod
@@ -807,6 +811,71 @@ class LiteRTLMProvider(LLMProviderBase):
                 history.append(litert_lm.Message.model(litert_lm.Contents.of(content)))
         return history, turns[send_at][1]
 
+    def _templates(self) -> List[Tuple[str, Optional[str]]]:
+        """The chat templates to try, best-known first. ``None`` means the model's embedded one.
+
+        The template is the most fragile joint in this whole rung, and it fails in the most
+        expensive way: ``send_message`` returns a bare
+        ``RuntimeError: litert_lm_conversation_send_message failed`` while the *real* reason
+        ("Failed to apply template: ...") goes to the runtime's own stderr, where a caller cannot
+        see it. Rather than guess which formulation a given build's Jinja accepts, try them:
+
+        1. the configured template — Gemma 4's turn format, escaped ``\\n``;
+        2. the same shape with a literal newline inside the string, which some builds prefer;
+        3. the model's own embedded template — broken on litert-lm-api 0.15 (it calls ``.get`` on a
+           map) but correct on any build that implements that method, and the best answer there.
+
+        Whichever works first is remembered for the process, so this costs one extra attempt once.
+        """
+        configured = self.settings.llm.litertlm_chat_template
+        return [("configured", configured),
+                ("literal-newline", configured.replace('{{ "\\n" }}', "{{ '\n' }}")),
+                ("model-embedded", None)]
+
+    def _send(self, engine: Any, litert_lm: Any, history: List[Any], prompt: str,
+              sampler: Any, max_tokens: int) -> Any:
+        """One turn through the runtime, falling across template variants until one works."""
+        candidates = ([(self._template_name, self._template)] if self._template_name is not None
+                      else self._templates())
+        errors: List[str] = []
+        for name, template in candidates:
+            kwargs: Dict[str, Any] = {"messages": history or None, "sampler_config": sampler}
+            if template is not None:
+                kwargs["chat_template"] = template
+            try:
+                conv = engine.create_conversation(**kwargs)
+            except Exception as exc:  # noqa: BLE001 — a rejected template is a candidate failing
+                errors.append(f"{name}: {exc}")
+                continue
+            try:
+                raw = conv.send_message(litert_lm.Message.user(prompt),
+                                        max_output_tokens=max_tokens)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{name}: {exc}")
+                continue
+            finally:
+                try:
+                    conv.close()          # drop the KV cache: the facade stays stateless
+                except Exception:  # noqa: BLE001
+                    pass
+            if self._template_name != name:
+                log.info("litertlm chat template in use: %s", name)
+                self._template_name, self._template = name, template
+            return raw
+
+        # Every template failed. On a host where that is structural, retrying it on every turn
+        # produces one warning per turn forever (observed in the wild) — so take the rung off the
+        # ladder and say why, exactly as an engine that will not start does.
+        detail = "; ".join(errors)
+        if self._template_name is None:
+            self._dead = f"no usable chat template ({detail})"
+            log.warning("litertlm: no chat template this build accepts — taking the rung off the "
+                        "ladder until reset: %s", detail)
+        else:
+            self._template_name = self._template = None   # re-probe from scratch next time
+        raise LLMError(f"litertlm could not render a turn — {detail}",
+                       context={"provider": self.name})
+
     def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
         litert_lm = self._binding()
         if litert_lm is None:
@@ -824,19 +893,7 @@ class LiteRTLMProvider(LLMProviderBase):
         # One engine, serialized: the runtime holds a single set of weights, and a 2.4 GB INT4 model
         # on CPU is the bottleneck anyway — concurrent turns queue rather than corrupt each other.
         with self._lock:
-            conv = engine.create_conversation(
-                chat_template=cfg.litertlm_chat_template,
-                messages=history or None,
-                sampler_config=sampler,
-            )
-            try:
-                raw = conv.send_message(litert_lm.Message.user(prompt),
-                                        max_output_tokens=int(req.max_tokens))
-            finally:
-                try:
-                    conv.close()          # drop the KV cache: the facade stays stateless
-                except Exception:  # noqa: BLE001
-                    pass
+            raw = self._send(engine, litert_lm, history, prompt, sampler, int(req.max_tokens))
         text, hit = truncate_at_stops(self._extract_text(raw), tuple(req.stop) + _GEMMA_STOPS)
         completion = estimate_tokens(text)
         # Honest finish reason. A stop marker in the text means the model ran past its turn and we
