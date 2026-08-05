@@ -205,6 +205,31 @@ class MinHashLSH:
         """The Jaccard similarity at which a pair becomes ~50% likely to be caught."""
         return float((1.0 / self.bands) ** (1.0 / self.rows))
 
+    def save(self, path: Any) -> Path:
+        """Persist the band tables AND the hash coefficients.
+
+        The coefficients matter as much as the tables: they are drawn from a seeded RNG at
+        construction, so a reloaded filter with fresh coefficients would compute different band
+        keys for the same document and match nothing it had already stored. The tables would be
+        present and useless — near-duplicate detection silently off across a resume.
+        """
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(out, mul=self._mul, add=self._add,
+                 meta=np.array([self.bands, self.rows, self.bits], dtype=np.int64),
+                 **{f"band{i}": t for i, t in enumerate(self._tables)})
+        return out
+
+    @classmethod
+    def load_from(cls, path: Any) -> "MinHashLSH":
+        blob = np.load(Path(path), allow_pickle=False)
+        bands, rows, bits = (int(v) for v in blob["meta"])
+        obj = cls(bands=bands, rows=rows, capacity_bits=bits)
+        obj._mul = blob["mul"]
+        obj._add = blob["add"]
+        obj._tables = [blob[f"band{i}"] for i in range(bands)]
+        return obj
+
     def signature(self, text: str) -> Optional[np.ndarray]:
         """Bottom-k MinHash of ``text``'s shingles, or ``None`` when there is too little text."""
         hashed = shingles(text)

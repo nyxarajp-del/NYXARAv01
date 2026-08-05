@@ -68,6 +68,12 @@ foundry = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "
 # installing it elsewhere is harmless, the forge just trains full-precision LoRA instead).
 qlora = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "tokenizers>=0.15",
          "bitsandbytes>=0.43"]
+# Pretraining-corpus builder (scripts/build_dataset.py, growth/corpus.py). Deliberately SEPARATE
+# from `foundry`: streaming public datasets and pushing shards to the Hub costs megabytes, while
+# `foundry` drags torch and transformers behind it. Bundling them meant a fresh container that
+# skipped the heavy install had no way to build a corpus — and `huggingface_hub` was declared
+# nowhere at all, arriving only as a transitive dependency of something else.
+corpus = ["datasets>=2.18", "huggingface_hub>=0.23", "pyarrow>=15.0", "numpy>=1.26"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [tool.pytest.ini_options]

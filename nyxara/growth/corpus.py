@@ -121,11 +121,16 @@ DEFAULT_STREAM_SOURCES: Dict[str, List[Dict[str, Any]]] = {
         {"path": "HuggingFaceTB/cosmopedia-v2", "text_key": "text", "weight": 1.0,
          "license": "Apache-2.0"},
     ],
+    # Both of the first two are GATED — `list_repo_files` succeeds on them while reading 403s —
+    # so the open sources below them are what actually carries the domain until access is
+    # granted. Verified reachable from this account rather than assumed.
     "code": [
         {"path": "bigcode/the-stack-smol", "text_key": "content", "weight": 2.0,
          "license": "per-file; developer opt-out applies"},
-        {"path": "nampdn-ai/tiny-codes", "text_key": "response", "weight": 1.0,
-         "license": "Apache-2.0"},
+        {"path": "iamtarun/python_code_instructions_18k_alpaca", "text_key": "output",
+         "weight": 1.5, "license": "Apache-2.0"},
+        {"path": "m-a-p/CodeFeedback-Filtered-Instruction", "text_key": "answer",
+         "weight": 1.5, "license": "Apache-2.0"},
     ],
     "math": [
         {"path": "open-web-math/open-web-math", "text_key": "text", "weight": 2.0,
@@ -136,6 +141,8 @@ DEFAULT_STREAM_SOURCES: Dict[str, List[Dict[str, Any]]] = {
     "conversation": [
         {"path": "HuggingFaceH4/ultrachat_200k", "split": "train_sft", "text_key": "messages",
          "weight": 2.0, "license": "MIT"},
+        # JSONL, not parquet: the row-group reader declines it and the `datasets` streaming
+        # fallback takes over, which is exactly what the fallback is for.
         {"path": "Open-Orca/SlimOrca", "text_key": "conversations", "weight": 1.0,
          "license": "MIT"},
     ],
@@ -689,17 +696,31 @@ class CorpusBuilder:
         self.shard_tokens = shard_tokens
         self.seed = seed
         self._scanner: Any = None
+        # Where the current document came from, so a row group is marked done only AFTER its
+        # documents are written. Marking on read would let a crash lose data and call it done.
+        self._pending: Tuple[str, Optional[str]] = ("", None)
+        from nyxara.growth.progress import BuildProgress
+
+        self.progress = BuildProgress.load(self.out_dir)
         # Bounded-memory screens from growth/screen. The `Set[str]` these replace held 64-char
         # hex digests and grew without limit — 3-5 GB at 6B tokens, and gone on restart.
         try:
             from nyxara.growth.screen import ExactDedup, MinHashLSH
 
-            self._exact = ExactDedup(capacity_bits=max(16, int(dedup_bits) + 3))
-            self._near = MinHashLSH(capacity_bits=max(14, int(dedup_bits)))
+            # Size the tables to the BUDGET, not to a constant. Fixed 2**25 slots is 268 MB for
+            # exact plus 268 MB across the LSH bands — correct at 6B tokens and absurd for a
+            # 600k-token smoke build, where the checkpoint was 536 MB of mostly-zero tables
+            # uploaded on every push. Roughly one document per 300 tokens, then the next power
+            # of two with headroom, clamped to the fixed ceiling the design was costed at.
+            expected_docs = max(1 << 12, int(self.tokens_budget / 300))
+            fitted = max(14, min(int(dedup_bits) + 3, expected_docs.bit_length() + 1))
+            self._exact = ExactDedup(capacity_bits=fitted)
+            self._near = MinHashLSH(capacity_bits=max(12, fitted - 3))
         except Exception:  # noqa: BLE001 — no numpy: fall back to the unbounded set
             self._exact = None
             self._near = None
         self._seen: Set[str] = set()
+        self._restore_dedup()
 
     # ---- screens (reused, not reimplemented) ---- #
     def _screen(self, text: str, report: CorpusReport, *, domain: str,
@@ -864,6 +885,49 @@ class CorpusBuilder:
             pass
         report.sources["own"] = n
 
+    def _save_dedup(self) -> None:
+        """Persist the dedup tables. A fresh table makes every seen document look new."""
+        try:
+            if self._exact is not None:
+                self._exact.save(self.out_dir / "dedup-exact.npy")
+            if self._near is not None:
+                self._near.save(self.out_dir / "dedup-lsh.npz")
+        except Exception:  # noqa: BLE001 — losing the tables costs duplicates, never the build
+            pass
+
+    def _restore_dedup(self) -> None:
+        try:
+            from nyxara.growth.screen import ExactDedup, MinHashLSH
+
+            exact = self.out_dir / "dedup-exact.npy"
+            if exact.exists():
+                self._exact = ExactDedup.load_from(exact)
+            lsh = self.out_dir / "dedup-lsh.npz"
+            if lsh.exists():
+                self._near = MinHashLSH.load_from(lsh)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _open_parquet(self, spec: Dict[str, Any], source_id: str,
+                      report: CorpusReport) -> Any:
+        """A row-group reader for one source, or ``None`` to fall back to `datasets` streaming."""
+        try:
+            from nyxara.growth.hf_source import open_source
+        except Exception:  # noqa: BLE001 — pyarrow/hub absent: the stream path still works
+            return None
+        try:
+            source = open_source(spec, source_id=source_id,
+                                 done=self.progress.done_for(source_id))
+        except Exception as exc:  # noqa: BLE001
+            report.note(f"{source_id}: parquet layout unresolved ({exc}); using the stream")
+            return None
+        if source is None:
+            return None
+        already = len(self.progress.done_for(source_id))
+        report.note(f"{source_id}: {len(source.files)} parquet file(s)"
+                    + (f", {already} row group(s) already done" if already else ""))
+        return source
+
     def _streamed_docs(self, report: CorpusReport, budget: Dict[str, int]
                        ) -> Iterator[Tuple[str, str, bool]]:
         """Streamed public datasets. Requires the optional ``datasets`` package."""
@@ -890,6 +954,23 @@ class CorpusBuilder:
             weights = [float(s.get("weight", 1.0)) for s in specs] or [1.0]
             total = sum(weights) or 1.0
             for spec, weight in zip(specs, weights):
+                source_id = f"{domain}:{spec['path']}"
+                quota = max(1, int(budget.get(domain, 0) * weight / total))
+
+                # Parquet row groups first. Measured against `datasets` streaming on this box:
+                # 817 KB/s streamed versus 4,880-33,252 KB/s by row group — the stream was 7x
+                # slower than the CPU screens it fed, so it, not the screens, was the whole
+                # build's bottleneck. Row groups also give O(1) resume: a finished group is
+                # skipped without a request, where `IterableDataset.skip(n)` replays n rows.
+                parquet = self._open_parquet(spec, source_id, report)
+                if parquet is not None:
+                    cursors.append({
+                        "domain": domain, "id": source_id, "kind": "parquet",
+                        "iter": parquet.rows(), "key": spec.get("text_key", "text"),
+                        "quota": quota, "taken": self.progress.tokens_from(source_id),
+                    })
+                    continue
+
                 try:
                     stream = load_dataset(spec["path"], spec.get("name"),
                                           split=spec.get("split", "train"), streaming=True)
@@ -897,12 +978,11 @@ class CorpusBuilder:
                     report.note(f"{domain}: {spec['path']} unavailable ({exc})")
                     continue
                 cursors.append({
-                    "domain": domain, "id": f"{domain}:{spec['path']}",
+                    "domain": domain, "id": source_id, "kind": "stream",
                     "iter": iter(stream), "key": spec.get("text_key", "text"),
                     # Each source gets its own slice of the domain budget, so one source cannot
                     # consume the share meant for the others.
-                    "quota": max(1, int(budget.get(domain, 0) * weight / total)),
-                    "taken": 0,
+                    "quota": quota, "taken": self.progress.tokens_from(source_id),
                 })
         if not cursors:
             report.sources["streamed"] = 0
@@ -946,13 +1026,19 @@ class CorpusBuilder:
                         self._close(cursor, cursors)
                         report.note(f"{cursor['id']} failed mid-stream ({exc})")
                         break
-                    text = _row_text(row, cursor["key"])
+                    # The parquet reader yields `(text, row_group_key)`; the streaming fallback
+                    # yields a raw row with no position to record.
+                    if cursor["kind"] == "parquet":
+                        text, key = row
+                    else:
+                        text, key = _row_text(row, cursor["key"]), None
                     if not text:
                         continue
                     emitted += 1
                     n += 1
                     cursor["taken"] += max(1, len(text) // 4)
                     report.sources[cursor["id"]] = report.sources.get(cursor["id"], 0) + 1
+                    self._pending = (cursor["id"], key)
                     yield text, domain, False
         report.sources["streamed"] = n
 
@@ -1022,11 +1108,20 @@ class CorpusBuilder:
                     report.documents[domain] = report.documents.get(domain, 0) + 1
                 else:
                     report.val_tokens += len(ids)
+                # Position is recorded only now, once the tokens are in the writer's buffer.
+                source_id, key = self._pending
+                if key:
+                    self.progress.mark(source_id, key, tokens=len(ids))
             if self._budget_spent(budget):
                 break
 
         index = writer.close(vocab_sig=self.tokenizer.vocab_sig(),
                              vocab_size=self.tokenizer.vocab_size)
+        self.progress.vocab_sig = self.tokenizer.vocab_sig()
+        self.progress.seed = self.seed
+        self.progress.report = report.to_dict()
+        self.progress.save(self.out_dir)
+        self._save_dedup()
         for domain in DOMAINS:
             if budget.get(domain, 0) > 0 and report.tokens.get(domain, 0) == 0:
                 report.note(f"{domain}: no data found — this domain is ABSENT from the corpus")
