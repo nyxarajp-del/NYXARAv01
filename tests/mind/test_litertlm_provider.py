@@ -198,14 +198,11 @@ def _settings(weights_path, **over):
 
 
 def _only_local(s, foundry_dir=None):
-    """Silence every cloud rung so the ladder is litertlm -> native.
+    """The ladder is already litertlm -> self -> native (there are no cloud rungs left).
 
     ``foundry_dir`` points ``self`` at an empty directory so a promoted model that happens to exist
     on the developer's machine cannot change which rung the fallback lands on.
     """
-    s.llm.aicredits_enabled = False
-    s.llm.groq_enabled = False
-    s.llm.airouter_enabled = False
     if foundry_dir is not None:
         s.llm.self_model_dir = foundry_dir
     return s
@@ -317,7 +314,7 @@ def test_availability_never_downloads(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 def test_litertlm_leads_the_auto_ladder():
     assert LLM._AUTO_LADDER[0] == "litertlm"
-    assert LLM._AUTO_LADDER == ("litertlm", "aicredits", "groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
 
 
 def test_it_drafts_the_turn_when_the_weights_are_present(monkeypatch, weights):
@@ -329,7 +326,7 @@ def test_it_drafts_the_turn_when_the_weights_are_present(monkeypatch, weights):
     assert resp.text == "on-device answer"
 
 
-def test_absent_weights_hand_the_lead_back_to_the_cloud(monkeypatch, tmp_path):
+def test_absent_weights_hand_the_lead_to_her_next_brain(monkeypatch, tmp_path):
     """The degradation promise: no weights simply means the ladder starts one rung lower."""
     _install_fake(monkeypatch)
     s = _settings(tmp_path / "nope.litertlm")

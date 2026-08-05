@@ -64,20 +64,16 @@ def test_test_profile_forces_native_llm():
     assert s.observability.telemetry_enabled is False
 
 
-def test_test_profile_kills_every_cloud_provider():
-    """No cloud rung may be reachable under TEST — the suite must never touch the network.
-
-    The cloud set is derived from the schema (a ``*_api_key`` field is what makes a provider a
-    remote one) rather than hardcoded, so adding provider #5 and forgetting its kill-switch fails
-    HERE instead of quietly sending ~6.6k tests out over the wire."""
+def test_no_provider_can_reach_the_network():
+    """The cloud rungs were removed, so the old 'every keyed provider is off under TEST' sweep has
+    nothing to sweep. What it guarded is now structural — assert THAT, so a re-introduced cloud
+    provider fails here instead of quietly sending the suite out over the wire."""
     from nyxara.kernel.config import LLMConfig
 
-    cloud = [f[: -len("_api_key")] for f in LLMConfig.model_fields if f.endswith("_api_key")]
-    assert cloud, "expected at least one cloud provider in LLMConfig"
-    s = NyxaraSettings.for_profile(Profile.TEST)
-    for prefix in cloud:
-        assert getattr(s.llm, f"{prefix}_enabled") is False, f"TEST profile leaks {prefix}"
-
+    keyed = [f for f in LLMConfig.model_fields if f.endswith("_api_key")]
+    assert not keyed, f"a provider grew an API key again: {keyed} — give it a TEST kill-switch"
+    assert not [f for f in LLMConfig.model_fields if f.endswith("_base_url")]
+    assert NyxaraSettings.for_profile(Profile.TEST).llm.active_key() is None
 
 def test_test_profile_seals_the_on_device_primary():
     """Her primary rung is local, so the key-derived sweep above cannot see it — check it by name.
@@ -100,8 +96,8 @@ def test_own_providers_are_the_in_process_rungs():
         s = NyxaraSettings()
         s.llm.provider = LLMProvider(name)
         assert s.llm.active_key() is None
-    for name in ("aicredits", "groq", "airouter"):
-        assert name not in OWN_PROVIDERS
+    # OWN_PROVIDERS is now the whole ladder — that IS the claim: nothing she runs is remote.
+    assert set(OWN_PROVIDERS) == set(LLM._AUTO_LADDER)
 
 
 def test_real_learning_defaults_on():
@@ -123,31 +119,17 @@ def test_test_profile_seals_the_foundry():
 
 
 def test_llm_active_model_and_key():
+    """Every provider resolves to a model name, and none of them carries a key any more."""
     s = NyxaraSettings()
-    s.llm.provider = LLMProvider.AICREDITS
-    assert s.llm.active_model() == s.llm.aicredits_model
-    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
-    s.llm.provider = LLMProvider.GROQ
-    assert s.llm.active_model() == s.llm.groq_model
-    assert s.llm.groq_model == "llama-3.3-70b-versatile"
-    s.llm.provider = LLMProvider.AIROUTER
-    assert s.llm.active_model() == s.llm.airouter_model
-    assert s.llm.airouter_model == "zai/glm-5"
-    # the cloud tools are the only providers carrying an API key — and each returns its OWN,
-    # never another's, so they can never be confused on the wire
-    assert s.llm.active_key() is not None
-    assert s.llm.active_key().get_secret_value() == s.llm.airouter_api_key.get_secret_value()
-    s.llm.provider = LLMProvider.GROQ
-    assert s.llm.active_key().get_secret_value() == s.llm.groq_api_key.get_secret_value()
-    s.llm.provider = LLMProvider.AICREDITS
-    assert s.llm.active_key().get_secret_value() == s.llm.aicredits_api_key.get_secret_value()
+    s.llm.provider = LLMProvider.LITERTLM
+    assert s.llm.active_model() == s.llm.litertlm_model == "gemma-4-E2B-it-litertlm"
+    assert s.llm.active_key() is None
     s.llm.provider = LLMProvider.SELF
     assert s.llm.active_model() == "nyxara-self"
-    # her own local brains carry no API key
     assert s.llm.active_key() is None
     s.llm.provider = LLMProvider.NATIVE
+    assert s.llm.active_model() == "nyxara-native"
     assert s.llm.active_key() is None
-
 
 def test_litertlm_is_primary_and_foundry_base_is_local():
     """The shipped defaults put her ON-DEVICE brain first while the foundry LoRA-tunes its own base."""
@@ -173,15 +155,10 @@ def test_litertlm_is_primary_and_foundry_base_is_local():
     s.llm.provider = LLMProvider.LITERTLM
     assert s.llm.active_model() == "gemma-4-E2B-it-litertlm"
     assert s.llm.active_key() is None
-    # the cloud rungs stay configured beneath it, aicredits first among them
-    s.llm.provider = LLMProvider.AICREDITS
-    assert s.llm.active_model() == "moonshotai/kimi-k2-thinking"
-    assert s.llm.aicredits_base_url == "https://aicredits.in/api/v1"
+    # nothing sits beneath it but her own brains — no endpoints, no keys, no cloud
+    from nyxara.kernel.config import OWN_PROVIDERS
+    assert set(OWN_PROVIDERS) == {"litertlm", "self", "native"}
     s.llm.provider = LLMProvider.AUTO
-    # groq and GLM-5-via-airouter stay configured as the lower cloud rungs, not the primary
-    assert s.llm.groq_model == "llama-3.3-70b-versatile"
-    assert s.llm.groq_base_url == "https://api.groq.com/openai/v1"
-    assert s.llm.airouter_model == "zai/glm-5"
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"
     # DistilGPT-2 is tiny — full-precision LoRA everywhere; no quantization, no remote code
@@ -221,11 +198,11 @@ def test_save_and_from_file_roundtrip(tmp_path):
 
 def test_env_override(monkeypatch):
     monkeypatch.setenv("NYXARA_PROFILE", "prod")
-    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "airouter")
+    monkeypatch.setenv("NYXARA_LLM__PROVIDER", "litertlm")
     monkeypatch.setenv("NYXARA_RESOURCES__MAX_CONCURRENT_TASKS", "128")
     s = NyxaraSettings()
     assert s.profile is Profile.PROD
-    assert s.llm.provider is LLMProvider.AIROUTER
+    assert s.llm.provider is LLMProvider.LITERTLM
     assert s.resources.max_concurrent_tasks == 128
 
 

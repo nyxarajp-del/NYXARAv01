@@ -1,4 +1,4 @@
-"""The ``auto`` provider ladder (mind/llm.py): aicredits→groq→airouter→self→native.
+"""The ``auto`` provider ladder (mind/llm.py): litertlm→self→native.
 
 Her own promoted weights answer first — but only past the honesty serve gate (a LoRA over
 the real base, or the explicit any-backend opt-in). Every rung degrades honestly; the
@@ -101,8 +101,8 @@ def test_active_model_supports_auto():
     s = NyxaraSettings.for_profile(Profile.DEV)
     assert s.llm.provider is LLMProvider.AUTO        # the auto ladder ships as the default
     assert s.llm.active_model() == "auto"            # no KeyError on the new member
-    s.llm.provider = LLMProvider.AICREDITS           # her primary rung, pinned by name
-    assert s.llm.active_model() == "moonshotai/kimi-k2-thinking"
+    s.llm.provider = LLMProvider.LITERTLM            # her primary rung, pinned by name
+    assert s.llm.active_model() == "gemma-4-E2B-it-litertlm"
 
 
 def test_active_model_covers_every_provider_member():

@@ -1,32 +1,28 @@
-"""NYXARA · guard/isolation_envelope.py — the air-gapped mind (Part K).
+"""NYXARA · guard/isolation_envelope.py — the air-gapped mind (Part K). CURRENTLY UNUSED.
 
-When NYXARA calls an external cloud tool (any ``mind/llm.py::OpenAICompatProvider`` — aicredits, Groq,
-airouter), the biggest privacy risk
-is that the provider — or anything on the wire — learns *who* she is, *whose* secrets she holds, or the
-internal names of her own architecture. The Isolation Envelope closes that gap the only honest way it can:
+**Read this first.** This module has no caller. It existed to protect one thing: a prompt on its way
+to an external cloud model. Those rungs — aicredits, Groq, airouter — were removed from
+``mind/llm.py`` at the Master's instruction, so every model she runs is now in-process and nothing
+she thinks leaves the host. There is no wire left to hide anything from.
 
-    Before the query leaves, every sensitive **named** term (her identity, the Master's name/handle/email,
-    registered secrets, architecture code-names) is replaced by an opaque, deterministic token
-    (``X1``, ``Y2``, ``Z3`` …). The cloud model solves an *abstract* problem. The reply is re-hydrated
-    **locally** — the reverse map never crosses the wire.
+It is kept, rather than deleted, because it is a working, self-contained utility and the threat it
+answers returns the moment anything external is added back. If you add a provider that reaches a
+network, wire this to it in the same change — that is what it is for.
 
-Honest boundary (stated so no one over-trusts it): this reliably hides *named identifiers and secrets*
-and de-identifies code/logic. It **cannot** hide the abstract *shape* of a problem, and free-form natural
-language cannot be fully anonymized without destroying meaning. So it is strong best-effort privacy for
-code/math/logic — not a guarantee of total information hiding.
+What it does, when something does call it:
 
-Stateless across requests, stateful within one: the calling cloud provider builds a fresh envelope per
-call, so the substitution map lives only for that single request/response round-trip. Each provider passes
-its OWN isolation flag via ``enabled=`` (``aicredits_isolation`` / ``groq_isolation`` /
-``airouter_isolation``), so privacy is per-rung rather than tied to whichever provider happened to be
-the first one written.
+    Before a query leaves, every sensitive **named** term (her identity, the Master's
+    name/handle/email, registered secrets, architecture code-names) is replaced by an opaque,
+    deterministic token (``X1``, ``Y2``, ``Z3`` …). The external model solves an *abstract* problem.
+    The reply is re-hydrated **locally** — the reverse map never crosses the wire.
 
-Note which rungs are NOT here. Her own brains — ``litertlm`` (the on-device Gemma that now leads the
-ladder), ``self`` and ``native``, i.e. ``config.OWN_PROVIDERS`` — run in her own process, so no prompt
-of theirs ever reaches a wire and there is nothing to abstract. They do not consult this module, and
-that is not an oversight: an envelope over a local model would cost accuracy to hide a name from
-itself. The strongest privacy posture available is therefore the default one — her primary answers
-on-device, and the envelope only engages on the cloud rungs beneath it.
+Honest boundary (stated so no one over-trusts it): this reliably hides *named identifiers and
+secrets* and de-identifies code/logic. It **cannot** hide the abstract *shape* of a problem, and
+free-form natural language cannot be fully anonymized without destroying meaning. So it is strong
+best-effort privacy for code/math/logic — not a guarantee of total information hiding.
+
+Stateless across requests, stateful within one: a caller builds a fresh envelope per call, so the
+substitution map lives only for that single request/response round-trip.
 """
 from __future__ import annotations
 
@@ -53,10 +49,9 @@ class IsolationEnvelope:
                  extra_secrets: Sequence[str] = (),
                  enabled: Optional[bool] = None) -> None:
         self.settings = settings or get_settings()
-        # ``enabled`` lets the CALLING provider supply its own isolation flag (aicredits_isolation /
-        # groq_isolation / airouter_isolation), so privacy is decided per cloud rung. Left None the
-        # envelope has no
-        # provider scope and falls back to the legacy read below.
+        # ``enabled`` lets a CALLING provider supply its own isolation flag, so privacy stays a
+        # per-provider decision rather than one global switch. Left None it defaults to ON: an
+        # envelope built without a scope is being built by something that wants protection.
         self._enabled_override = enabled
         self._forward: Dict[str, str] = {}   # original term -> token
         self._reverse: Dict[str, str] = {}   # token -> original term
@@ -66,7 +61,7 @@ class IsolationEnvelope:
     def enabled(self) -> bool:
         if self._enabled_override is not None:
             return bool(self._enabled_override)
-        return bool(getattr(self.settings.llm, "airouter_isolation", True))
+        return True     # no provider scope given -> protect by default
 
     def _collect_terms(self, extra_secrets: Sequence[str]) -> List[str]:
         """Sensitive named terms, longest-first (so composites are matched before their parts)."""

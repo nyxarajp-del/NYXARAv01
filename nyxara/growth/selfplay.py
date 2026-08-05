@@ -255,7 +255,7 @@ if __name__ == "__main__":  # pragma: no cover
             return "A clear, correct answer in NYXARA's own voice, Master."
 
         def chosen_provider(self):
-            return type("_P", (), {"name": "airouter"})()
+            return type("_P", (), {"name": "teacher"})()
 
     with tempfile.TemporaryDirectory() as d:
         store = Path(d) / "distill.jsonl"

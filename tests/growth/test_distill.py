@@ -17,7 +17,7 @@ class _ScriptedTeacher:
     """A deterministic, offline stand-in for a real frontier LLM."""
 
     def __init__(self, answer: str = "My Master is Jaypal Khoja (JP); my loyalty is absolute.",
-                 name: str = "airouter") -> None:
+                 name: str = "teacher") -> None:
         self.answer = answer
         self._name = name
         self.calls = 0
@@ -115,7 +115,7 @@ def test_available_is_false_for_mock_teacher(tmp_path):
 
 
 def test_available_true_for_real_teacher(tmp_path):
-    d = Distiller(llm=_ScriptedTeacher(name="airouter"), store_path=tmp_path / "s.jsonl")
+    d = Distiller(llm=_ScriptedTeacher(name="teacher"), store_path=tmp_path / "s.jsonl")
     assert d.available() is True
 
 
@@ -195,10 +195,10 @@ class _MultiFacade:
     """A stub LLM facade exposing several named providers (for distill_multi)."""
 
     def __init__(self):
-        self.answers = {"airouter": "The cloud tool's answer.", "self": "NYXARA's own answer."}
+        self.answers = {"teacher": "The external teacher's answer.", "self": "NYXARA's own answer."}
 
     def available_providers(self):
-        return ["native", "airouter", "self"]
+        return ["native", "teacher", "self"]
 
     def complete_with(self, name, req):
         ans = self.answers[name]
@@ -208,7 +208,7 @@ class _MultiFacade:
 def test_distill_multi_captures_each_real_teacher(tmp_path):
     d = Distiller(llm=_MultiFacade(), store_path=tmp_path / "m.jsonl")
     exs = d.distill_multi(["Who is your Master?"])
-    assert {e.source for e in exs} == {"airouter"}           # mock/self excluded
+    assert {e.source for e in exs} == {"teacher"}           # mock/self excluded
     assert d.count() == 1
 
 
@@ -221,5 +221,5 @@ def test_distill_multi_is_deduped_per_teacher(tmp_path):
 
 def test_distill_multi_explicit_teacher_list(tmp_path):
     d = Distiller(llm=_MultiFacade(), store_path=tmp_path / "m.jsonl")
-    exs = d.distill_multi(["Q?"], teachers=["airouter"])
-    assert {e.source for e in exs} == {"airouter"} and d.count() == 1
+    exs = d.distill_multi(["Q?"], teachers=["teacher"])
+    assert {e.source for e in exs} == {"teacher"} and d.count() == 1

@@ -251,7 +251,7 @@ class Distiller:
                       ) -> List[DistillationExample]:
         """Distil the SAME prompts from several real teachers for diverse supervision.
 
-        ``teachers`` is a list of provider names (e.g. ``["aicredits", "groq"]``); when omitted,
+        ``teachers`` is a list of provider names; when omitted,
         every currently-available real provider is used. Each answer is stored tagged with its
         teacher (``source``), and de-duplication is per-(prompt, teacher) — so re-running never
         bloats the corpus, but a second teacher's take on the same prompt is still captured."""
@@ -347,7 +347,7 @@ if __name__ == "__main__":  # pragma: no cover
 
         def chosen_provider(self):
             class _P:
-                name = "airouter"
+                name = "teacher-c"
             return _P()
 
     with tempfile.TemporaryDirectory() as d:
@@ -384,12 +384,12 @@ if __name__ == "__main__":  # pragma: no cover
 
     # MULTI-TEACHER: the same prompt is captured once per teacher (diverse supervision)
     class _MultiFacade:
-        answers = {"aicredits": "The primary cloud tool's take.",
-                   "groq": "The second cloud tool's take.",
-                   "airouter": "The last cloud tool's take."}
+        answers = {"teacher-a": "The first external teacher's take.",
+                   "teacher-b": "The second external teacher's take.",
+                   "teacher-c": "The last external teacher's take."}
 
         def available_providers(self):
-            return ["native", "aicredits", "groq", "airouter", "self"]
+            return ["native", "teacher-a", "teacher-b", "teacher-c", "self"]
 
         def complete_with(self, name, req):
             ans = self.answers[name]
@@ -404,7 +404,7 @@ if __name__ == "__main__":  # pragma: no cover
         sources = {e.source for e in exs}
         print(f"\nmulti-teacher        : {len(exs)} examples from {sorted(sources)}")
         # native/self excluded (her own brains are not teachers); every real cloud rung is used
-        assert sources == {"aicredits", "groq", "airouter"}
+        assert sources == {"teacher-a", "teacher-b", "teacher-c"}
         assert dm.distill_multi(["Who is your Master?"]) == []   # dedup per (prompt, teacher)
 
     print("\nALL SELF-TESTS PASSED ✓")
