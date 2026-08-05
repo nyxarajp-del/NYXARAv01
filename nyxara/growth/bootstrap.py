@@ -146,16 +146,23 @@ def ensure_primary_model(
     seed_corpus: Optional[List[str]] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> Optional[int]:
-    """Ensure NYXARA's OWN primary brain exists, forging a DistilGPT-2 LoRA on first boot.
+    """Ensure NYXARA's OWN brains are on disk, forging a DistilGPT-2 LoRA on first boot.
 
-    Acts **only** when her chosen primary provider is ``self`` (her own forged model). If one is
-    already promoted on disk it is left untouched and its version returned; otherwise a fresh
+    Two brains, in ladder order. First her PRIMARY one: the on-device LiteRT-LM Gemma
+    (``mind/litertlm_assets.ensure_litertlm_model``) is fetched when its weights are missing and
+    auto-download is on — a one-time ~2.4 GB download that turns the top rung of the ``auto`` ladder
+    from unavailable into her strongest voice. Then her FORGED one: a LoRA is trained and promoted
+    when ``self`` is the provider that would actually serve.
+
+    The foundry half acts **only** when her chosen provider is ``self`` (her own forged model). If one
+    is already promoted on disk it is left untouched and its version returned; otherwise a fresh
     LoRA-on-DistilGPT-2 candidate is trained, gauntlet-gated and promoted. Returns the active
     version, or ``None`` when nothing was/could be promoted. **Never raises** — boot integrity
-    comes first; on any failure the LLM facade's mock fallback keeps NYXARA responsive.
+    comes first; on any failure the LLM facade's ladder keeps NYXARA responsive.
     """
     settings = settings or get_settings()
     say = log or (lambda _msg: None)
+    _ensure_litertlm(settings, say)
     # Forge a primary brain when NYXARA's OWN model is the selected primary provider —
     # explicitly (`self`), or via the default `auto` ladder where `self` is the first rung.
     # Under `auto` the forge only runs when the result would actually SERVE (the honesty
@@ -178,6 +185,27 @@ def ensure_primary_model(
     except Exception as exc:  # noqa: BLE001 — boot must survive a failed forge
         say(f"primary brain      : could not forge ({exc}); falling back for now")
         return None
+
+
+def _ensure_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> None:
+    """Put her PRIMARY on-device brain on disk if it isn't already. Best-effort, never raises.
+
+    Present weights make this a no-op file check, which is the normal boot. When they are absent it
+    is a ~2.4 GB fetch, so it is gated by ``llm.litertlm_auto_download`` and never runs under TEST —
+    the asset module enforces both. Failure is not fatal: the ``auto`` ladder simply starts one rung
+    lower, at her cloud tools, and she keeps her voice either way.
+    """
+    try:
+        from nyxara.mind.litertlm_assets import ensure_litertlm_model, model_present
+        if model_present(settings):
+            return
+        if not bool(getattr(settings.llm, "litertlm_auto_download", False)):
+            return
+        say("primary brain      : fetching her on-device model (~2.4 GB, one time)…")
+        got = ensure_litertlm_model(settings)
+        say(f"primary brain      : {'ready at ' + str(got) if got else 'not fetched; using the cloud rungs for now'}")
+    except Exception as exc:  # noqa: BLE001 — boot must survive a failed fetch
+        say(f"primary brain      : on-device fetch skipped ({exc})")
 
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,

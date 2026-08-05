@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
-from nyxara.kernel.config import NyxaraSettings, get_settings
+from nyxara.kernel.config import OWN_PROVIDERS, NyxaraSettings, get_settings
 from nyxara.mind.metacognition import HONEST_ABSTENTION, MetaCognition, MetaDecision
 
 __all__ = ["RouterResult", "answer_quality", "default_verifier", "Router"]
@@ -95,6 +95,25 @@ class RouterResult:
                 "confidence": round(self.confidence, 4), "handed_off": self.handed_off}
 
 
+def _strongest_own_brain(settings: NyxaraSettings) -> Any:
+    """The best of HER OWN models to draft with — ``litertlm`` if its weights are here, else ``self``.
+
+    The router measures how often she answers unaided, so "unaided" has to mean her strongest own
+    brain, not merely her oldest one. Her on-device Gemma is both stronger than a freshly-forged LoRA
+    and always reachable, so it drafts whenever it is available; ``SelfProvider`` remains the fallback
+    (and the one the foundry keeps improving). Imported lazily — the router is constructed on paths
+    that must not pay for ``mind/llm`` unless they route.
+    """
+    from nyxara.mind.llm import LiteRTLMProvider, SelfProvider
+    try:
+        on_device = LiteRTLMProvider(settings)
+        if on_device.available():
+            return on_device
+    except Exception:  # noqa: BLE001 — never let the primary's absence break routing
+        pass
+    return SelfProvider(settings)
+
+
 # --------------------------------------------------------------------------- #
 # The router
 # --------------------------------------------------------------------------- #
@@ -111,8 +130,7 @@ class Router:
         self.llm = llm
         self.verifier = verifier or default_verifier(self.cfg.min_chars)
         if self_provider is None:
-            from nyxara.mind.llm import SelfProvider
-            self_provider = SelfProvider(self.settings)
+            self_provider = _strongest_own_brain(self.settings)
         self._self = self_provider
         self.meta = MetaCognition(answer_threshold=self.cfg.threshold,
                                   abstain_below=self.cfg.abstain_below)
@@ -125,16 +143,21 @@ class Router:
             return False
 
     def _teacher_name(self) -> Optional[str]:
-        """The real external teacher to consult — the configured provider, else any real one."""
+        """The real external teacher to consult — the configured provider, else any real one.
+
+        A "teacher" is a model that is *not hers*. ``OWN_PROVIDERS`` covers everything that runs
+        in-process — including her on-device ``litertlm`` primary — so handing off to one of those
+        would not be a hand-off at all; it would be her asking herself and calling it consultation.
+        """
         try:
             avail = list(self.llm.available_providers())
         except Exception:  # noqa: BLE001
             return None
         pref = self.settings.llm.provider.value
-        if pref in avail and pref not in ("self", "native"):
+        if pref in avail and pref not in OWN_PROVIDERS:
             return pref
         for name in avail:
-            if name not in ("self", "native"):
+            if name not in OWN_PROVIDERS:
                 return name
         return None
 
@@ -340,7 +363,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     class _Teacher:
         def available_providers(self):
-            return ["aicredits", "groq", "airouter", "self", "native"]
+            return ["litertlm", "aicredits", "groq", "airouter", "self", "native"]
 
         def complete_with(self, name, req):
             return type("_R", (), {"text": f"[teacher:{name}] a careful answer"})()

@@ -26,7 +26,7 @@ import os
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import (
     BaseModel,
@@ -41,6 +41,7 @@ __all__ = [
     "Profile",
     "LogLevel",
     "LLMProvider",
+    "OWN_PROVIDERS",
     "VectorBackend",
     "OWNER",
     "OwnerIdentity",
@@ -102,9 +103,13 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder aicredits→groq→airouter→self→native: her strongest reachable
-    #                               tool serves; she always degrades to her OWN offline brain — no
-    #                               manual flip. THE SHIPPED DEFAULT.
+    AUTO = "auto"                 # ladder litertlm→aicredits→groq→airouter→self→native: her strongest
+    #                               reachable brain serves; she always degrades to her OWN offline
+    #                               brain — no manual flip. THE SHIPPED DEFAULT.
+    LITERTLM = "litertlm"         # her PRIMARY brain: Gemma-4-E2B-it in Google's LiteRT-LM format,
+    #                               running fully ON-DEVICE through the ``litert_lm`` binding — no key,
+    #                               no network, nothing ever leaves the machine. First rung of the
+    #                               ``auto`` ladder whenever the weights are on disk.
     AICREDITS = "aicredits"       # OpenAI-compatible cloud tool (aicredits.in, e.g.
     #                               moonshotai/kimi-k2-thinking): her PRIMARY reachable model and a
     #                               SUBORDINATE provider she calls and controls — never her driver
@@ -116,6 +121,16 @@ class LLMProvider(str, Enum):
     SELF = "self"                 # NYXARA's OWN model, trained by the foundry (growth/foundry.py)
     NATIVE = "native"             # her always-on, dependency-free own-brain (stdlib KN n-gram);
     #                               the guaranteed floor of the ladder (replaces the old echo mock)
+
+
+# The providers that are HERS — they run in-process on her own hardware, so nothing they see ever
+# leaves the machine and none of them is an external "teacher". Everything NOT in this tuple is a
+# cloud tool she calls, which is exactly the distinction the rest of the codebase keeps asking about:
+# distillation only ever learns from a teacher (growth/distill.py), the confidence router only ever
+# hands off to a teacher (mind/router.py), and the vs-teacher benchmark is skipped when there is none
+# (growth/foundry.py). It lives here, beside the enum, because every module that asks the question
+# already imports this one — so there is exactly ONE answer to keep in step with the ladder.
+OWN_PROVIDERS: Tuple[str, ...] = ("litertlm", "self", "native")
 
 
 class VectorBackend(str, Enum):
@@ -313,34 +328,43 @@ class MetaControlConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Stateless LLM faculty settings (mind/llm.py).
 
-    Three cloud tools she *controls*, the rest her own: ``aicredits``, ``groq`` and ``airouter`` each
-    call an OpenAI-compatible endpoint (aicredits.in / api.groq.com / airouter.in) as SUBORDINATE
+    Her PRIMARY brain is ``litertlm`` and it runs ON HER OWN MACHINE: Gemma-4-E2B-it in Google's
+    LiteRT-LM format (a single ~2.4 GB INT4 ``model.litertlm``), served in-process through the
+    ``litert_lm`` binding. No API key, no endpoint, no network — the prompt never leaves the host,
+    which is why it needs no isolation envelope and is classed with her own brains in
+    ``OWN_PROVIDERS``.
+
+    Below it sit three cloud tools she *controls*: ``aicredits``, ``groq`` and ``airouter`` each call
+    an OpenAI-compatible endpoint (aicredits.in / api.groq.com / airouter.in) as SUBORDINATE
     providers — request in → text out, no persona, no state — reachable models she uses yet never her
-    drivers. Above that floor everything is *her own*: the foundry (growth/foundry.py) LoRA-fine-tunes
+    drivers. Under those, everything is *her own* again: the foundry (growth/foundry.py) LoRA-fine-tunes
     its own base on her lived memory and ``self`` serves the promoted adapter; ``native`` is her
     always-on, dependency-free OWN brain (a pure-stdlib Kneser-Ney n-gram over her identity seed
     corpus). Every backend degrades to ``native`` when its heavy/optional deps are absent. There is no
     echo mock, and no raw third-party model ever speaks as her.
 
-    The default is ``auto``, which makes ``aicredits`` her PRIMARY model *without* making her depend on
-    it: the ladder aicredits→groq→airouter→self→native drafts on the strongest reachable rung, so
-    aicredits answers every turn it can, one cloud outage costs her speed rather than a voice, and she
-    still ends on her own promoted foundry weights (past the serve gate — see
-    ``self_serve_any_backend``) and finally her always-on native own-brain. A keyless or offline machine
-    never crashes. Pinning a single provider by name is still supported, but note the asymmetry in
-    ``mind/llm.py::LLM.complete()``: a *pinned* provider that fails falls straight to ``native``,
-    skipping the intermediate cloud rungs — which is exactly why ``auto`` is the shipped default.
+    The default is ``auto``, which makes ``litertlm`` her PRIMARY model *without* making her depend on
+    it: the ladder litertlm→aicredits→groq→airouter→self→native drafts on the strongest reachable rung,
+    so her on-device brain answers every turn it can, a missing weights file or an unbuilt binding
+    costs her speed rather than a voice, and she still ends on her own promoted foundry weights (past
+    the serve gate — see ``self_serve_any_backend``) and finally her always-on native own-brain. A
+    keyless or offline machine never crashes — and with the weights on disk an offline machine now runs
+    on a genuinely strong model rather than an n-gram. Pinning a single provider by name is still
+    supported, but note the asymmetry in ``mind/llm.py::LLM.complete()``: a *pinned* provider that
+    fails falls straight to ``native``, skipping the intermediate rungs — which is exactly why ``auto``
+    is the shipped default.
     """
 
     model_config = {"validate_assignment": True}
 
-    # ``auto`` is the shipped default and makes ``aicredits`` her PRIMARY model: the ladder
-    # aicredits→groq→airouter→self→native always drafts on the strongest REACHABLE rung, so aicredits
-    # answers every turn it can while a single cloud outage costs her speed rather than a voice.
-    # Sovereignty holds regardless — the facade (mind/llm.py complete()) walks down to her own brains
-    # when no cloud is reachable, the reply is always a PROPOSAL under the guards, and no persona is
-    # injected. Pin a provider by name to force one rung (see the class docstring for the caveat: a
-    # pinned rung that fails skips the other clouds and falls straight to her native own-brain).
+    # ``auto`` is the shipped default and makes ``litertlm`` her PRIMARY model: the ladder
+    # litertlm→aicredits→groq→airouter→self→native always drafts on the strongest REACHABLE rung, so
+    # her on-device Gemma answers every turn it can while a missing weights file (or a cloud outage
+    # below it) costs her speed rather than a voice. Sovereignty holds regardless — the facade
+    # (mind/llm.py complete()) walks down to her own brains when nothing above is reachable, the reply
+    # is always a PROPOSAL under the guards, and no persona is injected. Pin a provider by name to
+    # force one rung (see the class docstring for the caveat: a pinned rung that fails skips the other
+    # rungs and falls straight to her native own-brain).
     provider: LLMProvider = LLMProvider.AUTO
     # NYXARA's OWN model, built & promoted by the foundry. None -> paths.data_dir/"foundry".
     self_model_dir: Optional[Path] = None
@@ -357,12 +381,69 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
-    # ---- aicredits (OpenAI-compatible cloud tool) — her PRIMARY provider, still never the driver -- #
+    # ---- litertlm — her PRIMARY brain, and the only strong one that never leaves the machine ---- #
+    # Gemma-4-E2B-it converted to Google's LiteRT-LM on-device format: one ~2.4 GB INT4
+    # ``model.litertlm`` file served in-process by the ``litert_lm`` binding (pip package
+    # ``litert-lm-api``). It leads the ``auto`` ladder, so she drafts on it every turn the weights are
+    # present, and it is classed in ``OWN_PROVIDERS`` — no API key, no endpoint, no isolation envelope,
+    # because the prompt is never transmitted anywhere. Its output is still a PROPOSAL under the guards
+    # like every other rung; primary is about reach, never about authority.
+    litertlm_enabled: bool = True
+    # The weights. ``None`` -> ``paths.data_dir/"models"/<litertlm_filename>``. Absent weights make the
+    # provider honestly unavailable and the ladder simply starts at aicredits instead.
+    litertlm_model_path: Optional[Path] = None
+    litertlm_repo_id: str = "jamarag/gemma-4-E2B-it-ultra-uncensored-heretic-litertlm"
+    litertlm_filename: str = "model.litertlm"
+    # Display label for reports/costing — the weights file itself carries no model name.
+    litertlm_model: str = "gemma-4-E2B-it-litertlm"
+    # Fetch the weights from HuggingFace on first boot when they are missing (mind/litertlm_assets.py,
+    # called from growth/bootstrap.py). A 2.4 GB download is a real event, so it is a flag: set it
+    # False on a metered or air-gapped host and run scripts/fetch_litertlm_model.py by hand instead.
+    # NEVER fires under the TEST profile.
+    litertlm_auto_download: bool = True
+    # Accelerator for the LiteRT runtime. ``cpu`` is the honest default — the only backend guaranteed
+    # to exist on an arbitrary host, and this INT4 model answers a short turn in ~1-5 s on CPU. Point
+    # it at ``gpu``/``npu`` where the device really has one.
+    litertlm_backend: Literal["cpu", "gpu", "npu"] = "cpu"
+    # Where the runtime keeps compiled artifacts (a GPU/NPU backend recompiles the graph on first run
+    # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
+    litertlm_cache_dir: Optional[Path] = None
+    litertlm_top_k: int = Field(default=40, ge=1)
+    # CPU threads for the LiteRT CPU backend. ``None`` -> let the runtime choose.
+    litertlm_threads: Optional[int] = Field(default=None, ge=1)
+    # THE EMBEDDED CHAT TEMPLATE IN THIS MODEL FILE DOES NOT RUN on litert-lm-api 0.15: it calls
+    # ``message.get('reasoning')``, and the runtime's Jinja engine has no ``get`` method on a map, so
+    # every ``send_message`` dies with "Failed to apply template". We therefore ship Gemma 4's turn
+    # format ourselves and pass it as ``chat_template=``, which overrides the embedded one. Three
+    # details are load-bearing, and all three were found the hard way against the real weights:
+    #   * The turn markers are ``<|turn>role`` / ``<turn|>`` — NOT Gemma 3's ``<start_of_turn>`` /
+    #     ``<end_of_turn>``, which this tokenizer has no tokens for. Feeding it the Gemma 3 markers
+    #     "works" just enough to be dangerous: short prompts answer, longer ones echo the input back
+    #     forever, because the model never sees a real turn boundary. Verified against the vocabulary:
+    #     token 105 is ``<|turn>``, 106 is ``<turn|>``. Gemma 4 also has a REAL system role.
+    #   * Newlines MUST be written as ``{{ '<newline>' }}`` expressions — a literal newline next to a
+    #     block tag is eaten by the engine's whitespace trimming, and the model then answers a
+    #     malformed prompt.
+    #   * ``m.content`` is only a LIST when the caller passes a ``litert_lm.Message`` object. A bare
+    #     string message normalises to ``{"role": ..., "content": "<str>"}``, the inner loop then
+    #     iterates characters, renders NOTHING, and the model answers an empty prompt with a canned
+    #     self-introduction — the same reply to every question. mind/llm.py always sends Message
+    #     objects for exactly this reason.
+    litertlm_chat_template: str = (
+        "{% for m in messages %}"
+        "<|turn>{% if m.role == 'model' or m.role == 'assistant' %}model"
+        "{% elif m.role == 'system' %}system{% else %}user{% endif %}{{ '\n' }}"
+        "{% for c in m.content %}{{ c.text }}{% endfor %}<turn|>{{ '\n' }}"
+        "{% endfor %}<|turn>model{{ '\n' }}"
+    )
+
+    # ---- aicredits (OpenAI-compatible cloud tool) — her TOP CLOUD rung, never the driver ---- #
     # NYXARA calls this like any other stateless provider (request in → text out); the kernel still
     # treats the output as a *proposal* that must pass every guard, and no persona is injected here —
-    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder puts aicredits first
-    # (strongest reachable tool = her PRIMARY model), degrading aicredits→groq→airouter→self→native so
-    # she always keeps her own voice. She uses it, benefits from it, controls it — it never steers her.
+    # her identity lives in identity/soul.py, not in the model. The ``auto`` ladder reaches it when her
+    # on-device ``litertlm`` brain is unavailable, degrading litertlm→aicredits→groq→airouter→self→
+    # native so she always keeps her own voice. She uses it, benefits from it, controls it — it never
+    # steers her.
     # Served through the ``openai`` SDK with ``base_url`` swapped, so no extra dependency is needed and
     # the network-free test fakes keep working.
     aicredits_enabled: bool = True
@@ -394,8 +475,8 @@ class LLMConfig(BaseModel):
     # ---- groq (OpenAI-compatible cloud tool) — the SECOND cloud rung, her first fallback ---- #
     # Identical subordinate contract to aicredits above: stateless, no persona, output is a proposal
     # under the guards. The ``auto`` ladder reaches it only when aicredits is unavailable
-    # (aicredits→groq→airouter→self→native), so it is her backup cloud voice rather than her primary
-    # one — and either way she degrades to her own brains rather than depending on the cloud.
+    # (litertlm→aicredits→groq→airouter→self→native), so it is her backup cloud voice rather than her
+    # first one — and either way she degrades to her own brains rather than depending on the cloud.
     # Served through the ``openai`` SDK with ``base_url`` swapped (Groq is OpenAI-compatible), so no
     # extra dependency is needed and the network-free test fakes keep working.
     groq_enabled: bool = True
@@ -418,7 +499,8 @@ class LLMConfig(BaseModel):
     # ---- airouter (OpenAI-compatible cloud tool) — the THIRD cloud rung, the last fallback ---- #
     # Identical contract to the rungs above: stateless, no persona, output is a proposal under the
     # guards. The ``auto`` ladder reaches it only when BOTH aicredits and groq are unavailable
-    # (aicredits→groq→airouter→self→native), so GLM-5 is her last cloud voice before she falls back to
+    # (litertlm→aicredits→groq→airouter→self→native), so GLM-5 is her last cloud voice before she falls
+    # back to
     # her own brains — and either way she degrades rather than depending on the cloud.
     airouter_enabled: bool = True
     airouter_base_url: str = "https://api.airouter.in/v1"
@@ -465,6 +547,7 @@ class LLMConfig(BaseModel):
         # loudly at first use instead of silently reporting the wrong model.
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.LITERTLM: self.litertlm_model,
             LLMProvider.AICREDITS: self.aicredits_model,
             LLMProvider.GROQ: self.groq_model,
             LLMProvider.AIROUTER: self.airouter_model,
@@ -474,8 +557,9 @@ class LLMConfig(BaseModel):
 
     def active_key(self) -> Optional[SecretStr]:
         """The cloud tools (``aicredits``, ``groq``, ``airouter``) are the only providers with an API
-        key; every other backend runs locally and needs none. Returns the key belonging to the
-        *active* cloud provider — never another one's, so they are impossible to confuse."""
+        key; every other backend — including her primary on-device ``litertlm`` brain — runs locally
+        and needs none. Returns the key belonging to the *active* cloud provider — never another
+        one's, so they are impossible to confuse."""
         if self.provider is LLMProvider.AICREDITS:
             return self.aicredits_api_key
         if self.provider is LLMProvider.GROQ:
@@ -3541,6 +3625,12 @@ class NyxaraSettings(BaseSettings):
             self.llm.aicredits_enabled = False
             self.llm.groq_enabled = False
             self.llm.airouter_enabled = False
+            # Her PRIMARY brain is local, so it has no API key and the schema-derived cloud check
+            # cannot see it — but loading 2.4 GB of weights into every test process would be just as
+            # fatal to a hermetic suite as a network call. Off under TEST, explicitly. The provider
+            # tests build their own settings and inject a fake binding instead.
+            self.llm.litertlm_enabled = False
+            self.llm.litertlm_auto_download = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
@@ -3798,6 +3888,11 @@ if __name__ == "__main__":  # pragma: no cover
     for _p in _cloud:
         assert getattr(test.llm, f"{_p}_enabled") is False, f"TEST profile leaks {_p}"
     print(f"test profile forces NATIVE llm + kills every cloud rung {_cloud} OK")
+    # Her on-device primary has no API key, so the schema probe above cannot catch it — assert its
+    # kill-switch by name, or a 2.4 GB load creeps back into the suite.
+    assert test.llm.litertlm_enabled is False
+    assert test.llm.litertlm_auto_download is False
+    print("test profile also seals the on-device litertlm primary OK")
 
     # Every provider member must have an active_model() row (the lookup is total by design)
     for _p in LLMProvider:
@@ -3805,6 +3900,19 @@ if __name__ == "__main__":  # pragma: no cover
         probe.llm.provider = _p
         assert isinstance(probe.llm.active_model(), str) and probe.llm.active_model()
     print("active_model() covers every LLMProvider member OK")
+
+    # Her own brains are exactly the ones that run in-process; everything else is a cloud tool.
+    assert OWN_PROVIDERS == ("litertlm", "self", "native")
+    assert "aicredits" not in OWN_PROVIDERS
+    for _p in OWN_PROVIDERS:
+        probe = NyxaraSettings(profile="dev")
+        probe.llm.provider = LLMProvider(_p)
+        assert probe.llm.active_key() is None, f"own provider {_p} must need no API key"
+    _dev = NyxaraSettings(profile="dev")
+    assert _dev.llm.provider is LLMProvider.AUTO
+    assert _dev.llm.litertlm_model == "gemma-4-E2B-it-litertlm"
+    assert _dev.llm.litertlm_enabled is True
+    print("OWN_PROVIDERS need no key; litertlm is the shipped primary OK")
 
     # Secret redaction
     s = NyxaraSettings(profile="dev")

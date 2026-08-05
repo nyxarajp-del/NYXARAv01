@@ -31,7 +31,7 @@ import types
 import pytest
 from pydantic import SecretStr
 
-from nyxara.kernel.config import OWNER, LLMProvider, NyxaraSettings, Profile
+from nyxara.kernel.config import OWN_PROVIDERS, OWNER, LLMProvider, NyxaraSettings, Profile
 from nyxara.mind.llm import LLM, AiCreditsProvider, LLMRequest
 
 
@@ -150,9 +150,15 @@ def _bare_machine(tmp_path, **over) -> NyxaraSettings:
 # --------------------------------------------------------------------------- #
 # 1. AiCredits is her PRIMARY model
 # --------------------------------------------------------------------------- #
-def test_aicredits_is_first_on_the_auto_ladder():
-    """Structural guarantee, asserted as the WHOLE tuple so a silent reorder cannot slip through."""
-    assert LLM._AUTO_LADDER == ("aicredits", "groq", "airouter", "self", "native")
+def test_aicredits_is_the_first_cloud_rung_on_the_auto_ladder():
+    """Structural guarantee, asserted as the WHOLE tuple so a silent reorder cannot slip through.
+
+    aicredits leads the CLOUD rungs but no longer leads the ladder: her on-device ``litertlm``
+    primary sits ahead of it, so a reachable cloud is now her fallback rather than her first voice."""
+    assert LLM._AUTO_LADDER == ("litertlm", "aicredits", "groq", "airouter", "self", "native")
+    assert LLM._AUTO_LADDER[0] == "litertlm"
+    clouds = [n for n in LLM._AUTO_LADDER if n not in OWN_PROVIDERS]
+    assert clouds[0] == "aicredits"
 
 
 def test_auto_is_the_shipped_default_so_aicredits_leads():

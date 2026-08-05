@@ -60,6 +60,15 @@ os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__AICREDITS_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__GROQ_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__AIROUTER_ENABLED", "false")
+# Her PRIMARY rung (mind/llm.py::LiteRTLMProvider) is not a network call, but it is a 2.4 GB
+# on-device model — and on a developer machine where the weights ARE present it answers for real.
+# That is worse than slow: a DEV-profile test that scripts a fake provider would silently get
+# Gemma's actual prose instead (observed in tests/mind/test_deliberate.py), so the suite would be
+# testing the model rather than the code. Same ``setdefault`` posture as the cloud rungs above: OFF
+# for the suite, and the litertlm tests opt in on their own settings object with a fake binding.
+# AUTO_DOWNLOAD is pinned off too, so no test run can ever start a multi-gigabyte download.
+os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
+os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

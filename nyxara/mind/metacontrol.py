@@ -277,10 +277,10 @@ class MetacognitiveController:
         escalation = bool(self._cfgv("escalation", True))
 
         ceiling = self._ceiling()
-        ceil_rung = int(getattr(ceiling, "max_rung", None)
-                        or getattr(self.deep_cfg, "max_rung", 4) or 4)
-        ceil_samples = int(getattr(ceiling, "samples", None)
-                           or getattr(self.deep_cfg, "samples", 3) or 3)
+        ceil_rung = max(1, int(getattr(ceiling, "max_rung", None)
+                               or getattr(self.deep_cfg, "max_rung", 4) or 4))
+        ceil_samples = max(1, int(getattr(ceiling, "samples", None)
+                                  or getattr(self.deep_cfg, "samples", 3) or 3))
         ceil_seconds = float(getattr(ceiling, "max_seconds", None)
                              or getattr(self.deep_cfg, "max_seconds", 60.0) or 60.0)
         base_samples = max(1, int(getattr(self.deep_cfg, "samples", 3) or 3))
@@ -301,6 +301,20 @@ class MetacognitiveController:
             samples = ceil_samples
             seconds = min(seconds_ceiling, max(ceil_seconds, 300.0))
             band = "extreme"
+
+        # ---- two invariants the band table cannot express on its own ---- #
+        # (1) No band may out-spend the machine. ``ceil_samples`` is a hardware-scaled ceiling
+        #     (growth/effective_scale.scaled_budget), while the moderate/hard rows are written off
+        #     the STATIC config — so on a machine that scales down, ``base_samples + 2`` asked for
+        #     more sampling than the ceiling allows, and more than the *extreme* band above it was
+        #     permitted. Clamping here fixes the over-spend and the inversion in one move: harder
+        #     bands can now only ever buy the same compute or more.
+        samples = max(1, min(samples, ceil_samples))
+        # (2) An entry rung above the max rung is not a budget, it is a contradiction. A low
+        #     ``ceil_rung`` used to leave e.g. entry=3 with max_rung=1 — enter above the ceiling and
+        #     the ladder has nowhere to start.
+        max_rung = max(1, min(max_rung, ceil_rung))
+        entry = min(entry, max_rung)
 
         # A history of over-confident "easy" calls raises the bar the ladder must clear before
         # it may stop early — calibration steering effort, not only the estimate.

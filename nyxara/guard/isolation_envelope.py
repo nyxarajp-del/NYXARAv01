@@ -20,6 +20,13 @@ call, so the substitution map lives only for that single request/response round-
 its OWN isolation flag via ``enabled=`` (``aicredits_isolation`` / ``groq_isolation`` /
 ``airouter_isolation``), so privacy is per-rung rather than tied to whichever provider happened to be
 the first one written.
+
+Note which rungs are NOT here. Her own brains — ``litertlm`` (the on-device Gemma that now leads the
+ladder), ``self`` and ``native``, i.e. ``config.OWN_PROVIDERS`` — run in her own process, so no prompt
+of theirs ever reaches a wire and there is nothing to abstract. They do not consult this module, and
+that is not an oversight: an envelope over a local model would cost accuracy to hide a name from
+itself. The strongest privacy posture available is therefore the default one — her primary answers
+on-device, and the envelope only engages on the cloud rungs beneath it.
 """
 from __future__ import annotations
 

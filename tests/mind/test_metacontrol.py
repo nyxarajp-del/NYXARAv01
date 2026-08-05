@@ -44,21 +44,66 @@ def test_estimate_orders_easy_before_hard():
     assert easy.difficulty < hard.difficulty
 
 
+def _sweep(mc):
+    """One budget per difficulty step, 0.0 … 1.0, at fixed moderate stakes."""
+    for i in range(11):
+        d = i / 10.0
+        yield mc.allocate(DifficultyEstimate(difficulty=d, calibrated=d,
+                                             signature="question/short/normal",
+                                             signals=DifficultySignals(stakes=0.3)))
+
+
 def test_budget_mapping_is_monotone():
     mc = _controller()
     prev = None
-    for i in range(11):
-        d = i / 10.0
-        est = DifficultyEstimate(difficulty=d, calibrated=d,
-                                 signature="question/short/normal",
-                                 signals=DifficultySignals(stakes=0.3))
-        b = mc.allocate(est)
+    for b in _sweep(mc):
         if prev is not None:
             assert b.entry_rung >= prev.entry_rung
             assert b.max_rung >= prev.max_rung
             assert b.samples >= prev.samples
             assert b.max_seconds >= prev.max_seconds
         prev = b
+
+
+class _Ceiling:
+    """A hardware-scaled ceiling, as growth/effective_scale.scaled_budget would return one."""
+
+    def __init__(self, max_rung, samples, max_seconds):
+        self.max_rung, self.samples, self.max_seconds = max_rung, samples, max_seconds
+
+
+def test_budget_mapping_stays_monotone_under_a_scaled_down_ceiling():
+    """The regression: a modest machine scales the ceiling BELOW the static band table.
+
+    The moderate/hard rows are written off the static config (``samples`` and ``samples + 2``)
+    while the extreme row takes the scaled ceiling — so a ceiling under ``samples + 2`` used to
+    make the hard band buy MORE sampling than the extreme band above it.
+    """
+    for ceil_samples in range(1, 9):
+        mc = _controller(ceiling=_Ceiling(max_rung=4, samples=ceil_samples, max_seconds=60.0))
+        prev = None
+        for b in _sweep(mc):
+            if prev is not None:
+                assert b.samples >= prev.samples, f"inverted at ceiling={ceil_samples}"
+            prev = b
+
+
+def test_no_band_outspends_the_machine_ceiling():
+    """A ceiling that is not enforced is not a ceiling."""
+    for ceil_samples, ceil_rung in ((1, 1), (2, 2), (3, 1), (6, 4)):
+        mc = _controller(ceiling=_Ceiling(max_rung=ceil_rung, samples=ceil_samples,
+                                          max_seconds=60.0))
+        for b in _sweep(mc):
+            assert b.samples <= ceil_samples
+            assert b.max_rung <= ceil_rung
+
+
+def test_entry_rung_never_exceeds_the_max_rung():
+    """Entering above the ceiling leaves the ladder nowhere to start — a contradiction, not a budget."""
+    for ceil_rung in range(1, 5):
+        mc = _controller(ceiling=_Ceiling(max_rung=ceil_rung, samples=4, max_seconds=60.0))
+        for b in _sweep(mc):
+            assert b.entry_rung <= b.max_rung, f"entry above max at ceiling={ceil_rung}"
 
 
 def test_easy_gets_one_forward_pass():

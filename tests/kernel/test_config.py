@@ -79,6 +79,31 @@ def test_test_profile_kills_every_cloud_provider():
         assert getattr(s.llm, f"{prefix}_enabled") is False, f"TEST profile leaks {prefix}"
 
 
+def test_test_profile_seals_the_on_device_primary():
+    """Her primary rung is local, so the key-derived sweep above cannot see it — check it by name.
+
+    It is not a network risk; it is a 2.4 GB model load and, on a machine where the weights happen
+    to be present, a real Gemma answering in place of a test's scripted provider."""
+    s = NyxaraSettings.for_profile(Profile.TEST)
+    assert s.llm.litertlm_enabled is False
+    assert s.llm.litertlm_auto_download is False
+
+
+def test_own_providers_are_the_in_process_rungs():
+    """One list answers 'is this hers or a teacher?' everywhere — keep it in step with the ladder."""
+    from nyxara.kernel.config import OWN_PROVIDERS
+    from nyxara.mind.llm import LLM
+
+    assert OWN_PROVIDERS == ("litertlm", "self", "native")
+    assert set(OWN_PROVIDERS) <= set(LLM._AUTO_LADDER)
+    for name in OWN_PROVIDERS:            # nothing of hers is reached over a wire, so none has a key
+        s = NyxaraSettings()
+        s.llm.provider = LLMProvider(name)
+        assert s.llm.active_key() is None
+    for name in ("aicredits", "groq", "airouter"):
+        assert name not in OWN_PROVIDERS
+
+
 def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
     s = NyxaraSettings.for_profile(Profile.DEV)
@@ -124,22 +149,32 @@ def test_llm_active_model_and_key():
     assert s.llm.active_key() is None
 
 
-def test_aicredits_is_primary_and_foundry_base_is_local():
-    """The shipped defaults put AiCredits first while the foundry LoRA-tunes its own local base."""
+def test_litertlm_is_primary_and_foundry_base_is_local():
+    """The shipped defaults put her ON-DEVICE brain first while the foundry LoRA-tunes its own base."""
     s = NyxaraSettings()
-    # serving: ``auto`` ships as the default, which makes aicredits her PRIMARY reachable model while
-    # keeping the degradation path intact (a *pinned* rung would skip the other clouds and drop
-    # straight to her native own-brain). Either way the facade degrades to her own brains when no
-    # cloud is reachable, keeping her sovereign.
+    # serving: ``auto`` ships as the default, which makes her on-device ``litertlm`` brain her PRIMARY
+    # model while keeping the degradation path intact (a *pinned* rung would skip the other rungs and
+    # drop straight to her native own-brain). Either way the facade degrades to her own brains when
+    # nothing above is reachable, keeping her sovereign.
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
-    assert s.llm.aicredits_base_url == "https://aicredits.in/api/v1"
-    assert s.llm.aicredits_model == "moonshotai/kimi-k2-thinking"
-    # pinning the primary rung by name resolves to its model
+    # her primary needs no endpoint and no key — that is what makes it un-outage-able
+    assert s.llm.litertlm_enabled is True
+    assert s.llm.litertlm_repo_id == "jamarag/gemma-4-E2B-it-ultra-uncensored-heretic-litertlm"
+    assert s.llm.litertlm_filename == "model.litertlm"
+    assert s.llm.litertlm_backend == "cpu"
+    # Gemma 4's turn markers, not Gemma 3's — the wrong pair makes long prompts echo forever
+    assert "<|turn>" in s.llm.litertlm_chat_template
+    assert "<start_of_turn>" not in s.llm.litertlm_chat_template
+    s.llm.provider = LLMProvider.LITERTLM
+    assert s.llm.active_model() == "gemma-4-E2B-it-litertlm"
+    assert s.llm.active_key() is None
+    # the cloud rungs stay configured beneath it, aicredits first among them
     s.llm.provider = LLMProvider.AICREDITS
     assert s.llm.active_model() == "moonshotai/kimi-k2-thinking"
+    assert s.llm.aicredits_base_url == "https://aicredits.in/api/v1"
     s.llm.provider = LLMProvider.AUTO
-    # groq and GLM-5-via-airouter stay configured as the cloud FALLBACK rungs, not the primary
+    # groq and GLM-5-via-airouter stay configured as the lower cloud rungs, not the primary
     assert s.llm.groq_model == "llama-3.3-70b-versatile"
     assert s.llm.groq_base_url == "https://api.groq.com/openai/v1"
     assert s.llm.airouter_model == "zai/glm-5"
