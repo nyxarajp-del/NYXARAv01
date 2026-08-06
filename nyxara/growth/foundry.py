@@ -90,7 +90,7 @@ def _stride_sample(items: Sequence[str], k: int) -> List[str]:
     return [items[int(i * step)] for i in range(k)]
 
 
-def _model_solver(model: BaseLanguageModel):
+def _model_solver(model: BaseLanguageModel, *, max_tokens: int = 128):
     """Wrap a forged model as a benchmark solver, rendered in NYXARA's own template.
 
     Train/inference/eval parity: the capability gauntlet measures the model exactly as
@@ -99,7 +99,7 @@ def _model_solver(model: BaseLanguageModel):
         from nyxara.mind.llm import (LLMRequest, format_self_prompt, truncate_at_stops,
                                      _SELF_USER_TAG, _SELF_ASSISTANT_TAG)
         rendered = format_self_prompt(LLMRequest.from_prompt(prompt, system=_CAP_BENCH_SYSTEM))
-        raw = model.generate(rendered, max_tokens=128)
+        raw = model.generate(rendered, max_tokens=max_tokens)
         text, _ = truncate_at_stops(raw, (f"\n{_SELF_USER_TAG}", f"\n{_SELF_ASSISTANT_TAG}",
                                           _SELF_USER_TAG, _SELF_ASSISTANT_TAG))
         return text
@@ -465,7 +465,17 @@ class Foundry:
             return 0.0
         try:
             from nyxara.eval.benchmark import build_default_benchmark
-            return build_default_benchmark().run(_model_solver(model)).mean_score
+            bench = build_default_benchmark()
+            # Bound the cost. The full battery at 128 tokens a task is 3,712 forward passes
+            # through a pure-NumPy transformer, per candidate, on the turn path — which is
+            # where the suite's missing hours were going. A fixed seed keeps the sampled
+            # tasks identical between scores, so the regression check still compares like
+            # with like; only the price changed, not what is being asked.
+            n = int(getattr(self.cfg, "capability_sample", 0) or 0)
+            if n:
+                bench = bench.sample(n, seed=0)
+            tokens = int(getattr(self.cfg, "capability_max_tokens", 128) or 128)
+            return bench.run(_model_solver(model, max_tokens=tokens)).mean_score
         except Exception:  # noqa: BLE001 — capability scoring is best-effort, never fatal
             return 0.0
 

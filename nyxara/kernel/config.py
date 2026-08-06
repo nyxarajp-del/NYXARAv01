@@ -848,6 +848,18 @@ class FoundryConfig(BaseModel):
     # benchmark, not merely lower perplexity. Tolerant of tiny noise via the margin.
     capability_gate: bool = True
     capability_regression_tol: float = Field(default=1e-6, ge=0.0)
+    # How much of the capability benchmark a single score costs. The gauntlet ran the whole
+    # 29-task battery at 128 tokens a task — 3,712 forward passes through a pure-NumPy
+    # transformer — for every candidate, on the ordinary turn path. That was the test suite's
+    # missing hour: with a per-test ceiling finally in place, the stack that came back pointed
+    # straight at ``_capability_score`` -> ``model.generate`` -> ``layernorm``.
+    #
+    # The sample is drawn with a FIXED seed, so every score sees the same tasks and successive
+    # forges stay comparable — a gate that compared against a differently-sampled baseline would
+    # be measuring the draw, not the model. Set ``capability_sample = 0`` to score the full
+    # battery. The benchmark answers are a number or a single letter, so 32 tokens is slack.
+    capability_sample: int = Field(default=8, ge=0)
+    capability_max_tokens: int = Field(default=32, ge=1)
     # Teacher-relative audit (the visible ceiling-break): when on, every forged candidate is also
     # A/B'd against the external teacher on the SAME oracle-graded battery and the gap
     # (own_accuracy − teacher_accuracy) is recorded as ``accuracy_vs_teacher`` in the version's
