@@ -373,8 +373,21 @@ class DomainClassifier:
             return Domain.GENERAL, conf, True, None
         return best, conf, False, None
 
+    #: Below this many tokens a problem carries no domain to find, so paying a whole generation
+    #: to look for one buys nothing. "Hii" is the case that made this matter: with an on-device
+    #: model at ~14 s a call (and ~95 s for the first, which loads the weights), classifying a
+    #: greeting cost 109 s of a 122 s turn — while the actual reasoning ran out of budget and
+    #: answered from the deterministic floor. An advisory labeller had outbid the answer.
+    _MIN_TOKENS_TO_REFINE = 3
+
     def _refine(self, problem: str) -> Optional[Domain]:
-        """Break a weak/ambiguous call with the LLM, if a real provider is available."""
+        """Break a weak/ambiguous call with the LLM, if a real provider is available.
+
+        Declines on input too thin to have a domain at all — a greeting is not an ambiguous
+        classification, it is an absent one, and the model's guess for it is noise either way.
+        """
+        if len(_tokens(problem)) < self._MIN_TOKENS_TO_REFINE:
+            return None
         if not _llm_real(self.llm):
             return None
         names = ", ".join(d.value for d in Domain if d is not Domain.GENERAL)

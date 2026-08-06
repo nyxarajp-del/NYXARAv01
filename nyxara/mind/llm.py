@@ -611,10 +611,22 @@ class LiteRTLMProvider(LLMProviderBase):
 
     name = "litertlm"
 
+    #: Loaded engines, shared across every instance in the process.
+    #:
+    #: Per-instance was wrong in two ways. The weights are 2.5 GB and take ~95 s to read, so a
+    #: second provider object — the boot warm-up, a second facade, a tool that builds its own —
+    #: would load a second full copy: 5 GB resident and 95 s paid twice, for one model. And it
+    #: made warming impossible, because the object that did the loading was not the object that
+    #: later served the turn. One process, one set of weights.
+    #:
+    #: Keyed by ``(path, backend, cache_dir)`` rather than path alone: the backend is part of what
+    #: an engine *is*, and sharing across it would hand a CPU engine to a caller that asked for
+    #: the GPU — silently, since both answer.
+    _ENGINES: Dict[Tuple[str, str, Optional[str]], Any] = {}
+    _ENGINE_LOCK = threading.Lock()
+
     def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
         super().__init__(settings)
-        self._engine: Any = None
-        self._engine_path: Optional[str] = None
         self._lock = threading.Lock()
         # Latched load failure. Once the runtime has proved it cannot start on this host, the rung
         # takes itself off the ladder instead of failing — and logging — on every single turn.
@@ -721,14 +733,28 @@ class LiteRTLMProvider(LLMProviderBase):
             return None
         return str(d)
 
+    def _engine_key(self) -> Tuple[str, str, Optional[str]]:
+        """What makes one loaded engine interchangeable with another."""
+        return (str(self.model_path()),
+                str(getattr(self.settings.llm, "litertlm_backend", "cpu") or "cpu").lower(),
+                self._cache_dir())
+
+    def _engine_for(self, key: Tuple[str, str, Optional[str]]) -> Any:
+        """The process-wide engine for ``key``, or ``None`` if it is not loaded."""
+        return type(self)._ENGINES.get(key)
+
     def _get_engine(self, litert_lm: Any) -> Any:
-        """Load once, reuse forever. Multi-GB and ~7 s, so a per-request load is not an option."""
-        path = str(self.model_path())
-        if self._engine is not None and self._engine_path == path:
-            return self._engine
-        with self._lock:
-            if self._engine is not None and self._engine_path == path:
-                return self._engine
+        """Load once per process, reuse forever. 2.5 GB and ~95 s — never per request, and
+        never per provider instance (see :attr:`_ENGINES`)."""
+        key = self._engine_key()
+        path = key[0]
+        engine = self._engine_for(key)
+        if engine is not None:
+            return engine
+        with type(self)._ENGINE_LOCK:
+            engine = self._engine_for(key)
+            if engine is not None:
+                return engine
             try:   # the runtime is chatty on stderr; keep her console readable
                 litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
             except Exception:  # noqa: BLE001
@@ -745,7 +771,7 @@ class LiteRTLMProvider(LLMProviderBase):
                 log.warning("litertlm engine could not start; taking the rung off the ladder "
                             "until reset: %s", self._dead)
                 raise
-            self._engine, self._engine_path = engine, path
+            type(self)._ENGINES[key] = engine
             log.info("litertlm engine loaded: %s", path)
             return engine
 
@@ -782,12 +808,13 @@ class LiteRTLMProvider(LLMProviderBase):
                 "model_path": str(path) if path is not None else None,
                 "model": self.settings.llm.litertlm_model,
                 "backend": getattr(self.settings.llm, "litertlm_backend", "cpu"),
-                "engine_loaded": self._engine is not None, "reason_unavailable": reason}
+                "engine_loaded": self._engine_for(self._engine_key()) is not None,
+                "reason_unavailable": reason}
 
     def close(self) -> None:
         """Release the engine and its weights (used by the tests and by a lean reload)."""
-        with self._lock:
-            engine, self._engine, self._engine_path = self._engine, None, None
+        with type(self)._ENGINE_LOCK:
+            engine = type(self)._ENGINES.pop(self._engine_key(), None)
         if engine is not None:
             try:
                 engine.close()
@@ -802,6 +829,26 @@ class LiteRTLMProvider(LLMProviderBase):
         """
         self._dead = None
         self._template_name = self._template = None
+
+    def warm(self) -> bool:
+        """Load the weights now, so the first turn does not pay for it.
+
+        Measured: a bare "Hii" took 122.7 s, and 95.2 s of that was ``Engine.__init__`` reading
+        2.5 GB off disk — inside the Master's first message, because the engine was built lazily
+        on first use. The cost is unavoidable and it is paid once; what was wrong was *when*.
+        Boot is the honest place for it: he is already watching a progress line there, and every
+        turn after is the ~14 s the model actually takes.
+
+        Returns whether the engine is up. Never raises — a host that cannot start the runtime
+        latches ``_dead`` exactly as it would have on the first turn, and the ladder steps down.
+        """
+        if not self.available():
+            return False
+        try:
+            import litert_lm
+            return self._get_engine(litert_lm) is not None
+        except Exception:  # noqa: BLE001 — warming is an optimisation, never a boot failure
+            return False
 
     # ---- request → litert_lm.Message objects ---- #
     @staticmethod

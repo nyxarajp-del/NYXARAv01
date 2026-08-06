@@ -155,6 +155,110 @@ def test_the_budget_never_drops_below_one_second():
 
 
 # --------------------------------------------------------------------------- #
+# The turn's own budget — the framings deadline only covered one stage
+# --------------------------------------------------------------------------- #
+def _budgeted_core(max_seconds=5.0, elapsed=0.0):
+    core = NyxaraCore.__new__(NyxaraCore)
+    core._last_compute_plan = (types.SimpleNamespace(max_seconds=max_seconds)
+                               if max_seconds is not None else None)
+    core._turn_clock = time.monotonic() - elapsed
+    core._skipped_stages = []
+    return core
+
+
+def test_a_fresh_turn_has_its_whole_allocation():
+    assert _budgeted_core(5.0)._budget_left() == pytest.approx(5.0, abs=0.2)
+
+
+def test_an_overrun_turn_skips_optional_cognition():
+    core = _budgeted_core(5.0, elapsed=6.0)
+    assert core._budget_spent("recursive_improve") is True
+
+
+def test_a_turn_inside_its_budget_skips_nothing():
+    core = _budgeted_core(30.0, elapsed=1.0)
+    assert core._budget_spent("recursive_improve") is False
+    assert core._skipped_stages == []
+
+
+def test_the_skips_are_recorded():
+    """A turn that quietly thinks less looks exactly like a turn that had less to say — this
+    module has already lost three rounds of diagnosis to that resemblance."""
+    core = _budgeted_core(1.0, elapsed=9.0)
+    core._budget_spent("role_council")
+    core._budget_spent("recursive_improve")
+    core._budget_spent("role_council")            # a repeat is not a second skip
+    assert core._skipped_stages == ["role_council (out of time)",
+                                    "recursive_improve (out of time)"]
+
+
+def test_the_recorded_skip_says_which_rule_dropped_it():
+    """'out of time' and 'fast path' are different facts about the turn, and an operator
+    reading the log needs to know which one cost him the faculty."""
+    slow = _budgeted_core(1.0, elapsed=9.0)
+    slow._budget_spent("recursive_improve", costs_a_generation=True)
+    assert "out of time" in slow._skipped_stages[0]
+
+    fast = _budgeted_core(30.0, elapsed=0.0)
+    fast._last_compute_plan = types.SimpleNamespace(max_seconds=30.0, entry_rung=0)
+    fast._budget_spent("recursive_improve", costs_a_generation=True)
+    assert "fast path" in fast._skipped_stages[0]
+
+
+def test_the_fast_path_only_drops_stages_that_cost_a_generation():
+    """A cheap stage on the fast path still runs — 'one forward pass' is a budget for model
+    calls, not an instruction to stop thinking."""
+    core = _budgeted_core(30.0)
+    core._last_compute_plan = types.SimpleNamespace(max_seconds=30.0, entry_rung=0)
+    assert core._budget_spent("cheap_enrichment") is False
+    assert core._budget_spent("expensive", costs_a_generation=True) is True
+
+
+def test_a_normal_turn_is_not_on_the_fast_path():
+    core = _budgeted_core(30.0)
+    core._last_compute_plan = types.SimpleNamespace(max_seconds=30.0, entry_rung=2)
+    assert core._on_fast_path() is False
+    assert core._budget_spent("expensive", costs_a_generation=True) is False
+
+
+def test_a_turn_with_no_plan_is_unbudgeted_rather_than_starved():
+    """No plan must mean 'no limit', never 'no thinking' — a missing budget would otherwise
+    silently disable every optional faculty on the turn."""
+    core = _budgeted_core(max_seconds=None)
+    assert core._budget_left() == float("inf")
+    assert core._budget_spent("recursive_improve") is False
+
+
+def test_a_nonsense_allocation_does_not_starve_the_turn():
+    for bad in (0.0, -1.0, "soon"):
+        core = _budgeted_core(max_seconds=bad, elapsed=100.0)
+        assert core._budget_left() == float("inf")
+        assert core._budget_spent("x") is False
+
+
+def test_within_budget_runs_the_stage_when_there_is_time():
+    core = _budgeted_core(30.0)
+    assert core._within_budget("s", lambda c: c + "!", "answer") == "answer!"
+
+
+def test_within_budget_returns_the_candidate_untouched_when_out_of_time():
+    core = _budgeted_core(1.0, elapsed=9.0)
+    def _boom(c):
+        raise AssertionError("an out-of-budget stage must not run")
+    assert core._within_budget("s", _boom, "answer") == "answer"
+
+
+def test_the_budget_guards_refinement_not_the_gates():
+    """The control law is downstream of every guard added here. A turn that runs out of time
+    gives a shallower answer, never a less-gated one — so no gate name may appear as a stage."""
+    import inspect
+    source = inspect.getsource(NyxaraCore._invoke_reasoner)
+    for gate in ("shield", "corrigibility", "permission", "guardian", "oversight", "initiative"):
+        assert f'_budget_spent("{gate}")' not in source
+        assert f'_within_budget("{gate}"' not in source
+
+
+# --------------------------------------------------------------------------- #
 # Saying so
 # --------------------------------------------------------------------------- #
 def test_hitting_the_deadline_is_announced(caplog):
