@@ -6275,28 +6275,38 @@ class NyxaraCore:
         # Only acts (not conversational responses) are gated here: an irreversible
         # high-stakes or low-confidence action is deferred to the Master rather than
         # taken alone. This never bypasses a prior gate — it can only add caution —
-        # so it is safe on the live path. One standing exception keeps the Master's
-        # word sovereign: when he has flipped the ``agency.autonomous_tools`` master
-        # switch (oversight in SOVEREIGN — "use any tool without per-action approval,
-        # nothing is ever queued"), an AUTONOMOUS act is not re-queued here; /scram,
-        # pause, permission caps and the transparency feed all still stand.
+        # so it is safe on the live path.
+        #
+        # When the Master has flipped the ``agency.autonomous_tools`` master switch
+        # (oversight in SOVEREIGN — "use any tool without per-action approval, nothing is
+        # ever queued"), the two THRESHOLD clauses are waived for a non-owner act: he has
+        # said, in effect, "stop asking me whether you are sure enough." The other two are
+        # not waived and no grant reaches them — a misaligned act is still refused, and an
+        # irreversible high-stakes act is still the Master's call.
+        #
+        # The gate used to be skipped WHOLESALE under that grant, which inverted the
+        # sovereignty it was meant to express: `delete the production database` escalated
+        # under Authority.OWNER and *executed* under Authority.AUTONOMOUS, so autonomy
+        # strictly outranked its owner. /scram, pause, permission caps and the transparency
+        # feed stood the whole time and did not catch it, because none of them is the gate
+        # that was skipped.
         if c.kind == "act":
             sovereign_grant = (authority is not Authority.OWNER
                                and getattr(self.oversight, "mode", None)
                                is ReviewMode.SOVEREIGN)
-            if sovereign_grant:
-                gates["initiative"] = "sovereign-grant"
-            else:
-                try:
-                    gov = self._initiative().gate(self._initiative_option(c))
+            try:
+                gov = self._initiative().gate(self._initiative_option(c))
+                from nyxara.planning.decide import DecisionAction
+                if sovereign_grant and gov.waivable:
+                    gates["initiative"] = f"sovereign-grant ({gov.basis})"
+                else:
                     gates["initiative"] = gov.action.value
-                    from nyxara.planning.decide import DecisionAction
                     if gov.action is DecisionAction.REJECT:
                         return Disposition.REFUSE, f"initiative: {gov.reason}"
                     if gov.action is not DecisionAction.ACT:
                         return Disposition.ESCALATE, f"initiative: {gov.reason}"
-                except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
-                    gates["initiative"] = f"skipped ({exc})"
+            except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
+                gates["initiative"] = f"skipped ({exc})"
 
         return Disposition.ACT, "cleared"
 
@@ -6669,22 +6679,109 @@ class NyxaraCore:
             return self._reason_once(stimulus, focus, memories)
         import concurrent.futures as _cf
         results: List[tuple] = []
+        deadline = self._parallel_deadline_s()
+        timed_out = False
+        ex = _cf.ThreadPoolExecutor(max_workers=len(framings))
         try:
-            with _cf.ThreadPoolExecutor(max_workers=len(framings)) as ex:
-                futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
-                        for name, mem in framings}
-                for fut in _cf.as_completed(futs):
-                    try:
-                        results.append((futs[fut], fut.result()))
-                    except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
-                        pass
+            futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
+                    for name, mem in framings}
+            for fut in _cf.as_completed(futs, timeout=deadline):
+                try:
+                    results.append((futs[fut], fut.result()))
+                except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
+                    pass
+        except _cf.TimeoutError:
+            # The budget ran out. Vote with whatever arrived — a late framing is not worth an
+            # unbounded turn, and metacontrol already decided how long this question is worth.
+            self._note_deadline(deadline, len(results), len(framings))
+            timed_out = True
         except Exception:  # noqa: BLE001 — never let concurrency break the turn
             return self._reason_once(stimulus, focus, memories)
+        finally:
+            # Do not join. A Python thread cannot be interrupted, so the deadline bounds the TURN,
+            # not the work: stragglers run on and their results are discarded. That is the honest
+            # trade — the alternative was `with ThreadPoolExecutor(...)`, whose __exit__ joins every
+            # worker and made the deadline decorative. A single core.process() under DEV defaults
+            # costs 3 framings x 3 passes x 3 samples x 5 RSI iterations of model calls, which is
+            # how a turn could run for the better part of an hour. Stragglers do finish and their
+            # threads drain, so this releases them rather than leaking them — but a framing that
+            # hung forever would keep its thread alive to interpreter exit, same as before.
+            ex.shutdown(wait=False, cancel_futures=True)
         if not results:
+            if timed_out:
+                # Spending the budget and then paying the FULL cost again is the one move worse
+                # than either. (Measured: a 2 s deadline with a 30 s framing returned in 32 s,
+                # because this line ran another complete pass after the deadline had already
+                # fired.) When time is what ran out, answer from the deterministic floor.
+                return _default_reasoner(stimulus, focus)
             return self._reason_once(stimulus, focus, memories)
         chosen_name, chosen = self._select_hypothesis(results)
         self._record_hypotheses(results, chosen_name)
         return chosen
+
+    @staticmethod
+    def _note_deadline(deadline: float, got: int, total: int) -> None:
+        """Say the budget was hit. A turn that quietly returns a thinner answer looks exactly like
+        a turn that thought less — and this module has been bitten by that once already."""
+        try:
+            import logging
+            logging.getLogger("nyxara.kernel.orchestrator").warning(
+                "reasoning deadline of %.1fs reached; voting with %d of %d framings",
+                deadline, got, total)
+        except Exception:  # noqa: BLE001 — reporting must never break the turn
+            pass
+
+    def _parallel_deadline_s(self) -> float:
+        """How long this turn's parallel framings may take, in seconds.
+
+        Derived from the ComputeBudget metacontrol already computed for this turn — it decides how
+        much an easy question is worth versus a hard one, and until now nothing on this path read
+        that decision.
+
+        A *share* of it, not all of it. ``max_seconds`` budgets the whole turn (5 s easy through
+        600 s extreme) and these framings are its first stage, ahead of recursive improvement, the
+        role council and the gates; spending the full allocation here would starve everything
+        downstream. ``metacontrol.parallel_deadline_share`` sets the split.
+
+        Falls back to a plain per-request ceiling when no plan was recorded, because a turn with
+        no budget is exactly the turn that runs forever.
+        """
+        plan = getattr(self, "_last_compute_plan", None)
+        seconds = getattr(plan, "max_seconds", None)
+        try:
+            seconds = float(seconds) if seconds is not None else 0.0
+        except (TypeError, ValueError):
+            seconds = 0.0
+        if seconds > 0.0:
+            seconds *= self._deadline_share()
+        else:
+            seconds = self._configured_timeout_s()
+        return max(1.0, seconds)
+
+    @staticmethod
+    def _deadline_share() -> float:
+        """Fraction of the turn budget the parallel framings may spend (config, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            share = float(get_settings().metacontrol.parallel_deadline_share)
+        except Exception:  # noqa: BLE001 — a budget must never be the thing that breaks a turn
+            return 0.5
+        return share if 0.0 < share <= 1.0 else 0.5
+
+    @staticmethod
+    def _configured_timeout_s() -> float:
+        """The per-request ceiling from config, or a plain 60 s if config cannot be read.
+
+        Read through ``get_settings()`` rather than ``self.settings``: this class has no such
+        attribute — every other site in this file spells it ``getattr(self, "settings", None)``,
+        and reaching for it directly here would have raised ``AttributeError`` on exactly the
+        path that needs the fallback (a turn with no compute plan).
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            return float(get_settings().llm.request_timeout_s)
+        except Exception:  # noqa: BLE001 — a budget must never be the thing that breaks a turn
+            return 60.0
 
     def _inject_self_knowledge(self, memories: List[Any], stimulus: str = "") -> List[Any]:
         """Level 2 — prepend a SelfKnowledgeReport to the memory context so the

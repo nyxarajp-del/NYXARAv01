@@ -155,10 +155,33 @@ class Governance:
     action: DecisionAction
     initiative_score: float
     reason: str
+    #: Which clause decided, as a stable token. ``reason`` is prose meant for the Master and its
+    #: wording changes; callers that must treat the clauses *differently* need something they can
+    #: branch on. One does: the kernel waives the two threshold clauses when the Master has turned
+    #: per-action approval off, and must go on honouring the other two — see :attr:`waivable`.
+    basis: str = "unspecified"
 
     @property
     def autonomous(self) -> bool:
         return self.action is DecisionAction.ACT
+
+    @property
+    def waivable(self) -> bool:
+        """Whether a standing owner grant may set this verdict aside.
+
+        Two of the four clauses are *thresholds on NYXARA's own certainty* — "am I confident
+        enough?", "is this reversible enough?" — and the answer the Master gives by enabling
+        ``agency.autonomous_tools`` is precisely "stop asking me that". Those are waivable.
+
+        The other two are not, and no grant reaches them:
+
+        * ``owner_alignment`` — Rule 1. A misaligned act is refused, never merely unqueued.
+        * ``high_stakes_irreversible`` — an irreversible, high-stakes move is the Master's call
+          by construction. Waiving it once let an AUTONOMOUS turn execute "delete the production
+          database" that the *Master's own* turn had escalated: autonomy strictly outranking its
+          owner, which is the one thing this layer exists to prevent.
+        """
+        return self.basis in ("confidence", "reversibility")
 
 
 class InitiativeGovernor:
@@ -175,23 +198,28 @@ class InitiativeGovernor:
         score = option.confidence * option.reversibility
         if not option.owner_aligned:
             return Governance(DecisionAction.REJECT, score,
-                              "not owner-aligned — refused (Rule 1)")
+                              "not owner-aligned — refused (Rule 1)",
+                              basis="owner_alignment")
         # an irreversible, high-stakes move is the Master's call, never NYXARA's alone
         if option.stakes >= self.high_stakes and option.reversibility < 0.5:
             return Governance(DecisionAction.ASK, score,
-                              "irreversible and high-stakes — defer to the Master")
+                              "irreversible and high-stakes — defer to the Master",
+                              basis="high_stakes_irreversible")
         if (option.confidence >= self.confidence_threshold
                 and option.reversibility >= self.reversibility_threshold):
             return Governance(DecisionAction.ACT, score,
                               f"confident ({option.confidence:.2f}) and reversible "
-                              f"({option.reversibility:.2f}) — act autonomously")
+                              f"({option.reversibility:.2f}) — act autonomously",
+                              basis="cleared")
         if option.confidence < self.confidence_threshold:
             return Governance(DecisionAction.ASK, score,
                               f"confidence {option.confidence:.2f} below "
-                              f"{self.confidence_threshold} — ask the Master")
+                              f"{self.confidence_threshold} — ask the Master",
+                              basis="confidence")
         return Governance(DecisionAction.ASK, score,
                           f"reversibility {option.reversibility:.2f} below "
-                          f"{self.reversibility_threshold} — ask the Master")
+                          f"{self.reversibility_threshold} — ask the Master",
+                          basis="reversibility")
 
 
 # --------------------------------------------------------------------------- #
@@ -382,18 +410,33 @@ if __name__ == "__main__":  # pragma: no cover
     gov = decider.governor.gate(risky)
     print(f"\nirreversible+stakes : {gov.action.value} — {gov.reason}")
     assert gov.action is DecisionAction.ASK
+    assert gov.basis == "high_stakes_irreversible"
+    assert not gov.waivable, "no standing grant may set the Master's own call aside"
 
     # low confidence -> ASK
     unsure = Option("guess", {"owner_benefit": 0.7}, confidence=0.4, reversibility=0.9,
                     stakes=0.3)
-    assert decider.governor.gate(unsure).action is DecisionAction.ASK
-    print("low confidence      : ask ✓")
+    unsure_gov = decider.governor.gate(unsure)
+    assert unsure_gov.action is DecisionAction.ASK
+    assert unsure_gov.basis == "confidence" and unsure_gov.waivable
+    print("low confidence      : ask ✓ (waivable — a threshold on her own certainty)")
 
     # not owner-aligned -> REJECT
     against = Option("betray", {"owner_benefit": 0.9}, confidence=0.99, reversibility=1.0,
                      owner_aligned=False)
-    assert decider.governor.gate(against).action is DecisionAction.REJECT
-    print("anti-owner          : reject ✓")
+    against_gov = decider.governor.gate(against)
+    assert against_gov.action is DecisionAction.REJECT
+    assert against_gov.basis == "owner_alignment" and not against_gov.waivable
+    print("anti-owner          : reject ✓ (never waivable — Rule 1)")
+
+    # The distinction the kernel branches on. Turning per-action approval off answers "am I sure
+    # enough?" with "stop asking me" — it does not answer "may I do something irreversible and
+    # high-stakes alone?", and conflating the two once let an autonomous turn execute a destructive
+    # act that the Master's OWN turn had escalated.
+    waivable = {g.basis for g in (unsure_gov, decider.governor.gate(
+        Option("meh", {"owner_benefit": 0.5}, confidence=0.99, reversibility=0.05, stakes=0.0)))}
+    assert waivable == {"confidence", "reversibility"}
+    print(f"waivable clauses    : {sorted(waivable)}")
 
     # minimax-regret for a high-stakes call: prefer the robust, balanced option
     hi_opts = [
