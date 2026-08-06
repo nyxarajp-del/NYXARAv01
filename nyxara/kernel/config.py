@@ -300,6 +300,13 @@ class MetaControlConfig(BaseModel):
     confidence_target: float = Field(default=0.75, ge=0.0, le=1.0)
     escalation: bool = True                # may climb past the entry rung when below target
     max_seconds_ceiling: float = Field(default=600.0, ge=1.0, le=600.0)
+    # What share of ``ComputeBudget.max_seconds`` the parallel hypothesis framings may spend
+    # (kernel/orchestrator.py::_reason_parallel). ``max_seconds`` budgets the WHOLE turn — 5s easy
+    # to 600s extreme — and the framings are one stage of it, ahead of recursive improvement, the
+    # role council and the gates. Handing them the full turn budget would let the first stage eat
+    # the lot; handing them a share leaves room for the rest. Raise it toward 1.0 to favour
+    # breadth of hypotheses over depth of refinement.
+    parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
     # Calibration correction only engages once this many outcomes have been observed.
     min_calibration_samples: int = Field(default=20, ge=0)
     # A verified score at/above this floor counts the allocation as "sufficient".

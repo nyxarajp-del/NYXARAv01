@@ -702,6 +702,38 @@ new vocabulary buys a different *capability* ruler, never a softer character one
   held-out battery: the meta-loss may raise difficulty and may never touch the ruler, because
   "she never plateaus" and "the ruler kept shrinking" otherwise look identical from inside.
 
+## Does a faculty beat its own absence? — `nyxara.eval.ablation`
+
+Every other battery in `nyxara.eval` measures **the whole mind**: `harness` asks whether it is
+still safe, `benchmark` and `hard_benchmark` ask how capable it is, `general_novel` asks how much
+it reasons out unaided. None of them can answer the question that decides whether a module should
+continue to exist:
+
+> Is she measurably better *with* this faculty than *without* it?
+
+92 modules are wired into the core. Each one's self-tests show that it **works** — which is not
+evidence that any of them **helps**. A module can be correct, tested, documented, reachable, and
+still contribute nothing to an answer. `python -m nyxara.eval --ablate` produces the missing
+evidence: it runs the held-out fold twice per faculty — once live, once switched off through the
+code's own `is None` fallback — and compares the *paired* outcomes with an exact McNemar test.
+
+The instrument is built mostly around the ways a null result can lie, because the cost of getting
+this wrong is deleted working code:
+
+- **`broken`** — the toggle reported that it changed nothing, so no measurement was taken. Never a
+  deletion candidate.
+- **`inert`** — not one answer differed in either arm. That is a finding about the *battery* (the
+  faculty never ran on these tasks), not about the faculty. Never a deletion candidate.
+- **`underpowered`** — answers changed, but too few to conclude anything. Reported separately from
+  a real null so "we did not look hard enough" cannot be read as "we looked and found nothing."
+- **`no-evidence`** / **`hurts`** — a genuine, adequately-powered finding. Only these support
+  removal, and they are ranked by the per-turn latency each faculty costs, because a module that
+  adds nothing and costs 12 seconds is a stronger candidate than one that costs a microsecond.
+
+The command exits 0 whatever it finds. That is deliberate: this reports evidence, it does not pass
+or fail a build, and a non-zero exit would invite wiring it into CI where a small-sample null would
+quietly become a delete-this signal.
+
 ## What this is not
 
 300M parameters is not, and cannot be made into, a frontier model. Trained well it is a capable

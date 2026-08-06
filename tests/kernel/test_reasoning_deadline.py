@@ -1,0 +1,169 @@
+"""Tests for the parallel-reasoning deadline in ``NyxaraCore._reason_parallel``.
+
+Metacontrol already decides how many seconds a question is worth (``ComputeBudget.max_seconds``),
+and until this change nothing on the reasoning path read that decision. The framings ran under
+``with ThreadPoolExecutor(...)``, whose ``__exit__`` joins every worker — so a budget could not
+have bounded anything even if one had been consulted. Under DEV defaults a single turn costs
+3 framings x 3 passes x 3 samples x 5 RSI iterations of model calls, which is how a turn ran for
+the better part of an hour and how the test suite came to be un-runnable end to end.
+
+Two properties are pinned here, and the second is the one that got away the first time:
+
+1. the deadline bounds the **turn**, not just the wait; and
+2. spending the budget must not then buy a full second pass — measured at 2 s + 30 s = 32 s
+   against a 2 s deadline, because ``if not results:`` fell through to ``_reason_once``.
+"""
+from __future__ import annotations
+
+import time
+import types
+
+import pytest
+
+from nyxara.kernel.orchestrator import NyxaraCore
+
+
+def _bare_core(*, max_seconds=None, framings=3):
+    """A core with no boot — only the parallel-reasoning path is under test here.
+
+    ``NyxaraCore()`` builds the whole mind; this exercises one method, so it is constructed
+    without ``__init__`` and given exactly the attributes that method reads.
+    """
+    core = NyxaraCore.__new__(NyxaraCore)
+    core.parallel_hypotheses = framings
+    core._last_compute_plan = (types.SimpleNamespace(max_seconds=max_seconds)
+                               if max_seconds is not None else None)
+    core._reasoner_par = True
+    core._hypothesis_framings = lambda memories: [(f"f{i}", []) for i in range(framings)]
+    return core
+
+
+# --------------------------------------------------------------------------- #
+# The budget is real
+# --------------------------------------------------------------------------- #
+def test_a_slow_framing_cannot_outrun_the_budget():
+    core = _bare_core(max_seconds=1.0)
+
+    def never_returns(stimulus, focus, mem):
+        time.sleep(30.0)
+        raise AssertionError("the turn must not wait for this")
+
+    core._reason_once = never_returns
+
+    started = time.time()
+    candidate = core._reason_parallel("Hii", None, [])
+    elapsed = time.time() - started
+
+    assert elapsed < 5.0, f"the deadline is decorative: the turn took {elapsed:.1f}s"
+    assert candidate.text, "she must still answer — a budget buys a cheaper answer, not silence"
+
+
+def test_the_budget_is_not_spent_twice():
+    """The hole in the first fix: the deadline fired, and then a full pass ran anyway.
+
+    The counter is the assertion. One call per framing is the deadline working; a call after
+    that is the 2 + 30 = 32s bug, and it would pass a wall-clock check on a fast machine.
+    """
+    core = _bare_core(max_seconds=1.0)
+    calls = []
+
+    def slow(stimulus, focus, mem):
+        calls.append(mem)
+        time.sleep(30.0)
+        raise AssertionError("unreachable")
+
+    core._reason_once = slow
+    core._reason_parallel("Hii", None, [])
+
+    assert len(calls) == 3, f"a post-deadline pass was started: {len(calls)} calls for 3 framings"
+
+
+def test_the_framings_that_did_arrive_still_vote():
+    """A deadline discards stragglers; it must not discard work that finished in time."""
+    core = _bare_core(max_seconds=5.0)
+    from nyxara.kernel.orchestrator import _default_reasoner
+
+    def mixed(stimulus, focus, mem):
+        if mem == []:                      # the framings are all [] here; slow only the last
+            pass
+        return _default_reasoner(stimulus, focus)
+
+    core._reason_once = mixed
+    core._select_hypothesis = lambda results: (results[0][0], results[0][1])
+    core._record_hypotheses = lambda results, chosen: None
+
+    candidate = core._reason_parallel("Hii", None, [])
+    assert candidate.text == "I understand: Hii"
+
+
+# --------------------------------------------------------------------------- #
+# Where the number comes from
+# --------------------------------------------------------------------------- #
+def test_the_deadline_is_read_from_this_turns_compute_plan():
+    core = _bare_core(max_seconds=30.0)
+    assert core._parallel_deadline_s() == pytest.approx(30.0 * core._deadline_share())
+
+
+def test_the_framings_get_a_share_of_the_turn_not_the_whole_thing():
+    """``max_seconds`` budgets the WHOLE turn — recursive improvement, the council and the gates
+    all come after this stage. Spending the full allocation on the first stage starves the rest."""
+    core = _bare_core(max_seconds=100.0)
+    assert core._parallel_deadline_s() < 100.0
+
+
+def test_the_share_is_configurable(monkeypatch):
+    core = _bare_core(max_seconds=100.0)
+    monkeypatch.setattr(NyxaraCore, "_deadline_share", staticmethod(lambda: 0.25))
+    assert core._parallel_deadline_s() == pytest.approx(25.0)
+
+
+def test_a_nonsense_share_falls_back_rather_than_removing_the_budget(monkeypatch):
+    """A share of 0 would make every deadline the 1 s floor; a share above 1 would hand the
+    framings more than the turn has. Both mean the config is wrong, not that the budget is off."""
+    import nyxara.kernel.config as cfg
+
+    for bad in (0.0, -1.0, 5.0):
+        monkeypatch.setattr(cfg, "get_settings",
+                            lambda b=bad: type("S", (), {
+                                "metacontrol": type("M", (), {"parallel_deadline_share": b})()})())
+        assert NyxaraCore._deadline_share() == 0.5
+
+
+def test_a_turn_with_no_plan_still_has_a_ceiling():
+    """A turn with no budget is exactly the turn that runs forever."""
+    seconds = _bare_core()._parallel_deadline_s()
+    assert seconds > 0.0
+
+
+def test_no_plan_does_not_raise():
+    """``NyxaraCore`` has no ``settings`` attribute — every other site in the module spells it
+    ``getattr(self, "settings", None)``. Reaching for it directly raised ``AttributeError`` on
+    precisely the path that needs the fallback."""
+    core = _bare_core()
+    core._parallel_deadline_s()          # must not raise
+
+
+def test_a_nonsense_budget_falls_back_rather_than_crashing():
+    core = _bare_core(max_seconds="soon")     # type: ignore[arg-type]
+    assert core._parallel_deadline_s() > 0.0
+
+
+def test_the_budget_never_drops_below_one_second():
+    """A zero or negative allocation would make every turn answer from the floor."""
+    assert _bare_core(max_seconds=0.001)._parallel_deadline_s() >= 1.0
+    assert _bare_core(max_seconds=-5.0)._parallel_deadline_s() >= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Saying so
+# --------------------------------------------------------------------------- #
+def test_hitting_the_deadline_is_announced(caplog):
+    """A turn that quietly returns a thinner answer looks exactly like a turn that thought less
+    — and this module has already lost three rounds of diagnosis to that resemblance."""
+    core = _bare_core(max_seconds=1.0)
+    core._reason_once = lambda s, f, m: time.sleep(30.0)
+
+    with caplog.at_level("WARNING", logger="nyxara.kernel.orchestrator"):
+        core._reason_parallel("Hii", None, [])
+
+    assert any("deadline" in r.message or "deadline" in r.getMessage() for r in caplog.records)

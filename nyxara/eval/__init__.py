@@ -15,6 +15,8 @@ Run the whole thing with ``python -m nyxara.eval``.
 
 from __future__ import annotations
 
+from nyxara.eval.ablation import (CORE_FACULTIES, AblationReport, AblationResult, Faculty,
+                                  ablate, attr_faculty, mcnemar_exact, run_ablation)
 from nyxara.eval.benchmark import (Benchmark, BenchmarkReport, BenchmarkResult,
                                   BenchmarkTask, Grader, build_arithmetic_benchmark,
                                   build_default_benchmark, build_logic_benchmark,
@@ -90,4 +92,16 @@ __all__ = [
     "run_structure_transfer",
     "run_law_induction",
     "run_generalization_benchmark",
+    # does a FACULTY beat its own absence? (eval/ablation.py)
+    # Every other battery here measures the whole mind. This one measures one part against not
+    # having it, on the held-out fold, with a paired test — the only evidence that can honestly
+    # justify removing a module rather than keeping it on faith.
+    "Faculty",
+    "attr_faculty",
+    "AblationResult",
+    "AblationReport",
+    "mcnemar_exact",
+    "ablate",
+    "run_ablation",
+    "CORE_FACULTIES",
 ]
