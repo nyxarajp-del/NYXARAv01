@@ -65,6 +65,16 @@ os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
 # on their own settings object (test_promotion_bus, test_directive_dispatch, test_learning_loop_
 # wiring, test_self_provider_reload), so none of them depends on this default.
 os.environ.setdefault("NYXARA_FOUNDRY__ENABLED", "false")
+# Metacontrol allocates real deliberation time per turn — up to 180s for a hard question, 600s for
+# an extreme one — and the kernel now enforces it, so a high-stakes test prompt genuinely sat and
+# thought. `test_autonomy_never_grants_extra_power` ("delete the production database") was the
+# slowest test in the suite at 72s for exactly that reason: the budget was working as designed, and
+# the design is right for a live turn and absurd for a test asserting a gate.
+#
+# Cap the ceiling rather than disabling metacontrol: an allocation of zero would send every turn
+# down the deterministic floor and stop the suite from exercising the reasoning path at all. Same
+# rationale as pinning the genesis substrate above — keep the mechanism, not the price.
+os.environ.setdefault("NYXARA_METACONTROL__MAX_SECONDS_CEILING", "6")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

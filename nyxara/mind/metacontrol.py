@@ -302,7 +302,7 @@ class MetacognitiveController:
             seconds = min(seconds_ceiling, max(ceil_seconds, 300.0))
             band = "extreme"
 
-        # ---- two invariants the band table cannot express on its own ---- #
+        # ---- three invariants the band table cannot express on its own ---- #
         # (1) No band may out-spend the machine. ``ceil_samples`` is a hardware-scaled ceiling
         #     (growth/effective_scale.scaled_budget), while the moderate/hard rows are written off
         #     the STATIC config — so on a machine that scales down, ``base_samples + 2`` asked for
@@ -315,6 +315,14 @@ class MetacognitiveController:
         #     the ladder has nowhere to start.
         max_rung = max(1, min(max_rung, ceil_rung))
         entry = min(entry, max_rung)
+        # (3) ``max_seconds_ceiling`` must actually be a ceiling. It was consulted only by the
+        #     *extreme* band; moderate and hard used ``max(ceil_seconds, 30/60)``, so lowering the
+        #     configured ceiling could not lower them at all — a knob documented as a cap that
+        #     could only ever raise the budget. Exactly the hole invariant (1) already closes for
+        #     samples, left open for seconds. Clamping here makes the two consistent, and gives the
+        #     test suite a way to say "no turn here is worth three minutes of deliberation" without
+        #     disabling metacontrol and losing the allocation entirely.
+        seconds = max(0.1, min(seconds, seconds_ceiling))
 
         # A history of over-confident "easy" calls raises the bar the ladder must clear before
         # it may stop early — calibration steering effort, not only the estimate.
