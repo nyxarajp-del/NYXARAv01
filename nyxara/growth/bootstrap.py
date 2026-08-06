@@ -198,14 +198,42 @@ def _ensure_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> No
     try:
         from nyxara.mind.litertlm_assets import ensure_litertlm_model, model_present
         if model_present(settings):
+            _warm_litertlm(settings, say)
             return
         if not bool(getattr(settings.llm, "litertlm_auto_download", False)):
             return
         say("primary brain      : fetching her on-device model (~2.4 GB, one time)…")
         got = ensure_litertlm_model(settings)
         say(f"primary brain      : {'ready at ' + str(got) if got else 'not fetched; using the cloud rungs for now'}")
+        if got:
+            _warm_litertlm(settings, say)
     except Exception as exc:  # noqa: BLE001 — boot must survive a failed fetch
         say(f"primary brain      : on-device fetch skipped ({exc})")
+
+
+def _warm_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> None:
+    """Load the on-device weights at boot rather than inside the Master's first message.
+
+    ``Engine.__init__`` reads 2.5 GB and takes ~95 s. Built lazily, that cost landed in whatever
+    turn happened to come first — measured as 95.2 s of a 122.7 s "Hii". It is the same work
+    either way; boot is simply the honest place to do it, where he is already watching a progress
+    line. Best-effort: a host that cannot start the runtime falls down the ladder exactly as it
+    would have on the first turn.
+    """
+    import time as _time
+    try:
+        from nyxara.mind.llm import LiteRTLMProvider
+        provider = LiteRTLMProvider(settings=settings)
+        if not provider.available():
+            return
+        say("primary brain      : loading her weights (~2.5 GB, once per boot)…")
+        started = _time.monotonic()
+        if provider.warm():
+            say(f"primary brain      : ready in {_time.monotonic() - started:.0f}s")
+        else:
+            say("primary brain      : could not start the runtime; using the rungs below it")
+    except Exception as exc:  # noqa: BLE001 — warming is an optimisation, never a boot failure
+        say(f"primary brain      : warm-up skipped ({exc})")
 
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,

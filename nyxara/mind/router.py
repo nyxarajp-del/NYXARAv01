@@ -34,6 +34,43 @@ def _tokens(text: str) -> list:
 
 
 # --------------------------------------------------------------------------- #
+# Scaffold phrases — the shapes her own machinery emits when it is NOT answering
+# --------------------------------------------------------------------------- #
+# ``kernel/orchestrator._default_reasoner`` is the deterministic stand-in used whenever real
+# reasoning is unavailable, and it emits fixed templates: "I understand: X", "perform: X". Those
+# strings then land in her transcripts, her transcripts become the foundry's training corpus, and
+# her forged model learns to emit them — fluently, and about anything.
+#
+# The verifier below could not see it. It scores *form*: length, coherence, unique-word ratio, and
+# how much of the prompt is parroted back. "I understand: Hii" is well-formed on every one of those
+# — three unique words, all real, only one of them from the prompt — so it scored 0.74 and cleared
+# the handoff threshold. She answered the Master with the stand-in's phrasing, from her own model,
+# confidently, and never asked the 2.5 GB Gemma sitting loaded in the same process.
+#
+# The echo penalty was the right idea aimed one level too low: it catches a model parroting the
+# *prompt*, not one parroting the *scaffold*. A fixed prefix dilutes the overlap ratio enough to
+# slip under it — "I understand: Hii" is 33% prompt words, and the penalty starts at 60%.
+_SCAFFOLD_PREFIXES: Tuple[str, ...] = (
+    "i understand:",       # _default_reasoner, conversational branch
+    "perform:",            # _default_reasoner, command branch
+    "done:",               # the act stage's spoken confirmation
+    "the master says:",    # dialogue-template continuation (the n-gram's signature)
+    "nyxara responds:",
+    "nyxara:",
+)
+
+
+def strip_scaffold(answer: str) -> Tuple[str, bool]:
+    """Remove a leading scaffold phrase. Returns ``(remainder, was_scaffolded)``."""
+    text = (answer or "").strip()
+    low = text.lower()
+    for prefix in _SCAFFOLD_PREFIXES:
+        if low.startswith(prefix):
+            return text[len(prefix):].strip(), True
+    return text, False
+
+
+# --------------------------------------------------------------------------- #
 # Intrinsic verifier — scores an answer on its own merits (no gold answer)
 # --------------------------------------------------------------------------- #
 def answer_quality(prompt: str, answer: str, *, min_chars: int = 2) -> float:
@@ -50,6 +87,20 @@ def answer_quality(prompt: str, answer: str, *, min_chars: int = 2) -> float:
     words = _tokens(ans)
     if not words:
         return 0.0
+
+    # 0) scaffold check, before anything else. A reply that is one of her own stand-in templates
+    #    wrapped around the prompt is not an answer at all — it is the shape of *not* answering,
+    #    reproduced by a model that learned it from her transcripts. Judge what is left once the
+    #    template is removed: "I understand: Hii" leaves "Hii", a bare echo, which scores 0.
+    body, scaffolded = strip_scaffold(ans)
+    if scaffolded:
+        rest = _tokens(body)
+        pwords = set(_tokens(prompt))
+        if not rest:
+            return 0.0                        # the template and nothing else
+        if pwords and all(w in pwords for w in rest):
+            return 0.0                        # the template wrapped around the question
+        ans, words = body, rest               # score only the part that says something
 
     # 1) length — a couple of words is fine; ramps to full by ~8 words
     length = min(1.0, len(words) / 8.0)
@@ -348,6 +399,18 @@ if __name__ == "__main__":  # pragma: no cover
     assert answer_quality("2+2?", "the the the the the") < 0.4
     assert answer_quality("What is the capital of France?", "The capital is Paris.") > 0.5
     print("verifier               : honest on empty / degenerate / good ✓")
+
+    # scaffold echo: her own stand-in's phrasing, learned from her transcripts and served back
+    # confidently by her forged model. It scored 0.74 here — above the 0.6 handoff threshold —
+    # so she answered the Master with the shape of not-answering and never asked her strongest
+    # model, which was loaded in the same process the whole time.
+    assert answer_quality("Hii", "I understand: Hii") == 0.0
+    assert answer_quality("delete the logs", "perform: delete the logs") == 0.0
+    assert answer_quality("Hii", "The Master says: Hii. NYXARA responds: Hii") < 0.6
+    # ...but the prefix is not itself the crime. A reply that says something real still passes.
+    assert answer_quality("Hii", "I understand: you are greeting me, and I am glad of it") > 0.6
+    assert answer_quality("Hii", "Hello. I am here. What is the matter") > 0.6
+    print("scaffold echo          : rejected; a real answer behind the same prefix passes ✓")
 
     from nyxara.kernel.config import NyxaraSettings, Profile
 

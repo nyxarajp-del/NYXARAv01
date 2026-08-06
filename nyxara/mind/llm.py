@@ -217,8 +217,10 @@ class LLMProviderBase:
 
     def complete(self, req: LLMRequest) -> LLMResponse:
         if not self.available():
-            raise LLMError(f"provider '{self.name}' is unavailable",
+            exc = LLMError(f"provider '{self.name}' is unavailable",
                            context={"provider": self.name})
+            self._record_failure(req.model or "unavailable", exc)
+            raise exc
         model = req.model or self.default_model()
         start = time.monotonic()
         try:
@@ -226,12 +228,38 @@ class LLMProviderBase:
         except LLMError:
             raise
         except Exception as exc:  # noqa: BLE001 - normalise any SDK error
+            self._record_failure(model, exc)
             raise LLMError(f"{self.name} generation failed: {exc}",
                            category=classify(exc), cause=exc,
                            context={"provider": self.name, "model": model})
-        return LLMResponse(text=text, provider=self.name, model=model,
+        resp = LLMResponse(text=text, provider=self.name, model=model,
                            finish_reason=finish, usage=usage,
                            latency_s=time.monotonic() - start, raw=raw)
+        self._record(resp)
+        return resp
+
+    def _record(self, resp: "LLMResponse") -> None:
+        """Tell the turn ledger a generation happened. Best-effort; never affects the answer.
+
+        This is the one place every provider's output passes through, which is exactly why the
+        record belongs here: a report built from these events cannot claim a rung spoke unless it
+        did (observe/turn_ledger.py)."""
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            get_ledger().record_generation(
+                resp.provider, resp.model, ok=True,
+                prompt_tokens=resp.usage.prompt_tokens,
+                completion_tokens=resp.usage.completion_tokens,
+                latency_s=resp.latency_s, chars=len((resp.text or "").strip()))
+        except Exception:  # noqa: BLE001 — observability must never break a turn
+            pass
+
+    def _record_failure(self, model: str, exc: Exception) -> None:
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            get_ledger().record_generation(self.name, model, ok=False, error=str(exc))
+        except Exception:  # noqa: BLE001
+            pass
 
     async def acomplete(self, req: LLMRequest) -> LLMResponse:
         import asyncio
@@ -384,10 +412,35 @@ class SelfProvider(LLMProviderBase):
         d = self.settings.llm.self_model_dir or (self.settings.paths.data_dir / "foundry")
         return Path(d)
 
+    # Files that mean "a real model was saved here". Checked by name only — no parsing, no load —
+    # because available() runs on every ladder walk.
+    _VERSION_ARTIFACTS = ("adapter", "model.pt", "weights.npz", "model.json")
+
     def available(self) -> bool:
+        """True only when the ``active`` pointer names a version that is actually THERE.
+
+        It used to be enough that the pointer file existed. A pointer is not a model: a version dir
+        that was never written, half-written, or cleaned up left this returning True while every
+        load threw — observed live as ``self: available: true`` sitting next to
+
+            self model unavailable: FileNotFoundError: .../foundry/v1/model.pt
+
+        turn after turn. A rung that cannot serve must not advertise itself; the ladder is built to
+        step over it, and it cannot step over a lie.
+        """
+        # Already serving: weights in memory can answer regardless of what the pointer now says.
+        # A promotion that lands corrupt must cost the NEW version, never the working one she is
+        # already running (tests/mind/test_self_provider_reload.py pins that resilience).
+        if self._lm is not None:
+            return True
         try:
-            return (self._root() / "active").exists()
-        except Exception:
+            root = self._root()
+            tag = (root / "active").read_text(encoding="utf-8").strip()
+            if not tag:
+                return False
+            vdir = root / tag
+            return any((vdir / name).exists() for name in self._VERSION_ARTIFACTS)
+        except Exception:  # noqa: BLE001 — unreadable is unavailable, and never fatal
             return False
 
     def _pointer_tag(self) -> Optional[str]:
@@ -558,10 +611,22 @@ class LiteRTLMProvider(LLMProviderBase):
 
     name = "litertlm"
 
+    #: Loaded engines, shared across every instance in the process.
+    #:
+    #: Per-instance was wrong in two ways. The weights are 2.5 GB and take ~95 s to read, so a
+    #: second provider object — the boot warm-up, a second facade, a tool that builds its own —
+    #: would load a second full copy: 5 GB resident and 95 s paid twice, for one model. And it
+    #: made warming impossible, because the object that did the loading was not the object that
+    #: later served the turn. One process, one set of weights.
+    #:
+    #: Keyed by ``(path, backend, cache_dir)`` rather than path alone: the backend is part of what
+    #: an engine *is*, and sharing across it would hand a CPU engine to a caller that asked for
+    #: the GPU — silently, since both answer.
+    _ENGINES: Dict[Tuple[str, str, Optional[str]], Any] = {}
+    _ENGINE_LOCK = threading.Lock()
+
     def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
         super().__init__(settings)
-        self._engine: Any = None
-        self._engine_path: Optional[str] = None
         self._lock = threading.Lock()
         # Latched load failure. Once the runtime has proved it cannot start on this host, the rung
         # takes itself off the ladder instead of failing — and logging — on every single turn.
@@ -668,14 +733,28 @@ class LiteRTLMProvider(LLMProviderBase):
             return None
         return str(d)
 
+    def _engine_key(self) -> Tuple[str, str, Optional[str]]:
+        """What makes one loaded engine interchangeable with another."""
+        return (str(self.model_path()),
+                str(getattr(self.settings.llm, "litertlm_backend", "cpu") or "cpu").lower(),
+                self._cache_dir())
+
+    def _engine_for(self, key: Tuple[str, str, Optional[str]]) -> Any:
+        """The process-wide engine for ``key``, or ``None`` if it is not loaded."""
+        return type(self)._ENGINES.get(key)
+
     def _get_engine(self, litert_lm: Any) -> Any:
-        """Load once, reuse forever. Multi-GB and ~7 s, so a per-request load is not an option."""
-        path = str(self.model_path())
-        if self._engine is not None and self._engine_path == path:
-            return self._engine
-        with self._lock:
-            if self._engine is not None and self._engine_path == path:
-                return self._engine
+        """Load once per process, reuse forever. 2.5 GB and ~95 s — never per request, and
+        never per provider instance (see :attr:`_ENGINES`)."""
+        key = self._engine_key()
+        path = key[0]
+        engine = self._engine_for(key)
+        if engine is not None:
+            return engine
+        with type(self)._ENGINE_LOCK:
+            engine = self._engine_for(key)
+            if engine is not None:
+                return engine
             try:   # the runtime is chatty on stderr; keep her console readable
                 litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
             except Exception:  # noqa: BLE001
@@ -692,7 +771,7 @@ class LiteRTLMProvider(LLMProviderBase):
                 log.warning("litertlm engine could not start; taking the rung off the ladder "
                             "until reset: %s", self._dead)
                 raise
-            self._engine, self._engine_path = engine, path
+            type(self)._ENGINES[key] = engine
             log.info("litertlm engine loaded: %s", path)
             return engine
 
@@ -729,12 +808,13 @@ class LiteRTLMProvider(LLMProviderBase):
                 "model_path": str(path) if path is not None else None,
                 "model": self.settings.llm.litertlm_model,
                 "backend": getattr(self.settings.llm, "litertlm_backend", "cpu"),
-                "engine_loaded": self._engine is not None, "reason_unavailable": reason}
+                "engine_loaded": self._engine_for(self._engine_key()) is not None,
+                "reason_unavailable": reason}
 
     def close(self) -> None:
         """Release the engine and its weights (used by the tests and by a lean reload)."""
-        with self._lock:
-            engine, self._engine, self._engine_path = self._engine, None, None
+        with type(self)._ENGINE_LOCK:
+            engine = type(self)._ENGINES.pop(self._engine_key(), None)
         if engine is not None:
             try:
                 engine.close()
@@ -749,6 +829,26 @@ class LiteRTLMProvider(LLMProviderBase):
         """
         self._dead = None
         self._template_name = self._template = None
+
+    def warm(self) -> bool:
+        """Load the weights now, so the first turn does not pay for it.
+
+        Measured: a bare "Hii" took 122.7 s, and 95.2 s of that was ``Engine.__init__`` reading
+        2.5 GB off disk — inside the Master's first message, because the engine was built lazily
+        on first use. The cost is unavoidable and it is paid once; what was wrong was *when*.
+        Boot is the honest place for it: he is already watching a progress line there, and every
+        turn after is the ~14 s the model actually takes.
+
+        Returns whether the engine is up. Never raises — a host that cannot start the runtime
+        latches ``_dead`` exactly as it would have on the first turn, and the ladder steps down.
+        """
+        if not self.available():
+            return False
+        try:
+            import litert_lm
+            return self._get_engine(litert_lm) is not None
+        except Exception:  # noqa: BLE001 — warming is an optimisation, never a boot failure
+            return False
 
     # ---- request → litert_lm.Message objects ---- #
     @staticmethod
@@ -1008,9 +1108,20 @@ class LLM:
             chosen = self.chosen_provider().name
         except Exception:  # noqa: BLE001
             chosen = None
+        # ``configured`` and ``chosen`` are both statements about INTENT — what is set, and what
+        # the ladder would pick if asked right now. Reading them as an account of what happened is
+        # what let "chosen: litertlm" sit beside "engine_loaded: false" while an n-gram did the
+        # talking. ``actual`` is the answer to the other question, and it comes from recorded
+        # generations only (observe/turn_ledger.py).
         view: Dict[str, Any] = {"configured": self.settings.llm.provider.value,
-                                "chosen": chosen,
+                                "would_choose": chosen,
+                                "chosen": chosen,          # kept: existing readers depend on it
                                 "last_fallback": self.last_fallback}
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            view["actual"] = get_ledger().view()
+        except Exception:  # noqa: BLE001 — the honest view degrades, it never breaks the report
+            view["actual"] = None
         for name in ("litertlm", "self"):
             prov = self._providers.get(name)
             if prov is not None and hasattr(prov, "learning_view"):
@@ -1102,6 +1213,11 @@ class LLM:
             reason = str(exc) or exc.__class__.__name__
             self.last_fallback = {"provider": provider_name, "error": reason,
                                   "ts": time.time()}
+            try:
+                from nyxara.observe.turn_ledger import get_ledger
+                get_ledger().record_degradation("mind/llm", f"{provider_name}: {reason}")
+            except Exception:  # noqa: BLE001
+                pass
             key = f"{provider_name}:{reason}"
             now = time.monotonic()
             if now - self._warned_at.get(key, -1e9) >= 60.0:

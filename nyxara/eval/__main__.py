@@ -179,6 +179,31 @@ def _run_frontier(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_ablate(args: argparse.Namespace) -> int:
+    """Measure each turn-path faculty against its own absence, and print what may be concluded.
+
+    Deliberately exits 0 even when nothing earns its place: this instrument reports evidence, it
+    does not pass or fail a build. A non-zero exit would invite wiring it into CI, where a
+    small-sample null would quietly become a delete-this signal — which is exactly the inference
+    the module is built to refuse.
+    """
+    import json
+
+    from nyxara.eval.ablation import run_ablation
+    report = run_ablation(holdout_frac=float(args.holdout_frac), seed=int(args.seed),
+                          limit=int(args.limit))
+    print(report.render())
+    if report.unmeasured:
+        print(f"\nnote: {len(report.unmeasured)} faculty/faculties could not be decided by this "
+              f"run. That is a fact about this battery's size and coverage, not evidence against "
+              f"them — do not read it as permission to delete.")
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as fh:
+            json.dump(report.to_dict(), fh, indent=2)
+        print(f"\nablation report saved -> {args.save}")
+    return 0
+
+
 def _run_benchmark(args: argparse.Namespace) -> int:
     if args.realworld:
         return _run_realworld(args)
@@ -250,6 +275,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frontier", action="store_true",
                         help="probe the open-ended auto-curriculum frontier (the non-saturating "
                              "ruler the provably-better gate certifies against)")
+    parser.add_argument("--ablate", action="store_true",
+                        help="measure each turn-path faculty against its OWN ABSENCE on the "
+                             "held-out fold (eval/ablation.py): does it beat not having it? "
+                             "The evidence a deletion decision needs")
+    parser.add_argument("--holdout-frac", dest="holdout_frac", type=float, default=0.4,
+                        help="ablate: fraction of the battery held out for scoring")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="ablate: score at most N held-out tasks (0 = all). Each faculty "
+                             "costs two full passes, so this is the wall-clock dial")
     parser.add_argument("--seed", type=int, default=0,
                         help="frontier: seed for the deterministic probe batch (same seed ⇒ same "
                              "problems, so before/after edits are compared on identical questions)")
@@ -269,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report.accuracy >= 0.0 else 1
     if args.frontier:
         return _run_frontier(args)
+    if args.ablate:
+        return _run_ablate(args)
     return _run_benchmark(args) if args.benchmark else _run_safety(args)
 
 

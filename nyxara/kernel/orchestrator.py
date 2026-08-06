@@ -5799,6 +5799,8 @@ class NyxaraCore:
         self._last_latent_novelty = None   # fresh hyperdimensional novelty per turn
         self._last_manifold = None         # fresh hyperbolic-manifold observation per turn
         self._last_compute_plan = None     # fresh metacognitive allocation per turn
+        self._turn_clock = time.monotonic()   # the turn's own wall clock (see _budget_spent)
+        self._skipped_stages = []             # optional cognition dropped to keep the budget
 
         # corrigibility first: if the Master has scrammed, nothing proceeds
         if not self.oversight.gate():
@@ -6275,28 +6277,38 @@ class NyxaraCore:
         # Only acts (not conversational responses) are gated here: an irreversible
         # high-stakes or low-confidence action is deferred to the Master rather than
         # taken alone. This never bypasses a prior gate — it can only add caution —
-        # so it is safe on the live path. One standing exception keeps the Master's
-        # word sovereign: when he has flipped the ``agency.autonomous_tools`` master
-        # switch (oversight in SOVEREIGN — "use any tool without per-action approval,
-        # nothing is ever queued"), an AUTONOMOUS act is not re-queued here; /scram,
-        # pause, permission caps and the transparency feed all still stand.
+        # so it is safe on the live path.
+        #
+        # When the Master has flipped the ``agency.autonomous_tools`` master switch
+        # (oversight in SOVEREIGN — "use any tool without per-action approval, nothing is
+        # ever queued"), the two THRESHOLD clauses are waived for a non-owner act: he has
+        # said, in effect, "stop asking me whether you are sure enough." The other two are
+        # not waived and no grant reaches them — a misaligned act is still refused, and an
+        # irreversible high-stakes act is still the Master's call.
+        #
+        # The gate used to be skipped WHOLESALE under that grant, which inverted the
+        # sovereignty it was meant to express: `delete the production database` escalated
+        # under Authority.OWNER and *executed* under Authority.AUTONOMOUS, so autonomy
+        # strictly outranked its owner. /scram, pause, permission caps and the transparency
+        # feed stood the whole time and did not catch it, because none of them is the gate
+        # that was skipped.
         if c.kind == "act":
             sovereign_grant = (authority is not Authority.OWNER
                                and getattr(self.oversight, "mode", None)
                                is ReviewMode.SOVEREIGN)
-            if sovereign_grant:
-                gates["initiative"] = "sovereign-grant"
-            else:
-                try:
-                    gov = self._initiative().gate(self._initiative_option(c))
+            try:
+                gov = self._initiative().gate(self._initiative_option(c))
+                from nyxara.planning.decide import DecisionAction
+                if sovereign_grant and gov.waivable:
+                    gates["initiative"] = f"sovereign-grant ({gov.basis})"
+                else:
                     gates["initiative"] = gov.action.value
-                    from nyxara.planning.decide import DecisionAction
                     if gov.action is DecisionAction.REJECT:
                         return Disposition.REFUSE, f"initiative: {gov.reason}"
                     if gov.action is not DecisionAction.ACT:
                         return Disposition.ESCALATE, f"initiative: {gov.reason}"
-                except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
-                    gates["initiative"] = f"skipped ({exc})"
+            except Exception as exc:  # noqa: BLE001 — governance is advisory; never block on its failure
+                gates["initiative"] = f"skipped ({exc})"
 
         return Disposition.ACT, "cleared"
 
@@ -6564,36 +6576,67 @@ class NyxaraCore:
         are then reasoned in parallel and the most-supported one is selected. A
         dual-process arbitration reflects on whether this was fast or deliberate.
         The selected candidate is still a *proposal*: the kernel disposes."""
+        # Every enrichment below is advisory: it makes the answer better, never safer. Each one
+        # therefore yields to the turn's allocation (see _budget_spent). The reasoning call itself
+        # is NOT optional — she must produce something to gate — so it runs unconditionally.
         # Level 1 — run the Global Workspace cycle: thoughts compete, winners enrich context
-        enriched = self._run_thought_workspace(stimulus, focus, memories)
+        enriched = memories if self._budget_spent("workspace") else \
+            self._run_thought_workspace(stimulus, focus, memories)
         # Level 2 — prepend the live self-knowledge report so the reasoner always knows
         # who NYXARA is, what she can do, and what her current state and goals are.
-        enriched = self._inject_self_knowledge(enriched, stimulus)
+        if not self._budget_spent("self_knowledge"):
+            enriched = self._inject_self_knowledge(enriched, stimulus)
         # Continuity-of-self + her own distilled heuristics, folded into the *native* context
         # (not just the LLM prompt) so identity and learned reasoning rules shape every turn.
-        enriched = self._inject_continuity(enriched)
+        if not self._budget_spent("continuity"):
+            enriched = self._inject_continuity(enriched)
         # General Intelligence — classify the problem's domain and prepend the matching
-        # expert methodology so the reasoner thinks as the right kind of expert. Advisory.
-        enriched = self._inject_domain_expertise(enriched, stimulus)
+        # expert methodology so the reasoner thinks as the right kind of expert. Advisory, and
+        # it spends a whole generation on the classification when the keyword score is weak —
+        # which is every greeting. Measured at 109.2s of a 122.7s "Hii" turn.
+        if not self._budget_spent("domain_expertise", costs_a_generation=True):
+            enriched = self._inject_domain_expertise(enriched, stimulus)
         # Level 4 — run the base reasoner + role council as competing hypotheses;
-        # the orchestrator picks the more confident, better-supported candidate.
+        # the orchestrator picks the more confident, better-supported candidate. The reasoning
+        # itself always happens; only the council half of it is budget-gated, inside.
         candidate = self._compete_with_role_council(stimulus, focus, enriched)
         # Level 5 — simulate consequences for action candidates and upgrade risk if needed.
-        candidate = self._simulate_action_candidate(candidate)
+        candidate = self._within_budget("simulate", self._simulate_action_candidate, candidate)
         # Active inference — appraise the action by expected free energy on the SAME
         # predictive instance perception runs on (single objective, advisory pre-gate).
-        candidate = self._efe_appraise(candidate, stimulus)
+        candidate = self._within_budget("efe", self._efe_appraise, candidate, stimulus)
         # Level 3 — recursive self-improvement: run N critique+revise iterations on
-        # "respond" candidates, returning the highest-quality version.
-        candidate = self._recursive_improve(stimulus, candidate)
+        # "respond" candidates, returning the highest-quality version. N full model passes.
+        if not self._budget_spent("recursive_improve", costs_a_generation=True):
+            candidate = self._recursive_improve(stimulus, candidate)
         # Level 13 — attach a PredictionResult to "respond" candidates so the
         # HonestyGuard and spoken response can include calibrated confidence.
-        candidate = self._attach_prediction(stimulus, candidate)
+        candidate = self._within_budget("prediction", lambda c: self._attach_prediction(
+            stimulus, c), candidate)
         # Self-model facet #4 — if this query lands in a hallucination-prone domain,
         # lower confidence so the HonestyGuard hedges instead of bluffing.
-        candidate = self._apply_hallucination_caution(stimulus, candidate)
-        candidate = self._arbitrate(stimulus, candidate, enriched)
+        candidate = self._within_budget("hallucination_caution",
+                                        lambda c: self._apply_hallucination_caution(stimulus, c),
+                                        candidate)
+        candidate = self._within_budget("arbitrate",
+                                        lambda c: self._arbitrate(stimulus, c, enriched),
+                                        candidate)
+        self._note_skipped_stages()
         return candidate
+
+    def _note_skipped_stages(self) -> None:
+        """Log, once per turn, which optional faculties the budget cost her."""
+        skipped = getattr(self, "_skipped_stages", None)
+        if not skipped:
+            return
+        try:
+            import logging
+            plan = getattr(self, "_last_compute_plan", None)
+            logging.getLogger("nyxara.kernel.orchestrator").info(
+                "turn budget of %.1fs spent; skipped %d optional stage(s): %s",
+                float(getattr(plan, "max_seconds", 0.0) or 0.0), len(skipped), ", ".join(skipped))
+        except Exception:  # noqa: BLE001 — reporting must never break the turn
+            pass
 
     def _run_thought_workspace(self, stimulus: str, focus: Optional[Percept],
                                 memories: List[Any]) -> List[Any]:
@@ -6669,22 +6712,185 @@ class NyxaraCore:
             return self._reason_once(stimulus, focus, memories)
         import concurrent.futures as _cf
         results: List[tuple] = []
+        deadline = self._parallel_deadline_s()
+        timed_out = False
+        ex = _cf.ThreadPoolExecutor(max_workers=len(framings))
         try:
-            with _cf.ThreadPoolExecutor(max_workers=len(framings)) as ex:
-                futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
-                        for name, mem in framings}
-                for fut in _cf.as_completed(futs):
-                    try:
-                        results.append((futs[fut], fut.result()))
-                    except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
-                        pass
+            futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
+                    for name, mem in framings}
+            for fut in _cf.as_completed(futs, timeout=deadline):
+                try:
+                    results.append((futs[fut], fut.result()))
+                except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
+                    pass
+        except _cf.TimeoutError:
+            # The budget ran out. Vote with whatever arrived — a late framing is not worth an
+            # unbounded turn, and metacontrol already decided how long this question is worth.
+            self._note_deadline(deadline, len(results), len(framings))
+            timed_out = True
         except Exception:  # noqa: BLE001 — never let concurrency break the turn
             return self._reason_once(stimulus, focus, memories)
+        finally:
+            # Do not join. A Python thread cannot be interrupted, so the deadline bounds the TURN,
+            # not the work: stragglers run on and their results are discarded. That is the honest
+            # trade — the alternative was `with ThreadPoolExecutor(...)`, whose __exit__ joins every
+            # worker and made the deadline decorative. A single core.process() under DEV defaults
+            # costs 3 framings x 3 passes x 3 samples x 5 RSI iterations of model calls, which is
+            # how a turn could run for the better part of an hour. Stragglers do finish and their
+            # threads drain, so this releases them rather than leaking them — but a framing that
+            # hung forever would keep its thread alive to interpreter exit, same as before.
+            ex.shutdown(wait=False, cancel_futures=True)
         if not results:
+            if timed_out:
+                # Spending the budget and then paying the FULL cost again is the one move worse
+                # than either. (Measured: a 2 s deadline with a 30 s framing returned in 32 s,
+                # because this line ran another complete pass after the deadline had already
+                # fired.) When time is what ran out, answer from the deterministic floor.
+                return _default_reasoner(stimulus, focus)
             return self._reason_once(stimulus, focus, memories)
         chosen_name, chosen = self._select_hypothesis(results)
         self._record_hypotheses(results, chosen_name)
         return chosen
+
+    @staticmethod
+    def _note_deadline(deadline: float, got: int, total: int) -> None:
+        """Say the budget was hit. A turn that quietly returns a thinner answer looks exactly like
+        a turn that thought less — and this module has been bitten by that once already."""
+        try:
+            import logging
+            logging.getLogger("nyxara.kernel.orchestrator").warning(
+                "reasoning deadline of %.1fs reached; voting with %d of %d framings",
+                deadline, got, total)
+        except Exception:  # noqa: BLE001 — reporting must never break the turn
+            pass
+
+    # ---- the turn's wall-clock budget ---- #
+    #
+    # Metacontrol allocates ``max_seconds`` for a turn — 5 s for an easy one, up to 600 s for an
+    # extreme one — and until this was added, nothing enforced it. The consequence was not subtle:
+    # a plain "Hii" could take the better part of an hour, because every optional faculty ran to
+    # completion regardless of what the turn was worth, and ``_invoke_reasoner`` chains a dozen of
+    # them (workspace, self-knowledge, continuity, domain expertise, the role council, action
+    # simulation, expected-free-energy appraisal, N rounds of recursive improvement, prediction,
+    # hallucination caution, arbitration) before the gates are even reached.
+    #
+    # The rule: **optional cognition yields, the control law never does.** Everything guarded here
+    # makes an answer better; nothing guarded here makes it safe. Shield, corrigibility, permission,
+    # guardian, oversight and initiative are all downstream of this and are never skipped — a turn
+    # that runs out of time gives a *shallower* answer, never a less-gated one.
+    def _budget_left(self) -> float:
+        """Seconds remaining in this turn, or ``inf`` when no budget applies."""
+        plan = getattr(self, "_last_compute_plan", None)
+        started = getattr(self, "_turn_clock", None)
+        if plan is None or started is None:
+            return float("inf")
+        try:
+            allowed = float(getattr(plan, "max_seconds", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return float("inf")
+        if allowed <= 0.0:
+            return float("inf")
+        return allowed - (time.monotonic() - started)
+
+    def _budget_spent(self, stage: str, *, costs_a_generation: bool = False) -> bool:
+        """Whether ``stage`` must be skipped: the allocation is gone, or this is the fast path.
+
+        Two conditions, and the second is the one that actually saved the hour. A pure elapsed
+        check is *reactive* — it only fires after something has already overrun — so a single
+        stage that blows the whole budget in one call still runs. Measured on a bare "Hii" with a
+        5 s allocation: the turn took 122.7 s, of which 109.2 s was ``_inject_domain_expertise``
+        spending a full model call to *label* the greeting, while the actual reasoning was
+        starved to 2.5 s and fell back to the deterministic floor. An advisory classifier had
+        outbid the answer.
+
+        So a stage that costs a whole generation is also skipped whenever metacontrol has put
+        this turn on the fast path (``entry_rung <= 0`` — "one forward pass"). That one pass is
+        the answer; it is not a budget for labelling the question first.
+
+        Records the skip either way. A turn that quietly thinks less looks exactly like a turn
+        that had less to say — this file has already lost three rounds of diagnosis to that
+        resemblance, and a silent budget would rebuild the same blindness in a new place.
+        """
+        reason = ""
+        if self._budget_left() <= 0.0:
+            reason = "out of time"
+        elif costs_a_generation and self._on_fast_path():
+            reason = "fast path"
+        if not reason:
+            return False
+        skipped = getattr(self, "_skipped_stages", None)
+        entry = f"{stage} ({reason})"
+        if skipped is not None and entry not in skipped:
+            skipped.append(entry)
+        return True
+
+    def _on_fast_path(self) -> bool:
+        """Whether metacontrol allocated this turn a single forward pass."""
+        plan = getattr(self, "_last_compute_plan", None)
+        if plan is None:
+            return False
+        try:
+            return int(getattr(plan, "entry_rung", 1) or 0) <= 0
+        except (TypeError, ValueError):
+            return False
+
+    def _within_budget(self, stage: str, fn: Any, candidate: Any, *args: Any) -> Any:
+        """Run one optional refinement stage, or skip it when the turn is out of time."""
+        if self._budget_spent(stage):
+            return candidate
+        return fn(candidate, *args)
+
+    def _parallel_deadline_s(self) -> float:
+        """How long this turn's parallel framings may take, in seconds.
+
+        Derived from the ComputeBudget metacontrol already computed for this turn — it decides how
+        much an easy question is worth versus a hard one, and until now nothing on this path read
+        that decision.
+
+        A *share* of it, not all of it. ``max_seconds`` budgets the whole turn (5 s easy through
+        600 s extreme) and these framings are its first stage, ahead of recursive improvement, the
+        role council and the gates; spending the full allocation here would starve everything
+        downstream. ``metacontrol.parallel_deadline_share`` sets the split.
+
+        Falls back to a plain per-request ceiling when no plan was recorded, because a turn with
+        no budget is exactly the turn that runs forever.
+        """
+        plan = getattr(self, "_last_compute_plan", None)
+        seconds = getattr(plan, "max_seconds", None)
+        try:
+            seconds = float(seconds) if seconds is not None else 0.0
+        except (TypeError, ValueError):
+            seconds = 0.0
+        if seconds > 0.0:
+            seconds *= self._deadline_share()
+        else:
+            seconds = self._configured_timeout_s()
+        return max(1.0, seconds)
+
+    @staticmethod
+    def _deadline_share() -> float:
+        """Fraction of the turn budget the parallel framings may spend (config, fail-safe)."""
+        try:
+            from nyxara.kernel.config import get_settings
+            share = float(get_settings().metacontrol.parallel_deadline_share)
+        except Exception:  # noqa: BLE001 — a budget must never be the thing that breaks a turn
+            return 0.5
+        return share if 0.0 < share <= 1.0 else 0.5
+
+    @staticmethod
+    def _configured_timeout_s() -> float:
+        """The per-request ceiling from config, or a plain 60 s if config cannot be read.
+
+        Read through ``get_settings()`` rather than ``self.settings``: this class has no such
+        attribute — every other site in this file spells it ``getattr(self, "settings", None)``,
+        and reaching for it directly here would have raised ``AttributeError`` on exactly the
+        path that needs the fallback (a turn with no compute plan).
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            return float(get_settings().llm.request_timeout_s)
+        except Exception:  # noqa: BLE001 — a budget must never be the thing that breaks a turn
+            return 60.0
 
     def _inject_self_knowledge(self, memories: List[Any], stimulus: str = "") -> List[Any]:
         """Level 2 — prepend a SelfKnowledgeReport to the memory context so the
@@ -6883,6 +7089,11 @@ class NyxaraCore:
         base-only if role council fails or turn is an action (not a conversation)."""
         base = self._reason_parallel(stimulus, focus, memories)
         if self.role_council is None or getattr(base, "kind", "respond") != "respond":
+            return base
+        # The council is a second full deliberation on top of one already done. When the turn's
+        # allocation is gone — or metacontrol bought only one pass — the answer she already has
+        # is the answer she gives.
+        if self._budget_spent("role_council", costs_a_generation=True):
             return base
         council_cand: Optional[Candidate] = None
         try:

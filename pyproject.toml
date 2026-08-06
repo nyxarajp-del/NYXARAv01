@@ -77,12 +77,19 @@ foundry = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "
 # installing it elsewhere is harmless, the forge just trains full-precision LoRA instead).
 qlora = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "datasets>=2.18", "tokenizers>=0.15",
          "bitsandbytes>=0.43"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-timeout>=2.3", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q"
+# A per-test ceiling, because the suite had no ceiling at all. CI's `Run tests` step was
+# CANCELLED at 2h40m and 4h55m on consecutive main runs — no failure, no traceback, nothing to
+# act on, and the whole Actions allowance spent on a job that never reported. A test that
+# overruns this now fails in five minutes with a stack pointing at where it hung.
+#
+# `thread` rather than the default `signal`: much of what hangs here is inside a worker thread
+# (the parallel reasoning framings), and a SIGALRM handler only ever fires on the main one.
+addopts = "-q --timeout=300 --timeout-method=thread"
 
 [tool.ruff]
 # Match the codebase's prevailing style; correctness rules over cosmetics.

@@ -409,3 +409,117 @@ def test_format_self_training_doc_appends_answer():
     assert doc.startswith(head)
     assert doc.endswith("It is 4.\n")
     assert f"{_SELF_ASSISTANT_TAG}\nIt is 4." in doc
+
+
+# -------------------- a degraded turn must not be a silent turn -------------------- #
+def test_reasoning_degradation_is_recorded_and_logged(caplog):
+    """The bug this pins: ``LLMReasoner.__call__`` swallowed every exception from the reasoning
+    stack and answered from her small own brain instead — no log, no record, no visible difference
+    except worse replies. Reported from a live session where ``/learning`` said ``chosen: litertlm``
+    with ``engine_loaded: false``: the ladder looked healthy and a 532-parameter n-gram was talking.
+
+    The fallback itself is correct and stays. Only the silence was the defect.
+    """
+    import logging
+
+    from nyxara.mind.llm_reasoner import LLMReasoner
+
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.provider = ProviderName.LITERTLM
+    reasoner = LLMReasoner(LLM(settings=settings, providers={"native": NativeProvider()}),
+                           settings=settings)
+    reasoner._is_real = lambda: True                     # a strong model is nominally reachable
+    def _boom(stimulus, focus=None):
+        raise RuntimeError("litert_lm_conversation_send_message failed")
+    reasoner._reason = _boom
+
+    with caplog.at_level(logging.WARNING, logger="nyxara.mind.llm_reasoner"):
+        candidate = reasoner("hello")
+
+    assert candidate is not None and candidate.text, "she must still answer — the fallback is right"
+    assert reasoner.last_degradation is not None, "the degradation must be recorded"
+    assert "send_message" in reasoner.last_degradation["reason"], "the real reason must survive"
+    assert any("own small brain" in r.message for r in caplog.records), "and be said out loud"
+
+
+def test_an_unreachable_model_is_also_recorded():
+    """The other silent path: no real model at all went straight to the small brain, unremarked."""
+    from nyxara.mind.llm_reasoner import LLMReasoner
+
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    reasoner = LLMReasoner(LLM(settings=settings, providers={"native": NativeProvider()}),
+                           settings=settings)
+    reasoner._is_real = lambda: False
+    reasoner("hello")
+    assert reasoner.last_degradation is not None
+    assert "no real model" in reasoner.last_degradation["reason"]
+
+
+def test_a_healthy_turn_clears_the_degradation_flag():
+    """It reports the LAST turn, not the worst turn ever — a recovered model must look recovered."""
+    from nyxara.mind.llm_reasoner import LLMReasoner
+
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.provider = ProviderName.LITERTLM
+    reasoner = LLMReasoner(LLM(settings=settings, providers={"native": NativeProvider()}),
+                           settings=settings)
+    reasoner.last_degradation = {"reason": "stale", "ts": 0}
+    reasoner._is_real = lambda: True
+    reasoner._reason = lambda stimulus, focus=None: _default_candidate()
+    reasoner("hello")
+    assert reasoner.last_degradation is None
+
+
+def _default_candidate():
+    from nyxara.kernel.orchestrator import Candidate
+    return Candidate(text="a real answer", kind="respond", confidence=0.9, reversible=True)
+
+
+# -------------------- a pointer is not a model -------------------- #
+def _self_provider(root):
+    from nyxara.mind.llm import SelfProvider
+    settings = NyxaraSettings.for_profile(Profile.DEV)
+    settings.llm.self_model_dir = root
+    return SelfProvider(settings)
+
+
+def test_self_is_unavailable_when_the_pointer_names_nothing(tmp_path):
+    """Reported live: ``self: available: true`` sitting beside, turn after turn,
+
+        self model unavailable: FileNotFoundError: .../foundry/v1/model.pt
+
+    ``available()`` checked only that the ``active`` pointer file existed. A pointer is not a model.
+    A rung that cannot serve must not advertise itself — the ladder is built to step over it, and
+    it cannot step over a lie.
+    """
+    (tmp_path / "active").write_text("v1", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is False, "a dangling pointer is not a model"
+
+    (tmp_path / "v1").mkdir()
+    assert _self_provider(tmp_path).available() is False, "an empty version dir is not a model"
+
+
+def test_self_is_available_once_a_version_is_actually_there(tmp_path):
+    (tmp_path / "active").write_text("v1", encoding="utf-8")
+    (tmp_path / "v1").mkdir()
+    (tmp_path / "v1" / "model.json").write_text("{}", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is True
+
+
+def test_every_backend_artifact_counts_as_present(tmp_path):
+    """Whatever the backend wrote, that version exists — the check must not favour one of them."""
+    for i, artifact in enumerate(("adapter", "model.pt", "weights.npz", "model.json")):
+        root = tmp_path / f"root{i}"
+        vdir = root / "v1"
+        vdir.mkdir(parents=True)
+        (root / "active").write_text("v1", encoding="utf-8")
+        if artifact == "adapter":
+            (vdir / artifact).mkdir()
+        else:
+            (vdir / artifact).write_bytes(b"x")
+        assert _self_provider(root).available() is True, f"{artifact} should count"
+
+
+def test_an_empty_pointer_is_not_available(tmp_path):
+    (tmp_path / "active").write_text("   \n", encoding="utf-8")
+    assert _self_provider(tmp_path).available() is False

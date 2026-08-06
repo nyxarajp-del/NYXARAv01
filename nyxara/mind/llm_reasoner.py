@@ -28,6 +28,8 @@ Stateless per call, like the faculty it sits on.
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Dict, Optional, Sequence
 
 from nyxara.agency.permissions import Capability, RiskTier
@@ -35,6 +37,8 @@ from nyxara.kernel.config import NyxaraSettings, get_settings
 from nyxara.kernel.orchestrator import Candidate, _default_reasoner
 from nyxara.mind.llm import LLM
 from nyxara.mind.self_reasoner import SelfBrain, build_self_brain
+
+log = logging.getLogger("nyxara.mind.llm_reasoner")
 
 __all__ = ["LLMReasoner"]
 
@@ -125,6 +129,11 @@ class LLMReasoner:
         # NYXARA's OWN always-on learned brain — the real (not template) fallback when no external
         # LLM is configured. Lazily trained from her persona + grounding; compounds as it learns.
         self._self_brain: Optional[SelfBrain] = None
+        # Why the strong model did not answer this turn. Silence here used to be total: any failure
+        # inside _reason() dropped to her small own brain with no log, no record, and no visible
+        # difference except worse answers. Surfaced in learning_view() and logged once per reason.
+        self.last_degradation: Optional[Dict[str, Any]] = None
+        self._degraded_at: Dict[str, float] = {}
 
     # ---- prompts ---- #
     def _default_system(self) -> str:
@@ -232,11 +241,30 @@ class LLMReasoner:
     # ---- the reasoning act ---- #
     def __call__(self, stimulus: str, focus: Any = None) -> Candidate:
         if not self._is_real():
+            self._note_degradation("no real model is reachable")
             return self._self_reason(stimulus, focus)
         try:
-            return self._reason(stimulus, focus)
-        except Exception:  # noqa: BLE001 — never let the mind crash the loop
+            candidate = self._reason(stimulus, focus)
+        except Exception as exc:  # noqa: BLE001 — never let the mind crash the loop
+            # ...but never let it degrade in SILENCE either. This used to swallow everything and
+            # answer from her small own brain, so a broken strong model looked exactly like a weak
+            # one: no warning, no record, just worse replies. The reply still comes from her own
+            # brain — that part was always right — but now the reason is visible.
+            self._note_degradation(f"{type(exc).__name__}: {exc}")
             return self._self_reason(stimulus, focus)
+        self.last_degradation = None
+        return candidate
+
+    def _note_degradation(self, reason: str) -> None:
+        """Record + log that the strong model did not answer this turn. Throttled per reason."""
+        try:
+            self.last_degradation = {"reason": reason, "ts": time.time()}
+            now = time.monotonic()
+            if now - self._degraded_at.get(reason, -1e9) >= 60.0:
+                self._degraded_at[reason] = now
+                log.warning("reasoning fell back to her own small brain — %s", reason)
+        except Exception:  # noqa: BLE001 — reporting must never break the turn
+            pass
 
     # ---- the own-brain act (no external LLM): a REAL learned reply, not a template ---- #
     def _ensure_self_brain(self) -> SelfBrain:
