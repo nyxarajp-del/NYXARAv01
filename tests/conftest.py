@@ -52,6 +52,19 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
+# The model foundry TRAINS. `AutonomicLoop._maybe_grow` -> `GrowthEngine.run` -> `improve_self` ->
+# `Foundry.self_improve` -> `train_candidate` -> `model.train_on(steps=train_steps)` is real
+# backprop, in pure NumPy, and it ran on every autonomic tick the suite drove — so a test that
+# merely asserts "growth is wired" paid for a full training run, four times over in
+# `test_periodic_growth_runs`. This is where CI's multi-hour `Run tests` cancellations came from.
+#
+# `Profile.TEST` already sets `foundry.enabled = False` for exactly this reason, and
+# `tests/growth/test_autolearn.py` documents relying on it — but the suite does not run under that
+# profile, so the switch was never reaching the settings the tests actually build. Set it the same
+# way as every other hermetic flag above. Tests that WANT the foundry already enable it explicitly
+# on their own settings object (test_promotion_bus, test_directive_dispatch, test_learning_loop_
+# wiring, test_self_provider_reload), so none of them depends on this default.
+os.environ.setdefault("NYXARA_FOUNDRY__ENABLED", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 
