@@ -307,6 +307,14 @@ class MetaControlConfig(BaseModel):
     # the lot; handing them a share leaves room for the rest. Raise it toward 1.0 to favour
     # breadth of hypotheses over depth of refinement.
     parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
+    # A floor under that share, used only until the turn ledger has observed a real generation.
+    # An easy turn is allotted 5s, of which the framings get half — while one generation on the
+    # on-device Gemma measures ~13.9s. The deadline therefore fired before the model could ever
+    # answer, and every easy turn fell to the deterministic stand-in ("I understand: Hii"), which
+    # reads exactly like a broken model rather than a budget too small to buy one call.
+    # Raising this cannot slow a turn: a deadline is a maximum wait, and fast framings still
+    # return at once. It only stops the budget from cutting off work that was about to succeed.
+    min_generation_budget_s: float = Field(default=30.0, gt=0.0)
     # Calibration correction only engages once this many outcomes have been observed.
     min_calibration_samples: int = Field(default=20, ge=0)
     # A verified score at/above this floor counts the allocation as "sufficient".

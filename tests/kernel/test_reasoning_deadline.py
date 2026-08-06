@@ -23,11 +23,15 @@ import pytest
 from nyxara.kernel.orchestrator import NyxaraCore
 
 
-def _bare_core(*, max_seconds=None, framings=3):
+def _bare_core(*, max_seconds=None, framings=3, floor=0.0):
     """A core with no boot — only the parallel-reasoning path is under test here.
 
     ``NyxaraCore()`` builds the whole mind; this exercises one method, so it is constructed
     without ``__init__`` and given exactly the attributes that method reads.
+
+    ``floor`` pins :meth:`_one_generation_s`, which in the live system is read from the turn
+    ledger. Most cases here want it out of the way (0.0) so the *share* arithmetic is what is
+    under test; the tests that care about the floor set it explicitly.
     """
     core = NyxaraCore.__new__(NyxaraCore)
     core.parallel_hypotheses = framings
@@ -35,6 +39,7 @@ def _bare_core(*, max_seconds=None, framings=3):
                                if max_seconds is not None else None)
     core._reasoner_par = True
     core._hypothesis_framings = lambda memories: [(f"f{i}", []) for i in range(framings)]
+    core._one_generation_s = lambda: floor
     return core
 
 
@@ -152,6 +157,83 @@ def test_the_budget_never_drops_below_one_second():
     """A zero or negative allocation would make every turn answer from the floor."""
     assert _bare_core(max_seconds=0.001)._parallel_deadline_s() >= 1.0
     assert _bare_core(max_seconds=-5.0)._parallel_deadline_s() >= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# A budget that cannot buy one generation is not a budget
+# --------------------------------------------------------------------------- #
+def test_the_deadline_is_never_shorter_than_one_generation():
+    """The hole the first version left, and it cost the Master a working answer.
+
+    An easy turn is allotted 5s; half of that is 2.5s for the framings; one generation on the
+    on-device Gemma measures ~13.9s. So the deadline fired before the model could ever reply,
+    every easy turn fell to ``_default_reasoner``, and she said "I understand: Hii" — which reads
+    exactly like a broken model rather than a budget too small to buy a single call.
+    """
+    core = _bare_core(max_seconds=5.0, floor=13.9)
+    assert core._parallel_deadline_s() >= 13.9
+
+
+def test_a_generous_allocation_is_not_dragged_down_to_the_floor():
+    """The floor raises a too-small budget; it must not cap a large one."""
+    core = _bare_core(max_seconds=600.0, floor=13.9)
+    assert core._parallel_deadline_s() > 13.9
+
+
+def test_the_floor_is_measured_not_guessed(monkeypatch):
+    """Read from the turn ledger — the same recorded events ``answered_by`` derives from — so a
+    faster machine earns a smaller floor by being measured, not by being configured."""
+    from nyxara.observe.turn_ledger import get_ledger, reset_ledger
+
+    reset_ledger()
+    try:
+        ledger = get_ledger()
+        ledger.begin()
+        ledger.record_generation("litertlm", "gemma", ok=True, chars=42, latency_s=7.0)
+        ledger.end()
+        core = NyxaraCore.__new__(NyxaraCore)
+        assert core._one_generation_s() >= 7.0, "an observed 7s call must not be cut off at 7s"
+    finally:
+        reset_ledger()
+
+
+def test_a_failed_generation_does_not_set_the_floor():
+    """A call that produced nothing says nothing about what a real call costs."""
+    from nyxara.observe.turn_ledger import get_ledger, reset_ledger
+
+    reset_ledger()
+    try:
+        ledger = get_ledger()
+        ledger.begin()
+        ledger.record_generation("litertlm", "gemma", ok=False, latency_s=900.0, error="boom")
+        ledger.end()
+        core = NyxaraCore.__new__(NyxaraCore)
+        assert core._one_generation_s() < 900.0
+    finally:
+        reset_ledger()
+
+
+def test_with_no_observation_the_floor_is_still_real():
+    """The first turn of a fresh process has nothing recorded, and it is exactly the turn that
+    would otherwise be cut off before the model has ever spoken."""
+    from nyxara.observe.turn_ledger import reset_ledger
+
+    reset_ledger()
+    core = NyxaraCore.__new__(NyxaraCore)
+    assert core._one_generation_s() > 1.0
+
+
+# --------------------------------------------------------------------------- #
+# A framing that returned nothing has not voted
+# --------------------------------------------------------------------------- #
+def test_a_framing_that_returns_none_does_not_crash_the_vote():
+    """Reached ``_hypothesis_signature(None)`` and took the turn down with an AttributeError —
+    unreachable while the deadline was too short for any framing to finish, immediate once it
+    was long enough."""
+    core = _bare_core(max_seconds=30.0, floor=0.0)
+    core._reason_once = lambda s, f, m: None
+    candidate = core._reason_parallel("Hii", None, [])
+    assert candidate is not None and candidate.text
 
 
 # --------------------------------------------------------------------------- #
