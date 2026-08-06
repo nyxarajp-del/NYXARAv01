@@ -758,12 +758,25 @@ class NyxaraReasoner:
         except Exception:  # noqa: BLE001 — council unavailable -> single deliberate pass
             return self._generate_llm(stimulus, system, mems, deliberate=True)
 
+    def _reply_tokens(self) -> int:
+        """The token budget for one conversational reply (config, fail-safe)."""
+        cfg = getattr(self.settings, "llm", None)
+        try:
+            return max(16, int(getattr(cfg, "conversational_max_tokens", 512)))
+        except (TypeError, ValueError):
+            return 512
+
     def _generate_llm(self, stimulus: str, system: str, mems: List[str],
                       deliberate: bool) -> Tuple[str, float, str]:
         temperature = 0.3 if deliberate else 0.6
+        # A reply, not a document. Asking for the full ``max_output_tokens`` (8192) meant a
+        # conversational turn could generate for twenty minutes on-device, outrun every deadline
+        # above it, and be discarded — so the Master received the deterministic stand-in instead
+        # of the answer that was on its way. Bounding the tokens is the only lever that reaches
+        # inside the generation; a deadline can only decline to wait for one.
         text = self.llm.generate(self._prompt(stimulus, mems), system=system,
                                  temperature=temperature,
-                                 max_tokens=self.settings.llm.max_output_tokens)
+                                 max_tokens=self._reply_tokens())
         text = (text or "").strip() or f"I understand: {stimulus.strip()}"
         conf = 0.78 if deliberate else 0.66
         how = "deliberate LLM pass" if deliberate else "single intuitive LLM pass"

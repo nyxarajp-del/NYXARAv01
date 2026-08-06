@@ -6720,9 +6720,16 @@ class NyxaraCore:
                     for name, mem in framings}
             for fut in _cf.as_completed(futs, timeout=deadline):
                 try:
-                    results.append((futs[fut], fut.result()))
+                    cand = fut.result()
                 except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
-                    pass
+                    continue
+                # A framing that returned nothing has not voted. Letting it through reached
+                # `_hypothesis_signature(None)` and took down the turn with an AttributeError —
+                # unreachable while the deadline was too short for any framing to finish, and
+                # immediate once it was long enough. Same rule as the turn ledger's: producing
+                # no answer is not the same as producing an answer, and neither is a crash.
+                if cand is not None and getattr(cand, "kind", None) is not None:
+                    results.append((futs[fut], cand))
         except _cf.TimeoutError:
             # The budget ran out. Vote with whatever arrived — a late framing is not worth an
             # unbounded turn, and metacontrol already decided how long this question is worth.
@@ -6747,7 +6754,12 @@ class NyxaraCore:
                 # because this line ran another complete pass after the deadline had already
                 # fired.) When time is what ran out, answer from the deterministic floor.
                 return _default_reasoner(stimulus, focus)
-            return self._reason_once(stimulus, focus, memories)
+            # The retry may itself come back empty — a reasoner that returns None is exactly what
+            # made the vote crash above. She must leave this method with something to gate.
+            retry = self._reason_once(stimulus, focus, memories)
+            if retry is None or getattr(retry, "kind", None) is None:
+                return _default_reasoner(stimulus, focus)
+            return retry
         chosen_name, chosen = self._select_hypothesis(results)
         self._record_hypotheses(results, chosen_name)
         return chosen
@@ -6865,7 +6877,46 @@ class NyxaraCore:
             seconds *= self._deadline_share()
         else:
             seconds = self._configured_timeout_s()
-        return max(1.0, seconds)
+        return max(1.0, self._one_generation_s(), seconds)
+
+    def _one_generation_s(self) -> float:
+        """A floor: no deadline may be shorter than a single generation actually costs.
+
+        This is the hole the first version of the budget left, and it cost the Master a working
+        answer. Metacontrol allots an easy turn 5 s; half of that is 2.5 s for the framings; one
+        generation on her on-device Gemma measures ~13.9 s. So the deadline fired before the model
+        could ever reply, every easy turn fell to ``_default_reasoner``, and she answered "I
+        understand: Hii" — which reads exactly like a broken model rather than a budget that could
+        not buy one call.
+
+        **A budget that cannot afford a single generation is not a budget. It is a guarantee of
+        the floor.**
+
+        The floor is read from what actually happened — the turn ledger's recorded latencies, the
+        same events ``answered_by`` is derived from — rather than from a guess about the hardware.
+        A machine with a faster model earns a smaller floor by being measured, not by being
+        configured.
+
+        Raising this cannot slow a turn down: the deadline is a *maximum wait*, and framings that
+        finish early return immediately. It only stops the budget from cutting off work that was
+        about to succeed.
+        """
+        observed = 0.0
+        try:
+            from nyxara.observe.turn_ledger import get_ledger
+            for turn in get_ledger().recent(limit=8):
+                for gen in turn.generations:
+                    if gen.ok and gen.chars > 0:
+                        observed = max(observed, float(gen.latency_s))
+        except Exception:  # noqa: BLE001 — observation must never break a turn
+            observed = 0.0
+        if observed > 0.0:
+            return max(1.0, observed * 2.0)     # headroom for a slower-than-usual reply
+        try:
+            from nyxara.kernel.config import get_settings
+            return max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
+        except Exception:  # noqa: BLE001
+            return 30.0
 
     @staticmethod
     def _deadline_share() -> float:

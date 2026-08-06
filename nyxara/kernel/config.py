@@ -307,6 +307,14 @@ class MetaControlConfig(BaseModel):
     # the lot; handing them a share leaves room for the rest. Raise it toward 1.0 to favour
     # breadth of hypotheses over depth of refinement.
     parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
+    # A floor under that share, used only until the turn ledger has observed a real generation.
+    # An easy turn is allotted 5s, of which the framings get half — while one generation on the
+    # on-device Gemma measures ~13.9s. The deadline therefore fired before the model could ever
+    # answer, and every easy turn fell to the deterministic stand-in ("I understand: Hii"), which
+    # reads exactly like a broken model rather than a budget too small to buy one call.
+    # Raising this cannot slow a turn: a deadline is a maximum wait, and fast framings still
+    # return at once. It only stops the budget from cutting off work that was about to succeed.
+    min_generation_budget_s: float = Field(default=30.0, gt=0.0)
     # Calibration correction only engages once this many outcomes have been observed.
     min_calibration_samples: int = Field(default=20, ge=0)
     # A verified score at/above this floor counts the allocation as "sufficient".
@@ -443,6 +451,20 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_output_tokens: int = Field(default=8192, ge=1, le=131072)
+    # What a *conversational reply* may be, as opposed to a long-form task. The turn path asked
+    # for the full ``max_output_tokens``, and on-device that is not a ceiling anyone reaches by
+    # accident — it is the price of the worst case: 8192 tokens at the ~7 tok/s this machine
+    # measures is twenty minutes for one reply.
+    #
+    # It is the lever that actually works. A deadline cannot interrupt a generation already
+    # running inside the runtime; a token cap stops one from being started. Measured: "Hii"
+    # produced 72-469 characters in 15-20s and answered; "Kya kar rhi ho" produced 1,586
+    # characters in 56s and blew a 40.9s deadline, so the turn fell to the deterministic floor
+    # and the Master got "I understand: Kya kar rhi ho" instead of the reply that was coming.
+    #
+    # The honest cost: an answer that genuinely needs more than this is cut short rather than
+    # rambling. Long-form work uses ``max_output_tokens`` and is unaffected.
+    conversational_max_tokens: int = Field(default=512, ge=16, le=131072)
     request_timeout_s: float = Field(default=60.0, gt=0)
     max_retries: int = Field(default=3, ge=0, le=10)
 
