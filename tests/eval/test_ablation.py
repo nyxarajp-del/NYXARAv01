@@ -159,6 +159,27 @@ def test_a_missing_attribute_reports_failure():
     assert attr_faculty("rc", "role_council").disable(_Core()) is False
 
 
+def test_every_shipped_faculty_names_an_attribute_the_core_actually_sets():
+    """A typo'd attribute name reports ``broken`` at run time, which is safe but late.
+
+    Checked statically against ``NyxaraCore``'s source rather than by building a core: a real one
+    costs a full boot, and the failure being guarded against is a misspelling, not a runtime
+    condition. Every faculty here is disabled by nulling ``core.<attr>``, so ``self.<attr> =``
+    must appear in the class.
+    """
+    import inspect
+
+    from nyxara.eval.ablation import CORE_FACULTIES
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    source = inspect.getsource(NyxaraCore)
+    for faculty in CORE_FACULTIES:
+        assert faculty.attr, f"{faculty.name!r} does not record which attribute it ablates"
+        assert f"self.{faculty.attr} = " in source or f"self.{faculty.attr}:" in source, (
+            f"{faculty.name!r} ablates core.{faculty.attr}, which NyxaraCore never assigns — "
+            f"the ablation would silently measure nothing")
+
+
 # --------------------------------------------------------------------------- #
 # End to end, against a fake mind
 # --------------------------------------------------------------------------- #

@@ -75,6 +75,10 @@ class Faculty:
     name: str
     disable: Callable[[Any], bool]
     note: str = ""
+    #: The core attribute this ablates, when it ablates one. Recorded rather than inferred from
+    #: ``note``: a checker that reads the prose gets the answer wrong the moment the prose is
+    #: rewritten, and the thing being checked is that the attribute name is not a typo.
+    attr: Optional[str] = None
 
     def __str__(self) -> str:  # pragma: no cover — display only
         return self.name
@@ -95,7 +99,7 @@ def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
         setattr(core, attr, None)
         return True
 
-    return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None")
+    return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None", attr=attr)
 
 
 #: A starting set aimed at the faculties that sit on the *turn* path, since those are the ones
@@ -103,6 +107,14 @@ def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
 #: growth will read as ``inert`` here, and that is the correct answer for this instrument — it
 #: means "ask a different battery", not "delete it".
 CORE_FACULTIES: Tuple[Faculty, ...] = (
+    # The two measured cost centres, first. Neither is a guess: a bare "Hii" turn took 122.7 s of
+    # which 109.2 s was ``_inject_domain_expertise`` spending a whole model call to *label* the
+    # greeting, and recursive improvement buys its quality with N further full passes. Both are
+    # advisory, so the question "is that price worth paying?" is exactly answerable here.
+    attr_faculty("domain_expertise", "general_intelligence",
+                 "classifies the domain and prepends an expert methodology (costs a generation)"),
+    attr_faculty("recursive_improve", "recursive_improver",
+                 "N critique+revise passes over the candidate (costs N generations)"),
     attr_faculty("role_council", "role_council", "the multi-role deliberation council"),
     attr_faculty("self_model", "self_model", "the self-knowledge report injected into context"),
     attr_faculty("world_model", "world_model", "the predictive world model"),
