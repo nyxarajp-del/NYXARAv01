@@ -94,6 +94,7 @@ def test_think_on_empty_input_is_an_empty_thought(brain):
 
 # -------------------- reflection -------------------- #
 def test_resolving_an_outcome_moves_the_winner_reliability(brain):
+    """A thought her own engines could not check stays open, so an explicit outcome still lands."""
     thought = brain.think("how might we keep a room warm")
     source = thought.winner.source
     before = brain.metacog.record_for(source).score
@@ -102,8 +103,19 @@ def test_resolving_an_outcome_moves_the_winner_reliability(brain):
     assert brain.metacog.record_for(source).score < before
 
 
-def test_resolve_accepts_a_cycle_id_directly(brain):
+def test_a_thought_verification_already_settled_is_not_resolved_twice(brain):
+    """Auto-verification consumes the outcome; a second resolve must not double-count it."""
     thought = brain.think("what pulls an apple down")
+    if thought.verification is None or thought.verification.outcome is None:
+        pytest.skip("this turn was not mechanically checkable")
+    assert brain.resolve(thought, correct=1.0) is None
+    assert brain.metacog.record_for(thought.winner.source).samples == 1
+
+
+def test_resolve_accepts_a_cycle_id_directly(brain):
+    thought = brain.think("how might we keep a room warm")
+    if thought.verification is not None and thought.verification.outcome is not None:
+        pytest.skip("this turn was settled automatically")
     assert brain.resolve(thought.cycle_id, correct=1.0) is not None
 
 

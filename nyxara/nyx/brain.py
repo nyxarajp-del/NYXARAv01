@@ -30,6 +30,8 @@ from nyxara.nyx.modules import (
     Proposal,
     Situation,
 )
+from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
+from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
@@ -78,6 +80,8 @@ class NyxThought:
     stimulus: str = ""
     percept: Optional[NyxPercept] = None
     deliberation: Optional[Deliberation] = None
+    collapsed: Optional[Collapsed] = None
+    verification: Optional[Verification] = None
     assessment: Any = None                       # nyx.metacog.Assessment
     cycle_id: str = ""
 
@@ -102,14 +106,28 @@ class NyxThought:
         winner = self.winner
         return float(winner.confidence) if winner is not None else 0.0
 
+    @property
+    def decided(self) -> bool:
+        """Whether one answer actually dominated. ``False`` means she is genuinely unsure."""
+        return bool(self.collapsed.decided) if self.collapsed is not None else bool(self.winner)
+
+    @property
+    def entropy(self) -> float:
+        """How spread out her belief still is, in bits. High = several answers are live."""
+        return float(self.collapsed.entropy) if self.collapsed is not None else 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         return {"stimulus": self.stimulus, "cycle_id": self.cycle_id,
                 "answer": self.answer, "verified": self.verified,
                 "confidence": round(self.confidence, 4),
+                "decided": self.decided, "entropy": round(self.entropy, 4),
                 "source": self.winner.source if self.winner else None,
                 "percept": self.percept.to_dict() if self.percept else None,
                 "deliberation": (self.deliberation.to_dict()
                                  if self.deliberation is not None else None),
+                "collapsed": self.collapsed.to_dict() if self.collapsed is not None else None,
+                "verification": (self.verification.to_dict()
+                                 if self.verification is not None else None),
                 "assessment": (self.assessment.to_dict()
                                if self.assessment is not None else None)}
 
@@ -131,6 +149,7 @@ class NyxBrain:
             max_links_per_trace=c.max_links_per_trace)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
+        self.hybrid = self._build_hybrid(c)
         self.turns = 0
 
     @staticmethod
@@ -154,6 +173,17 @@ class NyxBrain:
                                 capacity=c.workspace_capacity,
                                 access_threshold=c.access_threshold)
         except Exception:  # noqa: BLE001 — without a workspace she still perceives and recalls
+            return None
+
+    @staticmethod
+    def _build_hybrid(c: Any) -> Optional[SymbolicSubsymbolicFusion]:
+        if not getattr(c, "hybrid_enabled", True):
+            return None
+        try:
+            return SymbolicSubsymbolicFusion(
+                grounding=getattr(c, "grounding_check", True),
+                min_grounding_overlap=getattr(c, "min_grounding_overlap", 0.5))
+        except Exception:  # noqa: BLE001
             return None
 
     # ---- perception ------------------------------------------------------ #
@@ -217,10 +247,27 @@ class NyxBrain:
                 context=out.percept.context, recall=out.percept.recall,
                 novelty=out.percept.novelty, brain=self)
             out.deliberation = self.workspace.deliberate(situation, goals=goals)
+
+            # Measure how sure she actually is across *every* candidate, not just the winner.
+            # The workspace decides what reaches awareness; this says whether anything really
+            # dominated, and keeps the runners-up alive with real probabilities.
+            if out.deliberation is not None and out.deliberation.proposals \
+                    and getattr(self.config, "superposition_enabled", True):
+                out.collapsed = SolutionSuperposition.from_proposals(
+                    out.deliberation.proposals,
+                    collapse_threshold=self.config.collapse_threshold,
+                    max_candidates=self.config.max_candidates).collapse()
+
             if self.metacog is not None and out.deliberation is not None:
                 out.assessment = self.metacog.observe_cycle(
                     cycle_id=out.cycle_id, winner=out.deliberation.winner,
                     considered=out.deliberation.proposals)
+
+            # Check what she is about to say against her own engines, and let the verdict
+            # credit or debit the specialist that said it — the loop closes with no human.
+            if self.hybrid is not None and out.answer:
+                out.verification = self.hybrid.check_and_learn(self, out)
+
             if remember:
                 # What is worth remembering from a turn is what she *concluded*; the question is
                 # provenance. A verified derivation is a conclusion she can lean on later, an

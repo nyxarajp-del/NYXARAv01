@@ -2361,6 +2361,18 @@ class NyxConfig(BaseModel):
     metacog_min_samples: int = Field(default=5, ge=1)            # below this a record is untrusted
     overconfidence_gap: float = Field(default=0.3, ge=0.0, le=1.0)
 
+    # Pillar 4 — candidate answers held together until a decision is actually needed.
+    # Classical probability amplitudes: no qubits, no entanglement, no quantum speedup.
+    superposition_enabled: bool = True
+    collapse_threshold: float = Field(default=0.5, ge=0.0, le=1.0)  # below => stay undecided
+    max_candidates: int = Field(default=32, ge=1, le=1024)
+
+    # Pillar 2 — symbolic ∧ sub-symbolic: derived beats guessed, and checking her own answers
+    # is what lets meta-cognition learn with no human in the loop.
+    hybrid_enabled: bool = True
+    grounding_check: bool = True                                 # is the claim carried by evidence?
+    min_grounding_overlap: float = Field(default=0.5, ge=0.0, le=1.0)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

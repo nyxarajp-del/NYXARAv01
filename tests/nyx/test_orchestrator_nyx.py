@@ -7,6 +7,8 @@ The kernel still disposes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nyxara.agency.permissions import Authority
@@ -26,6 +28,22 @@ def nyx_env(monkeypatch):
             monkeypatch.setenv(f"NYXARA_NYX__{key.upper()}", str(value))
         return reload_settings()
     yield _set
+    monkeypatch.undo()
+    reload_settings()
+
+
+@pytest.fixture(autouse=True)
+def home(tmp_path, monkeypatch):
+    """An isolated ``NYXARA_HOME`` for every test here — autouse, so none can touch the real one.
+
+    Setting the variable is not enough: ``get_settings()`` is a cached singleton and
+    ``PathsConfig`` resolves the home once, at construction. Without the rebuild these tests
+    read and write the *real* ``~/.nyxara`` — which makes them non-hermetic and, as that store
+    accumulates, progressively slower.
+    """
+    monkeypatch.setenv("NYXARA_HOME", str(tmp_path))
+    reload_settings()
+    yield tmp_path
     monkeypatch.undo()
     reload_settings()
 
@@ -100,17 +118,16 @@ def test_a_broken_brain_never_breaks_a_turn():
 
 
 # -------------------- persistence -------------------- #
-def test_state_round_trips_through_save_and_load(tmp_path, monkeypatch):
-    monkeypatch.setenv("NYXARA_HOME", str(tmp_path))
-
+def test_state_round_trips_through_save_and_load(home):
     core = _core()
     core.process("gravity pulls an apple toward the ground", authority=Authority.OWNER)
     core.process("an apple falls because of gravity", authority=Authority.OWNER)
     saved = core.save_state()
     assert saved
 
-    sidecar = tmp_path_sidecar(saved)
+    sidecar = Path(saved).parent / "nyx.json"
     assert sidecar.exists() and sidecar.stat().st_size > 0
+    assert str(home) in str(sidecar)           # the isolation actually took effect
 
     revived = _core()
     revived.load_state()
@@ -119,13 +136,7 @@ def test_state_round_trips_through_save_and_load(tmp_path, monkeypatch):
     assert revived.nyx_related("gravity", k=4)
 
 
-def tmp_path_sidecar(saved_memory_path: str):
-    from pathlib import Path
-    return Path(saved_memory_path).parent / "nyx.json"
-
-
-def test_missing_sidecar_does_not_block_boot(tmp_path, monkeypatch):
-    monkeypatch.setenv("NYXARA_HOME", str(tmp_path))
+def test_missing_sidecar_does_not_block_boot(home):
     core = _core()
     core.load_state()                          # nothing saved yet
     assert core.nyx is not None

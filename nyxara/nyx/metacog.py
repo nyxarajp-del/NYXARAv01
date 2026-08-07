@@ -187,9 +187,23 @@ class RecursiveMetaCognition:
 
     # ---- introspection --------------------------------------------------- #
     def why(self, *, k: int = 1) -> List[Assessment]:
-        """The most recent reasoning traces — what `/nyx why` answers from."""
+        """The most recent *reasoning* traces — what ``/nyx why`` answers from.
+
+        Outcome records share the same history but answer a different question ("was I right?"),
+        and they carry no rationale. Asking why she thought something must not hand back the
+        note that says how it turned out.
+        """
         try:
-            return list(self.history)[-max(1, int(k)):]
+            reasoning = [a for a in self.history if a.observed is None]
+            return reasoning[-max(1, int(k)):]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def outcomes(self, *, k: int = 5) -> List[Assessment]:
+        """The most recent resolved outcomes — how right she turned out to be."""
+        try:
+            resolved = [a for a in self.history if a.observed is not None]
+            return resolved[-max(1, int(k)):]
         except Exception:  # noqa: BLE001
             return []
 
