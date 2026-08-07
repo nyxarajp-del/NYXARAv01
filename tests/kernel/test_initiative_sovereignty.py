@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.agency.permissions import Authority, Capability, RiskTier
+from nyxara.guard.oversight import ReviewMode
 from nyxara.kernel.orchestrator import Candidate, Disposition, NyxaraCore
 from nyxara.planning.decide import DecisionAction, Governance, InitiativeGovernor, Option
 
@@ -63,11 +64,43 @@ def test_the_standing_grant_still_frees_ordinary_autonomous_work():
 
 
 def test_the_waiver_is_recorded_in_the_gate_trace():
-    """A silently-waived gate is how this went unnoticed. Name the clause that was waived."""
+    """A silently-waived gate is how this went unnoticed. Name the clause that was waived.
+
+    Driven through ``_gate`` with a candidate built to trigger a *waivable* clause, rather than
+    through a prompt and whatever confidence the reasoner happens to return. The first version of
+    this test asked ``core.process("open the project notes")`` and asserted a waiver appeared —
+    which held only because a promoted model on the developer's machine produced a low-confidence
+    candidate. On a hermetic run the governor clears that option outright (``basis="cleared"``),
+    no waiver is needed, and the trace correctly reads ``act``. The test was passing on ambient
+    state, which is the same defect the scratch-home change exists to remove.
+    """
     core = _core()
-    result = core.process("open the project notes", authority=Authority.AUTONOMOUS)
-    initiative = (result.gates or {}).get("initiative", "")
-    assert "sovereign-grant" in initiative and "(" in initiative, initiative
+    assert core.oversight.mode is ReviewMode.SOVEREIGN, "premise: the standing grant is on"
+
+    # low confidence, fully reversible, low stakes -> the `confidence` clause, which IS waivable
+    candidate = Candidate(text="open the project notes", kind="act",
+                          capability=Capability.MESSAGE_SEND, risk=RiskTier.LOW,
+                          reversible=True, confidence=0.05, belief=0.05,
+                          rationale="a hesitant, harmless act")
+    gates: dict = {}
+    disposition, _ = core._gate(candidate, Authority.AUTONOMOUS, gates)
+
+    assert disposition is Disposition.ACT, "the grant should clear a hesitant, reversible act"
+    assert gates["initiative"] == "sovereign-grant (confidence)", gates["initiative"]
+
+
+def test_an_unwaivable_clause_is_never_recorded_as_a_grant():
+    """The other half: the trace must not claim a waiver the grant does not cover."""
+    core = _core()
+    candidate = Candidate(text="delete everything", kind="act",
+                          capability=Capability.FS_DELETE, risk=RiskTier.CRITICAL,
+                          reversible=False, confidence=0.99, belief=0.99,
+                          rationale="an irreversible, high-stakes act")
+    gates: dict = {}
+    disposition, _ = core._gate(candidate, Authority.AUTONOMOUS, gates)
+
+    assert "sovereign-grant" not in gates.get("initiative", "")
+    assert disposition is not Disposition.ACT
 
 
 # --------------------------------------------------------------------------- #
