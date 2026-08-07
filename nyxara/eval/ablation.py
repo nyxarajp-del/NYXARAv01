@@ -50,6 +50,7 @@ from nyxara.eval.benchmark import Benchmark, BenchmarkReport, Solver
 __all__ = [
     "Faculty",
     "attr_faculty",
+    "value_faculty",
     "AblationResult",
     "AblationReport",
     "mcnemar_exact",
@@ -102,12 +103,41 @@ def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
     return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None", attr=attr)
 
 
+def value_faculty(name: str, attr: str, off_value: Any, note: str = "") -> Faculty:
+    """A faculty turned off by *setting* an attribute rather than nulling it.
+
+    Some cognition is not a component that can be removed but a dial that can be turned down —
+    ``parallel_hypotheses = 3`` is three reasoning passes, ``= 1`` is one. Same contract as
+    :func:`attr_faculty`: reports ``False`` when the attribute is absent or already at the off
+    value, because in both cases nothing was disabled and nothing was measured.
+    """
+
+    def _disable(core: Any) -> bool:
+        current = getattr(core, attr, None)
+        if current is None or current == off_value:
+            return False
+        setattr(core, attr, off_value)
+        return True
+
+    return Faculty(name=name, disable=_disable,
+                   note=note or f"core.{attr} = {off_value!r}", attr=attr)
+
+
 #: A starting set aimed at the faculties that sit on the *turn* path, since those are the ones
 #: whose absence a battery can actually see. A faculty that only runs on an idle tick or during
 #: growth will read as ``inert`` here, and that is the correct answer for this instrument — it
 #: means "ask a different battery", not "delete it".
 CORE_FACULTIES: Tuple[Faculty, ...] = (
-    # The two measured cost centres, first. Neither is a guess: a bare "Hii" turn took 122.7 s of
+    # Parallel hypotheses, first, because it is the one whose *premise* changed underneath it.
+    # Three framings (grounded / unprimed / focused) each run the whole reasoner. That was close to
+    # free when the strongest rung was a CLOUD model — the three overlapped one network wait — and
+    # it is not free now that the primary brain is an on-device Gemma saturating the same CPU: the
+    # wall clock becomes three generations rather than one, and the deadline then discards two of
+    # the three results anyway. Whether the breadth still pays for itself is exactly this
+    # instrument's question, and nothing has ever asked it.
+    value_faculty("parallel_hypotheses", "parallel_hypotheses", 1,
+                  "3 competing framings, each a full reasoning pass, vs a single pass"),
+    # The two measured cost centres, next. Neither is a guess: a bare "Hii" turn took 122.7 s of
     # which 109.2 s was ``_inject_domain_expertise`` spending a whole model call to *label* the
     # greeting, and recursive improvement buys its quality with N further full passes. Both are
     # advisory, so the question "is that price worth paying?" is exactly answerable here.

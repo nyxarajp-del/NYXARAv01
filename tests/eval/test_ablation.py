@@ -159,6 +159,28 @@ def test_a_missing_attribute_reports_failure():
     assert attr_faculty("rc", "role_council").disable(_Core()) is False
 
 
+def test_turning_a_dial_down_reports_success():
+    from nyxara.eval.ablation import value_faculty
+
+    core = _Core(parallel_hypotheses=3)
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(core) is True
+    assert core.parallel_hypotheses == 1
+
+
+def test_a_dial_already_at_the_off_value_reports_failure():
+    """Same guard as nulling an already-None attribute: nothing was disabled, nothing measured."""
+    from nyxara.eval.ablation import value_faculty
+
+    core = _Core(parallel_hypotheses=1)
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(core) is False
+
+
+def test_a_missing_dial_reports_failure():
+    from nyxara.eval.ablation import value_faculty
+
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(_Core()) is False
+
+
 def test_every_shipped_faculty_names_an_attribute_the_core_actually_sets():
     """A typo'd attribute name reports ``broken`` at run time, which is safe but late.
 
