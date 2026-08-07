@@ -98,6 +98,20 @@ os.environ.setdefault("NYXARA_FOUNDRY__ENABLED", "false")
 # down the deterministic floor and stop the suite from exercising the reasoning path at all. Same
 # rationale as pinning the genesis substrate above — keep the mechanism, not the price.
 os.environ.setdefault("NYXARA_METACONTROL__MAX_SECONDS_CEILING", "6")
+# The suite reaches the live internet. `idle_maintenance` fires the ProactiveEngine's research
+# initiative, which runs `_research_topic` -> `researcher.research` -> `senses/search.py::_ddg_html`
+# -> an httpx TLS handshake to DuckDuckGo. `web.timeout_s` defaults to 60s, so
+# `test_easy_body_does_not_fight_mood_relaxation` — which ticks idle_maintenance TWENTY times —
+# sat for twenty minutes of network waits and blew the per-test ceiling.
+#
+# Capped rather than disabled, and this is deliberately NOT a claim of network hermeticity: the
+# request is still made, it just fails in a second instead of a minute, and every caller already
+# treats a failed search as "no results" and degrades honestly. Sealing egress outright is the
+# right end state but it has no safe global switch — `features.proactive_agency` is asserted ON by
+# test_growth_agency_wiring, and the idle web reach is gated by `full_control or
+# autonomous_internet` where full_control is asserted ON by the sovereignty tests. Turning either
+# off to fix a slow test would break a test that exists to pin real behaviour.
+os.environ.setdefault("NYXARA_WEB__TIMEOUT_S", "1")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 
