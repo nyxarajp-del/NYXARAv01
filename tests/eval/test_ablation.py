@@ -254,6 +254,47 @@ def test_each_arm_gets_a_fresh_core():
     assert built[1].helper is None
 
 
+def test_fresh_per_task_builds_a_core_for_every_task_in_both_arms():
+    built = []
+
+    def factory():
+        core = _FakeCore()
+        built.append(core)
+        return core
+
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), factory, fresh_per_task=True)
+    assert len(built) == 8, "4 tasks x 2 arms"
+    assert result.disabled_ok
+    assert [c.helper for c in built[:4]] == [built[i].helper for i in range(4)]
+    assert all(c.helper is None for c in built[4:]), "every core in the off arm must be ablated"
+
+
+def test_one_failed_ablation_condemns_the_whole_run():
+    """Averaging it away would drag the result toward 'no benefit' — the deleting direction.
+
+    Under ``fresh_per_task`` each core is ablated separately, so one core that arrived with the
+    faculty already absent contributes a concordant pair that looks like evidence. It is not
+    evidence; it is a hole, and the run must say so rather than quietly absorb it.
+    """
+    made = {"n": 0}
+
+    def factory():
+        core = _FakeCore()
+        made["n"] += 1
+        if made["n"] == 6:                       # one core in the off arm arrives already off
+            core.helper = None
+        return core
+
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), factory, fresh_per_task=True)
+    assert result.disabled_ok is False
+    assert result.verdict == "broken" and not result.deletion_candidate
+
+
+def test_the_shared_core_mode_still_reports_a_single_effective_toggle():
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), _FakeCore)
+    assert result.disabled_ok is True
+
+
 def test_a_solver_error_scores_zero_rather_than_crashing():
     class _Broken(_FakeCore):
         def process(self, prompt, authority=None):

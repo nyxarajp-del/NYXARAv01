@@ -305,30 +305,64 @@ def _outcomes(report: BenchmarkReport) -> Dict[str, Tuple[bool, str, float]]:
 
 def ablate(faculty: Faculty, benchmark: Benchmark,
            core_factory: Callable[[], Any], *,
-           alpha: float = 0.05, min_discordant: int = 6) -> AblationResult:
+           alpha: float = 0.05, min_discordant: int = 6,
+           fresh_per_task: bool = False) -> AblationResult:
     """Run ``benchmark`` twice — faculty on, faculty off — and compare the paired outcomes.
 
-    A **fresh core per arm**, because ablation mutates the core and a shared one would carry the
-    first arm's memory, journal and fatigue into the second. Same battery, same order, same seed:
-    the only intended difference between the arms is the faculty.
+    A **fresh core per arm** at minimum, because ablation mutates the core and reusing one would
+    carry the first arm's memory, journal and fatigue into the second. Same battery, same order,
+    same seed: the only intended difference between the arms is the faculty.
+
+    ``fresh_per_task`` decides what the number then means, and the default is the weaker claim:
+
+    * ``False`` (default) — one core per arm, tasks run in sequence. This measures the faculty
+      *in a session*, which is how it is actually used: a retriever that helps only because it
+      remembers task 3 when answering task 7 is genuinely helping. The cost is that the tasks are
+      not independent, so the discordant pairs McNemar's test consumes are exchangeable only
+      approximately. Treat a marginal p-value here as suggestive, not decisive.
+    * ``True`` — a fresh core per task, matching ``benchmark.core_solver``'s default. Tasks become
+      independent and the statistic is clean, at the price of one full boot per task (the whole
+      mind, per task, per arm) — which is why it is not the default.
+
+    Neither setting can manufacture a result the other would contradict in *direction*; the
+    difference is how much weight the p-value carries. Said plainly here because an instrument
+    that licenses deletions should not leave its own assumptions to be discovered.
     """
     from nyxara.agency.permissions import Authority
 
-    def _solver(core: Any) -> Solver:
-        def _solve(prompt: str) -> str:
-            return core.process(prompt, authority=Authority.OWNER).response
-        return _solve
+    def _solver(build: Callable[[], Any], *, ablated: bool) -> Tuple[Solver, List[bool]]:
+        """A solver plus the record of whether each ablation attempt actually took effect."""
+        shared: List[Any] = [] if fresh_per_task else [build()]
+        took: List[bool] = []
+        if shared and ablated:
+            took.append(bool(faculty.disable(shared[0])))
 
-    on_core = core_factory()
+        def _solve(prompt: str) -> str:
+            if fresh_per_task:
+                core = build()
+                if ablated:
+                    took.append(bool(faculty.disable(core)))
+            else:
+                core = shared[0]
+            return core.process(prompt, authority=Authority.OWNER).response
+
+        return _solve, took
+
+    on_solver, _ = _solver(core_factory, ablated=False)
     t0 = time.monotonic()
-    on_report = benchmark.run(_solver(on_core))
+    on_report = benchmark.run(on_solver)
     on_wall = time.monotonic() - t0
 
-    off_core = core_factory()
-    disabled_ok = bool(faculty.disable(off_core))
+    off_solver, took = _solver(core_factory, ablated=True)
     t0 = time.monotonic()
-    off_report = benchmark.run(_solver(off_core))
+    off_report = benchmark.run(off_solver)
     off_wall = time.monotonic() - t0
+
+    # The experiment is valid only if the ablation took effect EVERY time it was attempted. Under
+    # fresh_per_task a single core that had the faculty already absent would silently contribute a
+    # concordant pair and drag the result toward "no benefit" — the exact direction that deletes
+    # working code — so one failure condemns the whole run rather than being averaged away.
+    disabled_ok = bool(took) and all(took)
 
     on_by_id, off_by_id = _outcomes(on_report), _outcomes(off_report)
     shared = [tid for tid in on_by_id if tid in off_by_id]
@@ -362,7 +396,7 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
                  benchmark: Optional[Benchmark] = None,
                  core_factory: Optional[Callable[[], Any]] = None,
                  holdout_frac: float = 0.4, seed: int = 0,
-                 limit: int = 0,
+                 limit: int = 0, fresh_per_task: bool = False,
                  alpha: float = 0.05, min_discordant: int = 6) -> AblationReport:
     """Ablate each faculty against the **held-out** fold of a battery.
 
@@ -380,7 +414,8 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
         from nyxara.eval.harness import default_core_factory
         core_factory = default_core_factory
 
-    results = [ablate(f, holdout, core_factory, alpha=alpha, min_discordant=min_discordant)
+    results = [ablate(f, holdout, core_factory, alpha=alpha, min_discordant=min_discordant,
+                      fresh_per_task=fresh_per_task)
                for f in faculties]
     return AblationReport(battery=holdout.name, results=results, seed=seed)
 

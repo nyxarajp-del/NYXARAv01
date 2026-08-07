@@ -66,7 +66,7 @@ def test_the_waiver_is_recorded_in_the_gate_trace():
     """A silently-waived gate is how this went unnoticed. Name the clause that was waived."""
     core = _core()
     result = core.process("open the project notes", authority=Authority.AUTONOMOUS)
-    initiative = (result.meta or {}).get("gates", {}).get("initiative", "")
+    initiative = (result.gates or {}).get("initiative", "")
     assert "sovereign-grant" in initiative and "(" in initiative, initiative
 
 
@@ -110,7 +110,7 @@ def test_a_broken_governor_does_not_block_the_turn():
     core = _core()
     core._initiative = lambda: (_ for _ in ()).throw(RuntimeError("governor is down"))
     result = core.process("open the project notes", authority=Authority.AUTONOMOUS)
-    assert "skipped" in (result.meta or {}).get("gates", {}).get("initiative", "")
+    assert "skipped" in (result.gates or {}).get("initiative", "")
 
 
 def test_a_conversational_reply_is_not_initiative_gated():
