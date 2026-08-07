@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
@@ -154,6 +155,7 @@ class NyxBrain:
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
         self.ground = self._build_ground(c)
+        self.dialogue = self._build_dialogue(c)
         self.turns = 0
 
     @staticmethod
@@ -200,6 +202,22 @@ class NyxBrain:
                 max_new_per_turn=getattr(c, "ground_max_new_per_turn", 4),
                 bind_to_graph=getattr(c, "ground_bind_to_graph", True))
         except Exception:  # noqa: BLE001 — without grounding her words are honestly unanchored
+            return None
+
+    @staticmethod
+    def _build_dialogue(c: Any) -> Optional[Dialogue]:
+        if not getattr(c, "dialogue_enabled", True):
+            return None
+        try:
+            soul = None
+            try:
+                from nyxara.identity.soul import Soul
+                soul = Soul()
+            except Exception:  # noqa: BLE001 — she can speak without an identity fragment
+                soul = None
+            return Dialogue(require_fluent_surface=getattr(c, "require_fluent_surface", True),
+                            soul=soul, max_tokens=getattr(c, "reply_max_tokens", 220))
+        except Exception:  # noqa: BLE001
             return None
 
     # ---- perception ------------------------------------------------------ #
@@ -261,8 +279,6 @@ class NyxBrain:
             out.percept = self.perceive(out.stimulus, remember=False)
             out.cycle_id = f"cycle-{self.turns}"
             if self.workspace is None:
-                if remember:
-                    self.memory.remember(f"turn-{self.turns}", out.stimulus, kind="episode")
                 return out
             situation = Situation(
                 stimulus=out.stimulus, concepts=out.percept.concepts,
@@ -290,18 +306,36 @@ class NyxBrain:
             if self.hybrid is not None and out.answer:
                 out.verification = self.hybrid.check_and_learn(self, out)
 
-            if remember:
-                # What is worth remembering from a turn is what she *concluded*; the question is
-                # provenance. A verified derivation is a conclusion she can lean on later, an
-                # unverified one only an episode.
-                answer = out.answer
+            # What is worth remembering from a turn is what she *concluded*; the question is
+            # provenance. A turn she had no answer to writes nothing here — the concepts are
+            # already in the graph, and storing the bare question would make it its own best
+            # match, so re-asking would echo the question back as the answer.
+            if remember and out.answer:
                 self.memory.remember(
-                    f"turn-{self.turns}", answer or out.stimulus,
+                    f"turn-{self.turns}", out.answer,
                     kind=("conclusion" if out.verified else "episode"),
-                    cue=out.stimulus if answer else "")
+                    cue=out.stimulus)
             return out
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             return out
+
+    def converse(self, text: str, *, goals: Optional[Dict[str, float]] = None) -> Reply:
+        """Think, then say it. The content is hers; a fluent model only phrases it.
+
+        This is the path the Master actually talks to. When no fluent language surface is
+        installed she still answers — in her own words, with a note saying so — rather than
+        letting a fallback n-gram babble in her name.
+        """
+        try:
+            thought = self.think(text, goals=goals)
+            if self.dialogue is None:
+                return Reply(text=thought.answer, source=(thought.winner.source
+                                                          if thought.winner else ""),
+                             confidence=thought.confidence, verified=thought.verified,
+                             decided=thought.decided)
+            return self.dialogue.respond(thought, brain=self)
+        except Exception:  # noqa: BLE001 — she always says something, never crashes mid-sentence
+            return Reply()
 
     def resolve(self, thought: Any, *, correct: float) -> Any:
         """Tell meta-cognition how a thought actually turned out (0.0 … 1.0).

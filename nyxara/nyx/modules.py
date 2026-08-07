@@ -166,19 +166,32 @@ class GraphSpecialist(SpecialistModule):
     # Associations are weaker evidence than something she actually recalls or can derive — they
     # say *that* two things go together, never *what* is true of them.
     priority = 0.3
-    floor = 0.1                      # below this an edge is noise from a single co-occurrence
+
+    @staticmethod
+    def _floor(brain: Any) -> float:
+        """An association must have been seen more than once to be worth saying out loud.
+
+        Two words appearing together in *this* turn is not knowledge — it is the sentence the
+        Master just typed, handed back. A single Hebbian bump lands at ``hebbian_rate``, so the
+        bar sits just above it.
+        """
+        try:
+            return float(getattr(brain.graph, "hebbian_rate", 0.15)) * 1.05
+        except Exception:  # noqa: BLE001
+            return 0.16
 
     def consider(self, situation: Situation) -> Optional[Proposal]:
         brain = situation.brain
         if brain is None or not situation.concepts:
             return None
+        floor = self._floor(brain)
         seen: set = set()
         phrases: List[str] = []
         strongest = 0.0
         for concept in situation.concepts[:4]:
             partners: List[str] = []
             for other, weight in brain.related(concept, k=3):
-                if weight < self.floor:
+                if weight < floor:
                     continue
                 # the graph is undirected — a~b and b~a are one association, not two
                 edge = (concept, other) if concept <= other else (other, concept)

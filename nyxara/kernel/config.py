@@ -2381,6 +2381,14 @@ class NyxConfig(BaseModel):
     ground_max_new_per_turn: int = Field(default=4, ge=0)
     ground_bind_to_graph: bool = True            # a word's features become graph structure
 
+    # How she speaks. The content is always hers; a fluent model only phrases it. With
+    # ``require_fluent_surface`` on, a degraded rung (the n-gram floor) is *reported* rather
+    # than spoken through — it emits noise on a real prompt, and passing that off as her reply
+    # would misrepresent what she can do.
+    dialogue_enabled: bool = True
+    require_fluent_surface: bool = True
+    reply_max_tokens: int = Field(default=220, ge=16, le=4096)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

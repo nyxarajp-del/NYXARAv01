@@ -2099,9 +2099,24 @@ class NyxaraCore:
             brain = getattr(self, "nyx5", None)
             if brain is not None and getattr(getattr(settings, "nyx5", None), "as_reasoner", False):
                 from nyxara.nyx5 import Nyx5Reasoner
-                return Nyx5Reasoner(base=reasoner, brain=brain,
-                                    free_energy=getattr(self, "free_energy", None),
-                                    predictive=getattr(self, "predictive", None))
+                reasoner = Nyx5Reasoner(base=reasoner, brain=brain,
+                                        free_energy=getattr(self, "free_energy", None),
+                                        predictive=getattr(self, "predictive", None))
+        except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
+            pass
+        # NYX V.01 reason-seat (on by default): the unified brain wraps whatever reasoner was
+        # assembled above and supplies the *content* of a reply when its own cycle — grounded
+        # recall, a checked derivation, the collapsed superposition — has something better to
+        # say. It only ever PROPOSES: risk, capability, tool and every corrigibility flag are
+        # left exactly as the base set them, and the candidate still passes the identical
+        # fail-closed gate. The mind proposes; the kernel disposes.
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
+            nyx = getattr(self, "nyx", None)
+            if nyx is not None and getattr(getattr(settings, "nyx", None), "as_reasoner", False):
+                from nyxara.nyx.reasoner import NyxReasoner
+                return NyxReasoner(base=reasoner, brain=nyx)
         except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
             pass
         return reasoner

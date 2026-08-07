@@ -37,6 +37,7 @@ config-gated: a failure degrades to a null result, never a broken turn.
 from __future__ import annotations
 
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
+from nyxara.nyx.dialogue import Dialogue, Reply, Surface
 from nyxara.nyx.graph import (
     Activation,
     Concept,
@@ -59,6 +60,7 @@ from nyxara.nyx.modules import (
     SpecialistModule,
     default_specialists,
 )
+from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -78,6 +80,8 @@ __all__ = [
     "SymbolicSubsymbolicFusion", "Verification", "Verdict",
     # symbol grounding — what her words are actually about
     "WorldGrounding", "Understanding", "Grounded",
-    # the facade the kernel holds
-    "NyxBrain", "NyxPercept", "NyxThought",
+    # how she speaks — her content, a fluent model only phrases it
+    "Dialogue", "Reply", "Surface",
+    # the facade the kernel holds, and the reason-seat
+    "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]
