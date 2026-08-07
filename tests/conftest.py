@@ -14,6 +14,29 @@ the optimizer at a ``tmp_path`` file, never the live package.
 from __future__ import annotations
 
 import os
+import tempfile
+
+# --- the suite owns its own disk --- #
+# Hermeticity is symmetric: sealing the writers is only half of it, because the suite also READS.
+# `Profile.TEST` redirects `paths.root` to a scratch dir for exactly this reason, and
+# `tests/kernel/test_paths_hermeticity.py` pins that it does — but the suite does not run under
+# that profile (`get_settings()` returns Profile.DEV in here), so the redirect was never reaching
+# the settings the tests actually build. The test passed while the property it names was false:
+# it asserts "if you asked for TEST you would be safe", and nothing asks.
+#
+# Measured consequence on this machine: `/root/.nyxara/data/foundry/` holds ~10 promoted models
+# with `weights.npz`, so every test that builds a `NyxaraCore()` loaded a real genesis_np model and
+# ran NumPy transformer inference on the turn path — `tests/eval/` hit the 300 s per-test ceiling
+# inside `growth/genesis_numpy.py::softmax_lastdim`. Worse than slow: the suite's behaviour depended
+# on undeclared local state, so a clean CI machine and a developer's machine took different paths
+# through the same tests.
+#
+# `PathsConfig.root` reads NYXARA_HOME and derives every subdirectory from it, so one variable moves
+# the whole layout — set the same way as every other hermetic flag below. One root per process (not
+# per settings object), because plenty of tests write through one settings object and read through
+# another built later.
+os.environ.setdefault(
+    "NYXARA_HOME", tempfile.mkdtemp(prefix=f"nyxara-suite-{os.getpid()}-"))
 
 # --- force a hermetic, non-self-modifying posture for the whole suite (set before import) --- #
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")

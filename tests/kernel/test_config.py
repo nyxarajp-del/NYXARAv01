@@ -101,9 +101,18 @@ def test_own_providers_are_the_in_process_rungs():
 
 
 def test_real_learning_defaults_on():
-    """Real, weight-changing learning is the default posture (the closed loop)."""
+    """Real, weight-changing learning is the default posture (the closed loop).
+
+    ``foundry.enabled`` is read off the **schema**, not off a constructed settings object: the
+    suite sets ``NYXARA_FOUNDRY__ENABLED=false`` for hermeticity (a foundry run is real backprop),
+    and an env override reaches even an explicitly-constructed DEV object. The claim here is about
+    what NYXARA *ships with*, so the schema is the thing to ask. Asking the instance made this test
+    fail under its own suite's hermetic posture.
+    """
+    from nyxara.kernel.config import FoundryConfig
+
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
+    assert FoundryConfig.model_fields["enabled"].default is True   # on EVERY machine, not torch-gated
     assert s.foundry.lora_requires_gpu is False      # DistilGPT-2 LoRA-tunes on a CPU too, no GPU required
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
