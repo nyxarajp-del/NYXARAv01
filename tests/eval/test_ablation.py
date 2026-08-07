@@ -404,6 +404,69 @@ def test_run_ablation_scores_only_the_holdout_fold():
     assert report.results[0].n_tasks < 20
 
 
+# --------------------------------------------------------------------------- #
+# A run that cannot conclude must say so BEFORE it spends the compute
+# --------------------------------------------------------------------------- #
+# A fold of N tasks yields at most N discordant pairs, so a fold smaller than ``min_discordant``
+# is decided before the first task runs. This is not hypothetical: the first real run used
+# ``eval/general_novel`` — 20 tasks, whose id hashes cluster high enough that ``split(0.4)``
+# returns 4 — and forty minutes bought a foregone ``underpowered``.
+def test_a_fold_too_small_to_conclude_is_flagged_on_the_report():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.underpowered_by_design
+
+
+def test_an_adequate_fold_is_not_flagged():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(40),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert not report.underpowered_by_design
+
+
+def test_the_warning_names_the_shortfall_before_any_task_runs(caplog):
+    """Logged up front. After the run it is only an autopsy."""
+    with caplog.at_level("WARNING", logger="nyxara.eval.ablation"):
+        run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(3),
+                     core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "underpowered" in text and "discordant" in text
+
+
+def test_the_flag_is_carried_rather_than_inferred_from_the_verdicts():
+    """'We looked and found nothing' and 'this run could not have found anything' are the same
+    table of numbers. Only the flag distinguishes them."""
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.to_dict()["underpowered_by_design"] is True
+    assert "too small to reach a verdict" in report.render()
+
+
+def test_a_foregone_run_still_licenses_no_deletion():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.candidates == []
+
+
+def test_the_shipped_default_battery_can_actually_reach_a_verdict():
+    """The defect this guard was built for: ``general_novel`` holds 20 tasks and yields a 4-task
+    fold, so the instrument's own default could never license anything. Pinning the property, not
+    the battery — any future default must clear the bar too."""
+    import inspect
+
+    from nyxara.eval.ablation import run_ablation as _run
+
+    defaults = inspect.signature(_run).parameters
+    frac = defaults["holdout_frac"].default
+    seed = defaults["seed"].default
+    need = defaults["min_discordant"].default
+
+    from nyxara.eval.hard_benchmark import build_hard_benchmark
+    _, holdout = build_hard_benchmark().split(frac, seed=seed)
+    assert len(holdout) >= need, (
+        f"the default battery yields a {len(holdout)}-task fold but a verdict needs {need} "
+        f"discordant pairs — every default run would be underpowered before it started")
+
+
 def test_the_seed_rotates_the_holdout():
     """A faculty must not survive on one lucky partition."""
     battery = _battery(20)

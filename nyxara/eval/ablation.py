@@ -33,6 +33,15 @@ laundering ignorance into a recommendation. Every non-significant verdict theref
 discordant-pair count that produced it, and :meth:`AblationResult.deletion_candidate` refuses to
 recommend anything until the experiment was large enough to have noticed.
 
+**And a run that cannot conclude says so before it spends the compute.** A fold of N tasks yields
+at most N discordant pairs, so a fold smaller than ``min_discordant`` is decided before it starts:
+every verdict will be ``underpowered`` whatever happens. That was not hypothetical — the first
+real run here used ``eval/general_novel`` (20 tasks, whose id hashes cluster high enough that
+``split(0.4)`` returns **4**), and forty minutes bought a foregone conclusion. :func:`run_ablation`
+now checks the fold up front, logs it, and records ``underpowered_by_design`` on the report, because
+"we looked and found nothing" and "this run could not have found anything" are the same table of
+numbers and completely different conclusions.
+
 Cost is measured alongside accuracy, because it is half the decision: a faculty that adds nothing
 and costs 12 seconds a turn is a stronger candidate for removal than one that adds nothing and
 costs a microsecond.
@@ -326,6 +335,11 @@ class AblationReport:
     battery: str
     results: List[AblationResult] = field(default_factory=list)
     seed: int = 0
+    #: True when the fold was smaller than ``min_discordant``, so every verdict in this report was
+    #: ``underpowered`` before the first task ran. Carried on the report rather than left to be
+    #: inferred from the verdicts, because "we looked and found nothing" and "this run could not
+    #: have found anything" are the same table of numbers and completely different conclusions.
+    underpowered_by_design: bool = False
 
     def __len__(self) -> int:
         return len(self.results)
@@ -350,6 +364,7 @@ class AblationReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"battery": self.battery, "seed": self.seed, "n_faculties": len(self.results),
+                "underpowered_by_design": self.underpowered_by_design,
                 "earned": [r.faculty for r in self.earned],
                 "deletion_candidates": [r.faculty for r in self.candidates],
                 "unmeasured": [r.faculty for r in self.unmeasured],
@@ -357,6 +372,11 @@ class AblationReport:
 
     def render(self) -> str:
         lines = [f"ablation over {self.battery} (seed {self.seed})", "=" * 70]
+        if self.underpowered_by_design:
+            lines.append("  !! the fold was too small to reach a verdict — every line below was")
+            lines.append("     'underpowered' before the first task ran. This measures the run,")
+            lines.append("     not the faculties.")
+            lines.append("-" * 70)
         for r in sorted(self.results, key=lambda x: (x.verdict, -x.accuracy_delta)):
             lines.append("  " + r.explain())
         lines.append("-" * 70)
@@ -473,10 +493,20 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
     Held-out on purpose: the self-improvement loop tunes against the train fold, so scoring a
     faculty there would measure how well the loop has fitted it, not whether it helps. ``seed``
     rotates which tasks are held out, so a faculty cannot be kept alive by one lucky partition.
+
+    **The fold must be able to reach a verdict.** A fold of N tasks can produce at most N
+    discordant pairs, so a fold smaller than ``min_discordant`` cannot return anything but
+    ``underpowered`` however the run goes — the experiment is decided before it starts. That is
+    checked up front and said out loud, because the alternative is what happened the first time:
+    ``eval/general_novel`` holds 20 tasks and ``split(0.4)`` yields **4** of them (its id hashes
+    happen to cluster high at seed 0), so a 40-minute run bought a foregone conclusion.
+
+    The default battery is therefore ``hard_benchmark`` — 65 tasks, 20 held out — not
+    ``general_novel``. Pass ``benchmark=`` for anything else.
     """
     if benchmark is None:
-        from nyxara.eval.general_novel import build_general_novel_benchmark
-        benchmark = build_general_novel_benchmark()
+        from nyxara.eval.hard_benchmark import build_hard_benchmark
+        benchmark = build_hard_benchmark()
     _, holdout = benchmark.split(holdout_frac, seed=seed)
     if limit:
         holdout = holdout.sample(limit, seed=seed)
@@ -484,10 +514,25 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
         from nyxara.eval.harness import default_core_factory
         core_factory = default_core_factory
 
+    underpowered_by_design = len(holdout) < min_discordant
+    if underpowered_by_design:
+        _warn_foregone(len(holdout), min_discordant, benchmark.name)
+
     results = [ablate(f, holdout, core_factory, alpha=alpha, min_discordant=min_discordant,
                       fresh_per_task=fresh_per_task)
                for f in faculties]
-    return AblationReport(battery=holdout.name, results=results, seed=seed)
+    return AblationReport(battery=holdout.name, results=results, seed=seed,
+                          underpowered_by_design=underpowered_by_design)
+
+
+def _warn_foregone(n_tasks: int, min_discordant: int, battery: str) -> None:
+    """Say, before the compute is spent, that this run cannot reach a usable verdict."""
+    import logging
+    logging.getLogger("nyxara.eval.ablation").warning(
+        "ablation fold has %d task(s) but a verdict needs %d discordant pairs — every result "
+        "from this run will be 'underpowered' no matter what it finds (battery %r). Widen the "
+        "fold, use a larger battery, or lower min_discordant deliberately.",
+        n_tasks, min_discordant, battery)
 
 
 # --------------------------------------------------------------------------- #
