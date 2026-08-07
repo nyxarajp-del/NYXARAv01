@@ -308,17 +308,33 @@ class MetaControlConfig(BaseModel):
     # breadth of hypotheses over depth of refinement.
     parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
     # How many framings ``_reason_parallel`` reasons from at once — grounded / unprimed / focused,
-    # each a FULL reasoning pass. 1 disables the parallelism and takes the single-pass path.
+    # each a FULL reasoning pass. 1 takes the single-pass path.
     #
-    # This existed only as a hard-coded constructor default, so it could not be tuned at all, and
-    # its premise has quietly expired: three framings were nearly free when the strongest rung was
-    # a CLOUD model and the three overlapped one network wait. On-device they are three
-    # CPU-saturating generations competing for the same cores, and a first held-out ablation
-    # measured turning them off as saving 301.7s PER TASK with no task improved by having them
-    # (0 helped / 2 hurt, though at 2 discordant pairs that accuracy direction is underpowered and
-    # is NOT claimed). Exposed here so the number is reachable; the default is unchanged until a
-    # properly-powered run says otherwise. `python -m nyxara.eval --ablate` is what should decide.
-    parallel_hypotheses: int = Field(default=3, ge=1, le=8)
+    # DEFAULT 1, AND THAT IS A MEASUREMENT, NOT A PREFERENCE. Three framings were nearly free when
+    # her strongest rung was a CLOUD model: they overlapped one network wait. On-device they are
+    # three CPU-saturating generations competing for the same cores. Nobody revisited the number
+    # when the primary brain moved in-process, so a premise that had expired went on setting how
+    # much compute every turn spends.
+    #
+    # Ablated against its own absence on the held-out fold of ``eval/general_novel.py``
+    # (``python -m nyxara.eval --ablate``, 19 tasks, paired, exact McNemar):
+    #
+    #     verdict  hurts        accuracy  6/19 with  vs  12/19 without   (-31.6%)
+    #     helped   0            hurt      6          p   0.0312
+    #     differed 10/19        -> the ablation certainly took effect; not `inert`
+    #
+    # Not one task was answered correctly *because* of the parallelism, and six were answered
+    # wrongly *with* it. The mechanism is not mysterious: three concurrent generations make each
+    # one slower, all three then miss the deadline, none votes, and the turn falls to the
+    # deterministic floor — so the breadth meant to improve the answer is what destroys it.
+    #
+    # A first 4-task run of the same ablation returned ``underpowered`` (0 helped / 2 hurt, only
+    # 2 discordant pairs) and the default was deliberately LEFT at 3 on that evidence, because a
+    # suggestive direction is not a finding. This wider fold is what changed it.
+    #
+    # Raise it only with a machine where the framings genuinely run concurrently — and re-run the
+    # ablation there rather than assuming, since that is exactly the assumption that expired here.
+    parallel_hypotheses: int = Field(default=1, ge=1, le=8)
     # A floor under that share, used only until the turn ledger has observed a real generation.
     # An easy turn is allotted 5s, of which the framings get half — while one generation on the
     # on-device Gemma measures ~13.9s. The deadline therefore fired before the model could ever
