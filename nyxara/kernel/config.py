@@ -343,6 +343,21 @@ class MetaControlConfig(BaseModel):
     # Raising this cannot slow a turn: a deadline is a maximum wait, and fast framings still
     # return at once. It only stops the budget from cutting off work that was about to succeed.
     min_generation_budget_s: float = Field(default=30.0, gt=0.0)
+    # The other end of the same floor: the longest a SINGLE generation is ever assumed to take.
+    #
+    # The floor is measured from the turn ledger's recorded latencies, which is right — a faster
+    # machine should earn a smaller floor by being measured rather than configured. But the first
+    # version took the ``max`` of recent latencies and doubled it, so one slow call governed the
+    # next eight turns, and the longer deadline it bought permitted more concurrent work, which
+    # made the next call slower, which raised the floor again. Across one ablation run it went
+    # 30s -> 147s -> 429s -> 867s. A measurement-derived floor is only honest while the
+    # measurement is independent of the floor, and that one was not.
+    #
+    # A median fixed the outlier sensitivity; this caps the loop. Deliberately NOT
+    # ``max_seconds_ceiling``: that bounds a whole TURN and the test profile dials it to 6s, which
+    # would push the floor below a single real generation and reintroduce the very starvation the
+    # floor exists to prevent. Two different quantities need two different bounds.
+    max_generation_budget_s: float = Field(default=180.0, gt=0.0)
     # Calibration correction only engages once this many outcomes have been observed.
     min_calibration_samples: int = Field(default=20, ge=0)
     # A verified score at/above this floor counts the allocation as "sufficient".
