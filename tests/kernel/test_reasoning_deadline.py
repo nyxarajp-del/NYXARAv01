@@ -341,6 +341,43 @@ def test_the_budget_guards_refinement_not_the_gates():
 
 
 # --------------------------------------------------------------------------- #
+# How many framings, and where that number comes from
+# --------------------------------------------------------------------------- #
+def test_the_framing_count_is_reachable_from_config():
+    """It was a bare literal in ``__init__``, so the one number governing how much compute every
+    turn spends could not be changed without editing the file — and its premise had expired
+    unnoticed when her primary brain moved on-device."""
+    assert NyxaraCore._configured_parallel_hypotheses() >= 1
+
+
+def test_an_explicit_argument_still_wins_over_config(monkeypatch):
+    """Tests and callers that pin the count must be unaffected by the config default."""
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 3))
+    assert NyxaraCore(parallel_hypotheses=1).parallel_hypotheses == 1
+
+
+def test_config_supplies_the_count_when_the_caller_does_not(monkeypatch):
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 1))
+    assert NyxaraCore().parallel_hypotheses == 1
+
+
+def test_the_count_never_drops_below_one(monkeypatch):
+    """Zero framings is not a cheaper turn, it is no turn."""
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 0))
+    assert NyxaraCore().parallel_hypotheses == 1
+
+
+def test_an_unreadable_config_does_not_break_the_boot(monkeypatch):
+    import nyxara.kernel.config as cfg
+
+    def _boom():
+        raise RuntimeError("settings are on fire")
+
+    monkeypatch.setattr(cfg, "get_settings", _boom)
+    assert NyxaraCore._configured_parallel_hypotheses() == 3
+
+
+# --------------------------------------------------------------------------- #
 # Saying so
 # --------------------------------------------------------------------------- #
 def test_hitting_the_deadline_is_announced(caplog):

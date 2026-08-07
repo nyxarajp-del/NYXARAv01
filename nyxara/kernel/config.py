@@ -307,6 +307,18 @@ class MetaControlConfig(BaseModel):
     # the lot; handing them a share leaves room for the rest. Raise it toward 1.0 to favour
     # breadth of hypotheses over depth of refinement.
     parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
+    # How many framings ``_reason_parallel`` reasons from at once — grounded / unprimed / focused,
+    # each a FULL reasoning pass. 1 disables the parallelism and takes the single-pass path.
+    #
+    # This existed only as a hard-coded constructor default, so it could not be tuned at all, and
+    # its premise has quietly expired: three framings were nearly free when the strongest rung was
+    # a CLOUD model and the three overlapped one network wait. On-device they are three
+    # CPU-saturating generations competing for the same cores, and a first held-out ablation
+    # measured turning them off as saving 301.7s PER TASK with no task improved by having them
+    # (0 helped / 2 hurt, though at 2 discordant pairs that accuracy direction is underpowered and
+    # is NOT claimed). Exposed here so the number is reachable; the default is unchanged until a
+    # properly-powered run says otherwise. `python -m nyxara.eval --ablate` is what should decide.
+    parallel_hypotheses: int = Field(default=3, ge=1, le=8)
     # A floor under that share, used only until the turn ledger has observed a real generation.
     # An easy turn is allotted 5s, of which the framings get half — while one generation on the
     # on-device Gemma measures ~13.9s. The deadline therefore fired before the model could ever

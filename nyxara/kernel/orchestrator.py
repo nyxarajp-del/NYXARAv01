@@ -314,7 +314,7 @@ class NyxaraCore:
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
-                 history_turns: int = 6, parallel_hypotheses: int = 3,
+                 history_turns: int = 6, parallel_hypotheses: Optional[int] = None,
                  review_mode: Optional[ReviewMode] = None) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -825,7 +825,15 @@ class NyxaraCore:
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
         # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
         # threads whose winner still passes the one gate (the control law is preserved).
-        self.parallel_hypotheses = max(1, int(parallel_hypotheses))
+        #
+        # Config-driven when not passed explicitly (metacontrol.parallel_hypotheses). It was a
+        # bare literal here, which meant the one number governing how much compute every turn
+        # spends could not be changed without editing this file — and its premise had expired
+        # unnoticed when her primary brain moved on-device. An explicit argument still wins, so
+        # tests and callers that pin it are unaffected.
+        self.parallel_hypotheses = max(1, int(
+            parallel_hypotheses if parallel_hypotheses is not None
+            else self._configured_parallel_hypotheses()))
         # the last dual-process arbitration (which process ran, and why) — read by growth
         self._last_arbitration: Any = None
         self._last_intuition: Any = None      # the most recent machine-verified intuitive leap
@@ -6917,6 +6925,15 @@ class NyxaraCore:
             return max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
         except Exception:  # noqa: BLE001
             return 30.0
+
+    @staticmethod
+    def _configured_parallel_hypotheses() -> int:
+        """How many framings to reason from, from config, or 3 if config cannot be read."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return int(get_settings().metacontrol.parallel_hypotheses)
+        except Exception:  # noqa: BLE001 — a knob must never be the thing that breaks a boot
+            return 3
 
     @staticmethod
     def _deadline_share() -> float:
