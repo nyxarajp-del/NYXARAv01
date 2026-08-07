@@ -181,25 +181,92 @@ def test_a_missing_dial_reports_failure():
     assert value_faculty("par", "parallel_hypotheses", 1).disable(_Core()) is False
 
 
+# --------------------------------------------------------------------------- #
+# Dotted paths — ablating where the value is READ, not where it was built
+# --------------------------------------------------------------------------- #
+# Several faculties are handed to a collaborator at construction and copied into it:
+# ``NativeReasoner.__init__`` does ``self.law_discovery = law_discovery``. Nulling
+# ``core.law_discovery`` afterwards leaves the reasoner holding its own live reference, so the
+# toggle reports success, both arms answer identically, and the run says `inert` — "this faculty
+# never participates" when the truth is "my toggle never reached it."
+def test_a_dotted_path_disables_the_attribute_on_the_collaborator():
+    core = _Core(reasoner=_Core(law_discovery=object()))
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is True
+    assert core.reasoner.law_discovery is None
+
+
+def test_a_dotted_path_with_a_missing_link_reports_failure():
+    assert attr_faculty("law", "reasoner.law_discovery").disable(_Core()) is False
+    assert attr_faculty("law", "reasoner.law_discovery").disable(_Core(reasoner=None)) is False
+
+
+def test_a_dotted_leaf_already_none_reports_failure():
+    core = _Core(reasoner=_Core(law_discovery=None))
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is False
+
+
+def test_the_copied_reference_trap_is_what_the_dotted_path_avoids():
+    """The exact shape of the trap, so the reason for dotted paths cannot be refactored away.
+
+    Nulling the core leaves the collaborator's copy live — a false `inert` waiting to happen.
+    Nulling through the path reaches the copy the turn actually reads.
+    """
+    engine = object()
+    core = _Core(law_discovery=engine, reasoner=_Core(law_discovery=engine))
+
+    assert attr_faculty("law", "law_discovery").disable(core) is True, "the core's attr changed"
+    assert core.reasoner.law_discovery is engine, "...and the reasoner never noticed"
+
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is True
+    assert core.reasoner.law_discovery is None
+
+
+def test_a_dotted_dial_also_works():
+    core = _Core(reasoner=_Core(passes=3))
+    from nyxara.eval.ablation import value_faculty
+
+    assert value_faculty("p", "reasoner.passes", 1).disable(core) is True
+    assert core.reasoner.passes == 1
+
+
 def test_every_shipped_faculty_names_an_attribute_the_core_actually_sets():
     """A typo'd attribute name reports ``broken`` at run time, which is safe but late.
 
     Checked statically against ``NyxaraCore``'s source rather than by building a core: a real one
     costs a full boot, and the failure being guarded against is a misspelling, not a runtime
-    condition. Every faculty here is disabled by nulling ``core.<attr>``, so ``self.<attr> =``
-    must appear in the class.
+    condition.
+
+    A dotted path (``reasoner.law_discovery``) is checked in two parts, because its root and its
+    leaf live in different classes: the root must be something ``NyxaraCore`` assigns, and the leaf
+    must be assigned somewhere in the package. Both halves are only typo checks — that the path
+    actually reaches the faculty *on the turn path* is a runtime question, and the answer to it is
+    the ``disabled_ok`` / ``inert`` distinction, not this test.
     """
     import inspect
+    import pathlib
 
     from nyxara.eval.ablation import CORE_FACULTIES
     from nyxara.kernel.orchestrator import NyxaraCore
 
     source = inspect.getsource(NyxaraCore)
+    package = pathlib.Path(inspect.getfile(NyxaraCore)).parents[1]
+
+    def _assigned_in_core(attr: str) -> bool:
+        return f"self.{attr} = " in source or f"self.{attr}:" in source
+
     for faculty in CORE_FACULTIES:
         assert faculty.attr, f"{faculty.name!r} does not record which attribute it ablates"
-        assert f"self.{faculty.attr} = " in source or f"self.{faculty.attr}:" in source, (
-            f"{faculty.name!r} ablates core.{faculty.attr}, which NyxaraCore never assigns — "
+        root, _, leaf = faculty.attr.partition(".")
+        assert _assigned_in_core(root), (
+            f"{faculty.name!r} ablates core.{root}, which NyxaraCore never assigns — "
             f"the ablation would silently measure nothing")
+        if not leaf:
+            continue
+        found = any(f"self.{leaf} = " in p.read_text(encoding="utf-8", errors="ignore")
+                    for p in package.rglob("*.py"))
+        assert found, (
+            f"{faculty.name!r} ablates {faculty.attr}, but nothing in the package assigns "
+            f"self.{leaf} — the leaf is probably a typo")
 
 
 # --------------------------------------------------------------------------- #

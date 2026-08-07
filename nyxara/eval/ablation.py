@@ -85,19 +85,47 @@ class Faculty:
         return self.name
 
 
+def _resolve(root: Any, path: str) -> Tuple[Any, str]:
+    """Walk a dotted ``path`` to the object that actually holds the final attribute.
+
+    Returns ``(owner, leaf)``, or ``(None, leaf)`` when any link is missing. See
+    :func:`attr_faculty` for why a dotted path is worth supporting at all.
+    """
+    parts = path.split(".")
+    owner: Any = root
+    for step in parts[:-1]:
+        owner = getattr(owner, step, None)
+        if owner is None:
+            return None, parts[-1]
+    return owner, parts[-1]
+
+
 def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
-    """A faculty disabled by nulling one attribute on the core.
+    """A faculty disabled by nulling one attribute — ``attr`` may be a dotted path.
 
     This is the honest way to ablate *this* codebase: the call sites already guard with
     ``if self.<attr> is None`` and fall back, so setting it to ``None`` exercises the real
     degraded path rather than a special test-only branch. Reports ``False`` when the attribute
     is missing or already ``None`` — nothing was disabled, so nothing was measured.
+
+    **Point the path at where the value is READ, not where it was built.** Several faculties are
+    handed to a collaborator at construction and *copied* into it — ``NativeReasoner.__init__``
+    does ``self.law_discovery = law_discovery`` — so nulling ``core.law_discovery`` afterwards
+    leaves the reasoner holding its own live reference and changes nothing on the turn path. The
+    toggle would still return ``True`` (the core's attribute genuinely changed), the two arms
+    would answer identically, and the run would report **inert**.
+
+    That is a false ``inert``: "this faculty never participates" when the truth is "my toggle
+    never reached it." It cannot cause a deletion — ``inert`` is not a deletion candidate — but it
+    is a wasted experiment that reads like a finding, so the path exists to avoid it.
+    ``reasoner.law_discovery`` ablates the copy the turn actually consults.
     """
 
     def _disable(core: Any) -> bool:
-        if getattr(core, attr, None) is None:
+        owner, leaf = _resolve(core, attr)
+        if owner is None or getattr(owner, leaf, None) is None:
             return False
-        setattr(core, attr, None)
+        setattr(owner, leaf, None)
         return True
 
     return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None", attr=attr)
@@ -108,15 +136,19 @@ def value_faculty(name: str, attr: str, off_value: Any, note: str = "") -> Facul
 
     Some cognition is not a component that can be removed but a dial that can be turned down —
     ``parallel_hypotheses = 3`` is three reasoning passes, ``= 1`` is one. Same contract as
-    :func:`attr_faculty`: reports ``False`` when the attribute is absent or already at the off
-    value, because in both cases nothing was disabled and nothing was measured.
+    :func:`attr_faculty` (dotted paths included): reports ``False`` when the attribute is absent
+    or already at the off value, because in both cases nothing was disabled and nothing was
+    measured.
     """
 
     def _disable(core: Any) -> bool:
-        current = getattr(core, attr, None)
+        owner, leaf = _resolve(core, attr)
+        if owner is None:
+            return False
+        current = getattr(owner, leaf, None)
         if current is None or current == off_value:
             return False
-        setattr(core, attr, off_value)
+        setattr(owner, leaf, off_value)
         return True
 
     return Faculty(name=name, disable=_disable,
@@ -145,6 +177,14 @@ CORE_FACULTIES: Tuple[Faculty, ...] = (
                  "classifies the domain and prepends an expert methodology (costs a generation)"),
     attr_faculty("recursive_improve", "recursive_improver",
                  "N critique+revise passes over the candidate (costs N generations)"),
+    # Law induction, through the REASONER rather than the core. ``NyxaraCore`` builds the engine
+    # and hands it to the reasoner, which keeps its own reference — verified: after
+    # ``core.law_discovery = None`` the reasoner still holds a live ``LawDiscoveryEngine``. Ablating
+    # the core attribute would therefore change nothing on the turn path and report a false
+    # ``inert``. This faculty answered `"the status is good"` with a fall-distance law until the
+    # recall matcher was fixed; whether it earns its place at all is still open, which is this.
+    attr_faculty("law_discovery", "reasoner.law_discovery",
+                 "answers from a law she induced herself, when one matches the question"),
     attr_faculty("role_council", "role_council", "the multi-role deliberation council"),
     attr_faculty("self_model", "self_model", "the self-knowledge report injected into context"),
     attr_faculty("world_model", "world_model", "the predictive world model"),
