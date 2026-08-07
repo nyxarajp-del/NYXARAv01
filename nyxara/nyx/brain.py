@@ -1,0 +1,323 @@
+"""NYXARA · nyx/brain.py — the NYX V.01 brain facade (🧠, the single object the kernel holds).
+
+:class:`NyxBrain` is the one object ``NyxaraCore`` builds and holds as ``self.nyx``. It owns the
+self-rewiring concept graph and the content-addressed associative memory, and — as later phases
+land — the workspace, the specialists, the superposition and the meta-cognition that turn those
+into one cognitive cycle.
+
+Every method is **fail-soft**: on any error it degrades to a null result, never breaking a turn.
+Every faculty is **config-gated**, so a deployment can run exactly as much brain as it wants.
+
+Honest, as everywhere in NYX V.01: the graph is bounded Hebbian bookkeeping (it forgets, on
+purpose); memory has **no token context window** — which is true — but it is **not infinite**,
+which is not claimed. The mind proposes; the kernel disposes; the Master is sovereign.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from nyxara.nyx.graph import Activation, DynamicNeuralGraph
+from nyxara.nyx.holomem import HoloMemory, Recall, Trace
+from nyxara.nyx.metacog import RecursiveMetaCognition
+from nyxara.nyx.modules import (
+    CreativeSpecialist,
+    DerivationSpecialist,
+    EthicsSpecialist,
+    GraphSpecialist,
+    MemorySpecialist,
+    Proposal,
+    Situation,
+)
+from nyxara.nyx.workspace import Deliberation, NyxWorkspace
+
+__all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
+
+# Every specialist NYX can seat, by the name used in ``NyxConfig.specialists``.
+_SPECIALISTS = {
+    "memory": MemorySpecialist,
+    "graph": GraphSpecialist,
+    "derivation": DerivationSpecialist,
+    "creative": CreativeSpecialist,
+    "ethics": EthicsSpecialist,
+}
+
+
+@dataclass
+class NyxPercept:
+    """One perceive-tick: what the graph did, and what memory brought back."""
+
+    concepts: List[str] = field(default_factory=list)
+    born: List[str] = field(default_factory=list)
+    strengthened: int = 0
+    pruned: int = 0
+    spread: List[str] = field(default_factory=list)
+    context: List[Trace] = field(default_factory=list)
+    recall: Optional[Recall] = None
+
+    @property
+    def novelty(self) -> float:
+        """How much of this turn was new to her — 0.0 (all familiar) … 1.0 (all new)."""
+        if not self.concepts:
+            return 0.0
+        return min(1.0, len(self.born) / float(len(self.concepts)))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"concepts": self.concepts, "born": self.born,
+                "strengthened": self.strengthened, "pruned": self.pruned,
+                "spread": self.spread, "novelty": round(self.novelty, 4),
+                "context": [t.key for t in self.context],
+                "recall": self.recall.to_dict() if self.recall is not None else None}
+
+
+@dataclass
+class NyxThought:
+    """One complete cycle: perceive → ground in memory → deliberate → reflect."""
+
+    stimulus: str = ""
+    percept: Optional[NyxPercept] = None
+    deliberation: Optional[Deliberation] = None
+    assessment: Any = None                       # nyx.metacog.Assessment
+    cycle_id: str = ""
+
+    @property
+    def winner(self) -> Optional[Proposal]:
+        return self.deliberation.winner if self.deliberation is not None else None
+
+    @property
+    def answer(self) -> str:
+        """What reached awareness. Empty when nothing did — which is a real, honest outcome."""
+        winner = self.winner
+        return winner.content if winner is not None else ""
+
+    @property
+    def verified(self) -> bool:
+        """Whether the answer was *derived and checked*, not merely the most confident guess."""
+        winner = self.winner
+        return bool(winner is not None and winner.verifiable)
+
+    @property
+    def confidence(self) -> float:
+        winner = self.winner
+        return float(winner.confidence) if winner is not None else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"stimulus": self.stimulus, "cycle_id": self.cycle_id,
+                "answer": self.answer, "verified": self.verified,
+                "confidence": round(self.confidence, 4),
+                "source": self.winner.source if self.winner else None,
+                "percept": self.percept.to_dict() if self.percept else None,
+                "deliberation": (self.deliberation.to_dict()
+                                 if self.deliberation is not None else None),
+                "assessment": (self.assessment.to_dict()
+                               if self.assessment is not None else None)}
+
+
+class NyxBrain:
+    """The composed NYX V.01 brain: graph + memory + a workspace of competing specialists."""
+
+    def __init__(self, config: Any) -> None:
+        self.config = c = config
+        self.graph = DynamicNeuralGraph(
+            max_nodes=c.graph_max_nodes, max_edges=c.graph_max_edges,
+            hebbian_rate=c.hebbian_rate, decay_rate=c.decay_rate,
+            prune_threshold=c.graph_prune_threshold,
+            rewire_budget=c.rewire_budget_per_tick,
+            spread_depth=c.spread_depth, spread_falloff=c.spread_falloff)
+        self.memory = HoloMemory(
+            dim=c.holo_dim, capacity=c.holo_capacity, seed=c.seed,
+            recall_threshold=c.holo_recall_threshold, link_rate=c.link_rate,
+            max_links_per_trace=c.max_links_per_trace)
+        self.metacog = self._build_metacog(c)
+        self.workspace = self._build_workspace(c)
+        self.turns = 0
+
+    @staticmethod
+    def _build_metacog(c: Any) -> Optional[RecursiveMetaCognition]:
+        if not getattr(c, "metacog_enabled", True):
+            return None
+        try:
+            return RecursiveMetaCognition(
+                reliability_lr=c.reliability_lr, calibration_window=c.calibration_window,
+                min_samples=c.metacog_min_samples, overconfidence_gap=c.overconfidence_gap)
+        except Exception:  # noqa: BLE001 — meta-cognition is a capability, never required
+            return None
+
+    def _build_workspace(self, c: Any) -> Optional[NyxWorkspace]:
+        if not getattr(c, "workspace_enabled", True):
+            return None
+        try:
+            wanted = list(getattr(c, "specialists", []) or [])
+            seated = [_SPECIALISTS[name]() for name in wanted if name in _SPECIALISTS]
+            return NyxWorkspace(specialists=seated, metacog=self.metacog,
+                                capacity=c.workspace_capacity,
+                                access_threshold=c.access_threshold)
+        except Exception:  # noqa: BLE001 — without a workspace she still perceives and recalls
+            return None
+
+    # ---- perception ------------------------------------------------------ #
+    def perceive(self, text: str, *, remember: bool = True) -> NyxPercept:
+        """Rewire the graph from ``text``, lay the turn down in memory, and bring back context.
+
+        This is the whole of pillar 1 in one call: co-activation reshapes the network, and the
+        associative context that comes back is selected by *relevance*, not by recency in a
+        buffer. Fail-soft to an empty percept.
+        """
+        out = NyxPercept()
+        try:
+            text = str(text or "")
+            if not text.strip():
+                return out
+            self.turns += 1
+            act: Activation = self.graph.activate(text)
+            out.concepts = list(act.direct)
+            out.born = list(act.born)
+            out.strengthened = act.strengthened
+            out.pruned = act.pruned
+            out.spread = [n for n, _w in act.spread]
+
+            # Recall *before* writing, so the turn does not simply recall itself.
+            rec = self.memory.recall(text, k=self.config.recall_k)
+            out.recall = rec
+            out.context = self.memory.context(text, k=self.config.recall_k)
+            if remember:
+                self.memory.remember(f"turn-{self.turns}", text, kind="episode")
+            return out
+        except Exception:  # noqa: BLE001 — a perceive failure never breaks a turn
+            return out
+
+    # ---- the cognitive cycle --------------------------------------------- #
+    def think(self, stimulus: str, *, remember: bool = True,
+              goals: Optional[Dict[str, float]] = None) -> NyxThought:
+        """One whole thought: perceive → ground → deliberate → reflect.
+
+        This is the cycle the rest of NYX hangs off. The specialists each get the same grounded
+        situation; exactly one bid reaches the conscious bottleneck; and meta-cognition records
+        *why* that one won, so ``/nyx why`` can answer from a real trace rather than a story.
+
+        The outcome — whether the winner was actually right — is fed back separately through
+        :meth:`resolve`, because it is usually not knowable in the same instant.
+        """
+        out = NyxThought(stimulus=str(stimulus or ""))
+        try:
+            if not out.stimulus.strip():
+                return out
+            # Perceive without writing: the episode is laid down *after* deliberating, so what
+            # gets remembered is "I was asked X and concluded Y" rather than the bare question.
+            # Storing a naked question would make it its own best match when asked again.
+            out.percept = self.perceive(out.stimulus, remember=False)
+            out.cycle_id = f"cycle-{self.turns}"
+            if self.workspace is None:
+                if remember:
+                    self.memory.remember(f"turn-{self.turns}", out.stimulus, kind="episode")
+                return out
+            situation = Situation(
+                stimulus=out.stimulus, concepts=out.percept.concepts,
+                context=out.percept.context, recall=out.percept.recall,
+                novelty=out.percept.novelty, brain=self)
+            out.deliberation = self.workspace.deliberate(situation, goals=goals)
+            if self.metacog is not None and out.deliberation is not None:
+                out.assessment = self.metacog.observe_cycle(
+                    cycle_id=out.cycle_id, winner=out.deliberation.winner,
+                    considered=out.deliberation.proposals)
+            if remember:
+                # What is worth remembering from a turn is what she *concluded*; the question is
+                # provenance. A verified derivation is a conclusion she can lean on later, an
+                # unverified one only an episode.
+                answer = out.answer
+                self.memory.remember(
+                    f"turn-{self.turns}", answer or out.stimulus,
+                    kind=("conclusion" if out.verified else "episode"),
+                    cue=out.stimulus if answer else "")
+            return out
+        except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
+            return out
+
+    def resolve(self, thought: Any, *, correct: float) -> Any:
+        """Tell meta-cognition how a thought actually turned out (0.0 … 1.0).
+
+        No human is required in this loop: a derivation that checked out, a claim that survived
+        a grounding check, or an answer that was acted on are all measurable signals.
+        """
+        try:
+            if self.metacog is None or thought is None:
+                return None
+            cycle_id = thought if isinstance(thought, str) else getattr(thought, "cycle_id", "")
+            if not cycle_id:
+                return None
+            return self.metacog.observe_outcome(cycle_id=cycle_id, correct=correct)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why(self, *, k: int = 1) -> List[Any]:
+        """The most recent reasoning traces — what won, on what evidence, over what."""
+        try:
+            return self.metacog.why(k=k) if self.metacog is not None else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def remember(self, key: str, text: str, *, kind: str = "episode") -> None:
+        """Lay something down deliberately — a conclusion, a fact, a grounded concept."""
+        try:
+            self.memory.remember(key, text, kind=kind)
+            self.graph.activate(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def recall(self, cue: str, *, k: Optional[int] = None) -> Optional[Recall]:
+        """Content-addressed recall — no token window is consulted."""
+        try:
+            return self.memory.recall(cue, k=int(k or self.config.recall_k))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def related(self, concept: str, *, k: int = 8) -> List[Any]:
+        """What the graph currently associates with a concept, strongest first."""
+        try:
+            return self.graph.neighbours(concept, k=k)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def gaps(self, *, k: int = 5) -> List[str]:
+        """Concepts she keeps meeting but has never connected — the honest edge of her knowing."""
+        try:
+            return self.graph.gaps(k=k)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def stats(self) -> Dict[str, Any]:
+        try:
+            out: Dict[str, Any] = {
+                "graph": self.graph.stats().to_dict(), "memory": self.memory.stats(),
+                "turns": self.turns,
+                "as_reasoner": bool(getattr(self.config, "as_reasoner", False))}
+            if self.workspace is not None:
+                out["workspace"] = self.workspace.stats()
+            if self.metacog is not None:
+                out["metacog"] = self.metacog.stats()
+            return out
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # ---- persistence ----------------------------------------------------- #
+    def to_dict(self) -> Dict[str, Any]:
+        out = {"graph": self.graph.to_dict(), "memory": self.memory.to_dict(),
+               "turns": self.turns}
+        if self.metacog is not None:
+            out["metacog"] = self.metacog.to_dict()
+        return out
+
+    def load_dict(self, d: Dict[str, Any]) -> None:
+        try:
+            if not isinstance(d, dict):
+                return
+            if d.get("graph"):
+                self.graph.load_dict(d["graph"])
+            if d.get("memory"):
+                self.memory.load_dict(d["memory"])
+            if d.get("metacog") and self.metacog is not None:
+                self.metacog.load_dict(d["metacog"])
+            self.turns = int(d.get("turns", 0))
+        except Exception:  # noqa: BLE001 — a corrupt sidecar must never block boot
+            pass

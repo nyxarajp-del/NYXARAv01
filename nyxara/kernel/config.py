@@ -2295,6 +2295,73 @@ class Nyx5Config(BaseModel):
     anticipation_lookahead: int = Field(default=3, ge=0, le=5)
 
 
+class NyxConfig(BaseModel):
+    """NYX V.01 (nyxara/nyx/) — the unified brain that composes what NYXARA already has.
+
+    NYXARA had a Global Workspace, a holographic field, free-energy inference, superposition and
+    a spiking substrate — but no single place where they became **one thought**. NYX V.01 is that
+    place. It builds new machinery only where there was a real gap; everything else it composes.
+
+    Honest about what each part is (the rule this repo keeps — see ``docs/CAPABILITIES.md``):
+
+    * **Dynamic neural graph** — bounded Hebbian co-activation bookkeeping with disuse decay and
+      weakest-first eviction. Not biological synaptogenesis, no backpropagation, and *not*
+      unbounded: it forgets, on purpose and measurably.
+    * **Holographic memory** — recall is content-addressed over the full store, so there is **no
+      token context window**. That claim is true. "Infinite memory" is *not* claimed: capacity is
+      real, eviction is real, and a low-confidence recall reports itself as one.
+    * **Global workspace** — a simulation of the *architecture* of consciousness (salience
+      competition → narrow bottleneck → broadcast), not a claim about phenomenal experience.
+    * **Superposition** — classical probability amplitudes with Bayesian update and an
+      entropy-gated collapse. No qubits, no entanglement, no quantum speedup: candidates are held
+      together, not computed together.
+
+    NYX only ever *proposes*. With ``as_reasoner`` on it occupies the reason-seat and produces the
+    turn's candidate, but that candidate still passes the identical, unchanged, fail-closed
+    sovereign gate. The safety core (corrigibility, oversight, loyalty, honesty) is never
+    governed, rewritten, or bypassed by any NYX faculty."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    as_reasoner: bool = True                    # NYX V.01 takes the reason-seat (still gated)
+    seed: int = 42
+
+    # Pillar 1a — the dynamic neural graph (self-reconfiguring concept network)
+    graph_max_nodes: int = Field(default=4096, ge=8, le=1_048_576)
+    graph_max_edges: int = Field(default=32768, ge=8, le=8_388_608)
+    hebbian_rate: float = Field(default=0.15, gt=0.0, le=1.0)   # co-activation growth step
+    decay_rate: float = Field(default=0.01, ge=0.0, lt=1.0)     # per-tick disuse fade
+    graph_prune_threshold: float = Field(default=0.02, ge=0.0, le=1.0)  # cut below this weight
+    rewire_budget_per_tick: int = Field(default=256, ge=0)      # bounded structural change
+    spread_depth: int = Field(default=2, ge=1, le=6)            # spreading-activation hops
+    spread_falloff: float = Field(default=0.5, gt=0.0, le=1.0)
+
+    # Pillar 1b — content-addressed associative memory (replaces the token window)
+    holo_dim: int = Field(default=10000, ge=256, le=65536)      # reuse the audited HDC width
+    holo_capacity: int = Field(default=4096, ge=1)              # real capacity; eviction is real
+    holo_recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    link_rate: float = Field(default=0.2, gt=0.0, le=1.0)       # association growth step
+    max_links_per_trace: int = Field(default=16, ge=0)
+    recall_k: int = Field(default=5, ge=1, le=64)               # constellation size per recall
+
+    # Pillar 3a — the conscious bottleneck (Global Workspace Theory, kernel/workspace.py)
+    workspace_enabled: bool = True
+    workspace_capacity: int = Field(default=1, ge=1, le=8)      # coalitions per cycle (≈1)
+    access_threshold: float = Field(default=1.0, ge=0.0)        # below this, nothing is conscious
+    # Specialists that may bid. Each is an adapter over a faculty NYXARA already has; an
+    # unavailable one (missing optional dep) reports itself rather than faking competence.
+    specialists: List[str] = Field(
+        default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics"])
+
+    # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
+    metacog_enabled: bool = True
+    reliability_lr: float = Field(default=0.15, gt=0.0, le=1.0)  # EMA step on an outcome
+    calibration_window: int = Field(default=128, ge=1)           # retained assessments
+    metacog_min_samples: int = Field(default=5, ge=1)            # below this a record is untrusted
+    overconfidence_gap: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
 
@@ -3480,6 +3547,7 @@ class NyxaraSettings(BaseSettings):
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
+    nyx: NyxConfig = Field(default_factory=NyxConfig)
     hyperbolic_manifold: HyperbolicManifoldConfig = Field(
         default_factory=HyperbolicManifoldConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
