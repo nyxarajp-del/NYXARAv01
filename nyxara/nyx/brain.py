@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
+from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.modules import (
@@ -57,6 +58,7 @@ class NyxPercept:
     spread: List[str] = field(default_factory=list)
     context: List[Trace] = field(default_factory=list)
     recall: Optional[Recall] = None
+    grounded: Optional[Grounded] = None
 
     @property
     def novelty(self) -> float:
@@ -70,7 +72,8 @@ class NyxPercept:
                 "strengthened": self.strengthened, "pruned": self.pruned,
                 "spread": self.spread, "novelty": round(self.novelty, 4),
                 "context": [t.key for t in self.context],
-                "recall": self.recall.to_dict() if self.recall is not None else None}
+                "recall": self.recall.to_dict() if self.recall is not None else None,
+                "grounded": self.grounded.to_dict() if self.grounded is not None else None}
 
 
 @dataclass
@@ -150,6 +153,7 @@ class NyxBrain:
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
+        self.ground = self._build_ground(c)
         self.turns = 0
 
     @staticmethod
@@ -186,6 +190,18 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    @staticmethod
+    def _build_ground(c: Any) -> Optional[WorldGrounding]:
+        if not getattr(c, "ground_enabled", True):
+            return None
+        try:
+            return WorldGrounding(
+                read_unknown=getattr(c, "ground_read_unknown", True),
+                max_new_per_turn=getattr(c, "ground_max_new_per_turn", 4),
+                bind_to_graph=getattr(c, "ground_bind_to_graph", True))
+        except Exception:  # noqa: BLE001 — without grounding her words are honestly unanchored
+            return None
+
     # ---- perception ------------------------------------------------------ #
     def perceive(self, text: str, *, remember: bool = True) -> NyxPercept:
         """Rewire the graph from ``text``, lay the turn down in memory, and bring back context.
@@ -206,6 +222,12 @@ class NyxBrain:
             out.strengthened = act.strengthened
             out.pruned = act.pruned
             out.spread = [n for n, _w in act.spread]
+
+            # Ground the words before reasoning with them: an unknown word met in a sentence
+            # that describes it can be learned here and now, and a word she has no referent for
+            # is reported ungrounded rather than quietly treated as understood.
+            if self.ground is not None:
+                out.grounded = self.ground.understand(out.concepts, text=text, graph=self.graph)
 
             # Recall *before* writing, so the turn does not simply recall itself.
             rec = self.memory.recall(text, k=self.config.recall_k)
@@ -333,6 +355,13 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def understanding(self, word: str) -> Any:
+        """What she actually has behind a word — senses, neighbours, and whether it is grounded."""
+        try:
+            return self.ground.understanding(word) if self.ground is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def stats(self) -> Dict[str, Any]:
         try:
             out: Dict[str, Any] = {
@@ -343,6 +372,8 @@ class NyxBrain:
                 out["workspace"] = self.workspace.stats()
             if self.metacog is not None:
                 out["metacog"] = self.metacog.stats()
+            if self.ground is not None:
+                out["ground"] = self.ground.stats()
             return out
         except Exception:  # noqa: BLE001
             return {}
@@ -353,6 +384,8 @@ class NyxBrain:
                "turns": self.turns}
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
+        if self.ground is not None:
+            out["ground"] = self.ground.to_dict()
         return out
 
     def load_dict(self, d: Dict[str, Any]) -> None:
@@ -365,6 +398,8 @@ class NyxBrain:
                 self.memory.load_dict(d["memory"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
+            if d.get("ground") and self.ground is not None:
+                self.ground.load_dict(d["ground"])
             self.turns = int(d.get("turns", 0))
         except Exception:  # noqa: BLE001 — a corrupt sidecar must never block boot
             pass

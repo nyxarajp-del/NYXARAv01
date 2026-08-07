@@ -44,7 +44,9 @@ from nyxara.nyx.graph import (
     GraphStats,
     concepts_in,
 )
+from nyxara.nyx.ground import Grounded, Understanding, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
+from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verdict, Verification
 from nyxara.nyx.metacog import Assessment, RecursiveMetaCognition, Reliability
 from nyxara.nyx.modules import (
     CreativeSpecialist,
@@ -57,6 +59,7 @@ from nyxara.nyx.modules import (
     SpecialistModule,
     default_specialists,
 )
+from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 __all__ = [
@@ -69,6 +72,12 @@ __all__ = [
     "CreativeSpecialist", "EthicsSpecialist",
     "NyxWorkspace", "Deliberation",
     "RecursiveMetaCognition", "Reliability", "Assessment",
+    # pillar 4 — candidates held together, collapsed only when a decision is needed
+    "SolutionSuperposition", "Collapsed",
+    # pillar 2 — derived beats guessed, and she checks what she is about to say
+    "SymbolicSubsymbolicFusion", "Verification", "Verdict",
+    # symbol grounding — what her words are actually about
+    "WorldGrounding", "Understanding", "Grounded",
     # the facade the kernel holds
     "NyxBrain", "NyxPercept", "NyxThought",
 ]

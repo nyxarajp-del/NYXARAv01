@@ -187,11 +187,16 @@ class DynamicNeuralGraph:
         self._adj.setdefault(a, set()).add(b)
         self._adj.setdefault(b, set()).add(a)
 
-    def activate(self, concepts: Sequence[str] | str, *, learn: bool = True) -> Activation:
+    def activate(self, concepts: Sequence[str] | str, *, learn: bool = True,
+                 decay: bool = True) -> Activation:
         """Co-activate ``concepts``: born-if-new, Hebbian-linked pairwise, then spread.
 
         This is the graph's whole learning rule. ``learn=False`` reads without rewiring, which
         is what a hypothetical ("what *would* relate to this?") needs.
+
+        ``decay=False`` adds structure without ageing the graph. Decay models time passing
+        *between* moments, so several activations belonging to one moment — binding a word to
+        its perceptual features, say — must not age everything else several times over.
         """
         act = Activation()
         try:
@@ -202,7 +207,8 @@ class DynamicNeuralGraph:
                 return act
 
             if learn:
-                self.ticks += 1
+                if decay:
+                    self.ticks += 1
                 for ln in labels:
                     if self._touch(ln):
                         act.born.append(ln)
@@ -218,7 +224,8 @@ class DynamicNeuralGraph:
                         budget -= 1
                     if budget <= 0:
                         break
-                act.pruned = self._decay_and_prune()
+                if decay:
+                    act.pruned = self._decay_and_prune()
                 self._enforce_edge_cap()
 
             act.direct = [ln for ln in labels if ln in self.nodes]

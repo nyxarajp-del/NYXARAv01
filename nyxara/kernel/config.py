@@ -2373,6 +2373,14 @@ class NyxConfig(BaseModel):
     grounding_check: bool = True                                 # is the claim carried by evidence?
     min_grounding_overlap: float = Field(default=0.5, ge=0.0, le=1.0)
 
+    # Symbol grounding — what her words are *about*. A perceptual-feature model (senses,
+    # affordances, physics), not perception: she has no eyes, and says so by reporting a word
+    # ungrounded rather than treating it as known.
+    ground_enabled: bool = True
+    ground_read_unknown: bool = True             # ground a new word from the sentence around it
+    ground_max_new_per_turn: int = Field(default=4, ge=0)
+    ground_bind_to_graph: bool = True            # a word's features become graph structure
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
