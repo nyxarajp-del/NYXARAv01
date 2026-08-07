@@ -159,6 +159,116 @@ def test_a_missing_attribute_reports_failure():
     assert attr_faculty("rc", "role_council").disable(_Core()) is False
 
 
+def test_turning_a_dial_down_reports_success():
+    from nyxara.eval.ablation import value_faculty
+
+    core = _Core(parallel_hypotheses=3)
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(core) is True
+    assert core.parallel_hypotheses == 1
+
+
+def test_a_dial_already_at_the_off_value_reports_failure():
+    """Same guard as nulling an already-None attribute: nothing was disabled, nothing measured."""
+    from nyxara.eval.ablation import value_faculty
+
+    core = _Core(parallel_hypotheses=1)
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(core) is False
+
+
+def test_a_missing_dial_reports_failure():
+    from nyxara.eval.ablation import value_faculty
+
+    assert value_faculty("par", "parallel_hypotheses", 1).disable(_Core()) is False
+
+
+# --------------------------------------------------------------------------- #
+# Dotted paths — ablating where the value is READ, not where it was built
+# --------------------------------------------------------------------------- #
+# Several faculties are handed to a collaborator at construction and copied into it:
+# ``NativeReasoner.__init__`` does ``self.law_discovery = law_discovery``. Nulling
+# ``core.law_discovery`` afterwards leaves the reasoner holding its own live reference, so the
+# toggle reports success, both arms answer identically, and the run says `inert` — "this faculty
+# never participates" when the truth is "my toggle never reached it."
+def test_a_dotted_path_disables_the_attribute_on_the_collaborator():
+    core = _Core(reasoner=_Core(law_discovery=object()))
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is True
+    assert core.reasoner.law_discovery is None
+
+
+def test_a_dotted_path_with_a_missing_link_reports_failure():
+    assert attr_faculty("law", "reasoner.law_discovery").disable(_Core()) is False
+    assert attr_faculty("law", "reasoner.law_discovery").disable(_Core(reasoner=None)) is False
+
+
+def test_a_dotted_leaf_already_none_reports_failure():
+    core = _Core(reasoner=_Core(law_discovery=None))
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is False
+
+
+def test_the_copied_reference_trap_is_what_the_dotted_path_avoids():
+    """The exact shape of the trap, so the reason for dotted paths cannot be refactored away.
+
+    Nulling the core leaves the collaborator's copy live — a false `inert` waiting to happen.
+    Nulling through the path reaches the copy the turn actually reads.
+    """
+    engine = object()
+    core = _Core(law_discovery=engine, reasoner=_Core(law_discovery=engine))
+
+    assert attr_faculty("law", "law_discovery").disable(core) is True, "the core's attr changed"
+    assert core.reasoner.law_discovery is engine, "...and the reasoner never noticed"
+
+    assert attr_faculty("law", "reasoner.law_discovery").disable(core) is True
+    assert core.reasoner.law_discovery is None
+
+
+def test_a_dotted_dial_also_works():
+    core = _Core(reasoner=_Core(passes=3))
+    from nyxara.eval.ablation import value_faculty
+
+    assert value_faculty("p", "reasoner.passes", 1).disable(core) is True
+    assert core.reasoner.passes == 1
+
+
+def test_every_shipped_faculty_names_an_attribute_the_core_actually_sets():
+    """A typo'd attribute name reports ``broken`` at run time, which is safe but late.
+
+    Checked statically against ``NyxaraCore``'s source rather than by building a core: a real one
+    costs a full boot, and the failure being guarded against is a misspelling, not a runtime
+    condition.
+
+    A dotted path (``reasoner.law_discovery``) is checked in two parts, because its root and its
+    leaf live in different classes: the root must be something ``NyxaraCore`` assigns, and the leaf
+    must be assigned somewhere in the package. Both halves are only typo checks — that the path
+    actually reaches the faculty *on the turn path* is a runtime question, and the answer to it is
+    the ``disabled_ok`` / ``inert`` distinction, not this test.
+    """
+    import inspect
+    import pathlib
+
+    from nyxara.eval.ablation import CORE_FACULTIES
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    source = inspect.getsource(NyxaraCore)
+    package = pathlib.Path(inspect.getfile(NyxaraCore)).parents[1]
+
+    def _assigned_in_core(attr: str) -> bool:
+        return f"self.{attr} = " in source or f"self.{attr}:" in source
+
+    for faculty in CORE_FACULTIES:
+        assert faculty.attr, f"{faculty.name!r} does not record which attribute it ablates"
+        root, _, leaf = faculty.attr.partition(".")
+        assert _assigned_in_core(root), (
+            f"{faculty.name!r} ablates core.{root}, which NyxaraCore never assigns — "
+            f"the ablation would silently measure nothing")
+        if not leaf:
+            continue
+        found = any(f"self.{leaf} = " in p.read_text(encoding="utf-8", errors="ignore")
+                    for p in package.rglob("*.py"))
+        assert found, (
+            f"{faculty.name!r} ablates {faculty.attr}, but nothing in the package assigns "
+            f"self.{leaf} — the leaf is probably a typo")
+
+
 # --------------------------------------------------------------------------- #
 # End to end, against a fake mind
 # --------------------------------------------------------------------------- #
@@ -233,6 +343,47 @@ def test_each_arm_gets_a_fresh_core():
     assert built[1].helper is None
 
 
+def test_fresh_per_task_builds_a_core_for_every_task_in_both_arms():
+    built = []
+
+    def factory():
+        core = _FakeCore()
+        built.append(core)
+        return core
+
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), factory, fresh_per_task=True)
+    assert len(built) == 8, "4 tasks x 2 arms"
+    assert result.disabled_ok
+    assert [c.helper for c in built[:4]] == [built[i].helper for i in range(4)]
+    assert all(c.helper is None for c in built[4:]), "every core in the off arm must be ablated"
+
+
+def test_one_failed_ablation_condemns_the_whole_run():
+    """Averaging it away would drag the result toward 'no benefit' — the deleting direction.
+
+    Under ``fresh_per_task`` each core is ablated separately, so one core that arrived with the
+    faculty already absent contributes a concordant pair that looks like evidence. It is not
+    evidence; it is a hole, and the run must say so rather than quietly absorb it.
+    """
+    made = {"n": 0}
+
+    def factory():
+        core = _FakeCore()
+        made["n"] += 1
+        if made["n"] == 6:                       # one core in the off arm arrives already off
+            core.helper = None
+        return core
+
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), factory, fresh_per_task=True)
+    assert result.disabled_ok is False
+    assert result.verdict == "broken" and not result.deletion_candidate
+
+
+def test_the_shared_core_mode_still_reports_a_single_effective_toggle():
+    result = ablate(attr_faculty("helper", "helper"), _battery(4), _FakeCore)
+    assert result.disabled_ok is True
+
+
 def test_a_solver_error_scores_zero_rather_than_crashing():
     class _Broken(_FakeCore):
         def process(self, prompt, authority=None):
@@ -251,6 +402,69 @@ def test_run_ablation_scores_only_the_holdout_fold():
     assert len(report.results) == 1
     assert report.results[0].n_tasks == len(holdout)
     assert report.results[0].n_tasks < 20
+
+
+# --------------------------------------------------------------------------- #
+# A run that cannot conclude must say so BEFORE it spends the compute
+# --------------------------------------------------------------------------- #
+# A fold of N tasks yields at most N discordant pairs, so a fold smaller than ``min_discordant``
+# is decided before the first task runs. This is not hypothetical: the first real run used
+# ``eval/general_novel`` — 20 tasks, whose id hashes cluster high enough that ``split(0.4)``
+# returns 4 — and forty minutes bought a foregone ``underpowered``.
+def test_a_fold_too_small_to_conclude_is_flagged_on_the_report():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.underpowered_by_design
+
+
+def test_an_adequate_fold_is_not_flagged():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(40),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert not report.underpowered_by_design
+
+
+def test_the_warning_names_the_shortfall_before_any_task_runs(caplog):
+    """Logged up front. After the run it is only an autopsy."""
+    with caplog.at_level("WARNING", logger="nyxara.eval.ablation"):
+        run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(3),
+                     core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "underpowered" in text and "discordant" in text
+
+
+def test_the_flag_is_carried_rather_than_inferred_from_the_verdicts():
+    """'We looked and found nothing' and 'this run could not have found anything' are the same
+    table of numbers. Only the flag distinguishes them."""
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.to_dict()["underpowered_by_design"] is True
+    assert "too small to reach a verdict" in report.render()
+
+
+def test_a_foregone_run_still_licenses_no_deletion():
+    report = run_ablation([attr_faculty("helper", "helper")], benchmark=_battery(4),
+                          core_factory=_FakeCore, holdout_frac=0.99, seed=0, min_discordant=6)
+    assert report.candidates == []
+
+
+def test_the_shipped_default_battery_can_actually_reach_a_verdict():
+    """The defect this guard was built for: ``general_novel`` holds 20 tasks and yields a 4-task
+    fold, so the instrument's own default could never license anything. Pinning the property, not
+    the battery — any future default must clear the bar too."""
+    import inspect
+
+    from nyxara.eval.ablation import run_ablation as _run
+
+    defaults = inspect.signature(_run).parameters
+    frac = defaults["holdout_frac"].default
+    seed = defaults["seed"].default
+    need = defaults["min_discordant"].default
+
+    from nyxara.eval.hard_benchmark import build_hard_benchmark
+    _, holdout = build_hard_benchmark().split(frac, seed=seed)
+    assert len(holdout) >= need, (
+        f"the default battery yields a {len(holdout)}-task fold but a verdict needs {need} "
+        f"discordant pairs — every default run would be underpowered before it started")
 
 
 def test_the_seed_rotates_the_holdout():

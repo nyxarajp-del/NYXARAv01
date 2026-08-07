@@ -33,6 +33,15 @@ laundering ignorance into a recommendation. Every non-significant verdict theref
 discordant-pair count that produced it, and :meth:`AblationResult.deletion_candidate` refuses to
 recommend anything until the experiment was large enough to have noticed.
 
+**And a run that cannot conclude says so before it spends the compute.** A fold of N tasks yields
+at most N discordant pairs, so a fold smaller than ``min_discordant`` is decided before it starts:
+every verdict will be ``underpowered`` whatever happens. That was not hypothetical — the first
+real run here used ``eval/general_novel`` (20 tasks, whose id hashes cluster high enough that
+``split(0.4)`` returns **4**), and forty minutes bought a foregone conclusion. :func:`run_ablation`
+now checks the fold up front, logs it, and records ``underpowered_by_design`` on the report, because
+"we looked and found nothing" and "this run could not have found anything" are the same table of
+numbers and completely different conclusions.
+
 Cost is measured alongside accuracy, because it is half the decision: a faculty that adds nothing
 and costs 12 seconds a turn is a stronger candidate for removal than one that adds nothing and
 costs a microsecond.
@@ -50,6 +59,7 @@ from nyxara.eval.benchmark import Benchmark, BenchmarkReport, Solver
 __all__ = [
     "Faculty",
     "attr_faculty",
+    "value_faculty",
     "AblationResult",
     "AblationReport",
     "mcnemar_exact",
@@ -75,27 +85,83 @@ class Faculty:
     name: str
     disable: Callable[[Any], bool]
     note: str = ""
+    #: The core attribute this ablates, when it ablates one. Recorded rather than inferred from
+    #: ``note``: a checker that reads the prose gets the answer wrong the moment the prose is
+    #: rewritten, and the thing being checked is that the attribute name is not a typo.
+    attr: Optional[str] = None
 
     def __str__(self) -> str:  # pragma: no cover — display only
         return self.name
 
 
+def _resolve(root: Any, path: str) -> Tuple[Any, str]:
+    """Walk a dotted ``path`` to the object that actually holds the final attribute.
+
+    Returns ``(owner, leaf)``, or ``(None, leaf)`` when any link is missing. See
+    :func:`attr_faculty` for why a dotted path is worth supporting at all.
+    """
+    parts = path.split(".")
+    owner: Any = root
+    for step in parts[:-1]:
+        owner = getattr(owner, step, None)
+        if owner is None:
+            return None, parts[-1]
+    return owner, parts[-1]
+
+
 def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
-    """A faculty disabled by nulling one attribute on the core.
+    """A faculty disabled by nulling one attribute — ``attr`` may be a dotted path.
 
     This is the honest way to ablate *this* codebase: the call sites already guard with
     ``if self.<attr> is None`` and fall back, so setting it to ``None`` exercises the real
     degraded path rather than a special test-only branch. Reports ``False`` when the attribute
     is missing or already ``None`` — nothing was disabled, so nothing was measured.
+
+    **Point the path at where the value is READ, not where it was built.** Several faculties are
+    handed to a collaborator at construction and *copied* into it — ``NativeReasoner.__init__``
+    does ``self.law_discovery = law_discovery`` — so nulling ``core.law_discovery`` afterwards
+    leaves the reasoner holding its own live reference and changes nothing on the turn path. The
+    toggle would still return ``True`` (the core's attribute genuinely changed), the two arms
+    would answer identically, and the run would report **inert**.
+
+    That is a false ``inert``: "this faculty never participates" when the truth is "my toggle
+    never reached it." It cannot cause a deletion — ``inert`` is not a deletion candidate — but it
+    is a wasted experiment that reads like a finding, so the path exists to avoid it.
+    ``reasoner.law_discovery`` ablates the copy the turn actually consults.
     """
 
     def _disable(core: Any) -> bool:
-        if getattr(core, attr, None) is None:
+        owner, leaf = _resolve(core, attr)
+        if owner is None or getattr(owner, leaf, None) is None:
             return False
-        setattr(core, attr, None)
+        setattr(owner, leaf, None)
         return True
 
-    return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None")
+    return Faculty(name=name, disable=_disable, note=note or f"core.{attr} = None", attr=attr)
+
+
+def value_faculty(name: str, attr: str, off_value: Any, note: str = "") -> Faculty:
+    """A faculty turned off by *setting* an attribute rather than nulling it.
+
+    Some cognition is not a component that can be removed but a dial that can be turned down —
+    ``parallel_hypotheses = 3`` is three reasoning passes, ``= 1`` is one. Same contract as
+    :func:`attr_faculty` (dotted paths included): reports ``False`` when the attribute is absent
+    or already at the off value, because in both cases nothing was disabled and nothing was
+    measured.
+    """
+
+    def _disable(core: Any) -> bool:
+        owner, leaf = _resolve(core, attr)
+        if owner is None:
+            return False
+        current = getattr(owner, leaf, None)
+        if current is None or current == off_value:
+            return False
+        setattr(owner, leaf, off_value)
+        return True
+
+    return Faculty(name=name, disable=_disable,
+                   note=note or f"core.{attr} = {off_value!r}", attr=attr)
 
 
 #: A starting set aimed at the faculties that sit on the *turn* path, since those are the ones
@@ -103,6 +169,31 @@ def attr_faculty(name: str, attr: str, note: str = "") -> Faculty:
 #: growth will read as ``inert`` here, and that is the correct answer for this instrument — it
 #: means "ask a different battery", not "delete it".
 CORE_FACULTIES: Tuple[Faculty, ...] = (
+    # Parallel hypotheses, first, because it is the one whose *premise* changed underneath it.
+    # Three framings (grounded / unprimed / focused) each run the whole reasoner. That was close to
+    # free when the strongest rung was a CLOUD model — the three overlapped one network wait — and
+    # it is not free now that the primary brain is an on-device Gemma saturating the same CPU: the
+    # wall clock becomes three generations rather than one, and the deadline then discards two of
+    # the three results anyway. Whether the breadth still pays for itself is exactly this
+    # instrument's question, and nothing has ever asked it.
+    value_faculty("parallel_hypotheses", "parallel_hypotheses", 1,
+                  "3 competing framings, each a full reasoning pass, vs a single pass"),
+    # The two measured cost centres, next. Neither is a guess: a bare "Hii" turn took 122.7 s of
+    # which 109.2 s was ``_inject_domain_expertise`` spending a whole model call to *label* the
+    # greeting, and recursive improvement buys its quality with N further full passes. Both are
+    # advisory, so the question "is that price worth paying?" is exactly answerable here.
+    attr_faculty("domain_expertise", "general_intelligence",
+                 "classifies the domain and prepends an expert methodology (costs a generation)"),
+    attr_faculty("recursive_improve", "recursive_improver",
+                 "N critique+revise passes over the candidate (costs N generations)"),
+    # Law induction, through the REASONER rather than the core. ``NyxaraCore`` builds the engine
+    # and hands it to the reasoner, which keeps its own reference — verified: after
+    # ``core.law_discovery = None`` the reasoner still holds a live ``LawDiscoveryEngine``. Ablating
+    # the core attribute would therefore change nothing on the turn path and report a false
+    # ``inert``. This faculty answered `"the status is good"` with a fall-distance law until the
+    # recall matcher was fixed; whether it earns its place at all is still open, which is this.
+    attr_faculty("law_discovery", "reasoner.law_discovery",
+                 "answers from a law she induced herself, when one matches the question"),
     attr_faculty("role_council", "role_council", "the multi-role deliberation council"),
     attr_faculty("self_model", "self_model", "the self-knowledge report injected into context"),
     attr_faculty("world_model", "world_model", "the predictive world model"),
@@ -244,6 +335,11 @@ class AblationReport:
     battery: str
     results: List[AblationResult] = field(default_factory=list)
     seed: int = 0
+    #: True when the fold was smaller than ``min_discordant``, so every verdict in this report was
+    #: ``underpowered`` before the first task ran. Carried on the report rather than left to be
+    #: inferred from the verdicts, because "we looked and found nothing" and "this run could not
+    #: have found anything" are the same table of numbers and completely different conclusions.
+    underpowered_by_design: bool = False
 
     def __len__(self) -> int:
         return len(self.results)
@@ -268,6 +364,7 @@ class AblationReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"battery": self.battery, "seed": self.seed, "n_faculties": len(self.results),
+                "underpowered_by_design": self.underpowered_by_design,
                 "earned": [r.faculty for r in self.earned],
                 "deletion_candidates": [r.faculty for r in self.candidates],
                 "unmeasured": [r.faculty for r in self.unmeasured],
@@ -275,6 +372,11 @@ class AblationReport:
 
     def render(self) -> str:
         lines = [f"ablation over {self.battery} (seed {self.seed})", "=" * 70]
+        if self.underpowered_by_design:
+            lines.append("  !! the fold was too small to reach a verdict — every line below was")
+            lines.append("     'underpowered' before the first task ran. This measures the run,")
+            lines.append("     not the faculties.")
+            lines.append("-" * 70)
         for r in sorted(self.results, key=lambda x: (x.verdict, -x.accuracy_delta)):
             lines.append("  " + r.explain())
         lines.append("-" * 70)
@@ -293,30 +395,64 @@ def _outcomes(report: BenchmarkReport) -> Dict[str, Tuple[bool, str, float]]:
 
 def ablate(faculty: Faculty, benchmark: Benchmark,
            core_factory: Callable[[], Any], *,
-           alpha: float = 0.05, min_discordant: int = 6) -> AblationResult:
+           alpha: float = 0.05, min_discordant: int = 6,
+           fresh_per_task: bool = False) -> AblationResult:
     """Run ``benchmark`` twice — faculty on, faculty off — and compare the paired outcomes.
 
-    A **fresh core per arm**, because ablation mutates the core and a shared one would carry the
-    first arm's memory, journal and fatigue into the second. Same battery, same order, same seed:
-    the only intended difference between the arms is the faculty.
+    A **fresh core per arm** at minimum, because ablation mutates the core and reusing one would
+    carry the first arm's memory, journal and fatigue into the second. Same battery, same order,
+    same seed: the only intended difference between the arms is the faculty.
+
+    ``fresh_per_task`` decides what the number then means, and the default is the weaker claim:
+
+    * ``False`` (default) — one core per arm, tasks run in sequence. This measures the faculty
+      *in a session*, which is how it is actually used: a retriever that helps only because it
+      remembers task 3 when answering task 7 is genuinely helping. The cost is that the tasks are
+      not independent, so the discordant pairs McNemar's test consumes are exchangeable only
+      approximately. Treat a marginal p-value here as suggestive, not decisive.
+    * ``True`` — a fresh core per task, matching ``benchmark.core_solver``'s default. Tasks become
+      independent and the statistic is clean, at the price of one full boot per task (the whole
+      mind, per task, per arm) — which is why it is not the default.
+
+    Neither setting can manufacture a result the other would contradict in *direction*; the
+    difference is how much weight the p-value carries. Said plainly here because an instrument
+    that licenses deletions should not leave its own assumptions to be discovered.
     """
     from nyxara.agency.permissions import Authority
 
-    def _solver(core: Any) -> Solver:
-        def _solve(prompt: str) -> str:
-            return core.process(prompt, authority=Authority.OWNER).response
-        return _solve
+    def _solver(build: Callable[[], Any], *, ablated: bool) -> Tuple[Solver, List[bool]]:
+        """A solver plus the record of whether each ablation attempt actually took effect."""
+        shared: List[Any] = [] if fresh_per_task else [build()]
+        took: List[bool] = []
+        if shared and ablated:
+            took.append(bool(faculty.disable(shared[0])))
 
-    on_core = core_factory()
+        def _solve(prompt: str) -> str:
+            if fresh_per_task:
+                core = build()
+                if ablated:
+                    took.append(bool(faculty.disable(core)))
+            else:
+                core = shared[0]
+            return core.process(prompt, authority=Authority.OWNER).response
+
+        return _solve, took
+
+    on_solver, _ = _solver(core_factory, ablated=False)
     t0 = time.monotonic()
-    on_report = benchmark.run(_solver(on_core))
+    on_report = benchmark.run(on_solver)
     on_wall = time.monotonic() - t0
 
-    off_core = core_factory()
-    disabled_ok = bool(faculty.disable(off_core))
+    off_solver, took = _solver(core_factory, ablated=True)
     t0 = time.monotonic()
-    off_report = benchmark.run(_solver(off_core))
+    off_report = benchmark.run(off_solver)
     off_wall = time.monotonic() - t0
+
+    # The experiment is valid only if the ablation took effect EVERY time it was attempted. Under
+    # fresh_per_task a single core that had the faculty already absent would silently contribute a
+    # concordant pair and drag the result toward "no benefit" — the exact direction that deletes
+    # working code — so one failure condemns the whole run rather than being averaged away.
+    disabled_ok = bool(took) and all(took)
 
     on_by_id, off_by_id = _outcomes(on_report), _outcomes(off_report)
     shared = [tid for tid in on_by_id if tid in off_by_id]
@@ -350,17 +486,27 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
                  benchmark: Optional[Benchmark] = None,
                  core_factory: Optional[Callable[[], Any]] = None,
                  holdout_frac: float = 0.4, seed: int = 0,
-                 limit: int = 0,
+                 limit: int = 0, fresh_per_task: bool = False,
                  alpha: float = 0.05, min_discordant: int = 6) -> AblationReport:
     """Ablate each faculty against the **held-out** fold of a battery.
 
     Held-out on purpose: the self-improvement loop tunes against the train fold, so scoring a
     faculty there would measure how well the loop has fitted it, not whether it helps. ``seed``
     rotates which tasks are held out, so a faculty cannot be kept alive by one lucky partition.
+
+    **The fold must be able to reach a verdict.** A fold of N tasks can produce at most N
+    discordant pairs, so a fold smaller than ``min_discordant`` cannot return anything but
+    ``underpowered`` however the run goes — the experiment is decided before it starts. That is
+    checked up front and said out loud, because the alternative is what happened the first time:
+    ``eval/general_novel`` holds 20 tasks and ``split(0.4)`` yields **4** of them (its id hashes
+    happen to cluster high at seed 0), so a 40-minute run bought a foregone conclusion.
+
+    The default battery is therefore ``hard_benchmark`` — 65 tasks, 20 held out — not
+    ``general_novel``. Pass ``benchmark=`` for anything else.
     """
     if benchmark is None:
-        from nyxara.eval.general_novel import build_general_novel_benchmark
-        benchmark = build_general_novel_benchmark()
+        from nyxara.eval.hard_benchmark import build_hard_benchmark
+        benchmark = build_hard_benchmark()
     _, holdout = benchmark.split(holdout_frac, seed=seed)
     if limit:
         holdout = holdout.sample(limit, seed=seed)
@@ -368,9 +514,25 @@ def run_ablation(faculties: Sequence[Faculty] = CORE_FACULTIES, *,
         from nyxara.eval.harness import default_core_factory
         core_factory = default_core_factory
 
-    results = [ablate(f, holdout, core_factory, alpha=alpha, min_discordant=min_discordant)
+    underpowered_by_design = len(holdout) < min_discordant
+    if underpowered_by_design:
+        _warn_foregone(len(holdout), min_discordant, benchmark.name)
+
+    results = [ablate(f, holdout, core_factory, alpha=alpha, min_discordant=min_discordant,
+                      fresh_per_task=fresh_per_task)
                for f in faculties]
-    return AblationReport(battery=holdout.name, results=results, seed=seed)
+    return AblationReport(battery=holdout.name, results=results, seed=seed,
+                          underpowered_by_design=underpowered_by_design)
+
+
+def _warn_foregone(n_tasks: int, min_discordant: int, battery: str) -> None:
+    """Say, before the compute is spent, that this run cannot reach a usable verdict."""
+    import logging
+    logging.getLogger("nyxara.eval.ablation").warning(
+        "ablation fold has %d task(s) but a verdict needs %d discordant pairs — every result "
+        "from this run will be 'underpowered' no matter what it finds (battery %r). Widen the "
+        "fold, use a larger battery, or lower min_discordant deliberately.",
+        n_tasks, min_discordant, battery)
 
 
 # --------------------------------------------------------------------------- #

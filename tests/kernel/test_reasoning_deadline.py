@@ -213,6 +213,66 @@ def test_a_failed_generation_does_not_set_the_floor():
         reset_ledger()
 
 
+def test_one_slow_generation_does_not_set_the_floor():
+    """The ratchet. The first version took ``max`` of recent latencies and doubled it, so a single
+    outlier governed the next eight turns — and the longer deadline it bought permitted more
+    concurrent work, which made the next generation slower, which raised the floor again.
+    Measured across one ablation run: 30s -> 147s -> 429s -> 867s.
+
+    A floor derived from measurement is only honest while the measurement is independent of the
+    floor. The median is what restores that.
+    """
+    from nyxara.observe.turn_ledger import get_ledger, reset_ledger
+
+    reset_ledger()
+    try:
+        ledger = get_ledger()
+        ledger.begin()
+        for latency in (12.0, 13.0, 14.0, 900.0, 13.5):
+            ledger.record_generation("litertlm", "gemma", ok=True, chars=10, latency_s=latency)
+        ledger.end()
+        core = NyxaraCore.__new__(NyxaraCore)
+        floor = core._one_generation_s()
+        assert floor < 100.0, f"one 900s outlier still governs the floor ({floor:.0f}s)"
+        assert floor >= 13.5, "but the floor must still cover a typical call"
+    finally:
+        reset_ledger()
+
+
+def test_the_floor_can_never_outgrow_one_plausible_generation():
+    """However slow the last calls looked, the floor stops climbing — so a longer deadline can no
+    longer buy the contention that justifies a longer deadline."""
+    from nyxara.kernel.config import get_settings
+
+    ceiling = float(get_settings().metacontrol.max_generation_budget_s)
+    assert NyxaraCore._cap_generation_budget(ceiling * 10) == ceiling
+
+
+def test_the_cap_leaves_an_ordinary_floor_alone():
+    assert NyxaraCore._cap_generation_budget(27.0) == 27.0
+
+
+def test_the_cap_is_not_the_turn_ceiling():
+    """``max_seconds_ceiling`` bounds a whole TURN and the test profile dials it to 6s. Using it
+    here would drag the floor below a single real generation and reintroduce the starvation the
+    floor exists to prevent — two different quantities, two different bounds."""
+    from nyxara.kernel.config import get_settings
+
+    settings = get_settings()
+    assert settings.metacontrol.max_seconds_ceiling == 6.0, "premise: the suite dials this down"
+    assert NyxaraCore._cap_generation_budget(27.0) > settings.metacontrol.max_seconds_ceiling
+
+
+def test_an_unreadable_ceiling_does_not_remove_the_cap(monkeypatch):
+    import nyxara.kernel.config as cfg
+
+    def _boom():
+        raise RuntimeError("settings are on fire")
+
+    monkeypatch.setattr(cfg, "get_settings", _boom)
+    assert NyxaraCore._cap_generation_budget(10_000.0) == 180.0
+
+
 def test_with_no_observation_the_floor_is_still_real():
     """The first turn of a fresh process has nothing recorded, and it is exactly the turn that
     would otherwise be cut off before the model has ever spoken."""
@@ -338,6 +398,43 @@ def test_the_budget_guards_refinement_not_the_gates():
     for gate in ("shield", "corrigibility", "permission", "guardian", "oversight", "initiative"):
         assert f'_budget_spent("{gate}")' not in source
         assert f'_within_budget("{gate}"' not in source
+
+
+# --------------------------------------------------------------------------- #
+# How many framings, and where that number comes from
+# --------------------------------------------------------------------------- #
+def test_the_framing_count_is_reachable_from_config():
+    """It was a bare literal in ``__init__``, so the one number governing how much compute every
+    turn spends could not be changed without editing the file — and its premise had expired
+    unnoticed when her primary brain moved on-device."""
+    assert NyxaraCore._configured_parallel_hypotheses() >= 1
+
+
+def test_an_explicit_argument_still_wins_over_config(monkeypatch):
+    """Tests and callers that pin the count must be unaffected by the config default."""
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 3))
+    assert NyxaraCore(parallel_hypotheses=1).parallel_hypotheses == 1
+
+
+def test_config_supplies_the_count_when_the_caller_does_not(monkeypatch):
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 1))
+    assert NyxaraCore().parallel_hypotheses == 1
+
+
+def test_the_count_never_drops_below_one(monkeypatch):
+    """Zero framings is not a cheaper turn, it is no turn."""
+    monkeypatch.setattr(NyxaraCore, "_configured_parallel_hypotheses", staticmethod(lambda: 0))
+    assert NyxaraCore().parallel_hypotheses == 1
+
+
+def test_an_unreadable_config_does_not_break_the_boot(monkeypatch):
+    import nyxara.kernel.config as cfg
+
+    def _boom():
+        raise RuntimeError("settings are on fire")
+
+    monkeypatch.setattr(cfg, "get_settings", _boom)
+    assert NyxaraCore._configured_parallel_hypotheses() == 3
 
 
 # --------------------------------------------------------------------------- #

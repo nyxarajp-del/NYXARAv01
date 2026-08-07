@@ -55,3 +55,85 @@ def test_apply_returns_none_without_the_needed_variables():
 def test_apply_ignores_non_numeric_inputs():
     eng = _engine_with_product_law()
     assert eng.apply({"m": "not a number", "a": 4.0}) is None
+
+
+# --------------------------------------------------------------------------- #
+# Relevance — a law must answer the question that was asked
+# --------------------------------------------------------------------------- #
+# Observed in a live session: `"the status is good"` was answered with *"From my own experiments
+# I discovered the law fall_distance = 0.5197*((t)^2 * g) + ..."*. Not a dishonesty bug — she
+# really had discovered that law — a relevance bug. The match was an unanchored substring in
+# either direction, so the token `is` matched the target `fall_d(is)tance`, and any sentence
+# containing a short common word recalled a physics law.
+from nyxara.growth.law_discovery import Law, _word_parts        # noqa: E402
+
+
+def _engine_with(target: str, var_names: list) -> LawDiscoveryEngine:
+    """An engine holding exactly one law, so a recall names it or nothing."""
+    eng = LawDiscoveryEngine.__new__(LawDiscoveryEngine)
+    eng._laws = [Law(target=target, expression="0.5197*((t)^2 * g)",
+                     var_names=list(var_names), complexity=5)]
+    return eng
+
+
+def _falling() -> LawDiscoveryEngine:
+    return _engine_with("fall_distance", ["t", "g"])
+
+
+def test_a_common_word_inside_the_target_does_not_recall_a_law():
+    """`is` lives inside `fall_d-is-tance`. That is a spelling coincidence, not a question
+    about falling bodies."""
+    assert _falling().recall("the status is good") is None
+
+
+def test_arithmetic_does_not_summon_physics():
+    assert _falling().recall("what is 2+2?") is None
+
+
+def test_a_greeting_does_not_summon_physics():
+    assert _falling().recall("Hii") is None
+    assert _falling().recall("hello there") is None
+
+
+def test_a_one_letter_variable_is_not_evidence_of_relevance():
+    """Laws name their inputs `t`, `g`, `a` — and `a` is an English word. Concrete inputs reach
+    the law through ``apply``/``_extract_var_values``, which does not depend on this scoring."""
+    eng = _engine_with("velocity", ["a", "t"])
+    assert eng.recall("give me a hand") is None
+
+
+def test_the_law_is_still_recalled_by_its_own_words():
+    """The fix must not make the faculty unreachable — that would trade a wrong answer for no
+    answer, which is the other way to be useless."""
+    eng = _falling()
+    assert eng.recall("how far does it fall in time t under gravity g?") is not None
+    assert eng.recall("compute the fall distance") is not None
+    assert eng.recall("what is the fall_distance?") is not None
+
+
+def test_a_multi_character_variable_still_counts():
+    eng = _engine_with("force", ["mass", "accel"])
+    assert eng.recall("what force comes from mass and accel?") is not None
+
+
+def test_the_original_reported_query_returns_nothing():
+    """The exact string from the session that surfaced this."""
+    assert _falling().recall("the status is good") is None
+
+
+# ---- the helper the match is built on ---- #
+def test_word_parts_splits_on_underscores():
+    assert _word_parts("fall_distance") == {"fall", "distance"}
+
+
+def test_word_parts_splits_camel_case():
+    assert _word_parts("fallDistance") == {"fall", "distance"}
+
+
+def test_word_parts_drops_single_characters():
+    """A one-character part is not evidence — it is how `t` matched half the dictionary."""
+    assert _word_parts("x_velocity") == {"velocity"}
+
+
+def test_word_parts_survives_odd_input():
+    assert _word_parts("") == set() and _word_parts(None) == set()

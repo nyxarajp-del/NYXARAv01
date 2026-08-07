@@ -307,6 +307,34 @@ class MetaControlConfig(BaseModel):
     # the lot; handing them a share leaves room for the rest. Raise it toward 1.0 to favour
     # breadth of hypotheses over depth of refinement.
     parallel_deadline_share: float = Field(default=0.5, gt=0.0, le=1.0)
+    # How many framings ``_reason_parallel`` reasons from at once — grounded / unprimed / focused,
+    # each a FULL reasoning pass. 1 takes the single-pass path.
+    #
+    # DEFAULT 1, AND THAT IS A MEASUREMENT, NOT A PREFERENCE. Three framings were nearly free when
+    # her strongest rung was a CLOUD model: they overlapped one network wait. On-device they are
+    # three CPU-saturating generations competing for the same cores. Nobody revisited the number
+    # when the primary brain moved in-process, so a premise that had expired went on setting how
+    # much compute every turn spends.
+    #
+    # Ablated against its own absence on the held-out fold of ``eval/general_novel.py``
+    # (``python -m nyxara.eval --ablate``, 19 tasks, paired, exact McNemar):
+    #
+    #     verdict  hurts        accuracy  6/19 with  vs  12/19 without   (-31.6%)
+    #     helped   0            hurt      6          p   0.0312
+    #     differed 10/19        -> the ablation certainly took effect; not `inert`
+    #
+    # Not one task was answered correctly *because* of the parallelism, and six were answered
+    # wrongly *with* it. The mechanism is not mysterious: three concurrent generations make each
+    # one slower, all three then miss the deadline, none votes, and the turn falls to the
+    # deterministic floor — so the breadth meant to improve the answer is what destroys it.
+    #
+    # A first 4-task run of the same ablation returned ``underpowered`` (0 helped / 2 hurt, only
+    # 2 discordant pairs) and the default was deliberately LEFT at 3 on that evidence, because a
+    # suggestive direction is not a finding. This wider fold is what changed it.
+    #
+    # Raise it only with a machine where the framings genuinely run concurrently — and re-run the
+    # ablation there rather than assuming, since that is exactly the assumption that expired here.
+    parallel_hypotheses: int = Field(default=1, ge=1, le=8)
     # A floor under that share, used only until the turn ledger has observed a real generation.
     # An easy turn is allotted 5s, of which the framings get half — while one generation on the
     # on-device Gemma measures ~13.9s. The deadline therefore fired before the model could ever
@@ -315,6 +343,21 @@ class MetaControlConfig(BaseModel):
     # Raising this cannot slow a turn: a deadline is a maximum wait, and fast framings still
     # return at once. It only stops the budget from cutting off work that was about to succeed.
     min_generation_budget_s: float = Field(default=30.0, gt=0.0)
+    # The other end of the same floor: the longest a SINGLE generation is ever assumed to take.
+    #
+    # The floor is measured from the turn ledger's recorded latencies, which is right — a faster
+    # machine should earn a smaller floor by being measured rather than configured. But the first
+    # version took the ``max`` of recent latencies and doubled it, so one slow call governed the
+    # next eight turns, and the longer deadline it bought permitted more concurrent work, which
+    # made the next call slower, which raised the floor again. Across one ablation run it went
+    # 30s -> 147s -> 429s -> 867s. A measurement-derived floor is only honest while the
+    # measurement is independent of the floor, and that one was not.
+    #
+    # A median fixed the outlier sensitivity; this caps the loop. Deliberately NOT
+    # ``max_seconds_ceiling``: that bounds a whole TURN and the test profile dials it to 6s, which
+    # would push the floor below a single real generation and reintroduce the very starvation the
+    # floor exists to prevent. Two different quantities need two different bounds.
+    max_generation_budget_s: float = Field(default=180.0, gt=0.0)
     # Calibration correction only engages once this many outcomes have been observed.
     min_calibration_samples: int = Field(default=20, ge=0)
     # A verified score at/above this floor counts the allocation as "sufficient".

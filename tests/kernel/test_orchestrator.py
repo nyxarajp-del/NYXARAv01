@@ -134,10 +134,49 @@ def test_owner_conversation_acts():
 
 
 def test_response_is_honest_qualified():
+    """The spoken response carries calibrated confidence — in whichever of its forms applies.
+
+    This used to assert the *prefix* form only ("I'm confident that …"), which is one of three the
+    honesty layer produces and the only one that fits a short, claim-like answer. It is deliberate
+    (``observe/honesty.py::honest_statement``) that a **confident prose** answer carries no marker
+    at all: gluing a qualifier onto a fluent paragraph breaks the grammar and, worse, poisons
+    anything that later learns from the text. Low-confidence prose gets a trailing caveat instead.
+
+    So the test asserted a shape rather than the guarantee, and failed the moment a real faculty
+    answered in prose instead of the deterministic stand-in's short "I understand: …". It fails on
+    ``main`` too — this is not a regression, and it is not sensitive to how many framings run
+    (identical output at parallel_hypotheses 1 and 3).
+    """
+    from nyxara.observe.honesty import _reads_as_prose
+
     nyx = _core()
     r = nyx.process("the status is good", authority=Authority.OWNER)
-    # the spoken response carries an honesty qualifier
-    assert any(q in r.response for q in ("I'm confident", "I think", "I'm certain", "I suspect"))
+    prefixed = any(q in r.response for q in
+                   ("I'm confident", "I think", "I'm certain", "I suspect", "I'm not sure"))
+    caveated = "not fully certain" in r.response
+    assert prefixed or caveated or _reads_as_prose(r.response), (
+        "a short, claim-like answer must carry a confidence qualifier; only prose is left "
+        f"unmarked, and this is neither: {r.response[:120]!r}")
+
+
+def test_a_short_claim_still_carries_its_qualifier():
+    """The prefix form, tested where it actually applies — so dropping it would still be caught."""
+    from nyxara.observe.honesty import Claim, HonestyGuard
+
+    said = HonestyGuard().honest_statement(
+        Claim(text="the task is done", belief=0.9, expressed_confidence=0.9))
+    assert said.startswith(("I'm certain", "I'm confident", "I think", "I suspect"))
+
+
+def test_unsure_prose_says_so_rather_than_going_bare():
+    """The other half of the guarantee: prose escapes the prefix, not the honesty."""
+    from nyxara.observe.honesty import Claim, HonestyGuard
+
+    prose = ("A hash map is a data structure that stores key-value pairs and offers average "
+             "constant-time lookup by hashing the key.")
+    said = HonestyGuard().honest_statement(
+        Claim(text=prose, belief=0.2, expressed_confidence=0.2))
+    assert "not fully certain" in said
 
 
 # -------------------- owner command through the gates -------------------- #

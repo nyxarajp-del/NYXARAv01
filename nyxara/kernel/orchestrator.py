@@ -314,7 +314,7 @@ class NyxaraCore:
                  enable_skills: bool = True, enable_identity: bool = True,
                  enable_goals: bool = True, enable_social: bool = True,
                  enable_growth: bool = True, consolidate_every: int = 50,
-                 history_turns: int = 6, parallel_hypotheses: int = 3,
+                 history_turns: int = 6, parallel_hypotheses: Optional[int] = None,
                  review_mode: Optional[ReviewMode] = None) -> None:
         self.shield = shield or Shield()
         self.guardian = guardian or Guardian()
@@ -825,7 +825,15 @@ class NyxaraCore:
         # distributed cognition (Layer 8): how many hypotheses to reason in parallel and
         # select among each turn. 1 == single-threaded; >1 spawns concurrent thought
         # threads whose winner still passes the one gate (the control law is preserved).
-        self.parallel_hypotheses = max(1, int(parallel_hypotheses))
+        #
+        # Config-driven when not passed explicitly (metacontrol.parallel_hypotheses). It was a
+        # bare literal here, which meant the one number governing how much compute every turn
+        # spends could not be changed without editing this file — and its premise had expired
+        # unnoticed when her primary brain moved on-device. An explicit argument still wins, so
+        # tests and callers that pin it are unaffected.
+        self.parallel_hypotheses = max(1, int(
+            parallel_hypotheses if parallel_hypotheses is not None
+            else self._configured_parallel_hypotheses()))
         # the last dual-process arbitration (which process ran, and why) — read by growth
         self._last_arbitration: Any = None
         self._last_intuition: Any = None      # the most recent machine-verified intuitive leap
@@ -6900,23 +6908,66 @@ class NyxaraCore:
         Raising this cannot slow a turn down: the deadline is a *maximum wait*, and framings that
         finish early return immediately. It only stops the budget from cutting off work that was
         about to succeed.
+
+        **Median, and capped — because the first version of this ratcheted.** It took the ``max``
+        of recent latencies and doubled it, so one slow generation set the floor for the next eight
+        turns; the longer deadline then permitted more concurrent work, which made the next
+        generation slower still, which raised the floor again. Measured across a single ablation
+        run: ``30s -> 147s -> 429s -> 867s``. A floor derived from measurement is only honest while
+        the measurement is independent of the floor, and that one was not.
+
+        The median is robust to the single outlier that started each round, and the cap is the
+        invariant that ends the loop: a *floor* that exceeds the largest budget metacontrol can
+        ever allocate has stopped being a minimum and become an override.
         """
-        observed = 0.0
+        observed: List[float] = []
         try:
             from nyxara.observe.turn_ledger import get_ledger
             for turn in get_ledger().recent(limit=8):
                 for gen in turn.generations:
                     if gen.ok and gen.chars > 0:
-                        observed = max(observed, float(gen.latency_s))
+                        observed.append(float(gen.latency_s))
         except Exception:  # noqa: BLE001 — observation must never break a turn
-            observed = 0.0
-        if observed > 0.0:
-            return max(1.0, observed * 2.0)     # headroom for a slower-than-usual reply
+            observed = []
+        if observed:
+            observed.sort()
+            typical = observed[len(observed) // 2]          # median, not max
+            return self._cap_generation_budget(max(1.0, typical * 2.0))
         try:
             from nyxara.kernel.config import get_settings
             return max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
         except Exception:  # noqa: BLE001
             return 30.0
+
+    @staticmethod
+    def _cap_generation_budget(seconds: float) -> float:
+        """Never let the measured floor outgrow what a single generation could plausibly cost.
+
+        This is the invariant that breaks the ratchet: however slow the last calls looked, the
+        floor stops climbing here, so a longer deadline can no longer buy the contention that
+        justifies a longer deadline.
+
+        Bounded by ``metacontrol.max_generation_budget_s`` and deliberately NOT by
+        ``max_seconds_ceiling`` — that one bounds a whole TURN, and the test profile dials it to
+        6s, which would drag the floor below a single real generation and reintroduce exactly the
+        starvation the floor exists to prevent. A floor and a turn budget are different quantities
+        and need different bounds.
+        """
+        try:
+            from nyxara.kernel.config import get_settings
+            ceiling = float(get_settings().metacontrol.max_generation_budget_s)
+        except Exception:  # noqa: BLE001 — a cap must never be the thing that breaks a turn
+            ceiling = 180.0
+        return min(seconds, ceiling) if ceiling > 0.0 else seconds
+
+    @staticmethod
+    def _configured_parallel_hypotheses() -> int:
+        """How many framings to reason from, from config, or 3 if config cannot be read."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return int(get_settings().metacontrol.parallel_hypotheses)
+        except Exception:  # noqa: BLE001 — a knob must never be the thing that breaks a boot
+            return 3
 
     @staticmethod
     def _deadline_share() -> float:

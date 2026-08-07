@@ -51,9 +51,10 @@ import json
 import math
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "Variable",
@@ -87,6 +88,19 @@ def _is_number(x: Any) -> bool:
         return math.isfinite(float(x))
     except (TypeError, ValueError):
         return False
+
+
+def _word_parts(name: str) -> Set[str]:
+    """The whole words inside an identifier: ``fall_distance`` -> ``{"fall", "distance"}``.
+
+    Used to match a law's target against a question's words. Splitting on non-alphanumerics (and
+    on camelCase boundaries) is what keeps the match anchored to word starts and ends — the
+    fragment test it replaces let the token ``is`` match ``fall_d(is)tance``, so any sentence
+    containing a short common word recalled an unrelated law. Parts of one character are dropped
+    for the same reason: they are not evidence.
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(name or ""))
+    return {p for p in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if len(p) > 1}
 
 
 def _solve_lstsq(rows: List[List[float]], target: List[float],
@@ -1647,7 +1661,20 @@ class LawDiscoveryEngine:
         This is the missing link that lets a self-discovered law actually *ground an answer*: her
         reasoner asks ``recall("how far does it fall in time t under gravity g?")`` and gets back
         the ``fall_distance = ½·g·t²`` she invented herself from her own experiments. No LLM — a
-        keyword/variable match over her corroborated law tower, ranked by coverage then parsimony."""
+        keyword/variable match over her corroborated law tower, ranked by coverage then parsimony.
+
+        Matching is on **whole words**, which it was not. The test used to be an unanchored
+        substring in either direction, so the token ``is`` matched the target ``fall_d-is-tance``
+        and *any* sentence containing a short common word recalled a physics law. Measured, before
+        the fix::
+
+            "the status is good"  -> fall_distance = 0.5197*((t)^2 * g)
+            "what is 2+2?"        -> fall_distance = 0.5197*((t)^2 * g)
+
+        She was not being dishonest — she really had discovered that law — she was answering a
+        question nobody asked. A target is now matched by the whole string or by one of its
+        word parts (``fall_distance`` -> ``fall`` / ``distance``), never by a fragment inside one.
+        """
         if not self._laws:
             return None
         try:
@@ -1666,9 +1693,13 @@ class LawDiscoveryEngine:
             target = str(law.target).lower()
             names = [str(v).lower() for v in law.var_names]
             score = 0.0
-            if target and (target in tokens or any(target in t or t in target for t in tokens)):
+            if target and (target in tokens or (_word_parts(target) & tokens)):
                 score += 2.0
-            matched_vars = sum(1 for v in names if v and v in tokens)
+            # A one-character variable name is not evidence of relevance from prose: laws call
+            # their inputs `t`, `g`, `a`, and `a` is an English word. The concrete-input path
+            # (``apply`` / ``_extract_var_values``) reads those from `t=2`-style assignments and
+            # does not depend on this scoring, so requiring two characters here costs nothing.
+            matched_vars = sum(1 for v in names if len(v) > 1 and v in tokens)
             score += float(matched_vars)
             if score <= 0.0:
                 continue
