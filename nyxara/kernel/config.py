@@ -2401,6 +2401,17 @@ class NyxConfig(BaseModel):
     # rather than from a stored description. Introspection, not a claim of self-awareness.
     selfmodel_enabled: bool = True
 
+    # L-CHRONOS — decide by simulating how each option turns out. Only applies to *decisions*
+    # (a fact has no futures), and only once the world model has learned enough transitions to
+    # say anything; below that it reports itself blind rather than emitting zeros as foresight.
+    # "Thousands of futures" means exactly ``chronos_max_branches``, run sequentially.
+    chronos_enabled: bool = True
+    chronos_max_branches: int = Field(default=256, ge=2, le=100_000)
+    chronos_horizon: int = Field(default=4, ge=1, le=64)
+    chronos_budget_ms: float = Field(default=400.0, gt=0.0)
+    chronos_risk_aversion: float = Field(default=0.5, ge=0.0, le=5.0)
+    chronos_min_coverage: int = Field(default=8, ge=1)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

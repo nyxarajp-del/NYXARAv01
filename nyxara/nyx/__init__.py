@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
+from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply, Surface
 from nyxara.nyx.graph import (
     Activation,
@@ -87,6 +88,8 @@ __all__ = [
     # thinking between prompts, and what she can truthfully say about herself
     "ContinuousAutonomousReasoning", "CarStep", "Wondering",
     "NyxSelfModel", "SelfReport",
+    # L-CHRONOS — deciding by simulating how each option turns out
+    "TemporalCausalMatrix", "Futures", "Future",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

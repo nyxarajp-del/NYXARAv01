@@ -15,12 +15,12 @@ which is not claimed. The mind proposes; the kernel disposes; the Master is sove
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import re
-
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
+from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
@@ -106,6 +106,7 @@ class NyxThought:
     percept: Optional[NyxPercept] = None
     deliberation: Optional[Deliberation] = None
     collapsed: Optional[Collapsed] = None
+    futures: Optional[Futures] = None
     verification: Optional[Verification] = None
     assessment: Any = None                       # nyx.metacog.Assessment
     cycle_id: str = ""
@@ -151,6 +152,7 @@ class NyxThought:
                 "deliberation": (self.deliberation.to_dict()
                                  if self.deliberation is not None else None),
                 "collapsed": self.collapsed.to_dict() if self.collapsed is not None else None,
+                "futures": self.futures.to_dict() if self.futures is not None else None,
                 "verification": (self.verification.to_dict()
                                  if self.verification is not None else None),
                 "assessment": (self.assessment.to_dict()
@@ -177,6 +179,7 @@ class NyxBrain:
         self.hybrid = self._build_hybrid(c)
         self.ground = self._build_ground(c)
         self.dialogue = self._build_dialogue(c)
+        self.chronos = self._build_chronos(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
@@ -241,6 +244,18 @@ class NyxBrain:
             return Dialogue(require_fluent_surface=getattr(c, "require_fluent_surface", True),
                             soul=soul, max_tokens=getattr(c, "reply_max_tokens", 220))
         except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _build_chronos(c: Any) -> Optional[TemporalCausalMatrix]:
+        if not getattr(c, "chronos_enabled", True):
+            return None
+        try:
+            return TemporalCausalMatrix(
+                max_branches=c.chronos_max_branches, horizon=c.chronos_horizon,
+                budget_ms=c.chronos_budget_ms, risk_aversion=c.chronos_risk_aversion,
+                min_coverage=c.chronos_min_coverage, seed=c.seed)
+        except Exception:  # noqa: BLE001 — without it she simply cannot see ahead
             return None
 
     def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
@@ -327,10 +342,20 @@ class NyxBrain:
             # dominated, and keeps the runners-up alive with real probabilities.
             if out.deliberation is not None and out.deliberation.proposals \
                     and getattr(self.config, "superposition_enabled", True):
-                out.collapsed = SolutionSuperposition.from_proposals(
+                state = SolutionSuperposition.from_proposals(
                     out.deliberation.proposals,
                     collapse_threshold=self.config.collapse_threshold,
-                    max_candidates=self.config.max_candidates).collapse()
+                    max_candidates=self.config.max_candidates)
+                # L-CHRONOS: on a *decision*, simulate how each option turns out and fold the
+                # ranking in as evidence. It contributes nothing when the turn is a question of
+                # fact, or when the world model has learned too little to see ahead — which is
+                # the point: no foresight is better than fabricated foresight.
+                if self.chronos is not None and self.chronos.applies(out.stimulus):
+                    out.futures = self.chronos.explore(out.deliberation.proposals)
+                    evidence = self.chronos.evidence(out.futures)
+                    if evidence:
+                        state.observe(evidence)
+                out.collapsed = state.collapse()
 
             if self.metacog is not None and out.deliberation is not None:
                 out.assessment = self.metacog.observe_cycle(
@@ -480,6 +505,8 @@ class NyxBrain:
                 out["ground"] = self.ground.stats()
             if self.dialogue is not None:
                 out["dialogue"] = self.dialogue.stats()
+            if self.chronos is not None:
+                out["chronos"] = self.chronos.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
