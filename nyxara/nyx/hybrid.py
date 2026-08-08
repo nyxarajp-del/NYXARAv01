@@ -83,7 +83,8 @@ class SymbolicSubsymbolicFusion:
     _NOT_EVIDENCE = frozenset({"episode", "conjecture"})
 
     def __init__(self, *, engine: Any = None, grounding: bool = True,
-                 min_grounding_overlap: float = 0.5, semantics: Any = None) -> None:
+                 min_grounding_overlap: float = 0.5, semantics: Any = None,
+                 prover: Any = None) -> None:
         self._engine = engine
         self._tried = engine is not None
         self.grounding = bool(grounding)
@@ -92,6 +93,10 @@ class SymbolicSubsymbolicFusion:
         # covering a claim about a "car" — provided the space can *justify* the link. Without
         # one this is exact word overlap, exactly as V.01 did it.
         self.semantics = semantics
+        # NYX V.02: and with a prover attached, a formally expressible claim can be *decided*
+        # rather than merely corroborated. Most claims are not formally expressible; those go
+        # down the unchanged path, which is why this is an addition and not a replacement.
+        self.prover = prover
 
     def _get_engine(self) -> Any:
         if not self._tried:
@@ -182,6 +187,14 @@ class SymbolicSubsymbolicFusion:
         if not texts:
             return None
 
+        certificate = self._proved(claim)
+        if certificate is not None:
+            return Verification(
+                verdict=Verdict.SUPPORTED if certificate.proved else Verdict.CONTRADICTED,
+                confidence=1.0,
+                reason=(f"machine-checked: {certificate.verdict} — {certificate.note}"),
+                grounded_in=[certificate.formula] if certificate.formula else [])
+
         overlap, source = self._overlap(claim, texts, asked=stimulus)
         if overlap is None:
             # The claim says nothing the question did not already say. There is no assertion
@@ -210,6 +223,21 @@ class SymbolicSubsymbolicFusion:
             return bool(a) and a == b
         except Exception:  # noqa: BLE001
             return False
+
+    def _proved(self, claim: str) -> Any:
+        """A machine-checkable verdict, when the claim admits one at all.
+
+        Returns ``None`` for everything that is not formally expressible — which is most of
+        what she says — so the unchanged evidence path still runs. A prover that returns
+        ``contingent`` or ``unknown`` also returns ``None`` here: neither is a verdict.
+        """
+        if self.prover is None:
+            return None
+        try:
+            got = self.prover.prove(claim)
+            return got if getattr(got, "decisive", False) else None
+        except Exception:  # noqa: BLE001 — a prover failure is never a proof
+            return None
 
     def _covers(self, wanted: str, have: set) -> bool:
         """Is this one word of the claim carried by the evidence — as itself, or as a synonym?

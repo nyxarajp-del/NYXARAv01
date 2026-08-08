@@ -58,6 +58,7 @@ from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import SemanticSpace
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.telepathy import Frame, Received, SemanticStream
+from nyxara.nyx.theorem_prover import Certificate as ProofCertificate, ProofCore
 from nyxara.nyx.synergy import HiveSynapse
 from nyxara.nyx.will import Choice, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
@@ -258,11 +259,14 @@ class NyxBrain:
         self.omega = self._build_omega(c)
         self.agenda = self._build_agenda(c)
         self.telepathy = self._build_telepathy(c)
+        self.prover = self._build_prover(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
+        self.prover = self.prover if getattr(self, 'prover', None) is not None \
+            else self._build_prover(c)
         self.hybrid = self._build_hybrid(c)
         self.ground = self._build_ground(c)
         self.dialogue = self._build_dialogue(c)
@@ -293,6 +297,16 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    @staticmethod
+    def _build_prover(c: Any) -> Optional[ProofCore]:
+        if not getattr(c, "prover_enabled", True):
+            return None
+        try:
+            return ProofCore(timeout_ms=getattr(c, "prover_timeout_ms", 3000),
+                             max_vars=getattr(c, "prover_max_vars", 8))
+        except Exception:  # noqa: BLE001 — without it "verifiable" means what it meant in V.01
             return None
 
     def _build_telepathy(self, c: Any) -> Optional[SemanticStream]:
@@ -475,7 +489,7 @@ class NyxBrain:
             return SymbolicSubsymbolicFusion(
                 grounding=getattr(c, "grounding_check", True),
                 min_grounding_overlap=getattr(c, "min_grounding_overlap", 0.5),
-                semantics=self.semantics)
+                semantics=self.semantics, prover=getattr(self, "prover", None))
         except Exception:  # noqa: BLE001
             return None
 
@@ -1024,6 +1038,17 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def prove(self, claim: str) -> Optional[ProofCertificate]:
+        """A machine-checkable verdict, or an honest report that there is none to be had.
+
+        Most of what she says is not formally expressible, and for those this returns
+        ``INEXPRESSIBLE`` rather than inventing a verdict — that refusal is the point.
+        """
+        try:
+            return self.prover.prove(claim) if self.prover is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def receive_frame(self, frame: Any) -> Optional[Received]:
         """Take meaning as structure rather than as prose — the tokenizer is not involved.
 
@@ -1245,6 +1270,8 @@ class NyxBrain:
                 out["agenda"] = self.agenda.stats()
             if self.telepathy is not None:
                 out["telepathy"] = self.telepathy.stats()
+            if self.prover is not None:
+                out["prover"] = self.prover.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:

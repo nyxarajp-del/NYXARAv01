@@ -458,6 +458,7 @@ _NYX_HELP = """\
 /nyx omega [evolve|rollback]  the constants she thinks with — and what she measured them to
 /nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
 /nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
+/nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -576,6 +577,15 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "prove":
+        prover = getattr(brain, "prover", None)
+        if prover is None:
+            print("the proof core is off (NYXARA_NYX__PROVER_ENABLED=false).")
+        elif not rest:
+            print(prover.describe())
+        else:
+            got = brain.prove(rest.strip("\"'"))
+            print(got.render() if got is not None else "the proof core is unavailable.")
     elif sub == "telepathy":
         stream = getattr(brain, "telepathy", None)
         action = rest.strip()

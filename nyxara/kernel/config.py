@@ -2688,6 +2688,18 @@ class NyxConfig(BaseModel):
     telepathy_trigger_words: int = Field(default=2, ge=1)
     telepathy_max_shorthand: int = Field(default=64, ge=1)
 
+    # The proof core (nyxara/nyx/theorem_prover.py). The control law was already "verifiable
+    # beats probabilistic"; until now "verifiable" meant HER OWN ENGINES AGREED. This gives the
+    # word a machine-checkable meaning where the claim admits one — z3, with SymPy behind it.
+    #
+    # "Eliminate hallucination mathematically" cannot be fully true and is not claimed: a proof
+    # runs only on FORMALLY EXPRESSIBLE claims. "Gravity pulls the apple down" is not an SMT
+    # formula, and asked to prove it she returns INEXPRESSIBLE rather than inventing a verdict.
+    # A timeout is reported as "could not prove", never as "correct".
+    prover_enabled: bool = True
+    prover_timeout_ms: int = Field(default=3000, ge=50)
+    prover_max_vars: int = Field(default=8, ge=1, le=64)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

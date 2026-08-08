@@ -85,6 +85,7 @@ from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.synergy import HiveSynapse, Shared, Transport
 from nyxara.nyx.telepathy import Frame, Received, SemanticStream, Shorthand
+from nyxara.nyx.theorem_prover import Certificate, ProofCore, Verdict as ProofVerdict
 from nyxara.nyx.will import Choice, EntropySource, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -148,6 +149,8 @@ __all__ = [
     "SovereignAgenda", "Goal", "Progress", "Briefing",
     # L-NEURAL-TELEPATHY — meaning as structure, not prose. No mind reading, and none claimed
     "SemanticStream", "Frame", "Received", "Shorthand",
+    # The proof core — a claim that carries its certificate, or admits it has none
+    "ProofCore", "Certificate", "ProofVerdict",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]
