@@ -58,6 +58,7 @@ from nyxara.nyx.ground import Grounded, Understanding, WorldGrounding
 from nyxara.nyx.hands import Hands, Reach, ToolRecord
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verdict, Verification
+from nyxara.nyx.hyper_vector import Bound, Capacity, Retrieved as VsaRetrieved, VectorSymbolic
 from nyxara.nyx.icl import Demonstration, InContextLearner, Learned
 from nyxara.nyx.intent import Intent, IntentReader, Reading
 from nyxara.nyx.lingua import Lingua, LinguaRead, Register, Token
@@ -151,6 +152,8 @@ __all__ = [
     "SemanticStream", "Frame", "Received", "Shorthand",
     # The proof core — a claim that carries its certificate, or admits it has none
     "ProofCore", "Certificate", "ProofVerdict",
+    # Vector-symbolic structure — which role is bound to which filler, and zero-shot analogy
+    "VectorSymbolic", "Bound", "VsaRetrieved", "Capacity",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

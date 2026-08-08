@@ -2700,6 +2700,18 @@ class NyxConfig(BaseModel):
     prover_timeout_ms: int = Field(default=3000, ge=50)
     prover_max_vars: int = Field(default=8, ge=1, le=64)
 
+    # Vector-symbolic structure (nyxara/nyx/hyper_vector.py). `semantics` answers HOW CLOSE two
+    # concepts are; it cannot answer WHICH ROLE IS BOUND TO WHICH FILLER. "The engine turns the
+    # flywheel" and "the flywheel turns the engine" have identical concepts and opposite
+    # meanings — a bag of words cannot tell them apart, and a bound hypervector can.
+    #
+    # Capacity is REAL: a bundle holds only so many bindings before cleanup returns the wrong
+    # symbol. Every retrieval carries a margin, and capacity_probe() measures where it breaks
+    # on THIS machine rather than quoting a number. Measured retrieval, never "absolute".
+    vsa_enabled: bool = True
+    vsa_dim: int = Field(default=10000, ge=64, le=65536)
+    vsa_min_margin: float = Field(default=0.05, ge=0.0, le=1.0)  # below this: not a retrieval
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

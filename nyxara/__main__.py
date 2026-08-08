@@ -459,6 +459,7 @@ _NYX_HELP = """\
 /nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
 /nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
 /nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
+/nyx analogy <a:b::c>      zero-shot analogy over structures she holds
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -577,6 +578,26 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "analogy":
+        vsa = getattr(brain, "vsa", None)
+        if vsa is None:
+            print("vector-symbolic structure is off (NYXARA_NYX__VSA_ENABLED=false).")
+        elif not rest:
+            print(vsa.describe())
+        else:
+            spec = rest.strip("\"'").replace("::", ":")
+            parts = [p.strip() for p in spec.split(":") if p.strip()]
+            if len(parts) != 3:
+                print("usage: /nyx analogy <a>:<b>::<c>")
+            else:
+                got = brain.analogy(*parts)
+                if got is None:
+                    print("vector-symbolic structure is unavailable.")
+                else:
+                    print(f"{parts[0]} : {parts[1]} :: {parts[2]} : "
+                          f"{got.filler if got.trusted else '?'}")
+                    print(f"  margin {got.margin:.3f}  trusted={got.trusted}")
+                    print(f"  {got.note}")
     elif sub == "prove":
         prover = getattr(brain, "prover", None)
         if prover is None:

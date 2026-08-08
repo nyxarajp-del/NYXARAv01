@@ -35,6 +35,7 @@ from nyxara.nyx.hands import Hands, Reach
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
+from nyxara.nyx.hyper_vector import Retrieved as VsaRetrieved, VectorSymbolic
 from nyxara.nyx.icl import InContextLearner, Learned
 from nyxara.nyx.intent import Intent, IntentReader
 from nyxara.nyx.lingua import Lingua, LinguaRead
@@ -260,6 +261,7 @@ class NyxBrain:
         self.agenda = self._build_agenda(c)
         self.telepathy = self._build_telepathy(c)
         self.prover = self._build_prover(c)
+        self.vsa = self._build_vsa(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
@@ -297,6 +299,16 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_vsa(self, c: Any) -> Optional[VectorSymbolic]:
+        if not getattr(c, "vsa_enabled", True):
+            return None
+        try:
+            return VectorSymbolic(self, dim=getattr(c, "vsa_dim", 10000),
+                                  seed=getattr(c, "seed", 42),
+                                  min_margin=getattr(c, "vsa_min_margin", 0.05))
+        except Exception:  # noqa: BLE001 — without it her concepts stay a bag of words
             return None
 
     @staticmethod
@@ -1038,6 +1050,26 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def bind_structure(self, name: str, roles: Optional[Dict[str, str]] = None, *,
+                       sequence: Optional[List[str]] = None) -> Any:
+        """Hold a whole role-filler structure in one vector — not a bag of words.
+
+        "The engine turns the flywheel" and "the flywheel turns the engine" have identical
+        concepts and opposite meanings; this is what tells them apart.
+        """
+        try:
+            return self.vsa.encode(name, roles, sequence=sequence) \
+                if self.vsa is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def analogy(self, a: str, b: str, c: str) -> Optional[VsaRetrieved]:
+        """``a : b :: c : ?`` over structures she holds — no training, no examples."""
+        try:
+            return self.vsa.analogy(a, b, c) if self.vsa is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def prove(self, claim: str) -> Optional[ProofCertificate]:
         """A machine-checkable verdict, or an honest report that there is none to be had.
 
@@ -1272,6 +1304,8 @@ class NyxBrain:
                 out["telepathy"] = self.telepathy.stats()
             if self.prover is not None:
                 out["prover"] = self.prover.stats()
+            if self.vsa is not None:
+                out["vsa"] = self.vsa.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1326,6 +1360,8 @@ class NyxBrain:
             out["agenda"] = self.agenda.to_dict()
         if self.telepathy is not None:
             out["telepathy"] = self.telepathy.to_dict()
+        if self.vsa is not None:
+            out["vsa"] = self.vsa.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1368,6 +1404,8 @@ class NyxBrain:
                 self.agenda.load_dict(d["agenda"])
             if d.get("telepathy") and self.telepathy is not None:
                 self.telepathy.load_dict(d["telepathy"])
+            if d.get("vsa") and self.vsa is not None:
+                self.vsa.load_dict(d["vsa"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:
