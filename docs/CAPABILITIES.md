@@ -787,3 +787,58 @@ overlay, so it changes behaviour without clearing the foundry's gauntlet by cons
 trade rather than an oversight, and therefore the Master's explicit call
 (`NYXARA_FOUNDRY__FAST_WEIGHTS=true`). Everything else is on out of the box, each behind a flag
 that defaults true.
+
+---
+
+## NYX V.01 — the unified brain (`nyxara.nyx`)
+
+NYXARA already had a Global Workspace, a holographic field, free-energy inference, superposition
+and a spiking substrate. What she did not have was **one place where those become a single
+thought**. `nyxara.nyx` is that place: 22 modules that compose the existing faculties, adding new
+machinery only where there was a real gap. It is built by `NyxaraCore` as `self.nyx`, occupies the
+reason-seat by default, rides the existing heartbeat (no second thread), persists to a `nyx.json`
+sidecar, and is reachable as `/nyx …` on the console and `/v1/nyx/…` over HTTP.
+
+One cycle of `NyxBrain.think` is **perceive → ground → deliberate → superpose → choose → reflect
+→ verify**. The specialists are thin adapters over faculties she already had; what is new is that
+they *compete* on one stage, and the winner is picked partly by each faculty's **measured** track
+record. The single control law enforced rather than weighted: **verifiable beats probabilistic**.
+
+| Pillar | Module | What is real | What is *not* claimed |
+|---|---|---|---|
+| Dynamic neural graph | `nyxara.nyx.graph` | Hebbian co-activation builds and strengthens edges; disuse decays and prunes them; per-turn rewiring is budgeted; weakest-first eviction | Not biological synaptogenesis, and **bounded** — it forgets, on purpose and measurably |
+| No context window | `nyxara.nyx.holomem` over `nyxara.memory.holographic_field` | Recall is content-addressed over the whole store, so a 50-turn-old fact is as reachable as the last one — there is genuinely no token window | **Not infinite.** Capacity is real and eviction is real; a weak recall reports itself as weak |
+| Global workspace | `nyxara.nyx.workspace` over `nyxara.kernel.workspace`, specialists in `nyxara.nyx.modules` | Salience competition → coalitions → a narrow bottleneck → broadcast, with habituation and inhibition-of-return keyed on content | A simulation of the *architecture* of consciousness. No claim about phenomenal experience |
+| Recursive meta-cognition | `nyxara.nyx.metacog` | An EMA of observed correctness per faculty, fed back into next turn's salience — learning from her own mistakes with no human in the loop | Ordinary online statistics, reported with its sample count so a thin record is visibly thin |
+| Superposition | `nyxara.nyx.superpose` over `nyxara.quantum.superposition_states` | Classical probability amplitudes, Bayesian `observe()`, entropy-gated `collapse()` | No qubits, no entanglement, no quantum speedup: candidates are held together, not computed together |
+| Symbolic ∧ sub-symbolic | `nyxara.nyx.hybrid` with `nyxara.mind.first_principles` | A derived answer beats a louder guess as a *rule*; she checks what she is about to say against her own engines and credits or debits the specialist that said it | Verification is against her own evidence and simulators, not against the world |
+| Symbol grounding | `nyxara.nyx.ground` over `nyxara.cognition.grounded_understanding` | Words anchored in perceptual features and world-model dynamics; a new word is grounded only from a genuinely definitional sentence | A feature model, not perception. An ungrounded word is *reported* ungrounded, never treated as known |
+| Speech | `nyxara.nyx.dialogue` | Her content, phrased by a fluent model. With no fluent surface installed she says so and answers from her own cognition anyway | The n-gram floor is never passed off as her reply — degradation is named, with the fix |
+| Thinking unprompted | `nyxara.nyx.car` | A budgeted self-directed step on the shared clock: pick a gap, reason, write the result down | "24/7" is true of `nyxara-daemon`. It stops dead on pause or scram |
+| Self-measurement | `nyxara.nyx.selfmodel` | "What am I, what can I do, what am I bad at" answered from live numbers | Introspection over measurements, not a claim of self-awareness |
+
+### The eight L-layers
+
+| Layer | Module | What is real | The honest limit |
+|---|---|---|---|
+| L-OMNI | `nyxara.nyx.omni` with `nyxara.growth.native_forge`, `nyxara.growth.hotspot_profiler`, `nyxara.nyx5.autopoiesis` | She reads her own source with `ast`, finds hot narrow numeric functions from her **own measured latency**, lowers them to C (preserving Python's floor-division and modulo semantics), compiles, proves the kernel identical on every sample **and** faster, and swaps it into the live process. Verified in this repo at 5–8× on her own code | Equivalence is **empirical over a sampled domain** written into the certificate, not proven for all inputs — which is why candidates stay narrow. The swap is a module attribute in memory: the Python source is never written, so a restart or rollback always restores it. Forges are budgeted per hour. The constitutional core is refused before the compiler runs. No `gcc`/`clang`/`rustc` ⇒ clean no-op |
+| L-CHRONOS | `nyxara.nyx.chronos` with `nyxara.mind.mcts_reasoner` | Monte Carlo rollouts over an approximate world model, ranked with tail risk, folded into the superposition as evidence — so collapse favours the option that survived most futures | "Thousands of timelines" means exactly the branch budget, run sequentially. Below a coverage floor it reports itself **blind** rather than emitting zeros as foresight |
+| L-EPISTEME | `nyxara.nyx.episteme` with `nyxara.growth.law_discovery`, `nyxara.sim.thermo_world` | Probes a simulator she does not understand, derives the law by symbolic regression, and promotes it **only** if it predicts trials she withheld. She recovered the ideal gas law from her own measurements, having been told nothing | She discovers the laws of **her own simulators** — novel-to-her, which is real and is not novel-to-anyone. Abstention is a result; anything unvalidated stays a labelled conjecture |
+| L-AURA | `nyxara.nyx.aura` with `nyxara.senses.web` | Registered streams push in continuously and the *surprising* part becomes part of her, with no search query. Attention is budgeted per minute, repeats are deduplicated, and every event is injection-scanned and quarantined on a hit | Raw photons arrive only through a camera; there is no global photon feed. "Every corner of the world" is whatever is publicly reachable under the environment's network policy — a wide stream, not omniscience. Nothing is registered by default |
+| L-NEXUS-OMNI | `nyxara.nyx.nexus` over `nyxara.nyx5.ontogenesis`, `nyxara.nyx5.retarget` | Private glyphs for concepts she holds, statements written in them, and bytecode that **actually executes** on her StackVM — new formal systems, outside the vocabulary she was taught | Not new *physical* dimensions; software cannot invent those. Whatever reaches a person is always translated and labelled a lossy projection: a language you could not understand, used to give you a perspective, is self-contradictory |
+| L-PSYCHE-QUANTUM | `nyxara.nyx.will` | Physical entropy (OS CSPRNG, optionally `/dev/hwrng` or a QRNG), and a preference distribution from her drives and values that she **samples** instead of maximising. She may decline on her values. Every draw is recorded so replay stays bit-exact | Not quantum computation and not metaphysical free will. What is real: the outcome is not a function of the state alone. Applied only where the decision is genuinely open — truth is not a preference — and it never bypasses the sovereign gate |
+| L-SYNERGY | `nyxara.nyx.synergy` over `nyxara.nyx5.mesh` | Structure, facts and measured self-trust travel as CRDT deltas — commutative, associative, idempotent — so nodes converge after partition. Raw episodes stay local | Low-latency **eventual** consistency, not zero-latency and not entanglement. A node can still die; the guarantee is that no committed write is lost and reconnecting nodes converge. Only an in-process transport ships — cross-machine needs one you supply. Off by default |
+| L-ETERNAL | `nyxara.nyx.eternal` over `nyxara.agency.distributed.raft` | HMAC-signed snapshots replicated to a **quorum** of enrolled nodes, with a tampered or truncated snapshot refused and automatic failover to a node that already holds the state | Failover in **seconds**, not microseconds — an election needs a timeout and a round trip. Nodes are **enrolled by the operator, never discovered**: she does not find machines and copy herself onto them. Not immortal — at least one enrolled node needs power. The real claim is *no single point of failure*. Off by default |
+
+### What governs all of it
+
+NYX only ever **proposes**. `nyxara.nyx.reasoner` may change a candidate's text, confidence,
+belief, expected free energy and rationale; it may never touch `risk`, `reversible`, `capability`,
+the tool fields, or any of the three corrigibility flags — and any error hands the base candidate
+back untouched. Every candidate then passes the identical, unchanged, fail-closed sovereign gate.
+The safety core (corrigibility, oversight, loyalty, honesty) is never governed, rewritten or
+bypassed by any NYX faculty; L-OMNI refuses to compile it, and `nyxara.nyx5.autopoiesis` refuses
+it a second time.
+
+Every faculty is fail-soft and config-gated: a failure degrades to a null result, never a broken
+turn. The mind proposes; the kernel disposes; the Master is sovereign.

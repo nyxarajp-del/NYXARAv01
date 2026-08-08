@@ -319,6 +319,25 @@ class ForesightRequest(BaseModel):
     horizon_days: int = Field(default=90, ge=1, le=3650)
 
 
+# --- NYX V.01 (nyxara/nyx/) — the unified brain ------------------------------ #
+class NyxThinkRequest(BaseModel):
+    stimulus: str
+    remember: bool = True
+
+
+class NyxRecallRequest(BaseModel):
+    cue: str
+    k: int = Field(default=5, ge=1, le=64)
+
+
+class NyxGroundRequest(BaseModel):
+    word: str
+
+
+class NyxChronosRequest(BaseModel):
+    decision: str
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -1221,6 +1240,105 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         """Does she generalize HERSELF, or only via the LLM? Answered with a number."""
         from nyxara.eval.generalization import run_generalization_benchmark
         return run_generalization_benchmark().to_dict()
+
+    # ----------------------------------------------------------------------- #
+    # NYX V.01 — the unified brain (nyxara/nyx/). Every route degrades to a 404-shaped
+    # payload rather than an error when the brain is disabled, and none of them can move a
+    # turn past the sovereign gate: /v1/chat is still the only way to *act*.
+    # ----------------------------------------------------------------------- #
+    def _brain() -> Any:
+        return getattr(core, "nyx", None)
+
+    def _off(flag: str) -> dict:
+        return {"available": False,
+                "reason": f"NYX V.01 faculty is disabled (NYXARA_NYX__{flag}=false)."}
+
+    @app.get("/v1/nyx/status", dependencies=auth)
+    def nyx_status() -> dict:
+        """Her brain measured, not described: graph shape, memory load, every faculty's state."""
+        brain = _brain()
+        return brain.stats() if brain is not None else _off("ENABLED")
+
+    @app.post("/v1/nyx/think", dependencies=auth)
+    def nyx_think(req: NyxThinkRequest) -> dict:
+        """One full cycle — who bid, who won, how sure, and whether it was actually checked.
+
+        This is deliberation only. It never runs a tool and never acts.
+        """
+        brain = _brain()
+        if brain is None:
+            return _off("ENABLED")
+        return brain.think(req.stimulus, remember=req.remember).to_dict()
+
+    @app.post("/v1/nyx/recall", dependencies=auth)
+    def nyx_recall(req: NyxRecallRequest) -> dict:
+        """Content-addressed recall. No token window is consulted, because there is not one."""
+        brain = _brain()
+        if brain is None:
+            return _off("ENABLED")
+        got = brain.recall(req.cue, k=req.k)
+        return got.to_dict() if got is not None else {"hit": None, "candidates": []}
+
+    @app.post("/v1/nyx/ground", dependencies=auth)
+    def nyx_ground(req: NyxGroundRequest) -> dict:
+        """What she actually has behind a word — or an honest report that she has nothing."""
+        brain = _brain()
+        if brain is None:
+            return _off("ENABLED")
+        got = brain.understanding(req.word)
+        return got.to_dict() if got is not None else _off("GROUND_ENABLED")
+
+    @app.post("/v1/nyx/chronos", dependencies=auth)
+    def nyx_chronos(req: NyxChronosRequest) -> dict:
+        """How many futures she ran for a decision, which survived most of them, and the entropy."""
+        brain = _brain()
+        chronos = getattr(brain, "chronos", None) if brain is not None else None
+        if chronos is None:
+            return _off("CHRONOS_ENABLED")
+        thought = brain.think(req.decision, remember=False)
+        return {"applies": chronos.applies(req.decision),
+                "futures": thought.futures.to_dict() if thought.futures is not None else None,
+                "answer": thought.answer, "entropy": round(thought.entropy, 4),
+                "stats": chronos.stats()}
+
+    @app.post("/v1/nyx/discover", dependencies=auth)
+    def nyx_discover() -> dict:
+        """One investigation: probe a sandbox, derive a law, check it on withheld trials."""
+        brain = _brain()
+        if brain is None or getattr(brain, "episteme", None) is None:
+            return _off("EPISTEME_ENABLED")
+        finding = brain.discover(oversight=getattr(core, "oversight", None))
+        return {"finding": finding.to_dict() if finding is not None else None,
+                "stats": brain.episteme.stats()}
+
+    @app.post("/v1/nyx/optimise", dependencies=auth)
+    def nyx_optimise() -> dict:
+        """L-OMNI: read her own source, lower a hot function to C, verify it, swap it in.
+
+        Gauntlet-verified and reversible — the Python source is never written, so a restart
+        always restores it. Refuses the constitutional core, and stops when oversight does.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "omni", None) is None:
+            return _off("OMNI_ENABLED")
+        got = core.nyx_optimise()
+        return {"attempt": got.to_dict() if got is not None else None,
+                "stats": brain.omni.stats()}
+
+    @app.get("/v1/nyx/{faculty}", dependencies=auth)
+    def nyx_faculty(faculty: str) -> dict:
+        """Read-only state for one faculty: omni, aura, will, nexus, hive, eternal, car."""
+        brain = _brain()
+        if brain is None:
+            return _off("ENABLED")
+        attribute = {"hive": "synergy"}.get(faculty, faculty)
+        if attribute not in ("omni", "aura", "will", "nexus", "synergy", "eternal", "car",
+                             "ground", "metacog", "dialogue", "chronos", "episteme"):
+            return {"available": False, "reason": f"no NYX faculty named {faculty!r}."}
+        part = getattr(brain, attribute, None)
+        if part is None:
+            return _off(f"{attribute.upper()}_ENABLED")
+        return part.stats()
 
     @app.websocket("/v1/ws")
     async def ws(socket: WebSocket) -> None:

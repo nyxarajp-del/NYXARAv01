@@ -2295,6 +2295,205 @@ class Nyx5Config(BaseModel):
     anticipation_lookahead: int = Field(default=3, ge=0, le=5)
 
 
+class NyxConfig(BaseModel):
+    """NYX V.01 (nyxara/nyx/) — the unified brain that composes what NYXARA already has.
+
+    NYXARA had a Global Workspace, a holographic field, free-energy inference, superposition and
+    a spiking substrate — but no single place where they became **one thought**. NYX V.01 is that
+    place. It builds new machinery only where there was a real gap; everything else it composes.
+
+    Honest about what each part is (the rule this repo keeps — see ``docs/CAPABILITIES.md``):
+
+    * **Dynamic neural graph** — bounded Hebbian co-activation bookkeeping with disuse decay and
+      weakest-first eviction. Not biological synaptogenesis, no backpropagation, and *not*
+      unbounded: it forgets, on purpose and measurably.
+    * **Holographic memory** — recall is content-addressed over the full store, so there is **no
+      token context window**. That claim is true. "Infinite memory" is *not* claimed: capacity is
+      real, eviction is real, and a low-confidence recall reports itself as one.
+    * **Global workspace** — a simulation of the *architecture* of consciousness (salience
+      competition → narrow bottleneck → broadcast), not a claim about phenomenal experience.
+    * **Superposition** — classical probability amplitudes with Bayesian update and an
+      entropy-gated collapse. No qubits, no entanglement, no quantum speedup: candidates are held
+      together, not computed together.
+
+    NYX only ever *proposes*. With ``as_reasoner`` on it occupies the reason-seat and produces the
+    turn's candidate, but that candidate still passes the identical, unchanged, fail-closed
+    sovereign gate. The safety core (corrigibility, oversight, loyalty, honesty) is never
+    governed, rewritten, or bypassed by any NYX faculty."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    as_reasoner: bool = True                    # NYX V.01 takes the reason-seat (still gated)
+    seed: int = 42
+
+    # Pillar 1a — the dynamic neural graph (self-reconfiguring concept network)
+    graph_max_nodes: int = Field(default=4096, ge=8, le=1_048_576)
+    graph_max_edges: int = Field(default=32768, ge=8, le=8_388_608)
+    hebbian_rate: float = Field(default=0.15, gt=0.0, le=1.0)   # co-activation growth step
+    decay_rate: float = Field(default=0.01, ge=0.0, lt=1.0)     # per-tick disuse fade
+    graph_prune_threshold: float = Field(default=0.02, ge=0.0, le=1.0)  # cut below this weight
+    rewire_budget_per_tick: int = Field(default=256, ge=0)      # bounded structural change
+    spread_depth: int = Field(default=2, ge=1, le=6)            # spreading-activation hops
+    spread_falloff: float = Field(default=0.5, gt=0.0, le=1.0)
+
+    # Pillar 1b — content-addressed associative memory (replaces the token window)
+    holo_dim: int = Field(default=10000, ge=256, le=65536)      # reuse the audited HDC width
+    holo_capacity: int = Field(default=4096, ge=1)              # real capacity; eviction is real
+    holo_recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    link_rate: float = Field(default=0.2, gt=0.0, le=1.0)       # association growth step
+    max_links_per_trace: int = Field(default=16, ge=0)
+    recall_k: int = Field(default=5, ge=1, le=64)               # constellation size per recall
+
+    # Pillar 3a — the conscious bottleneck (Global Workspace Theory, kernel/workspace.py)
+    workspace_enabled: bool = True
+    workspace_capacity: int = Field(default=1, ge=1, le=8)      # coalitions per cycle (≈1)
+    access_threshold: float = Field(default=1.0, ge=0.0)        # below this, nothing is conscious
+    # Specialists that may bid. Each is an adapter over a faculty NYXARA already has; an
+    # unavailable one (missing optional dep) reports itself rather than faking competence.
+    specialists: List[str] = Field(
+        default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics"])
+
+    # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
+    metacog_enabled: bool = True
+    reliability_lr: float = Field(default=0.15, gt=0.0, le=1.0)  # EMA step on an outcome
+    calibration_window: int = Field(default=128, ge=1)           # retained assessments
+    metacog_min_samples: int = Field(default=5, ge=1)            # below this a record is untrusted
+    overconfidence_gap: float = Field(default=0.3, ge=0.0, le=1.0)
+
+    # Pillar 4 — candidate answers held together until a decision is actually needed.
+    # Classical probability amplitudes: no qubits, no entanglement, no quantum speedup.
+    superposition_enabled: bool = True
+    collapse_threshold: float = Field(default=0.5, ge=0.0, le=1.0)  # below => stay undecided
+    max_candidates: int = Field(default=32, ge=1, le=1024)
+
+    # Pillar 2 — symbolic ∧ sub-symbolic: derived beats guessed, and checking her own answers
+    # is what lets meta-cognition learn with no human in the loop.
+    hybrid_enabled: bool = True
+    grounding_check: bool = True                                 # is the claim carried by evidence?
+    min_grounding_overlap: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # Symbol grounding — what her words are *about*. A perceptual-feature model (senses,
+    # affordances, physics), not perception: she has no eyes, and says so by reporting a word
+    # ungrounded rather than treating it as known.
+    ground_enabled: bool = True
+    ground_read_unknown: bool = True             # ground a new word from the sentence around it
+    ground_max_new_per_turn: int = Field(default=4, ge=0)
+    ground_bind_to_graph: bool = True            # a word's features become graph structure
+
+    # How she speaks. The content is always hers; a fluent model only phrases it. With
+    # ``require_fluent_surface`` on, a degraded rung (the n-gram floor) is *reported* rather
+    # than spoken through — it emits noise on a real prompt, and passing that off as her reply
+    # would misrepresent what she can do.
+    dialogue_enabled: bool = True
+    require_fluent_surface: bool = True
+    reply_max_tokens: int = Field(default=220, ge=16, le=4096)
+
+    # Pillar 2b — thinking between prompts. Rides the existing heartbeat/autonomic clock (no
+    # second thread), is budgeted, and stops dead when oversight pauses or scrams. "24/7" is
+    # true of ``nyxara-daemon``; beats are counted so the claim stays checkable.
+    car_enabled: bool = True
+    car_interval_s: float = Field(default=30.0, ge=0.0)  # at most one self-directed thought per N s
+    car_budget_ms: float = Field(default=250.0, gt=0.0)
+    car_max_questions: int = Field(default=3, ge=1)
+
+    # Self-measurement — "what am I, what can I do, what am I bad at" answered from live state
+    # rather than from a stored description. Introspection, not a claim of self-awareness.
+    selfmodel_enabled: bool = True
+
+    # L-CHRONOS — decide by simulating how each option turns out. Only applies to *decisions*
+    # (a fact has no futures), and only once the world model has learned enough transitions to
+    # say anything; below that it reports itself blind rather than emitting zeros as foresight.
+    # "Thousands of futures" means exactly ``chronos_max_branches``, run sequentially.
+    chronos_enabled: bool = True
+    chronos_max_branches: int = Field(default=256, ge=2, le=100_000)
+    chronos_horizon: int = Field(default=4, ge=1, le=64)
+    chronos_budget_ms: float = Field(default=400.0, gt=0.0)
+    chronos_risk_aversion: float = Field(default=0.5, ge=0.0, le=5.0)
+    chronos_min_coverage: int = Field(default=8, ge=1)
+
+    # L-PSYCHE-QUANTUM — she *chooses* rather than computing the maximum. The entropy is
+    # physical (OS CSPRNG, or /dev/hwrng or a configured QRNG when present) and the source is
+    # named in every choice. Not quantum computation and not metaphysical free will: what is
+    # real is that the outcome is not a function of the state alone. It applies only where the
+    # decision is genuinely open — truth is not a preference — and every choice still passes
+    # the unchanged sovereign gate. Draws are recorded so replay stays bit-exact.
+    will_enabled: bool = True
+    entropy_source: Literal["auto", "urandom", "hwrng", "qrng", "seeded"] = "auto"
+    will_temperature: float = Field(default=0.6, ge=0.0, le=5.0)  # 0 == a deterministic mind
+    will_may_decline: bool = True                                 # her values get a say
+    will_record: bool = True                                      # required for replay
+
+    # L-AURA — the world arriving without being asked for. Registered streams push in and the
+    # *surprising* part becomes part of her, with no search query. Nothing is registered by
+    # default and nothing touches the network unless you add it; host sensors need neither.
+    # Ambient content is untrusted by construction: every event is scanned for prompt injection
+    # and a flagged one is quarantined — recorded, never learned from, never an instruction.
+    aura_enabled: bool = True
+    aura_host_sensors: bool = True               # her own machine; no network, no config
+    aura_max_events_per_min: int = Field(default=60, ge=0)   # a stream is unbounded; a mind is not
+    aura_surprise_gate: float = Field(default=0.5, ge=0.0, le=1.0)
+    aura_scan: bool = True                       # never disable outside a hermetic test
+    aura_max_text: int = Field(default=2000, ge=64)
+
+    # L-EPISTEME — she goes and finds out. Probes a sandbox she does not understand, derives the
+    # law behind it, and keeps it only if it predicts trials she withheld. A law that fits the
+    # points it was fitted to has established nothing, so the held-out check is the whole gate:
+    # it promotes to a fact, and everything else stays a labelled conjecture. She is discovering
+    # the laws of her own simulators, not new physics — novel-to-her, which is a real thing.
+    episteme_enabled: bool = True
+    episteme_trials: int = Field(default=20, ge=6, le=500)
+    episteme_holdout_fraction: float = Field(default=0.3, ge=0.1, le=0.6)
+    episteme_max_holdout_error: float = Field(default=0.05, ge=0.0, le=1.0)
+    episteme_budget_ms: float = Field(default=4000.0, gt=0.0)
+    episteme_every_s: float = Field(default=120.0, ge=0.0)   # investigations are not cheap
+
+    # L-NEXUS-OMNI — her own notation. Private glyphs for the concepts she has, statements
+    # written in them, and — the part that stops it being decorative — bytecode that actually
+    # executes on her StackVM. Whatever reaches a person is *always* translated and labelled a
+    # lossy projection: a language you could not understand, used to give you a perspective, is
+    # self-contradictory. These are new formal systems, not new physical dimensions.
+    nexus_enabled: bool = True
+    nexus_translate_always: bool = True          # never turn this off outside a test
+    nexus_max_notations: int = Field(default=16, ge=1)
+    nexus_max_vm_steps: int = Field(default=100_000, ge=1)
+
+    # L-SYNERGY — several instances, one mind. Structure and conclusions travel as CRDT deltas;
+    # raw episodes stay local. Convergence is guaranteed *after* partition, not during it, and
+    # the only transport that ships is in-process — cross-machine needs one you supply.
+    synergy_enabled: bool = False                # default single-node: it costs nothing off
+    node_id: str = ""                            # blank => a name is derived at boot
+    sync_every_s: float = Field(default=15.0, ge=0.0)
+
+    # L-OMNI — she reads her own source, lowers the hot numeric parts to C, and swaps them into
+    # the running process. ON by default, live hot-swap included, at Master JP's explicit
+    # instruction. What that does *not* switch off, because these are the reasons it is safe:
+    # the compiled kernel must be identical on every sample AND at least ``omni_min_speedup``
+    # faster or it is not adopted; the swap is a module attribute in memory, so the Python
+    # source is never written and any restart or rollback restores it; the constitutional files
+    # and any target naming loyalty/corrigibility/oversight/honesty are refused before the
+    # compiler is invoked; and it stops dead when oversight pauses or scrams. Equivalence is
+    # established on a *sampled* domain (written into the certificate), not proven for all
+    # inputs — which is why candidates stay narrow numeric functions. No gcc/clang/rustc ⇒ the
+    # whole layer is a clean no-op. A forge attempt costs up to ~2 s on the beat that runs it,
+    # which is what the per-hour budget is for.
+    omni_enabled: bool = True
+    omni_hot_swap: bool = True                   # the live ctypes load; off ⇒ scan-only
+    omni_min_speedup: float = Field(default=1.2, ge=1.0, le=1000.0)
+    omni_max_forges_per_hour: int = Field(default=2, ge=0)
+    omni_cases: int = Field(default=24, ge=4, le=512)     # samples the equivalence check uses
+    omni_scan_per_beat: int = Field(default=6, ge=1)      # modules parsed per beat
+    omni_every_s: float = Field(default=300.0, ge=0.0)    # compiling herself is not a thought
+
+    # L-ETERNAL — no single machine holds her. Signed snapshots replicated to a *quorum* of
+    # enrolled nodes, with failover in seconds (an election needs a timeout and a round trip;
+    # microseconds is not a thing a network does). Nodes are enrolled by the operator and never
+    # discovered: she does not find machines and copy herself onto them.
+    eternal_enabled: bool = False                # default single-machine
+    eternal_nodes: List[str] = Field(default_factory=list)   # enrolled, never auto-discovered
+    eternal_snapshot_every_s: float = Field(default=60.0, ge=0.0)
+
+
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
 
@@ -3480,6 +3679,7 @@ class NyxaraSettings(BaseSettings):
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
+    nyx: NyxConfig = Field(default_factory=NyxConfig)
     hyperbolic_manifold: HyperbolicManifoldConfig = Field(
         default_factory=HyperbolicManifoldConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)

@@ -138,11 +138,32 @@ class Heartbeat:
         #     beat and pre-emptively heals on a spike (causal/thermo_inference.py). Never raises.
         self._thermo_beat(core)
 
+        # 3c) NYX V.01 KEEPS THINKING — on its own sub-cadence NYX picks a question out of its
+        #     own uncertainty and thinks one bounded cycle. Skipped while a turn owns the mind,
+        #     so background thought never races real cognition, and it rides *this* clock rather
+        #     than starting a second one. Oversight is passed through: a scrammed mind rests.
+        if not engaged:
+            self._nyx_beat(core)
+
         pulse = LifePulse(beat=beat_idx, at=now, dt=dt, alive_seconds=self.alive_seconds,
                           awake=awake, state=state, engaged=engaged, monologue=monologue,
                           acted=acted, did=did)
         self._last_pulse = pulse
         return pulse
+
+    def _nyx_beat(self, core: Any) -> None:
+        """Give NYX V.01 one beat of its continuous reasoning (nyx/car.py).
+
+        A capability, never a hard dependency: absent or disabled, this is a clean no-op. NYX
+        counts beats itself and thinks only every ``car_every_beats``, so this stays cheap.
+        """
+        try:
+            nyx = getattr(core, "nyx", None)
+            if nyx is None:
+                return
+            nyx.tick(oversight=getattr(core, "oversight", None))
+        except Exception:  # noqa: BLE001 — a background beat never breaks the heartbeat
+            pass
 
     def _thermo_beat(self, core: Any) -> None:
         """Tick the CAUSAL engine's thermodynamic monitor (surprise → pre-emptive heal).

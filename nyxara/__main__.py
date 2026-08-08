@@ -412,6 +412,7 @@ commands:
   /thermal           thermal/compute pressure as something she FEELS, not merely measures
   /replay [save]     the deterministic tape of this run — /replay save writes it for step-for-step replay
   /save              persist long-term memory to disk now
+  /nyx [sub]         NYX V.01 — her brain; /nyx help for the family
   /quit              leave the console"""
 
 # disposition -> short glyph for the status line
@@ -435,6 +436,207 @@ def _print_result(result) -> None:
         gates = " ".join(f"{k}={v}" for k, v in result.gates.items())
         line += f"  gates: {gates}"
     print(line)
+
+
+_NYX_HELP = """\
+/nyx                       her brain at a glance — graph, memory, faculties, voice
+/nyx self                  what she can truthfully say about herself, from live numbers
+/nyx think <text>          one full cycle, shown: who bid, who won, how sure, was it checked
+/nyx why                   why the last thought went the way it did
+/nyx recall <cue>          content-addressed recall — no token window is consulted
+/nyx ground <word>         what she actually has behind a word (or that she has nothing)
+/nyx wonder                one self-directed thought, right now
+/nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
+/nyx aura                  what is arriving on its own — streams, what landed, what was refused
+/nyx discover              run one investigation now: probe a sandbox, derive, check, promote
+/nyx nexus                 the notation she minted for herself — and its translation back
+/nyx omni                  where she is slow, what she rewrote in C, and how to undo it
+/nyx omni forge            read herself and attempt one rewrite now (verified, reversible)
+/nyx omni rollback         put every Python function back — always available
+/nyx hive                  other instances: what converged, and whether there is a wire at all
+/nyx eternal               durability: enrolled nodes, leader, signed snapshots
+"""
+
+
+def _nyx_command(core: NyxaraCore, arg: str) -> None:
+    """The ``/nyx`` family — a window into NYX V.01 (nyxara/nyx/)."""
+    brain = getattr(core, "nyx", None)
+    if brain is None:
+        print("NYX V.01 is disabled (NYXARA_NYX__ENABLED=false).")
+        return
+
+    sub, _, rest = arg.partition(" ")
+    sub, rest = sub.strip().lower(), rest.strip()
+
+    if sub in ("help", "?"):
+        print(_NYX_HELP)
+    elif sub == "self":
+        report = brain.about_self()
+        if report is None:
+            print("self-measurement is disabled (NYXARA_NYX__SELFMODEL_ENABLED=false).")
+        else:
+            print(report.describe())
+            print()
+            print(json.dumps(report.to_dict(), indent=2, default=str))
+    elif sub == "think":
+        if not rest:
+            print("usage: /nyx think <text>")
+            return
+        _print_thought(brain.think(rest))
+    elif sub == "why":
+        traces = brain.why(k=3)
+        if not traces:
+            print("nothing thought about yet.")
+        for trace in traces:
+            print(json.dumps(trace.to_dict(), indent=2, default=str))
+    elif sub == "recall":
+        if not rest:
+            print("usage: /nyx recall <cue>")
+            return
+        got = brain.recall(rest)
+        if got is None or got.hit is None:
+            print("nothing came back.")
+        else:
+            mark = "" if got.decided else "  (not confident)"
+            print(f"{got.hit.key} [{got.hit.kind}] {got.score:.2f}{mark}\n  {got.hit.text}")
+            for key, weight in got.associated:
+                print(f"  ↳ {key} ({weight:.2f})")
+    elif sub == "ground":
+        if not rest:
+            print("usage: /nyx ground <word>")
+            return
+        got = brain.understanding(rest)
+        if got is None:
+            print("grounding is disabled (NYXARA_NYX__GROUND_ENABLED=false).")
+        elif not got.grounded:
+            print(f"'{rest}' is still just a word to me — I have nothing behind it.")
+        else:
+            print(got.explanation)
+            print(f"  fires across {got.depth} senses, confidence {got.confidence:.2f}")
+            if got.neighbours:
+                near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
+                print(f"  nearest in meaning: {near}")
+    elif sub in ("hive", "eternal"):
+        part = getattr(brain, "synergy" if sub == "hive" else "eternal", None)
+        if part is None:
+            flag = "SYNERGY_ENABLED" if sub == "hive" else "ETERNAL_ENABLED"
+            print(f"this is a single {'node' if sub == 'hive' else 'machine'} "
+                  f"(NYXARA_NYX__{flag}=false).")
+        else:
+            stats = part.stats()
+            print(json.dumps(stats, indent=2, default=str))
+            if not stats.get("available"):
+                print("\nnot active: the logic is here, but no transport is attached. "
+                      "Only an in-process transport ships; cross-machine needs one you supply "
+                      "(see nyxara.nyx.synergy.Transport).")
+    elif sub == "nexus":
+        nexus = getattr(brain, "nexus", None)
+        if nexus is None:
+            print("she is not minting notation (NYXARA_NYX__NEXUS_ENABLED=false).")
+        elif not nexus.notations:
+            print("she has not minted any notation yet — try /nyx discover first.")
+        else:
+            for name, notation in nexus.notations.items():
+                glyphs = ", ".join(f"{c}={g}" for c, g in notation.symbols.items())
+                print(f"{name}: {glyphs}")
+            for statement in nexus.statements[-3:]:
+                print(f"\n  she writes : {statement.written}")
+                print(f"  it runs    : {statement.realised} -> {statement.value}"
+                      f"  ({len(statement.program)} instructions)")
+                print(f"  reaches you: {nexus.translate(statement)}")
+    elif sub == "discover":
+        discovery = getattr(brain, "episteme", None)
+        if discovery is None:
+            print("autonomous discovery is off (NYXARA_NYX__EPISTEME_ENABLED=false).")
+        elif not discovery.available():
+            print("there is nothing she can experiment on.")
+        else:
+            got = brain.discover(oversight=getattr(core, "oversight", None))
+            print(json.dumps(got.to_dict() if got else None, indent=2, default=str))
+            print("\nheld as fact:", json.dumps(discovery.promoted, indent=2))
+            if discovery.conjectures:
+                print("still only conjecture:", json.dumps(discovery.conjectures, indent=2))
+    elif sub == "omni":
+        _nyx_omni(core, brain, rest.strip().lower())
+    elif sub == "aura":
+        field_ = getattr(brain, "aura", None)
+        if field_ is None:
+            print("ambient awareness is off (NYXARA_NYX__AURA_ENABLED=false).")
+        elif not field_.streams:
+            print("nothing is registered — she is not watching anything yet.")
+        else:
+            print(json.dumps(field_.stats(), indent=2, default=str))
+    elif sub in ("wonder", "car"):
+        if sub == "wonder":
+            step = brain.wonder(oversight=getattr(core, "oversight", None))
+            print(json.dumps(step.to_dict() if step else None, indent=2, default=str))
+        else:
+            car = getattr(brain, "car", None)
+            if car is None:
+                print("between-prompts thinking is off (NYXARA_NYX__CAR_ENABLED=false).")
+            else:
+                print(json.dumps(car.stats(), indent=2, default=str))
+    elif not sub:
+        print(json.dumps(brain.stats(), indent=2, default=str))
+    else:
+        print(f"unknown: /nyx {sub}\n{_NYX_HELP}")
+
+
+def _nyx_omni(core: NyxaraCore, brain, action: str) -> None:
+    """``/nyx omni`` — what she has rewritten of herself, and the undo that is always there."""
+    omni = getattr(brain, "omni", None)
+    if omni is None:
+        print("she is not rewriting herself (NYXARA_NYX__OMNI_ENABLED=false).")
+        return
+    if action == "rollback":
+        print(f"put back {omni.rollback_all()} function(s) — pure Python again.")
+        return
+    if action == "forge":
+        got = brain.optimise(oversight=getattr(core, "oversight", None))
+        if got is None:
+            print("nothing to attempt: no toolchain, the hourly budget is spent, "
+                  "or every candidate she can read has already been tried.")
+        else:
+            print(json.dumps(got.to_dict(), indent=2, default=str))
+        return
+
+    stats = omni.stats()
+    print(json.dumps(stats, indent=2, default=str))
+    if not stats.get("available"):
+        print("\nnot active: no gcc/clang/cc or rustc on PATH, or the live swap is off. "
+              "The layer is a clean no-op — nothing is faked.")
+    candidates = omni.scan()[:5]
+    if candidates:
+        print("\nof herself, these could become C kernels:")
+        for kernel in candidates:
+            print(f"  {kernel.target:<48} {kernel.reason}")
+    else:
+        print("\nshe has found nothing of herself narrow enough to compile — most of her is "
+              "orchestration, where a C kernel has nothing to win.")
+    print("\nevery adoption is reversible: the Python source is never written, so a restart "
+          "or /nyx omni rollback restores it.")
+
+
+def _print_thought(thought) -> None:
+    """Show one cycle the way it actually happened — who bid, who won, and on what."""
+    if thought is None:
+        print("(no thought)")
+        return
+    print(f"answer   : {thought.answer or '(nothing reached awareness)'}")
+    print(f"source   : {thought.winner.source if thought.winner else '—'}"
+          f"   verified: {thought.verified}   decided: {thought.decided}"
+          f"   confidence: {thought.confidence:.2f}   entropy: {thought.entropy:.2f}")
+    if thought.deliberation is not None and thought.deliberation.proposals:
+        print("bids     :")
+        for proposal in thought.deliberation.proposals:
+            mark = "✓" if proposal.verifiable else " "
+            print(f"  {mark} {proposal.source:<11} {proposal.confidence:.2f}  "
+                  f"{proposal.content[:70]}")
+    if thought.verification is not None:
+        print(f"checked  : {thought.verification.verdict.value} — "
+              f"{thought.verification.reason}")
+    if thought.assessment is not None and thought.assessment.why:
+        print(f"because  : {'; '.join(thought.assessment.why[:3])}")
 
 
 def _handle_command(core: NyxaraCore, line: str) -> bool:
@@ -1086,6 +1288,8 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print(f"recording: {len(rec.entries)} entries this run "
                   f"(cap {core._REPLAY_MAX_ENTRIES}, then rotated)")
             print("/replay save   writes the tape so this run can be replayed step-for-step.")
+    elif cmd == "nyx":
+        _nyx_command(core, arg)
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.
