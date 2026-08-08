@@ -457,6 +457,7 @@ _NYX_HELP = """\
 /nyx axiom <description>   write a new axiom system down, and check whether it holds together
 /nyx omega [evolve|rollback]  the constants she thinks with — and what she measured them to
 /nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
+/nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -575,6 +576,26 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "telepathy":
+        stream = getattr(brain, "telepathy", None)
+        action = rest.strip()
+        if stream is None:
+            print("the vector channel is off (NYXARA_NYX__TELEPATHY_ENABLED=false).")
+        elif action.lower() == "emit":
+            frame = brain.emit_frame()
+            print(json.dumps(frame.to_dict(), indent=2, default=str, ensure_ascii=False)
+                  if frame is not None else "nothing to emit.")
+        elif action:
+            got = stream.expand(action)
+            if got is not None:
+                print(got.note)
+            else:
+                short = stream.observe(action)
+                print(f"noted. I have a shorthand for that now: {short.trigger!r}"
+                      if short is not None
+                      else "noted — say it a few more times and I will offer you a shorthand.")
+        else:
+            print(stream.describe())
     elif sub == "agenda":
         agenda = getattr(brain, "agenda", None)
         action, _, arg = rest.strip().partition(" ")

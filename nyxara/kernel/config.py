@@ -2672,6 +2672,22 @@ class NyxConfig(BaseModel):
     agenda_every_s: float = Field(default=30.0, ge=0.0)
     agenda_budget_ms: float = Field(default=400.0, gt=0.0)
 
+    # L-NEURAL-TELEPATHY (nyxara/nyx/telepathy.py). THERE IS NO BRAIN-COMPUTER INTERFACE HERE
+    # and none is claimed: raw mental intent cannot be read by any software. What is real is
+    # that the bottleneck is PROSE — every instruction is squeezed through words, tokenised,
+    # and re-extracted, losing things measurably on the way.
+    #
+    # A Frame (concepts + typed role→filler bindings + an optional dense vector) goes straight
+    # into semantics and the graph, bypassing the tokenizer, so nothing is lost PAST the spec —
+    # measured by compare(), not asserted. She emits her own state as a frame too, which really
+    # is lossless machine-to-machine. And she learns your shorthand from repetitions she
+    # actually saw, so the spec you have to write gets shorter.
+    telepathy_enabled: bool = True
+    telepathy_queue: int = Field(default=128, ge=1)
+    telepathy_mint_after: int = Field(default=3, ge=2)     # repeats before a shorthand is offered
+    telepathy_trigger_words: int = Field(default=2, ge=1)
+    telepathy_max_shorthand: int = Field(default=64, ge=1)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

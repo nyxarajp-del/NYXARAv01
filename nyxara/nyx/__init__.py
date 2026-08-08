@@ -84,6 +84,7 @@ from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.synergy import HiveSynapse, Shared, Transport
+from nyxara.nyx.telepathy import Frame, Received, SemanticStream, Shorthand
 from nyxara.nyx.will import Choice, EntropySource, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -145,6 +146,8 @@ __all__ = [
     "SelfEvolutionKernel", "Fitness",
     # L-ABSOLUTE-AGENCY — goals of her own, that outlive the session
     "SovereignAgenda", "Goal", "Progress", "Briefing",
+    # L-NEURAL-TELEPATHY — meaning as structure, not prose. No mind reading, and none claimed
+    "SemanticStream", "Frame", "Received", "Shorthand",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

@@ -57,6 +57,7 @@ from nyxara.nyx.reason import Chain, OpenDomainReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import SemanticSpace
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
+from nyxara.nyx.telepathy import Frame, Received, SemanticStream
 from nyxara.nyx.synergy import HiveSynapse
 from nyxara.nyx.will import Choice, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
@@ -256,6 +257,7 @@ class NyxBrain:
         self.axiom = self._build_axiom(c)
         self.omega = self._build_omega(c)
         self.agenda = self._build_agenda(c)
+        self.telepathy = self._build_telepathy(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
@@ -291,6 +293,17 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_telepathy(self, c: Any) -> Optional[SemanticStream]:
+        if not getattr(c, "telepathy_enabled", True):
+            return None
+        try:
+            return SemanticStream(self, queue=getattr(c, "telepathy_queue", 128),
+                                  mint_after=getattr(c, "telepathy_mint_after", 3),
+                                  trigger_words=getattr(c, "telepathy_trigger_words", 2),
+                                  max_shorthand=getattr(c, "telepathy_max_shorthand", 64))
+        except Exception:  # noqa: BLE001 — without it every instruction goes through prose
             return None
 
     def _build_agenda(self, c: Any) -> Optional[SovereignAgenda]:
@@ -1011,6 +1024,24 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def receive_frame(self, frame: Any) -> Optional[Received]:
+        """Take meaning as structure rather than as prose — the tokenizer is not involved.
+
+        There is no mind reading here and none is claimed. What is real is that past the
+        frame, nothing is lost.
+        """
+        try:
+            return self.telepathy.receive(frame) if self.telepathy is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def emit_frame(self) -> Optional[Frame]:
+        """Her own state as structure, for another node or tool to consume without prose."""
+        try:
+            return self.telepathy.emit() if self.telepathy is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def pursue(self, *, oversight: Any = None, force: bool = False) -> Any:
         """One budgeted step on the goal she most wants to advance. ``None`` when she does not.
 
@@ -1212,6 +1243,8 @@ class NyxBrain:
                 out["omega"] = self.omega.stats()
             if self.agenda is not None:
                 out["agenda"] = self.agenda.stats()
+            if self.telepathy is not None:
+                out["telepathy"] = self.telepathy.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1264,6 +1297,8 @@ class NyxBrain:
             out["omega"] = self.omega.to_dict()
         if self.agenda is not None:
             out["agenda"] = self.agenda.to_dict()
+        if self.telepathy is not None:
+            out["telepathy"] = self.telepathy.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1304,6 +1339,8 @@ class NyxBrain:
                 self.omega.load_dict(d["omega"])
             if d.get("agenda") and self.agenda is not None:
                 self.agenda.load_dict(d["agenda"])
+            if d.get("telepathy") and self.telepathy is not None:
+                self.telepathy.load_dict(d["telepathy"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:
