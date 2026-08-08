@@ -2622,6 +2622,19 @@ class NyxConfig(BaseModel):
     consequence_fail_closed_irreversible: bool = True
     consequence_prefer_variant: bool = True      # branch instead of writing shared history
 
+    # L-AXIOM-GENESIS (nyxara/nyx/axiom.py). Every reasoning engine here starts from premises
+    # somebody gave it. This does the thing a mathematician does when no system fits: write a
+    # new set of axioms down and check whether it holds together — with z3, over a finite
+    # domain, so the check is decidable and its BOUND is visible.
+    #
+    # Honest: new FORMAL systems, not new physical truths — a consistent system is coherent,
+    # not true. Gödel is not evaded: a model found proves consistency AT THAT SIZE; none found
+    # proves nothing, and is reported as "no model up to size N". She will not prove Riemann.
+    axiom_enabled: bool = True
+    axiom_bound: int = Field(default=4, ge=2, le=12)      # the domain size searched, and stated
+    axiom_timeout_ms: int = Field(default=2000, ge=50)    # per solver call; no infinite speed
+    axiom_max_systems: int = Field(default=16, ge=1)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

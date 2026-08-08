@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from nyxara.nyx.aura import AwarenessField, Event, Sensed, Stream
 from nyxara.nyx.author import Author, Authored, Stage
+from nyxara.nyx.axiom import Axiom, AxiomGenesis, Genesis, System, Theorem
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
@@ -136,6 +137,8 @@ __all__ = [
     "Author", "Authored", "Stage",
     # L-CHRONO-CAUSAL — look before acting, and step back from a bad irreversible tail
     "ConsequenceGate", "ConsequenceVerdict", "Effect", "Foresight", "Reversibility",
+    # L-AXIOM-GENESIS — a formal system of her own, checked rather than asserted
+    "AxiomGenesis", "Axiom", "System", "Theorem", "Genesis",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

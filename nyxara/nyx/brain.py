@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.author import Author, Authored
+from nyxara.nyx.axiom import AxiomGenesis, Genesis
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.consequence import ConsequenceGate, Verdict
@@ -250,6 +251,7 @@ class NyxBrain:
         self.intent = self._build_intent(c)
         self.icl = self._build_icl(c)
         self.reason = self._build_reason(c)
+        self.axiom = self._build_axiom(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
@@ -285,6 +287,16 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_axiom(self, c: Any) -> Optional[AxiomGenesis]:
+        if not getattr(c, "axiom_enabled", True):
+            return None
+        try:
+            return AxiomGenesis(self, bound=getattr(c, "axiom_bound", 4),
+                                timeout_ms=getattr(c, "axiom_timeout_ms", 2000),
+                                max_systems=getattr(c, "axiom_max_systems", 16))
+        except Exception:  # noqa: BLE001 — without it every premise she has was given to her
             return None
 
     def _build_consequence(self, c: Any) -> Optional[ConsequenceGate]:
@@ -966,6 +978,18 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def invent_axioms(self, problem: str, *, name: str = "") -> Optional[Genesis]:
+        """Write down a new axiom system for a problem no domain covers, and check it.
+
+        Consistency is a **bounded** model search: a model found proves consistency at that
+        size; none found proves nothing, and is reported as exactly that. She invents formal
+        systems, not physical truths.
+        """
+        try:
+            return self.axiom.invent(problem, name=name) if self.axiom is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def foresee(self, action: str, args: Optional[Dict[str, Any]] = None) -> Optional[Verdict]:
         """What would happen if she did this — before she does it.
 
@@ -1110,6 +1134,8 @@ class NyxBrain:
                 out["author"] = self.author.stats()
             if self.consequence is not None:
                 out["consequence"] = self.consequence.stats()
+            if self.axiom is not None:
+                out["axiom"] = self.axiom.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1156,6 +1182,8 @@ class NyxBrain:
             out["hands"] = self.hands.to_dict()
         if self.author is not None:
             out["author"] = self.author.to_dict()
+        if self.axiom is not None:
+            out["axiom"] = self.axiom.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1190,6 +1218,8 @@ class NyxBrain:
                 self.hands.load_dict(d["hands"])
             if d.get("author") and self.author is not None:
                 self.author.load_dict(d["author"])
+            if d.get("axiom") and self.axiom is not None:
+                self.axiom.load_dict(d["axiom"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

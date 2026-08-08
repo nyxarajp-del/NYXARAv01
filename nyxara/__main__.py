@@ -454,6 +454,7 @@ _NYX_HELP = """\
 /nyx hands                 the toolset she can see, and her measured record with each
 /nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
 /nyx consequence <action>  what would happen if she did it — before she does it
+/nyx axiom <description>   write a new axiom system down, and check whether it holds together
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -572,6 +573,18 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "axiom":
+        genesis = getattr(brain, "axiom", None)
+        if genesis is None:
+            print("axiom genesis is off (NYXARA_NYX__AXIOM_ENABLED=false).")
+        elif not genesis.available():
+            print("z3 is not installed, so consistency cannot be checked — and an axiom "
+                  "system nobody checked is not a result.")
+        elif not rest:
+            print(json.dumps(genesis.stats(), indent=2, default=str))
+        else:
+            got = brain.invent_axioms(rest.strip("\"'"))
+            print(got.render() if got is not None else "axiom genesis is unavailable.")
     elif sub == "consequence":
         gate = getattr(brain, "consequence", None)
         if gate is None:
