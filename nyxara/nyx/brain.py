@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from nyxara.nyx.agenda import Briefing, Goal, SovereignAgenda
 from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.author import Author, Authored
 from nyxara.nyx.axiom import AxiomGenesis, Genesis
@@ -254,6 +255,7 @@ class NyxBrain:
         self.reason = self._build_reason(c)
         self.axiom = self._build_axiom(c)
         self.omega = self._build_omega(c)
+        self.agenda = self._build_agenda(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
@@ -289,6 +291,18 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_agenda(self, c: Any) -> Optional[SovereignAgenda]:
+        if not getattr(c, "agenda_enabled", True):
+            return None
+        try:
+            return SovereignAgenda(self, max_goals=getattr(c, "agenda_max_goals", 24),
+                                   max_open=getattr(c, "agenda_max_open", 6),
+                                   stall_after=getattr(c, "agenda_stall_after", 3),
+                                   every_s=getattr(c, "agenda_every_s", 30.0),
+                                   budget_ms=getattr(c, "agenda_budget_ms", 400.0))
+        except Exception:  # noqa: BLE001 — without it she thinks one thought and forgets it
             return None
 
     def _build_omega(self, c: Any) -> Optional[SelfEvolutionKernel]:
@@ -997,6 +1011,32 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def pursue(self, *, oversight: Any = None, force: bool = False) -> Any:
+        """One budgeted step on the goal she most wants to advance. ``None`` when she does not.
+
+        Unlike :meth:`wonder`, which thinks one thought and forgets it, this advances something
+        she set herself and that survives the session.
+        """
+        try:
+            return self.agenda.beat(oversight=oversight, force=force) \
+                if self.agenda is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def briefing(self) -> Optional[Briefing]:
+        """What she would tell the Master unprompted: chose, found, stuck, declined."""
+        try:
+            return self.agenda.brief() if self.agenda is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def set_goal(self, subject: str, *, kind: str = "understand") -> Optional[Goal]:
+        """A goal the Master hands her. The Master is sovereign over the agenda."""
+        try:
+            return self.agenda.add(subject, kind=kind) if self.agenda is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def evolve(self, *, oversight: Any = None, force: bool = False) -> Optional[OmegaStep]:
         """One budgeted change to the constants she thinks with — gauntleted and reversible.
 
@@ -1170,6 +1210,8 @@ class NyxBrain:
                 out["axiom"] = self.axiom.stats()
             if self.omega is not None:
                 out["omega"] = self.omega.stats()
+            if self.agenda is not None:
+                out["agenda"] = self.agenda.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1220,6 +1262,8 @@ class NyxBrain:
             out["axiom"] = self.axiom.to_dict()
         if self.omega is not None:
             out["omega"] = self.omega.to_dict()
+        if self.agenda is not None:
+            out["agenda"] = self.agenda.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1258,6 +1302,8 @@ class NyxBrain:
                 self.axiom.load_dict(d["axiom"])
             if d.get("omega") and self.omega is not None:
                 self.omega.load_dict(d["omega"])
+            if d.get("agenda") and self.agenda is not None:
+                self.agenda.load_dict(d["agenda"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

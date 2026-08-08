@@ -36,6 +36,7 @@ config-gated: a failure degrades to a null result, never a broken turn.
 
 from __future__ import annotations
 
+from nyxara.nyx.agenda import Briefing, Goal, Progress, SovereignAgenda
 from nyxara.nyx.aura import AwarenessField, Event, Sensed, Stream
 from nyxara.nyx.author import Author, Authored, Stage
 from nyxara.nyx.axiom import Axiom, AxiomGenesis, Genesis, System, Theorem
@@ -142,6 +143,8 @@ __all__ = [
     "AxiomGenesis", "Axiom", "System", "Theorem", "Genesis",
     # L-OMEGA — she tunes the mind she thinks with, gauntleted and always reversible
     "SelfEvolutionKernel", "Fitness",
+    # L-ABSOLUTE-AGENCY — goals of her own, that outlive the session
+    "SovereignAgenda", "Goal", "Progress", "Briefing",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

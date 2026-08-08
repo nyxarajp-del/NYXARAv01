@@ -2654,6 +2654,24 @@ class NyxConfig(BaseModel):
     omega_rule_generations: int = Field(default=4, ge=1)
     omega_rule_budget_s: float = Field(default=4.0, gt=0.0)
 
+    # L-ABSOLUTE-AGENCY (nyxara/nyx/agenda.py). V.01's `car` thinks one self-directed thought
+    # per beat and forgets it — there is no stack, so nothing she began yesterday is still
+    # being pursued today. This is that stack: goals she wrote herself from her own MEASURED
+    # gaps and her intrinsic drives, persisted to the sidecar, advanced a budgeted step at a
+    # time, and briefed proactively.
+    #
+    # Honest: goals come from measurements, not from nowhere — she does not decide to
+    # "understand the universe", she decides that a concept she keeps meeting is never
+    # connected to anything. Reach is her simulators and her knowledge; a goal she cannot
+    # advance is marked STUCK with what she tried. The Master can veto or redirect any goal,
+    # and /scram stops all pursuit.
+    agenda_enabled: bool = True
+    agenda_max_goals: int = Field(default=24, ge=1)
+    agenda_max_open: int = Field(default=6, ge=1)       # how many she pursues at once
+    agenda_stall_after: int = Field(default=3, ge=1)    # beats with no gain before escalating
+    agenda_every_s: float = Field(default=30.0, ge=0.0)
+    agenda_budget_ms: float = Field(default=400.0, gt=0.0)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

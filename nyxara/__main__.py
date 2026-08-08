@@ -456,6 +456,7 @@ _NYX_HELP = """\
 /nyx consequence <action>  what would happen if she did it — before she does it
 /nyx axiom <description>   write a new axiom system down, and check whether it holds together
 /nyx omega [evolve|rollback]  the constants she thinks with — and what she measured them to
+/nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -574,6 +575,30 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "agenda":
+        agenda = getattr(brain, "agenda", None)
+        action, _, arg = rest.strip().partition(" ")
+        action, arg = action.lower(), arg.strip()
+        if agenda is None:
+            print("her own agenda is off (NYXARA_NYX__AGENDA_ENABLED=false) — she thinks one "
+                  "thought at a time and forgets it.")
+        elif action == "pursue":
+            step = brain.pursue(oversight=getattr(core, "oversight", None), force=True)
+            print(json.dumps(step.to_dict(), indent=2, default=str) if step is not None
+                  else "she did not act — nothing open, or oversight stopped her.")
+        elif action == "brief":
+            got = brain.briefing()
+            print(got.text if got is not None else "no briefing available.")
+        elif action == "goal" and arg:
+            goal = brain.set_goal(arg)
+            print(f"taken on: {goal.render()}" if goal is not None else "could not take it on.")
+        elif action == "veto" and arg:
+            print("dropped." if agenda.veto(arg) else "no goal with that id.")
+        else:
+            print(agenda.describe())
+            print()
+            print(json.dumps({k: v for k, v in agenda.stats().items() if k != "note"},
+                             indent=2, default=str))
     elif sub == "omega":
         kernel = getattr(brain, "omega", None)
         action = rest.strip().lower()
