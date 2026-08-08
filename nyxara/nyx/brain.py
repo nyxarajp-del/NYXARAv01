@@ -16,6 +16,7 @@ which is not claimed. The mind proposes; the kernel disposes; the Master is sove
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,7 @@ from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply
+from nyxara.nyx.episteme import AutonomousDiscovery
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
@@ -186,9 +188,11 @@ class NyxBrain:
         self.chronos = self._build_chronos(c)
         self.will = self._build_will(c)
         self.aura = self._build_aura(c)
+        self.episteme = self._build_episteme(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
+        self._last_investigation = 0.0
 
     @staticmethod
     def _build_metacog(c: Any) -> Optional[RecursiveMetaCognition]:
@@ -291,6 +295,18 @@ class NyxBrain:
                 field_.register_host_sensors()
             return field_
         except Exception:  # noqa: BLE001 — without it nothing arrives on its own
+            return None
+
+    def _build_episteme(self, c: Any) -> Optional[AutonomousDiscovery]:
+        if not getattr(c, "episteme_enabled", True):
+            return None
+        try:
+            return AutonomousDiscovery(
+                self, trials=getattr(c, "episteme_trials", 20),
+                holdout_fraction=getattr(c, "episteme_holdout_fraction", 0.3),
+                max_holdout_error=getattr(c, "episteme_max_holdout_error", 0.05),
+                budget_ms=getattr(c, "episteme_budget_ms", 4000.0), seed=c.seed)
+        except Exception:  # noqa: BLE001 — without it she only knows what she was told
             return None
 
     def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
@@ -509,12 +525,36 @@ class NyxBrain:
         try:
             if self.aura is not None:
                 self.aura.beat(oversight=oversight)   # the world arrives on the same clock
+            self._episteme_beat(oversight)
             if self.car is None:
                 return None
             if oversight is not None:
                 self.car.oversight = oversight
             return self.car.beat()
         except Exception:  # noqa: BLE001 — a background beat never raises into the loop
+            return None
+
+    def _episteme_beat(self, oversight: Any) -> None:
+        """Investigate on a slower cadence than she thinks — an experiment is not cheap."""
+        try:
+            if self.episteme is None:
+                return
+            every = float(getattr(self.config, "episteme_every_s", 120.0))
+            now = time.monotonic()
+            if self._last_investigation and (now - self._last_investigation) < every:
+                return
+            self._last_investigation = now
+            self.episteme.beat(oversight=oversight)
+        except Exception:  # noqa: BLE001 — investigating never breaks the beat
+            pass
+
+    def discover(self, *, oversight: Any = None) -> Any:
+        """Run one investigation right now, regardless of the cadence."""
+        try:
+            if self.episteme is None:
+                return None
+            return self.episteme.beat(oversight=oversight)
+        except Exception:  # noqa: BLE001
             return None
 
     def wonder(self, *, oversight: Any = None) -> Optional[CarStep]:
@@ -562,6 +602,8 @@ class NyxBrain:
                 out["will"] = self.will.stats()
             if self.aura is not None:
                 out["aura"] = self.aura.stats()
+            if self.episteme is not None:
+                out["episteme"] = self.episteme.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
@@ -578,6 +620,8 @@ class NyxBrain:
             out["ground"] = self.ground.to_dict()
         if self.aura is not None:
             out["aura"] = self.aura.to_dict()
+        if self.episteme is not None:
+            out["episteme"] = self.episteme.to_dict()
         if self.car is not None:
             out["car"] = self.car.to_dict()
         return out
@@ -596,6 +640,8 @@ class NyxBrain:
                 self.ground.load_dict(d["ground"])
             if d.get("aura") and self.aura is not None:
                 self.aura.load_dict(d["aura"])
+            if d.get("episteme") and self.episteme is not None:
+                self.episteme.load_dict(d["episteme"])
             if d.get("car") and self.car is not None:
                 self.car.load_dict(d["car"])
             self.turns = int(d.get("turns", 0))

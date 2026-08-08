@@ -2436,6 +2436,18 @@ class NyxConfig(BaseModel):
     aura_scan: bool = True                       # never disable outside a hermetic test
     aura_max_text: int = Field(default=2000, ge=64)
 
+    # L-EPISTEME — she goes and finds out. Probes a sandbox she does not understand, derives the
+    # law behind it, and keeps it only if it predicts trials she withheld. A law that fits the
+    # points it was fitted to has established nothing, so the held-out check is the whole gate:
+    # it promotes to a fact, and everything else stays a labelled conjecture. She is discovering
+    # the laws of her own simulators, not new physics — novel-to-her, which is a real thing.
+    episteme_enabled: bool = True
+    episteme_trials: int = Field(default=20, ge=6, le=500)
+    episteme_holdout_fraction: float = Field(default=0.3, ge=0.1, le=0.6)
+    episteme_max_holdout_error: float = Field(default=0.05, ge=0.0, le=1.0)
+    episteme_budget_ms: float = Field(default=4000.0, gt=0.0)
+    episteme_every_s: float = Field(default=120.0, ge=0.0)   # investigations are not cheap
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

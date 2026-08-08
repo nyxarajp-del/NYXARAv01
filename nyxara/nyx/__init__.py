@@ -41,6 +41,7 @@ from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply, Surface
+from nyxara.nyx.episteme import AutonomousDiscovery, Experiment, Finding, Knob
 from nyxara.nyx.graph import (
     Activation,
     Concept,
@@ -96,6 +97,8 @@ __all__ = [
     "SovereignWill", "EntropySource", "Choice",
     # L-AURA — the world arriving without being asked for
     "AwarenessField", "Stream", "Event", "Sensed",
+    # L-EPISTEME — finding things out, and keeping only what survives a held-out check
+    "AutonomousDiscovery", "Experiment", "Knob", "Finding",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

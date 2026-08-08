@@ -448,6 +448,7 @@ _NYX_HELP = """\
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
+/nyx discover              run one investigation now: probe a sandbox, derive, check, promote
 """
 
 
@@ -509,6 +510,18 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub == "discover":
+        discovery = getattr(brain, "episteme", None)
+        if discovery is None:
+            print("autonomous discovery is off (NYXARA_NYX__EPISTEME_ENABLED=false).")
+        elif not discovery.available():
+            print("there is nothing she can experiment on.")
+        else:
+            got = brain.discover(oversight=getattr(core, "oversight", None))
+            print(json.dumps(got.to_dict() if got else None, indent=2, default=str))
+            print("\nheld as fact:", json.dumps(discovery.promoted, indent=2))
+            if discovery.conjectures:
+                print("still only conjecture:", json.dumps(discovery.conjectures, indent=2))
     elif sub == "aura":
         field_ = getattr(brain, "aura", None)
         if field_ is None:
