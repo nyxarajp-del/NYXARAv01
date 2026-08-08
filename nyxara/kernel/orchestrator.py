@@ -8694,6 +8694,19 @@ class NyxaraCore:
         # (so the idle scheduler does not re-enter), and is honest even when the body below is
         # slow — the timestamp reflects when upkeep started, not only when it finished.
         self._last_maintenance = time.time()
+        # 0) NYX V.01 keeps thinking: one beat of continuous autonomous reasoning. It picks its
+        # own question from where her knowledge is thinnest (an ungrounded word, an unconnected
+        # concept, a faculty her record says to distrust), thinks one bounded cycle, and folds
+        # what it learns back in. Colour-only, budgeted, and it stops when oversight does.
+        try:
+            nyx = getattr(self, "nyx", None)
+            if nyx is not None:
+                step = nyx.tick(oversight=self.oversight)
+                if step is not None and step.ran:
+                    report["nyx_wondered"] = (step.wondering.text if step.wondering else "")
+                    report["nyx_learned"] = step.learned
+        except Exception:  # noqa: BLE001 — background thinking never breaks upkeep
+            pass
         # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
         if self.dream_session is not None:
             try:

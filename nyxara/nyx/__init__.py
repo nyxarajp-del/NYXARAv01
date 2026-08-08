@@ -37,6 +37,7 @@ config-gated: a failure degrades to a null result, never a broken turn.
 from __future__ import annotations
 
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
+from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.dialogue import Dialogue, Reply, Surface
 from nyxara.nyx.graph import (
     Activation,
@@ -61,6 +62,7 @@ from nyxara.nyx.modules import (
     default_specialists,
 )
 from nyxara.nyx.reasoner import NyxReasoner
+from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -82,6 +84,9 @@ __all__ = [
     "WorldGrounding", "Understanding", "Grounded",
     # how she speaks — her content, a fluent model only phrases it
     "Dialogue", "Reply", "Surface",
+    # thinking between prompts, and what she can truthfully say about herself
+    "ContinuousAutonomousReasoning", "CarStep", "Wondering",
+    "NyxSelfModel", "SelfReport",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

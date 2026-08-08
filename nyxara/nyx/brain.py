@@ -18,10 +18,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
+from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.modules import (
     CreativeSpecialist,
@@ -32,7 +34,7 @@ from nyxara.nyx.modules import (
     Proposal,
     Situation,
 )
-from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
+from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -156,6 +158,8 @@ class NyxBrain:
         self.hybrid = self._build_hybrid(c)
         self.ground = self._build_ground(c)
         self.dialogue = self._build_dialogue(c)
+        self.car = self._build_car(c)
+        self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
 
     @staticmethod
@@ -218,6 +222,17 @@ class NyxBrain:
             return Dialogue(require_fluent_surface=getattr(c, "require_fluent_surface", True),
                             soul=soul, max_tokens=getattr(c, "reply_max_tokens", 220))
         except Exception:  # noqa: BLE001
+            return None
+
+    def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
+        if not getattr(c, "car_enabled", True):
+            return None
+        try:
+            return ContinuousAutonomousReasoning(
+                self, budget_ms=getattr(c, "car_budget_ms", 250.0),
+                interval_s=getattr(c, "car_interval_s", 30.0),
+                max_questions=getattr(c, "car_max_questions", 3))
+        except Exception:  # noqa: BLE001 — without it she simply does not think between prompts
             return None
 
     # ---- perception ------------------------------------------------------ #
@@ -389,6 +404,40 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    # ---- thinking between prompts ---------------------------------------- #
+    def tick(self, *, oversight: Any = None) -> Optional[CarStep]:
+        """One beat of the shared clock — she thinks on her own every ``car_every_beats``.
+
+        Called from the heartbeat and the autonomic loop. No new thread; oversight is honoured,
+        so a paused or scrammed mind stays quiet.
+        """
+        try:
+            if self.car is None:
+                return None
+            if oversight is not None:
+                self.car.oversight = oversight
+            return self.car.beat()
+        except Exception:  # noqa: BLE001 — a background beat never raises into the loop
+            return None
+
+    def wonder(self, *, oversight: Any = None) -> Optional[CarStep]:
+        """Think one self-directed thought right now, regardless of the beat count."""
+        try:
+            if self.car is None:
+                return None
+            if oversight is not None:
+                self.car.oversight = oversight
+            return self.car.step()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def about_self(self) -> Optional[SelfReport]:
+        """What she can truthfully say about herself, read off live state."""
+        try:
+            return self.selfmodel.report() if self.selfmodel is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def understanding(self, word: str) -> Any:
         """What she actually has behind a word — senses, neighbours, and whether it is grounded."""
         try:
@@ -408,6 +457,10 @@ class NyxBrain:
                 out["metacog"] = self.metacog.stats()
             if self.ground is not None:
                 out["ground"] = self.ground.stats()
+            if self.dialogue is not None:
+                out["dialogue"] = self.dialogue.stats()
+            if self.car is not None:
+                out["car"] = self.car.stats()
             return out
         except Exception:  # noqa: BLE001
             return {}
@@ -420,6 +473,8 @@ class NyxBrain:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
             out["ground"] = self.ground.to_dict()
+        if self.car is not None:
+            out["car"] = self.car.to_dict()
         return out
 
     def load_dict(self, d: Dict[str, Any]) -> None:
@@ -434,6 +489,8 @@ class NyxBrain:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:
                 self.ground.load_dict(d["ground"])
+            if d.get("car") and self.car is not None:
+                self.car.load_dict(d["car"])
             self.turns = int(d.get("turns", 0))
         except Exception:  # noqa: BLE001 — a corrupt sidecar must never block boot
             pass

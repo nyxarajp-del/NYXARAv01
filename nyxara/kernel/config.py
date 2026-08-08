@@ -2389,6 +2389,18 @@ class NyxConfig(BaseModel):
     require_fluent_surface: bool = True
     reply_max_tokens: int = Field(default=220, ge=16, le=4096)
 
+    # Pillar 2b — thinking between prompts. Rides the existing heartbeat/autonomic clock (no
+    # second thread), is budgeted, and stops dead when oversight pauses or scrams. "24/7" is
+    # true of ``nyxara-daemon``; beats are counted so the claim stays checkable.
+    car_enabled: bool = True
+    car_interval_s: float = Field(default=30.0, ge=0.0)  # at most one self-directed thought per N s
+    car_budget_ms: float = Field(default=250.0, gt=0.0)
+    car_max_questions: int = Field(default=3, ge=1)
+
+    # Self-measurement — "what am I, what can I do, what am I bad at" answered from live state
+    # rather than from a stored description. Introspection, not a claim of self-awareness.
+    selfmodel_enabled: bool = True
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
