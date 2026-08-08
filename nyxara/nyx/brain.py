@@ -24,6 +24,7 @@ from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.author import Author, Authored
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
+from nyxara.nyx.consequence import ConsequenceGate, Verdict
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.episteme import AutonomousDiscovery
 from nyxara.nyx.eternal import Continuity
@@ -249,6 +250,7 @@ class NyxBrain:
         self.intent = self._build_intent(c)
         self.icl = self._build_icl(c)
         self.reason = self._build_reason(c)
+        self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
         self.metacog = self._build_metacog(c)
@@ -283,6 +285,20 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_consequence(self, c: Any) -> Optional[ConsequenceGate]:
+        if not getattr(c, "consequence_enabled", True):
+            return None
+        try:
+            return ConsequenceGate(
+                self, workspace=getattr(c, "consequence_workspace", ""),
+                tail_risk_ceiling=getattr(c, "consequence_tail_risk_ceiling", 0.5),
+                branches=getattr(c, "consequence_branches", 64),
+                require_foresight_for_irreversible=getattr(
+                    c, "consequence_fail_closed_irreversible", True),
+                prefer_reversible_variant=getattr(c, "consequence_prefer_variant", True))
+        except Exception:  # noqa: BLE001 — without it she acts without looking, as V.01 did
             return None
 
     def _build_author(self, c: Any) -> Optional[Author]:
@@ -950,6 +966,19 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def foresee(self, action: str, args: Optional[Dict[str, Any]] = None) -> Optional[Verdict]:
+        """What would happen if she did this — before she does it.
+
+        The reversibility class, the blast radius, what git would actually do, and the tail
+        risk across bounded rollouts. Her own foresight: it asks nobody for permission.
+        """
+        try:
+            if self.consequence is None:
+                return None
+            return self.consequence.check(action, args, registry=getattr(self, "tools", None))
+        except Exception:  # noqa: BLE001
+            return None
+
     def author_code(self, spec: str, *, name: str = "", load: Optional[bool] = None,
                     oversight: Any = None) -> Optional[Authored]:
         """Write code from a spec, through the full gauntlet — or refuse and name why.
@@ -1079,6 +1108,8 @@ class NyxBrain:
                 out["hands"] = self.hands.stats()
             if self.author is not None:
                 out["author"] = self.author.stats()
+            if self.consequence is not None:
+                out["consequence"] = self.consequence.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:

@@ -205,6 +205,9 @@ class Author:
                 return out
 
             want_load = self.load_enabled if load is None else bool(load)
+            if want_load and not self._gate_allows(out):
+                self.refused += 1
+                return out
             if want_load:
                 self._load(out, name=name)
             else:
@@ -376,6 +379,25 @@ class Author:
         out.stages.append(Stage("gauntlet", True,
                                 f"{len(getattr(report, 'results', []))} invariants held"))
         return True
+
+    def _gate_allows(self, out: Authored) -> bool:
+        """L-CHRONO-CAUSAL, in front of the one step here that changes the process.
+
+        Everything before this is a sandbox and a read; loading is where authored code becomes
+        live. The gate models it like any other action, and a bad irreversible tail stops it.
+        """
+        gate = getattr(self.brain, "consequence", None)
+        if gate is None:
+            return True
+        try:
+            may, verdict = gate.guard("author_load", {"path": out.path or str(out.family)})
+            if not may:
+                out.stages.append(Stage("load", False, verdict.why))
+                out.refusal = f"the consequence gate stopped the load: {verdict.why}"
+                return False
+            return True
+        except Exception:  # noqa: BLE001 — a gate that cannot run does not block a sandboxed load
+            return True
 
     # ---- stage 7: load it into the process ---------------------------------- #
     def _load(self, out: Authored, *, name: str = "") -> None:

@@ -99,6 +99,8 @@ class Reach:
     refused: str = ""                # the gate's reason, when it declined
     candidates: List[Tuple[str, float]] = field(default_factory=list)
     why: str = ""
+    verdict: Dict[str, Any] = field(default_factory=dict)   # the consequence gate's decision
+    rerouted_via: str = ""       # a reversible variant she took first, when there was one
     duration_ms: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -106,7 +108,9 @@ class Reach:
                 "args": dict(self.args), "ran": self.ran, "ok": self.ok,
                 "value": self.value, "error": self.error, "refused": self.refused,
                 "candidates": [[n, round(s, 4)] for n, s in self.candidates],
-                "why": self.why, "duration_ms": round(self.duration_ms, 2)}
+                "why": self.why, "verdict": dict(self.verdict),
+                "rerouted_via": self.rerouted_via,
+                "duration_ms": round(self.duration_ms, 2)}
 
 
 class Hands:
@@ -264,6 +268,24 @@ class Hands:
 
             out.tool = tool
             out.args = dict(args or {})
+
+            # L-CHRONO-CAUSAL: look before acting. This is her own foresight, not an
+            # escalation — nobody is asked for permission, and full autonomy is untouched.
+            gate = getattr(self.brain, "consequence", None)
+            if gate is not None:
+                may, verdict = gate.guard(tool, out.args, registry=registry)
+                out.verdict = verdict.to_dict()
+                if not may:
+                    out.refused = verdict.why
+                    out.why = f"the consequence gate stopped this: {verdict.why}"
+                    self.declined += 1
+                    return out
+                if verdict.variant:
+                    # A reversible route to the same intent. She takes it herself.
+                    out.why = verdict.why
+                    self._invoke(registry, verdict.variant, dict(verdict.variant_args),
+                                 authority=authority, dry_run=dry_run)
+                    out.rerouted_via = verdict.variant
             if not self.autonomous:
                 out.why = ("autonomous tool use is switched off for this deployment "
                            "(NYXARA_NYX__HANDS_AUTONOMOUS=false)")

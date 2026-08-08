@@ -453,6 +453,7 @@ _NYX_HELP = """\
 /nyx reason <question>     work down the tiers — and see which one answered, and its label
 /nyx hands                 the toolset she can see, and her measured record with each
 /nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
+/nyx consequence <action>  what would happen if she did it — before she does it
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -571,6 +572,23 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "consequence":
+        gate = getattr(brain, "consequence", None)
+        if gate is None:
+            print("the consequence gate is off (NYXARA_NYX__CONSEQUENCE_ENABLED=false) — "
+                  "she acts without looking ahead.")
+        elif not rest:
+            print(json.dumps(gate.stats(), indent=2, default=str))
+        else:
+            parts = rest.strip("\"'").split()
+            action = parts[0]
+            args = {}
+            for token in parts[1:]:
+                if "=" in token:
+                    key, _, value = token.partition("=")
+                    args[key] = value
+            got = brain.foresee(action, args)
+            print(got.render() if got is not None else "foresight is unavailable.")
     elif sub == "author":
         author = getattr(brain, "author", None)
         if author is None:

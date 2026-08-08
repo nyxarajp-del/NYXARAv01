@@ -41,6 +41,7 @@ from nyxara.nyx.author import Author, Authored, Stage
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
+from nyxara.nyx.consequence import ConsequenceGate, Effect, Foresight, Reversibility, Verdict as ConsequenceVerdict
 from nyxara.nyx.dialogue import Dialogue, Reply, Surface
 from nyxara.nyx.episteme import AutonomousDiscovery, Experiment, Finding, Knob
 from nyxara.nyx.eternal import Continuity, Replication, Snapshot
@@ -133,6 +134,8 @@ __all__ = [
     "Hands", "Reach", "ToolRecord",
     # NYX V.02 — prose in, verified code out, or a refusal that names itself
     "Author", "Authored", "Stage",
+    # L-CHRONO-CAUSAL — look before acting, and step back from a bad irreversible tail
+    "ConsequenceGate", "ConsequenceVerdict", "Effect", "Foresight", "Reversibility",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

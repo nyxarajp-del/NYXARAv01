@@ -2603,6 +2603,25 @@ class NyxConfig(BaseModel):
     author_lineage: bool = True                  # a signed, revertible ledger entry
     author_max_source_bytes: int = Field(default=20_000, ge=256)
 
+    # L-CHRONO-CAUSAL (nyxara/nyx/consequence.py). L-CHRONOS simulates futures for decisions
+    # INSIDE think() — which answer to give. It has never run on a tool call or on code being
+    # written, which was survivable while her brain was blind to tools. With hands and author
+    # aboard it is the gap that matters most, so this gate sits IN FRONT of execution.
+    #
+    # Honest: "ten thousand timelines" means exactly `consequence_branches`, run sequentially.
+    # Five years is not simulable — the horizon covers her own system state (which files
+    # change, what git does, what the blast radius is), not the world. There is no "100%
+    # optimal": she reports tail risk and confidence and calls herself blind rather than
+    # emitting zeros as foresight. This is HER foresight — it asks nobody for permission, so
+    # full autonomy is untouched.
+    consequence_enabled: bool = True
+    consequence_workspace: str = ""              # blank ⇒ the process working directory
+    consequence_branches: int = Field(default=64, ge=2, le=100_000)
+    consequence_tail_risk_ceiling: float = Field(default=0.5, ge=0.0, le=1.0)  # CVaR ceiling
+    # The one non-advisory rule: cannot see ahead + cannot be taken back ⇒ she does not act.
+    consequence_fail_closed_irreversible: bool = True
+    consequence_prefer_variant: bool = True      # branch instead of writing shared history
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
