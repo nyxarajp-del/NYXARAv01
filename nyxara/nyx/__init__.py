@@ -64,6 +64,7 @@ from nyxara.nyx.modules import (
     SpecialistModule,
     default_specialists,
 )
+from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
 from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
@@ -99,6 +100,8 @@ __all__ = [
     "AwarenessField", "Stream", "Event", "Sensed",
     # L-EPISTEME — finding things out, and keeping only what survives a held-out check
     "AutonomousDiscovery", "Experiment", "Knob", "Finding",
+    # L-NEXUS-OMNI — her own notation: private symbols that execute and always translate
+    "OntologyGenesis", "Notation", "Statement",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

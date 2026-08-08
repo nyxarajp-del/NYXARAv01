@@ -30,6 +30,7 @@ from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
 from nyxara.nyx.metacog import RecursiveMetaCognition
+from nyxara.nyx.nexus import OntologyGenesis
 from nyxara.nyx.modules import (
     CreativeSpecialist,
     DerivationSpecialist,
@@ -188,6 +189,7 @@ class NyxBrain:
         self.chronos = self._build_chronos(c)
         self.will = self._build_will(c)
         self.aura = self._build_aura(c)
+        self.nexus = self._build_nexus(c)
         self.episteme = self._build_episteme(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
@@ -295,6 +297,18 @@ class NyxBrain:
                 field_.register_host_sensors()
             return field_
         except Exception:  # noqa: BLE001 — without it nothing arrives on its own
+            return None
+
+    @staticmethod
+    def _build_nexus(c: Any) -> Optional[OntologyGenesis]:
+        if not getattr(c, "nexus_enabled", True):
+            return None
+        try:
+            return OntologyGenesis(
+                translate_always=getattr(c, "nexus_translate_always", True),
+                max_notations=getattr(c, "nexus_max_notations", 16),
+                max_vm_steps=getattr(c, "nexus_max_vm_steps", 100_000))
+        except Exception:  # noqa: BLE001 — without it she only ever uses borrowed symbols
             return None
 
     def _build_episteme(self, c: Any) -> Optional[AutonomousDiscovery]:
@@ -549,13 +563,46 @@ class NyxBrain:
             pass
 
     def discover(self, *, oversight: Any = None) -> Any:
-        """Run one investigation right now, regardless of the cadence."""
+        """Run one investigation right now, and give anything it establishes her own notation."""
         try:
             if self.episteme is None:
                 return None
-            return self.episteme.beat(oversight=oversight)
+            finding = self.episteme.beat(oversight=oversight)
+            if finding is not None and finding.promoted:
+                self._name_it(finding)
+            return finding
         except Exception:  # noqa: BLE001
             return None
+
+    def _name_it(self, finding: Any) -> None:
+        """A law she established herself is the natural thing to hold in symbols of her own.
+
+        The statement is only kept when it actually compiles and runs — a notation that cannot
+        be executed is not a language, and one she cannot translate back is not communication.
+        """
+        try:
+            nexus = self.nexus
+            if nexus is None or not getattr(finding, "expression", ""):
+                return
+            expression = str(finding.expression)
+            if "=" in expression:
+                _target, _, body = expression.partition("=")
+            else:
+                body = expression
+            body = body.replace("·", "*").strip()
+            # The *variables* of the law, not its prose concepts: ``concepts_in`` is tuned for
+            # sentences and drops single letters, which is exactly what a law is full of.
+            concepts = list(dict.fromkeys(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", body)))
+            if not concepts:
+                return
+            notation = nexus.invent(finding.experiment, concepts)
+            if notation is None:
+                return
+            # Bind every free name to 1 purely to prove the statement executes; the value is
+            # incidental, the point is that the notation is a language and not decoration.
+            nexus.express(notation, body, bindings={c: 1.0 for c in concepts})
+        except Exception:  # noqa: BLE001 — naming is a flourish, never a requirement
+            pass
 
     def wonder(self, *, oversight: Any = None) -> Optional[CarStep]:
         """Think one self-directed thought right now, regardless of the beat count."""
@@ -604,6 +651,8 @@ class NyxBrain:
                 out["aura"] = self.aura.stats()
             if self.episteme is not None:
                 out["episteme"] = self.episteme.stats()
+            if self.nexus is not None:
+                out["nexus"] = self.nexus.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
@@ -622,6 +671,8 @@ class NyxBrain:
             out["aura"] = self.aura.to_dict()
         if self.episteme is not None:
             out["episteme"] = self.episteme.to_dict()
+        if self.nexus is not None:
+            out["nexus"] = self.nexus.to_dict()
         if self.car is not None:
             out["car"] = self.car.to_dict()
         return out
@@ -642,6 +693,8 @@ class NyxBrain:
                 self.aura.load_dict(d["aura"])
             if d.get("episteme") and self.episteme is not None:
                 self.episteme.load_dict(d["episteme"])
+            if d.get("nexus") and self.nexus is not None:
+                self.nexus.load_dict(d["nexus"])
             if d.get("car") and self.car is not None:
                 self.car.load_dict(d["car"])
             self.turns = int(d.get("turns", 0))

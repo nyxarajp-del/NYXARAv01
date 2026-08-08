@@ -2448,6 +2448,16 @@ class NyxConfig(BaseModel):
     episteme_budget_ms: float = Field(default=4000.0, gt=0.0)
     episteme_every_s: float = Field(default=120.0, ge=0.0)   # investigations are not cheap
 
+    # L-NEXUS-OMNI — her own notation. Private glyphs for the concepts she has, statements
+    # written in them, and — the part that stops it being decorative — bytecode that actually
+    # executes on her StackVM. Whatever reaches a person is *always* translated and labelled a
+    # lossy projection: a language you could not understand, used to give you a perspective, is
+    # self-contradictory. These are new formal systems, not new physical dimensions.
+    nexus_enabled: bool = True
+    nexus_translate_always: bool = True          # never turn this off outside a test
+    nexus_max_notations: int = Field(default=16, ge=1)
+    nexus_max_vm_steps: int = Field(default=100_000, ge=1)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

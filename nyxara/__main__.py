@@ -449,6 +449,7 @@ _NYX_HELP = """\
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
 /nyx discover              run one investigation now: probe a sandbox, derive, check, promote
+/nyx nexus                 the notation she minted for herself — and its translation back
 """
 
 
@@ -510,6 +511,21 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub == "nexus":
+        nexus = getattr(brain, "nexus", None)
+        if nexus is None:
+            print("she is not minting notation (NYXARA_NYX__NEXUS_ENABLED=false).")
+        elif not nexus.notations:
+            print("she has not minted any notation yet — try /nyx discover first.")
+        else:
+            for name, notation in nexus.notations.items():
+                glyphs = ", ".join(f"{c}={g}" for c, g in notation.symbols.items())
+                print(f"{name}: {glyphs}")
+            for statement in nexus.statements[-3:]:
+                print(f"\n  she writes : {statement.written}")
+                print(f"  it runs    : {statement.realised} -> {statement.value}"
+                      f"  ({len(statement.program)} instructions)")
+                print(f"  reaches you: {nexus.translate(statement)}")
     elif sub == "discover":
         discovery = getattr(brain, "episteme", None)
         if discovery is None:
