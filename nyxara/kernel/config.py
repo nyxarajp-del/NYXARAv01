@@ -2635,6 +2635,25 @@ class NyxConfig(BaseModel):
     axiom_timeout_ms: int = Field(default=2000, ge=50)    # per solver call; no infinite speed
     axiom_max_systems: int = Field(default=16, ge=1)
 
+    # L-OMEGA (nyxara/nyx/omega.py). L-OMNI rewrites her CODE; author writes NEW code. Neither
+    # touches the constants her graph and memory actually run on — hebbian_rate, decay_rate,
+    # recall_threshold were numbers somebody typed once and never measured against an outcome.
+    #
+    # She tunes her knobs, NOT her constitution: the tunable set is a whitelist declared on
+    # graph and holomem, and the safety core is refused twice over (here and in
+    # nyx5.autopoiesis). Not "better every second": one change at a time on a budgeted cadence,
+    # anything that does not beat its own baseline is rolled back, and below a sample floor she
+    # does not evolve at all. Stops dead on /scram.
+    omega_enabled: bool = True
+    omega_every_s: float = Field(default=120.0, ge=0.0)   # at most one change per N seconds
+    omega_step: float = Field(default=0.2, gt=0.0, le=0.9)  # hill-climb step, as a range share
+    omega_min_samples: int = Field(default=12, ge=1)      # below this, hill-climbing is noise
+    omega_stall_after: int = Field(default=4, ge=1)       # rollbacks before she stops tuning
+    omega_rule_synth_on_stall: bool = True                # …and invents a learning rule instead
+    omega_rule_population: int = Field(default=8, ge=2)
+    omega_rule_generations: int = Field(default=4, ge=1)
+    omega_rule_budget_s: float = Field(default=4.0, gt=0.0)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

@@ -455,6 +455,7 @@ _NYX_HELP = """\
 /nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
 /nyx consequence <action>  what would happen if she did it — before she does it
 /nyx axiom <description>   write a new axiom system down, and check whether it holds together
+/nyx omega [evolve|rollback]  the constants she thinks with — and what she measured them to
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -573,6 +574,21 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "omega":
+        kernel = getattr(brain, "omega", None)
+        action = rest.strip().lower()
+        if kernel is None:
+            print("self-evolution is off (NYXARA_NYX__OMEGA_ENABLED=false) — her constants "
+                  "stay whatever was typed.")
+        elif action == "evolve":
+            step = brain.evolve(oversight=getattr(core, "oversight", None), force=True)
+            print(step.render() if step is not None else "self-evolution is unavailable.")
+            if step is not None and step.reason:
+                print(f"  {step.reason}")
+        elif action == "rollback":
+            print("knobs restored." if kernel.rollback() else "no rollback point to restore.")
+        else:
+            print(kernel.describe())
     elif sub == "axiom":
         genesis = getattr(brain, "axiom", None)
         if genesis is None:

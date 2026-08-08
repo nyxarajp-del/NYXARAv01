@@ -77,6 +77,7 @@ from nyxara.nyx.modules import (
 from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
 from nyxara.nyx.omni import Forged, Kernel, MetamorphicCompiler
 from nyxara.nyx.reasoner import NyxReasoner
+from nyxara.nyx.omega import Fitness, SelfEvolutionKernel
 from nyxara.nyx.reason import Chain, OpenDomainReasoner, Step
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
@@ -139,6 +140,8 @@ __all__ = [
     "ConsequenceGate", "ConsequenceVerdict", "Effect", "Foresight", "Reversibility",
     # L-AXIOM-GENESIS — a formal system of her own, checked rather than asserted
     "AxiomGenesis", "Axiom", "System", "Theorem", "Genesis",
+    # L-OMEGA — she tunes the mind she thinks with, gauntleted and always reversible
+    "SelfEvolutionKernel", "Fitness",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

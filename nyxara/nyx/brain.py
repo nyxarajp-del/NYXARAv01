@@ -39,6 +39,7 @@ from nyxara.nyx.intent import Intent, IntentReader
 from nyxara.nyx.lingua import Lingua, LinguaRead
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.nexus import OntologyGenesis
+from nyxara.nyx.omega import SelfEvolutionKernel, Step as OmegaStep
 from nyxara.nyx.omni import MetamorphicCompiler
 from nyxara.nyx.modules import (
     CreativeSpecialist,
@@ -252,6 +253,7 @@ class NyxBrain:
         self.icl = self._build_icl(c)
         self.reason = self._build_reason(c)
         self.axiom = self._build_axiom(c)
+        self.omega = self._build_omega(c)
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
@@ -287,6 +289,23 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_omega(self, c: Any) -> Optional[SelfEvolutionKernel]:
+        if not getattr(c, "omega_enabled", True):
+            return None
+        try:
+            return SelfEvolutionKernel(
+                self, every_s=getattr(c, "omega_every_s", 120.0),
+                step=getattr(c, "omega_step", 0.2),
+                min_samples=getattr(c, "omega_min_samples", 12),
+                stall_after=getattr(c, "omega_stall_after", 4),
+                rule_synth_on_stall=getattr(c, "omega_rule_synth_on_stall", True),
+                rule_population=getattr(c, "omega_rule_population", 8),
+                rule_generations=getattr(c, "omega_rule_generations", 4),
+                rule_budget_s=getattr(c, "omega_rule_budget_s", 4.0),
+                seed=getattr(c, "seed", 42))
+        except Exception:  # noqa: BLE001 — without it her constants stay whatever was typed
             return None
 
     def _build_axiom(self, c: Any) -> Optional[AxiomGenesis]:
@@ -978,6 +997,19 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def evolve(self, *, oversight: Any = None, force: bool = False) -> Optional[OmegaStep]:
+        """One budgeted change to the constants she thinks with — gauntleted and reversible.
+
+        Below a sample floor she declines: hill-climbing on a handful of turns is fitting
+        noise. She tunes her knobs, never her constitution.
+        """
+        try:
+            if self.omega is None:
+                return None
+            return self.omega.evolve(oversight=oversight, force=force)
+        except Exception:  # noqa: BLE001
+            return None
+
     def invent_axioms(self, problem: str, *, name: str = "") -> Optional[Genesis]:
         """Write down a new axiom system for a problem no domain covers, and check it.
 
@@ -1136,6 +1168,8 @@ class NyxBrain:
                 out["consequence"] = self.consequence.stats()
             if self.axiom is not None:
                 out["axiom"] = self.axiom.stats()
+            if self.omega is not None:
+                out["omega"] = self.omega.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1184,6 +1218,8 @@ class NyxBrain:
             out["author"] = self.author.to_dict()
         if self.axiom is not None:
             out["axiom"] = self.axiom.to_dict()
+        if self.omega is not None:
+            out["omega"] = self.omega.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1220,6 +1256,8 @@ class NyxBrain:
                 self.author.load_dict(d["author"])
             if d.get("axiom") and self.axiom is not None:
                 self.axiom.load_dict(d["axiom"])
+            if d.get("omega") and self.omega is not None:
+                self.omega.load_dict(d["omega"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

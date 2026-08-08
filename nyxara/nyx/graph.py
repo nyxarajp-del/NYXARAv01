@@ -514,6 +514,50 @@ class DynamicNeuralGraph:
             self._adj.pop(node.label, None)
             self.nodes.pop(node.label, None)
 
+    # ---- the seam L-OMEGA tunes (NYX V.02) -------------------------------- #
+    #: What she is allowed to change about how this graph learns, with the range each knob is
+    #: clamped to. Deliberately a *whitelist*: everything not named here is not tunable, and
+    #: nothing structural about the safety core appears in it or ever could.
+    KNOBS: Dict[str, Tuple[float, float]] = {
+        "hebbian_rate": (0.01, 0.6),
+        "decay_rate": (0.0, 0.2),
+        "prune_threshold": (0.001, 0.2),
+        "spread_falloff": (0.1, 0.95),
+        "spread_depth": (1.0, 4.0),
+        "rewire_budget": (16.0, 2048.0),
+        "semantic_birth_weight": (0.0, 0.5),
+        "synonym_bridge": (0.0, 1.0),
+    }
+
+    def knobs(self) -> Dict[str, float]:
+        """The current setting of every tunable, so a change can be measured and undone."""
+        try:
+            return {name: float(getattr(self, name, 0.0)) for name in self.KNOBS}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def apply_knobs(self, values: Dict[str, Any]) -> Dict[str, float]:
+        """Set tunables, clamped to their declared ranges. Unknown names are ignored.
+
+        Returns what was *actually* applied, which is not always what was asked for — a knob
+        outside its range is clamped rather than refused, and an unknown one silently does
+        nothing rather than growing a new attribute on the graph.
+        """
+        applied: Dict[str, float] = {}
+        try:
+            for name, raw in (values or {}).items():
+                bounds = self.KNOBS.get(str(name))
+                if bounds is None:
+                    continue
+                low, high = bounds
+                value = max(low, min(high, float(raw)))
+                setattr(self, name, int(value) if name in ("spread_depth", "rewire_budget")
+                        else value)
+                applied[str(name)] = float(getattr(self, name))
+            return applied
+        except Exception:  # noqa: BLE001 — a bad knob leaves the graph as it was
+            return applied
+
     # ---- introspection --------------------------------------------------- #
     def gaps(self, *, k: int = 5) -> List[str]:
         """Concepts the graph knows *of* but barely knows — the honest edge of her knowledge.
