@@ -450,6 +450,9 @@ _NYX_HELP = """\
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
 /nyx discover              run one investigation now: probe a sandbox, derive, check, promote
 /nyx nexus                 the notation she minted for herself — and its translation back
+/nyx omni                  where she is slow, what she rewrote in C, and how to undo it
+/nyx omni forge            read herself and attempt one rewrite now (verified, reversible)
+/nyx omni rollback         put every Python function back — always available
 /nyx hive                  other instances: what converged, and whether there is a wire at all
 /nyx eternal               durability: enrolled nodes, leader, signed snapshots
 """
@@ -553,6 +556,8 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print("\nheld as fact:", json.dumps(discovery.promoted, indent=2))
             if discovery.conjectures:
                 print("still only conjecture:", json.dumps(discovery.conjectures, indent=2))
+    elif sub == "omni":
+        _nyx_omni(core, brain, rest.strip().lower())
     elif sub == "aura":
         field_ = getattr(brain, "aura", None)
         if field_ is None:
@@ -575,6 +580,41 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
         print(json.dumps(brain.stats(), indent=2, default=str))
     else:
         print(f"unknown: /nyx {sub}\n{_NYX_HELP}")
+
+
+def _nyx_omni(core: NyxaraCore, brain, action: str) -> None:
+    """``/nyx omni`` — what she has rewritten of herself, and the undo that is always there."""
+    omni = getattr(brain, "omni", None)
+    if omni is None:
+        print("she is not rewriting herself (NYXARA_NYX__OMNI_ENABLED=false).")
+        return
+    if action == "rollback":
+        print(f"put back {omni.rollback_all()} function(s) — pure Python again.")
+        return
+    if action == "forge":
+        got = brain.optimise(oversight=getattr(core, "oversight", None))
+        if got is None:
+            print("nothing to attempt: no toolchain, the hourly budget is spent, "
+                  "or every candidate she can read has already been tried.")
+        else:
+            print(json.dumps(got.to_dict(), indent=2, default=str))
+        return
+
+    stats = omni.stats()
+    print(json.dumps(stats, indent=2, default=str))
+    if not stats.get("available"):
+        print("\nnot active: no gcc/clang/cc or rustc on PATH, or the live swap is off. "
+              "The layer is a clean no-op — nothing is faked.")
+    candidates = omni.scan()[:5]
+    if candidates:
+        print("\nof herself, these could become C kernels:")
+        for kernel in candidates:
+            print(f"  {kernel.target:<48} {kernel.reason}")
+    else:
+        print("\nshe has found nothing of herself narrow enough to compile — most of her is "
+              "orchestration, where a C kernel has nothing to win.")
+    print("\nevery adoption is reversible: the Python source is never written, so a restart "
+          "or /nyx omni rollback restores it.")
 
 
 def _print_thought(thought) -> None:

@@ -66,6 +66,7 @@ from nyxara.nyx.modules import (
     default_specialists,
 )
 from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
+from nyxara.nyx.omni import Forged, Kernel, MetamorphicCompiler
 from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
@@ -104,6 +105,8 @@ __all__ = [
     "AutonomousDiscovery", "Experiment", "Knob", "Finding",
     # L-NEXUS-OMNI — her own notation: private symbols that execute and always translate
     "OntologyGenesis", "Notation", "Statement",
+    # L-OMNI — reading her own source and rewriting the slow parts in C, reversibly
+    "MetamorphicCompiler", "Kernel", "Forged",
     # L-SYNERGY — several instances converging; L-ETERNAL — no single machine holds her
     "HiveSynapse", "Shared", "Transport",
     "Continuity", "Snapshot", "Replication",

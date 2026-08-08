@@ -75,6 +75,15 @@ os.environ.setdefault("NYXARA_FOUNDRY__ENABLED", "false")
 # down the deterministic floor and stop the suite from exercising the reasoning path at all. Same
 # rationale as pinning the genesis substrate above — keep the mechanism, not the price.
 os.environ.setdefault("NYXARA_METACONTROL__MAX_SECONDS_CEILING", "6")
+# L-OMNI (nyx/omni.py) reads NYXARA's own source, lowers hot numeric functions to C, compiles
+# them and swaps them into the *live process*. ON for real runs at Master JP's instruction, and
+# the same hermetic rationale as every flag above applies to the suite: a test asserting that the
+# layer is wired should not invoke a C compiler, and a kernel swapped into one test's process is
+# state leaking into the next. Scanning and lowering stay ON — those are pure and fast, and they
+# are what most of test_omni.py exercises; only the compile-and-load tier is sealed. The tests
+# that forge for real (tests/nyx/test_omni.py) build their own compiler with hot_swap=True and
+# point it at a module in tmp_path, never at the live package.
+os.environ.setdefault("NYXARA_NYX__OMNI_HOT_SWAP", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

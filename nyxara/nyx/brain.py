@@ -32,6 +32,7 @@ from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.nexus import OntologyGenesis
+from nyxara.nyx.omni import MetamorphicCompiler
 from nyxara.nyx.modules import (
     CreativeSpecialist,
     DerivationSpecialist,
@@ -55,6 +56,38 @@ __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
 _QUESTION = re.compile(
     r"^\s*(what|why|how|who|whom|whose|when|where|which|is|are|was|were|do|does|did|can|could|"
     r"will|would|should|shall|may|might|have|has|had|am|tell me|explain)\b", re.I)
+
+
+class _Latency:
+    """Time one step of a real thought and attribute it to the module that did the work.
+
+    This is L-OMNI's only input, and it is why the layer is not a hand-written list of functions
+    to optimise: the module she is measurably slowest in is the module she goes and reads.
+    Absent a compiler the timer is inert, so measuring costs nothing when nothing uses it.
+    """
+
+    __slots__ = ("omni", "_module", "_t0")
+
+    def __init__(self, omni: Any) -> None:
+        self.omni = omni
+        self._module = ""
+        self._t0 = 0.0
+
+    def at(self, module: str) -> "_Latency":
+        self._module = module
+        return self
+
+    def __enter__(self) -> "_Latency":
+        self._t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *_exc: Any) -> bool:
+        try:
+            if self.omni is not None:
+                self.omni.observe(self._module, (time.perf_counter() - self._t0) * 1000.0)
+        except Exception:  # noqa: BLE001 — a stopwatch never breaks a thought
+            pass
+        return False
 
 
 def is_question(text: str) -> bool:
@@ -195,10 +228,12 @@ class NyxBrain:
         self.synergy = self._build_synergy(c)
         self.eternal = self._build_eternal(c)
         self.episteme = self._build_episteme(c)
+        self.omni = self._build_omni(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
         self._last_investigation = 0.0
+        self._last_forge = 0.0
 
     @staticmethod
     def _build_metacog(c: Any) -> Optional[RecursiveMetaCognition]:
@@ -346,6 +381,19 @@ class NyxBrain:
         except Exception:  # noqa: BLE001 — without it she only knows what she was told
             return None
 
+    def _build_omni(self, c: Any) -> Optional[MetamorphicCompiler]:
+        if not getattr(c, "omni_enabled", True):
+            return None
+        try:
+            return MetamorphicCompiler(
+                self, hot_swap=getattr(c, "omni_hot_swap", True),
+                min_speedup=getattr(c, "omni_min_speedup", 1.2),
+                max_forges_per_hour=getattr(c, "omni_max_forges_per_hour", 2),
+                cases=getattr(c, "omni_cases", 24),
+                scan_per_beat=getattr(c, "omni_scan_per_beat", 6), seed=c.seed)
+        except Exception:  # noqa: BLE001 — without it she stays exactly as fast as she was
+            return None
+
     def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
         if not getattr(c, "car_enabled", True):
             return None
@@ -415,7 +463,12 @@ class NyxBrain:
             # Perceive without writing: the episode is laid down *after* deliberating, so what
             # gets remembered is "I was asked X and concluded Y" rather than the bare question.
             # Storing a naked question would make it its own best match when asked again.
-            out.percept = self.perceive(out.stimulus, remember=False)
+            # L-OMNI's one input: where the time in a real thought of hers actually goes. No
+            # workload is synthesised and no function is nominated by hand — she optimises the
+            # module she is measurably slowest in.
+            clock = _Latency(self.omni)
+            with clock.at("nyxara.nyx.graph"):
+                out.percept = self.perceive(out.stimulus, remember=False)
             out.cycle_id = f"cycle-{self.turns}"
             if self.workspace is None:
                 return out
@@ -423,7 +476,8 @@ class NyxBrain:
                 stimulus=out.stimulus, concepts=out.percept.concepts,
                 context=out.percept.context, recall=out.percept.recall,
                 novelty=out.percept.novelty, brain=self)
-            out.deliberation = self.workspace.deliberate(situation, goals=goals)
+            with clock.at("nyxara.nyx.workspace"):
+                out.deliberation = self.workspace.deliberate(situation, goals=goals)
 
             # Measure how sure she actually is across *every* candidate, not just the winner.
             # The workspace decides what reaches awareness; this says whether anything really
@@ -439,11 +493,13 @@ class NyxBrain:
                 # fact, or when the world model has learned too little to see ahead — which is
                 # the point: no foresight is better than fabricated foresight.
                 if self.chronos is not None and self.chronos.applies(out.stimulus):
-                    out.futures = self.chronos.explore(out.deliberation.proposals)
+                    with clock.at("nyxara.nyx.chronos"):
+                        out.futures = self.chronos.explore(out.deliberation.proposals)
                     evidence = self.chronos.evidence(out.futures)
                     if evidence:
                         state.observe(evidence)
-                out.collapsed = state.collapse()
+                with clock.at("nyxara.nyx.superpose"):
+                    out.collapsed = state.collapse()
 
                 # L-PSYCHE-QUANTUM: where the decision is genuinely open — several answers
                 # still live — she *chooses* rather than taking the maximum, sampling from her
@@ -466,7 +522,8 @@ class NyxBrain:
             # Check what she is about to say against her own engines, and let the verdict
             # credit or debit the specialist that said it — the loop closes with no human.
             if self.hybrid is not None and out.answer:
-                out.verification = self.hybrid.check_and_learn(self, out)
+                with clock.at("nyxara.nyx.hybrid"):
+                    out.verification = self.hybrid.check_and_learn(self, out)
 
             # What is worth remembering from a turn is what she *concluded*; the question is
             # provenance. A turn she had no answer to writes nothing here — the concepts are
@@ -563,6 +620,7 @@ class NyxBrain:
             if self.aura is not None:
                 self.aura.beat(oversight=oversight)   # the world arrives on the same clock
             self._episteme_beat(oversight)
+            self._omni_beat(oversight)
             if self.synergy is not None:
                 self.synergy.beat(oversight=oversight)
             if self.eternal is not None:
@@ -588,6 +646,30 @@ class NyxBrain:
             self.episteme.beat(oversight=oversight)
         except Exception:  # noqa: BLE001 — investigating never breaks the beat
             pass
+
+    def _omni_beat(self, oversight: Any) -> None:
+        """Rewrite herself on a much slower cadence than she thinks — a forge is not a thought."""
+        try:
+            if self.omni is None:
+                return
+            every = float(getattr(self.config, "omni_every_s", 300.0))
+            now = time.monotonic()
+            if self._last_forge and (now - self._last_forge) < every:
+                return
+            self._last_forge = now
+            self.omni.beat(oversight=oversight)
+        except Exception:  # noqa: BLE001 — recompiling herself never breaks the beat
+            pass
+
+    def optimise(self, *, oversight: Any = None) -> Any:
+        """Attempt one self-rewrite right now: read herself, lower it, verify it, swap it in."""
+        try:
+            if self.omni is None:
+                return None
+            self._last_forge = time.monotonic()
+            return self.omni.beat(oversight=oversight)
+        except Exception:  # noqa: BLE001
+            return None
 
     def discover(self, *, oversight: Any = None) -> Any:
         """Run one investigation right now, and give anything it establishes her own notation."""
@@ -678,6 +760,8 @@ class NyxBrain:
                 out["aura"] = self.aura.stats()
             if self.episteme is not None:
                 out["episteme"] = self.episteme.stats()
+            if self.omni is not None:
+                out["omni"] = self.omni.stats()
             if self.nexus is not None:
                 out["nexus"] = self.nexus.stats()
             if self.synergy is not None:
@@ -702,6 +786,8 @@ class NyxBrain:
             out["aura"] = self.aura.to_dict()
         if self.episteme is not None:
             out["episteme"] = self.episteme.to_dict()
+        if self.omni is not None:
+            out["omni"] = self.omni.to_dict()
         if self.nexus is not None:
             out["nexus"] = self.nexus.to_dict()
         if self.car is not None:
@@ -724,6 +810,8 @@ class NyxBrain:
                 self.aura.load_dict(d["aura"])
             if d.get("episteme") and self.episteme is not None:
                 self.episteme.load_dict(d["episteme"])
+            if d.get("omni") and self.omni is not None:
+                self.omni.load_dict(d["omni"])
             if d.get("nexus") and self.nexus is not None:
                 self.nexus.load_dict(d["nexus"])
             if d.get("car") and self.car is not None:

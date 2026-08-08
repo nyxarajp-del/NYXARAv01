@@ -3641,6 +3641,20 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001
             return []
 
+    def nyx_optimise(self) -> Any:
+        """One L-OMNI attempt: read her own source, lower a hot function to C, verify, swap.
+
+        Gauntlet-verified and reversible — the Python source is never written, so a restart or
+        ``brain.omni.rollback_all()`` always restores it. Oversight is honoured: a paused or
+        scrammed mind does not recompile itself.
+        """
+        brain = getattr(self, "nyx", None)
+        try:
+            return (brain.optimise(oversight=getattr(self, "oversight", None))
+                    if brain is not None else None)
+        except Exception:  # noqa: BLE001 — self-optimisation is never fatal
+            return None
+
     def nyx_stats(self) -> Dict[str, Any]:
         """A snapshot of NYX V.01 (graph shape, memory load) — or {} when absent."""
         brain = getattr(self, "nyx", None)

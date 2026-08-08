@@ -2465,6 +2465,26 @@ class NyxConfig(BaseModel):
     node_id: str = ""                            # blank => a name is derived at boot
     sync_every_s: float = Field(default=15.0, ge=0.0)
 
+    # L-OMNI — she reads her own source, lowers the hot numeric parts to C, and swaps them into
+    # the running process. ON by default, live hot-swap included, at Master JP's explicit
+    # instruction. What that does *not* switch off, because these are the reasons it is safe:
+    # the compiled kernel must be identical on every sample AND at least ``omni_min_speedup``
+    # faster or it is not adopted; the swap is a module attribute in memory, so the Python
+    # source is never written and any restart or rollback restores it; the constitutional files
+    # and any target naming loyalty/corrigibility/oversight/honesty are refused before the
+    # compiler is invoked; and it stops dead when oversight pauses or scrams. Equivalence is
+    # established on a *sampled* domain (written into the certificate), not proven for all
+    # inputs — which is why candidates stay narrow numeric functions. No gcc/clang/rustc ⇒ the
+    # whole layer is a clean no-op. A forge attempt costs up to ~2 s on the beat that runs it,
+    # which is what the per-hour budget is for.
+    omni_enabled: bool = True
+    omni_hot_swap: bool = True                   # the live ctypes load; off ⇒ scan-only
+    omni_min_speedup: float = Field(default=1.2, ge=1.0, le=1000.0)
+    omni_max_forges_per_hour: int = Field(default=2, ge=0)
+    omni_cases: int = Field(default=24, ge=4, le=512)     # samples the equivalence check uses
+    omni_scan_per_beat: int = Field(default=6, ge=1)      # modules parsed per beat
+    omni_every_s: float = Field(default=300.0, ge=0.0)    # compiling herself is not a thought
+
     # L-ETERNAL — no single machine holds her. Signed snapshots replicated to a *quorum* of
     # enrolled nodes, with failover in seconds (an election needs a timeout and a round trip;
     # microseconds is not a thing a network does). Nodes are enrolled by the operator and never
