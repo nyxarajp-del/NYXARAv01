@@ -447,6 +447,7 @@ _NYX_HELP = """\
 /nyx ground <word>         what she actually has behind a word (or that she has nothing)
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
+/nyx aura                  what is arriving on its own — streams, what landed, what was refused
 """
 
 
@@ -508,6 +509,14 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub == "aura":
+        field_ = getattr(brain, "aura", None)
+        if field_ is None:
+            print("ambient awareness is off (NYXARA_NYX__AURA_ENABLED=false).")
+        elif not field_.streams:
+            print("nothing is registered — she is not watching anything yet.")
+        else:
+            print(json.dumps(field_.stats(), indent=2, default=str))
     elif sub in ("wonder", "car"):
         if sub == "wonder":
             step = brain.wonder(oversight=getattr(core, "oversight", None))

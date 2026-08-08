@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply
@@ -184,6 +185,7 @@ class NyxBrain:
         self.dialogue = self._build_dialogue(c)
         self.chronos = self._build_chronos(c)
         self.will = self._build_will(c)
+        self.aura = self._build_aura(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
@@ -274,6 +276,21 @@ class NyxBrain:
                 budget_ms=c.chronos_budget_ms, risk_aversion=c.chronos_risk_aversion,
                 min_coverage=c.chronos_min_coverage, seed=c.seed)
         except Exception:  # noqa: BLE001 — without it she simply cannot see ahead
+            return None
+
+    def _build_aura(self, c: Any) -> Optional[AwarenessField]:
+        if not getattr(c, "aura_enabled", True):
+            return None
+        try:
+            field_ = AwarenessField(
+                self, max_events_per_min=getattr(c, "aura_max_events_per_min", 60),
+                surprise_gate=getattr(c, "aura_surprise_gate", 0.5),
+                scan=getattr(c, "aura_scan", True),
+                max_text=getattr(c, "aura_max_text", 2000))
+            if getattr(c, "aura_host_sensors", True):
+                field_.register_host_sensors()
+            return field_
+        except Exception:  # noqa: BLE001 — without it nothing arrives on its own
             return None
 
     def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
@@ -483,12 +500,15 @@ class NyxBrain:
 
     # ---- thinking between prompts ---------------------------------------- #
     def tick(self, *, oversight: Any = None) -> Optional[CarStep]:
-        """One beat of the shared clock — she thinks on her own every ``car_every_beats``.
+        """One beat of the shared clock: the world arrives, and she thinks on her own.
 
-        Called from the heartbeat and the autonomic loop. No new thread; oversight is honoured,
-        so a paused or scrammed mind stays quiet.
+        Called from the heartbeat and the autonomic loop. No new thread; oversight is honoured
+        by both halves, so a paused or scrammed mind neither senses nor wonders. Sensing is
+        capped per minute and thinking at most once per ``car_interval_s``.
         """
         try:
+            if self.aura is not None:
+                self.aura.beat(oversight=oversight)   # the world arrives on the same clock
             if self.car is None:
                 return None
             if oversight is not None:
@@ -540,6 +560,8 @@ class NyxBrain:
                 out["chronos"] = self.chronos.stats()
             if self.will is not None:
                 out["will"] = self.will.stats()
+            if self.aura is not None:
+                out["aura"] = self.aura.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
@@ -554,6 +576,8 @@ class NyxBrain:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
             out["ground"] = self.ground.to_dict()
+        if self.aura is not None:
+            out["aura"] = self.aura.to_dict()
         if self.car is not None:
             out["car"] = self.car.to_dict()
         return out
@@ -570,6 +594,8 @@ class NyxBrain:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:
                 self.ground.load_dict(d["ground"])
+            if d.get("aura") and self.aura is not None:
+                self.aura.load_dict(d["aura"])
             if d.get("car") and self.car is not None:
                 self.car.load_dict(d["car"])
             self.turns = int(d.get("turns", 0))

@@ -55,6 +55,10 @@ def concepts_in(text: str, *, cap: int = 32) -> List[str]:
         for tok in _TOKEN_RE.findall((text or "").lower()):
             if len(tok) < 2 or tok in _STOP or tok in seen:
                 continue
+            # A bare number is a measurement, not a concept. Without this, ambient telemetry
+            # ("host mem rose to 0.0906") mints a fresh node for every decimal it ever sees.
+            if tok.isdigit():
+                continue
             seen.add(tok)
             out.append(tok)
             if len(out) >= cap:

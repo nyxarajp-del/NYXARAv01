@@ -2424,6 +2424,18 @@ class NyxConfig(BaseModel):
     will_may_decline: bool = True                                 # her values get a say
     will_record: bool = True                                      # required for replay
 
+    # L-AURA — the world arriving without being asked for. Registered streams push in and the
+    # *surprising* part becomes part of her, with no search query. Nothing is registered by
+    # default and nothing touches the network unless you add it; host sensors need neither.
+    # Ambient content is untrusted by construction: every event is scanned for prompt injection
+    # and a flagged one is quarantined — recorded, never learned from, never an instruction.
+    aura_enabled: bool = True
+    aura_host_sensors: bool = True               # her own machine; no network, no config
+    aura_max_events_per_min: int = Field(default=60, ge=0)   # a stream is unbounded; a mind is not
+    aura_surprise_gate: float = Field(default=0.5, ge=0.0, le=1.0)
+    aura_scan: bool = True                       # never disable outside a hermetic test
+    aura_max_text: int = Field(default=2000, ge=64)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

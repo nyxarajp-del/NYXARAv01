@@ -36,6 +36,7 @@ config-gated: a failure degrades to a null result, never a broken turn.
 
 from __future__ import annotations
 
+from nyxara.nyx.aura import AwarenessField, Event, Sensed, Stream
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
@@ -93,6 +94,8 @@ __all__ = [
     "TemporalCausalMatrix", "Futures", "Future",
     # L-PSYCHE-QUANTUM — choosing from her own preferences with physical entropy
     "SovereignWill", "EntropySource", "Choice",
+    # L-AURA — the world arriving without being asked for
+    "AwarenessField", "Stream", "Event", "Sensed",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]
