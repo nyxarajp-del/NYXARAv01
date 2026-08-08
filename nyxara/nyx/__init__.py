@@ -64,6 +64,7 @@ from nyxara.nyx.modules import (
     GraphSpecialist,
     MemorySpecialist,
     Proposal,
+    ReasonSpecialist,
     Situation,
     SkillSpecialist,
     SpecialistModule,
@@ -72,6 +73,7 @@ from nyxara.nyx.modules import (
 from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
 from nyxara.nyx.omni import Forged, Kernel, MetamorphicCompiler
 from nyxara.nyx.reasoner import NyxReasoner
+from nyxara.nyx.reason import Chain, OpenDomainReasoner, Step
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
@@ -86,7 +88,7 @@ __all__ = [
     # pillar 3 — the specialists, the conscious bottleneck, and measured self-trust
     "SpecialistModule", "Proposal", "Situation", "default_specialists",
     "MemorySpecialist", "GraphSpecialist", "DerivationSpecialist",
-    "CreativeSpecialist", "EthicsSpecialist", "SkillSpecialist",
+    "CreativeSpecialist", "EthicsSpecialist", "SkillSpecialist", "ReasonSpecialist",
     "NyxWorkspace", "Deliberation",
     "RecursiveMetaCognition", "Reliability", "Assessment",
     # pillar 4 — candidates held together, collapsed only when a decision is needed
@@ -123,6 +125,8 @@ __all__ = [
     "InContextLearner", "Demonstration", "Learned",
     # NYX V.02 — what was actually asked for, and what she has to ask back
     "IntentReader", "Intent", "Reading",
+    # NYX V.02 — a seat for every domain, each answer carrying the tier it came from
+    "OpenDomainReasoner", "Chain", "Step",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

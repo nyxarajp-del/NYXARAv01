@@ -2353,7 +2353,7 @@ class NyxConfig(BaseModel):
     # unavailable one (missing optional dep) reports itself rather than faking competence.
     specialists: List[str] = Field(
         default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics",
-                                 "skill"])
+                                 "skill", "reason"])
 
     # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
     metacog_enabled: bool = True
@@ -2559,6 +2559,20 @@ class NyxConfig(BaseModel):
     intent_min_reading_gap: float = Field(default=0.15, ge=0.0, le=1.0)  # below ⇒ still live
     intent_max_open_questions: int = Field(default=3, ge=0, le=16)
     intent_drives_dialogue: bool = True          # ambiguity becomes a clarifying question
+
+    # Open-domain reasoning (nyxara/nyx/reason.py). V.01 could derive from first principles in
+    # exactly four domains; outside them `derive()` returned None and the turn produced
+    # *silence* — not "I am not sure", nothing. This is not a new engine: it is a seat, a
+    # cascade over engines this repo already has, arranged strongest-evidence-first, where
+    # every answer carries the tier it came from.
+    #
+    # verifiable=True only for an exact chain, a symbolically certified derivation, or an
+    # induced rule that predicted a demonstration held out of its own induction. Everything
+    # else is a labelled plausible chain with its steps exposed, and the label never drops.
+    reason_enabled: bool = True
+    reason_min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
+    reason_use_generalization: bool = True       # the induced/mapped/modelled/composed tiers
+    reason_use_associative: bool = True          # the floor: her own graph, labelled as such
 
 
 class HyperbolicManifoldConfig(BaseModel):

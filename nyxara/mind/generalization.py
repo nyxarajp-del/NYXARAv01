@@ -65,13 +65,28 @@ _QUERY = re.compile(
     re.IGNORECASE)
 # Fragment boundaries: commas, semicolons, newlines, and sentence periods (not decimals).
 _SPLIT = re.compile(r"[,;\n]|(?<!\d)\.(?!\d)")
+# When the demonstrations are already one per line, a comma is *inside* a value, not between
+# fragments. Splitting on it turned "john smith -> Smith, John" into a demo mapping to "Smith",
+# which is how a perfectly ordinary field-permutation task became unlearnable.
+_SPLIT_LINES = re.compile(r"[;\n]")
+# A demonstration whose answer is missing is the *query*, not a demonstration. Without this the
+# probe row lands in the demo list, `query` stays None, and skill induction is never reached at
+# all — which is exactly what "apple -> APPLE!, mango -> MANGO!, car -> ?" measured as.
+_PROBE_MARKS = frozenset({"?", "??", "???", "___", "…", "...", "_", "-"})
 _ARROW_PAIR = re.compile(r"^(?P<l>.+?)\s*" + _ARROW + r"\s*(?P<r>.+?)$")
 _COLON_PAIR = re.compile(r"^(?P<l>[^:]+?)\s*:\s*(?P<r>[^:]+?)$")
 _NUM = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)$")
 
 
 def _fragments(text: str) -> List[str]:
-    return [f.strip() for f in _SPLIT.split(text or "") if f and f.strip()]
+    """Split a prompt into candidate demonstration fragments.
+
+    Line structure wins when it exists: a prompt written one demonstration per line has already
+    said where its boundaries are, and a comma inside such a line belongs to the *value*.
+    """
+    raw = text or ""
+    splitter = _SPLIT_LINES if "\n" in raw else _SPLIT
+    return [f.strip() for f in splitter.split(raw) if f and f.strip()]
 
 
 def _strip_quotes(s: str) -> str:
@@ -114,7 +129,10 @@ def parse_demos(prompt: str) -> Tuple[List[Tuple[str, str]], Optional[str]]:
             right = _strip_quotes(am.group("r"))
             # a right side that is itself a query marker means this was "... . now: x"
             if left and right and not re.search(_ARROW, right):
-                demos.append((left, right))
+                if right.strip() in _PROBE_MARKS:
+                    query = left          # "car -> ?" asks the question, it does not answer one
+                else:
+                    demos.append((left, right))
                 continue
         # not an arrow demo — is it the query?
         q = _looks_query_marker(frag)
@@ -365,6 +383,17 @@ class GeneralizationEngine:
         projects a genuinely new inference, so the normal path still runs."""
         if not self.use_domain_genesis:
             return None
+        # A demonstration block is not an alien field. Measured: on
+        # "john smith -> Smith, John / mary jones -> Jones, Mary / jon doe -> ?" genesis read
+        # "jon" as a *relation* and answered with a from-scratch theory of a domain that does
+        # not exist. Demonstrations mean the task is induction; if induction declined, the
+        # honest answer is that she could not learn the rule, not a theory about "jon".
+        try:
+            demos, _query = parse_demos(prompt)
+            if len(demos) >= self.min_demos:
+                return None
+        except Exception:  # noqa: BLE001 — an unparseable prompt is simply not a demo block
+            pass
         eng = self._ensure_domain_genesis()
         if eng is None:
             return None

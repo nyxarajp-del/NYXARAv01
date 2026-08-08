@@ -450,6 +450,7 @@ _NYX_HELP = """\
 /nyx teach <a> <b>         tell her two words are the same thing (the relational rung)
 /nyx skills                procedures she induced from demonstrations, and whether they transfer
 /nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
+/nyx reason <question>     work down the tiers — and see which one answered, and its label
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -568,6 +569,15 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "reason":
+        reasoner = getattr(brain, "reason", None)
+        if reasoner is None:
+            print("open-domain reasoning is off (NYXARA_NYX__REASON_ENABLED=false) — "
+                  "outside four domains she is silent again.")
+        elif not rest:
+            print(json.dumps(reasoner.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            print(reasoner.solve(rest.strip("\"'")).render())
     elif sub == "intent":
         reader = getattr(brain, "intent", None)
         if reader is None:

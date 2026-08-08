@@ -43,9 +43,11 @@ from nyxara.nyx.modules import (
     GraphSpecialist,
     MemorySpecialist,
     Proposal,
+    ReasonSpecialist,
     Situation,
     SkillSpecialist,
 )
+from nyxara.nyx.reason import Chain, OpenDomainReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import SemanticSpace
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
@@ -124,6 +126,7 @@ _SPECIALISTS = {
     "creative": CreativeSpecialist,
     "ethics": EthicsSpecialist,
     "skill": SkillSpecialist,
+    "reason": ReasonSpecialist,
 }
 
 
@@ -243,6 +246,7 @@ class NyxBrain:
         self._wire_semantics(c)
         self.intent = self._build_intent(c)
         self.icl = self._build_icl(c)
+        self.reason = self._build_reason(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
@@ -272,6 +276,17 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_reason(self, c: Any) -> Optional[OpenDomainReasoner]:
+        if not getattr(c, "reason_enabled", True):
+            return None
+        try:
+            return OpenDomainReasoner(
+                self, min_confidence=getattr(c, "reason_min_confidence", 0.3),
+                use_generalization=getattr(c, "reason_use_generalization", True),
+                use_associative=getattr(c, "reason_use_associative", True))
+        except Exception:  # noqa: BLE001 — without it, outside four domains she is silent again
             return None
 
     def _build_intent(self, c: Any) -> Optional[IntentReader]:
@@ -887,6 +902,18 @@ class NyxBrain:
         return Deliberation(winner=proposal, proposals=[proposal],
                             salience=float(induced.confidence), coalition=["skill"])
 
+    def reason_about(self, question: str) -> Optional[Chain]:
+        """Work down the reasoning tiers and return the chain, with its honest label.
+
+        Outside the four checkable domains this is a *plausible* chain, not a derivation, and
+        :meth:`~nyxara.nyx.reason.Chain.label` says so on every answer. That is the thing V.01
+        could not do: it had no tier below "derived", so it produced silence instead.
+        """
+        try:
+            return self.reason.solve(question) if self.reason is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def intent_of(self, text: str) -> Optional[Intent]:
         """What was actually asked for: mood, actions, ordering, negation, what is unclear.
 
@@ -967,6 +994,8 @@ class NyxBrain:
                 out["semantics"] = self.semantics.stats()
             if self.intent is not None:
                 out["intent"] = self.intent.stats()
+            if self.reason is not None:
+                out["reason"] = self.reason.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:

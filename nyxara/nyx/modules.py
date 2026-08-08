@@ -35,6 +35,7 @@ __all__ = [
     "CreativeSpecialist",
     "EthicsSpecialist",
     "SkillSpecialist",
+    "ReasonSpecialist",
     "default_specialists",
 ]
 
@@ -437,6 +438,43 @@ class SkillSpecialist(SpecialistModule):
                        "a procedure induced from demonstrations (fit, not yet transfer-tested)"))
 
 
+# --------------------------------------------------------------------------- #
+# Reason — a seat for every domain, not just the four checkable ones (NYX V.02)
+# --------------------------------------------------------------------------- #
+class ReasonSpecialist(SpecialistModule):
+    """Bids with :class:`~nyxara.nyx.reason.OpenDomainReasoner`'s best tier for this turn.
+
+    Distinct from :class:`DerivationSpecialist`, which bids **only** where a first-principles
+    derivation exists — the four checkable domains. This one covers everything past them, and
+    pays for that reach by carrying the tier and the label on every bid: ``verifiable`` is set
+    only when a step was genuinely checked, so a mapped or modelled answer never outranks a
+    derived one just for being fluent.
+    """
+
+    name = "reason"
+    tags = frozenset({"reasoning", "open-domain"})
+    priority = 0.6
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        reasoner = getattr(situation.brain, "reason", None)
+        if reasoner is None:
+            return None
+        chain = reasoner.solve(situation.stimulus)
+        if chain is None or not chain.answered:
+            return None
+        if chain.tier == "associative":
+            # :class:`GraphSpecialist` already holds that seat, on the same graph. Bidding the
+            # associative tier here too would put one piece of evidence on the stage twice and
+            # let mere association out-vote a recall by weight of numbers.
+            return None
+        return Proposal(
+            source=self.name, content=chain.answer,
+            confidence=_clamp01(chain.confidence), verifiable=bool(chain.verifiable),
+            novelty=0.5, urgency=0.1, tags=self.tags,
+            evidence=[s.text for s in chain.steps[:6]],
+            rationale=f"{chain.tier} tier — {chain.why}")
+
+
 def default_specialists(brain: Any = None) -> List[SpecialistModule]:
     """The standard cast. ``brain`` is unused here but kept so callers read symmetrically."""
     return [
@@ -446,4 +484,5 @@ def default_specialists(brain: Any = None) -> List[SpecialistModule]:
         CreativeSpecialist(),
         EthicsSpecialist(),
         SkillSpecialist(),
+        ReasonSpecialist(),
     ]
