@@ -451,6 +451,7 @@ _NYX_HELP = """\
 /nyx skills                procedures she induced from demonstrations, and whether they transfer
 /nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
 /nyx reason <question>     work down the tiers — and see which one answered, and its label
+/nyx hands                 the toolset she can see, and her measured record with each
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -569,6 +570,19 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "hands":
+        hands = getattr(brain, "hands", None)
+        if hands is None:
+            print("tool agency is off (NYXARA_NYX__HANDS_ENABLED=false).")
+        else:
+            print(hands.describe())
+            print()
+            stats = hands.stats()
+            print(json.dumps({k: v for k, v in stats.items() if k != "record"},
+                             indent=2, default=str))
+            if stats.get("record"):
+                print("track record:")
+                print(json.dumps(stats["record"], indent=2, default=str))
     elif sub == "reason":
         reasoner = getattr(brain, "reason", None)
         if reasoner is None:

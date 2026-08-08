@@ -51,6 +51,7 @@ from nyxara.nyx.graph import (
     concepts_in,
 )
 from nyxara.nyx.ground import Grounded, Understanding, WorldGrounding
+from nyxara.nyx.hands import Hands, Reach, ToolRecord
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verdict, Verification
 from nyxara.nyx.icl import Demonstration, InContextLearner, Learned
@@ -127,6 +128,8 @@ __all__ = [
     "IntentReader", "Intent", "Reading",
     # NYX V.02 — a seat for every domain, each answer carrying the tier it came from
     "OpenDomainReasoner", "Chain", "Step",
+    # NYX V.02 — sight of the toolset she was always allowed to use
+    "Hands", "Reach", "ToolRecord",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

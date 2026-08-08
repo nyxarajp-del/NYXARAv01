@@ -27,6 +27,7 @@ from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.episteme import AutonomousDiscovery
 from nyxara.nyx.eternal import Continuity
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
+from nyxara.nyx.hands import Hands, Reach
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
@@ -247,6 +248,7 @@ class NyxBrain:
         self.intent = self._build_intent(c)
         self.icl = self._build_icl(c)
         self.reason = self._build_reason(c)
+        self.hands = self._build_hands(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
@@ -262,6 +264,9 @@ class NyxBrain:
         self.omni = self._build_omni(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
+        self.tools: Any = None
+        self.knowledge: Any = None
+        self.core: Any = None
         self.turns = 0
         self._last_investigation = 0.0
         self._last_forge = 0.0
@@ -276,6 +281,17 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_hands(self, c: Any) -> Optional[Hands]:
+        if not getattr(c, "hands_enabled", True):
+            return None
+        try:
+            return Hands(self, registry=getattr(self, "tools", None),
+                         min_score=getattr(c, "hands_min_score", 0.5),
+                         max_per_beat=getattr(c, "hands_max_per_beat", 1),
+                         autonomous=getattr(c, "hands_autonomous", True))
+        except Exception:  # noqa: BLE001 — without it her brain is blind to tools, as in V.01
             return None
 
     def _build_reason(self, c: Any) -> Optional[OpenDomainReasoner]:
@@ -902,6 +918,40 @@ class NyxBrain:
         return Deliberation(winner=proposal, proposals=[proposal],
                             salience=float(induced.confidence), coalition=["skill"])
 
+    def attach_kernel(self, *, tools: Any = None, knowledge: Any = None,
+                      core: Any = None) -> None:
+        """Give her the live toolset and knowledge base the kernel holds.
+
+        Called once by :class:`~nyxara.kernel.orchestrator.NyxaraCore` after construction. Until
+        this happens her brain is *blind* to tools — which is exactly the V.01 state, and is a
+        wiring gap, never a permission one: the tools were always registered and always allowed.
+        """
+        try:
+            self.tools = tools
+            self.knowledge = knowledge
+            self.core = core
+            if self.hands is not None and tools is not None:
+                self.hands._registry = tools
+                self.hands._tried_router = False
+        except Exception:  # noqa: BLE001
+            return
+
+    def act(self, request: str, *, tool: str = "", args: Optional[Dict[str, Any]] = None,
+            oversight: Any = None, dry_run: bool = False) -> Optional[Reach]:
+        """Reach for a tool, through the registry's unchanged pipeline. Never around it.
+
+        Judges first whether the turn wants a tool at all — a question of fact does not — and
+        stops dead when oversight has paused or scrammed her.
+        """
+        try:
+            if self.hands is None:
+                return None
+            return self.hands.reach(request, tool=tool, args=args,
+                                    intent=self.intent_of(request),
+                                    oversight=oversight, dry_run=dry_run)
+        except Exception:  # noqa: BLE001
+            return None
+
     def reason_about(self, question: str) -> Optional[Chain]:
         """Work down the reasoning tiers and return the chain, with its honest label.
 
@@ -996,6 +1046,8 @@ class NyxBrain:
                 out["intent"] = self.intent.stats()
             if self.reason is not None:
                 out["reason"] = self.reason.stats()
+            if self.hands is not None:
+                out["hands"] = self.hands.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1038,6 +1090,8 @@ class NyxBrain:
             out["semantics"] = self.semantics.to_dict()
         if self.icl is not None:
             out["icl"] = self.icl.to_dict()
+        if self.hands is not None:
+            out["hands"] = self.hands.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1068,6 +1122,8 @@ class NyxBrain:
                 self.semantics.load_dict(d["semantics"])
             if d.get("icl") and self.icl is not None:
                 self.icl.load_dict(d["icl"])
+            if d.get("hands") and self.hands is not None:
+                self.hands.load_dict(d["hands"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

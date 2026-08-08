@@ -2574,6 +2574,20 @@ class NyxConfig(BaseModel):
     reason_use_generalization: bool = True       # the induced/mapped/modelled/composed tiers
     reason_use_associative: bool = True          # the floor: her own graph, labelled as such
 
+    # Tool agency (nyxara/nyx/hands.py). NOTHING HERE LOOSENS ANYTHING. NYXARA already ships
+    # full operational control on by default — shell, code execution, file write and delete,
+    # self-modify, package install, autonomous internet — without escalating each action. What
+    # was measurably missing was *sight*: NyxBrain was never handed `core.tools`, and
+    # NyxReasoner deliberately never set tool/tool_args (reasoner.py:14). Both were pure wiring.
+    #
+    # Execution goes through the registry's unchanged, fail-closed capability/risk pipeline.
+    # /scram and oversight are untouched and remain the way to stop her.
+    hands_enabled: bool = True
+    hands_autonomous: bool = True                # reach without asking, as the repo already does
+    hands_min_score: float = Field(default=0.5, ge=0.0, le=1.0)   # router fit floor
+    hands_max_per_beat: int = Field(default=1, ge=0, le=8)        # budgeted reaches per beat
+    reasoner_may_propose_tools: bool = True      # the seat may FILL an empty tool field
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

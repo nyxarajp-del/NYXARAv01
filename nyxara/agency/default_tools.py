@@ -1455,6 +1455,16 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                               ToolParam("timeout_s", "float", required=False, default=5.0)],
                       capability=Capability.PROC_EXEC, risk=RiskTier.HIGH, reversible=False))
 
+    # ---- git as a typed faculty (NYX V.02) ---- #
+    # git was already reachable through `run_shell`, and still is. This adds the *typed* route:
+    # structured arguments, an argv list with shell=False, refs that cannot become options,
+    # and one audited decision per call instead of a shell transcript to reconstruct.
+    try:
+        from nyxara.agency.git_tool import build_git_tools
+        build_git_tools(registry)
+    except Exception:  # noqa: BLE001 — no git on this machine is a missing tool, not a crash
+        pass
+
     return registry
 
 
