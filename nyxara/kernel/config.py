@@ -2412,6 +2412,18 @@ class NyxConfig(BaseModel):
     chronos_risk_aversion: float = Field(default=0.5, ge=0.0, le=5.0)
     chronos_min_coverage: int = Field(default=8, ge=1)
 
+    # L-PSYCHE-QUANTUM — she *chooses* rather than computing the maximum. The entropy is
+    # physical (OS CSPRNG, or /dev/hwrng or a configured QRNG when present) and the source is
+    # named in every choice. Not quantum computation and not metaphysical free will: what is
+    # real is that the outcome is not a function of the state alone. It applies only where the
+    # decision is genuinely open — truth is not a preference — and every choice still passes
+    # the unchanged sovereign gate. Draws are recorded so replay stays bit-exact.
+    will_enabled: bool = True
+    entropy_source: Literal["auto", "urandom", "hwrng", "qrng", "seeded"] = "auto"
+    will_temperature: float = Field(default=0.6, ge=0.0, le=5.0)  # 0 == a deterministic mind
+    will_may_decline: bool = True                                 # her values get a say
+    will_record: bool = True                                      # required for replay
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

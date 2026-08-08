@@ -65,6 +65,7 @@ from nyxara.nyx.modules import (
 from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
+from nyxara.nyx.will import Choice, EntropySource, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 __all__ = [
@@ -90,6 +91,8 @@ __all__ = [
     "NyxSelfModel", "SelfReport",
     # L-CHRONOS — deciding by simulating how each option turns out
     "TemporalCausalMatrix", "Futures", "Future",
+    # L-PSYCHE-QUANTUM — choosing from her own preferences with physical entropy
+    "SovereignWill", "EntropySource", "Choice",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

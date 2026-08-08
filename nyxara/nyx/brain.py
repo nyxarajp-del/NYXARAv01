@@ -38,6 +38,7 @@ from nyxara.nyx.modules import (
 )
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
+from nyxara.nyx.will import Choice, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
@@ -107,6 +108,7 @@ class NyxThought:
     deliberation: Optional[Deliberation] = None
     collapsed: Optional[Collapsed] = None
     futures: Optional[Futures] = None
+    choice: Optional[Choice] = None
     verification: Optional[Verification] = None
     assessment: Any = None                       # nyx.metacog.Assessment
     cycle_id: str = ""
@@ -153,6 +155,7 @@ class NyxThought:
                                  if self.deliberation is not None else None),
                 "collapsed": self.collapsed.to_dict() if self.collapsed is not None else None,
                 "futures": self.futures.to_dict() if self.futures is not None else None,
+                "choice": self.choice.to_dict() if self.choice is not None else None,
                 "verification": (self.verification.to_dict()
                                  if self.verification is not None else None),
                 "assessment": (self.assessment.to_dict()
@@ -180,6 +183,7 @@ class NyxBrain:
         self.ground = self._build_ground(c)
         self.dialogue = self._build_dialogue(c)
         self.chronos = self._build_chronos(c)
+        self.will = self._build_will(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.turns = 0
@@ -244,6 +248,20 @@ class NyxBrain:
             return Dialogue(require_fluent_surface=getattr(c, "require_fluent_surface", True),
                             soul=soul, max_tokens=getattr(c, "reply_max_tokens", 220))
         except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _build_will(c: Any) -> Optional[SovereignWill]:
+        if not getattr(c, "will_enabled", True):
+            return None
+        try:
+            from nyxara.nyx.will import EntropySource
+            return SovereignWill(
+                entropy=EntropySource(prefer=getattr(c, "entropy_source", "auto")),
+                temperature=getattr(c, "will_temperature", 0.6),
+                may_decline=getattr(c, "will_may_decline", True),
+                record=getattr(c, "will_record", True))
+        except Exception:  # noqa: BLE001 — without it she computes the maximum, as code does
             return None
 
     @staticmethod
@@ -356,6 +374,19 @@ class NyxBrain:
                     if evidence:
                         state.observe(evidence)
                 out.collapsed = state.collapse()
+
+                # L-PSYCHE-QUANTUM: where the decision is genuinely open — several answers
+                # still live — she *chooses* rather than taking the maximum, sampling from her
+                # own preferences with physically-sourced entropy. Deliberately not applied to
+                # a settled or verified answer: truth is not a preference, and a whim must not
+                # displace something she checked.
+                if self.will is not None and not out.collapsed.decided and not out.verified:
+                    out.choice = self.will.choose(out.deliberation.proposals)
+                    if out.choice.picked and out.choice.picked != out.deliberation.winner.source:
+                        chosen = next((p for p in out.deliberation.proposals
+                                       if p.source == out.choice.picked), None)
+                        if chosen is not None:
+                            out.deliberation.winner = chosen
 
             if self.metacog is not None and out.deliberation is not None:
                 out.assessment = self.metacog.observe_cycle(
@@ -507,6 +538,8 @@ class NyxBrain:
                 out["dialogue"] = self.dialogue.stats()
             if self.chronos is not None:
                 out["chronos"] = self.chronos.stats()
+            if self.will is not None:
+                out["will"] = self.will.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
