@@ -37,6 +37,7 @@ config-gated: a failure degrades to a null result, never a broken turn.
 from __future__ import annotations
 
 from nyxara.nyx.aura import AwarenessField, Event, Sensed, Stream
+from nyxara.nyx.author import Author, Authored, Stage
 from nyxara.nyx.brain import NyxBrain, NyxPercept, NyxThought
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
@@ -130,6 +131,8 @@ __all__ = [
     "OpenDomainReasoner", "Chain", "Step",
     # NYX V.02 — sight of the toolset she was always allowed to use
     "Hands", "Reach", "ToolRecord",
+    # NYX V.02 — prose in, verified code out, or a refusal that names itself
+    "Author", "Authored", "Stage",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

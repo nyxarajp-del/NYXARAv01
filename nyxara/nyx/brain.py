@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from nyxara.nyx.aura import AwarenessField
+from nyxara.nyx.author import Author, Authored
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply
@@ -249,6 +250,7 @@ class NyxBrain:
         self.icl = self._build_icl(c)
         self.reason = self._build_reason(c)
         self.hands = self._build_hands(c)
+        self.author = self._build_author(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
@@ -281,6 +283,18 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_author(self, c: Any) -> Optional[Author]:
+        if not getattr(c, "author_enabled", True):
+            return None
+        try:
+            return Author(self,
+                          sandbox_timeout_s=getattr(c, "author_sandbox_timeout_s", 5.0),
+                          load=getattr(c, "author_load", True),
+                          lineage=getattr(c, "author_lineage", True),
+                          max_source_bytes=getattr(c, "author_max_source_bytes", 20_000))
+        except Exception:  # noqa: BLE001 — without it she can only lower code, never write it
             return None
 
     def _build_hands(self, c: Any) -> Optional[Hands]:
@@ -936,6 +950,21 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return
 
+    def author_code(self, spec: str, *, name: str = "", load: Optional[bool] = None,
+                    oversight: Any = None) -> Optional[Authored]:
+        """Write code from a spec, through the full gauntlet — or refuse and name why.
+
+        L-OMNI lowers functions she has already measured as slow; this writes ones that did
+        not exist. Bounded by what the synthesiser can *derive*: outside those families the
+        result carries a refusal naming what was not derived, never a plausible-looking file.
+        """
+        try:
+            if self.author is None:
+                return None
+            return self.author.write(spec, name=name, load=load, oversight=oversight)
+        except Exception:  # noqa: BLE001
+            return None
+
     def act(self, request: str, *, tool: str = "", args: Optional[Dict[str, Any]] = None,
             oversight: Any = None, dry_run: bool = False) -> Optional[Reach]:
         """Reach for a tool, through the registry's unchanged pipeline. Never around it.
@@ -1048,6 +1077,8 @@ class NyxBrain:
                 out["reason"] = self.reason.stats()
             if self.hands is not None:
                 out["hands"] = self.hands.stats()
+            if self.author is not None:
+                out["author"] = self.author.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1092,6 +1123,8 @@ class NyxBrain:
             out["icl"] = self.icl.to_dict()
         if self.hands is not None:
             out["hands"] = self.hands.to_dict()
+        if self.author is not None:
+            out["author"] = self.author.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1124,6 +1157,8 @@ class NyxBrain:
                 self.icl.load_dict(d["icl"])
             if d.get("hands") and self.hands is not None:
                 self.hands.load_dict(d["hands"])
+            if d.get("author") and self.author is not None:
+                self.author.load_dict(d["author"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

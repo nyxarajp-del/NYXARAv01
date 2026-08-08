@@ -2588,6 +2588,21 @@ class NyxConfig(BaseModel):
     hands_max_per_beat: int = Field(default=1, ge=0, le=8)        # budgeted reaches per beat
     reasoner_may_propose_tools: bool = True      # the seat may FILL an empty tool field
 
+    # Writing code from a spec (nyxara/nyx/author.py). L-OMNI already rewrites functions she
+    # has ALREADY MEASURED as slow — it lowers what exists and cannot write what does not.
+    # This is the other direction: prose → synthesise → screen → sandbox → check the answer
+    # against an independently computed one → integrity gauntlet → load → signed lineage.
+    #
+    # The synthesiser is deterministic and BOUNDED (arithmetic, number theory, closed-form
+    # sequences, list and string operations). Outside those families she refuses and names
+    # what she could not derive. Writing a whole subsystem from prose is what a large
+    # pretrained model does; none ships here, and a plausible-looking file is worse than a no.
+    author_enabled: bool = True
+    author_sandbox_timeout_s: float = Field(default=5.0, gt=0.0, le=120.0)
+    author_load: bool = True                     # import into nyxara/growth/_forged/ on success
+    author_lineage: bool = True                  # a signed, revertible ledger entry
+    author_max_source_bytes: int = Field(default=20_000, ge=256)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

@@ -452,6 +452,7 @@ _NYX_HELP = """\
 /nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
 /nyx reason <question>     work down the tiers — and see which one answered, and its label
 /nyx hands                 the toolset she can see, and her measured record with each
+/nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -570,6 +571,21 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             print(brain.semantics.describe(words[0], words[1]))
         else:
             print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "author":
+        author = getattr(brain, "author", None)
+        if author is None:
+            print("code authoring is off (NYXARA_NYX__AUTHOR_ENABLED=false).")
+        elif not rest:
+            print(author.describe())
+            print()
+            print(json.dumps(author.stats(), indent=2, default=str))
+        else:
+            got = brain.author_code(rest.strip("\"'"),
+                                    oversight=getattr(core, "oversight", None))
+            print(got.render() if got is not None else "authoring is unavailable.")
+            if got is not None and got.ok and got.source:
+                print("\n--- what she wrote ---")
+                print(got.source)
     elif sub == "hands":
         hands = getattr(brain, "hands", None)
         if hands is None:
