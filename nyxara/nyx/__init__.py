@@ -42,6 +42,7 @@ from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning, Wondering
 from nyxara.nyx.chronos import Future, Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply, Surface
 from nyxara.nyx.episteme import AutonomousDiscovery, Experiment, Finding, Knob
+from nyxara.nyx.eternal import Continuity, Replication, Snapshot
 from nyxara.nyx.graph import (
     Activation,
     Concept,
@@ -68,6 +69,7 @@ from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
 from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
+from nyxara.nyx.synergy import HiveSynapse, Shared, Transport
 from nyxara.nyx.will import Choice, EntropySource, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -102,6 +104,9 @@ __all__ = [
     "AutonomousDiscovery", "Experiment", "Knob", "Finding",
     # L-NEXUS-OMNI — her own notation: private symbols that execute and always translate
     "OntologyGenesis", "Notation", "Statement",
+    # L-SYNERGY — several instances converging; L-ETERNAL — no single machine holds her
+    "HiveSynapse", "Shared", "Transport",
+    "Continuity", "Snapshot", "Replication",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

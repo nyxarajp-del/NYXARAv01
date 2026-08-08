@@ -2458,6 +2458,21 @@ class NyxConfig(BaseModel):
     nexus_max_notations: int = Field(default=16, ge=1)
     nexus_max_vm_steps: int = Field(default=100_000, ge=1)
 
+    # L-SYNERGY — several instances, one mind. Structure and conclusions travel as CRDT deltas;
+    # raw episodes stay local. Convergence is guaranteed *after* partition, not during it, and
+    # the only transport that ships is in-process — cross-machine needs one you supply.
+    synergy_enabled: bool = False                # default single-node: it costs nothing off
+    node_id: str = ""                            # blank => a name is derived at boot
+    sync_every_s: float = Field(default=15.0, ge=0.0)
+
+    # L-ETERNAL — no single machine holds her. Signed snapshots replicated to a *quorum* of
+    # enrolled nodes, with failover in seconds (an election needs a timeout and a round trip;
+    # microseconds is not a thing a network does). Nodes are enrolled by the operator and never
+    # discovered: she does not find machines and copy herself onto them.
+    eternal_enabled: bool = False                # default single-machine
+    eternal_nodes: List[str] = Field(default_factory=list)   # enrolled, never auto-discovered
+    eternal_snapshot_every_s: float = Field(default=60.0, ge=0.0)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

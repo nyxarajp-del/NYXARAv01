@@ -450,6 +450,8 @@ _NYX_HELP = """\
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
 /nyx discover              run one investigation now: probe a sandbox, derive, check, promote
 /nyx nexus                 the notation she minted for herself — and its translation back
+/nyx hive                  other instances: what converged, and whether there is a wire at all
+/nyx eternal               durability: enrolled nodes, leader, signed snapshots
 """
 
 
@@ -511,6 +513,19 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub in ("hive", "eternal"):
+        part = getattr(brain, "synergy" if sub == "hive" else "eternal", None)
+        if part is None:
+            flag = "SYNERGY_ENABLED" if sub == "hive" else "ETERNAL_ENABLED"
+            print(f"this is a single {'node' if sub == 'hive' else 'machine'} "
+                  f"(NYXARA_NYX__{flag}=false).")
+        else:
+            stats = part.stats()
+            print(json.dumps(stats, indent=2, default=str))
+            if not stats.get("available"):
+                print("\nnot active: the logic is here, but no transport is attached. "
+                      "Only an in-process transport ships; cross-machine needs one you supply "
+                      "(see nyxara.nyx.synergy.Transport).")
     elif sub == "nexus":
         nexus = getattr(brain, "nexus", None)
         if nexus is None:

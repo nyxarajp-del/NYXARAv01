@@ -25,6 +25,7 @@ from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.episteme import AutonomousDiscovery
+from nyxara.nyx.eternal import Continuity
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
@@ -42,6 +43,7 @@ from nyxara.nyx.modules import (
 )
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
+from nyxara.nyx.synergy import HiveSynapse
 from nyxara.nyx.will import Choice, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
@@ -190,6 +192,8 @@ class NyxBrain:
         self.will = self._build_will(c)
         self.aura = self._build_aura(c)
         self.nexus = self._build_nexus(c)
+        self.synergy = self._build_synergy(c)
+        self.eternal = self._build_eternal(c)
         self.episteme = self._build_episteme(c)
         self.car = self._build_car(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
@@ -297,6 +301,25 @@ class NyxBrain:
                 field_.register_host_sensors()
             return field_
         except Exception:  # noqa: BLE001 — without it nothing arrives on its own
+            return None
+
+    def _build_synergy(self, c: Any) -> Optional[HiveSynapse]:
+        if not getattr(c, "synergy_enabled", False):
+            return None
+        try:
+            return HiveSynapse(self, node_id=getattr(c, "node_id", "") or "node",
+                               dim=c.holo_dim, seed=c.seed)
+        except Exception:  # noqa: BLE001 — without it she is simply one instance
+            return None
+
+    def _build_eternal(self, c: Any) -> Optional[Continuity]:
+        if not getattr(c, "eternal_enabled", False):
+            return None
+        try:
+            return Continuity(self, node_id=getattr(c, "node_id", "") or "node",
+                              nodes=list(getattr(c, "eternal_nodes", []) or []),
+                              snapshot_every_s=getattr(c, "eternal_snapshot_every_s", 60.0))
+        except Exception:  # noqa: BLE001
             return None
 
     @staticmethod
@@ -540,6 +563,10 @@ class NyxBrain:
             if self.aura is not None:
                 self.aura.beat(oversight=oversight)   # the world arrives on the same clock
             self._episteme_beat(oversight)
+            if self.synergy is not None:
+                self.synergy.beat(oversight=oversight)
+            if self.eternal is not None:
+                self.eternal.beat(oversight=oversight)
             if self.car is None:
                 return None
             if oversight is not None:
@@ -653,6 +680,10 @@ class NyxBrain:
                 out["episteme"] = self.episteme.stats()
             if self.nexus is not None:
                 out["nexus"] = self.nexus.stats()
+            if self.synergy is not None:
+                out["synergy"] = self.synergy.stats()
+            if self.eternal is not None:
+                out["eternal"] = self.eternal.stats()
             if self.car is not None:
                 out["car"] = self.car.stats()
             return out
