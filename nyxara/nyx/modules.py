@@ -112,7 +112,7 @@ class MemorySpecialist(SpecialistModule):
     floor = 0.05                     # below this the "recall" is crosstalk, not a memory
     # What she *knows* should outrank what merely *happened*: a fact or a settled conclusion is
     # better evidence than an episode, which is only a record of a past exchange.
-    kind_weight = {"fact": 1.0, "conclusion": 1.0, "percept": 0.9,
+    kind_weight = {"fact": 1.0, "conclusion": 1.0, "told": 0.95, "percept": 0.9,
                    "episode": 0.7, "conjecture": 0.5}
 
     def consider(self, situation: Situation) -> Optional[Proposal]:
@@ -166,6 +166,11 @@ class GraphSpecialist(SpecialistModule):
     # Associations are weaker evidence than something she actually recalls or can derive — they
     # say *that* two things go together, never *what* is true of them.
     priority = 0.3
+    # An edge weight is not a confidence. 0.55 means "these two keep turning up together",
+    # not "I am 55% sure this answers you" — and left unconverted it lets a well-worn
+    # co-occurrence out-shout a genuine recall. Associations are capped low on purpose: they
+    # can win when nothing else has anything, and never against something she actually knows.
+    ceiling = 0.3
 
     @staticmethod
     def _floor(brain: Any) -> float:
@@ -208,8 +213,12 @@ class GraphSpecialist(SpecialistModule):
         # remembered and said out loud, so it has to be something a person could read.
         return Proposal(
             source=self.name, content="; ".join(phrases[:4]),
-            confidence=_clamp01(strongest), verifiable=False,
-            novelty=_clamp01(situation.novelty), tags=self.tags,
+            confidence=min(self.ceiling, _clamp01(strongest)), verifiable=False,
+            # Associations are never news. This is structure she already had, read back out —
+            # so novelty is low and flat, like recall's. Reporting the *turn's* novelty here
+            # (or inverting the edge weight, which makes weak edges look like insights) let an
+            # ordinary co-occurrence out-shout a real memory on the novelty term alone.
+            novelty=0.1, tags=self.tags,
             evidence=situation.concepts[:4],
             rationale=f"{len(seen)} learned associations, strongest {strongest:.2f}")
 

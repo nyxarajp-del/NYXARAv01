@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import re
+
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.graph import Activation, DynamicNeuralGraph
@@ -39,6 +41,23 @@ from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
+
+# Being *told* something and being *asked* something are different events, and conflating them
+# is why a stored question can come back as its own answer. A question is not knowledge; a
+# statement the Master makes is.
+_QUESTION = re.compile(
+    r"^\s*(what|why|how|who|whom|whose|when|where|which|is|are|was|were|do|does|did|can|could|"
+    r"will|would|should|shall|may|might|have|has|had|am|tell me|explain)\b", re.I)
+
+
+def is_question(text: str) -> bool:
+    """Was this asked, rather than asserted? Deliberately simple and deterministic."""
+    try:
+        text = str(text or "").strip()
+        return bool(text) and (text.endswith("?") or _QUESTION.match(text) is not None)
+    except Exception:  # noqa: BLE001
+        return False
+
 
 # Every specialist NYX can seat, by the name used in ``NyxConfig.specialists``.
 _SPECIALISTS = {
@@ -266,8 +285,10 @@ class NyxBrain:
             rec = self.memory.recall(text, k=self.config.recall_k)
             out.recall = rec
             out.context = self.memory.context(text, k=self.config.recall_k)
-            if remember:
-                self.memory.remember(f"turn-{self.turns}", text, kind="episode")
+            # A question is not knowledge — storing it only makes it its own best match when
+            # asked again. A statement is something she was *told*, which is real evidence.
+            if remember and not is_question(text):
+                self.memory.remember(f"turn-{self.turns}", text, kind="told")
             return out
         except Exception:  # noqa: BLE001 — a perceive failure never breaks a turn
             return out

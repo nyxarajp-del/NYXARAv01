@@ -120,7 +120,13 @@ class NyxWorkspace:
                     goal_relevance=strength,
                     emotional_intensity=0.0,
                     source_priority=self._priority(proposal),
-                    tags=frozenset(proposal.tags))
+                    # The workspace's habituation and inhibition-of-return key off
+                    # ``source:tags``. With a *fixed cast* bidding every cycle that would
+                    # suppress whichever faculty was right last time, rotating the winner for
+                    # reasons unrelated to the question. Folding a fingerprint of the content
+                    # into the tags restores the mechanism's actual purpose: repeating the same
+                    # thing is damped, having something new to say is not penalised.
+                    tags=frozenset(proposal.tags) | {self._fingerprint(proposal.content)})
                 by_id[content.item_id] = proposal
                 self._gw.submit(content)
 
@@ -138,6 +144,16 @@ class NyxWorkspace:
             return self._apply_verifiable_law(out)
         except Exception:  # noqa: BLE001 — deliberation degrades, it does not crash
             return self._fallback(out)
+
+    @staticmethod
+    def _fingerprint(content: str) -> str:
+        """A short, stable tag for *what was said*, so habituation tracks content not faculty."""
+        try:
+            import hashlib
+            digest = hashlib.sha1(str(content or "").strip().lower().encode()).hexdigest()
+            return f"said:{digest[:12]}"
+        except Exception:  # noqa: BLE001
+            return "said:?"
 
     def _trust(self, source: str) -> float:
         """How much her *measured* record says this faculty is worth listening to (0.5 … 1.5)."""

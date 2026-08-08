@@ -144,3 +144,22 @@ def test_default_cast_is_wired_and_bids_on_a_real_question():
     # derivation needs sympy; without it the cast simply stays quieter — both are valid
     assert got.winner is None or got.winner.source in {
         "derivation", "graph", "memory", "creative", "ethics"}
+
+
+def test_a_faculty_is_not_suppressed_for_having_been_right_recently():
+    """IOR must damp repeating the same *content*, not whichever faculty last won.
+
+    With a fixed cast bidding every cycle, keying inhibition on ``source:tags`` rotated the
+    winner for reasons unrelated to the question — the same query answered worse the second
+    time. The content fingerprint restores the mechanism's actual purpose.
+    """
+    ws = NyxWorkspace(specialists=[_Fixed("strong", confidence=0.9, priority=0.7),
+                                   _Fixed("weak", confidence=0.3, priority=0.3)])
+    winners = [ws.deliberate(_sit()).winner.source for _ in range(6)]
+    assert winners.count("strong") >= 5
+
+
+def test_the_content_fingerprint_is_stable_for_the_same_text():
+    ws = NyxWorkspace(specialists=[])
+    assert ws._fingerprint("hello there") == ws._fingerprint("  Hello There  ")
+    assert ws._fingerprint("a") != ws._fingerprint("b")
