@@ -445,6 +445,11 @@ _NYX_HELP = """\
 /nyx why                   why the last thought went the way it did
 /nyx recall <cue>          content-addressed recall — no token window is consulted
 /nyx ground <word>         what she actually has behind a word (or that she has nothing)
+/nyx lingua [text]         her tongue: scripts and languages she has met — or read one turn
+/nyx semantics [a] [b]     meaning: nearest concepts, or one pair — with the rung and grade
+/nyx teach <a> <b>         tell her two words are the same thing (the relational rung)
+/nyx skills                procedures she induced from demonstrations, and whether they transfer
+/nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -516,6 +521,74 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub == "lingua":
+        lingua = getattr(brain, "lingua", None)
+        if lingua is None:
+            print("her tongue is off (NYXARA_NYX__LINGUA_ENABLED=false) — "
+                  "she reads ASCII only, as V.01 did.")
+        elif not rest:
+            print(json.dumps(lingua.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            read = lingua.read(rest)
+            print(f"language : {read.primary}"
+                  f"{'  (code-mixed)' if read.code_mixed else ''}"
+                  f"{'  (Hinglish)' if read.hinglish else ''}")
+            print(f"scripts  : {', '.join(f'{s}×{n}' for s, n in read.scripts.items()) or '—'}")
+            print(f"register : {', '.join(read.register.markers) or 'neutral'}"
+                  f"  (formality {read.register.formality:.2f})")
+            print(f"concepts : {', '.join(read.concepts) or '— nothing but grammar'}")
+            bridged = [f"{c} → {k}" for c, k in read.keys.items() if k and k != c]
+            if bridged:
+                print(f"bridge   : {'; '.join(bridged[:8])}")
+    elif sub == "semantics":
+        space = getattr(brain, "semantics", None)
+        if space is None:
+            print("her semantic space is off (NYXARA_NYX__SEMANTICS_ENABLED=false) — "
+                  "concepts are bare labels again, as in V.01.")
+        elif not rest:
+            print(json.dumps(space.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            words = rest.split()
+            if len(words) >= 2:
+                print(space.describe(words[0], words[1]))
+            else:
+                near = space.similar(words[0], k=8, candidates=list(brain.graph.nodes) or None)
+                if not near:
+                    print(f"nothing is near '{words[0]}' that I can justify. "
+                          f"That is ignorance, not a measurement of zero — "
+                          f"rungs available: {space.rungs_available()}")
+                for label, score, rung in near:
+                    print(f"  {label:24} {score:.3f}   [{rung}]")
+    elif sub == "teach":
+        words = rest.split()
+        if len(words) < 2:
+            print("usage: /nyx teach <word> <word>")
+        elif brain.teach_meaning(words[0], words[1]):
+            print(f"held: '{words[0]}' and '{words[1]}' are the same thing.")
+            print(brain.semantics.describe(words[0], words[1]))
+        else:
+            print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "intent":
+        reader = getattr(brain, "intent", None)
+        if reader is None:
+            print("intent reading is off (NYXARA_NYX__INTENT_ENABLED=false) — "
+                  "she is back to the opener regex.")
+        elif not rest:
+            print(json.dumps(reader.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            got = reader.read(rest.strip("\"'"))
+            print(reader.describe(got))
+            ask = got.clarifying_question()
+            if ask:
+                print(f"\nshe would ask: {ask}")
+    elif sub == "skills":
+        learner = getattr(brain, "icl", None)
+        if learner is None:
+            print("in-context learning is off (NYXARA_NYX__ICL_ENABLED=false).")
+        else:
+            print(learner.describe())
+            print()
+            print(json.dumps(learner.stats(), indent=2, default=str))
     elif sub in ("hive", "eternal"):
         part = getattr(brain, "synergy" if sub == "hive" else "eternal", None)
         if part is None:

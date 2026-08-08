@@ -2352,7 +2352,8 @@ class NyxConfig(BaseModel):
     # Specialists that may bid. Each is an adapter over a faculty NYXARA already has; an
     # unavailable one (missing optional dep) reports itself rather than faking competence.
     specialists: List[str] = Field(
-        default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics"])
+        default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics",
+                                 "skill"])
 
     # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
     metacog_enabled: bool = True
@@ -2492,6 +2493,72 @@ class NyxConfig(BaseModel):
     eternal_enabled: bool = False                # default single-machine
     eternal_nodes: List[str] = Field(default_factory=list)   # enrolled, never auto-discovered
     eternal_snapshot_every_s: float = Field(default=60.0, ge=0.0)
+
+    # ---- NYX V.02 ------------------------------------------------------------------- #
+    # The tongue (nyxara/nyx/lingua.py). V.01 read the world through `[a-z0-9]`, which made
+    # Devanagari literally invisible and let Hinglish grammar ("ka", "hai", "kya") become the
+    # hubs of the concept graph. This is a Unicode scanner with no favourite alphabet, plus
+    # function words in three registers, code-mixing detection, and a transliteration bridge.
+    # Language identification here is evidence-based — script membership and function words —
+    # because no lexicon and no pretrained model ship with this repo. A Latin content word
+    # carries no evidence of its language and is reported as inheriting the turn's, not as
+    # confidently labelled.
+    lingua_enabled: bool = True
+    lingua_max_tokens: int = Field(default=512, ge=8, le=8192)
+    lingua_min_concept_len: int = Field(default=2, ge=1, le=8)   # Latin floor; Devanagari is 1
+    lingua_transliterate: bool = True            # the "गुरुत्वाकर्षण" ↔ "gurutvakarshan" key
+    lingua_use_nlp: bool = True                  # consult senses/nlp as a last-resort guess
+
+    # Meaning as a vector (nyxara/nyx/semantics.py). The measured V.01 failure was blunt:
+    # cos("car","automobile") == 0.0 while cos("car","banana") == 0.27 — a random noun beat a
+    # synonym. This is a three-rung ladder (relational → distributional → subword) where every
+    # answer names its rung and carries a grade.
+    #
+    # NOTHING SHIPS: no lexicon file, no downloaded weights. That is deliberate, and its cost
+    # is stated rather than hidden — on day one "car" ≈ "automobile" is near zero, and she
+    # reports that as *not knowing* rather than as *unrelated*. The distributional rung is
+    # `memory.neural_embedder.SelfLearnedEmbedder` (real SGNS) trained on her own corpus.
+    semantics_enabled: bool = True
+    semantics_dim: int = Field(default=64, ge=8, le=512)          # SGNS latent width
+    semantics_min_count: int = Field(default=3, ge=1)             # reads before a word places
+    semantics_grade_floor: float = Field(default=0.25, ge=0.0, le=1.0)  # below ⇒ "I don't know"
+    semantics_train_budget_s: float = Field(default=0.5, gt=0.0)  # gradient descent is not a thought
+    semantics_train_every: int = Field(default=32, ge=1)          # texts between training passes
+    semantics_max_vocab: int = Field(default=8192, ge=64)
+    semantics_max_relations: int = Field(default=8192, ge=16)
+    # How much the space is allowed to shape the graph. Birth links are a *prior*: weak enough
+    # that one real co-activation outweighs the guess.
+    semantics_birth_links: int = Field(default=2, ge=0, le=16)
+    semantics_birth_weight: float = Field(default=0.1, ge=0.0, le=1.0)
+    semantics_synonym_bridge: float = Field(default=0.5, ge=0.0, le=1.0)  # spread crossing
+    semantics_merge_enabled: bool = True          # bounded node fusion, ledgered and reversible
+    semantics_merge_min_weight: float = Field(default=0.9, ge=0.0, le=1.0)
+    semantics_merge_per_beat: int = Field(default=1, ge=0, le=16)
+
+    # In-context learning (nyxara/nyx/icl.py). V.01's "learning" was a Hebbian weight and a
+    # memory write — both real, neither a new *procedure*. This reads demonstrations out of a
+    # turn ("apple -> APPLE!"), induces a program with cognition/skill_induction, answers the
+    # probe, and keeps the program across restarts. Program induction over a *finite* operation
+    # set: outside it she refuses and says so, rather than guessing a plausible pattern. No
+    # weight is updated anywhere — the learning is the program.
+    icl_enabled: bool = True
+    icl_min_demos: int = Field(default=2, ge=2, le=16)
+    icl_max_demos: int = Field(default=24, ge=2, le=256)
+    icl_remember: bool = True                    # second copy in holomem, so it outlives boot
+
+    # Intent (nyxara/nyx/intent.py). V.01 decided what kind of turn had arrived from a leading
+    # wh-word or a trailing "?" (brain.py:56). Measured, that read
+    # "mera code fix kar do lekin pehle test chala" as a *statement*, missing both the
+    # imperative and the ordering constraint — and the ordering is the half that decides
+    # whether an agent is safe to hand a tool to. This reads mood, actions, ordering, negation
+    # scope, constraints, conditions and scope, in English and Hinglish/Devanagari.
+    #
+    # Its most important behaviour is not answering: when two readings stay live it returns
+    # BOTH and dialogue asks which was meant, instead of picking one and acting.
+    intent_enabled: bool = True
+    intent_min_reading_gap: float = Field(default=0.15, ge=0.0, le=1.0)  # below ⇒ still live
+    intent_max_open_questions: int = Field(default=3, ge=0, le=16)
+    intent_drives_dialogue: bool = True          # ambiguity becomes a clarifying question
 
 
 class HyperbolicManifoldConfig(BaseModel):

@@ -83,11 +83,15 @@ class SymbolicSubsymbolicFusion:
     _NOT_EVIDENCE = frozenset({"episode", "conjecture"})
 
     def __init__(self, *, engine: Any = None, grounding: bool = True,
-                 min_grounding_overlap: float = 0.5) -> None:
+                 min_grounding_overlap: float = 0.5, semantics: Any = None) -> None:
         self._engine = engine
         self._tried = engine is not None
         self.grounding = bool(grounding)
         self.min_grounding_overlap = float(min_grounding_overlap)
+        # NYX V.02: with a semantic space attached, evidence that says "automobile" counts as
+        # covering a claim about a "car" — provided the space can *justify* the link. Without
+        # one this is exact word overlap, exactly as V.01 did it.
+        self.semantics = semantics
 
     def _get_engine(self) -> Any:
         if not self._tried:
@@ -207,8 +211,27 @@ class SymbolicSubsymbolicFusion:
         except Exception:  # noqa: BLE001
             return False
 
-    @staticmethod
-    def _overlap(claim: str, texts: Sequence[str], *, asked: str = "") -> tuple:
+    def _covers(self, wanted: str, have: set) -> bool:
+        """Is this one word of the claim carried by the evidence — as itself, or as a synonym?
+
+        Only the **relational** rung counts. A distributional neighbour is not a substitute
+        ("hot" sits next to "cold"), and letting one stand in for the other here would turn a
+        coverage check into a generous one.
+        """
+        if wanted in have:
+            return True
+        space = self.semantics
+        if space is None:
+            return False
+        try:
+            for other, _weight in space.synonyms(wanted):
+                if other in have:
+                    return True
+        except Exception:  # noqa: BLE001 — a missing space means exact overlap, not a crash
+            return False
+        return False
+
+    def _overlap(self, claim: str, texts: Sequence[str], *, asked: str = "") -> tuple:
         """Fraction of the claim's *new* content that appears in the best supporting text.
 
         Words the question already contained are removed first: a reply that only restates the
@@ -228,7 +251,8 @@ class SymbolicSubsymbolicFusion:
             best, best_source = 0.0, ""
             for text in texts:
                 have = set(concepts_in(text))
-                score = len(wanted & have) / float(len(wanted))
+                covered = sum(1 for w in wanted if self._covers(w, have))
+                score = covered / float(len(wanted))
                 if score > best:
                     best, best_source = score, text[:80]
             return best, best_source

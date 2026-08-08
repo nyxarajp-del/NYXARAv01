@@ -117,6 +117,10 @@ class Operation:
         if self.name == "template":
             return _apply_template(text, str(self.params.get("inp", "")),
                                    str(self.params.get("out", "")))
+        if self.name == "reorder":                      # field permutation + case + join
+            return _apply_reorder(text, self.params.get("order", ()),
+                                  str(self.params.get("join", " ")),
+                                  str(self.params.get("case", "none")))
         return text                                     # unknown op → inert (never raises)
 
     @property
@@ -125,6 +129,8 @@ class Operation:
         base = 1.0
         if self.name in ("affix", "strip_affix", "replace", "arith"):
             base = 1.4
+        elif self.name == "reorder":
+            base = 1.6
         elif self.name == "template":
             base = 1.8
         return base
@@ -300,9 +306,92 @@ def _induce_template(xs: Sequence[str], ys: Sequence[str]) -> Optional[Operation
     return op if all(op.apply(x) == y for x, y in zip(xs, ys)) else None
 
 
+# --------------------------------------------------------------------------- #
+# Field permutation — "john smith" → "Smith, John"
+#
+# Measured gap: the operation set could reverse *all* the words and could rewrite a template
+# with fixed tokens, but it had no way to say "put field 2 first, field 1 second, title-case
+# both, join with a comma". That is one of the most common few-shot demonstrations there is,
+# and it induced as None. This family closes it.
+# --------------------------------------------------------------------------- #
+_FIELD_SPLIT = re.compile(r"[,;]\s*|\s+")
+#: Separators an output may have been joined with, most specific first.
+_JOIN_CANDIDATES: Tuple[str, ...] = (", ", "; ", " - ", " | ", ",", ";", " ", "-", "_", "|", "/")
+#: Per-field case transforms the inducer may propose, cheapest first.
+_FIELD_CASES: Tuple[str, ...] = ("none", "title", "upper", "lower", "capitalize")
+
+_CASE_FN: Dict[str, Callable[[str], str]] = {
+    "none": lambda s: s, "title": str.title, "upper": str.upper,
+    "lower": str.lower, "capitalize": str.capitalize,
+}
+
+
+def _fields(text: str) -> List[str]:
+    return [f for f in _FIELD_SPLIT.split(str(text).strip()) if f]
+
+
+def _apply_reorder(text: str, order: Sequence[Any], join: str, case: str) -> str:
+    """Split into fields, permute, case each field, re-join. Inert when the shape does not fit."""
+    fields = _fields(text)
+    try:
+        idx = [int(i) for i in order]
+    except Exception:  # noqa: BLE001
+        return text
+    if not idx or any(i < 0 or i >= len(fields) for i in idx):
+        return text                                     # wrong arity → no fire, never a crash
+    fn = _CASE_FN.get(str(case), _CASE_FN["none"])
+    return str(join).join(fn(fields[i]) for i in idx)
+
+
+def _induce_reorder(xs: Sequence[str], ys: Sequence[str]) -> Optional[Operation]:
+    """Induce a field permutation + per-field case + join separator, or decline.
+
+    Requires the *same* permutation, case and separator to explain every demonstration — one
+    pair can always be explained by some permutation, which is why a single demo proves nothing.
+    """
+    if not xs or len(xs) != len(ys):
+        return None
+    in_fields = [_fields(x) for x in xs]
+    if any(len(f) < 2 for f in in_fields):
+        return None                                     # nothing to permute
+    for join in _JOIN_CANDIDATES:
+        out_fields = [[f for f in str(y).split(join) if f] for y in ys]
+        if any(len(o) != len(i) for o, i in zip(out_fields, in_fields)):
+            continue
+        for case in _FIELD_CASES:
+            fn = _CASE_FN[case]
+            order: Optional[List[int]] = None
+            consistent = True
+            for ins, outs in zip(in_fields, out_fields):
+                cased = [fn(f) for f in ins]
+                here: List[int] = []
+                used: set = set()
+                for target in outs:
+                    match = next((i for i, c in enumerate(cased)
+                                  if c == target and i not in used), None)
+                    if match is None:
+                        consistent = False
+                        break
+                    used.add(match)
+                    here.append(match)
+                if not consistent:
+                    break
+                if order is None:
+                    order = here
+                elif order != here:
+                    consistent = False
+                    break
+            if consistent and order and order != sorted(order):
+                # A permutation that is the identity is not a discovery — `identity` and the
+                # join-only case are already covered by cheaper ops.
+                return Operation("reorder", {"order": order, "join": join, "case": case})
+    return None
+
+
 # order matters: the simplest / most specific inducers are tried first (Occam)
 _PARAM_INDUCERS: Tuple[Callable[[Sequence[str], Sequence[str]], Optional[Operation]], ...] = (
-    _induce_arith, _induce_affix, _induce_strip_affix, _induce_replace, _induce_template,
+    _induce_arith, _induce_affix, _induce_strip_affix, _induce_replace, _induce_reorder,
+    _induce_template,
 )
 
 
@@ -479,7 +568,7 @@ class SkillInductionEngine:
     #: unrelated conversational turn (its full generality is still reachable via ``apply``).
     _ANCHORLESS_SIM_FLOOR = 0.75
 
-    def _match(self, skill: InductiveSkill, stimulus: str) -> float:
+    def _match(self, skill: InductiveSkill, stimulus: str, *, probe: bool = False) -> float:
         """How well ``stimulus`` fits a learned skill (0..1) — structure first, then embedding.
 
         A skill only auto-fires when the input actually looks like what it was taught to transform.
@@ -498,12 +587,21 @@ class SkillInductionEngine:
                 has_anchor = any(p != "?" for p in it)
                 if has_anchor:
                     return 1.0                          # a fixed trigger token matched → confident
+                if probe:
+                    return 1.0                          # the caller identified this as the probe
                 # anchorless structural match: allow only if also semantically close to a demo
                 sim = self._demo_similarity(text, skill)
                 return sim if sim >= self._ANCHORLESS_SIM_FLOOR else 0.0
         # no structural match: fall back to semantic proximity to the demonstrated inputs
         sim = self._demo_similarity(text, skill)
-        return sim if sim >= self._ANCHORLESS_SIM_FLOOR else 0.0
+        if sim >= self._ANCHORLESS_SIM_FLOOR:
+            return sim
+        # The floor exists so a skill never hijacks an unrelated conversational turn. Measured
+        # cost of applying it unconditionally: a ×2 skill taught from "3 → 6" answered None to
+        # "7", because "7" is not *lexically* close to "3". When the caller has already parsed
+        # the turn and knows which token is the probe (``apple -> APPLE!``, then ``car -> ?``),
+        # that protection is not needed — nothing is being hijacked, the question was asked.
+        return 0.6 if probe else 0.0
 
     def _demo_similarity(self, text: str, skill: InductiveSkill) -> float:
         """Max cosine of ``text`` to any demonstrated input (0.0 without an embedder/demos)."""
@@ -526,18 +624,24 @@ class SkillInductionEngine:
         out = skill.apply(text)
         return (out, skill.confidence) if out != text else None
 
-    def solve(self, stimulus: str) -> Optional[Tuple[str, float]]:
+    def solve(self, stimulus: str, *, probe: bool = False) -> Optional[Tuple[str, float]]:
         """Best-matching learned skill applied to ``stimulus`` → ``(answer, confidence)`` or None.
 
         Conservative: only fires above the match + confidence floors and only when the transform
-        actually changes the input, so it never hijacks an unrelated turn."""
+        actually changes the input, so it never hijacks an unrelated turn.
+
+        ``probe=True`` says *the caller has already identified this string as the question of a
+        demonstration block*. The anchorless similarity floor is then skipped — it guards
+        against hijacking an unrelated turn, and an explicitly-parsed probe is not one. Every
+        other guard (the transform must change the input, confidence must clear the floor)
+        still applies."""
         self._hydrate()
         if not self._skills:
             return None
         best: Optional[Tuple[str, float]] = None
         best_key = (0.0, 0.0)
         for skill in self._skills.values():
-            m = self._match(skill, stimulus)
+            m = self._match(skill, stimulus, probe=probe)
             if m < self.match_threshold or skill.confidence < self.apply_confidence:
                 continue
             out = skill.apply(stimulus)

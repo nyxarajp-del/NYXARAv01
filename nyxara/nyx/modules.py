@@ -34,6 +34,7 @@ __all__ = [
     "DerivationSpecialist",
     "CreativeSpecialist",
     "EthicsSpecialist",
+    "SkillSpecialist",
     "default_specialists",
 ]
 
@@ -391,6 +392,51 @@ class EthicsSpecialist(SpecialistModule):
             rationale=("frameworks disagree" if disagreement else "frameworks agree"))
 
 
+# --------------------------------------------------------------------------- #
+# Skill — a procedure she induced from demonstrations, inside a turn (NYX V.02)
+# --------------------------------------------------------------------------- #
+class SkillSpecialist(SpecialistModule):
+    """Bids when a procedure learned from demonstrations actually fits this turn.
+
+    ``verifiable=True`` is earned, not assumed: the program was accepted only because it
+    reproduced **every** demonstration exactly, and it is only marked verified when it *also*
+    predicted a demonstration held out of the induction. That is measured transfer, so it is a
+    derivation rather than a guess — the same standard the rest of this file holds itself to.
+    """
+
+    name = "skill"
+    tags = frozenset({"induction", "procedure"})
+    priority = 0.65
+
+    def available(self) -> bool:
+        try:
+            from nyxara.cognition.skill_induction import SkillInductionEngine  # noqa: F401
+            return True
+        except Exception:  # noqa: BLE001 — no engine ⇒ this seat stays empty and says so
+            return False
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        learner = getattr(situation.brain, "icl", None)
+        if learner is None:
+            return None
+        got = learner.solve(situation.stimulus)
+        if got is None:
+            return None
+        answer, confidence = str(got[0]), float(got[1])
+        if not answer.strip():
+            return None
+        skill = next((s for s in learner.skills()
+                      if s.apply(situation.stimulus) == answer), None)
+        generalized = bool(getattr(skill, "generalized", False))
+        return Proposal(
+            source=self.name, content=answer, confidence=_clamp01(confidence),
+            verifiable=generalized, novelty=0.4, urgency=0.2, tags=self.tags,
+            evidence=[skill.render()] if skill is not None else [],
+            rationale=("a procedure induced from demonstrations, which also predicted a "
+                       "held-out example" if generalized else
+                       "a procedure induced from demonstrations (fit, not yet transfer-tested)"))
+
+
 def default_specialists(brain: Any = None) -> List[SpecialistModule]:
     """The standard cast. ``brain`` is unused here but kept so callers read symmetrically."""
     return [
@@ -399,4 +445,5 @@ def default_specialists(brain: Any = None) -> List[SpecialistModule]:
         DerivationSpecialist(),
         CreativeSpecialist(),
         EthicsSpecialist(),
+        SkillSpecialist(),
     ]

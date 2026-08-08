@@ -53,6 +53,9 @@ from nyxara.nyx.graph import (
 from nyxara.nyx.ground import Grounded, Understanding, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verdict, Verification
+from nyxara.nyx.icl import Demonstration, InContextLearner, Learned
+from nyxara.nyx.intent import Intent, IntentReader, Reading
+from nyxara.nyx.lingua import Lingua, LinguaRead, Register, Token
 from nyxara.nyx.metacog import Assessment, RecursiveMetaCognition, Reliability
 from nyxara.nyx.modules import (
     CreativeSpecialist,
@@ -62,6 +65,7 @@ from nyxara.nyx.modules import (
     MemorySpecialist,
     Proposal,
     Situation,
+    SkillSpecialist,
     SpecialistModule,
     default_specialists,
 )
@@ -69,6 +73,7 @@ from nyxara.nyx.nexus import Notation, OntologyGenesis, Statement
 from nyxara.nyx.omni import Forged, Kernel, MetamorphicCompiler
 from nyxara.nyx.reasoner import NyxReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
+from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.synergy import HiveSynapse, Shared, Transport
 from nyxara.nyx.will import Choice, EntropySource, SovereignWill
@@ -81,7 +86,7 @@ __all__ = [
     # pillar 3 — the specialists, the conscious bottleneck, and measured self-trust
     "SpecialistModule", "Proposal", "Situation", "default_specialists",
     "MemorySpecialist", "GraphSpecialist", "DerivationSpecialist",
-    "CreativeSpecialist", "EthicsSpecialist",
+    "CreativeSpecialist", "EthicsSpecialist", "SkillSpecialist",
     "NyxWorkspace", "Deliberation",
     "RecursiveMetaCognition", "Reliability", "Assessment",
     # pillar 4 — candidates held together, collapsed only when a decision is needed
@@ -110,6 +115,14 @@ __all__ = [
     # L-SYNERGY — several instances converging; L-ETERNAL — no single machine holds her
     "HiveSynapse", "Shared", "Transport",
     "Continuity", "Snapshot", "Replication",
+    # NYX V.02 — the tongue: no alphabet is privileged, and grammar is not structure
+    "Lingua", "LinguaRead", "Token", "Register",
+    # NYX V.02 — meaning as a vector, on a ladder that names its own rung
+    "SemanticSpace", "Similarity", "Relation",
+    # NYX V.02 — a procedure learned inside one turn, and kept
+    "InContextLearner", "Demonstration", "Learned",
+    # NYX V.02 — what was actually asked for, and what she has to ask back
+    "IntentReader", "Intent", "Reading",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]

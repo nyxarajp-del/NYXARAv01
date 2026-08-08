@@ -30,6 +30,9 @@ from nyxara.nyx.graph import Activation, DynamicNeuralGraph
 from nyxara.nyx.ground import Grounded, WorldGrounding
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
 from nyxara.nyx.hybrid import SymbolicSubsymbolicFusion, Verification
+from nyxara.nyx.icl import InContextLearner, Learned
+from nyxara.nyx.intent import Intent, IntentReader
+from nyxara.nyx.lingua import Lingua, LinguaRead
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.nexus import OntologyGenesis
 from nyxara.nyx.omni import MetamorphicCompiler
@@ -41,8 +44,10 @@ from nyxara.nyx.modules import (
     MemorySpecialist,
     Proposal,
     Situation,
+    SkillSpecialist,
 )
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
+from nyxara.nyx.semantics import SemanticSpace
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.synergy import HiveSynapse
 from nyxara.nyx.will import Choice, SovereignWill
@@ -91,7 +96,19 @@ class _Latency:
 
 
 def is_question(text: str) -> bool:
-    """Was this asked, rather than asserted? Deliberately simple and deterministic."""
+    """Was this asked, rather than asserted?
+
+    NYX V.02: this now asks :mod:`nyxara.nyx.intent`, which decides from *mood* across English,
+    Hinglish and Devanagari rather than from a leading wh-word — the regex below could not see
+    "kya ye kaam karta hai" as a question at all, and read
+    "mera code fix kar do lekin pehle test chala" as a statement. The regex stays as the floor
+    under it, so a failure in the reader degrades to V.01 behaviour rather than to nothing.
+    """
+    try:
+        from nyxara.nyx.intent import is_question as _read_mood
+        return _read_mood(text)
+    except Exception:  # noqa: BLE001 — the reader is a capability, never a dependency
+        pass
     try:
         text = str(text or "").strip()
         return bool(text) and (text.endswith("?") or _QUESTION.match(text) is not None)
@@ -106,6 +123,7 @@ _SPECIALISTS = {
     "derivation": DerivationSpecialist,
     "creative": CreativeSpecialist,
     "ethics": EthicsSpecialist,
+    "skill": SkillSpecialist,
 }
 
 
@@ -150,6 +168,8 @@ class NyxThought:
     choice: Optional[Choice] = None
     verification: Optional[Verification] = None
     assessment: Any = None                       # nyx.metacog.Assessment
+    induced: Any = None                          # nyx.icl.Learned, when the turn taught her one
+    intent: Any = None                           # nyx.intent.Intent — what was actually asked
     cycle_id: str = ""
 
     @property
@@ -197,6 +217,8 @@ class NyxThought:
                 "choice": self.choice.to_dict() if self.choice is not None else None,
                 "verification": (self.verification.to_dict()
                                  if self.verification is not None else None),
+                "induced": (self.induced.to_dict() if self.induced is not None else None),
+                "intent": (self.intent.to_dict() if self.intent is not None else None),
                 "assessment": (self.assessment.to_dict()
                                if self.assessment is not None else None)}
 
@@ -216,6 +238,11 @@ class NyxBrain:
             dim=c.holo_dim, capacity=c.holo_capacity, seed=c.seed,
             recall_threshold=c.holo_recall_threshold, link_rate=c.link_rate,
             max_links_per_trace=c.max_links_per_trace)
+        self.lingua = self._build_lingua(c)
+        self.semantics = self._build_semantics(c)
+        self._wire_semantics(c)
+        self.intent = self._build_intent(c)
+        self.icl = self._build_icl(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.hybrid = self._build_hybrid(c)
@@ -234,6 +261,70 @@ class NyxBrain:
         self.turns = 0
         self._last_investigation = 0.0
         self._last_forge = 0.0
+
+    @staticmethod
+    def _build_lingua(c: Any) -> Optional[Lingua]:
+        if not getattr(c, "lingua_enabled", True):
+            return None
+        try:
+            return Lingua(max_tokens=getattr(c, "lingua_max_tokens", 512),
+                          min_concept_len=getattr(c, "lingua_min_concept_len", 2),
+                          transliterate_bridge=getattr(c, "lingua_transliterate", True),
+                          use_nlp=getattr(c, "lingua_use_nlp", True))
+        except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_intent(self, c: Any) -> Optional[IntentReader]:
+        if not getattr(c, "intent_enabled", True):
+            return None
+        try:
+            return IntentReader(
+                lingua=self.lingua,
+                min_reading_gap=getattr(c, "intent_min_reading_gap", 0.15),
+                max_open_questions=getattr(c, "intent_max_open_questions", 3))
+        except Exception:  # noqa: BLE001 — without it she is back to the opener regex
+            return None
+
+    def _build_icl(self, c: Any) -> Optional[InContextLearner]:
+        if not getattr(c, "icl_enabled", True):
+            return None
+        try:
+            return InContextLearner(self, min_demos=getattr(c, "icl_min_demos", 2),
+                                    max_demos=getattr(c, "icl_max_demos", 24),
+                                    remember=getattr(c, "icl_remember", True))
+        except Exception:  # noqa: BLE001 — without it a demonstration is only a thing she saw
+            return None
+
+    @staticmethod
+    def _build_semantics(c: Any) -> Optional[SemanticSpace]:
+        if not getattr(c, "semantics_enabled", True):
+            return None
+        try:
+            return SemanticSpace(
+                dim=getattr(c, "semantics_dim", 64),
+                min_count=getattr(c, "semantics_min_count", 3),
+                grade_floor=getattr(c, "semantics_grade_floor", 0.25),
+                train_budget_s=getattr(c, "semantics_train_budget_s", 0.5),
+                train_every=getattr(c, "semantics_train_every", 32),
+                max_vocab=getattr(c, "semantics_max_vocab", 8192),
+                max_relations=getattr(c, "semantics_max_relations", 8192),
+                seed=getattr(c, "seed", 42))
+        except Exception:  # noqa: BLE001 — without it her concepts are labels again, as in V.01
+            return None
+
+    def _wire_semantics(self, c: Any) -> None:
+        """Give the graph its semantic prior. Silent no-op when the space is absent."""
+        try:
+            if self.semantics is None:
+                return
+            self.graph.attach_semantics(
+                self.semantics,
+                birth_links=getattr(c, "semantics_birth_links", 2),
+                birth_weight=getattr(c, "semantics_birth_weight", 0.1),
+                synonym_bridge=getattr(c, "semantics_synonym_bridge", 0.5),
+                merge_min_weight=getattr(c, "semantics_merge_min_weight", 0.9))
+        except Exception:  # noqa: BLE001
+            return
 
     @staticmethod
     def _build_metacog(c: Any) -> Optional[RecursiveMetaCognition]:
@@ -258,14 +349,14 @@ class NyxBrain:
         except Exception:  # noqa: BLE001 — without a workspace she still perceives and recalls
             return None
 
-    @staticmethod
-    def _build_hybrid(c: Any) -> Optional[SymbolicSubsymbolicFusion]:
+    def _build_hybrid(self, c: Any) -> Optional[SymbolicSubsymbolicFusion]:
         if not getattr(c, "hybrid_enabled", True):
             return None
         try:
             return SymbolicSubsymbolicFusion(
                 grounding=getattr(c, "grounding_check", True),
-                min_grounding_overlap=getattr(c, "min_grounding_overlap", 0.5))
+                min_grounding_overlap=getattr(c, "min_grounding_overlap", 0.5),
+                semantics=self.semantics)
         except Exception:  # noqa: BLE001
             return None
 
@@ -419,6 +510,12 @@ class NyxBrain:
             if not text.strip():
                 return out
             self.turns += 1
+            # Read the turn into the semantic space *before* activating, so a concept born
+            # this tick is placed next to what it means rather than born isolated. Training
+            # itself is not done here: gradient descent is not a thought, and does not get to
+            # cost one — it happens on a maintenance beat, in :meth:`consolidate_meaning`.
+            if self.semantics is not None:
+                self.semantics.train_on(text, source="turn", train=False)
             act: Activation = self.graph.activate(text)
             out.concepts = list(act.direct)
             out.born = list(act.born)
@@ -470,6 +567,28 @@ class NyxBrain:
             with clock.at("nyxara.nyx.graph"):
                 out.percept = self.perceive(out.stimulus, remember=False)
             out.cycle_id = f"cycle-{self.turns}"
+
+            # Read what was actually asked for before deciding anything. Everything downstream
+            # — the ordering constraint, whether a tool is even wanted, whether she should be
+            # answering at all or asking — hangs off this.
+            if self.intent is not None:
+                with clock.at("nyxara.nyx.intent"):
+                    out.intent = self.intent.read(out.stimulus)
+
+            # In-context learning happens *before* deliberation, because a turn that carries
+            # demonstrations is teaching her a procedure, and the specialists should get to
+            # compete with that procedure already in hand. When the block names its own probe,
+            # the induced answer is the turn's answer and there is nothing to deliberate about.
+            if self.icl is not None:
+                with clock.at("nyxara.nyx.icl"):
+                    out.induced = self.icl.learn(out.stimulus)
+                if out.induced is not None and out.induced.answer:
+                    out.deliberation = self._induced_only(out.induced)
+                    if remember:
+                        self.memory.remember(f"turn-{self.turns}", out.answer,
+                                             kind="conclusion", cue=out.stimulus)
+                    return out
+
             if self.workspace is None:
                 return out
             situation = Situation(
@@ -738,12 +857,118 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def understand(self, text: str) -> Optional[LinguaRead]:
+        """How the turn was *written*: scripts, languages, code-mixing, register, concepts.
+
+        Distinct from :meth:`understanding`, which asks what a single word is *about*. This
+        one is form, that one is meaning — and NYX V.01 had neither for anything outside
+        ASCII. Returns ``None`` only when the tongue is disabled.
+        """
+        try:
+            return self.lingua.read(text) if self.lingua is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _induced_only(induced: Learned) -> Deliberation:
+        """A one-bidder deliberation carrying the induced answer.
+
+        The turn asked a question and supplied the rule to answer it with; there is nothing for
+        the specialists to disagree about. ``verifiable`` is set only when the program predicted
+        a demonstration held out of the induction — fit alone is not transfer.
+        """
+        proposal = Proposal(
+            source="skill", content=induced.answer,
+            confidence=float(induced.confidence), verifiable=bool(induced.generalized),
+            novelty=0.5, urgency=0.2, tags=frozenset({"induction", "procedure"}),
+            evidence=[induced.program] if induced.program else [],
+            rationale=("induced from the demonstrations in this turn"
+                       + (" and confirmed on a held-out one" if induced.generalized else "")))
+        return Deliberation(winner=proposal, proposals=[proposal],
+                            salience=float(induced.confidence), coalition=["skill"])
+
+    def intent_of(self, text: str) -> Optional[Intent]:
+        """What was actually asked for: mood, actions, ordering, negation, what is unclear.
+
+        The structure V.01 had no way to represent. Read ``ambiguous`` and
+        ``clarifying_question()`` before acting on ``goal`` — a live second reading means she
+        should ask, not choose.
+        """
+        try:
+            return self.intent.read(text) if self.intent is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def learn_from(self, text: str, *, name: str = "") -> Optional[Learned]:
+        """Induce a procedure from demonstrations in this turn, and answer its probe.
+
+        The other kind of learning: not a weight, not a memory write, but a *program* she did
+        not have before the turn started. Outside her operation set the result carries a
+        refusal in plain words rather than a plausible-looking guess.
+        """
+        try:
+            return self.icl.learn(text, name=name) if self.icl is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def meaning(self, a: str, b: str = "") -> Any:
+        """What she can honestly say about a concept's meaning — or about a pair of them.
+
+        With one argument: the nearest concepts she can justify, each labelled with the rung
+        that justified it. With two: a :class:`~nyxara.nyx.semantics.Similarity`, whose
+        ``known`` flag distinguishes *I do not know* from *unrelated* — the distinction V.01
+        could not make.
+        """
+        try:
+            if self.semantics is None:
+                return None
+            return self.semantics.similarity(a, b) if b else \
+                self.semantics.similar(a, candidates=list(self.graph.nodes) or None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def teach_meaning(self, a: str, b: str, *, kind: str = "synonym",
+                      weight: float = 0.9) -> bool:
+        """Tell her two words are the same thing. The relational rung, filled by hand."""
+        try:
+            if self.semantics is None:
+                return False
+            return bool(self.semantics.teach(a, b, kind=kind, weight=weight, source="taught"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def consolidate_meaning(self, *, budget_s: Optional[float] = None) -> Dict[str, Any]:
+        """Spend a real gradient budget on her own corpus, then fuse what turned out to be one.
+
+        Called from a maintenance beat, never from a turn. Node fusion is bounded per call and
+        written to the graph's merge ledger, so every structural change stays reversible.
+        """
+        out: Dict[str, Any] = {"trained": False}
+        try:
+            if self.semantics is None:
+                return out
+            out = dict(self.semantics.consolidate(budget_s=budget_s) or {})
+            per_beat = int(getattr(self.config, "semantics_merge_per_beat", 1))
+            if getattr(self.config, "semantics_merge_enabled", True) and per_beat > 0:
+                out["merged"] = [list(p) for p in self.graph.auto_merge(limit=per_beat)]
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
     def stats(self) -> Dict[str, Any]:
         try:
             out: Dict[str, Any] = {
                 "graph": self.graph.stats().to_dict(), "memory": self.memory.stats(),
                 "turns": self.turns,
                 "as_reasoner": bool(getattr(self.config, "as_reasoner", False))}
+            if self.lingua is not None:
+                out["lingua"] = self.lingua.stats()
+            if self.semantics is not None:
+                out["semantics"] = self.semantics.stats()
+            if self.intent is not None:
+                out["intent"] = self.intent.stats()
+            if self.icl is not None:
+                out["icl"] = self.icl.stats()
             if self.workspace is not None:
                 out["workspace"] = self.workspace.stats()
             if self.metacog is not None:
@@ -778,6 +1003,12 @@ class NyxBrain:
     def to_dict(self) -> Dict[str, Any]:
         out = {"graph": self.graph.to_dict(), "memory": self.memory.to_dict(),
                "turns": self.turns}
+        if self.lingua is not None:
+            out["lingua"] = self.lingua.to_dict()
+        if self.semantics is not None:
+            out["semantics"] = self.semantics.to_dict()
+        if self.icl is not None:
+            out["icl"] = self.icl.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -802,6 +1033,12 @@ class NyxBrain:
                 self.graph.load_dict(d["graph"])
             if d.get("memory"):
                 self.memory.load_dict(d["memory"])
+            if d.get("lingua") and self.lingua is not None:
+                self.lingua.load_dict(d["lingua"])
+            if d.get("semantics") and self.semantics is not None:
+                self.semantics.load_dict(d["semantics"])
+            if d.get("icl") and self.icl is not None:
+                self.icl.load_dict(d["icl"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

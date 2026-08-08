@@ -67,6 +67,7 @@ class Reply:
 
     text: str = ""
     source: str = ""                 # which specialist's content this came from
+    asked: bool = False              # True when she asked instead of answering
     rendered: bool = False           # True when a fluent model phrased it
     verified: bool = False           # True when a derivation or her evidence backed it
     confidence: float = 0.0
@@ -74,11 +75,17 @@ class Reply:
     surface: Optional[Surface] = None
     evidence: List[str] = field(default_factory=list)
     why: List[str] = field(default_factory=list)
+    # What arrived, as read by nyxara.nyx.lingua: the language it was written in, and its
+    # tone. Recorded, never generated — she does not learn to be funny by noticing a joke.
+    language: str = ""
+    register: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"text": self.text, "source": self.source, "rendered": self.rendered,
                 "verified": self.verified, "confidence": round(self.confidence, 4),
                 "decided": self.decided, "evidence": self.evidence, "why": self.why,
+                "language": self.language, "register": dict(self.register),
+                "asked": self.asked,
                 "surface": self.surface.to_dict() if self.surface is not None else None}
 
 
@@ -143,6 +150,15 @@ class Dialogue:
             out.evidence = list(getattr(getattr(thought, "winner", None), "evidence", []) or [])
             assessment = getattr(thought, "assessment", None)
             out.why = list(getattr(assessment, "why", []) or [])
+            self._read_register(out, thought, brain)
+
+            # NYX V.02: when two readings of the instruction are still live, or she was asked
+            # to do and not do the same thing, the right output is a question. Guessing which
+            # was meant and acting on it is the failure this whole gap was about.
+            question = self._clarify(thought, brain)
+            if question:
+                out.text, out.asked, out.decided = question, True, False
+                return out
 
             if not content:
                 out.text = self._nothing_to_say(thought)
@@ -206,6 +222,41 @@ class Dialogue:
         except Exception:  # noqa: BLE001
             return True
 
+    @staticmethod
+    def _clarify(thought: Any, brain: Any) -> str:
+        """The one thing worth asking before acting — empty when nothing needs asking.
+
+        Only fires on a *contradiction* or a genuinely live second reading. An under-specified
+        detail is surfaced with the answer rather than in place of it: stopping to ask about
+        every vague word would be its own kind of uselessness.
+        """
+        try:
+            config = getattr(brain, "config", None)
+            if config is not None and not getattr(config, "intent_drives_dialogue", True):
+                return ""
+            intent = getattr(thought, "intent", None)
+            if intent is None:
+                return ""
+            if not (intent.contradictions or intent.ambiguous):
+                return ""
+            return str(intent.clarifying_question() or "")
+        except Exception:  # noqa: BLE001 — she answers rather than crashing on a parse
+            return ""
+
+    @staticmethod
+    def _read_register(reply: Reply, thought: Any, brain: Any) -> None:
+        """Record how the turn was written — language and tone — from the tongue, if she has one."""
+        try:
+            lingua = getattr(brain, "lingua", None)
+            stimulus = str(getattr(thought, "stimulus", "") or "")
+            if lingua is None or not stimulus:
+                return
+            read = lingua.read(stimulus)
+            reply.language = "hi-Latn" if read.hinglish else read.primary
+            reply.register = read.register.to_dict()
+        except Exception:  # noqa: BLE001 — tone is a garnish; it never costs a reply
+            return
+
     def _plainly(self, content: str, reply: Reply) -> str:
         """Her own words, with the caveats that are actually true of this turn."""
         parts = [content]
@@ -214,6 +265,11 @@ class Dialogue:
         surface = reply.surface
         if surface is not None and not surface.fluent and surface.note:
             parts.append(f"[{surface.note}]")
+        # She understood the language; she cannot *speak* it. Saying so is the same law that
+        # keeps the n-gram floor out of her mouth, applied one level up.
+        if reply.language and reply.language not in ("en", "und", ""):
+            parts.append(f"[read as {reply.language}; I am answering in English — I have no "
+                         f"fluent surface for {reply.language}, and will not fake one.]")
         return "\n".join(parts)
 
     def _nothing_to_say(self, thought: Any) -> str:
