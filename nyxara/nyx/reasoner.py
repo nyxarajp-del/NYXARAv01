@@ -11,8 +11,15 @@ What it may change, and what it may never touch, is the whole safety story:
 * **may change** — ``text`` (when her cycle produced a stronger answer), ``confidence``,
   ``belief``, ``efe``, and a short honest ``rationale`` naming the specialist that won and
   whether the answer was derived or guessed;
-* **never touches** — ``risk``, ``reversible``, ``capability``, ``tool``/``tool_args``, and the
-  three corrigibility flags. Risk is never lowered and a safety flag is never weakened.
+* **may propose a tool** (NYX V.02) — ``tool``/``tool_args``, and *only* when the base left
+  them empty. She may say "this turn wants ``git_status``"; she may never rewrite a tool the
+  base already chose, and she may never change what that tool is *allowed* to do. See
+  :meth:`NyxReasoner._propose_tool`;
+* **never touches** — ``risk``, ``reversible``, ``capability``, and the three corrigibility
+  flags. Risk is never lowered and a safety flag is never weakened. A proposed tool changes
+  what she is *asking* to do, never what the gate will let through: the candidate still passes
+  the identical, unchanged, fail-closed pipeline, which reads the tool's own registered
+  capability and risk, not anything written here.
 
 Sovereignty is preserved absolutely: NYX only ever *proposes*. The returned candidate flows
 through the kernel's unchanged, fail-closed gate exactly like any other, and the gate — not this
@@ -39,10 +46,14 @@ class NyxReasoner:
     """NYX V.01 in the reason seat — proposes content, never disposes, never relaxes a guard."""
 
     def __init__(self, *, base: Callable[..., Any], brain: Any,
-                 min_confidence: float = 0.25) -> None:
+                 min_confidence: float = 0.25, may_propose_tools: bool = True) -> None:
         self.base = base
         self.brain = brain
         self.min_confidence = float(min_confidence)
+        # NYX V.02: her brain can now *see* the toolset (nyxara.nyx.hands). Letting the seat
+        # name a tool is the last piece of that wiring — and it stays a proposal.
+        self.may_propose_tools = bool(may_propose_tools)
+        self.tools_proposed = 0
 
     def __call__(self, stimulus: str, focus: Any = None, **kwargs: Any) -> Any:
         candidate = self._call_base(stimulus, focus, kwargs)
@@ -79,8 +90,46 @@ class NyxReasoner:
             if spoken:
                 candidate.text = spoken
 
+        self._propose_tool(candidate, thought)
         self._calibrate(candidate, thought, confidence, verified)
         self._annotate(candidate, source, thought, verified)
+
+    def _propose_tool(self, candidate: Any, thought: Any) -> None:
+        """Name a tool this turn wants — only into an empty field, and only as a proposal.
+
+        Three restraints, all deliberate:
+
+        * she may only *fill* ``tool``/``tool_args``, never replace what the base chose. The
+          base convened its own faculties; overriding its choice would change what the Master
+          is being asked to approve.
+        * she never touches ``risk``, ``reversible``, ``capability`` or a corrigibility flag.
+          The gate reads the tool's own registered capability and risk from the registry, so
+          naming a tool here cannot make it cheaper than it is.
+        * :class:`~nyxara.nyx.hands.Hands` decides whether the turn wants a tool at all. A
+          question of fact does not, and the commonest failure of a tool-using agent is
+          reaching because it can.
+        """
+        if not self.may_propose_tools:
+            return
+        try:
+            if getattr(candidate, "tool", ""):
+                return                       # the base already chose; not hers to rewrite
+            hands = getattr(self.brain, "hands", None)
+            if hands is None or not hands.available():
+                return
+            stimulus = str(getattr(thought, "stimulus", "") or "")
+            wanted, _why = hands.wants_tool(stimulus, getattr(thought, "intent", None))
+            if not wanted:
+                return
+            ranked = hands.choose(stimulus, top_k=1)
+            if not ranked:
+                return
+            candidate.tool = ranked[0][0]
+            if not getattr(candidate, "tool_args", None):
+                candidate.tool_args = {}
+            self.tools_proposed += 1
+        except Exception:  # noqa: BLE001 — a failed proposal leaves the candidate untouched
+            return
 
     def _should_speak(self, candidate: Any, thought: Any, answer: str, confidence: float,
                       verified: bool) -> bool:

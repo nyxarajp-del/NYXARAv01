@@ -74,6 +74,9 @@ _MAX_FACTORIAL_N = 5000
 _MAX_FIB_N = 100_000
 _MAX_PRIME_LIMIT = 5_000_000
 _MAX_NTH_PRIME = 200_000
+# Closed-form sequences (triangular, square): no loop, so the cap only keeps the printed
+# integer from becoming absurd.
+_MAX_CLOSED_FORM_N = 10_000_000
 
 
 def _ints(text: str) -> List[int]:
@@ -244,6 +247,36 @@ class CodeSynthesizer:
                    f"result = a\n"
                    f"print(result)\n")
             return SynthesisResult(True, src, "local:number_theory", "number_theory", a)
+
+        # The classical closed-form sequences, alongside factorial and fibonacci above. Same
+        # shape, same guardrail: a named sequence with a derivable nth term, not a free-form
+        # request. Anything without a closed form belongs outside this family and is refused.
+        if "triangular" in low and ints:
+            n = ints[0]
+            if not (0 <= n <= _MAX_CLOSED_FORM_N):
+                return None
+            expected = n * (n + 1) // 2
+            src = (f"# NYXARA self-authored program (the {n}th triangular number)\n"
+                   f"def triangular(n):\n"
+                   f"    # T(n) = n(n+1)/2 — the closed form, not a loop\n"
+                   f"    return n * (n + 1) // 2\n"
+                   f"\n"
+                   f"result = triangular({n})\n"
+                   f"print(result)\n")
+            return SynthesisResult(True, src, "local:number_theory", "number_theory", expected)
+
+        if ("square" in low and "number" in low) and ints:
+            n = ints[0]
+            if not (0 <= n <= _MAX_CLOSED_FORM_N):
+                return None
+            expected = n * n
+            src = (f"# NYXARA self-authored program (the {n}th square number)\n"
+                   f"def square(n):\n"
+                   f"    return n * n\n"
+                   f"\n"
+                   f"result = square({n})\n"
+                   f"print(result)\n")
+            return SynthesisResult(True, src, "local:number_theory", "number_theory", expected)
 
         if ("prime" in low and ("factor" in low or "factorize" in low
                                 or "factorise" in low)) and ints:

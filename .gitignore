@@ -6,3 +6,6 @@ __pycache__/
 .env
 .venv/
 venv/
+
+# Code NYXARA authored herself at runtime — a live artifact, never a committed one.
+nyxara/growth/_forged/

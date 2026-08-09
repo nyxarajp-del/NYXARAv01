@@ -445,6 +445,26 @@ _NYX_HELP = """\
 /nyx why                   why the last thought went the way it did
 /nyx recall <cue>          content-addressed recall — no token window is consulted
 /nyx ground <word>         what she actually has behind a word (or that she has nothing)
+/nyx lingua [text]         her tongue: scripts and languages she has met — or read one turn
+/nyx semantics [a] [b]     meaning: nearest concepts, or one pair — with the rung and grade
+/nyx teach <a> <b>         tell her two words are the same thing (the relational rung)
+/nyx skills                procedures she induced from demonstrations, and whether they transfer
+/nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
+/nyx reason <question>     work down the tiers — and see which one answered, and its label
+/nyx hands                 the toolset she can see, and her measured record with each
+/nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
+/nyx consequence <action>  what would happen if she did it — before she does it
+/nyx axiom <description>   write a new axiom system down, and check whether it holds together
+/nyx omega [evolve|evolve!|rollback]  the constants she thinks with — and what she measured them to
+/nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
+/nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
+/nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
+/nyx analogy <a:b::c>      zero-shot analogy over structures she holds
+/nyx why-causal <x> <y>    would y still happen if she intervened on x — do(x) beside the weight
+/nyx weave [<a> <b> <type>]  typed edges laid over the graph, and the schema changes she made
+/nyx debate <claim>        her Skeptic attacks it — survive, weaken, or abstain
+/nyx stream [brief]        what arrived while you were away, compressed at four scales
+/nyx goal <command>        decompose one command into a DAG, price its risk, and run it
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -516,6 +536,298 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
             if got.neighbours:
                 near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
                 print(f"  nearest in meaning: {near}")
+    elif sub == "lingua":
+        lingua = getattr(brain, "lingua", None)
+        if lingua is None:
+            print("her tongue is off (NYXARA_NYX__LINGUA_ENABLED=false) — "
+                  "she reads ASCII only, as V.01 did.")
+        elif not rest:
+            print(json.dumps(lingua.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            read = lingua.read(rest)
+            print(f"language : {read.primary}"
+                  f"{'  (code-mixed)' if read.code_mixed else ''}"
+                  f"{'  (Hinglish)' if read.hinglish else ''}")
+            print(f"scripts  : {', '.join(f'{s}×{n}' for s, n in read.scripts.items()) or '—'}")
+            print(f"register : {', '.join(read.register.markers) or 'neutral'}"
+                  f"  (formality {read.register.formality:.2f})")
+            print(f"concepts : {', '.join(read.concepts) or '— nothing but grammar'}")
+            bridged = [f"{c} → {k}" for c, k in read.keys.items() if k and k != c]
+            if bridged:
+                print(f"bridge   : {'; '.join(bridged[:8])}")
+    elif sub == "semantics":
+        space = getattr(brain, "semantics", None)
+        if space is None:
+            print("her semantic space is off (NYXARA_NYX__SEMANTICS_ENABLED=false) — "
+                  "concepts are bare labels again, as in V.01.")
+        elif not rest:
+            print(json.dumps(space.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            words = rest.split()
+            if len(words) >= 2:
+                print(space.describe(words[0], words[1]))
+            else:
+                near = space.similar(words[0], k=8, candidates=list(brain.graph.nodes) or None)
+                if not near:
+                    print(f"nothing is near '{words[0]}' that I can justify. "
+                          f"That is ignorance, not a measurement of zero — "
+                          f"rungs available: {space.rungs_available()}")
+                for label, score, rung in near:
+                    print(f"  {label:24} {score:.3f}   [{rung}]")
+    elif sub == "teach":
+        words = rest.split()
+        if len(words) < 2:
+            print("usage: /nyx teach <word> <word>")
+        elif brain.teach_meaning(words[0], words[1]):
+            print(f"held: '{words[0]}' and '{words[1]}' are the same thing.")
+            print(brain.semantics.describe(words[0], words[1]))
+        else:
+            print("could not hold that (semantics disabled, or the two words are the same).")
+    elif sub == "analogy":
+        vsa = getattr(brain, "vsa", None)
+        if vsa is None:
+            print("vector-symbolic structure is off (NYXARA_NYX__VSA_ENABLED=false).")
+        elif not rest:
+            print(vsa.describe())
+        else:
+            spec = rest.strip("\"'").replace("::", ":")
+            parts = [p.strip() for p in spec.split(":") if p.strip()]
+            if len(parts) != 3:
+                print("usage: /nyx analogy <a>:<b>::<c>")
+            else:
+                got = brain.analogy(*parts)
+                if got is None:
+                    print("vector-symbolic structure is unavailable.")
+                else:
+                    print(f"{parts[0]} : {parts[1]} :: {parts[2]} : "
+                          f"{got.filler if got.trusted else '?'}")
+                    print(f"  margin {got.margin:.3f}  trusted={got.trusted}")
+                    print(f"  {got.note}")
+    elif sub == "prove":
+        prover = getattr(brain, "prover", None)
+        if prover is None:
+            print("the proof core is off (NYXARA_NYX__PROVER_ENABLED=false).")
+        elif not rest:
+            print(prover.describe())
+        else:
+            got = brain.prove(rest.strip("\"'"))
+            print(got.render() if got is not None else "the proof core is unavailable.")
+    elif sub == "telepathy":
+        stream = getattr(brain, "telepathy", None)
+        action = rest.strip()
+        if stream is None:
+            print("the vector channel is off (NYXARA_NYX__TELEPATHY_ENABLED=false).")
+        elif action.lower() == "emit":
+            frame = brain.emit_frame()
+            print(json.dumps(frame.to_dict(), indent=2, default=str, ensure_ascii=False)
+                  if frame is not None else "nothing to emit.")
+        elif action:
+            got = stream.expand(action)
+            if got is not None:
+                print(got.note)
+            else:
+                short = stream.observe(action)
+                print(f"noted. I have a shorthand for that now: {short.trigger!r}"
+                      if short is not None
+                      else "noted — say it a few more times and I will offer you a shorthand.")
+        else:
+            print(stream.describe())
+    elif sub == "why-causal":
+        causal = getattr(brain, "causal", None)
+        words = rest.split()
+        if causal is None:
+            print("the causal engine is off (NYXARA_NYX__CAUSAL_ENABLED=false) — every arrow "
+                  "is back to being an association.")
+        elif len(words) < 2:
+            print("usage: /nyx why-causal <cause> <effect>")
+            print(causal.describe())
+        else:
+            got = brain.why_causal(words[0], words[1], question=rest)
+            print(got.render() if got is not None else "the causal engine is unavailable.")
+    elif sub == "weave":
+        weaver = getattr(brain, "weaver", None)
+        words = rest.split()
+        if weaver is None:
+            print("the graph weaver is off (NYXARA_NYX__WEAVER_ENABLED=false) — the graph keeps "
+                  "one untyped edge kind.")
+        elif len(words) >= 2:
+            edge = brain.weave(words[0], words[1],
+                               type=(words[2] if len(words) > 2 else "co-occurs"))
+            print(edge.render() if edge is not None
+                  else "not laid — an unknown type is a candidate until it has support.")
+        else:
+            print(weaver.describe())
+    elif sub == "debate":
+        dialectic = getattr(brain, "dialectic", None)
+        if dialectic is None:
+            print("adversarial self-dialogue is off (NYXARA_NYX__DIALECTIC_ENABLED=false) — "
+                  "the winner ships unattacked.")
+        elif not rest:
+            print(json.dumps({k: v for k, v in dialectic.stats().items() if k != "note"},
+                             indent=2, default=str))
+        else:
+            got = brain.debate(rest.strip("\"\'"))
+            print(got.render() if got is not None else "the dialectic is unavailable.")
+    elif sub == "stream":
+        stream = getattr(brain, "stream", None)
+        if stream is None:
+            print("the perpetual stream is off (NYXARA_NYX__STREAM_ENABLED=false) — events "
+                  "accumulate and never compress.")
+        elif rest.strip().lower() in ("brief", "briefing", ""):
+            print(brain.catch_up() or "nothing to report.")
+        else:
+            brain.digest(force=True)
+            print(stream.describe())
+    elif sub == "goal":
+        goals = getattr(brain, "goals", None)
+        if goals is None:
+            print("the goal tree is off (NYXARA_NYX__GOALS_ENABLED=false) — a command is one "
+                  "action, never a plan.")
+        elif not rest:
+            print(goals.describe())
+        else:
+            made = brain.decompose(rest.strip("\"\'"))
+            if made is None:
+                print("the goal tree is unavailable.")
+            else:
+                print(made.render())
+                print()
+                got = goals.run(made, oversight=getattr(core, "oversight", None))
+                print(got.render())
+                print()
+                print(made.render())
+    elif sub == "agenda":
+        agenda = getattr(brain, "agenda", None)
+        action, _, arg = rest.strip().partition(" ")
+        action, arg = action.lower(), arg.strip()
+        if agenda is None:
+            print("her own agenda is off (NYXARA_NYX__AGENDA_ENABLED=false) — she thinks one "
+                  "thought at a time and forgets it.")
+        elif action == "pursue":
+            step = brain.pursue(oversight=getattr(core, "oversight", None), force=True)
+            print(json.dumps(step.to_dict(), indent=2, default=str) if step is not None
+                  else "she did not act — nothing open, or oversight stopped her.")
+        elif action == "brief":
+            got = brain.briefing()
+            print(got.text if got is not None else "no briefing available.")
+        elif action == "goal" and arg:
+            goal = brain.set_goal(arg)
+            print(f"taken on: {goal.render()}" if goal is not None else "could not take it on.")
+        elif action == "veto" and arg:
+            print("dropped." if agenda.veto(arg) else "no goal with that id.")
+        else:
+            print(agenda.describe())
+            print()
+            print(json.dumps({k: v for k, v in agenda.stats().items() if k != "note"},
+                             indent=2, default=str))
+    elif sub == "omega":
+        kernel = getattr(brain, "omega", None)
+        action = rest.strip().lower()
+        if kernel is None:
+            print("self-evolution is off (NYXARA_NYX__OMEGA_ENABLED=false) — her constants "
+                  "stay whatever was typed.")
+        elif action in ("evolve", "evolve!"):
+            # "evolve" waives the cadence — run now. "evolve!" additionally waives the sample
+            # floor, which is a different and much larger thing to waive, so it needs its own
+            # word rather than riding along on "run now".
+            step = brain.evolve(oversight=getattr(core, "oversight", None), force=True,
+                                ignore_sample_floor=action.endswith("!"))
+            print(step.render() if step is not None else "self-evolution is unavailable.")
+            if step is not None and step.reason:
+                print(f"  {step.reason}")
+            if step is not None and step.status == "skipped" and "fitting noise" in step.reason:
+                print("  (/nyx omega evolve! runs anyway — the step is then marked UNMEASURED)")
+        elif action == "rollback":
+            print("knobs restored." if kernel.rollback() else "no rollback point to restore.")
+        else:
+            print(kernel.describe())
+    elif sub == "axiom":
+        genesis = getattr(brain, "axiom", None)
+        if genesis is None:
+            print("axiom genesis is off (NYXARA_NYX__AXIOM_ENABLED=false).")
+        elif not genesis.available():
+            print("z3 is not installed, so consistency cannot be checked — and an axiom "
+                  "system nobody checked is not a result.")
+        elif not rest:
+            print(json.dumps(genesis.stats(), indent=2, default=str))
+        else:
+            got = brain.invent_axioms(rest.strip("\"'"))
+            print(got.render() if got is not None else "axiom genesis is unavailable.")
+    elif sub == "consequence":
+        gate = getattr(brain, "consequence", None)
+        if gate is None:
+            print("the consequence gate is off (NYXARA_NYX__CONSEQUENCE_ENABLED=false) — "
+                  "she acts without looking ahead.")
+        elif not rest:
+            print(json.dumps(gate.stats(), indent=2, default=str))
+        else:
+            parts = rest.strip("\"'").split()
+            action = parts[0]
+            args = {}
+            for token in parts[1:]:
+                if "=" in token:
+                    key, _, value = token.partition("=")
+                    args[key] = value
+            got = brain.foresee(action, args)
+            print(got.render() if got is not None else "foresight is unavailable.")
+    elif sub == "author":
+        author = getattr(brain, "author", None)
+        if author is None:
+            print("code authoring is off (NYXARA_NYX__AUTHOR_ENABLED=false).")
+        elif not rest:
+            print(author.describe())
+            print()
+            print(json.dumps(author.stats(), indent=2, default=str))
+        else:
+            got = brain.author_code(rest.strip("\"'"),
+                                    oversight=getattr(core, "oversight", None))
+            print(got.render() if got is not None else "authoring is unavailable.")
+            if got is not None and got.ok and got.source:
+                print("\n--- what she wrote ---")
+                print(got.source)
+    elif sub == "hands":
+        hands = getattr(brain, "hands", None)
+        if hands is None:
+            print("tool agency is off (NYXARA_NYX__HANDS_ENABLED=false).")
+        else:
+            print(hands.describe())
+            print()
+            stats = hands.stats()
+            print(json.dumps({k: v for k, v in stats.items() if k != "record"},
+                             indent=2, default=str))
+            if stats.get("record"):
+                print("track record:")
+                print(json.dumps(stats["record"], indent=2, default=str))
+    elif sub == "reason":
+        reasoner = getattr(brain, "reason", None)
+        if reasoner is None:
+            print("open-domain reasoning is off (NYXARA_NYX__REASON_ENABLED=false) — "
+                  "outside four domains she is silent again.")
+        elif not rest:
+            print(json.dumps(reasoner.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            print(reasoner.solve(rest.strip("\"'")).render())
+    elif sub == "intent":
+        reader = getattr(brain, "intent", None)
+        if reader is None:
+            print("intent reading is off (NYXARA_NYX__INTENT_ENABLED=false) — "
+                  "she is back to the opener regex.")
+        elif not rest:
+            print(json.dumps(reader.stats(), indent=2, default=str, ensure_ascii=False))
+        else:
+            got = reader.read(rest.strip("\"'"))
+            print(reader.describe(got))
+            ask = got.clarifying_question()
+            if ask:
+                print(f"\nshe would ask: {ask}")
+    elif sub == "skills":
+        learner = getattr(brain, "icl", None)
+        if learner is None:
+            print("in-context learning is off (NYXARA_NYX__ICL_ENABLED=false).")
+        else:
+            print(learner.describe())
+            print()
+            print(json.dumps(learner.stats(), indent=2, default=str))
     elif sub in ("hive", "eternal"):
         part = getattr(brain, "synergy" if sub == "hive" else "eternal", None)
         if part is None:

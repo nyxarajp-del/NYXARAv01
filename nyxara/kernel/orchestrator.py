@@ -2107,16 +2107,22 @@ class NyxaraCore:
         # NYX V.01 reason-seat (on by default): the unified brain wraps whatever reasoner was
         # assembled above and supplies the *content* of a reply when its own cycle — grounded
         # recall, a checked derivation, the collapsed superposition — has something better to
-        # say. It only ever PROPOSES: risk, capability, tool and every corrigibility flag are
-        # left exactly as the base set them, and the candidate still passes the identical
-        # fail-closed gate. The mind proposes; the kernel disposes.
+        # say. It only ever PROPOSES: risk, capability and every corrigibility flag are left
+        # exactly as the base set them, and the candidate still passes the identical fail-closed
+        # gate. NYX V.02 lets it FILL an empty tool field — never replace a tool the base chose,
+        # and never change what that tool is allowed to do: the gate reads the tool's own
+        # registered capability and risk, not anything the seat wrote. The mind proposes; the
+        # kernel disposes.
         try:
             from nyxara.kernel.config import get_settings
             settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
             nyx = getattr(self, "nyx", None)
             if nyx is not None and getattr(getattr(settings, "nyx", None), "as_reasoner", False):
                 from nyxara.nyx.reasoner import NyxReasoner
-                return NyxReasoner(base=reasoner, brain=nyx)
+                return NyxReasoner(
+                    base=reasoner, brain=nyx,
+                    may_propose_tools=getattr(getattr(settings, "nyx", None),
+                                              "reasoner_may_propose_tools", True))
         except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
             pass
         return reasoner
@@ -3605,7 +3611,17 @@ class NyxaraCore:
             if cfg is None or not cfg.enabled:
                 return None
             from nyxara.nyx.brain import NyxBrain
-            return NyxBrain(cfg)
+            brain = NyxBrain(cfg)
+            # NYX V.02: hand her the live toolset and knowledge base. Her brain was never given
+            # them, which is why `nyxara.nyx.hands` describes itself as closing a *wiring* gap
+            # rather than a permission one — the tools were always there and always allowed.
+            try:
+                brain.attach_kernel(tools=getattr(self, "tools", None),
+                                    knowledge=getattr(self, "knowledge", None),
+                                    core=self)
+            except Exception:  # noqa: BLE001 — a brain without hands still thinks
+                pass
+            return brain
         except Exception:  # noqa: BLE001 — NYX V.01 is a capability, never required
             return None
 

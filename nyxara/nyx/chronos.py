@@ -104,10 +104,23 @@ class TemporalCausalMatrix:
     # ---- when it applies --------------------------------------------------- #
     @staticmethod
     def applies(stimulus: str) -> bool:
-        """Is this a decision — something with futures — rather than a question of fact?"""
+        """Is this a decision — something with futures — rather than a question of fact?
+
+        NYX V.02: an **imperative** has futures too, and the marker list below never saw one.
+        "delete build/ and commit" contains no word from ``_DECISION``, yet it is exactly the
+        kind of turn that should be rolled forward before anything happens. Asking
+        :mod:`nyxara.nyx.intent` for the mood catches it, in three registers; the marker list
+        stays as the floor so a reader failure degrades to V.01 behaviour.
+        """
         try:
-            return bool(_DECISION.search(str(stimulus or "")))
+            if _DECISION.search(str(stimulus or "")):
+                return True
         except Exception:  # noqa: BLE001
+            return False
+        try:
+            from nyxara.nyx.intent import is_command
+            return is_command(stimulus)
+        except Exception:  # noqa: BLE001 — the reader is a capability, never a dependency
             return False
 
     def world_model(self) -> Any:

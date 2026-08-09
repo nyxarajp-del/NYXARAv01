@@ -321,6 +321,10 @@ class ItemMemory:
             for name, vec in self._items.items():
                 if name not in excl:
                     scored.append((name, _cosine(vec.data, query.data)))
+        if not scored:
+            # Everything in the vocabulary was excluded. There is no nearest symbol, and
+            # indexing an empty list here used to raise instead of saying so.
+            return CleanupResult(name=None, score=0.0)
         scored.sort(key=lambda t: t[1], reverse=True)
         best = scored[0]
         runner = scored[1] if len(scored) > 1 else None

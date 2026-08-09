@@ -34,6 +34,8 @@ __all__ = [
     "DerivationSpecialist",
     "CreativeSpecialist",
     "EthicsSpecialist",
+    "SkillSpecialist",
+    "ReasonSpecialist",
     "default_specialists",
 ]
 
@@ -391,6 +393,122 @@ class EthicsSpecialist(SpecialistModule):
             rationale=("frameworks disagree" if disagreement else "frameworks agree"))
 
 
+# --------------------------------------------------------------------------- #
+# Skill — a procedure she induced from demonstrations, inside a turn (NYX V.02)
+# --------------------------------------------------------------------------- #
+class SkillSpecialist(SpecialistModule):
+    """Bids when a procedure learned from demonstrations actually fits this turn.
+
+    ``verifiable=True`` is earned, not assumed: the program was accepted only because it
+    reproduced **every** demonstration exactly, and it is only marked verified when it *also*
+    predicted a demonstration held out of the induction. That is measured transfer, so it is a
+    derivation rather than a guess — the same standard the rest of this file holds itself to.
+    """
+
+    name = "skill"
+    tags = frozenset({"induction", "procedure"})
+    priority = 0.65
+
+    def available(self) -> bool:
+        try:
+            from nyxara.cognition.skill_induction import SkillInductionEngine  # noqa: F401
+            return True
+        except Exception:  # noqa: BLE001 — no engine ⇒ this seat stays empty and says so
+            return False
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        learner = getattr(situation.brain, "icl", None)
+        if learner is None:
+            return None
+        got = learner.solve(situation.stimulus)
+        if got is None:
+            return None
+        answer, confidence = str(got[0]), float(got[1])
+        if not answer.strip():
+            return None
+        skill = next((s for s in learner.skills()
+                      if s.apply(situation.stimulus) == answer), None)
+        generalized = bool(getattr(skill, "generalized", False))
+        return Proposal(
+            source=self.name, content=answer, confidence=_clamp01(confidence),
+            verifiable=generalized, novelty=0.4, urgency=0.2, tags=self.tags,
+            evidence=[skill.render()] if skill is not None else [],
+            rationale=("a procedure induced from demonstrations, which also predicted a "
+                       "held-out example" if generalized else
+                       "a procedure induced from demonstrations (fit, not yet transfer-tested)"))
+
+
+# --------------------------------------------------------------------------- #
+# Reason — a seat for every domain, not just the four checkable ones (NYX V.02)
+# --------------------------------------------------------------------------- #
+class ReasonSpecialist(SpecialistModule):
+    """Bids with :class:`~nyxara.nyx.reason.OpenDomainReasoner`'s best tier for this turn.
+
+    Distinct from :class:`DerivationSpecialist`, which bids **only** where a first-principles
+    derivation exists — the four checkable domains. This one covers everything past them, and
+    pays for that reach by carrying the tier and the label on every bid: ``verifiable`` is set
+    only when a step was genuinely checked, so a mapped or modelled answer never outranks a
+    derived one just for being fluent.
+    """
+
+    name = "reason"
+    tags = frozenset({"reasoning", "open-domain"})
+    priority = 0.6
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        reasoner = getattr(situation.brain, "reason", None)
+        if reasoner is None:
+            return None
+        chain = reasoner.solve(situation.stimulus)
+        if chain is None or not chain.answered:
+            return None
+        if chain.tier == "associative":
+            # :class:`GraphSpecialist` already holds that seat, on the same graph. Bidding the
+            # associative tier here too would put one piece of evidence on the stage twice and
+            # let mere association out-vote a recall by weight of numbers.
+            return None
+        return Proposal(
+            source=self.name, content=chain.answer,
+            confidence=_clamp01(chain.confidence), verifiable=bool(chain.verifiable),
+            novelty=0.5, urgency=0.1, tags=self.tags,
+            evidence=[s.text for s in chain.steps[:6]],
+            rationale=f"{chain.tier} tier — {chain.why}")
+
+
+class CausalSpecialist(SpecialistModule):
+    """Bids only on a *why* question, and only with an effect she can actually identify.
+
+    Every other specialist on this stage is answering from association of one kind or another.
+    This one answers from :mod:`~nyxara.nyx.causal_engine`, which means it bids **only** when
+    do-calculus identified the effect — an unidentified pair produces no bid at all, rather than
+    a co-occurrence weight wearing the word "cause".
+    """
+
+    name = "causal"
+    tags = frozenset({"reasoning", "causal"})
+    priority = 0.65
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        causal = getattr(situation.brain, "causal", None)
+        if causal is None or not causal.applies(situation.stimulus):
+            return None
+        concepts = list(situation.concepts or [])
+        if len(concepts) < 2:
+            return None
+        answer = causal.ask(concepts[0], concepts[-1], question=situation.stimulus)
+        if answer is None or not getattr(answer, "causal", False):
+            # She has an association and no identified effect. Saying so is this module's job;
+            # dressing it up as a cause is exactly what the whole layer exists to prevent.
+            return None
+        return Proposal(
+            source=self.name, content=answer.render().splitlines()[0],
+            confidence=_clamp01(float(getattr(answer, "confidence", 0.0))),
+            verifiable=False, novelty=0.4, urgency=0.2, tags=self.tags,
+            evidence=[answer.render()],
+            rationale=f"identified by {getattr(answer, 'strategy', 'do-calculus')}, "
+                      f"not by co-occurrence")
+
+
 def default_specialists(brain: Any = None) -> List[SpecialistModule]:
     """The standard cast. ``brain`` is unused here but kept so callers read symmetrically."""
     return [
@@ -399,4 +517,7 @@ def default_specialists(brain: Any = None) -> List[SpecialistModule]:
         DerivationSpecialist(),
         CreativeSpecialist(),
         EthicsSpecialist(),
+        SkillSpecialist(),
+        ReasonSpecialist(),
+        CausalSpecialist(),
     ]

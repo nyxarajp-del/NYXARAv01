@@ -255,6 +255,44 @@ class HoloMemory:
         except Exception:  # noqa: BLE001
             return []
 
+    # ---- the seam L-OMEGA tunes (NYX V.02) -------------------------------- #
+    #: What she may change about how memory recalls and associates. A whitelist, with ranges.
+    #: Capacity is deliberately absent: growing it is not a knob, it is a resource decision.
+    KNOBS: Dict[str, Tuple[float, float]] = {
+        "recall_threshold": (0.02, 0.6),
+        "link_rate": (0.02, 0.8),
+        "max_links_per_trace": (2.0, 64.0),
+    }
+
+    def knobs(self) -> Dict[str, float]:
+        try:
+            return {name: float(getattr(self, name, 0.0)) for name in self.KNOBS}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def apply_knobs(self, values: Dict[str, Any]) -> Dict[str, float]:
+        """Set tunables, clamped. The field's own threshold is kept in step with the trace one."""
+        applied: Dict[str, float] = {}
+        try:
+            for name, raw in (values or {}).items():
+                bounds = self.KNOBS.get(str(name))
+                if bounds is None:
+                    continue
+                low, high = bounds
+                value = max(low, min(high, float(raw)))
+                setattr(self, name, int(value) if name == "max_links_per_trace" else value)
+                applied[str(name)] = float(getattr(self, name))
+            if "recall_threshold" in applied:
+                # The underlying field carries its own copy; leaving it stale would make the
+                # knob look tuned while recall behaved exactly as before.
+                try:
+                    self.field.recall_threshold = self.recall_threshold
+                except Exception:  # noqa: BLE001
+                    pass
+            return applied
+        except Exception:  # noqa: BLE001
+            return applied
+
     def stats(self) -> Dict[str, Any]:
         try:
             links = sum(len(t.links) for t in self.traces.values())
