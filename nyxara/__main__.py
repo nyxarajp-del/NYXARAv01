@@ -455,7 +455,7 @@ _NYX_HELP = """\
 /nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
 /nyx consequence <action>  what would happen if she did it — before she does it
 /nyx axiom <description>   write a new axiom system down, and check whether it holds together
-/nyx omega [evolve|rollback]  the constants she thinks with — and what she measured them to
+/nyx omega [evolve|evolve!|rollback]  the constants she thinks with — and what she measured them to
 /nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
 /nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
 /nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
@@ -726,11 +726,17 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
         if kernel is None:
             print("self-evolution is off (NYXARA_NYX__OMEGA_ENABLED=false) — her constants "
                   "stay whatever was typed.")
-        elif action == "evolve":
-            step = brain.evolve(oversight=getattr(core, "oversight", None), force=True)
+        elif action in ("evolve", "evolve!"):
+            # "evolve" waives the cadence — run now. "evolve!" additionally waives the sample
+            # floor, which is a different and much larger thing to waive, so it needs its own
+            # word rather than riding along on "run now".
+            step = brain.evolve(oversight=getattr(core, "oversight", None), force=True,
+                                ignore_sample_floor=action.endswith("!"))
             print(step.render() if step is not None else "self-evolution is unavailable.")
             if step is not None and step.reason:
                 print(f"  {step.reason}")
+            if step is not None and step.status == "skipped" and "fitting noise" in step.reason:
+                print("  (/nyx omega evolve! runs anyway — the step is then marked UNMEASURED)")
         elif action == "rollback":
             print("knobs restored." if kernel.rollback() else "no rollback point to restore.")
         else:

@@ -366,7 +366,11 @@ class NyxAxiomRequest(BaseModel):
 
 
 class NyxEvolveRequest(BaseModel):
+    # ``force`` waives the *cadence* — run now rather than wait for the next slot. It does not
+    # waive the sample floor, which is an epistemic guard rather than a scheduling one; that
+    # needs its own name so it can never be waived as a side effect of asking her to run now.
     force: bool = False
+    ignore_sample_floor: bool = False
 
 
 class NyxDebateRequest(BaseModel):
@@ -1461,11 +1465,17 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
 
     @app.post("/v1/nyx/evolve", dependencies=auth)
     def nyx_evolve(req: NyxEvolveRequest) -> dict:
-        """One budgeted change to the constants she thinks with — gauntleted and reversible."""
+        """One budgeted change to the constants she thinks with — gauntleted and reversible.
+
+        ``force`` runs her now instead of waiting for the cadence. It does **not** waive the
+        sample floor: below it she declines, and a step taken with the floor waived carries
+        ``measured: false`` so its score is never mistaken for evidence.
+        """
         brain = _brain()
         if brain is None or getattr(brain, "omega", None) is None:
             return _off("OMEGA_ENABLED")
-        got = brain.evolve(oversight=getattr(core, "oversight", None), force=req.force)
+        got = brain.evolve(oversight=getattr(core, "oversight", None), force=req.force,
+                           ignore_sample_floor=req.ignore_sample_floor)
         return {"step": got.to_dict() if got is not None else None,
                 "stats": brain.omega.stats()}
 

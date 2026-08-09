@@ -31,8 +31,31 @@ def _warm(brain: NyxBrain) -> NyxBrain:
     return brain
 
 
+#: Distinct enough that the traces they produce do not all collide on recall. Near-identical
+#: turns retrieve each other and the replay probe reads flat at every threshold, which measures
+#: the corpus rather than the knob.
+_LINES = ("gravity pulls the apple toward the ground",
+          "a heavier flywheel smooths the running of an engine",
+          "friction converts motion into heat inside a bearing",
+          "the governor limits how much steam reaches the valve",
+          "lubrication reduces wear between a piston and its cylinder")
+
+
+def _resolved(brain: NyxBrain, n: int = 12) -> NyxBrain:
+    """Give her real resolved assessments and real stored traces, both honestly.
+
+    ``force`` waives the cadence and deliberately **not** the sample floor, so a test that wants
+    her to actually evolve has to give her something to have measured — which is the whole point
+    of the floor, and is exactly what the old ``force=True`` shortcut was quietly skipping.
+    """
+    for index in range(max(1, n)):
+        thought = brain.think(f"{_LINES[index % len(_LINES)]} — case {index}")
+        brain.resolve(thought, correct=1.0)
+    return brain
+
+
 def _kernel(**kw) -> SelfEvolutionKernel:
-    brain = _brain()
+    brain = _resolved(_brain())
     kw.setdefault("every_s", 0.0)
     kw.setdefault("min_samples", 1)
     return SelfEvolutionKernel(brain, **kw)
@@ -100,8 +123,35 @@ def test_fitness_reports_its_sample_count():
 
 def test_an_empty_graph_earns_no_free_health_bonus():
     """Otherwise every knob wins on a cold boot, before she has learned anything."""
-    kernel = _kernel()
+    kernel = SelfEvolutionKernel(_brain(), every_s=0.0, min_samples=1)
+    assert kernel.brain.graph.stats().edges == 0
     assert kernel._score_after(kernel.brain.graph, "hebbian_rate") == \
+        pytest.approx(kernel.fitness().score)
+
+
+def test_an_uninformative_graph_earns_no_free_health_bonus_either():
+    """"Empty" was never the real threshold — *uninformative* is.
+
+    A three-edge graph's mean degree is an artefact of two turns, not a property of her
+    topology, and scoring it handed every knob most of the free win that guarding only the
+    empty case was supposed to prevent.
+    """
+    kernel = SelfEvolutionKernel(_brain(), every_s=0.0, min_samples=1,
+                                 min_edges_for_health=24, replay_k=0)
+    kernel.brain.perceive("the engine turns the flywheel")
+    edges = kernel.brain.graph.stats().edges
+    assert 0 < edges < kernel.min_edges_for_health
+    assert kernel._score_after(kernel.brain.graph, "hebbian_rate") == \
+        pytest.approx(kernel.fitness().score)
+
+
+def test_the_health_probe_still_reads_a_graph_that_has_enough_structure():
+    """The guard abstains while the graph says nothing; it does not switch the probe off."""
+    kernel = SelfEvolutionKernel(_brain(), every_s=0.0, min_samples=1,
+                                 min_edges_for_health=4, replay_k=0)
+    _warm(kernel.brain)
+    assert kernel.brain.graph.stats().edges >= 4
+    assert kernel._score_after(kernel.brain.graph, "hebbian_rate") != \
         pytest.approx(kernel.fitness().score)
 
 
@@ -147,12 +197,21 @@ def test_a_change_that_does_not_beat_its_baseline_is_rolled_back(monkeypatch):
 
 
 def test_a_change_that_beats_its_baseline_is_kept():
-    kernel = _kernel()
-    _warm(kernel.brain)
+    """A real hill-climb, on the one knob the one-step gauntlet can actually see.
+
+    ``recall_threshold`` set too high loses retrieval she could otherwise make; lowering it
+    raises the replay score immediately, so the gauntlet has something real to promote on.
+    """
+    kernel = _kernel(stall_after=99)
+    kernel.brain.memory.apply_knobs({"recall_threshold": 0.3})   # deliberately too high
     before = kernel.knobs()
-    step = kernel.evolve(force=True)
-    assert step.status == "promoted"
+    for _ in range(80):
+        if kernel.evolve(force=True).status == "promoted":
+            break
+    assert kernel.promoted >= 1
     assert kernel.knobs() != before
+    # …and it is an actual improvement, not merely a change that was allowed through.
+    assert kernel.brain.memory.knobs()["recall_threshold"] < 0.3
 
 
 def test_without_a_gauntlet_nothing_is_applied(monkeypatch):
@@ -177,12 +236,13 @@ def test_without_a_gauntlet_nothing_is_applied(monkeypatch):
 # Reversibility — the point of the layer
 # --------------------------------------------------------------------------- #
 def test_a_checkpoint_restores_every_knob_exactly():
-    kernel = _kernel()
-    _warm(kernel.brain)
+    kernel = _kernel(stall_after=99)
+    kernel.brain.memory.apply_knobs({"recall_threshold": 0.3})
     kernel.checkpoint(note="start")
     original = kernel.knobs()
-    for _ in range(5):
-        kernel.evolve(force=True)
+    for _ in range(80):
+        if kernel.evolve(force=True).status == "promoted":
+            break
     assert kernel.knobs() != original
     assert kernel.rollback()
     assert kernel.knobs() == original
@@ -256,7 +316,7 @@ def test_an_unreadable_oversight_is_treated_as_stop():
 # Through the brain, and across a restart
 # --------------------------------------------------------------------------- #
 def test_evolve_is_reachable_on_the_brain():
-    step = _brain().evolve(force=True)
+    step = _resolved(_brain()).evolve(force=True)
     assert step is not None and step.status in ("promoted", "rolled_back", "refused")
 
 
@@ -303,5 +363,119 @@ def test_everything_is_fail_soft_on_junk():
 
 def test_a_brain_with_nothing_tunable_says_so():
     kernel = SelfEvolutionKernel(object(), every_s=0.0, min_samples=1)
-    step = kernel.evolve(force=True)
+    step = kernel.evolve(force=True, ignore_sample_floor=True)
     assert step.status == "skipped" and "nothing tunable" in step.reason
+
+
+# --------------------------------------------------------------------------- #
+# The three guarantees the docs make — each one was measurably not true
+# --------------------------------------------------------------------------- #
+def test_force_waives_the_cadence_and_not_the_sample_floor():
+    """The floor is an epistemic guard; the cadence is a schedule. Only one is overrulable.
+
+    Both ``/nyx omega evolve`` and ``POST /v1/nyx/evolve`` pass ``force=True``, so a ``force``
+    that also waived the floor meant "she does not evolve below the floor" was false on every
+    path anyone actually uses.
+    """
+    kernel = SelfEvolutionKernel(_brain(), every_s=3600.0, min_samples=12)
+    assert not kernel.fitness().enough
+    kernel.evolve()                              # consumes the first slot
+
+    step = kernel.evolve()                       # blocked by the cadence
+    assert step.status == "skipped" and "not due" in step.reason
+
+    step = kernel.evolve(force=True)             # cadence waived, floor still holds
+    assert step.status == "skipped" and "fitting noise" in step.reason
+    assert not step.knob                         # nothing was touched
+
+
+def test_waiving_the_floor_needs_its_own_name_and_marks_the_step_unmeasured():
+    kernel = SelfEvolutionKernel(_brain(), every_s=0.0, min_samples=12)
+    step = kernel.evolve(force=True, ignore_sample_floor=True)
+    assert step.knob and step.status in ("promoted", "rolled_back")
+    assert step.measured is False
+    assert "sample floor was waived" in step.reason
+    assert "UNMEASURED" in step.render()
+
+
+def test_a_step_taken_above_the_floor_is_marked_measured():
+    kernel = _kernel()
+    assert kernel.fitness().enough
+    assert kernel.evolve(force=True).measured is True
+
+
+def test_the_baseline_is_read_on_the_same_scale_the_gauntlet_scores_on():
+    """Baseline was raw fitness while the score included the probes.
+
+    Measured before the fix: every knob was promoted, all with an identical score, because the
+    gap was the probe's and not the knob's — so "roll back anything that did not beat its own
+    baseline" never actually tested a knob.
+    """
+    kernel = _kernel(stall_after=99)
+    for _ in range(6):
+        step = kernel.evolve(force=True)
+        if step.knob and step.status in ("promoted", "rolled_back"):
+            assert step.baseline == pytest.approx(
+                kernel._score_after(kernel.targets()[step.target], step.knob))
+
+
+def test_a_knob_the_gauntlet_cannot_see_is_not_reported_as_having_failed():
+    """"Did not beat baseline" reads as evidence against the knob. None was gathered."""
+    kernel = _kernel(stall_after=99)
+    inert = [kernel.evolve(force=True) for _ in range(12)]
+    unmoved = [s for s in inert if s.knob and s.scored == pytest.approx(s.baseline)]
+    assert unmoved
+    for step in unmoved:
+        assert "moved nothing the one-step gauntlet can measure" in step.reason
+    assert any(v["inert"] for v in kernel.stats()["bandit"].values())
+
+
+def test_an_unavailable_gauntlet_still_says_it_was_unavailable(monkeypatch):
+    """A refusal to run must not be mistaken for a change that measured nothing."""
+    kernel = _kernel()
+    import builtins
+    real_import = builtins.__import__
+
+    def blocked(name, *args, **kw):
+        if name == "nyxara.nyx5.autopoiesis":
+            raise ImportError("no gauntlet")
+        return real_import(name, *args, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    step = kernel.evolve(force=True)
+    monkeypatch.setattr(builtins, "__import__", real_import)
+    assert "unavailable" in step.reason
+
+
+# --------------------------------------------------------------------------- #
+# The replay probe — the only part of the score a knob can move in one step
+# --------------------------------------------------------------------------- #
+def test_the_replay_probe_responds_to_the_knob_that_governs_retrieval():
+    kernel = _kernel()
+    kernel.brain.memory.apply_knobs({"recall_threshold": 0.02})
+    generous = kernel._replay()
+    kernel.brain.memory.apply_knobs({"recall_threshold": 0.6})
+    strict = kernel._replay()
+    assert generous is not None and strict is not None
+    assert strict < generous            # a threshold nothing clears recalls nothing
+
+
+def test_the_replay_probe_asks_with_the_cue_not_the_stored_text():
+    """A trace's own text matches itself at ~1.0, so no threshold ever binds and the probe
+    reads identically at every setting — it would measure nothing at all."""
+    kernel = _kernel()
+    traces = list(kernel.brain.memory.traces.values())
+    assert any(t.cue for t in traces)
+    by_text = [kernel.brain.memory.recall(t.text, k=1) for t in traces if t.cue]
+    assert all(g.score > 0.9 for g in by_text if g.hit is not None)
+
+
+def test_the_replay_probe_abstains_rather_than_scoring_zero_on_an_empty_store():
+    """Nothing stored is not the same as nothing recalled."""
+    kernel = SelfEvolutionKernel(_brain(), every_s=0.0, min_samples=1)
+    assert kernel._replay() is None
+
+
+def test_the_replay_probe_can_be_switched_off():
+    kernel = SelfEvolutionKernel(_resolved(_brain()), every_s=0.0, min_samples=1, replay_k=0)
+    assert kernel._replay() is None

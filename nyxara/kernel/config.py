@@ -2649,6 +2649,14 @@ class NyxConfig(BaseModel):
     omega_step: float = Field(default=0.2, gt=0.0, le=0.9)  # hill-climb step, as a range share
     omega_min_samples: int = Field(default=12, ge=1)      # below this, hill-climbing is noise
     omega_stall_after: int = Field(default=4, ge=1)       # rollbacks before she stops tuning
+    # Below this much structure the topology probe abstains: a three-edge graph's mean degree
+    # is an artefact of two turns, not a property of her topology, and scoring it would hand
+    # every knob a free win on a cold boot.
+    omega_min_edges_for_health: int = Field(default=24, ge=1)
+    # How many stored traces the replay probe re-asks per scoring. This is the ONLY part of the
+    # score a knob can move inside one step, so it is what makes the hill-climb a hill-climb —
+    # but it runs twice per evolution step, so it stays bounded.
+    omega_replay_k: int = Field(default=24, ge=0)
     omega_rule_synth_on_stall: bool = True                # …and invents a learning rule instead
     omega_rule_population: int = Field(default=8, ge=2)
     omega_rule_generations: int = Field(default=4, ge=1)

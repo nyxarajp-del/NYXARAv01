@@ -426,6 +426,8 @@ class NyxBrain:
                 rule_population=getattr(c, "omega_rule_population", 8),
                 rule_generations=getattr(c, "omega_rule_generations", 4),
                 rule_budget_s=getattr(c, "omega_rule_budget_s", 4.0),
+                min_edges_for_health=getattr(c, "omega_min_edges_for_health", 24),
+                replay_k=getattr(c, "omega_replay_k", 24),
                 seed=getattr(c, "seed", 42))
         except Exception:  # noqa: BLE001 — without it her constants stay whatever was typed
             return None
@@ -1316,16 +1318,20 @@ class NyxBrain:
         except Exception:  # noqa: BLE001
             return None
 
-    def evolve(self, *, oversight: Any = None, force: bool = False) -> Optional[OmegaStep]:
+    def evolve(self, *, oversight: Any = None, force: bool = False,
+               ignore_sample_floor: bool = False) -> Optional[OmegaStep]:
         """One budgeted change to the constants she thinks with — gauntleted and reversible.
 
-        Below a sample floor she declines: hill-climbing on a handful of turns is fitting
-        noise. She tunes her knobs, never her constitution.
+        ``force`` means *run now* — it waives the cadence, not the sample floor. Below the
+        floor she still declines, because hill-climbing on a handful of turns is fitting
+        noise, and waiving that needs its own explicit ``ignore_sample_floor``. She tunes her
+        knobs, never her constitution.
         """
         try:
             if self.omega is None:
                 return None
-            return self.omega.evolve(oversight=oversight, force=force)
+            return self.omega.evolve(oversight=oversight, force=force,
+                                     ignore_sample_floor=ignore_sample_floor)
         except Exception:  # noqa: BLE001
             return None
 

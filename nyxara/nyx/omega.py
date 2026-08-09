@@ -30,10 +30,26 @@ Honest framing (the rule this repo keeps, see ``docs/CAPABILITIES.md``):
 * **Not "better every second".** Evolution runs on a budgeted cadence and one change at a time,
   because a mind that reshapes itself every tick has no baseline left to measure against. It
   stops dead on ``/scram``.
-* **Fitness is measured, not asserted** — observed correctness from meta-cognition and observed
-  recall quality, reported with their sample counts. Below a sample floor she **does not
-  evolve at all**, because hill-climbing on noise is how a system tunes itself into a hole.
+* **Fitness is measured, not asserted** — observed correctness from meta-cognition, observed
+  recall quality, and a **replay** of what she has actually stored, reported with their sample
+  counts. Below a sample floor she **does not evolve at all**, because hill-climbing on noise is
+  how a system tunes itself into a hole. ``force`` waives the **cadence** and not that floor:
+  running now and hill-climbing on noise are different requests, and waiving the floor needs its
+  own ``ignore_sample_floor`` — after which the step is marked ``measured=False`` so its score is
+  never read back as evidence.
+* **The baseline is read on the same scale the gauntlet scores on.** Anything else compares the
+  probe against itself rather than the knob, and promotes every change on a gap it never earned.
+* **The one-step gauntlet can only see a knob that moves retrieval.** ``recall_threshold`` moves
+  it immediately; ``hebbian_rate`` and its neighbours act over later turns and cannot be scored
+  now. Those are reported as **not measurable in one step** — never as having *failed*, because
+  no evidence was gathered either way — and the bandit counts them so it stops picking them.
+* **A probe with nothing to read abstains.** An empty graph, a graph too small for its mean
+  degree to mean anything, and an empty store all contribute *nothing* rather than a free win.
 * Every step is **reversible**, and :meth:`rollback` puts the knobs back exactly.
+
+Known limit, stated rather than hidden: this is **greedy** hill-climbing, so it cannot cross a
+flat region. A knob parked far enough from the gradient stays there, because one step in the
+right direction measures no improvement and is correctly rolled back.
 
 Pure standard library. Every public method is fail-soft.
 """
@@ -84,18 +100,20 @@ class Step:
     scored: float = 0.0
     status: str = ""             # promoted | rolled_back | refused | skipped
     reason: str = ""
+    measured: bool = True        # False ⇒ the sample floor was waived; the score is not evidence
     lineage: str = ""
     at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"target": self.target, "knob": self.knob, "was": self.was, "now": self.now,
                 "baseline": round(self.baseline, 4), "scored": round(self.scored, 4),
-                "status": self.status, "reason": self.reason, "lineage": self.lineage,
-                "at": round(self.at, 3)}
+                "status": self.status, "reason": self.reason, "measured": self.measured,
+                "lineage": self.lineage, "at": round(self.at, 3)}
 
     def render(self) -> str:
         arrow = f"{self.was} → {self.now}" if self.knob else self.reason
-        return f"{self.status:12} {self.target}.{self.knob or '—':22} {arrow}"
+        tail = "" if self.measured else "   [UNMEASURED — sample floor waived]"
+        return f"{self.status:12} {self.target}.{self.knob or '—':22} {arrow}{tail}"
 
 
 class SelfEvolutionKernel:
@@ -105,7 +123,8 @@ class SelfEvolutionKernel:
                  min_samples: int = 12, seed: int = 42, max_ledger: int = 256,
                  rule_synth_on_stall: bool = True, stall_after: int = 4,
                  rule_population: int = 8, rule_generations: int = 4,
-                 rule_budget_s: float = 4.0) -> None:
+                 rule_budget_s: float = 4.0, min_edges_for_health: int = 24,
+                 replay_k: int = 24) -> None:
         self.brain = brain
         self.every_s = max(0.0, float(every_s))
         # Rule synthesis is genetic programming over update rules — real, and expensive. It is
@@ -117,6 +136,10 @@ class SelfEvolutionKernel:
         # Below this many resolved assessments, hill-climbing is fitting noise. She waits.
         self.min_samples = max(1, int(min_samples))
         self.stall_after = max(1, int(stall_after))
+        # Below this much structure the topology probe says nothing, so it contributes nothing.
+        self.min_edges_for_health = max(1, int(min_edges_for_health))
+        # How many stored traces the replay probe re-asks. Bounded: this runs twice per step.
+        self.replay_k = max(0, int(replay_k))
         self.rule_synth_on_stall = bool(rule_synth_on_stall)
         self._rng = random.Random(int(seed))
 
@@ -135,6 +158,9 @@ class SelfEvolutionKernel:
         # trying again, and one that never has is worth trying less often.
         self._pulls: Dict[str, int] = {}
         self._wins: Dict[str, int] = {}
+        # Knobs whose effect the one-step gauntlet cannot see at all. Counted from real runs
+        # rather than declared, because which knobs are inert depends on what she has stored.
+        self._inert: Dict[str, int] = {}
 
     # ---- what she is allowed to touch -------------------------------------- #
     def targets(self) -> Dict[str, Any]:
@@ -200,8 +226,18 @@ class SelfEvolutionKernel:
         now = time.time() if now is None else float(now)
         return self.every_s <= 0.0 or (now - self._last_run) >= self.every_s
 
-    def evolve(self, *, oversight: Any = None, force: bool = False) -> Step:
-        """One change, gauntleted and reversible. Silence is a legitimate outcome."""
+    def evolve(self, *, oversight: Any = None, force: bool = False,
+               ignore_sample_floor: bool = False) -> Step:
+        """One change, gauntleted and reversible. Silence is a legitimate outcome.
+
+        ``force`` waives the **cadence** and nothing else — it means *run now* rather than
+        *wait for the next slot*. It deliberately does **not** waive the sample floor: the
+        cadence is a scheduling rule and a human may reasonably overrule it, while the floor
+        is an epistemic guard, and hill-climbing on noise is how a system tunes itself into a
+        hole. Waiving the floor needs its own name, ``ignore_sample_floor``, so it can never
+        happen as a side effect of asking her to run now — and when it is used, the step says
+        so, so the ledger never shows a measured result where there was none.
+        """
         out = Step(status="skipped")
         try:
             if self._stopped(oversight):
@@ -214,9 +250,12 @@ class SelfEvolutionKernel:
             self._last_run = time.time()
 
             before = self.fitness()
-            if not before.enough and not force:
-                out.reason = before.why
-                return out
+            waived = False
+            if not before.enough:
+                if not ignore_sample_floor:
+                    out.reason = before.why
+                    return out
+                waived = True
 
             targets = self.targets()
             if not targets:
@@ -240,14 +279,33 @@ class SelfEvolutionKernel:
                 return out
 
             out.target, out.knob = target_name, knob
-            out.baseline = before.score
+            out.measured = before.enough
             out.was = obj.knobs().get(knob)
+            # The baseline has to be read on the SAME scale the gauntlet will score on.
+            # ``before.score`` is raw fitness; the gauntlet scores with the topology probe
+            # added, so comparing the two measured the probe rather than the knob — and
+            # promoted every change on a gap the knob never earned.
+            out.baseline = self._score_after(obj, knob)
             proposed = self._perturb(obj, knob, out.was)
             out.now = proposed
 
-            promoted, scored, reason = self._gauntlet(obj, knob, out.was, proposed,
-                                                      before.score)
+            promoted, scored, reason, ran = self._gauntlet(obj, knob, out.was, proposed,
+                                                           out.baseline)
             out.scored, out.reason = scored, reason
+            if ran and not promoted and abs(scored - out.baseline) < 1e-9:
+                # It did not fail — it was not visible. Reporting "did not beat baseline" for a
+                # knob the gauntlet cannot see would read as evidence against the knob, when in
+                # fact no evidence was gathered at all. The bandit already learns to stop
+                # picking these; the reason has to say why.
+                self._inert[knob] = self._inert.get(knob, 0) + 1
+                out.reason = ("this knob moved nothing the one-step gauntlet can measure — its "
+                              "effect shows up over later turns, not now, so it is put back "
+                              "rather than judged on evidence that was never gathered")
+            if waived:
+                # Appended to whatever the reason now says — including the inert note above —
+                # so a waived floor never erases the more specific explanation.
+                out.reason = (f"{out.reason} — AND the sample floor was waived ({before.why}), "
+                              f"so this score is not evidence")
             out.status = "promoted" if promoted else "rolled_back"
             self.evolutions += 1
             self._pulls[knob] = self._pulls.get(knob, 0) + 1
@@ -295,12 +353,18 @@ class SelfEvolutionKernel:
         return max(low, min(high, float(current or low) + direction * self.step * span))
 
     def _gauntlet(self, obj: Any, knob: str, was: Any, now: float,
-                  baseline: float) -> Tuple[bool, float, str]:
-        """Apply, score, and roll back anything that did not beat its own baseline."""
+                  baseline: float) -> Tuple[bool, float, str, bool]:
+        """Apply, score, and roll back anything that did not beat its own baseline.
+
+        The fourth element says whether the gauntlet actually **ran**. Without it a refusal to
+        run is indistinguishable from a change that scored exactly its baseline, and the caller
+        would report "this knob moved nothing measurable" when in truth nothing was measured.
+        """
         try:
             from nyxara.nyx5.autopoiesis import AutopoieticRewriter, RewriteProposal
         except Exception:  # noqa: BLE001 — no gauntlet means no change: fail closed
-            return False, baseline, "the autopoietic gauntlet is unavailable — nothing applied"
+            return (False, baseline,
+                    "the autopoietic gauntlet is unavailable — nothing applied", False)
 
         state: Dict[str, Any] = {}
         rewriter = AutopoieticRewriter(require_gauntlet=True, max_rewrites_per_cycle=1)
@@ -320,25 +384,73 @@ class SelfEvolutionKernel:
             baseline=baseline))
         status = str(getattr(outcome, "status", ""))
         return (status == "promoted", float(getattr(outcome, "score", 0.0)),
-                str(getattr(outcome, "reason", "") or status))
+                str(getattr(outcome, "reason", "") or status), True)
+
+    def _replay(self) -> Optional[float]:
+        """Re-ask what she already stored, and see how much of it comes back.
+
+        This is the only part of the score that a knob can actually **move within one step**.
+        Fitness comes from metacog and from store-level counts, and neither responds to a knob
+        until more turns have gone by — so scoring on those alone measured the weather, not the
+        change. Replaying her own traces through the live ``recall`` path responds immediately
+        to anything that changes retrieval.
+
+        Returns ``None`` when there is not enough stored to ask, rather than a zero: nothing
+        stored is not the same as nothing recalled.
+        """
+        try:
+            memory = getattr(self.brain, "memory", None)
+            if memory is None or self.replay_k <= 0:
+                return None
+            traces = list(getattr(memory, "traces", {}).values())
+            if len(traces) < 4:
+                return None
+            # Deterministic and bounded: the oldest N, so the sample does not drift between the
+            # before-reading and the after-reading of the same step.
+            sample = sorted(traces, key=lambda t: getattr(t, "written_tick", 0))[: self.replay_k]
+            hits = 0
+            for trace in sample:
+                # Ask with the CUE, not the text. A trace's own text matches itself at ~1.0, so
+                # a threshold never binds and the probe reads the same at every setting — it
+                # measures nothing. The cue is the question that produced the trace and is
+                # deliberately not encoded, so "can she get the conclusion back from what was
+                # asked" is both a real retrieval task and one a knob can move.
+                cue = str(getattr(trace, "cue", "") or "").strip()
+                if not cue:
+                    continue
+                got = memory.recall(cue, k=1)
+                found = getattr(got, "hit", None)
+                if found is not None and found.key == trace.key and getattr(got, "decided", False):
+                    hits += 1
+            asked = sum(1 for t in sample if str(getattr(t, "cue", "") or "").strip())
+            return (hits / float(asked)) if asked else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def _score_after(self, obj: Any, knob: str) -> float:
         """Re-measure with the knob in place.
 
-        Honest about what this is: her measured fitness *plus a probe* over the live graph, so a
-        knob that breaks recall or shreds structure scores lower immediately rather than only
-        after enough turns have gone by to notice.
+        Honest about what this is: her measured fitness, plus a topology probe over the live
+        graph, plus a **replay** of what she has stored — the last of which is the only term a
+        knob can move inside one step.
         """
         base = self.fitness().score
+        replay = self._replay()
+        if replay is not None:
+            base = 0.6 * base + 0.4 * replay
         try:
             graph = getattr(self.brain, "graph", None)
             if graph is None:
                 return base
             stats = graph.stats()
-            if not int(getattr(stats, "edges", 0)):
-                # An empty graph has no structure to be healthy or unhealthy about. Scoring it
-                # would hand every knob a free win on a cold boot, which is how a system tunes
-                # itself somewhere arbitrary before it has learned anything.
+            edges = int(getattr(stats, "edges", 0) or 0)
+            if edges < self.min_edges_for_health:
+                # A graph with no structure has nothing to be healthy or unhealthy about, and
+                # neither has one with three edges: its mean degree is an artefact of two turns,
+                # not a property of her topology. Scoring either hands every knob a free win on
+                # a cold boot, which is how a system tunes itself somewhere arbitrary before it
+                # has learned anything. "Empty" is not the real threshold — *uninformative* is,
+                # so the probe abstains until there is enough structure to read.
                 return base
             # A graph that has pruned itself down to isolated nodes is not a better graph, and
             # neither is one that has become a single clique.
@@ -464,14 +576,21 @@ class SelfEvolutionKernel:
                 "stalls": self._stalls, "stall_after": self.stall_after,
                 "every_s": self.every_s,
                 "rollback_points": len(self.rollback_points),
-                "bandit": {k: {"pulls": self._pulls.get(k, 0), "wins": self._wins.get(k, 0)}
+                "bandit": {k: {"pulls": self._pulls.get(k, 0), "wins": self._wins.get(k, 0),
+                               "inert": self._inert.get(k, 0)}
                            for k in sorted(self._pulls)},
+                "replay": self._replay(),
+                "min_edges_for_health": self.min_edges_for_health,
                 "note": ("she tunes her knobs, not her constitution — the tunable set is a "
                          "whitelist and the safety core is refused twice over. Not 'better "
                          "every second': one change at a time on a budgeted cadence, because a "
                          "mind that reshapes itself every tick has no baseline left. Anything "
                          "that does not beat its own baseline is rolled back, and below a "
-                         "sample floor she does not evolve at all"),
+                         "sample floor she does not evolve at all — a floor that `force` does "
+                         "NOT waive, because running now and hill-climbing on noise are "
+                         "different requests. The one-step gauntlet can only see a knob that "
+                         "moves RETRIEVAL: the rest act over later turns, and those are "
+                         "reported as unmeasured rather than as having failed"),
             }
         except Exception:  # noqa: BLE001
             return {}
@@ -500,6 +619,7 @@ class SelfEvolutionKernel:
                 "rolled_back": self.rolled_back, "refused": self.refused,
                 "rules_invented": self.rules_invented, "stalls": self._stalls,
                 "pulls": dict(self._pulls), "wins": dict(self._wins),
+                "inert": dict(self._inert),
                 "knobs": self.knobs(),
                 "ledger": [s.to_dict() for s in self.ledger[-64:]],
                 "rollback_points": list(self.rollback_points[-8:])}
@@ -516,6 +636,7 @@ class SelfEvolutionKernel:
             self._stalls = int(data.get("stalls", 0))
             self._pulls = {str(k): int(v) for k, v in (data.get("pulls") or {}).items()}
             self._wins = {str(k): int(v) for k, v in (data.get("wins") or {}).items()}
+            self._inert = {str(k): int(v) for k, v in (data.get("inert") or {}).items()}
             self.rollback_points = [p for p in (data.get("rollback_points") or [])
                                     if isinstance(p, dict)]
             self.ledger = [Step(**{k: v for k, v in raw.items() if k in Step.__annotations__})
