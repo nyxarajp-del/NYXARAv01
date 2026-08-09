@@ -216,6 +216,30 @@ def test_the_stream_route_is_not_swallowed_by_the_faculty_catch_all(
     assert "note" in client.get("/v1/nyx/stream").json()
 
 
+def test_the_catch_all_is_registered_after_every_literal_nyx_route() -> None:
+    """The invariant itself, not one instance of it.
+
+    FastAPI matches in registration order, so a literal GET declared after ``{faculty}`` is
+    silently unreachable — a bug that looks exactly like a working route, because the catch-all
+    answers with a plausible payload instead of a 404. Asserting the ordering directly means a
+    future literal route cannot be added below it without this failing.
+    """
+    app = create_app()
+    literal, catch_all = [], None
+    for index, route in enumerate(app.routes):
+        path = getattr(route, "path", "")
+        if not path.startswith("/v1/nyx") or "GET" not in getattr(route, "methods", set()):
+            continue
+        if "{" in path:
+            catch_all = index
+        else:
+            literal.append((index, path))
+
+    assert catch_all is not None and literal
+    late = [path for index, path in literal if index > catch_all]
+    assert not late, f"unreachable — declared after the catch-all: {late}"
+
+
 # --------------------------------------------------------------------------- #
 # Read-only faculty state
 # --------------------------------------------------------------------------- #

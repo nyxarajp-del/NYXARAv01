@@ -1596,7 +1596,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
                              "lingua", "semantics", "icl", "intent", "reason", "hands",
                              "author", "consequence", "axiom", "omega", "telepathy",
                              "prover", "vsa", "causal", "weaver", "dialectic", "stream",
-                             "goals"):
+                             "goals", "agenda"):
             return {"available": False, "reason": f"no NYX faculty named {faculty!r}."}
         part = getattr(brain, attribute, None)
         if part is None:

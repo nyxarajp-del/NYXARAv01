@@ -102,6 +102,45 @@ def test_a_failing_tool_is_recorded_as_a_failure_not_a_crash():
     assert brain.hands.record["boom_tool"].failed == 1
 
 
+def test_a_dry_run_does_not_report_itself_as_having_run():
+    """``dry_run`` answers *what would happen*. Nothing executed, so nothing may say it did."""
+    brain = _brain()
+    reach = brain.act("echo this back", tool="echo_tool", args={"text": "hi"}, dry_run=True)
+    assert reach.ran is False and reach.ok is False
+    assert "nothing was executed" in reach.why
+
+
+def test_a_dry_run_is_distinguishable_from_a_refusal():
+    """``ran: false`` alone cannot tell the two apart, so the reason has to say which it was."""
+    brain = _brain()
+    dry = brain.act("echo this back", tool="echo_tool", args={"text": "hi"}, dry_run=True)
+    declined = brain.act("gravity pulls the apple down")
+    assert "dry run" in dry.why and not dry.refused
+    assert "dry run" not in declined.why
+
+
+def test_a_dry_run_does_not_move_the_tools_track_record():
+    """Crediting a use for something that never ran teaches her a reliability she never measured.
+
+    The record is the input to :meth:`Hands._trust`, which decides what she reaches for next —
+    so a phantom use does not merely look wrong, it changes later behaviour.
+    """
+    brain = _brain()
+    for _ in range(5):
+        brain.act("echo this back", tool="echo_tool", args={"text": "hi"}, dry_run=True)
+    assert "echo_tool" not in brain.hands.record
+    assert brain.hands.reaches == 0
+
+
+def test_a_real_reach_after_a_dry_run_is_the_first_recorded_use():
+    brain = _brain()
+    brain.act("echo this back", tool="echo_tool", args={"text": "hi"}, dry_run=True)
+    reach = brain.act("echo this back", tool="echo_tool", args={"text": "hi"})
+    assert reach.ran is True
+    assert brain.hands.record["echo_tool"].uses == 1
+    assert brain.hands.reaches == 1
+
+
 def test_a_turn_that_does_not_want_a_tool_is_declined_not_forced():
     brain = _brain()
     reach = brain.act("gravity pulls the apple down")

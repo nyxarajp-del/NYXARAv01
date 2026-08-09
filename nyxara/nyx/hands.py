@@ -322,9 +322,12 @@ class Hands:
             decision = getattr(result, "decision", None) or {}
             if isinstance(decision, dict) and decision.get("allowed") is False:
                 out.refused = str(decision.get("reason", "") or "owner confirmation required")
-            if not out.why:
-                out.why = ("dry run — this is the tool I would pick and what the gate decided, "
-                           "and nothing was executed")
+            # Appended, never merely filled in: when the caller named a tool ``why`` already
+            # says so, and a reply whose only signal is ``ran: false`` cannot be told apart
+            # from a refusal. The caller has to be able to see which of the two this was.
+            note = ("dry run — this is the tool I would pick and what the gate decided, and "
+                    "nothing was executed")
+            out.why = f"{out.why}; {note}" if out.why else note
             return
         rec = self.record.setdefault(out.tool, ToolRecord(name=out.tool))
         rec.uses += 1
