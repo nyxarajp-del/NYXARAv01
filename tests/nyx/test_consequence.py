@@ -250,3 +250,44 @@ def test_reversibility_ordering_is_worst_wins():
 def test_everything_is_fail_soft_on_junk(gate):
     assert gate.check(None).allowed is False
     assert Verdict().to_dict()["allowed"] is True     # a default verdict is inert, not a stop
+
+
+# --------------------------------------------------------------------------- #
+# Unmodelled is not the same as safe
+# --------------------------------------------------------------------------- #
+def test_an_action_she_modelled_nothing_about_is_unknown_not_undoable():
+    """``_class_of`` started at UNDOABLE, so anything it could not model came out "safe".
+
+    Measured before the fix: ``rm -rf /some/unknown/path`` was classed **undoable** and
+    **allowed** — free text has no args, so it produced no paths, no registry entry and no
+    outbound token, and the loop had nothing to worsen. That is the empty-graph-free-bonus
+    shape, in the one gate that decides whether she destroys something.
+    """
+    gate = ConsequenceGate()
+    verdict = gate.check("rm -rf /some/unknown/path", {})
+    assert verdict.reversibility == Reversibility.UNKNOWN
+    assert verdict.allowed is False
+    assert "could not model this action at all" in verdict.why
+
+
+def test_an_unmodelled_action_gets_its_own_words_not_the_irreversible_ones():
+    """"Cannot be taken back and cannot see ahead" is a different claim from "I do not know it"."""
+    verdict = ConsequenceGate().check("do the thing", {})
+    assert "cannot be taken back" not in verdict.why
+    assert "Unmodelled is not the same as safe" in verdict.why
+
+
+def test_a_registered_tool_that_touches_nothing_is_still_undoable():
+    """The distinction is *modelled nothing*, not *does nothing* — a read-only tool must pass."""
+    from nyxara.agency.permissions import Capability, RiskTier
+    from nyxara.agency.tools import ToolParam, ToolRegistry, ToolSpec
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec("echo_tool", handler=lambda text: text,
+                               description="repeat the given text back",
+                               params=[ToolParam("text", "str")],
+                               capability=Capability.TOOL_CALL, risk=RiskTier.TRIVIAL))
+    verdict = ConsequenceGate().check("echo_tool", {"text": "hi"}, registry=registry)
+    assert verdict.reversibility == Reversibility.UNDOABLE
+    assert verdict.allowed is True
+    assert verdict.effects            # the registry's own flags are something to read

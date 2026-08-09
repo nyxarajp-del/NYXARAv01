@@ -137,6 +137,34 @@ _CUES: Tuple[Tuple[str, str], ...] = (
     ("equivalence", "symmetric"),
     ("order", "transitive"),
 )
+
+
+def _with_own_names(cues: Tuple[Tuple[str, str], ...]) -> Tuple[Tuple[str, str], ...]:
+    """Every property answers to its own name, in hyphen and space form.
+
+    Not a convenience — an invariant. ``cyclic-pair`` was expressible, listed in ``PROPERTIES``,
+    and reachable by no phrasing at all: the hand-written cues covered "cycle"/"both ways" and
+    ``\bcycle`` does not match "cyclic". So *"an irreflexive transitive relation with a cyclic
+    pair"* quietly built ``{irreflexive, transitive}`` instead — a weaker system than the one
+    described, which then found a model and was promoted. She answered a question nobody asked
+    and called it a success. Deriving the names from ``PROPERTIES`` means a property that can be
+    expressed can always be *named*, including any added later.
+    """
+    out = list(cues)
+    have = {cue for cue, _name in cues}
+    for name in sorted(PROPERTIES):
+        for form in (name, name.replace("-", " ")):
+            if form not in have:
+                out.append((form, name))
+                have.add(form)
+    # Longest first, so a specific phrasing is never shadowed by a prefix of itself.
+    return tuple(sorted(out, key=lambda pair: -len(pair[0])))
+
+
+#: The cue table she actually matches against: the hand-written phrasings above, plus every
+#: property's own name. Built once.
+_ALL_CUES: Tuple[Tuple[str, str], ...] = _with_own_names(_CUES)
+
 _NEGATORS = ("not ", "no ", "never ", "without ", "fails ", "non-", "non")
 
 
@@ -246,12 +274,12 @@ class Genesis:
         if self.system is not None:
             lines.append(f"  system    : {self.system.render()}")
             if self.system.consistent:
-                lines.append(f"  consistent: a model exists at size "
+                lines.append(f"  model     : a model exists at size "
                              f"{self.system.model_size} (bounded check to "
                              f"{self.system.bound})")
                 lines.append(f"  witness   : {self.system.model}")
             else:
-                lines.append(f"  consistent: NO model up to size {self.system.bound} — "
+                lines.append(f"  model     : NO model up to size {self.system.bound} — "
                              f"that is not a proof of inconsistency, and not a proof of "
                              f"consistency either")
             for axiom in self.system.axioms:
@@ -306,7 +334,7 @@ class AxiomGenesis:
             if "a<b" in low.replace(" ", "") and "b<a" in low.replace(" ", ""):
                 out.append(Axiom(name="cyclic-pair", why="read from 'a<b and b<a'"))
             seen = {a.name for a in out}
-            for cue, name in _CUES:
+            for cue, name in _ALL_CUES:
                 if name in seen:
                     continue
                 match = re.search(rf"\b{re.escape(cue)}", low)

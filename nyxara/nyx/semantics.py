@@ -353,9 +353,18 @@ class SemanticSpace:
             return False
 
     def _put(self, rel: Relation) -> None:
+        """Keep the strongest claim about a pair. A weaker one never displaces it.
+
+        The kind used to be part of the test, so a 0.3 ``is-a`` parsed out of prose silently
+        overwrote a 0.9 ``synonym`` she had been *told* — destroying the strongest evidence she
+        has, emptying :meth:`synonyms`, and with it the merge and activation bridges that read
+        it. Reading a sentence must not make her forget what she was taught.
+        """
         bucket = self._relations.setdefault(rel.a, {})
         prior = bucket.get(rel.b)
-        if prior is not None and prior.weight >= rel.weight and prior.kind == rel.kind:
+        if prior is not None and prior.weight > rel.weight:
+            return
+        if prior is not None and prior.weight == rel.weight and prior.kind == rel.kind:
             return
         bucket[rel.b] = rel
         self._enforce_relation_cap()
@@ -525,7 +534,14 @@ class SemanticSpace:
             for other in pool:
                 sim = self.similarity(label, other)
                 if sim.score > 0.0 and sim.known:
-                    scored.append((other, sim.score, sim.rung))
+                    # Ranked on EVIDENCE, not on the bare number. Sorting by ``score`` alone
+                    # threw the grade away exactly where it matters most — this list is what
+                    # grows the concept graph — so "cars" (spelling, graded 0.4) outranked
+                    # "vehicle" (meaning) by nearly 3×, and she wired herself on orthography.
+                    # ``score × grade`` is "how alike, weighted by how much I actually know",
+                    # and the grade already encodes the ladder: a subword rung cannot exceed
+                    # 0.4 of its own score, so spelling can no longer beat meaning here.
+                    scored.append((other, sim.score * sim.grade, sim.rung))
             scored.sort(key=lambda t: -t[1])
             return scored[: max(0, int(k))]
         except Exception:  # noqa: BLE001

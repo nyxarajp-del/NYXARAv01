@@ -235,12 +235,19 @@ def test_without_a_gauntlet_nothing_is_applied(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Reversibility — the point of the layer
 # --------------------------------------------------------------------------- #
-def test_a_checkpoint_restores_every_knob_exactly():
+def test_a_checkpoint_restores_every_knob_exactly(monkeypatch):
+    """About rollback, not about the hill-climb — so the promotion is made deterministic.
+
+    Leaving it to the real search made this test depend on the shape of the fitness landscape,
+    which any change elsewhere in the brain can move. A checkpoint has to restore the knobs
+    exactly after *any* change, however that change came about.
+    """
     kernel = _kernel(stall_after=99)
-    kernel.brain.memory.apply_knobs({"recall_threshold": 0.3})
+    rising = iter(range(1, 500))
+    monkeypatch.setattr(kernel, "_score_after", lambda obj, knob: float(next(rising)))
     kernel.checkpoint(note="start")
     original = kernel.knobs()
-    for _ in range(80):
+    for _ in range(8):
         if kernel.evolve(force=True).status == "promoted":
             break
     assert kernel.knobs() != original
@@ -479,3 +486,18 @@ def test_the_replay_probe_abstains_rather_than_scoring_zero_on_an_empty_store():
 def test_the_replay_probe_can_be_switched_off():
     kernel = SelfEvolutionKernel(_resolved(_brain()), every_s=0.0, min_samples=1, replay_k=0)
     assert kernel._replay() is None
+
+
+def test_the_replay_probe_does_not_move_the_store_it_measures():
+    """A measurement that rewrites its subject is not a measurement.
+
+    ``recall`` bumps ``trace.recalls`` and the recency list on every call, and the probe makes
+    one read per sampled trace, twice per scoring step. Left on ``recall`` it rewrote the store
+    it was reading, and the first reading disagreed with every one after it.
+    """
+    kernel = _kernel()
+    traces = list(kernel.brain.memory.traces.values())
+    before = [t.recalls for t in traces]
+    readings = [kernel._replay() for _ in range(6)]
+    assert [t.recalls for t in traces] == before
+    assert len(set(readings)) == 1          # …and it reads the same every time

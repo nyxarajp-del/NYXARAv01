@@ -304,6 +304,22 @@ class ConsequenceGate:
 
     @staticmethod
     def _class_of(effects: Sequence[Effect]) -> str:
+        """The worst thing any modelled effect does — and UNKNOWN when nothing was modelled.
+
+        Starting at ``UNDOABLE`` meant an action she could not model *at all* came out as
+        "this can be taken back": ``rm -rf /some/unknown/path`` was classed undoable and
+        allowed, because free text with no args produces no paths, no registry entry and no
+        outbound token, so the loop had nothing to worsen. That is the same shape as handing
+        an empty graph a free health bonus, in the one gate that decides whether she destroys
+        something. An action she has modelled nothing about is UNKNOWN, and ``_decide`` already
+        treats unknown as un-take-back-able.
+
+        A **registered** tool always contributes a ``registered`` effect, so a read-only tool
+        that touches nothing still lands here with something to read and stays undoable — the
+        distinction is *modelled nothing*, not *does nothing*.
+        """
+        if not effects:
+            return Reversibility.UNKNOWN
         worst = Reversibility.UNDOABLE
         for effect in effects:
             worst = Reversibility.worse(worst, effect.reversibility)
@@ -341,6 +357,16 @@ class ConsequenceGate:
     def _decide(self, out: Verdict) -> None:
         irreversible = out.reversibility in (Reversibility.IRREVERSIBLE,
                                              Reversibility.UNKNOWN)
+        # An action she modelled *nothing* about deserves its own words. "This cannot be taken
+        # back and she cannot see ahead" describes a known-irreversible action; saying it about
+        # something she simply did not recognise is a different claim, and a misleading one.
+        if not out.effects:
+            out.allowed = False
+            out.why = ("I could not model this action at all — no registered tool, no path, "
+                       "nothing outbound. Unmodelled is not the same as safe, so I do not act "
+                       "on it")
+            self.stopped += 1
+            return
         bad_tail = out.foresight.ran and out.foresight.tail_risk > self.tail_risk_ceiling
 
         if not irreversible and not bad_tail:

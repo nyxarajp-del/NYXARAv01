@@ -339,6 +339,13 @@ def test_everything_is_fail_soft_on_junk():
     assert hands.load_dict({"record": "junk"}) is False   # corrupt, and it says so
 
 
-def test_an_unknown_tool_is_an_error_not_a_crash():
+def test_an_unknown_tool_is_named_as_unknown_rather_than_refused_generically():
+    """The registry already knows the tool does not exist; that beats the gate's generic no.
+
+    Once an unmodelled action became UNKNOWN-reversibility, a bad tool name was refused with
+    "I could not model this action" — true, but far less useful than the fact the registry was
+    holding all along.
+    """
     reach = _brain().act("x", tool="no_such_tool", args={})
     assert reach.ran is False and reach.error
+    assert "no tool called" in reach.error

@@ -11,7 +11,12 @@ from __future__ import annotations
 import pytest
 
 from nyxara.nyx.graph import DynamicNeuralGraph
-from nyxara.nyx.semantics import RUNGS, SemanticSpace, Similarity
+from nyxara.nyx.semantics import (
+    _SUBWORD_MAX_GRADE,
+    RUNGS,
+    SemanticSpace,
+    Similarity,
+)
 
 CAR_CORPUS = [
     "the car drove down the road quickly",
@@ -358,3 +363,66 @@ def test_similarity_serialises():
     got = _space().similarity("car", "automobile").to_dict()
     assert set(got) == {"a", "b", "score", "rung", "grade", "known", "why"}
     assert isinstance(Similarity().to_dict(), dict)
+
+
+# --------------------------------------------------------------------------- #
+# Evidence has to govern where it matters, not only where it is reported
+# --------------------------------------------------------------------------- #
+def test_a_weaker_parsed_relation_never_erases_a_stronger_taught_one():
+    """Reading a sentence must not make her forget what she was told.
+
+    ``_put`` used to include the *kind* in its test, so a 0.3 ``is-a`` mined from prose
+    overwrote a 0.9 ``synonym`` she had been taught — destroying the strongest evidence she
+    has, emptying :meth:`synonyms`, and with it the merge and activation bridges that read it.
+    """
+    space = SemanticSpace()
+    space.teach("car", "vehicle", kind="synonym", weight=0.9)
+    space.teach("car", "vehicle", kind="is-a", weight=0.3)
+    assert space.similarity("car", "vehicle").score == pytest.approx(0.9)
+    assert space.synonyms("car") == [("vehicle", 0.9)]
+
+
+def test_a_stronger_relation_still_replaces_a_weaker_one():
+    space = SemanticSpace()
+    space.teach("car", "vehicle", kind="is-a", weight=0.3)
+    space.teach("car", "vehicle", kind="synonym", weight=0.9)
+    assert space.similarity("car", "vehicle").score == pytest.approx(0.9)
+
+
+def test_spelling_does_not_outrank_meaning_where_the_graph_grows():
+    """`similar()` is what grows the concept graph, and it used to sort on the bare score.
+
+    Measured before the fix: "cars" (subword, graded 0.4) outranked "vehicle" (meaning) by
+    nearly 3×, so she wired herself on orthography. Ranking on ``score × grade`` — how alike,
+    weighted by how much she actually knows — puts evidence back in charge.
+    """
+    space = SemanticSpace()
+    space.teach("car", "vehicle", weight=0.9)
+    for _ in range(4):
+        space.train_on("the car is a vehicle that needs fuel")
+        space.train_on("cars and carts and carting things around")
+    ranked = space.similar("car", k=6)
+    assert ranked, "she should have found something"
+    labels = [label for label, _score, _rung in ranked]
+    rungs = {label: rung for label, _score, rung in ranked}
+    assert labels[0] == "vehicle" and rungs["vehicle"] == "relational"
+    if "cars" in labels:
+        assert labels.index("vehicle") < labels.index("cars")
+
+
+def test_the_number_similar_returns_is_weighted_by_evidence():
+    space = SemanticSpace()
+    space.teach("car", "vehicle", weight=0.9)
+    ranked = dict((label, score) for label, score, _rung in space.similar("car", k=6))
+    sim = space.similarity("car", "vehicle")
+    assert ranked["vehicle"] == pytest.approx(sim.score * sim.grade)
+
+
+def test_a_subword_pair_can_never_be_ranked_as_strongly_as_it_scores():
+    """The 0.4 cap has to bite in the ranking too, or it is decorative."""
+    space = SemanticSpace()
+    sim = space.similarity("cat", "cats")
+    assert sim.rung == "subword" and sim.grade <= _SUBWORD_MAX_GRADE
+    ranked = dict((label, score) for label, score, _rung in space.similar("cat", k=6))
+    if "cats" in ranked:
+        assert ranked["cats"] <= sim.score * _SUBWORD_MAX_GRADE

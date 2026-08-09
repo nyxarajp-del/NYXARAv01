@@ -269,6 +269,17 @@ class Hands:
             out.tool = tool
             out.args = dict(args or {})
 
+            # A tool that does not exist is a fact the registry already knows, and saying so
+            # is a better answer than the gate's honest-but-generic "I could not model this".
+            # The specific diagnosis beats the general one, and it keeps the gate for what the
+            # gate is for: deciding about actions that are real.
+            if not self._known(registry, tool):
+                out.error = (f"there is no tool called {tool!r} in the registry — "
+                             f"I cannot reach for something that does not exist")
+                out.why = out.error
+                self.declined += 1
+                return out
+
             # L-CHRONO-CAUSAL: look before acting. This is her own foresight, not an
             # escalation — nobody is asked for permission, and full autonomy is untouched.
             gate = getattr(self.brain, "consequence", None)
@@ -303,6 +314,19 @@ class Hands:
             return out
         finally:
             out.duration_ms = (time.perf_counter() - t0) * 1000.0
+
+    @staticmethod
+    def _known(registry: Any, tool: str) -> bool:
+        """Does the registry actually hold this tool? An unreadable registry is not a verdict."""
+        try:
+            if registry is None:
+                return True
+            getter = getattr(registry, "get", None)
+            if getter is None:
+                return True
+            return getter(tool) is not None
+        except Exception:  # noqa: BLE001 — if she cannot ask, she does not pretend to know
+            return True
 
     def _invoke(self, registry: Any, tool: str, args: Dict[str, Any], *,
                 authority: Any, dry_run: bool) -> Any:

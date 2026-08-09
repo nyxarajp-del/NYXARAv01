@@ -488,7 +488,16 @@ class GoalTree:
             node.risk_why = str(getattr(verdict, "why", ""))
             fore = getattr(verdict, "foresight", None)
             node.tail_risk = float(getattr(fore, "tail_risk", 0.0) or 0.0)
-            if not node.allowed:
+            if not getattr(verdict, "effects", None):
+                # A node is a *clause*, not a tool call — no tool has been chosen yet, so the
+                # gate has nothing to model and its refusal here is "I cannot price this",
+                # not "I refuse this". Blocking on that would block every plan. The binding
+                # check still happens: `hands.reach` asks the same gate with the real tool and
+                # its real arguments before anything runs.
+                node.allowed = True
+                node.risk_why = ("not priceable before a tool is chosen — the gate is asked "
+                                 "again, for real, when this node executes")
+            elif not node.allowed:
                 node.status = _BLOCKED
                 node.error = node.risk_why or "the consequence gate declined this step"
         except Exception:  # noqa: BLE001 — an unpriced node is unknown-risk, never silently safe

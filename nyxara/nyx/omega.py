@@ -408,6 +408,8 @@ class SelfEvolutionKernel:
             # Deterministic and bounded: the oldest N, so the sample does not drift between the
             # before-reading and the after-reading of the same step.
             sample = sorted(traces, key=lambda t: getattr(t, "written_tick", 0))[: self.replay_k]
+            # The same bar ``recall`` applies to decide it is confident — read, not re-derived.
+            threshold = float(getattr(memory, "recall_threshold", 0.0) or 0.0)
             hits = 0
             for trace in sample:
                 # Ask with the CUE, not the text. A trace's own text matches itself at ~1.0, so
@@ -418,9 +420,15 @@ class SelfEvolutionKernel:
                 cue = str(getattr(trace, "cue", "") or "").strip()
                 if not cue:
                     continue
-                got = memory.recall(cue, k=1)
-                found = getattr(got, "hit", None)
-                if found is not None and found.key == trace.key and getattr(got, "decided", False):
+                # ``candidates`` and not ``recall``: recall bumps ``trace.recalls`` and the
+                # recency list on every call, so a probe that ran 16 reads per scoring step was
+                # rewriting the very store it was measuring — the first reading and every one
+                # after it disagreed. A measurement must not move its subject.
+                near = memory.candidates(cue, k=1)
+                if not near:
+                    continue
+                found, score = near[0]
+                if found.key == trace.key and float(score) >= threshold:
                     hits += 1
             asked = sum(1 for t in sample if str(getattr(t, "cue", "") or "").strip())
             return (hits / float(asked)) if asked else None

@@ -224,3 +224,48 @@ def test_the_record_survives_a_restart():
 def test_an_axiom_renders_with_its_polarity():
     assert Axiom(name="transitive", asserted=False).render() == "¬transitive"
     assert Axiom(name="transitive").render() == "transitive"
+
+
+# --------------------------------------------------------------------------- #
+# A property she can express must be a property she can be asked for
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("name", sorted(PROPERTIES))
+def test_every_property_answers_to_its_own_name(name):
+    """``cyclic-pair`` was expressible, listed, and reachable by no phrasing at all.
+
+    The hand-written cues covered "cycle" and "both ways", and ``\bcycle`` does not match
+    "cyclic" — so a description naming it built a *weaker* system instead, found a model for
+    that, and promoted it. She answered a question nobody asked and called it a success.
+    """
+    for phrasing in (name, name.replace("-", " ")):
+        got = AxiomGenesis().read(f"a relation that is {phrasing}")
+        assert name in {axiom.name for axiom in got}, f"{phrasing!r} did not select {name!r}"
+
+
+def test_the_headline_case_reproduces_exactly():
+    """The two systems the docs cite. Both were wrong while ``cyclic-pair`` was unreachable."""
+    genesis = AxiomGenesis()
+
+    ok = genesis.invent("a transitive relation with a cyclic pair")
+    assert {a.name for a in ok.system.axioms} == {"transitive", "cyclic-pair"}
+    assert ok.system.consistent is True and ok.system.model_size == 2
+
+    none = genesis.invent("an irreflexive transitive relation with a cyclic pair")
+    assert {a.name for a in none.system.axioms} == {"irreflexive", "transitive", "cyclic-pair"}
+    assert none.system.consistent is None
+    assert not none.promoted
+
+
+def test_no_model_found_is_never_reported_as_inconsistent_or_consistent():
+    """Gödel's respect is in this one line, so it is asserted rather than trusted."""
+    rendered = AxiomGenesis().invent(
+        "an irreflexive transitive relation with a cyclic pair").render().lower()
+    assert "not a proof of inconsistency" in rendered
+    assert "not a proof of consistency either" in rendered
+
+
+def test_a_row_label_never_asserts_what_its_value_denies():
+    """The row read ``consistent:`` while its value said no model had been found."""
+    rendered = AxiomGenesis().invent(
+        "an irreflexive transitive relation with a cyclic pair").render()
+    assert "consistent:" not in rendered
