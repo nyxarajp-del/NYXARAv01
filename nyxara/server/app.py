@@ -338,6 +338,55 @@ class NyxChronosRequest(BaseModel):
     decision: str
 
 
+# --- NYX V.02 (nyxara/nyx/) — the nineteen ----------------------------------- #
+class NyxTextRequest(BaseModel):
+    """One string in. Used by the routes whose whole input is a sentence."""
+
+    text: str
+
+
+class NyxAuthorRequest(BaseModel):
+    spec: str
+    name: str = ""
+    load: Optional[bool] = None
+
+
+class NyxActRequest(BaseModel):
+    request: str
+    tool: str = ""
+    args: Dict[str, Any] = Field(default_factory=dict)
+    # Default to the honest thing over HTTP: say what she *would* do. Acting is opt-in per call
+    # and still goes through the registry's unchanged capability/risk/governor pipeline.
+    dry_run: bool = True
+
+
+class NyxAxiomRequest(BaseModel):
+    problem: str
+    name: str = ""
+
+
+class NyxEvolveRequest(BaseModel):
+    force: bool = False
+
+
+class NyxDebateRequest(BaseModel):
+    claim: str
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    verified: bool = False
+
+
+class NyxCausalRequest(BaseModel):
+    cause: str
+    effect: str
+    question: str = ""
+
+
+class NyxGoalRequest(BaseModel):
+    request: str
+    # Same rule as /v1/nyx/act: decompose and price by default, execute only when asked.
+    run: bool = False
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -1325,15 +1374,229 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         return {"attempt": got.to_dict() if got is not None else None,
                 "stats": brain.omni.stats()}
 
+    # ----------------------------------------------------------------------- #
+    # NYX V.02 — the nineteen. Same rule as above: these are *faculties*, not a second way
+    # to act. /v1/nyx/act and /v1/nyx/goal are the only two that can touch the world, both
+    # go through the registry's unchanged pipeline and the consequence gate, and both
+    # default to saying what she WOULD do rather than doing it.
+    #
+    # Registered before the ``{faculty}`` catch-all below, because FastAPI matches in
+    # registration order and a literal path declared after it would never be reached.
+    # ----------------------------------------------------------------------- #
+    def _faculty(name: str) -> Any:
+        brain = _brain()
+        return getattr(brain, name, None) if brain is not None else None
+
+    @app.post("/v1/nyx/intent", dependencies=auth)
+    def nyx_intent(req: NyxTextRequest) -> dict:
+        """What was actually asked for: mood, actions, ordering, negation, what is unclear.
+
+        A parser, not a mind-reader. When two readings stay live it returns **both** with a
+        clarifying question, rather than picking one and hoping.
+        """
+        got = _brain().intent_of(req.text) if _brain() is not None else None
+        if got is None:
+            return _off("INTENT_ENABLED")
+        return {**got.to_dict(), "clarifying_question": got.clarifying_question()}
+
+    @app.post("/v1/nyx/reason", dependencies=auth)
+    def nyx_reason(req: NyxTextRequest) -> dict:
+        """Work down the tiers, and see which one answered — with its label, not just its text."""
+        got = _brain().reason_about(req.text) if _brain() is not None else None
+        if got is None:
+            return _off("REASON_ENABLED")
+        return got.to_dict()
+
+    @app.post("/v1/nyx/learn", dependencies=auth)
+    def nyx_learn(req: NyxTextRequest) -> dict:
+        """Induce a *procedure* from demonstrations in this turn and answer its probe.
+
+        In-context learning: no weight is updated anywhere, and outside the operation set
+        she refuses in plain words and names the set.
+        """
+        got = _brain().learn_from(req.text) if _brain() is not None else None
+        if got is None:
+            return _off("ICL_ENABLED")
+        return got.to_dict()
+
+    @app.post("/v1/nyx/author", dependencies=auth)
+    def nyx_author(req: NyxAuthorRequest) -> dict:
+        """Prose in, verified code out — or a refusal that names what was not derived.
+
+        Every stage of the gauntlet is on the reply, so the caller sees *where* it stopped.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "author", None) is None:
+            return _off("AUTHOR_ENABLED")
+        got = brain.author_code(req.spec, name=req.name, load=req.load,
+                                oversight=getattr(core, "oversight", None))
+        return got.to_dict() if got is not None else _off("AUTHOR_ENABLED")
+
+    @app.post("/v1/nyx/act", dependencies=auth)
+    def nyx_act(req: NyxActRequest) -> dict:
+        """Reach for a tool, through the registry's unchanged pipeline. Never around it.
+
+        ``dry_run`` defaults to **true**: the reply says which tool she would pick, what the
+        consequence gate decided and why, without running anything.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "hands", None) is None:
+            return _off("HANDS_ENABLED")
+        got = brain.act(req.request, tool=req.tool, args=dict(req.args),
+                        oversight=getattr(core, "oversight", None), dry_run=req.dry_run)
+        return got.to_dict() if got is not None else _off("HANDS_ENABLED")
+
+    @app.post("/v1/nyx/axiom", dependencies=auth)
+    def nyx_axiom(req: NyxAxiomRequest) -> dict:
+        """Write a new axiom system down, then check whether it holds together.
+
+        A model found proves consistency **at that size**; no model found proves nothing,
+        and is reported as exactly that.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "axiom", None) is None:
+            return _off("AXIOM_ENABLED")
+        got = brain.invent_axioms(req.problem, name=req.name)
+        return got.to_dict() if got is not None else _off("AXIOM_ENABLED")
+
+    @app.post("/v1/nyx/evolve", dependencies=auth)
+    def nyx_evolve(req: NyxEvolveRequest) -> dict:
+        """One budgeted change to the constants she thinks with — gauntleted and reversible."""
+        brain = _brain()
+        if brain is None or getattr(brain, "omega", None) is None:
+            return _off("OMEGA_ENABLED")
+        got = brain.evolve(oversight=getattr(core, "oversight", None), force=req.force)
+        return {"step": got.to_dict() if got is not None else None,
+                "stats": brain.omega.stats()}
+
+    @app.post("/v1/nyx/prove", dependencies=auth)
+    def nyx_prove(req: NyxTextRequest) -> dict:
+        """A machine-checked verdict, or an honest report that the claim admits none.
+
+        Most of what she says is not formally expressible; for those this returns
+        INEXPRESSIBLE rather than inventing a verdict, and that refusal is the point.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "prover", None) is None:
+            return _off("PROVER_ENABLED")
+        got = brain.prove(req.text)
+        return got.to_dict() if got is not None else _off("PROVER_ENABLED")
+
+    @app.post("/v1/nyx/debate", dependencies=auth)
+    def nyx_debate(req: NyxDebateRequest) -> dict:
+        """Her Skeptic attacks a claim: it survives, it survives weakened, or she abstains."""
+        brain = _brain()
+        if brain is None or getattr(brain, "dialectic", None) is None:
+            return _off("DIALECTIC_ENABLED")
+        got = brain.debate(req.claim, confidence=req.confidence, verified=req.verified)
+        return got.to_dict() if got is not None else _off("DIALECTIC_ENABLED")
+
+    @app.post("/v1/nyx/causal", dependencies=auth)
+    def nyx_causal(req: NyxCausalRequest) -> dict:
+        """Would the effect still happen if she intervened? ``do(X)`` beside the co-occurrence.
+
+        An unidentified pair says so. Identification rests on the graph and the assumptions
+        behind it, so the strategy, the confounder and the confidence all ride on the reply.
+        """
+        brain = _brain()
+        if brain is None or getattr(brain, "causal", None) is None:
+            return _off("CAUSAL_ENABLED")
+        got = brain.why_causal(req.cause, req.effect, question=req.question)
+        return got.to_dict() if got is not None else _off("CAUSAL_ENABLED")
+
+    @app.post("/v1/nyx/goal", dependencies=auth)
+    def nyx_goal(req: NyxGoalRequest) -> dict:
+        """One command → a DAG with a risk class and a way back priced per node.
+
+        ``run`` defaults to **false**: the reply is the plan and its priced risks, and
+        nothing has happened. With ``run=true`` a node she cannot finish keeps its reason
+        and the plan reports itself *incomplete* rather than done.
+        """
+        brain = _brain()
+        goals = getattr(brain, "goals", None) if brain is not None else None
+        if goals is None:
+            return _off("GOALS_ENABLED")
+        plan = brain.decompose(req.request)
+        if plan is None:
+            return _off("GOALS_ENABLED")
+        if not req.run:
+            return {"plan": plan.to_dict(), "run": None}
+        got = goals.run(plan, oversight=getattr(core, "oversight", None))
+        return {"plan": plan.to_dict(), "run": got.to_dict()}
+
+    @app.get("/v1/nyx/agenda", dependencies=auth)
+    def nyx_agenda() -> dict:
+        """Goals she wrote herself, how far each has got, and what she is stuck on."""
+        agenda = _faculty("agenda")
+        if agenda is None:
+            return _off("AGENDA_ENABLED")
+        got = _brain().briefing()
+        return {"briefing": got.to_dict() if got is not None else None,
+                "goals": [goal.to_dict() for goal in agenda.open_goals()],
+                "stats": agenda.stats()}
+
+    @app.get("/v1/nyx/stream/digest", dependencies=auth)
+    def nyx_stream_digest() -> dict:
+        """What arrived while you were away, compressed at four scales at once."""
+        stream = _faculty("stream")
+        if stream is None:
+            return _off("STREAM_ENABLED")
+        digests = _brain().digest(force=True)
+        return {"digests": {name: digest.to_dict() for name, digest in digests.items()},
+                "briefing": _brain().catch_up(), "stats": stream.stats()}
+
+    @app.websocket("/v1/nyx/telepathy")
+    async def nyx_telepathy(socket: WebSocket) -> None:
+        """Meaning as structure, both ways — the tokenizer is never involved.
+
+        **There is no mind reading here and none is claimed.** What is real is that past the
+        frame nothing is lost: send ``{"frame": {...}}`` and the concepts and role→filler
+        bindings go straight into semantics and the graph; send ``{"emit": true}`` and her
+        own state comes back as a frame for another node to consume without prose.
+        """
+        if token is not None and socket.query_params.get("token") != token:
+            await socket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        await socket.accept()
+        try:
+            while True:
+                data = await socket.receive_json()
+                brain = _brain()
+                telepathy = getattr(brain, "telepathy", None) if brain is not None else None
+                if telepathy is None:
+                    await socket.send_json(_off("TELEPATHY_ENABLED"))
+                    continue
+                if data.get("emit"):
+                    frame = brain.emit_frame()
+                    await socket.send_json(
+                        {"frame": frame.to_dict() if frame is not None else None})
+                    continue
+                frame = data.get("frame")
+                if not isinstance(frame, dict):
+                    await socket.send_json(
+                        {"error": "send {\"frame\": {...}} or {\"emit\": true}"})
+                    continue
+                got = brain.receive_frame(frame)
+                await socket.send_json(
+                    got.to_dict() if got is not None
+                    else {"error": "that frame carried nothing I could take in"})
+        except WebSocketDisconnect:
+            return
+
     @app.get("/v1/nyx/{faculty}", dependencies=auth)
     def nyx_faculty(faculty: str) -> dict:
-        """Read-only state for one faculty: omni, aura, will, nexus, hive, eternal, car."""
+        """Read-only state for one faculty, V.01 or V.02. Never acts, never changes anything."""
         brain = _brain()
         if brain is None:
             return _off("ENABLED")
         attribute = {"hive": "synergy"}.get(faculty, faculty)
         if attribute not in ("omni", "aura", "will", "nexus", "synergy", "eternal", "car",
-                             "ground", "metacog", "dialogue", "chronos", "episteme"):
+                             "ground", "metacog", "dialogue", "chronos", "episteme",
+                             # NYX V.02
+                             "lingua", "semantics", "icl", "intent", "reason", "hands",
+                             "author", "consequence", "axiom", "omega", "telepathy",
+                             "prover", "vsa", "causal", "weaver", "dialectic", "stream",
+                             "goals"):
             return {"available": False, "reason": f"no NYX faculty named {faculty!r}."}
         part = getattr(brain, attribute, None)
         if part is None:

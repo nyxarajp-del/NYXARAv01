@@ -294,8 +294,9 @@ class Hands:
 
             result = self._invoke(registry, tool, out.args, authority=authority,
                                   dry_run=dry_run)
-            self._absorb(out, result)
-            self.reaches += 1
+            self._absorb(out, result, dry_run=dry_run)
+            if not dry_run:
+                self.reaches += 1
             return out
         except Exception as exc:  # noqa: BLE001 — a reach that fails is data, not a crash
             out.error = f"{type(exc).__name__}: {exc}"
@@ -311,7 +312,20 @@ class Hands:
             authority = Authority.AUTONOMOUS
         return registry.invoke(tool, args, authority=authority, dry_run=bool(dry_run))
 
-    def _absorb(self, out: Reach, result: Any) -> None:
+    def _absorb(self, out: Reach, result: Any, *, dry_run: bool = False) -> None:
+        if dry_run:
+            # A dry run answers "what would happen"; nothing executed, so ``ran`` stays False
+            # and the tool's track record does not move. Crediting a use for something that
+            # never ran would teach her a reliability she has not measured.
+            out.value = getattr(result, "value", None)
+            out.error = str(getattr(result, "error", "") or "")
+            decision = getattr(result, "decision", None) or {}
+            if isinstance(decision, dict) and decision.get("allowed") is False:
+                out.refused = str(decision.get("reason", "") or "owner confirmation required")
+            if not out.why:
+                out.why = ("dry run — this is the tool I would pick and what the gate decided, "
+                           "and nothing was executed")
+            return
         rec = self.record.setdefault(out.tool, ToolRecord(name=out.tool))
         rec.uses += 1
         rec.last_used = time.time()
