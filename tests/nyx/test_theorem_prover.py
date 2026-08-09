@@ -8,6 +8,8 @@ is not claimed anywhere.
 
 from __future__ import annotations
 
+import concurrent.futures as cf
+
 import pytest
 
 from nyxara.kernel.config import NyxConfig
@@ -219,3 +221,28 @@ def test_a_certificate_serialises_with_its_verdict():
     assert got["verdict"] == Verdict.PROVED and got["proved"] is True
     assert set(got) >= {"claim", "formula", "engine", "witness", "note"}
     assert Certificate().proved is False
+
+
+# --------------------------------------------------------------------------- #
+# Thread safety — z3's global context is shared, and the orchestrator reasons in parallel
+# --------------------------------------------------------------------------- #
+def test_proving_from_several_threads_at_once_does_not_crash_the_process():
+    """Since V.02 the prover runs inside ``think()``, and ``think()`` runs on a thread pool.
+
+    z3's Python API builds every expression in one **global context** that is not thread-safe:
+    without a lock this corrupts the heap and aborts the interpreter, which no ``except`` in a
+    fail-soft module can catch. This test is the reason ``Z3_LOCK`` exists.
+    """
+    claims = ["for all real x, x*x >= 0", "2 + 2 = 5", "for all real x, x*x >= 1",
+              "there exists real x, x*x = 4", "x > 5"]
+
+    def work(_index: int):
+        core = ProofCore()
+        return [core.prove(claim).verdict for claim in claims]
+
+    with cf.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(work, range(32)))
+
+    assert results[0] == [Verdict.PROVED, Verdict.REFUTED, Verdict.REFUTED,
+                          Verdict.PROVED, Verdict.CONTINGENT]
+    assert all(row == results[0] for row in results)   # and every thread agreed

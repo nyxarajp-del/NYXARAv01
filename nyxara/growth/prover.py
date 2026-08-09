@@ -335,20 +335,27 @@ class Prover:
         m = re.match(r"^(.*?)(<=|>=|<|>)(.*)$", claim.statement)
         if not m:
             return None
+        # z3's global context is not thread-safe — and *building* an expression touches it just
+        # as solving does — while this is reachable from a reasoning turn the orchestrator runs
+        # on a thread pool. See nyxara.nyx.theorem_prover.Z3_LOCK.
+        from nyxara.nyx.theorem_prover import Z3_LOCK
         try:
-            names = sorted(set(re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", claim.statement)))
-            syms = {n: z3.Real(n) for n in names}
-            lhs = eval(_to_py(m.group(1)), {"__builtins__": {}}, syms)   # noqa: S307 — names sandboxed
-            rhs = eval(_to_py(m.group(3)), {"__builtins__": {}}, syms)   # noqa: S307
-            rel = {"<=": lhs <= rhs, ">=": lhs >= rhs, "<": lhs < rhs, ">": lhs > rhs}[m.group(2)]
-            s = z3.Solver()
-            s.add(z3.Not(rel))
-            if s.check() == z3.unsat:
-                return ProofResult(ProofVerdict.PROVEN, certificate="z3: negation unsatisfiable",
+            with Z3_LOCK:
+                names = sorted(set(re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", claim.statement)))
+                syms = {n: z3.Real(n) for n in names}
+                lhs = eval(_to_py(m.group(1)), {"__builtins__": {}}, syms)   # noqa: S307
+                rhs = eval(_to_py(m.group(3)), {"__builtins__": {}}, syms)   # noqa: S307
+                rel = {"<=": lhs <= rhs, ">=": lhs >= rhs,
+                       "<": lhs < rhs, ">": lhs > rhs}[m.group(2)]
+                s = z3.Solver()
+                s.add(z3.Not(rel))
+                if s.check() == z3.unsat:
+                    return ProofResult(ProofVerdict.PROVEN,
+                                       certificate="z3: negation unsatisfiable",
+                                       method="z3 (universal)", confidence=1.0, claim=claim)
+                return ProofResult(ProofVerdict.REFUTED,
+                                   certificate=f"z3 counter-model: {s.model()}",
                                    method="z3 (universal)", confidence=1.0, claim=claim)
-            return ProofResult(ProofVerdict.REFUTED,
-                               certificate=f"z3 counter-model: {s.model()}",
-                               method="z3 (universal)", confidence=1.0, claim=claim)
         except Exception:  # noqa: BLE001
             return None
 

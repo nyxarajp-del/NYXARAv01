@@ -25,8 +25,10 @@ from nyxara.nyx.aura import AwarenessField
 from nyxara.nyx.author import Author, Authored
 from nyxara.nyx.axiom import AxiomGenesis, Genesis
 from nyxara.nyx.car import CarStep, ContinuousAutonomousReasoning
+from nyxara.nyx.causal_engine import Answer as CausalAnswer, CausalReasoner
 from nyxara.nyx.chronos import Futures, TemporalCausalMatrix
 from nyxara.nyx.consequence import ConsequenceGate, Verdict
+from nyxara.nyx.dialectic import AdversarialSelfDialogue, Debate
 from nyxara.nyx.dialogue import Dialogue, Reply
 from nyxara.nyx.episteme import AutonomousDiscovery
 from nyxara.nyx.eternal import Continuity
@@ -39,11 +41,13 @@ from nyxara.nyx.hyper_vector import Retrieved as VsaRetrieved, VectorSymbolic
 from nyxara.nyx.icl import InContextLearner, Learned
 from nyxara.nyx.intent import Intent, IntentReader
 from nyxara.nyx.lingua import Lingua, LinguaRead
+from nyxara.nyx.meta_architecture import GraphWeaver, TypedEdge
 from nyxara.nyx.metacog import RecursiveMetaCognition
 from nyxara.nyx.nexus import OntologyGenesis
 from nyxara.nyx.omega import SelfEvolutionKernel, Step as OmegaStep
 from nyxara.nyx.omni import MetamorphicCompiler
 from nyxara.nyx.modules import (
+    CausalSpecialist,
     CreativeSpecialist,
     DerivationSpecialist,
     EthicsSpecialist,
@@ -56,7 +60,9 @@ from nyxara.nyx.modules import (
 )
 from nyxara.nyx.reason import Chain, OpenDomainReasoner
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
+from nyxara.nyx.sovereign_intent import GoalTree, Plan, Run
 from nyxara.nyx.semantics import SemanticSpace
+from nyxara.nyx.stream import Digest, PerpetualStream
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.telepathy import Frame, Received, SemanticStream
 from nyxara.nyx.theorem_prover import Certificate as ProofCertificate, ProofCore
@@ -136,6 +142,7 @@ _SPECIALISTS = {
     "ethics": EthicsSpecialist,
     "skill": SkillSpecialist,
     "reason": ReasonSpecialist,
+    "causal": CausalSpecialist,
 }
 
 
@@ -182,6 +189,7 @@ class NyxThought:
     assessment: Any = None                       # nyx.metacog.Assessment
     induced: Any = None                          # nyx.icl.Learned, when the turn taught her one
     intent: Any = None                           # nyx.intent.Intent — what was actually asked
+    debate: Any = None                           # nyx.dialectic.Debate — the winner, attacked
     cycle_id: str = ""
 
     @property
@@ -231,6 +239,7 @@ class NyxThought:
                                  if self.verification is not None else None),
                 "induced": (self.induced.to_dict() if self.induced is not None else None),
                 "intent": (self.intent.to_dict() if self.intent is not None else None),
+                "debate": (self.debate.to_dict() if self.debate is not None else None),
                 "assessment": (self.assessment.to_dict()
                                if self.assessment is not None else None)}
 
@@ -265,6 +274,11 @@ class NyxBrain:
         self.consequence = self._build_consequence(c)
         self.hands = self._build_hands(c)
         self.author = self._build_author(c)
+        self.causal = self._build_causal(c)
+        self.weaver = self._build_weaver(c)
+        self.dialectic = self._build_dialectic(c)
+        self.stream = self._build_stream(c)
+        self.goals = self._build_goals(c)
         self.metacog = self._build_metacog(c)
         self.workspace = self._build_workspace(c)
         self.prover = self.prover if getattr(self, 'prover', None) is not None \
@@ -299,6 +313,61 @@ class NyxBrain:
                           transliterate_bridge=getattr(c, "lingua_transliterate", True),
                           use_nlp=getattr(c, "lingua_use_nlp", True))
         except Exception:  # noqa: BLE001 — without a tongue she falls back to the ASCII floor
+            return None
+
+    def _build_causal(self, c: Any) -> Optional[CausalReasoner]:
+        if not getattr(c, "causal_enabled", True):
+            return None
+        try:
+            return CausalReasoner(self,
+                                  min_confidence=getattr(c, "causal_min_confidence", 0.3),
+                                  max_edges=getattr(c, "causal_max_edges", 2048),
+                                  wire_to_graph=getattr(c, "causal_wire_to_graph", True))
+        except Exception:  # noqa: BLE001 — without it every arrow is back to being association
+            return None
+
+    def _build_weaver(self, c: Any) -> Optional[GraphWeaver]:
+        if not getattr(c, "weaver_enabled", True):
+            return None
+        try:
+            return GraphWeaver(self, min_support=getattr(c, "weaver_min_support", 3),
+                               max_types=getattr(c, "weaver_max_types", 32),
+                               rewire_budget=getattr(c, "weaver_rewire_budget", 16),
+                               max_edges=getattr(c, "weaver_max_edges", 8192))
+        except Exception:  # noqa: BLE001 — without it the graph keeps one untyped edge kind
+            return None
+
+    def _build_dialectic(self, c: Any) -> Optional[AdversarialSelfDialogue]:
+        if not getattr(c, "dialectic_enabled", True):
+            return None
+        try:
+            return AdversarialSelfDialogue(
+                self, abstain_above=getattr(c, "dialectic_abstain_above", 1.2),
+                weaken_above=getattr(c, "dialectic_weaken_above", 0.4),
+                budget_ms=getattr(c, "dialectic_budget_ms", 250.0),
+                use_prover=getattr(c, "dialectic_use_prover", True))
+        except Exception:  # noqa: BLE001 — without it the winner ships unattacked, as in V.01
+            return None
+
+    def _build_stream(self, c: Any) -> Optional[PerpetualStream]:
+        if not getattr(c, "stream_enabled", True):
+            return None
+        try:
+            return PerpetualStream(self, capacity=getattr(c, "stream_capacity", 2048),
+                                   every_s=getattr(c, "stream_every_s", 15.0),
+                                   novel_cap=getattr(c, "stream_novel_cap", 12))
+        except Exception:  # noqa: BLE001 — without it events accumulate and never compress
+            return None
+
+    def _build_goals(self, c: Any) -> Optional[GoalTree]:
+        if not getattr(c, "goals_enabled", True):
+            return None
+        try:
+            return GoalTree(self, max_nodes=getattr(c, "goals_max_nodes", 24),
+                            max_steps=getattr(c, "goals_max_steps", 12),
+                            max_repairs=getattr(c, "goals_max_repairs", 3),
+                            execute=getattr(c, "goals_execute", True))
+        except Exception:  # noqa: BLE001 — without it a command is one action, never a plan
             return None
 
     def _build_vsa(self, c: Any) -> Optional[VectorSymbolic]:
@@ -713,6 +782,18 @@ class NyxBrain:
                 out.percept = self.perceive(out.stimulus, remember=False)
             out.cycle_id = f"cycle-{self.turns}"
 
+            # Three layers that only *watch* a turn go past: the causal engine notes which
+            # concepts were seen together (co-occurrence is its evidence, never its answer), the
+            # weaver reads any typed relation the sentence states outright, and the stream takes
+            # the turn in so a briefing has something to compress. None of them can change what
+            # she concludes here.
+            if self.causal is not None:
+                self.causal.observe(out.percept.concepts)
+            if self.weaver is not None:
+                self.weaver.read(out.stimulus)
+            if self.stream is not None:
+                self.stream.absorb_turn(out.stimulus)
+
             # Read what was actually asked for before deciding anything. Everything downstream
             # — the ordering constraint, whether a tool is even wanted, whether she should be
             # answering at all or asking — hangs off this.
@@ -789,6 +870,16 @@ class NyxBrain:
                 with clock.at("nyxara.nyx.hybrid"):
                     out.verification = self.hybrid.check_and_learn(self, out)
 
+            # The winner has won a competition for salience. That is not the same as being
+            # right, and until now nothing attacked it between winning and shipping. A
+            # refutation makes her abstain outright; a lesser objection cuts the confidence she
+            # reports — which is the whole point, not a failure of the debate.
+            if self.dialectic is not None and out.answer \
+                    and getattr(self.config, "dialectic_review_turns", True):
+                with clock.at("nyxara.nyx.dialectic"):
+                    out.debate = self.dialectic.review(out)
+                self._apply_debate(out)
+
             # What is worth remembering from a turn is what she *concluded*; the question is
             # provenance. A turn she had no answer to writes nothing here — the concepts are
             # already in the graph, and storing the bare question would make it its own best
@@ -801,6 +892,22 @@ class NyxBrain:
             return out
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             return out
+
+    @staticmethod
+    def _apply_debate(out: NyxThought) -> None:
+        """Let the debate's verdict actually reach the answer. A review nothing obeys is theatre."""
+        try:
+            debate, winner = out.debate, out.winner
+            if debate is None or winner is None or not debate.debated:
+                return
+            if debate.abstained:
+                # She says nothing rather than something she cannot defend.
+                winner.content = ""
+                winner.confidence = 0.0
+            elif debate.confidence_after < debate.confidence_before:
+                winner.confidence = float(debate.confidence_after)
+        except Exception:  # noqa: BLE001 — a debate that cannot be applied leaves the answer be
+            return
 
     def converse(self, text: str, *, goals: Optional[Dict[str, float]] = None) -> Reply:
         """Think, then say it. The content is hers; a fluent model only phrases it.
@@ -889,6 +996,10 @@ class NyxBrain:
                 self.synergy.beat(oversight=oversight)
             if self.eternal is not None:
                 self.eternal.beat(oversight=oversight)
+            if self.stream is not None:
+                self.stream.tick(oversight=oversight)   # compress on the same beat, no new thread
+            if self.weaver is not None:
+                self.weaver.tick()                      # spend the rewire budget, then stop
             if self.car is None:
                 return None
             if oversight is not None:
@@ -1078,6 +1189,86 @@ class NyxBrain:
         """
         try:
             return self.prover.prove(claim) if self.prover is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def why_causal(self, cause: str, effect: str, *, question: str = "") -> Optional[CausalAnswer]:
+        """Would the effect still happen if she intervened? Not "do these two co-occur".
+
+        The answer prints ``do(X)`` beside the Hebbian weight, so association and causation are
+        never blurred into one number.
+        """
+        try:
+            return self.causal.ask(cause, effect, question=question) \
+                if self.causal is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def root_cause(self, *, k: int = 3) -> List[CausalAnswer]:
+        """The upstream causes she can actually identify — never a guess dressed as a cause."""
+        try:
+            return self.causal.root_cause(k=k) if self.causal is not None else []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def weave(self, a: str = "", b: str = "", *, type: str = "co-occurs") -> Optional[TypedEdge]:
+        """Lay a typed, directed edge over the graph without touching a Hebbian weight."""
+        try:
+            if self.weaver is None:
+                return None
+            if not a and not b:
+                self.weaver.tick()
+                return None
+            return self.weaver.relate(a, b, type=type)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def debate(self, claim: str, *, confidence: float = 0.5,
+               verified: bool = False) -> Optional[Debate]:
+        """Attack a claim before it ships. Three outcomes, and one of them is silence."""
+        try:
+            return self.dialectic.debate(claim, confidence=confidence, verified=verified) \
+                if self.dialectic is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def digest(self, *, force: bool = False) -> Dict[str, Digest]:
+        """Compress what arrived, at every scale at once. Rides the beat; no second thread."""
+        try:
+            return self.stream.tick(force=force) if self.stream is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def catch_up(self) -> str:
+        """One paragraph for someone who has just come back."""
+        try:
+            return self.stream.briefing() if self.stream is not None else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def decompose(self, request: str) -> Optional[Plan]:
+        """One instruction → a DAG, with a risk class and a way back priced per node.
+
+        Nothing runs here. This is the plan the Master gets to look at first.
+        """
+        try:
+            return self.goals.plan(request) if self.goals is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def carry_out(self, request: str = "", *, oversight: Any = None,
+                  dry_run: bool = False) -> Optional[Run]:
+        """Plan it and run it — or, with no request, continue the newest unfinished plan.
+
+        A node she cannot finish is reported, never silently skipped, and the run says
+        *incomplete* rather than *done*.
+        """
+        try:
+            if self.goals is None:
+                return None
+            if not str(request or "").strip():
+                return self.goals.resume(oversight=oversight)
+            return self.goals.pursue(request, oversight=oversight, dry_run=dry_run)[1]
         except Exception:  # noqa: BLE001
             return None
 
@@ -1306,6 +1497,16 @@ class NyxBrain:
                 out["prover"] = self.prover.stats()
             if self.vsa is not None:
                 out["vsa"] = self.vsa.stats()
+            if self.causal is not None:
+                out["causal"] = self.causal.stats()
+            if self.weaver is not None:
+                out["weaver"] = self.weaver.stats()
+            if self.dialectic is not None:
+                out["dialectic"] = self.dialectic.stats()
+            if self.stream is not None:
+                out["stream"] = self.stream.stats()
+            if self.goals is not None:
+                out["goals"] = self.goals.stats()
             if self.icl is not None:
                 out["icl"] = self.icl.stats()
             if self.workspace is not None:
@@ -1362,6 +1563,16 @@ class NyxBrain:
             out["telepathy"] = self.telepathy.to_dict()
         if self.vsa is not None:
             out["vsa"] = self.vsa.to_dict()
+        if self.causal is not None:
+            out["causal"] = self.causal.to_dict()
+        if self.weaver is not None:
+            out["weaver"] = self.weaver.to_dict()
+        if self.dialectic is not None:
+            out["dialectic"] = self.dialectic.to_dict()
+        if self.stream is not None:
+            out["stream"] = self.stream.to_dict()
+        if self.goals is not None:
+            out["goals"] = self.goals.to_dict()
         if self.metacog is not None:
             out["metacog"] = self.metacog.to_dict()
         if self.ground is not None:
@@ -1406,6 +1617,16 @@ class NyxBrain:
                 self.telepathy.load_dict(d["telepathy"])
             if d.get("vsa") and self.vsa is not None:
                 self.vsa.load_dict(d["vsa"])
+            if d.get("causal") and self.causal is not None:
+                self.causal.load_dict(d["causal"])
+            if d.get("weaver") and self.weaver is not None:
+                self.weaver.load_dict(d["weaver"])
+            if d.get("dialectic") and self.dialectic is not None:
+                self.dialectic.load_dict(d["dialectic"])
+            if d.get("stream") and self.stream is not None:
+                self.stream.load_dict(d["stream"])
+            if d.get("goals") and self.goals is not None:
+                self.goals.load_dict(d["goals"])
             if d.get("metacog") and self.metacog is not None:
                 self.metacog.load_dict(d["metacog"])
             if d.get("ground") and self.ground is not None:

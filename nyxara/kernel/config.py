@@ -2353,7 +2353,7 @@ class NyxConfig(BaseModel):
     # unavailable one (missing optional dep) reports itself rather than faking competence.
     specialists: List[str] = Field(
         default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics",
-                                 "skill", "reason"])
+                                 "skill", "reason", "causal"])
 
     # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
     metacog_enabled: bool = True
@@ -2711,6 +2711,72 @@ class NyxConfig(BaseModel):
     vsa_enabled: bool = True
     vsa_dim: int = Field(default=10000, ge=64, le=65536)
     vsa_min_margin: float = Field(default=0.05, ge=0.0, le=1.0)  # below this: not a retrieval
+
+    # Causation, kept apart from association (nyxara/nyx/causal_engine.py). The Hebbian graph
+    # answers "how often do these two fire together"; it has never answered "would B still happen
+    # if I intervened on A". Every answer prints do(X) BESIDE the co-occurrence weight, so the
+    # difference between the two is on the page rather than blurred.
+    #
+    # Honest: do-calculus identifies an effect only when the causal graph is right — given the
+    # wrong graph it returns a confident wrong number, so a thin graph is reported as thin.
+    causal_enabled: bool = True
+    causal_min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
+    causal_max_edges: int = Field(default=2048, ge=8)
+    causal_wire_to_graph: bool = True   # a confirmed cause also lays a typed edge she can read
+
+    # Typed structural plasticity (nyxara/nyx/meta_architecture.py). V.01's graph has exactly ONE
+    # edge kind — a co-occurrence weight. This layers typed, directed edges over it (is-a,
+    # part-of, causes, precedes, contradicts, synonym-of) without touching a single Hebbian value.
+    #
+    # Honest: a NEW edge type needs support, not an idea — below min_support a pattern is a
+    # counted candidate and nothing is minted. A node is split only when its two neighbourhoods
+    # are genuinely disjoint. Every schema change is ledgered and reversible.
+    weaver_enabled: bool = True
+    weaver_min_support: int = Field(default=3, ge=1)
+    weaver_max_types: int = Field(default=32, ge=1)
+    weaver_rewire_budget: int = Field(default=16, ge=0)
+    weaver_max_edges: int = Field(default=8192, ge=1)
+
+    # The answer is attacked before you see it (nyxara/nyx/dialectic.py). `workspace` runs a
+    # competition for SALIENCE — the loudest coalition wins. Nothing has ever attacked a
+    # conclusion after it won and before it shipped. Proponent versus Skeptic, with the prover as
+    # the sharpest weapon: a refutation makes her abstain.
+    #
+    # Honest: a STRUCTURED CRITIQUE with a finite objection set, not "bulletproof" — an error
+    # outside that set walks through. Confidence going DOWN after a debate is the point.
+    dialectic_enabled: bool = True
+    dialectic_abstain_above: float = Field(default=1.2, ge=0.0)   # total severity → say nothing
+    dialectic_weaken_above: float = Field(default=0.4, ge=0.0)    # total severity → cut confidence
+    dialectic_budget_ms: float = Field(default=250.0, ge=10.0)
+    dialectic_use_prover: bool = True
+    dialectic_review_turns: bool = True   # False → debate() still works, think() just skips it
+
+    # What happened while you were away (nyxara/nyx/stream.py). `aura` absorbs events one at a
+    # time and `car` thinks between prompts; neither ever COMPRESSES a thousand events into
+    # something a person could read on returning. Four scales at once, and a briefing.
+    #
+    # Honest: "never sleeping" is true only while the process runs — nyxara-daemon runs, a CLI
+    # session that exits does not, and the tick count keeps the claim checkable. It rides the
+    # existing heartbeat (no second thread) and digests only what actually arrived.
+    stream_enabled: bool = True
+    stream_capacity: int = Field(default=2048, ge=16)
+    stream_every_s: float = Field(default=15.0, ge=0.0)
+    stream_novel_cap: int = Field(default=12, ge=1)
+
+    # One command, decomposed and actually run (nyxara/nyx/sovereign_intent.py). `agenda` pursues
+    # goals SHE chose; `hands` runs one tool; `author` writes one function. This is the thing
+    # between them: an instruction becomes a DAG with a risk class and a rollback strategy per
+    # node, decided BEFORE anything runs, and an execution that re-plans around a failure.
+    #
+    # Honest: her reach is exactly author's bounded synthesis and the registry's tools — nothing
+    # here widens either. A node she cannot finish is marked blocked with its reason, and the
+    # plan reports itself INCOMPLETE rather than done. Every node still goes through the registry
+    # and the consequence gate, so permissions, capability bounds, the audit log and /scram apply.
+    goals_enabled: bool = True
+    goals_max_nodes: int = Field(default=24, ge=1)
+    goals_max_steps: int = Field(default=12, ge=1)     # nodes executed per run() call
+    goals_max_repairs: int = Field(default=3, ge=0)    # re-plans before she stops inserting nodes
+    goals_execute: bool = True                         # False → plan and price, never act
 
 
 class HyperbolicManifoldConfig(BaseModel):

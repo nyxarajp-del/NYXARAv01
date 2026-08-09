@@ -35,11 +35,20 @@ from __future__ import annotations
 
 import ast
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-__all__ = ["Verdict", "Certificate", "ProofCore"]
+__all__ = ["Verdict", "Certificate", "ProofCore", "Z3_LOCK"]
+
+#: z3's Python API builds every expression in one **global context**, and that context is not
+#: thread-safe: two threads asserting into it at the same time segfault the interpreter, which
+#: is not something a fail-soft ``except`` can catch. Since V.02 the prover is reachable from
+#: ``think()``, and the orchestrator reasons on a thread pool — so every z3 section in this repo
+#: takes this one process-wide lock. Solving is milliseconds and bounded by an explicit timeout,
+#: so serialising it costs far less than the crash it prevents.
+Z3_LOCK = threading.RLock()
 
 
 class Verdict:
@@ -196,7 +205,8 @@ class ProofCore:
                 self.unknown += 1
                 return out
 
-            verdict, witness, engine, note = self._decide(z3, body, sorts, quantifier)
+            with Z3_LOCK:      # z3's global context is not thread-safe; see Z3_LOCK
+                verdict, witness, engine, note = self._decide(z3, body, sorts, quantifier)
             out.verdict, out.witness, out.engine, out.note = verdict, witness, engine, note
             self._count(verdict)
             return out

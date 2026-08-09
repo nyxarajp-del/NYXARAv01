@@ -475,6 +475,40 @@ class ReasonSpecialist(SpecialistModule):
             rationale=f"{chain.tier} tier — {chain.why}")
 
 
+class CausalSpecialist(SpecialistModule):
+    """Bids only on a *why* question, and only with an effect she can actually identify.
+
+    Every other specialist on this stage is answering from association of one kind or another.
+    This one answers from :mod:`~nyxara.nyx.causal_engine`, which means it bids **only** when
+    do-calculus identified the effect — an unidentified pair produces no bid at all, rather than
+    a co-occurrence weight wearing the word "cause".
+    """
+
+    name = "causal"
+    tags = frozenset({"reasoning", "causal"})
+    priority = 0.65
+
+    def consider(self, situation: Situation) -> Optional[Proposal]:
+        causal = getattr(situation.brain, "causal", None)
+        if causal is None or not causal.applies(situation.stimulus):
+            return None
+        concepts = list(situation.concepts or [])
+        if len(concepts) < 2:
+            return None
+        answer = causal.ask(concepts[0], concepts[-1], question=situation.stimulus)
+        if answer is None or not getattr(answer, "causal", False):
+            # She has an association and no identified effect. Saying so is this module's job;
+            # dressing it up as a cause is exactly what the whole layer exists to prevent.
+            return None
+        return Proposal(
+            source=self.name, content=answer.render().splitlines()[0],
+            confidence=_clamp01(float(getattr(answer, "confidence", 0.0))),
+            verifiable=False, novelty=0.4, urgency=0.2, tags=self.tags,
+            evidence=[answer.render()],
+            rationale=f"identified by {getattr(answer, 'strategy', 'do-calculus')}, "
+                      f"not by co-occurrence")
+
+
 def default_specialists(brain: Any = None) -> List[SpecialistModule]:
     """The standard cast. ``brain`` is unused here but kept so callers read symmetrically."""
     return [
@@ -485,4 +519,5 @@ def default_specialists(brain: Any = None) -> List[SpecialistModule]:
         EthicsSpecialist(),
         SkillSpecialist(),
         ReasonSpecialist(),
+        CausalSpecialist(),
     ]

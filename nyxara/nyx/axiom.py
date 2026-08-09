@@ -339,15 +339,20 @@ class AxiomGenesis:
         z3 = _z3()
         if z3 is None:
             return None, 0, ""
+        from nyxara.nyx.theorem_prover import Z3_LOCK
         for n in range(2, self.bound + 1):
+            # z3's global context is not thread-safe, and the orchestrator reasons on a thread
+            # pool — two threads building expressions at once segfault the interpreter, which no
+            # ``except`` here can catch. See Z3_LOCK.
             try:
-                solver = z3.Solver()
-                solver.set("timeout", self.timeout_ms)
-                for formula in self._formulas(axioms, n):
-                    solver.add(formula)
-                verdict = solver.check()
-                if verdict == z3.sat:
-                    return True, n, self._render_model(solver.model(), n)
+                with Z3_LOCK:
+                    solver = z3.Solver()
+                    solver.set("timeout", self.timeout_ms)
+                    for formula in self._formulas(axioms, n):
+                        solver.add(formula)
+                    verdict = solver.check()
+                    if verdict == z3.sat:
+                        return True, n, self._render_model(solver.model(), n)
             except Exception:  # noqa: BLE001 — a solver failure is not a mathematical result
                 continue
         return None, 0, ""

@@ -460,6 +460,11 @@ _NYX_HELP = """\
 /nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
 /nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
 /nyx analogy <a:b::c>      zero-shot analogy over structures she holds
+/nyx why-causal <x> <y>    would y still happen if she intervened on x — do(x) beside the weight
+/nyx weave [<a> <b> <type>]  typed edges laid over the graph, and the schema changes she made
+/nyx debate <claim>        her Skeptic attacks it — survive, weaken, or abstain
+/nyx stream [brief]        what arrived while you were away, compressed at four scales
+/nyx goal <command>        decompose one command into a DAG, price its risk, and run it
 /nyx wonder                one self-directed thought, right now
 /nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
 /nyx aura                  what is arriving on its own — streams, what landed, what was refused
@@ -627,6 +632,70 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
                       else "noted — say it a few more times and I will offer you a shorthand.")
         else:
             print(stream.describe())
+    elif sub == "why-causal":
+        causal = getattr(brain, "causal", None)
+        words = rest.split()
+        if causal is None:
+            print("the causal engine is off (NYXARA_NYX__CAUSAL_ENABLED=false) — every arrow "
+                  "is back to being an association.")
+        elif len(words) < 2:
+            print("usage: /nyx why-causal <cause> <effect>")
+            print(causal.describe())
+        else:
+            got = brain.why_causal(words[0], words[1], question=rest)
+            print(got.render() if got is not None else "the causal engine is unavailable.")
+    elif sub == "weave":
+        weaver = getattr(brain, "weaver", None)
+        words = rest.split()
+        if weaver is None:
+            print("the graph weaver is off (NYXARA_NYX__WEAVER_ENABLED=false) — the graph keeps "
+                  "one untyped edge kind.")
+        elif len(words) >= 2:
+            edge = brain.weave(words[0], words[1],
+                               type=(words[2] if len(words) > 2 else "co-occurs"))
+            print(edge.render() if edge is not None
+                  else "not laid — an unknown type is a candidate until it has support.")
+        else:
+            print(weaver.describe())
+    elif sub == "debate":
+        dialectic = getattr(brain, "dialectic", None)
+        if dialectic is None:
+            print("adversarial self-dialogue is off (NYXARA_NYX__DIALECTIC_ENABLED=false) — "
+                  "the winner ships unattacked.")
+        elif not rest:
+            print(json.dumps({k: v for k, v in dialectic.stats().items() if k != "note"},
+                             indent=2, default=str))
+        else:
+            got = brain.debate(rest.strip("\"\'"))
+            print(got.render() if got is not None else "the dialectic is unavailable.")
+    elif sub == "stream":
+        stream = getattr(brain, "stream", None)
+        if stream is None:
+            print("the perpetual stream is off (NYXARA_NYX__STREAM_ENABLED=false) — events "
+                  "accumulate and never compress.")
+        elif rest.strip().lower() in ("brief", "briefing", ""):
+            print(brain.catch_up() or "nothing to report.")
+        else:
+            brain.digest(force=True)
+            print(stream.describe())
+    elif sub == "goal":
+        goals = getattr(brain, "goals", None)
+        if goals is None:
+            print("the goal tree is off (NYXARA_NYX__GOALS_ENABLED=false) — a command is one "
+                  "action, never a plan.")
+        elif not rest:
+            print(goals.describe())
+        else:
+            made = brain.decompose(rest.strip("\"\'"))
+            if made is None:
+                print("the goal tree is unavailable.")
+            else:
+                print(made.render())
+                print()
+                got = goals.run(made, oversight=getattr(core, "oversight", None))
+                print(got.render())
+                print()
+                print(made.render())
     elif sub == "agenda":
         agenda = getattr(brain, "agenda", None)
         action, _, arg = rest.strip().partition(" ")

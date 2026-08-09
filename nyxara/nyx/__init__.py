@@ -54,6 +54,8 @@ from nyxara.nyx.graph import (
     GraphStats,
     concepts_in,
 )
+from nyxara.nyx.causal_engine import Answer as CausalAnswer, CausalEdge, CausalReasoner
+from nyxara.nyx.dialectic import AdversarialSelfDialogue, Debate, Objection
 from nyxara.nyx.ground import Grounded, Understanding, WorldGrounding
 from nyxara.nyx.hands import Hands, Reach, ToolRecord
 from nyxara.nyx.holomem import HoloMemory, Recall, Trace
@@ -62,8 +64,10 @@ from nyxara.nyx.hyper_vector import Bound, Capacity, Retrieved as VsaRetrieved, 
 from nyxara.nyx.icl import Demonstration, InContextLearner, Learned
 from nyxara.nyx.intent import Intent, IntentReader, Reading
 from nyxara.nyx.lingua import Lingua, LinguaRead, Register, Token
+from nyxara.nyx.meta_architecture import EdgeType, GraphWeaver, SchemaChange, TypedEdge
 from nyxara.nyx.metacog import Assessment, RecursiveMetaCognition, Reliability
 from nyxara.nyx.modules import (
+    CausalSpecialist,
     CreativeSpecialist,
     DerivationSpecialist,
     EthicsSpecialist,
@@ -83,6 +87,8 @@ from nyxara.nyx.omega import Fitness, SelfEvolutionKernel
 from nyxara.nyx.reason import Chain, OpenDomainReasoner, Step
 from nyxara.nyx.selfmodel import NyxSelfModel, SelfReport
 from nyxara.nyx.semantics import Relation, SemanticSpace, Similarity
+from nyxara.nyx.sovereign_intent import GoalTree, Node, Plan, Run
+from nyxara.nyx.stream import Digest, Moment, PerpetualStream
 from nyxara.nyx.superpose import Collapsed, SolutionSuperposition
 from nyxara.nyx.synergy import HiveSynapse, Shared, Transport
 from nyxara.nyx.telepathy import Frame, Received, SemanticStream, Shorthand
@@ -98,6 +104,7 @@ __all__ = [
     "SpecialistModule", "Proposal", "Situation", "default_specialists",
     "MemorySpecialist", "GraphSpecialist", "DerivationSpecialist",
     "CreativeSpecialist", "EthicsSpecialist", "SkillSpecialist", "ReasonSpecialist",
+    "CausalSpecialist",
     "NyxWorkspace", "Deliberation",
     "RecursiveMetaCognition", "Reliability", "Assessment",
     # pillar 4 — candidates held together, collapsed only when a decision is needed
@@ -154,6 +161,16 @@ __all__ = [
     "ProofCore", "Certificate", "ProofVerdict",
     # Vector-symbolic structure — which role is bound to which filler, and zero-shot analogy
     "VectorSymbolic", "Bound", "VsaRetrieved", "Capacity",
+    # Causation kept apart from association — do(X) printed beside the Hebbian weight
+    "CausalReasoner", "CausalEdge", "CausalAnswer",
+    # Typed structural plasticity — new edge kinds, born from support and always reversible
+    "GraphWeaver", "EdgeType", "TypedEdge", "SchemaChange",
+    # The answer is attacked before you see it — and sometimes she abstains
+    "AdversarialSelfDialogue", "Debate", "Objection",
+    # What happened while you were away — compression at four scales, not a log
+    "PerpetualStream", "Digest", "Moment",
+    # One command → a DAG with priced risk and a way back per node, run honestly
+    "GoalTree", "Plan", "Node", "Run",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
 ]
