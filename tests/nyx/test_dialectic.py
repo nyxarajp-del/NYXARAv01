@@ -226,3 +226,72 @@ def test_the_review_can_be_switched_off_without_losing_the_faculty():
         brain.think("the engine turns the flywheel")
     assert brain.think("the engine turns the flywheel").debate is None
     assert brain.debate("all cars are always fast") is not None
+
+
+# --------------------------------------------------------------------------- #
+# The budget — declared in the docstring, and previously never consulted
+# --------------------------------------------------------------------------- #
+def test_the_prover_is_bounded_by_the_budget_not_by_its_own_timeout():
+    """Her prover carries a 3000 ms timeout; a turn's debate is budgeted at 250 ms.
+
+    ``budget_ms`` was stored and never read, so the one expensive weapon could overrun the
+    stated budget by an order of magnitude on exactly the claim hardest to decide. It is now
+    handed the time that is actually left.
+    """
+    from nyxara.nyx.theorem_prover import ProofCore
+
+    dialectic = _dialectic(brain=_Brain(ProofCore(timeout_ms=3000)))
+    dialectic.budget_ms = 10.0
+    got = dialectic.debate("for all real x, x*x >= 0")
+    assert got.elapsed_ms <= 60.0            # generous, but nowhere near the prover's own 3000
+    assert dialectic.stats()["prover_bounded"] >= 1
+
+
+def test_a_prover_whose_own_timeout_fits_is_used_unchanged():
+    class _Quick:
+        timeout_ms = 1
+        max_vars = 8
+
+        @staticmethod
+        def prove(claim: str):
+            return type("Cert", (), {"verdict": "unknown", "note": ""})()
+
+    dialectic = _dialectic(brain=_Brain(_Quick()))
+    dialectic.debate("for all real x, x*x >= 0")
+    assert dialectic.stats()["prover_bounded"] == 0
+
+
+def test_the_budget_cuts_the_attack_short_and_says_it_did():
+    """Surviving a shortened attack is not the same claim as surviving a full one."""
+    import time as _time
+
+    class _Slow:
+        @staticmethod
+        def attack(claim: str):
+            _time.sleep(0.05)
+            return type("R", (), {"objections": []})()
+
+    dialectic = _dialectic(brain=_Brain(_Silent()))
+    dialectic.budget_ms = 12.0
+    dialectic._critic = _Slow()
+    got = dialectic.debate("all cars are always fast and every engine always fails")
+    assert got.truncated is True
+    assert dialectic.stats()["budget_bites"] >= 1
+    assert "FEWER weapons" in got.note
+    assert "cut short" in got.render()
+
+
+def test_an_untruncated_debate_says_nothing_about_the_budget():
+    got = _dialectic().debate("all cars are always fast and every engine always fails")
+    assert got.truncated is False
+    assert "cut short" not in got.render()
+    assert got.to_dict()["truncated"] is False
+
+
+def test_the_budget_counters_survive_a_round_trip():
+    dialectic = _dialectic(brain=_Brain(_Silent()))
+    dialectic.budget_ms = 10.0
+    dialectic.debate("for all real x, x*x >= 0")
+    fresh = _dialectic()
+    assert fresh.load_dict(dialectic.to_dict())
+    assert fresh.prover_bounded == dialectic.prover_bounded

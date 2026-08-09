@@ -22,9 +22,12 @@ Honest framing (the rule this repo keeps, see ``docs/CAPABILITIES.md``):
   vagueness, contradiction, unsupported assertion, missing mechanism, and formal refutation.
   An error outside that set walks straight through, and calling it bulletproof would be the
   usual lie.
-* **It is budgeted.** One debate per turn, and a turn that cannot afford one is answered
-  without it rather than delayed — with ``debated=False`` on the record, so the difference is
-  never invisible.
+* **It is budgeted, and the budget is enforced rather than declared.** The prover is the only
+  expensive weapon — z3, with its own timeout an order of magnitude past a turn's budget — so
+  it is handed *the time that is actually left* instead of its own worst case. A proof that
+  fits still happens; one that does not comes back as "could not prove", which this module
+  already treats as no objection. When nothing is left it does without the prover entirely and
+  counts that, so the difference is never invisible.
 * Confidence going *down* after a debate is a **success**, not a failure. The point is not to
   win the argument; it is to know how much of the answer was load-bearing.
 
@@ -36,7 +39,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["Objection", "Debate", "AdversarialSelfDialogue"]
 
@@ -70,6 +73,7 @@ class Debate:
     defence: str = ""
     survived: bool = True
     abstained: bool = False
+    truncated: bool = False   # the budget cut the attack short — fewer weapons were used
     confidence_before: float = 0.0
     confidence_after: float = 0.0
     answer: str = ""
@@ -93,6 +97,8 @@ class Debate:
         if self.defence:
             lines.append(f"  defence    : {self.defence[:100]}")
         lines.append(f"  confidence : {self.confidence_before:.2f} → {self.confidence_after:.2f}")
+        if self.truncated:
+            lines.append("  budget     : the attack was cut short — fewer weapons than usual")
         lines.append(f"  outcome    : "
                      f"{'abstained' if self.abstained else 'survived' if self.survived else 'weakened'}"
                      f" — {self.note}")
@@ -102,7 +108,8 @@ class Debate:
         return {"claim": self.claim, "debated": self.debated,
                 "objections": [o.to_dict() for o in self.objections],
                 "defence": self.defence, "survived": self.survived,
-                "abstained": self.abstained, "severity": round(self.severity, 3),
+                "abstained": self.abstained, "truncated": self.truncated,
+                "severity": round(self.severity, 3),
                 "confidence_before": round(self.confidence_before, 4),
                 "confidence_after": round(self.confidence_after, 4),
                 "answer": self.answer, "note": self.note,
@@ -123,6 +130,8 @@ class AdversarialSelfDialogue:
         self.use_prover = bool(use_prover)
 
         self._critic: Any = None
+        self.budget_bites = 0        # times the budget made her do WITHOUT the prover
+        self.prover_bounded = 0      # times it ran, but on the time left rather than its own
         self.debates = 0
         self.weakened = 0
         self.abstentions = 0
@@ -151,7 +160,9 @@ class AdversarialSelfDialogue:
                 self.skipped += 1
                 return out
 
-            out.objections = self._attack(out.claim, evidence or [], verified=verified)
+            deadline = t0 + self.budget_ms / 1000.0
+            out.objections, out.truncated = self._attack(
+                out.claim, evidence or [], verified=verified, deadline=deadline)
             out.defence = self._defend(out.claim, verified=verified, evidence=evidence or [])
             out.debated = True
             self.debates += 1
@@ -173,6 +184,9 @@ class AdversarialSelfDialogue:
                 self.weakened += 1
                 out.note = ("it survived, but not intact — the confidence you see is what was "
                             "left after the attack, which is the point")
+            elif out.truncated:
+                out.note = ("the budget ran out mid-attack, so it stands against FEWER weapons "
+                            "than usual — surviving a shortened attack is not the same claim")
             else:
                 out.note = "attacked and left standing"
             return out
@@ -183,12 +197,23 @@ class AdversarialSelfDialogue:
             out.elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
     # ---- the Skeptic ------------------------------------------------------------- #
-    def _attack(self, claim: str, evidence: List[str], *, verified: bool) -> List[Objection]:
+    def _attack(self, claim: str, evidence: List[str], *, verified: bool,
+                deadline: float = 0.0) -> Tuple[List[Objection], bool]:
+        """Returns the objections **and** whether the budget cut the attack short.
+
+        Surviving a truncated attack is not the same as surviving a full one, and a caller that
+        cannot tell them apart will read the first as the second.
+        """
         out: List[Objection] = []
 
         # The sharpest weapon there is: ask for a proof, and take a refutation seriously.
+        # It is also the only expensive one — z3, with its own timeout, serialised behind the
+        # process-wide lock — which is what the budget exists for. The budget was declared and
+        # then never consulted, so "a turn that cannot afford a debate is answered without it"
+        # was a promise with no mechanism. It is bounded here rather than hoped for: the prover
+        # is given the time that is actually left, never its own worst case.
         if self.use_prover:
-            prover = getattr(self.brain, "prover", None)
+            prover = self._affordable_prover(deadline)
             if prover is not None:
                 try:
                     got = prover.prove(claim)
@@ -199,6 +224,12 @@ class AdversarialSelfDialogue:
                             detail=f"formally refuted: {got.note[:100]}"))
                 except Exception:  # noqa: BLE001 — a prover failure is not an objection
                     pass
+
+        if deadline > 0.0 and time.perf_counter() >= deadline:
+            # The budget is spent. She stops attacking rather than running over, and the count
+            # says she did — a shorter attack that admits it beats a longer one that hides it.
+            self.budget_bites += 1
+            return out, True
 
         critic = self.critic()
         if critic is not None:
@@ -211,6 +242,10 @@ class AdversarialSelfDialogue:
             except Exception:  # noqa: BLE001
                 pass
 
+        if deadline > 0.0 and time.perf_counter() >= deadline:
+            self.budget_bites += 1
+            return out, True
+
         # A universal with no evidence behind it is the commonest overreach there is.
         if _HEDGELESS.search(claim) and not evidence and not verified:
             out.append(Objection(
@@ -222,7 +257,40 @@ class AdversarialSelfDialogue:
             out.append(Objection(
                 kind="no-mechanism", severity=0.3,
                 detail="it asserts what happens and never says by what means"))
-        return out
+        return out, False
+
+    def _affordable_prover(self, deadline: float) -> Any:
+        """The prover, bounded by what is left of the budget — or ``None`` when nothing is.
+
+        Her own prover carries a 3000 ms timeout and the debate is budgeted at 250 ms, so
+        letting it run unbounded would overrun the budget by an order of magnitude on exactly
+        the claim that is hardest to decide. Rather than drop the sharpest weapon, it is given
+        the remaining time: a proof that fits still happens, one that does not comes back as
+        "could not prove", which is a verdict this module already treats as no objection.
+        """
+        prover = getattr(self.brain, "prover", None)
+        if prover is None:
+            return None
+        if deadline <= 0.0:
+            return prover
+        remaining_ms = (deadline - time.perf_counter()) * 1000.0
+        if remaining_ms <= 1.0:
+            self.budget_bites += 1
+            return None
+        own = float(getattr(prover, "timeout_ms", 0.0) or 0.0)
+        if own <= remaining_ms:
+            return prover
+        try:
+            from nyxara.nyx.theorem_prover import ProofCore
+            # Bounding is the ordinary path, not an exception — her prover's own worst case is
+            # an order of magnitude past a turn's budget — so it is counted separately from
+            # actually going without, which is the thing worth noticing.
+            self.prover_bounded += 1
+            return ProofCore(timeout_ms=int(max(1.0, remaining_ms)),
+                             max_vars=int(getattr(prover, "max_vars", 8)))
+        except Exception:  # noqa: BLE001 — without a bounded one she does without, not over
+            self.budget_bites += 1
+            return None
 
     # ---- the Proponent ------------------------------------------------------------- #
     @staticmethod
@@ -258,7 +326,8 @@ class AdversarialSelfDialogue:
             return {
                 "debates": self.debates, "weakened": self.weakened,
                 "abstentions": self.abstentions, "refutations": self.refutations,
-                "skipped": self.skipped,
+                "skipped": self.skipped, "budget_bites": self.budget_bites,
+                "prover_bounded": self.prover_bounded, "budget_ms": self.budget_ms,
                 "abstain_above": self.abstain_above, "weaken_above": self.weaken_above,
                 "objection_kinds": ["vagueness", "contradiction", "unsupported",
                                     "no-mechanism", "refuted"],
@@ -276,13 +345,15 @@ class AdversarialSelfDialogue:
     def to_dict(self) -> Dict[str, Any]:
         return {"debates": self.debates, "weakened": self.weakened,
                 "abstentions": self.abstentions, "refutations": self.refutations,
-                "skipped": self.skipped}
+                "skipped": self.skipped, "budget_bites": self.budget_bites,
+                "prover_bounded": self.prover_bounded}
 
     def load_dict(self, data: Any) -> bool:
         try:
             if not isinstance(data, dict):
                 return False
-            for key in ("debates", "weakened", "abstentions", "refutations", "skipped"):
+            for key in ("debates", "weakened", "abstentions", "refutations", "skipped",
+                        "budget_bites", "prover_bounded"):
                 setattr(self, key, int(data.get(key, 0)))
             return True
         except Exception:  # noqa: BLE001
