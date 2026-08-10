@@ -46,6 +46,7 @@ the box.
 from __future__ import annotations
 
 import json
+import pathlib
 import os
 import sys
 
@@ -475,6 +476,20 @@ _NYX_HELP = """\
 /nyx omni rollback         put every Python function back — always available
 /nyx hive                  other instances: what converged, and whether there is a wire at all
 /nyx eternal               durability: enrolled nodes, leader, signed snapshots
+  --- NYX V.03 --------------------------------------------------------------
+  /nyx monad                  six brains as one mind: one workspace, one memory
+  /nyx surprise [beats]       the one drive — free energy, and any structural request
+  /nyx ascend [domain]        search a checkable domain; no verifier ⇒ honest refusal
+  /nyx library                proven artifacts, each with the certificate behind it
+  /nyx telos [advance]        the frontier she mined from her own faults
+  /nyx omniscient [pulse]     ingestion coverage, lag and drops
+  /nyx ask <question>         answered from what was already ingested — no live search
+  /nyx automata [steps]       local rules only; emergence measured, never claimed
+  /nyx atlas                  index her own body
+  /nyx find <symbol>          where it lives; ambiguity is shown, not resolved
+  /nyx craft rename <a> <b>   staged, dry-run refactor across the blast radius
+  /nyx craft harden <path>    generate tests that had to pass first
+  /nyx craft triage <log>     a CI log turned into typed failures
 """
 
 
@@ -890,8 +905,174 @@ def _nyx_command(core: NyxaraCore, arg: str) -> None:
                 print(json.dumps(car.stats(), indent=2, default=str))
     elif not sub:
         print(json.dumps(brain.stats(), indent=2, default=str))
+    # ---- NYX V.03 ---------------------------------------------------- #
+    elif sub == "monad":
+        _nyx_v03_report(getattr(brain, "monad", None), "monad",
+                        "one workspace, one memory — the six brains as one mind")
+    elif sub == "surprise":
+        homeostat = getattr(brain, "homeostat", None)
+        if homeostat is None:
+            print("homeostat is disabled (NYXARA_NYX__HOMEOSTAT_ENABLED=false).")
+        else:
+            beats = int(rest) if rest.isdigit() else 50
+            for _ in range(max(1, beats)):
+                homeostat.step()
+            print(homeostat.summary())
+            print()
+            print(json.dumps(homeostat.stats(), indent=2, default=str))
+    elif sub == "ascend":
+        _nyx_ascend(brain, rest)
+    elif sub == "library":
+        ascent = getattr(brain, "ascent", None)
+        if ascent is None:
+            print("ascent is disabled (NYXARA_NYX__ASCENT_ENABLED=false).")
+        else:
+            print(ascent.summary())
+    elif sub == "telos" or sub == "frontier":
+        telos = getattr(brain, "telos", None)
+        if telos is None:
+            print("telos is disabled (NYXARA_NYX__TELOS_ENABLED=false).")
+        else:
+            telos.refresh()
+            if sub == "telos" and rest == "advance":
+                print(json.dumps(telos.advance().to_dict(), indent=2, default=str))
+            print(telos.summary())
+    elif sub == "omniscient":
+        omni_stream = getattr(brain, "omniscient", None)
+        if omni_stream is None:
+            print("omniscient is disabled (NYXARA_NYX__OMNISCIENT_ENABLED=false).")
+        else:
+            if rest == "pulse":
+                print(json.dumps(omni_stream.pulse(force=True), indent=2, default=str))
+            print(omni_stream.summary())
+    elif sub == "ask":
+        omni_stream = getattr(brain, "omniscient", None)
+        if omni_stream is None or not rest:
+            print("usage: /nyx ask <question>   (answers from what was already ingested)")
+        else:
+            answer = omni_stream.ask(rest)
+            if not answer.facts:
+                print("nothing ingested about that — and nothing invented.")
+            else:
+                age_h = answer.age_s / 3600.0
+                print(f"as of {age_h:.1f}h ago, from {', '.join(answer.sources)} "
+                      f"(no live search):")
+                for fact in answer.facts:
+                    print(f"  · {fact.subject} —{fact.predicate}→ {fact.object}")
+    elif sub == "automata":
+        _nyx_automata(rest)
+    elif sub == "atlas":
+        atlas = getattr(brain, "atlas", None)
+        if atlas is None:
+            print("atlas is disabled (NYXARA_NYX__ATLAS_ENABLED=false).")
+        else:
+            print(json.dumps(atlas.refresh(), indent=2, default=str))
+            print(atlas.summary())
+    elif sub == "find":
+        atlas = getattr(brain, "atlas", None)
+        if atlas is None or not rest:
+            print("usage: /nyx find <symbol>")
+        else:
+            if not atlas.modules:
+                atlas.refresh()
+            hits = atlas.find(rest)
+            if not hits:
+                print(f"{rest!r} is not in the index — and nothing is guessed.")
+            for symbol in hits:
+                print(f"  {symbol.kind:<9} {symbol.dotted}  →  {symbol.location}")
+    elif sub == "craft":
+        _nyx_craft(brain, rest)
     else:
         print(f"unknown: /nyx {sub}\n{_NYX_HELP}")
+
+
+def _nyx_v03_report(faculty: Any, name: str, blurb: str) -> None:
+    """Print one V.03 faculty's own report, or say plainly that it is switched off."""
+    if faculty is None:
+        print(f"{name} is disabled (NYXARA_NYX__{name.upper()}_ENABLED=false).")
+        return
+    print(f"{blurb}\n")
+    summary = getattr(faculty, "summary", None)
+    if callable(summary):
+        print(summary())
+        print()
+    print(json.dumps(faculty.stats(), indent=2, default=str))
+
+
+def _nyx_ascend(brain: Any, rest: str) -> None:
+    """Search a checkable domain for something she does not already have."""
+    ascent = getattr(brain, "ascent", None)
+    if ascent is None:
+        print("ascent is disabled (NYXARA_NYX__ASCENT_ENABLED=false).")
+        return
+    from nyxara.nyx.ascent import Problem
+
+    domain = rest.strip() or "expression"
+    if domain not in ascent.registry.domains():
+        print(f"no verifier for domain {domain!r} — checkable domains are "
+              f"{ascent.registry.domains()}. Nothing is scored without one.")
+        return
+    # A demonstration problem stated only as examples: the answer is nowhere in this file.
+    problem = Problem(name=f"{domain}-demo", domain=domain, variables=("x",),
+                      examples=(((1,), 2), ((2,), 5), ((3,), 10)),
+                      holdout=(((7,), 50), ((11,), 122)))
+    run = ascent.ascend(problem)
+    print(json.dumps(run.to_dict(), indent=2, default=str))
+    if run.solved:
+        print(f"\nfound by search, checked against held-out cases: {run.artifact.statement}")
+
+
+def _nyx_automata(rest: str) -> None:
+    """Run a lattice and report what was measured — never what it looked like."""
+    from nyxara.nyx.automata import LIFE, Lattice
+
+    parts = rest.split()
+    steps = int(parts[-1]) if parts and parts[-1].isdigit() else 60
+    glider = [[0] * 16 for _ in range(16)]
+    for y, x in ((0, 1), (1, 2), (2, 0), (2, 1), (2, 2)):
+        glider[y][x] = 1
+    lattice = Lattice(grid=glider, rule=LIFE).run(max(1, steps))
+    print(lattice.render())
+    print()
+    print(json.dumps(lattice.stats(), indent=2, default=str))
+
+
+def _nyx_craft(brain: Any, rest: str) -> None:
+    """The staged coding facade — every stage reported, whether it ran or not."""
+    craft = getattr(brain, "craft", None)
+    if craft is None:
+        print("craft is disabled (NYXARA_NYX__CRAFT_ENABLED=false).")
+        return
+    job, _, args = rest.partition(" ")
+    job, args = job.strip().lower(), args.strip()
+    atlas = getattr(brain, "atlas", None)
+    if atlas is not None and not atlas.modules:
+        atlas.refresh()
+
+    if job == "rename":
+        old, _, new = args.partition(" ")
+        if not old or not new:
+            print("usage: /nyx craft rename <old> <new>   (always a dry run from the console)")
+            return
+        print(craft.rename(old.strip(), new.strip(), dry_run=True).summary())
+    elif job == "harden":
+        if not args:
+            print("usage: /nyx craft harden <path.py>")
+            return
+        print(craft.harden(args, dry_run=True).summary())
+    elif job == "triage":
+        if not args:
+            print("usage: /nyx craft triage <path-to-ci-log>")
+            return
+        try:
+            log = pathlib.Path(args).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            print(f"cannot read {args}: {exc}")
+            return
+        print(craft.triage(log).summary())
+    else:
+        print("usage: /nyx craft {rename|harden|triage} ...")
+
 
 
 def _nyx_omni(core: NyxaraCore, brain, action: str) -> None:
