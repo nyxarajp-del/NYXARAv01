@@ -2786,6 +2786,55 @@ class NyxConfig(BaseModel):
     goals_max_repairs: int = Field(default=3, ge=0)    # re-plans before she stops inserting nodes
     goals_execute: bool = True                         # False → plan and price, never act
 
+    # ------------------------------------------------------------------ #
+    # NYX V.03 — one mind, one drive, and capability she manufactures
+    # ------------------------------------------------------------------ #
+    # L-MONAD (nyx/monad.py). She has six brain-level objects and they were running as separate
+    # minds: two GlobalWorkspace instances, two memories, no shared objective. This joins them —
+    # every substrate bids into ONE workspace, and one recall reaches every store. Off is
+    # byte-identical to the old behaviour, which is what makes it a regression-free change.
+    monad_enabled: bool = True
+
+    # L-HOMEOSTAT (nyx/homeostat.py). Active inference as the mind's single drive: predict her own
+    # next state, measure the gap, and when belief-updating will not close it, ask for STRUCTURAL
+    # change. It measures and requests; it never mutates anything itself.
+    homeostat_enabled: bool = True
+    homeostat_error_threshold: float = Field(default=0.08, ge=0.0)
+    homeostat_structural_after: int = Field(default=8, ge=1)
+
+    # L-ASCENT (nyx/ascent.py). capability = search × verifier × time. It manufactures only what a
+    # verifier can actually check, and refuses a domain where nothing can.
+    ascent_enabled: bool = True
+    ascent_budget: int = Field(default=4000, ge=1)
+    ascent_every_s: float = Field(default=900.0, ge=1.0)
+
+    # TELOS (nyx/telos.py). A frontier mined from her own contradictions, undecidables and
+    # structural faults — never invented. Every objective is gated by owner_alignment BEFORE
+    # adoption, and Rule 8 files are untargetable.
+    telos_enabled: bool = True
+    telos_every_s: float = Field(default=600.0, ge=1.0)
+    telos_max_frontier: int = Field(default=200, ge=1)
+
+    # OMNISCIENT (nyx/omniscient.py). Continuous ingestion into a live typed hypergraph, so a
+    # question about yesterday is answered from what she already has rather than by searching.
+    # She ingests the feeds she is CONFIGURED to watch — coverage and lag are reported.
+    omniscient_enabled: bool = True
+    omniscient_every_s: float = Field(default=900.0, ge=1.0)
+    omniscient_max_events_per_min: int = Field(default=600, ge=1)
+    omniscient_max_facts: int = Field(default=50_000, ge=100)
+
+    # MULTIVERSE (nyx/multiverse.py). A trade-off surface with machine-proven invariants and
+    # quantified tail risk — never a single answer, and never a claim of zero risk.
+    multiverse_enabled: bool = True
+    multiverse_branches: int = Field(default=512, ge=1)
+    multiverse_cvar_alpha: float = Field(default=0.1, gt=0.0, le=0.9)
+
+    # ATLAS (nyx/atlas.py). The map of her own body. Indexing a thousand modules is not a
+    # constructor's job, so it happens on a slow cadence rather than at build time.
+    atlas_enabled: bool = True
+    atlas_every_s: float = Field(default=3600.0, ge=1.0)
+    atlas_index_tests: bool = True     # without the tests tree, blast radius can answer nothing
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
