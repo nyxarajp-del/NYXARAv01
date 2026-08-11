@@ -38,6 +38,12 @@ The mind proposes; the kernel disposes; the Master is sovereign.
 
 from __future__ import annotations
 
+from nyxara.nyx001.brain import NyxV001Brain, NyxV001Percept, NyxV001Thought
+from nyxara.nyx001.dark_core import DarkCore, Impulse, Pulse
+from nyxara.nyx001.development import Curriculum, STAGES, Stage, StageState
+from nyxara.nyx001.fusion import Fused, Fusion, Vote
+from nyxara.nyx001.lingua import DynamicEmbedding, Grounding, SequenceModel, Tokenizer
+from nyxara.nyx001.reasoner import NyxV001Reasoner
 from nyxara.nyx001.layers import (
     ActiveLearning,
     CognitiveCompression,
@@ -69,6 +75,13 @@ from nyxara.nyx001.substrate import (
 )
 
 __all__ = [
+    # the brain
+    "NyxV001Brain", "NyxV001Percept", "NyxV001Thought", "NyxV001Reasoner",
+    "Fusion", "Fused", "Vote", "DarkCore", "Pulse", "Impulse",
+    "Curriculum", "Stage", "StageState", "STAGES",
+    # Track B
+    "Tokenizer", "DynamicEmbedding", "SequenceModel", "Grounding",
+    # the stack
     "CognitiveStack", "CycleResult", "Observation",
     "Substrate", "Perception", "WorldModel", "EpisodicMemory", "SemanticMemory",
     "DynamicAttention", "ReasoningEngine", "CounterfactualEngine", "Planner",
