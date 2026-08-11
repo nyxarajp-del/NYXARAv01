@@ -96,6 +96,22 @@ from nyxara.nyx.theorem_prover import Certificate, ProofCore, Verdict as ProofVe
 from nyxara.nyx.will import Choice, EntropySource, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
+# ---- NYX V.03 — one mind, one drive, and capability she manufactures ---- #
+from nyxara.nyx.ascent import (
+    Artifact, Ascent, AscentRun, Candidate, Judgement, Problem, SolutionLibrary, Verdict,
+    Verifier, VerifierRegistry,
+)
+from nyxara.nyx.atlas import Atlas, CallSite, ModuleEntry, Symbol
+from nyxara.nyx.automata import Analysis, Lattice, LifeRule, Pattern, Rule
+from nyxara.nyx.homeostat import Beat, Homeostat, SelfSensor, StructuralRequest
+from nyxara.nyx.monad import Monad, MonadCycle, Substrate, UnifiedRecall
+from nyxara.nyx.multiverse import (
+    Component, Coupling, Design, DesignResult, Invariant, Multiverse, MultiverseReport,
+    SystemModel,
+)
+from nyxara.nyx.omniscient import Fact, Hyperedge, Omniscient, Source
+from nyxara.nyx.telos import OpenProblem, Telos, TelosStep
+
 __all__ = [
     # pillar 1 — the dynamic neural graph + content-addressed memory
     "DynamicNeuralGraph", "Concept", "Activation", "GraphStats", "concepts_in",
@@ -173,4 +189,23 @@ __all__ = [
     "GoalTree", "Plan", "Node", "Run",
     # the facade the kernel holds, and the reason-seat
     "NyxBrain", "NyxPercept", "NyxThought", "NyxReasoner",
+    # ---- NYX V.03 ---- #
+    # L-MONAD — six brains stop being six minds: one workspace, one memory, one report
+    "Monad", "MonadCycle", "Substrate", "UnifiedRecall",
+    # L-HOMEOSTAT — active inference as the single drive; it requests structure, never mutates
+    "Homeostat", "SelfSensor", "Beat", "StructuralRequest",
+    # L-ASCENT — capability = search x verifier x time; no verifier, no ascent
+    "Ascent", "AscentRun", "SolutionLibrary", "Artifact", "Verdict", "Verifier",
+    "VerifierRegistry", "Candidate", "Judgement", "Problem",
+    # TELOS — a frontier mined from her own faults, gated by owner alignment before adoption
+    "Telos", "OpenProblem", "TelosStep",
+    # OMNISCIENT — the world arriving as a typed hypergraph, answerable without a live search
+    "Omniscient", "Source", "Fact", "Hyperedge",
+    # MULTIVERSE — a trade-off surface with proven invariants and quantified tail risk
+    "Multiverse", "MultiverseReport", "SystemModel", "Design", "DesignResult", "Invariant",
+    "Component", "Coupling",
+    # AUTOMATA — complexity nobody wrote; emergence measured, never claimed
+    "Lattice", "Rule", "LifeRule", "Pattern", "Analysis",
+    # ATLAS — the map of her own body
+    "Atlas", "Symbol", "CallSite", "ModuleEntry",
 ]

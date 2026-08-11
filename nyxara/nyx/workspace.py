@@ -66,13 +66,24 @@ class NyxWorkspace:
 
     def __init__(self, *, specialists: Optional[Sequence[SpecialistModule]] = None,
                  metacog: Any = None, capacity: int = 1, access_threshold: float = 1.0,
-                 bus: Any = None) -> None:
+                 bus: Any = None, workspace: Any = None) -> None:
         self.specialists: List[SpecialistModule] = list(
             specialists if specialists is not None else default_specialists())
         self.metacog = metacog
         self.cycles = 0
-        self._gw = self._build_workspace(capacity=capacity, access_threshold=access_threshold,
-                                         bus=bus)
+        # ``workspace`` lets a *shared* GlobalWorkspace be injected instead of a private one.
+        # A mind with two bottlenecks is two minds; :mod:`nyxara.nyx.monad` passes the single
+        # instance every substrate bids into. Left None, this builds its own exactly as before.
+        self._gw = workspace if workspace is not None else self._build_workspace(
+            capacity=capacity, access_threshold=access_threshold, bus=bus)
+
+    def add_specialist(self, specialist: SpecialistModule) -> bool:
+        """Register another bidder. Returns False when the name is already present, so joining
+        the same substrate twice cannot give it two votes."""
+        if any(s.name == specialist.name for s in self.specialists):
+            return False
+        self.specialists.append(specialist)
+        return True
 
     @staticmethod
     def _build_workspace(*, capacity: int, access_threshold: float, bus: Any) -> Any:

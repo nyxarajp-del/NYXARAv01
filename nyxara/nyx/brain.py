@@ -69,6 +69,13 @@ from nyxara.nyx.theorem_prover import Certificate as ProofCertificate, ProofCore
 from nyxara.nyx.synergy import HiveSynapse
 from nyxara.nyx.will import Choice, SovereignWill
 from nyxara.nyx.workspace import Deliberation, NyxWorkspace
+# NYX V.03 — one mind, one drive, and capability she manufactures.
+from nyxara.nyx.ascent import Ascent
+from nyxara.nyx.homeostat import Homeostat
+from nyxara.nyx.monad import Monad
+from nyxara.nyx.multiverse import Multiverse
+from nyxara.nyx.omniscient import Omniscient
+from nyxara.nyx.telos import FrontierSource, InefficiencySource, Telos
 
 __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
 
@@ -78,6 +85,23 @@ __all__ = ["NyxPercept", "NyxThought", "NyxBrain"]
 _QUESTION = re.compile(
     r"^\s*(what|why|how|who|whom|whose|when|where|which|is|are|was|were|do|does|did|can|could|"
     r"will|would|should|shall|may|might|have|has|had|am|tell me|explain)\b", re.I)
+
+
+def _permitted(oversight: Any) -> bool:
+    """Autonomy buys no extra power: a paused or scrammed mind takes no background work.
+
+    Mirrors :meth:`nyxara.nyx.car.ContinuousAutonomousReasoning._permitted` — an unreadable gate
+    means *do not act*, never *carry on*.
+    """
+    if oversight is None:
+        return True
+    try:
+        check = getattr(oversight, "gate", None)
+        if callable(check):
+            return bool(check())
+        return bool(check) if check is not None else True
+    except Exception:  # noqa: BLE001 — if oversight cannot be read, do not act
+        return False
 
 
 class _Latency:
@@ -295,6 +319,15 @@ class NyxBrain:
         self.episteme = self._build_episteme(c)
         self.omni = self._build_omni(c)
         self.car = self._build_car(c)
+        # NYX V.03. Order matters: the monad adopts the workspace built above, the homeostat
+        # measures the monad, and telos pursues through ascent.
+        self.monad = self._build_monad(c)
+        self.homeostat = self._build_homeostat(c)
+        self.ascent = self._build_ascent(c)
+        self.omniscient = self._build_omniscient(c)
+        self.telos = self._build_telos(c)
+        self.multiverse = self._build_multiverse(c)
+        self.atlas = self._build_atlas(c)
         self.selfmodel = NyxSelfModel(self) if getattr(c, "selfmodel_enabled", True) else None
         self.tools: Any = None
         self.knowledge: Any = None
@@ -302,6 +335,7 @@ class NyxBrain:
         self.turns = 0
         self._last_investigation = 0.0
         self._last_forge = 0.0
+        self._slow_beats: Dict[str, float] = {}
 
     @staticmethod
     def _build_lingua(c: Any) -> Optional[Lingua]:
@@ -701,6 +735,84 @@ class NyxBrain:
         except Exception:  # noqa: BLE001 — without it she stays exactly as fast as she was
             return None
 
+    # ------------------------------------------------------------------ #
+    # NYX V.03
+    # ------------------------------------------------------------------ #
+    def _build_monad(self, c: Any) -> Optional[Monad]:
+        """One workspace, one memory. Adopts the workspace already built above rather than
+        making a second — two bottlenecks would be two minds."""
+        if not getattr(c, "monad_enabled", True):
+            return None
+        try:
+            return Monad(self)
+        except Exception:  # noqa: BLE001 — unjoined substrates behave exactly as they did
+            return None
+
+    def _build_homeostat(self, c: Any) -> Optional[Homeostat]:
+        if not getattr(c, "homeostat_enabled", True):
+            return None
+        try:
+            return Homeostat(
+                monad=self.monad, brain=self,
+                error_threshold=getattr(c, "homeostat_error_threshold", 0.08),
+                structural_after=getattr(c, "homeostat_structural_after", 8))
+        except Exception:  # noqa: BLE001 — without a drive she has no shared objective, no more
+            return None
+
+    def _build_ascent(self, c: Any) -> Optional[Ascent]:
+        if not getattr(c, "ascent_enabled", True):
+            return None
+        try:
+            return Ascent(default_budget=getattr(c, "ascent_budget", 4000))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_omniscient(self, c: Any) -> Optional[Omniscient]:
+        if not getattr(c, "omniscient_enabled", True):
+            return None
+        try:
+            return Omniscient(
+                max_events_per_min=getattr(c, "omniscient_max_events_per_min", 600),
+                max_facts=getattr(c, "omniscient_max_facts", 50_000))
+        except Exception:  # noqa: BLE001 — offline she simply ingests nothing
+            return None
+
+    def _build_telos(self, c: Any) -> Optional[Telos]:
+        """Wells that are real on this machine: her own structural faults, and whatever the
+        ingestion stream has actually seen. A dry well reports itself dry."""
+        if not getattr(c, "telos_enabled", True):
+            return None
+        try:
+            sources = [InefficiencySource()]
+            if self.omniscient is not None:
+                sources.append(FrontierSource(feed=self.omniscient))
+            return Telos(sources=sources, pursuer=self.ascent,
+                         competence=getattr(self, "competence", None),
+                         will=getattr(self, "will", None),
+                         max_frontier=getattr(c, "telos_max_frontier", 200))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_multiverse(self, c: Any) -> Optional[Multiverse]:
+        if not getattr(c, "multiverse_enabled", True):
+            return None
+        try:
+            return Multiverse(branches=getattr(c, "multiverse_branches", 512),
+                              cvar_alpha=getattr(c, "multiverse_cvar_alpha", 0.1), seed=c.seed)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_atlas(self, c: Any) -> Any:
+        """Constructed here, indexed later: walking a thousand modules is not a constructor's
+        job, so the first refresh happens on the slow beat or on demand."""
+        if not getattr(c, "atlas_enabled", True):
+            return None
+        try:
+            from nyxara.nyx.atlas import Atlas
+            return Atlas(include_tests=getattr(c, "atlas_index_tests", True))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_car(self, c: Any) -> Optional[ContinuousAutonomousReasoning]:
         if not getattr(c, "car_enabled", True):
             return None
@@ -994,6 +1106,14 @@ class NyxBrain:
                 self.aura.beat(oversight=oversight)   # the world arrives on the same clock
             self._episteme_beat(oversight)
             self._omni_beat(oversight)
+            # NYX V.03. The drive runs every beat because measuring is cheap; ingesting a feed,
+            # mining a frontier and re-indexing a thousand modules are not thoughts, so they run
+            # on their own much slower cadences.
+            if self.homeostat is not None:
+                self.homeostat.step()
+            self._omniscient_beat(oversight)
+            self._telos_beat(oversight)
+            self._atlas_beat(oversight)
             if self.synergy is not None:
                 self.synergy.beat(oversight=oversight)
             if self.eternal is not None:
@@ -1022,6 +1142,55 @@ class NyxBrain:
             self._last_investigation = now
             self.episteme.beat(oversight=oversight)
         except Exception:  # noqa: BLE001 — investigating never breaks the beat
+            pass
+
+    def _slow_beat(self, name: str, every_s: float) -> bool:
+        """True when this named cadence is due. One clock, so the beats cannot drift apart."""
+        try:
+            now = time.monotonic()
+            last = self._slow_beats.get(name, 0.0)
+            if last and (now - last) < max(1.0, float(every_s)):
+                return False
+            self._slow_beats[name] = now
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _omniscient_beat(self, oversight: Any) -> None:
+        """The world arrives on its own cadence — a feed is not a thought."""
+        try:
+            if self.omniscient is None or not _permitted(oversight):
+                return
+            if not self._slow_beat("omniscient",
+                                   getattr(self.config, "omniscient_every_s", 900.0)):
+                return
+            self.omniscient.pulse()
+        except Exception:  # noqa: BLE001 — ingesting never breaks the beat
+            pass
+
+    def _telos_beat(self, oversight: Any) -> None:
+        """Re-mine the frontier and advance one problem. Every objective is still gated by
+        owner_alignment inside telos before anything is adopted."""
+        try:
+            if self.telos is None or not _permitted(oversight):
+                return
+            if not self._slow_beat("telos", getattr(self.config, "telos_every_s", 600.0)):
+                return
+            self.telos.refresh()
+            self.telos.advance()
+        except Exception:  # noqa: BLE001 — a research programme never breaks the beat
+            pass
+
+    def _atlas_beat(self, oversight: Any) -> None:
+        """Keep the map of her own body current. Walking a thousand modules is expensive, so
+        this is the slowest cadence of the lot."""
+        try:
+            if self.atlas is None or not _permitted(oversight):
+                return
+            if not self._slow_beat("atlas", getattr(self.config, "atlas_every_s", 3600.0)):
+                return
+            self.atlas.refresh()
+        except Exception:  # noqa: BLE001
             pass
 
     def _omni_beat(self, oversight: Any) -> None:
