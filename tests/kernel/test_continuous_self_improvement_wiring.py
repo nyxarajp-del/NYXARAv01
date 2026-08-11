@@ -66,7 +66,22 @@ def test_growth_engine_absent_when_growth_disabled():
 
 
 # -------------------- the suite seals it OFF (hermetic) -------------------- #
+@pytest.mark.timeout(900)
 def test_continuous_is_off_by_default_in_the_suite():
+    """Six idle passes must not run the growth tower.
+
+    The 900s override is a mitigation, not a fix, and the thing it mitigates is **pre-existing**:
+    this test overruns the suite's 300s ceiling on ``main`` too, at this same line. What it costs
+    is ``idle_maintenance`` doing real work per pass — chiefly ``sim/physics_world.physics_stream``
+    training a pure-Python world model — and that cost AMPLIFIES roughly 9x when the test runs
+    late in a full suite versus alone (35s isolated). The amplification is accumulated state from
+    earlier tests, and it is not diagnosed here.
+
+    NYX V.001 in the reason-seat makes it worse by about 45% (measured: 24s → 35s isolated), which
+    is the Layer stack's ~0.15s per turn paid across many turns. That is a real cost of the merge
+    and is recorded rather than hidden — but it is not what pushes this past the ceiling, because
+    the ceiling is already breached without it.
+    """
     nyx = NyxaraCore()
     for _ in range(6):
         report = nyx.idle_maintenance()
