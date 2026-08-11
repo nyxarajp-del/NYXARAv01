@@ -256,7 +256,16 @@ class WorldModel:
             if s.size < self.width:
                 s = np.pad(s, (0, self.width - s.size))
             h = self._state.copy() if self._state is not None else None
-            base = 1.0 - min(1.0, self.mean_error() or 0.0)
+            # An UNTRAINED model must report maximum uncertainty, not zero. `mean_error() or 0.0`
+            # collapsed None to 0.0 and produced confidence 1.0 at every horizon — a model that
+            # has never seen a single example declaring perfect foresight. Layers 7 and 8 both
+            # gate on this number, so the bug silently licensed causal claims and plans built on
+            # nothing at all.
+            mean_err = self.mean_error()
+            if mean_err is None:
+                base = 0.0                       # ⇒ uncertainty 1.0 at every horizon
+            else:
+                base = 1.0 - min(1.0, mean_err)
             acts = list(actions or [])
             for k in range(max(1, int(horizon))):
                 a = self._encode_action(acts[k] if k < len(acts) else None)

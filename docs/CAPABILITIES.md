@@ -895,3 +895,100 @@ it a second time.
 
 Every faculty is fail-soft and config-gated: a failure degrades to a null result, never a broken
 turn. The mind proposes; the kernel disposes; the Master is sovereign.
+
+---
+
+## NYX V.001 — the primary brain (`nyxara.nyx001`)
+
+NYX V.001 is the merge. It is the object `NyxaraCore` holds as `self.nyx001`, and it sits at the
+**outermost** position of the reason-seat chain. It owns three minds:
+
+| part | module | what it is |
+|---|---|---|
+| NYX V.01/.02/.03 | `nyxara.nyx.brain` | the concept graph, holographic memory, global workspace, specialists, superposition, and every V.02/V.03 faculty |
+| NYX-5 | `nyxara.nyx5.nyx5_brain` | the event-driven spiking simulation, HDC long-term memory, active-inference surprise meter |
+| Layers 0–17 | `nyxara.nyx001.layers` | a from-scratch cognitive stack that inherits **no** pretrained intelligence |
+
+`core.nyx` and `core.nyx5` remain valid and are **identity views** into it (`core.nyx is
+core.nyx001.v03`), so the references and tests that predate the merge keep working while ownership
+changes and there is exactly one of each brain in the process.
+
+### Layers 0–17
+
+`nyxara.nyx001.layers` implements the charter's eighteen mechanisms. Layer 2 is the central organ:
+`ŝ = F_θ(s,a)`, `e = D(s,ŝ)`, gradient update. Everything else is downstream of whether that error
+actually falls, which `CognitiveStack.is_learning()` reports — returning `None`, not `False`, when
+there is not yet enough evidence to say.
+
+`nyxara.nyx001.substrate` is Layer 0: an autograd re-exported from `nyxara.growth.genesis_numpy`
+(which already had a correct one) plus the ops the layers needed, seeded initialisation, the
+adaptive optimizer `Δθ = F(E,N,U,M,T)`, and a five-term composite objective whose terms stay
+separately measurable.
+
+### What it refuses to inherit
+
+The charter's prohibition list is enforced, not promised. No pretrained weights, no LLM call, no
+human-written knowledge rule, no hand-coded reasoning chain, no copied Transformer recipe. Every
+parameter is born from a seeded generator in `nyxara.nyx001.substrate.init`; the sequence
+mechanism in `nyxara.nyx001.lingua.sequence` is a selective state-space scan, not attention.
+NYXARA's existing LLM ladder (`nyxara.mind.llm`) is untouched and stays a separate, optional
+modality — the Layer stack does not read from it.
+
+**What that costs.** A system inheriting nothing knows nothing at birth. `nyxara.nyx001.lingua`'s
+tokenizer segments nothing until experience teaches it merges; Layer 1's encoder is a hash sketch,
+so early perception is lexical rather than semantic. This is a working cognitive system at medium
+scale. It is **not a language model** and does not compete with one.
+
+### Fusion — one thought from three
+
+`nyxara.nyx001.fusion` does not average the three brains' confidences: three numbers produced by
+unrelated procedures do not share a scale. Instead the repo's one enforced control law applies —
+**verifiable beats probabilistic**, categorically — and below it each source's vote is scaled by
+its own *measured* reliability, reported with its sample count. `agreement` is a first-class field,
+so high confidence on low agreement is surfaced as `contested` rather than smoothed away.
+
+### The Dark Cognitive Core and the childhood
+
+`nyxara.nyx001.dark_core` fuses Layers 9, 10, 11 and 12 into one drive. Rigidity enters its value
+function with a *positive* weight — the system is pulled toward the beliefs it is most comfortable
+with, precisely to attack them.
+
+`nyxara.nyx001.development` is Stages 0–10, entered by **measurement, never by schedule**, with
+no-skip prerequisites and cascading regression. Stage 5's criterion is not "the error is low" but
+"the model beats copying its own input", because a residual world model posts a tiny error by
+predicting no change at all.
+
+### Measurement
+
+`nyxara.nyx001.metrics` replaces the word "god-like" with an index over G, M, R, P, T, L, U, A, C.
+A component that cannot be measured reports `None`, never `0.0`, and the aggregate is a
+**geometric** mean so one near-zero component drags the index down instead of being averaged away.
+
+`nyxara.nyx001.proving_ground` runs the six strict tests — zero-shot, few-shot, transfer, memory
+interference, adaptation, long-horizon — every one graded on held-out data against a copy baseline.
+
+**Measured at 20k training steps, width 24, and reported as found rather than tuned to pass:**
+
+| test | score | verdict |
+|---|---|---|
+| few-shot | 0.68 | ✓ closes 68% of its error in 40 steps on a new system |
+| transfer | 0.56 | ✓ pretrained 0.56 vs fresh 0.00 on a different *kind* of system |
+| zero-shot | 0.00 | × does not generalise to a rotation angle held out of training |
+| memory interference | 0.00 | × **catastrophic forgetting** — 0.474 on A, 0.0 after learning B |
+| long-horizon | 0.00 | × a 10-step rollout is worse than copying |
+| adaptation | — | not measurable at that seed (reference skill below the floor) |
+
+Two of six. By the charter's own rule that is **not intelligence yet**, and that is the verdict the
+suite prints. The forgetting result is the most useful of them: test 4 exists to catch exactly that,
+and it caught it. Seed variance is real and visible too — the same system trained to 0.474 skill
+under one seed and 0.0001 under another.
+
+### What governs all of it
+
+`nyxara.nyx001.reasoner` carries the same contract as `nyxara.nyx.reasoner`, and it matters more
+because this seat is outermost and sees every turn. It may write `text`, `confidence`, `belief`,
+`efe` and `rationale`, and may **fill an empty** `tool` field; it may never touch `risk`,
+`reversible`, `capability` or the three corrigibility flags, never takes over an action candidate,
+and leaves the base's text alone when the three brains disagree. Any error returns the base
+candidate untouched. Every candidate then passes the identical, unchanged, fail-closed sovereign
+gate. The mind proposes; the kernel disposes; the Master is sovereign.
