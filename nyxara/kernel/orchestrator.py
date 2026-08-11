@@ -3670,7 +3670,11 @@ class NyxaraCore:
             if cfg is None or not cfg.enabled:
                 return None
             from nyxara.nyx001.brain import NyxV001Brain
-            brain = NyxV001Brain(cfg)
+            # Adopt the two brains already built above rather than letting NYX V.001 build its
+            # own. Without this every boot constructed NyxBrain and Nyx5Brain TWICE and threw one
+            # of each away — pure waste, paid again by every test that constructs a core.
+            brain = NyxV001Brain(cfg, v03=getattr(self, "nyx", None),
+                                 snn=getattr(self, "nyx5", None))
             try:
                 brain.attach_kernel(tools=getattr(self, "tools", None),
                                     knowledge=getattr(self, "knowledge", None),

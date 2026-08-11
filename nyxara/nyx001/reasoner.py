@@ -70,7 +70,12 @@ class NyxV001Reasoner:
             if str(getattr(candidate, "kind", "")).lower() in ("action", "tool", "command"):
                 return self._annotate_only(candidate, stimulus)
 
-            thought = self.brain.think(stimulus, remember=True)
+            # Hand the base's answer in as V.01-.03's vote rather than letting the brain ask it
+            # again. NyxReasoner sits inside this chain and has already deliberated; recomputing
+            # would double the per-turn cost AND fuse a second, possibly different answer than the
+            # one the chain below actually produced.
+            thought = self.brain.think(stimulus, remember=True,
+                                       v03_vote=self._vote_from(candidate))
             fused = getattr(thought, "fused", None)
             if fused is None or not thought.answer.strip():
                 return candidate
@@ -96,6 +101,22 @@ class NyxV001Reasoner:
             return out
         except Exception:  # noqa: BLE001 — the seat never breaks a turn; the base stands
             return candidate
+
+    @staticmethod
+    def _vote_from(candidate: Any) -> Any:
+        """The base candidate, expressed as V.01-.03's vote in the fusion.
+
+        ``verifiable`` is read from the candidate rather than assumed: only V.02's proof core or
+        an induced rule that predicted a held-out demonstration sets it, and this seat must not
+        promote a plausible answer to a checked one.
+        """
+        from nyxara.nyx001.fusion import Vote
+        return Vote(source="v03",
+                    text=str(getattr(candidate, "text", "") or ""),
+                    confidence=float(getattr(candidate, "confidence", 0.0) or 0.0),
+                    verifiable=bool(getattr(candidate, "verified", False)
+                                    or getattr(candidate, "verifiable", False)),
+                    rationale="deliberated by the chain below this seat")
 
     # ---- the only mutations allowed ---- #
     def _set(self, candidate: Any, *, text: str = "", confidence: float = -1.0,

@@ -114,15 +114,21 @@ class NyxV001Thought:
 class NyxV001Brain:
     """NYX V.001 — V.01/.02/.03 + NYX-5 + Layers 0–17, fused into one primary brain."""
 
-    def __init__(self, config: Any = None) -> None:
+    def __init__(self, config: Any = None, *, v03: Any = None, snn: Any = None) -> None:
+        """``v03``/``snn`` adopt brains the caller has ALREADY built rather than building more.
+
+        The kernel constructs both before it constructs this, so without adoption every boot built
+        ``NyxBrain`` and ``Nyx5Brain`` twice and discarded one of each — measured at boot, and
+        paid again by every test that constructs a core.
+        """
         self.config = config
         self.turns = 0
         self.core: Any = None
         self._beats: Dict[str, float] = {}
 
         self.stack: Optional[CognitiveStack] = self._build_stack(config)
-        self.v03: Any = self._build_v03(config)
-        self.snn: Any = self._build_snn(config)
+        self.v03: Any = v03 if v03 is not None else self._build_v03(config)
+        self.snn: Any = snn if snn is not None else self._build_snn(config)
         self.fusion = Fusion() if self._gate("fusion", True) else None
         self.dark = DarkCore(self.stack) if (self.stack is not None
                                              and self._gate("dark_core", True)) else None
@@ -208,9 +214,17 @@ class NyxV001Brain:
         return out
 
     # ---- think ---- #
-    def think(self, stimulus: str, *, remember: bool = True,
-              goals: Any = None) -> NyxV001Thought:
-        """One full cycle: perceive → three votes → fuse → critique → answer."""
+    def think(self, stimulus: str, *, remember: bool = True, goals: Any = None,
+              v03_vote: Optional[Vote] = None) -> NyxV001Thought:
+        """One full cycle: perceive → three votes → fuse → critique → answer.
+
+        ``v03_vote`` lets a caller that has *already* obtained V.01–.03's answer hand it in rather
+        than have it recomputed. The reason-seat does exactly that: ``NyxReasoner`` sits inside the
+        chain below it and has already run ``nyx.think()`` by the time this is called. Without
+        this, V.03 deliberates **twice per turn** — wasted work, and worse, two independent
+        deliberations that can disagree, so the vote fused here would not be the answer the chain
+        below actually produced.
+        """
         out = NyxV001Thought(stimulus=str(stimulus or ""))
         t0 = time.time()
         if not out.stimulus.strip():
@@ -219,7 +233,7 @@ class NyxV001Brain:
             self.turns += 1
             out.cycle_id = f"v001-{self.turns}"
             out.percept = self.perceive(out.stimulus, remember=remember)
-            votes = self._collect_votes(out, goals)
+            votes = self._collect_votes(out, goals, v03_vote=v03_vote)
             if self.fusion is not None:
                 out.fused = self.fusion.fuse(votes)
             out.critique = self._critique(out)
@@ -231,12 +245,15 @@ class NyxV001Brain:
             out.ms = (time.time() - t0) * 1000.0
             return out
 
-    def _collect_votes(self, thought: NyxV001Thought, goals: Any) -> List[Vote]:
+    def _collect_votes(self, thought: NyxV001Thought, goals: Any,
+                       *, v03_vote: Optional[Vote] = None) -> List[Vote]:
         """One vote per brain, each in its own currency, each labelled honestly."""
         votes: List[Vote] = []
         # V.01-.03 — the only source that can produce a verifiable answer
+        if v03_vote is not None:
+            votes.append(v03_vote)          # already deliberated below us; do not re-run it
         try:
-            if self.v03 is not None:
+            if v03_vote is None and self.v03 is not None:
                 t = self.v03.think(thought.stimulus, remember=False, goals=goals)
                 votes.append(Vote(source="v03", text=str(getattr(t, "answer", "") or ""),
                                   confidence=float(getattr(t, "confidence", 0.0) or 0.0),
