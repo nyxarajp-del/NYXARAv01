@@ -413,6 +413,7 @@ commands:
   /thermal           thermal/compute pressure as something she FEELS, not merely measures
   /replay [save]     the deterministic tape of this run — /replay save writes it for step-for-step replay
   /save              persist long-term memory to disk now
+  /nyx001 [sub]      NYX V.001 — her PRIMARY brain (all three); /nyx001 help
   /nyx [sub]         NYX V.01 — her brain; /nyx help for the family
   /quit              leave the console"""
 
@@ -491,6 +492,125 @@ _NYX_HELP = """\
   /nyx craft harden <path>    generate tests that had to pass first
   /nyx craft triage <log>     a CI log turned into typed failures
 """
+
+
+_NYX001_HELP = """/nyx001                    all three brains at a glance — and whether she is learning
+/nyx001 layers             Layers 0-17: which ran, what each measured
+/nyx001 stage              the Stage 0-10 childhood — measured, never scheduled
+/nyx001 dark               one pulse of the dark core: what she wants to know next
+/nyx001 think <text>       one fused cycle — three brains vote, one thought comes out
+/nyx001 score              the intelligence index (G,M,R,P,T,L,U,A,C), with sample counts
+/nyx001 prove              the six strict tests: zero-shot, few-shot, transfer,
+                           interference, adaptation, long-horizon
+"""
+
+
+def _nyx001_command(core: NyxaraCore, arg: str) -> None:
+    """The ``/nyx001`` family — a window into NYX V.001, the primary brain."""
+    brain = getattr(core, "nyx001", None)
+    if brain is None:
+        print("NYX V.001 is disabled (NYXARA_NYX001__ENABLED=false).")
+        return
+
+    sub, _, rest = arg.partition(" ")
+    sub, rest = sub.strip().lower(), rest.strip()
+
+    if sub in ("help", "?"):
+        print(_NYX001_HELP)
+        return
+
+    if not sub:
+        st = brain.stats()
+        brains = st.get("brains", {})
+        print(f"NYX V.001 — turns {st.get('turns', 0)}")
+        print(f"  V.01/.02/.03 : {'aboard' if brains.get('v03') else 'absent'}")
+        print(f"  NYX-5        : {'aboard' if brains.get('snn') else 'absent'}")
+        print(f"  Layers 0-17  : {'aboard' if brains.get('stack') else 'absent'}")
+        learning = st.get("is_learning")
+        print(f"  learning     : {'yes' if learning else ('not yet measurable' if learning is None else 'no')}")
+        cur = st.get("curriculum") or {}
+        if cur:
+            print(f"  childhood    : {cur.get('summary', '—')}")
+        return
+
+    if sub == "layers":
+        stack = getattr(brain, "stack", None)
+        if stack is None:
+            print("the Layer 0-17 stack is disabled (NYXARA_NYX001__LAYERS_ENABLED=false).")
+            return
+        st = stack.stats()
+        print(f"cycles {st.get('cycles', 0)} · active layers {st.get('active_layers', 0)}/18")
+        print(f"learning curve: {st.get('learning_curve')}")
+        for name in ("perception", "world_model", "episodic", "semantic", "curiosity",
+                     "reasoning", "contradiction", "compression", "resource",
+                     "active_learning", "self_improvement"):
+            if name in st:
+                print(f"  {name:18s} {st[name]}")
+        return
+
+    if sub == "stage":
+        rep = brain.develop()
+        if not rep:
+            print("the childhood curriculum is disabled.")
+            return
+        print(rep.get("summary", "—"))
+        for s in rep.get("states", []):
+            mark = "✓" if s["active"] else ("·" if s["measured"] is None else "×")
+            measured = "—" if s["measured"] is None else f"{s['measured']:.3f}"
+            print(f"  {mark} stage {s['number']:2d} {s['name']:24s} {measured} / {s['threshold']}")
+        return
+
+    if sub == "dark":
+        dark = getattr(brain, "dark", None)
+        if dark is None:
+            print("the dark core is disabled.")
+            return
+        p = dark.pulse()
+        if p.starved:
+            print("the dark core has nothing to pursue — no experience yet.")
+            return
+        c = p.chosen
+        print(f"drive {p.drive:.4f} · {c.kind} → {c.target}")
+        print(f"  because: {c.rationale}")
+        print(f"  made {p.hypotheses_made} hypotheses, {p.attacks_made} attacks, "
+              f"{p.destroyed} destroyed")
+        return
+
+    if sub == "think":
+        if not rest:
+            print("usage: /nyx001 think <text>")
+            return
+        t = brain.think(rest)
+        print(t.answer or "(no answer — none of the three brains produced content)")
+        if t.fused is not None:
+            print(f"  [{'verified' if t.verifiable else 'plausible'}] "
+                  f"confidence {t.confidence:.2f} · agreement {t.fused.agreement:.2f}"
+                  + (" · CONTESTED" if t.contested else ""))
+            print(f"  {t.fused.reason}")
+        return
+
+    if sub == "score":
+        try:
+            from nyxara.nyx001.metrics import IntelligenceIndex
+        except Exception:  # noqa: BLE001
+            print("metrics unavailable.")
+            return
+        rep = IntelligenceIndex().measure(brain)
+        print(rep.render())
+        return
+
+    if sub == "prove":
+        try:
+            from nyxara.nyx001.proving_ground import ProvingGround
+        except Exception:  # noqa: BLE001
+            print("the proving ground is unavailable.")
+            return
+        print("running the six strict tests — this trains from scratch and takes a while…")
+        rep = ProvingGround().run_all(brain)
+        print(rep.render())
+        return
+
+    print(f"unknown /nyx001 subcommand: {sub!r}. Try /nyx001 help.")
 
 
 def _nyx_command(core: NyxaraCore, arg: str) -> None:
@@ -1783,6 +1903,8 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print("/replay save   writes the tape so this run can be replayed step-for-step.")
     elif cmd == "nyx":
         _nyx_command(core, arg)
+    elif cmd == "nyx001":
+        _nyx001_command(core, arg)
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.

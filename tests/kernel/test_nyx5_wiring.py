@@ -65,10 +65,25 @@ def test_colour_only_disposition_matches_disabled():
 
 
 def test_reason_seat_opt_in_installs_nyx5_reasoner():
+    """NYX-5 occupies a seat in the chain when opted in — not necessarily the outermost one.
+
+    This originally asserted ``Nyx5Reasoner`` was the outermost reasoner, and it has been failing
+    on main since NYX V.01 landed with ``as_reasoner`` defaulting true and wrapping it. NYX V.001
+    now wraps that in turn. The assertion that was actually meant is that NYX-5 is *installed in
+    the chain*, which is what the wiring guarantees; which seat is outermost is a separate
+    question, covered by ``tests/kernel/test_nyx001_wiring.py``.
+    """
     os.environ["NYXARA_NYX5__AS_REASONER"] = "true"
     reload_settings()
     nyx = _core()
-    assert type(nyx.reasoner).__name__ == "Nyx5Reasoner"
+    chain = []
+    node = nyx.reasoner
+    for _ in range(8):                           # bounded walk; the chain is short by construction
+        chain.append(type(node).__name__)
+        node = getattr(node, "base", None)
+        if node is None:
+            break
+    assert "Nyx5Reasoner" in chain, f"NYX-5 not installed in the reason-seat chain: {chain}"
     r = nyx.process("hello master")              # candidate still flows through the gate
     assert r.disposition is not None
 

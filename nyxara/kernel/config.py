@@ -2295,6 +2295,93 @@ class Nyx5Config(BaseModel):
     anticipation_lookahead: int = Field(default=3, ge=0, le=5)
 
 
+class NyxV001Config(BaseModel):
+    """NYX V.001 (nyxara/nyx001/) — NYXARA's PRIMARY brain: V.01/.02/.03 + NYX-5 + Layers 0–17.
+
+    NYX V.001 is the merge. It owns :class:`NyxBrain` (the whole of V.01/.02/.03),
+    :class:`Nyx5Brain` (the spiking substrate) and a new from-scratch cognitive stack, and it sits
+    at the OUTERMOST position of the reason-seat chain. ``core.nyx`` and ``core.nyx5`` remain
+    valid and point into it, so nothing that already worked stops working.
+
+    The two brains it inherits keep their own config sections (``nyx`` and ``nyx5``) — this
+    section configures the merge and the new Layer 0–17 stack only.
+
+    **The Layer stack inherits nothing.** Its charter forbids pretrained weights, external LLM
+    intelligence, human-written knowledge rules, hand-coded reasoning chains and the copied
+    Transformer recipe. That is enforced rather than promised: every parameter is born from a
+    seeded generator, and the sequence mechanism is a selective state-space scan. NYXARA's
+    existing LLM ladder is untouched and stays a separate, optional modality — the Layer stack
+    does not read from it.
+
+    **What that costs, stated rather than discovered.** A system that inherits nothing knows
+    nothing at birth. Layer 1's encoder is a hash sketch, so early perception is lexical rather
+    than semantic, and concepts that track meaning appear only after the world model has learned
+    what predicts what. This is a working cognitive system at medium scale. It is **not a
+    language model** and does not compete with one.
+
+    ``scale`` defaults to ``medium`` (width 256, depth 4, context 128, vocab 8192). That is real
+    capacity, and it is slower than a toy: a full developmental run is minutes, not milliseconds.
+
+    NYX V.001 only ever *proposes*. Every candidate flows through the kernel's unchanged,
+    fail-closed sovereign gate, and the safety core (corrigibility, oversight, loyalty, honesty)
+    is never governed, rewritten, or bypassed by any faculty here."""
+
+    model_config = {"validate_assignment": True}
+
+    enabled: bool = True
+    as_reasoner: bool = True                     # takes the OUTERMOST reason-seat (still gated)
+    seed: int = 42
+
+    # Which of the three minds are aboard. Turning one off leaves the other two working.
+    v03_enabled: bool = True                     # NYX V.01/.02/.03 (nyxara/nyx/)
+    snn_enabled: bool = True                     # NYX-5 (nyxara/nyx5/)
+    layers_enabled: bool = True                  # the from-scratch Layer 0-17 stack
+
+    # Layer 0 — the substrate. `scale` is the ladder the charter asks to be climbed:
+    # toy (32/1/16/256) · small (64/2/32/1024) · medium (256/4/128/8192) · scaled (512/6/256/32768)
+    scale: str = "medium"
+    lr: float = Field(default=3e-3, gt=0.0, le=1.0)          # world-model base learning rate
+    memory_capacity: int = Field(default=8192, ge=32)        # Layer 3 episode capacity
+    credit_threshold: float = Field(default=0.01, ge=0.0)    # error below which relevance is credited
+
+    # Per-layer gates. Every layer is optional; a layer that is off is ABSENT from the reports
+    # rather than reporting zeros, which is the distinction this whole package keeps.
+    l01_enabled: bool = True                     # perception
+    l02_enabled: bool = True                     # dynamic world model — the central organ
+    l03_enabled: bool = True                     # episodic memory
+    l04_enabled: bool = True                     # semantic memory / concept formation
+    l05_enabled: bool = True                     # dynamic attention  A=f(Q,K,V,G,U,M,E,T,R)
+    l06_enabled: bool = True                     # reasoning engine
+    l07_enabled: bool = True                     # counterfactual engine
+    l08_enabled: bool = True                     # planning
+    l09_enabled: bool = True                     # curiosity / information gain
+    l10_enabled: bool = True                     # contradiction engine
+    l11_enabled: bool = True                     # self-critique
+    l12_enabled: bool = True                     # self-model
+    l13_enabled: bool = True                     # meta-learning
+    l14_enabled: bool = True                     # cognitive compression
+    l15_enabled: bool = True                     # resource-aware cognition
+    l16_enabled: bool = True                     # active learning + environment interaction
+    l17_enabled: bool = True                     # controlled self-improvement (fail-closed)
+
+    # The faculties that only exist once the three minds are together.
+    fusion_enabled: bool = True                  # one thought from three, verifiable-beats-guess
+    dark_core_enabled: bool = True               # curiosity+contradiction+critique+self as ONE drive
+    development_enabled: bool = True             # the Stage 0-10 childhood, measured not scheduled
+
+    # The reason-seat's own restraints. Neither loosens anything: the seat may write text,
+    # confidence, belief, efe and rationale, and may FILL an empty tool field. It never touches
+    # risk, reversible, capability or the three corrigibility flags. See nyx001/reasoner.py.
+    reasoner_may_propose_tools: bool = True      # fill an EMPTY tool field, never replace one
+    reasoner_min_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
+
+    # The heartbeat. Consolidation (compression + meta-learning) and development assessment are
+    # expensive, so they run on a beat rather than every turn.
+    tick_enabled: bool = True
+    consolidate_every_s: float = Field(default=30.0, gt=0.0)
+    develop_every_s: float = Field(default=60.0, gt=0.0)
+
+
 class NyxConfig(BaseModel):
     """NYX V.01 (nyxara/nyx/) — the unified brain that composes what NYXARA already has.
 
@@ -4022,6 +4109,8 @@ class NyxaraSettings(BaseSettings):
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
     nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
     nyx: NyxConfig = Field(default_factory=NyxConfig)
+    # NYX V.001 — the primary brain. Owns the two sections above and adds Layers 0-17.
+    nyx001: NyxV001Config = Field(default_factory=NyxV001Config)
     hyperbolic_manifold: HyperbolicManifoldConfig = Field(
         default_factory=HyperbolicManifoldConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
