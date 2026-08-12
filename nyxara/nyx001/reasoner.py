@@ -102,6 +102,28 @@ class NyxV001Reasoner:
         except Exception:  # noqa: BLE001 — the seat never breaks a turn; the base stands
             return candidate
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward anything this seat does not define to the reasoner it wraps.
+
+        A seat is a wrapper, and without this it is an opaque one: installing it hid every
+        attribute of the chain below from anyone holding ``core.reasoner``. That was not a
+        theoretical loss. ``_build_explorer`` reads ``getattr(reasoner, "llm", None)``, got
+        ``None`` because the seat had no ``llm`` of its own, and built the Infinite Explorer
+        with no model at all — so it fell to the deterministic recipe path, drew the generic
+        echo scaffold, and persisted that as a "verified" solution. The seats being on by
+        default is what made a getattr-with-default silently wrong everywhere.
+
+        Only called when normal lookup fails, so a seat's own attributes always win. Dunders are
+        refused rather than forwarded: copy, pickle and friends probe for them, and answering on
+        the base's behalf makes this object claim protocols it does not implement.
+        """
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        base = self.__dict__.get("base")          # not self.base — that would recurse
+        if base is None:
+            raise AttributeError(name)
+        return getattr(base, name)
+
     @staticmethod
     def _vote_from(candidate: Any) -> Any:
         """The base candidate, expressed as V.01-.03's vote in the fusion.

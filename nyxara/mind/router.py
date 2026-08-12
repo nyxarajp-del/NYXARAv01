@@ -50,6 +50,16 @@ def _tokens(text: str) -> list:
 # The echo penalty was the right idea aimed one level too low: it catches a model parroting the
 # *prompt*, not one parroting the *scaffold*. A fixed prefix dilutes the overlap ratio enough to
 # slip under it — "I understand: Hii" is 33% prompt words, and the penalty starts at 60%.
+# The same trap, one layer up: her CALIBRATION qualifiers (observe/honesty.py::_qualifier) are
+# prepended to an answer before this verifier ever sees it. They are her own words about her own
+# confidence, not the drafting model's content — so counting them was the verifier scoring her
+# boilerplate and calling it quality. Worse, it scored *upward*: the qualifier adds length and
+# unique words, the two signals below that reward substance. Measured, "I'm certain that The
+# answer is clear." — a reply that says nothing — cleared the 0.6 threshold at **0.921**, higher
+# than the "I understand: Hii" case above, because the honesty layer had padded it.
+#
+# Longest-first below: "i'm confident that" must be tried before any shorter prefix that is its
+# own prefix, or the strip leaves a fragment behind and scores that instead.
 _SCAFFOLD_PREFIXES: Tuple[str, ...] = (
     "i understand:",       # _default_reasoner, conversational branch
     "perform:",            # _default_reasoner, command branch
@@ -57,17 +67,42 @@ _SCAFFOLD_PREFIXES: Tuple[str, ...] = (
     "the master says:",    # dialogue-template continuation (the n-gram's signature)
     "nyxara responds:",
     "nyxara:",
+    # observe/honesty.py::_qualifier — every rung of it
+    "i suspect, though i'm not sure, that",
+    "i doubt, but it's possible, that",
+    "i don't know whether",
+    "i'm confident that",
+    "i'm certain that",
+    "i think",
 )
 
 
 def strip_scaffold(answer: str) -> Tuple[str, bool]:
-    """Remove a leading scaffold phrase. Returns ``(remainder, was_scaffolded)``."""
+    """Remove leading scaffold phrases, repeatedly. Returns ``(remainder, was_scaffolded)``.
+
+    Repeatedly, because they stack. Her calibration qualifier is prepended to whatever the
+    deterministic reasoner produced, so a real reply looks like:
+
+        "I'm confident that I understand: Who wrote Hamlet?"
+         └── qualifier ───┘ └─ scaffold ─┘ └── the question ──┘
+
+    Stripping one prefix and returning left "I understand: Who wrote Hamlet?" to be scored as
+    content, and it scored 0.827 against a 0.6 threshold — a reply that is a template wrapped
+    around a hedge wrapped around the question, accepted as her own confident answer. Peeled to
+    the end it leaves the bare question, which the echo rule below correctly scores 0.
+    """
     text = (answer or "").strip()
-    low = text.lower()
-    for prefix in _SCAFFOLD_PREFIXES:
-        if low.startswith(prefix):
-            return text[len(prefix):].strip(), True
-    return text, False
+    seen = False
+    for _ in range(len(_SCAFFOLD_PREFIXES) + 1):     # bounded: each pass removes one prefix
+        low = text.lower()
+        for prefix in _SCAFFOLD_PREFIXES:
+            if low.startswith(prefix):
+                text = text[len(prefix):].strip()
+                seen = True
+                break
+        else:
+            break
+    return text, seen
 
 
 # --------------------------------------------------------------------------- #
@@ -185,6 +220,42 @@ class Router:
         self._self = self_provider
         self.meta = MetaCognition(answer_threshold=self.cfg.threshold,
                                   abstain_below=self.cfg.abstain_below)
+
+    # ---- how good "good enough" has to be ---- #
+    def _strong_rung_available(self) -> bool:
+        """Is a stronger own rung reachable that this draft is NOT the one using?
+
+        Only ``litertlm`` counts: it is the one rung both markedly stronger than the learned
+        n-gram brain and reachable without forging anything. When it is what is drafting there is
+        nothing stronger to lose and this is False.
+        """
+        try:
+            from nyxara.mind.llm import LiteRTLMProvider
+            if not isinstance(self._self, LiteRTLMProvider) \
+                    and LiteRTLMProvider(self.settings).available():
+                return True
+        except Exception:  # noqa: BLE001 — an unreadable rung is simply "not available"
+            pass
+        # A configured teacher deliberately does NOT count. Extending this to teachers was tried
+        # and reverted: it raised the bar on the ordinary own-model-first path and broke
+        # test_draft_self_hands_off_a_confident_answer, which encodes the behaviour this router
+        # exists to provide. The trade being guarded here is her weak brain displacing her strong
+        # one, not her displacing the teacher — that second one is the whole point of the module.
+        return False
+
+    def _handoff_threshold(self) -> float:
+        """The bar this draft must clear, raised when something stronger is standing by.
+
+        The verifier cannot tell a correct short answer from a fluent empty one — 'Paris.' scores
+        0.585 and "The answer is clear." scores 0.792, the difference being word count alone. So
+        rather than pick a threshold that cannot exist, the bar moves with what a handoff costs:
+        nothing stronger reachable, and ``threshold`` stands; something stronger reachable, and a
+        well-formed non-answer is no longer enough to displace it.
+        """
+        base = float(self.cfg.threshold)
+        if not self._strong_rung_available():
+            return base
+        return max(base, float(getattr(self.cfg, "threshold_with_strong_rung", base)))
 
     # ---- availability ---- #
     def self_available(self) -> bool:
@@ -326,7 +397,7 @@ class Router:
                 confidence = float(self.verifier(prompt, own))
             except Exception:  # noqa: BLE001 — a failed own attempt simply defers downstream
                 own, confidence = None, 0.0
-            if own and confidence >= self.cfg.threshold:
+            if own and confidence >= self._handoff_threshold():
                 return RouterResult(own, "self", confidence, handed_off=True)
 
         # 2) metacognition decides: own / teacher / honest abstention — now informed by an
@@ -371,7 +442,7 @@ class Router:
         if not own:
             return None
         conf = float(self.verifier(prompt, own))
-        if conf >= self.cfg.threshold:
+        if conf >= self._handoff_threshold():
             return RouterResult(own, "self", conf, handed_off=True)
         return None
 

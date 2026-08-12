@@ -158,7 +158,7 @@ class WebSearcher:
                  max_bytes: int = 5_000_000,
                  user_agent: str = "NYXARA/1.0 (+https://nyxara.ai)",
                  governor: Any = None, allow_private: bool = False,
-                 fetcher: Any = None) -> None:
+                 fetcher: Any = None, enabled: bool = True) -> None:
         self.provider = provider
         self.brave_key = brave_key
         self.tavily_key = tavily_key
@@ -169,6 +169,7 @@ class WebSearcher:
         self.user_agent = user_agent
         self.governor = governor
         self.allow_private = allow_private
+        self.enabled = enabled
         self._fetcher = fetcher  # injected WebFetcher (tests pass a fake-transport one)
 
     # ---- public ---- #
@@ -236,7 +237,7 @@ class WebSearcher:
         from nyxara.senses.web import WebFetcher
         return WebFetcher(governor=self.governor, allow_private=self.allow_private,
                           max_bytes=self.max_bytes, timeout=self.timeout_s,
-                          user_agent=self.user_agent)
+                          user_agent=self.user_agent, enabled=self.enabled)
 
     def _ddg_html(self, query: str, n: int) -> SearchResponse:
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)

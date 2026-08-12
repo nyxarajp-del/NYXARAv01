@@ -197,7 +197,8 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
             return {"governor": governor}
         return {"governor": governor, "allow_private": bool(web.allow_private),
                 "max_bytes": int(web.max_bytes), "timeout": float(web.timeout_s),
-                "user_agent": web.user_agent, "max_redirects": int(web.max_redirects)}
+                "user_agent": web.user_agent, "max_redirects": int(web.max_redirects),
+                "enabled": bool(getattr(web, "enabled", True))}
 
     # ---- time: trivial, read-only ---- #
     def _now() -> str:
@@ -422,7 +423,8 @@ def build_default_tools(registry: ToolRegistry, *, memory: Any = None,
                 serpapi_key=_secret(web.serpapi_api_key),
                 max_results=int(web.max_results), timeout_s=float(web.timeout_s),
                 max_bytes=int(web.max_bytes), user_agent=web.user_agent,
-                governor=governor, allow_private=bool(web.allow_private))
+                governor=governor, allow_private=bool(web.allow_private),
+                enabled=bool(getattr(web, "enabled", True)))
         else:
             searcher = WebSearcher(governor=governor)  # keyless DDG default
         # errors-as-data: a failed search returns [] rather than raising, so the act stage

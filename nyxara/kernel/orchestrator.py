@@ -6969,43 +6969,66 @@ class NyxaraCore:
         if (self.parallel_hypotheses <= 1 or len(framings) <= 1
                 or not self._reasoner_parallelizable()):
             return self._reason_once(stimulus, focus, memories)
-        import concurrent.futures as _cf
+        # DAEMON threads, deliberately, rather than a ThreadPoolExecutor.
+        #
+        # A Python thread cannot be interrupted, so the deadline bounds the TURN and not the work:
+        # stragglers run on and their results are discarded. That part is unchanged and is the
+        # honest trade — joining them would make the deadline decorative, and a single
+        # core.process() under DEV defaults costs 3 framings x 3 passes x 3 samples x 5 RSI
+        # iterations of model calls, which is how a turn could run for the better part of an hour.
+        #
+        # What changed is what a straggler costs at SHUTDOWN. ThreadPoolExecutor's workers are
+        # non-daemon and `concurrent.futures.thread` registers an atexit hook that joins every one
+        # of them, so `shutdown(wait=False)` released the pool and the interpreter still waited.
+        # Measured: a finished process held 232% CPU and 3.8 GB for 30 minutes and only reported
+        # completion when killed, with its work long done. The old comment here anticipated
+        # exactly this ("would keep its thread alive to interpreter exit") and accepted it.
+        #
+        # Daemon threads do not block interpreter exit, so the deadline now bounds the process too.
+        # The exposure that buys is narrow: a daemon thread is only killed abruptly AT shutdown,
+        # and a straggler's output is already discarded by the time it gets there — the turn's
+        # writes all happen on this thread, after the gate.
+        import queue as _queue
+        import threading as _threading
         results: List[tuple] = []
-        deadline = self._parallel_deadline_s()
+        deadline = self._parallel_deadline_s(n_framings=len(framings))
         timed_out = False
-        ex = _cf.ThreadPoolExecutor(max_workers=len(framings))
         try:
-            futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
-                    for name, mem in framings}
-            for fut in _cf.as_completed(futs, timeout=deadline):
+            done: "_queue.Queue[tuple]" = _queue.Queue()
+
+            def _run(name: str, mem: List[Any]) -> None:
                 try:
-                    cand = fut.result()
-                except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
-                    continue
+                    done.put((name, self._reason_once(stimulus, focus, mem)))
+                except Exception:  # noqa: BLE001 — a failed framing just doesn't vote
+                    done.put((name, None))
+
+            for name, mem in framings:
+                _threading.Thread(target=_run, args=(name, mem), daemon=True,
+                                  name=f"nyx-framing-{name}"[:48]).start()
+            end = time.monotonic() + deadline
+            for _ in range(len(framings)):
+                left = end - time.monotonic()
+                if left <= 0:
+                    timed_out = True
+                    break
+                try:
+                    name, cand = done.get(timeout=left)
+                except _queue.Empty:
+                    timed_out = True
+                    break
                 # A framing that returned nothing has not voted. Letting it through reached
                 # `_hypothesis_signature(None)` and took down the turn with an AttributeError —
                 # unreachable while the deadline was too short for any framing to finish, and
                 # immediate once it was long enough. Same rule as the turn ledger's: producing
                 # no answer is not the same as producing an answer, and neither is a crash.
                 if cand is not None and getattr(cand, "kind", None) is not None:
-                    results.append((futs[fut], cand))
-        except _cf.TimeoutError:
-            # The budget ran out. Vote with whatever arrived — a late framing is not worth an
-            # unbounded turn, and metacontrol already decided how long this question is worth.
-            self._note_deadline(deadline, len(results), len(framings))
-            timed_out = True
+                    results.append((name, cand))
+            if timed_out:
+                # The budget ran out. Vote with whatever arrived — a late framing is not worth an
+                # unbounded turn, and metacontrol already decided how long this question is worth.
+                self._note_deadline(deadline, len(results), len(framings))
         except Exception:  # noqa: BLE001 — never let concurrency break the turn
             return self._reason_once(stimulus, focus, memories)
-        finally:
-            # Do not join. A Python thread cannot be interrupted, so the deadline bounds the TURN,
-            # not the work: stragglers run on and their results are discarded. That is the honest
-            # trade — the alternative was `with ThreadPoolExecutor(...)`, whose __exit__ joins every
-            # worker and made the deadline decorative. A single core.process() under DEV defaults
-            # costs 3 framings x 3 passes x 3 samples x 5 RSI iterations of model calls, which is
-            # how a turn could run for the better part of an hour. Stragglers do finish and their
-            # threads drain, so this releases them rather than leaking them — but a framing that
-            # hung forever would keep its thread alive to interpreter exit, same as before.
-            ex.shutdown(wait=False, cancel_futures=True)
         if not results:
             if timed_out:
                 # Spending the budget and then paying the FULL cost again is the one move worse
@@ -7111,7 +7134,7 @@ class NyxaraCore:
             return candidate
         return fn(candidate, *args)
 
-    def _parallel_deadline_s(self) -> float:
+    def _parallel_deadline_s(self, *, n_framings: int = 1) -> float:
         """How long this turn's parallel framings may take, in seconds.
 
         Derived from the ComputeBudget metacontrol already computed for this turn — it decides how
@@ -7136,7 +7159,18 @@ class NyxaraCore:
             seconds *= self._deadline_share()
         else:
             seconds = self._configured_timeout_s()
-        return max(1.0, self._one_generation_s(), seconds)
+        # ``n_framings`` generations, not one. They are launched on separate threads, but the
+        # on-device engine serves them under a single lock, so they queue: measured on this host
+        # at **2.55x** the cost of one generation for three framings — near-perfectly serial.
+        # Sizing the floor for a single generation therefore guaranteed the timeout whenever more
+        # than one framing ran, which is the normal path. Observed directly: a 30 s deadline, a
+        # 32.1 s turn, and "voting with 0 of 3 framings".
+        #
+        # Safe when a provider really is concurrent, because this is a MAXIMUM WAIT and framings
+        # that finish early return immediately — the same reason the floor itself is safe to
+        # raise. It only stops the budget cutting off work that was about to succeed.
+        floor = self._one_generation_s() * max(1, int(n_framings))
+        return max(1.0, floor, seconds)
 
     def _one_generation_s(self) -> float:
         """A floor: no deadline may be shorter than a single generation actually costs.
@@ -7169,13 +7203,23 @@ class NyxaraCore:
                         observed = max(observed, float(gen.latency_s))
         except Exception:  # noqa: BLE001 — observation must never break a turn
             observed = 0.0
-        if observed > 0.0:
-            return max(1.0, observed * 2.0)     # headroom for a slower-than-usual reply
+        # ``min_generation_budget_s`` is a MINIMUM, and until now it was only a fallback: it was
+        # read solely when there were no observations, so any measurement at all — however
+        # unrepresentative — silently replaced it. The ledger records every generation, including
+        # the cheap internal ones, and `observed` is their max. Measured here: turns kept dying on
+        # a 15.0 s deadline (7.5 s observed x 2) with the minimum configured at 240 s, and every
+        # knowledge question fell to the deterministic scaffold. Setting the knob changed nothing,
+        # which is the worst way for a knob to be wrong.
+        #
+        # A floor that a measurement can lower is not a floor. Both paths now respect it.
         try:
             from nyxara.kernel.config import get_settings
-            return max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
+            floor = max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
         except Exception:  # noqa: BLE001
-            return 30.0
+            floor = 30.0
+        if observed > 0.0:
+            return max(floor, observed * 2.0)   # headroom for a slower-than-usual reply
+        return floor
 
     @staticmethod
     def _deadline_share() -> float:

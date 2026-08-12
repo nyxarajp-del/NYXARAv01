@@ -413,6 +413,13 @@ class LLMConfig(BaseModel):
     # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
     litertlm_cache_dir: Optional[Path] = None
     litertlm_top_k: int = Field(default=40, ge=1)
+    # The model's context window, in tokens. Her callers do not know it: NyxaraReasoner composes a
+    # system text from identity + recalled memories + the self-model + domain expertise, and an
+    # ordinary turn measured 4552 tokens against Gemma 4's 4096. The runtime refuses the whole
+    # request at that point, so mind/llm.py trims history (then the system text) to fit rather than
+    # losing the turn. Lower it for a smaller model; raising it past what the weights accept only
+    # moves the refusal back into the runtime.
+    litertlm_context_tokens: int = Field(default=4096, ge=512)
     # The runtime's shared library declares a hard dependency on the Vulkan LOADER
     # (``libvulkan.so.1``) even on the CPU backend, yet imports no symbol from it. On a host without
     # that loader the whole rung is unloadable. mind/vulkan_shim.py generates a 344-byte stub
@@ -1343,6 +1350,20 @@ class RouterConfig(BaseModel):
     enabled: bool = True
     # Minimum verifier score (0..1) for NYXARA to speak her own model's answer unaided.
     threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # The bar to clear when a STRONGER own rung is reachable but is not the one drafting.
+    #
+    # The verifier scores form — length, coherence, unique-word ratio — and cannot see whether an
+    # answer answers anything. Measured: 'Paris.' scores 0.585 and is refused, while "The answer
+    # is clear." scores 0.792 and is accepted; the entire difference is word count, because the
+    # coherence term is ~1.0 for any fluent sentence and carries 0.65 of the weight. No single
+    # threshold orders those two correctly, so a second one is used where the stakes differ.
+    #
+    # Handing off is a trade: her own voice for whatever the stronger rung would have said. When
+    # nothing stronger is reachable there is no trade and ``threshold`` stands. When there is,
+    # the weaker drafter has to be clearly good rather than merely well-formed — that is what
+    # this raises, and it is the difference between her answering from her own brain and her
+    # answering from her own brain *instead of* the 2.5 GB model already loaded beside it.
+    threshold_with_strong_rung: float = Field(default=0.85, ge=0.0, le=1.0)
     # An answer shorter than this many characters is never trusted (degenerate output).
     min_chars: int = Field(default=2, ge=0)
     # When the own answer fails the bar, fall back to the external teacher (else keep own).
@@ -3852,6 +3873,17 @@ class WebConfig(BaseModel):
     user_agent: str = "NYXARA/1.0 (+https://nyxara.ai)"
     max_redirects: int = Field(default=20, ge=0, le=50)
 
+    # The master switch for outbound HTTP. ON everywhere except TEST, where it is forced off:
+    # the TEST branch below says "tests run hermetically: never reach the network", and until
+    # this existed nothing made that true. tests/growth/test_autolearn.py reached the real web —
+    # run_validation -> benchmark -> core.process -> _maybe_bootstrap -> explorer -> researcher
+    # -> web_fetch -> httpx — and hung there, in four threads at once, on every run including
+    # main's. A suite whose result depends on a network is not a suite.
+    #
+    # Off means the fetchers return an honest blocked result, exactly as the SSRF guard's does;
+    # nothing raises and no caller learns a new failure mode.
+    enabled: bool = True
+
     # access posture: unrestricted reach. allow_private=True turns the SSRF guard OFF so
     # loopback/private/link-local hosts are reachable. injection_scan keeps untrusted page
     # text sanitised (defense in depth; does not reduce reach).
@@ -4172,6 +4204,17 @@ class NyxaraSettings(BaseSettings):
         this is a fail-closed guarantee (Rules 5, 6, 8). DEV stays permissive but
         still cannot disable invariant enforcement or audit logging.
         """
+        # What the operator actually supplied, read BEFORE this method starts assigning. Every
+        # assignment below marks its own field "set", so by the end ``model_fields_set`` cannot
+        # tell an operator's choice from our own hardening — it has to be captured here or not
+        # at all. Used by the max-power block far below, which was overwriting explicit input:
+        # ``NYXARA_PERCEPTION__ENABLED=false`` bound correctly and was then reassigned to True,
+        # so the flag could not be turned off from config at all and a bare NyxaraCore() started
+        # a `nyxara-perception` thread regardless. A silently-ignored setting is worse than an
+        # unsupported one: it reads as working.
+        supplied_perception = set(self.perception.model_fields_set)
+        supplied_metacontrol = set(self.metacontrol.model_fields_set)
+
         # These can NEVER be disabled, in any profile.
         self.features.invariant_enforcement = True
         self.features.audit_logging = True
@@ -4225,6 +4268,11 @@ class NyxaraSettings(BaseSettings):
             # tests build their own settings and inject a fake binding instead.
             self.llm.litertlm_enabled = False
             self.llm.litertlm_auto_download = False
+            # The sentence above was an intention, not a mechanism: the LLM rungs were sealed and
+            # the web was not, so her researcher still dialled out from inside the suite. Sealing
+            # it here rather than in each caller means one switch governs every path to fd-level
+            # HTTP — search, fetch and http_request alike.
+            self.web.enabled = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
@@ -4331,7 +4379,13 @@ class NyxaraSettings(BaseSettings):
             # allocates per turn, so an easy prompt remains one forward pass. That per-turn choice
             # IS the max-power feature, not a weakening of it.
             self.metacontrol.enabled = True
-            self.metacontrol.max_seconds_ceiling = 600.0
+            # Same rule as perception above, and the second proven case of this block ignoring
+            # explicit input. tests/conftest.py sets NYXARA_METACONTROL__MAX_SECONDS_CEILING=6
+            # specifically to stop the suite spending real deliberation time per turn, and
+            # documents why — and it read back as 600.0, because this line ran after the
+            # environment. The fix the suite already had was never in effect.
+            if "max_seconds_ceiling" not in supplied_metacontrol:
+                self.metacontrol.max_seconds_ceiling = 600.0
             self.metacontrol.escalation = True
             self.metacontrol.probe_self_consistency = True
             self.llm.reasoning_passes = 5
@@ -4364,7 +4418,11 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.grounded_web_enabled = True
             # She never stops watching or listening at full power: faster escalation
             # cadence and a sharper orienting reflex (still gate-checked per event).
-            self.perception.enabled = True
+            # Unless the operator said otherwise — max power is a default posture, not an
+            # override of explicit input. Watching and listening is the one knob here where
+            # ignoring that is not merely surprising.
+            if "enabled" not in supplied_perception:
+                self.perception.enabled = True
             self.perception.min_escalation_interval_s = 10.0
             self.perception.burst_interval_s = 0.25
 

@@ -26,6 +26,20 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # is hermetic and fast, but installing mutates a live faculty — seal it OFF for the suite (same
 # rationale as the flags above). Tests that exercise adoption build their own synthesizer/settings.
 os.environ.setdefault("NYXARA_RULE_SYNTHESIS__AUTONOMOUS_ENACT", "false")
+# Two enactment paths this file's own header promises to close were not in the list. Comparing
+# the Profile.TEST block against this file: it forces 27 settings, 13 were mirrored here, and
+# these were among the 14 that were not — so they ran at their live defaults in every test.
+os.environ.setdefault("NYXARA_COGNITIVE_ARCHITECT__AUTONOMOUS_ENACT", "false")
+os.environ.setdefault("NYXARA_SELF_EVOLVING__AUTONOMOUS_ENACT", "false")
+os.environ.setdefault("NYXARA_COGNITIVE_ARCHITECT__PERSIST", "false")
+# A bare NyxaraCore() starts a `nyxara-perception` thread, so every test that builds one was
+# running continuous perception. Until now this could not be turned off at all: the max-power
+# block in config.py reassigned it after the environment was read (fixed alongside this).
+os.environ.setdefault("NYXARA_PERCEPTION__ENABLED", "false")
+# Running pytest inside pytest. Left at its live default the gauntlet shells out to the suite
+# from within the suite.
+os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__RUN_PYTEST_IN_GAUNTLET", "false")
+os.environ.setdefault("NYXARA_OBSERVABILITY__TELEMETRY_ENABLED", "false")
 # The Genesis Protocol's boot kickoff (run_on_boot, ON for live DEV/PROD) designs and micro-trains
 # a real neural architecture on the first idle tick — minutes of compute that every core-booting
 # test would otherwise pay. Same hermetic rationale as the enactment flags above: keep it OFF for
@@ -52,6 +66,15 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
+# Outbound HTTP. `Profile.TEST` says "tests run hermetically: never reach the network", and the
+# suite does not run under that profile — the same gap the foundry note below describes — so the
+# sentence was true of a profile nobody used. It reached the real web through
+# `run_validation -> benchmark -> core.process -> _maybe_bootstrap -> explorer -> researcher ->
+# web_fetch -> httpx`, in four threads at once, and `tests/growth/test_autolearn.py` hung there on
+# every run including main's. Off means the fetchers return a blocked result the same way the SSRF
+# guard's does, so no caller learns a new failure mode. Tests that want a transport inject a fake
+# one (tests/senses/test_web.py) and are unaffected.
+os.environ.setdefault("NYXARA_WEB__ENABLED", "false")
 # The model foundry TRAINS. `AutonomicLoop._maybe_grow` -> `GrowthEngine.run` -> `improve_self` ->
 # `Foundry.self_improve` -> `train_candidate` -> `model.train_on(steps=train_steps)` is real
 # backprop, in pure NumPy, and it ran on every autonomic tick the suite drove — so a test that

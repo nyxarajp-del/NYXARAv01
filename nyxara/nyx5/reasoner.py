@@ -30,6 +30,24 @@ class Nyx5Reasoner:
         self.free_energy = free_energy
         self.predictive = predictive
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward anything this seat does not define to the reasoner it wraps.
+
+        See ``nyxara/nyx001/reasoner.py`` for what the missing delegation cost: a seat with no
+        ``llm`` of its own made ``getattr(reasoner, "llm", None)`` return None for every caller
+        holding ``core.reasoner``, and the explorer was built with no model because of it.
+
+        Only called when normal lookup fails, so this seat's own attributes always win. Dunders
+        are refused rather than forwarded — copy and pickle probe for them, and answering on the
+        base's behalf claims protocols this object does not implement.
+        """
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        base = self.__dict__.get("base")          # not self.base — that would recurse
+        if base is None:
+            raise AttributeError(name)
+        return getattr(base, name)
+
     def __call__(self, stimulus: str, focus: Any = None, **kwargs: Any) -> Any:
         tick = None
         try:

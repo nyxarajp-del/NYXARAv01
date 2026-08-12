@@ -70,11 +70,16 @@ _CHITCHAT = {
     "hi", "hello", "hey", "yo", "sup", "thanks", "thank", "ok", "okay", "bye",
     "goodbye", "cool", "nice", "lol", "yes", "no", "yeah", "nah", "please",
 }
-# verbs / cues that mark a stimulus as a *solvable task* rather than conversation
+# verbs / cues that mark a stimulus as a *solvable task* rather than conversation.
+# Every entry names an OPERATION she could write code for. "what is the" used to sit here and
+# does not name one: it is how most factual questions open, so it pulled "what is the capital of
+# France?" into a write-run-debug loop. Nothing is lost by its absence — the computational
+# questions it used to catch open the same way and match on their operation instead
+# ("what is the SUM of…", "what is the FACTORIAL of…").
 _TASK_CUES = (
     "compute", "calculate", "convert", "reverse", "count", "sort", "find", "solve",
     "encode", "decode", "hash", "generate", "parse", "extract", "sum", "average",
-    "factorial", "fibonacci", "prime", "how many", "what is the", "write", "build",
+    "factorial", "fibonacci", "prime", "how many", "write", "build",
     "make a", "list the", "transform", "translate", "format",
 )
 
@@ -162,9 +167,14 @@ class InfiniteExplorer:
         # pure greeting / acknowledgement → not a task
         if len(words) <= 3 and all(w in _CHITCHAT for w in words):
             return False
-        if low.endswith("?") or any(cue in low for cue in _TASK_CUES):
+        if any(cue in low for cue in _TASK_CUES):
             return True
-        # a recipe-shaped request (the foundry can name a real recipe) is solvable
+        # A question mark is NOT a task cue. It marks the Master *asking*, and this is a loop that
+        # writes and runs code — the two are unrelated. Treating them as the same thing sent every
+        # factual question ("what is the capital of France?") through research + synthesis, whose
+        # artefacts then persisted (below) and came back on later turns as her answer.
+        # Whether the foundry can name a real recipe is the honest test, and it is already the
+        # next line — a genuine task reaches it and still qualifies.
         try:
             return best_recipe(t).key != "generic"
         except Exception:  # noqa: BLE001
@@ -382,8 +392,22 @@ class InfiniteExplorer:
 
     # ---- deterministic offline synthesis (Capability Foundry recipe) ---- #
     def _recipe_code(self, recipe: Any) -> str:
-        """Turn a foundry recipe into a runnable script that surfaces ``result``."""
-        if recipe is None:
+        """Turn a foundry recipe into a runnable script that surfaces ``result``.
+
+        The ``generic`` recipe is refused. It is the foundry's honest last-resort placeholder —
+        ``handle(payload)`` returns ``{'echo': payload, 'scaffold': True}`` — and it is the
+        fallback for *any* task no real recipe matches. Run here it always succeeds and always
+        matches its own identity example, so :meth:`_solve_loop` marked the task ``solved`` and
+        :meth:`_verify_offline` marked it ``verified``, for every task in existence. That wrote
+        memories reading "bootstrapped a working solution … verified against a known-good
+        example" whose answer was the echo scaffold, and a claim of *verified* is exactly what
+        outranks an ordinary answer downstream (``nyx001/fusion.py``'s control law).
+
+        Echoing an argument proves the sandbox ran. It proves nothing about the task, so there is
+        no code here to return: the caller's existing no-code path records an honest failure and
+        the turn keeps its abstention. Recipes that actually match a task are unaffected.
+        """
+        if recipe is None or getattr(recipe, "key", "") == "generic":
             return ""
         args = {}
         examples = getattr(recipe, "examples", None) or []
