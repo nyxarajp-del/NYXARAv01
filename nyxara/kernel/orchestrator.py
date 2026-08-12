@@ -6991,7 +6991,7 @@ class NyxaraCore:
         import queue as _queue
         import threading as _threading
         results: List[tuple] = []
-        deadline = self._parallel_deadline_s()
+        deadline = self._parallel_deadline_s(n_framings=len(framings))
         timed_out = False
         try:
             done: "_queue.Queue[tuple]" = _queue.Queue()
@@ -7134,7 +7134,7 @@ class NyxaraCore:
             return candidate
         return fn(candidate, *args)
 
-    def _parallel_deadline_s(self) -> float:
+    def _parallel_deadline_s(self, *, n_framings: int = 1) -> float:
         """How long this turn's parallel framings may take, in seconds.
 
         Derived from the ComputeBudget metacontrol already computed for this turn — it decides how
@@ -7159,7 +7159,18 @@ class NyxaraCore:
             seconds *= self._deadline_share()
         else:
             seconds = self._configured_timeout_s()
-        return max(1.0, self._one_generation_s(), seconds)
+        # ``n_framings`` generations, not one. They are launched on separate threads, but the
+        # on-device engine serves them under a single lock, so they queue: measured on this host
+        # at **2.55x** the cost of one generation for three framings — near-perfectly serial.
+        # Sizing the floor for a single generation therefore guaranteed the timeout whenever more
+        # than one framing ran, which is the normal path. Observed directly: a 30 s deadline, a
+        # 32.1 s turn, and "voting with 0 of 3 framings".
+        #
+        # Safe when a provider really is concurrent, because this is a MAXIMUM WAIT and framings
+        # that finish early return immediately — the same reason the floor itself is safe to
+        # raise. It only stops the budget cutting off work that was about to succeed.
+        floor = self._one_generation_s() * max(1, int(n_framings))
+        return max(1.0, floor, seconds)
 
     def _one_generation_s(self) -> float:
         """A floor: no deadline may be shorter than a single generation actually costs.
