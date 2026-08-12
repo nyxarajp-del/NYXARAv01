@@ -78,13 +78,31 @@ _SCAFFOLD_PREFIXES: Tuple[str, ...] = (
 
 
 def strip_scaffold(answer: str) -> Tuple[str, bool]:
-    """Remove a leading scaffold phrase. Returns ``(remainder, was_scaffolded)``."""
+    """Remove leading scaffold phrases, repeatedly. Returns ``(remainder, was_scaffolded)``.
+
+    Repeatedly, because they stack. Her calibration qualifier is prepended to whatever the
+    deterministic reasoner produced, so a real reply looks like:
+
+        "I'm confident that I understand: Who wrote Hamlet?"
+         └── qualifier ───┘ └─ scaffold ─┘ └── the question ──┘
+
+    Stripping one prefix and returning left "I understand: Who wrote Hamlet?" to be scored as
+    content, and it scored 0.827 against a 0.6 threshold — a reply that is a template wrapped
+    around a hedge wrapped around the question, accepted as her own confident answer. Peeled to
+    the end it leaves the bare question, which the echo rule below correctly scores 0.
+    """
     text = (answer or "").strip()
-    low = text.lower()
-    for prefix in _SCAFFOLD_PREFIXES:
-        if low.startswith(prefix):
-            return text[len(prefix):].strip(), True
-    return text, False
+    seen = False
+    for _ in range(len(_SCAFFOLD_PREFIXES) + 1):     # bounded: each pass removes one prefix
+        low = text.lower()
+        for prefix in _SCAFFOLD_PREFIXES:
+            if low.startswith(prefix):
+                text = text[len(prefix):].strip()
+                seen = True
+                break
+        else:
+            break
+    return text, seen
 
 
 # --------------------------------------------------------------------------- #

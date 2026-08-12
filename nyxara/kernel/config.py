@@ -4190,6 +4190,16 @@ class NyxaraSettings(BaseSettings):
         this is a fail-closed guarantee (Rules 5, 6, 8). DEV stays permissive but
         still cannot disable invariant enforcement or audit logging.
         """
+        # What the operator actually supplied, read BEFORE this method starts assigning. Every
+        # assignment below marks its own field "set", so by the end ``model_fields_set`` cannot
+        # tell an operator's choice from our own hardening — it has to be captured here or not
+        # at all. Used by the max-power block far below, which was overwriting explicit input:
+        # ``NYXARA_PERCEPTION__ENABLED=false`` bound correctly and was then reassigned to True,
+        # so the flag could not be turned off from config at all and a bare NyxaraCore() started
+        # a `nyxara-perception` thread regardless. A silently-ignored setting is worse than an
+        # unsupported one: it reads as working.
+        supplied_perception = set(self.perception.model_fields_set)
+
         # These can NEVER be disabled, in any profile.
         self.features.invariant_enforcement = True
         self.features.audit_logging = True
@@ -4387,7 +4397,11 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.grounded_web_enabled = True
             # She never stops watching or listening at full power: faster escalation
             # cadence and a sharper orienting reflex (still gate-checked per event).
-            self.perception.enabled = True
+            # Unless the operator said otherwise — max power is a default posture, not an
+            # override of explicit input. Watching and listening is the one knob here where
+            # ignoring that is not merely surprising.
+            if "enabled" not in supplied_perception:
+                self.perception.enabled = True
             self.perception.min_escalation_interval_s = 10.0
             self.perception.burst_interval_s = 0.25
 
