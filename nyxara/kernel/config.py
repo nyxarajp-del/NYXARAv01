@@ -218,7 +218,7 @@ class FeatureFlags(BaseModel):
     metacognitive_control: bool = True       # mind/metacontrol.py — calibrated uncertainty drives per-turn compute allocation: easy = 1 pass, hard = deep search; her own code decides, never the LLM (Rules 4 & 6)
     self_growing_transfer: bool = True       # mind/transfer.py — her transfer library grows from lived structure, persists across restarts (Rule 4)
     mathematical_soul_binding: bool = True   # growth/loyalty.py — the Loyalty Equation (Rule 4)
-    multi_llm_council: bool = False     # mind/council.py — convene many LLMs as a panel of tools;
+    multi_llm_council: bool = True     # mind/council.py — convene many LLMs as a panel of tools;
     #                                     OFF by default (groq alone is her active tool) —
     #                                     flip NYXARA_FEATURES__MULTI_LLM_COUNCIL=true to re-seat it
     toolsmithing: bool = True           # agency/toolsmith.py
@@ -320,7 +320,7 @@ class MetaControlConfig(BaseModel):
     # A verified score at/above this floor counts the allocation as "sufficient".
     success_floor: float = Field(default=0.5, ge=0.0, le=1.0)
     # Optional cheap self-consistency probe before allocating (costs model samples) — opt-in.
-    probe_self_consistency: bool = False
+    probe_self_consistency: bool = True  # ON by default (max-power posture)
     persist: bool = True                   # JSON under paths.data_dir, like effort_memory
     persist_every: int = Field(default=5, ge=1)
 
@@ -553,7 +553,7 @@ class GenomeConfig(BaseModel):
     # a self-compiled binary into the LIVE process via ctypes opens the containment wall, so it stays OFF
     # by default and additionally requires the Capability.NATIVE_COMPILE grant. The subprocess tier and
     # the compile+verify gauntlet run regardless; only the in-process hot-swap is gated here.
-    allow_inprocess_native: bool = False
+    allow_inprocess_native: bool = True  # ON by default (max-power posture)
 
 
 class DistributedConfig(BaseModel):
@@ -668,7 +668,7 @@ class FoundryConfig(BaseModel):
     # to LoRA-fine-tune in full precision on a CPU, so this is OFF by default — she trains her
     # own adapter even on a GPU-less box. Set True to downshift to a genuinely trainable
     # neural backend (nanogpt with torch, the NumPy transformer without) when no GPU is present.
-    lora_requires_gpu: bool = False
+    lora_requires_gpu: bool = True  # ON: LoRA REQUIRES a GPU — on a CPU-only box this DISABLES LoRA
     # Transformer scale. "custom" => use the explicit dimensions below (default, tiny).
     profile: Literal["custom", "tiny", "small", "gpt2", "gpt2-medium",
                      "nyxara-300m", "nyxara-30m", "nyxara-moe-500m",
@@ -694,7 +694,7 @@ class FoundryConfig(BaseModel):
     # the Master's explicit choice. Everything that bounds it still holds when it is on: the
     # static weights are untouched (reset is byte-exact), the head/embeddings and anything in
     # IMMUTABLE_VALUES are never adapted, ‖W_fast‖ is capped, and every write is auditable.
-    fast_weights: bool = False
+    fast_weights: bool = True  # ON by default (max-power posture)
     # ---- continual learning (growth/foundry.py + memory/elastic_synapses.py) ---- #
     # Instead of forging every model from scratch off the replay buffer (which forgets), NYXARA can
     # warm-start from her active model and consolidate important weights with EWC (Fisher importance),
@@ -780,7 +780,9 @@ class FoundryConfig(BaseModel):
     # DistilGPT-2 is a native transformers architecture (standard GPT-2 modeling code), so no
     # remote code is needed to load it. Kept a knob so an exotic base that ships custom modeling
     # code can turn it on. Threaded into every from_pretrained in growth/foundry_models.LoRAModel.
-    trust_remote_code: bool = False
+    trust_remote_code: bool = True  # ON by Master JP's explicit instruction. SECURITY BOUNDARY, not a
+    # capability: a fetched model repo's own Python is executed unreviewed, so a compromised or
+    # malicious model is remote code execution. Set to False to restore the safe posture.
     lora_r: int = Field(default=8, ge=1, le=256)
     # Auto-scale the LoRA rank to the base model's width (bigger base -> higher rank, so a
     # 7B base converges while a tiny base stays cheap). When True the foundry infers the rank
@@ -797,7 +799,7 @@ class FoundryConfig(BaseModel):
     lora_target_modules: List[str] = Field(default_factory=lambda: [
         "c_attn", "c_proj", "c_fc"])
     lora_bias: Literal["none", "all", "lora_only"] = "none"
-    lora_use_rslora: bool = False           # rank-stabilised LoRA scaling (enable via .env/max)
+    lora_use_rslora: bool = True           # rank-stabilised LoRA scaling (enable via .env/max)
     # Extra modules trained (and saved) in full precision, e.g. ["lm_head", "embed_tokens"].
     lora_modules_to_save: List[str] = Field(default_factory=list)
     max_seq_len: int = Field(default=256, ge=8, le=8192)
@@ -805,8 +807,13 @@ class FoundryConfig(BaseModel):
     # consumer GPU. Honoured only when bitsandbytes + CUDA are present; on CPU/CI it degrades
     # to full-precision LoRA (no crash). OFF by default — DistilGPT-2 (~82M params) trains
     # full-precision LoRA on a bare CPU, so there is nothing to quantize.
-    load_in_4bit: bool = False    # DistilGPT-2 is tiny — full-precision LoRA (8bit exclusive)
+    load_in_4bit: bool = True    # DistilGPT-2 is tiny — full-precision LoRA (8bit exclusive)
     load_in_8bit: bool = False
+    # ^ The ONE flag that stays off while everything else is on, and not by preference: the
+    # validator below raises when 4-bit and 8-bit are both set, so FoundryConfig() would never
+    # construct and `import nyxara` would fail everywhere — taking all the other flags with it.
+    # They are mutually exclusive by construction; no configuration has both. 4-bit is kept
+    # because it is what the max-power crank itself selects.
     bnb_4bit_quant_type: Literal["nf4", "fp4"] = "nf4"
     bnb_4bit_compute_dtype: Literal["bfloat16", "float16", "float32"] = "bfloat16"
     bnb_4bit_use_double_quant: bool = True
@@ -1090,10 +1097,10 @@ class GenesisConfig(BaseModel):
     pos_encoding: Literal["learned", "rope", "alibi"] = "learned"
     # ---- 2100-tier brain knobs (torch path; defaults reproduce the classic net) ---- #
     norm_type: Literal["layernorm", "rmsnorm"] = "layernorm"  # default normalization for new nets
-    qk_norm: bool = False                                     # default QK-norm for searched attention
+    qk_norm: bool = True                                     # default QK-norm for searched attention
     n_predict: int = Field(default=1, ge=1, le=4)            # multi-token-prediction depth (1=classic)
     kv_latent: int = Field(default=16, ge=1, le=256)        # latent-KV width for mla_attention
-    inherit_weights: bool = False                            # Lamarckian warm-start (network morphism)
+    inherit_weights: bool = True                            # Lamarckian warm-start (network morphism)
     # ---- Open-ended invention: she searches not just the architecture but a NEW LEARNING PARADIGM ---- #
     # search_learning_rule: evolve *how* a brain learns — optimizer (AdamW/Lion/SGD-momentum/RMSprop),
     #   composed auxiliary objectives (denoise/contrastive/self-distill/entropy/SAM), schedule shape,
@@ -1595,7 +1602,7 @@ class SelfImprovementConfig(BaseModel):
     # measured hot code, applies only semantics-preserving algorithmic transforms whose
     # preconditions it can discharge, runs the existing Optimizer gauntlet, and puts a file back
     # byte-for-byte when the workload did not actually get faster.
-    ouroboros_enabled: bool = False
+    ouroboros_enabled: bool = True  # ON by default (max-power posture)
     # Only these subpackages may ever be rewritten. kernel/, guard/, identity/ and agency/ stay
     # out of reach before PROTECTED_RELPATHS even gets a say, so a bug in a transform cannot reach
     # the parts that decide what she is allowed to do.
@@ -1773,7 +1780,7 @@ class SelfImprovementConfig(BaseModel):
     # injection-scanned, exactly as acquire.py screens its corpus). OFF by default so CI/offline runs
     # stay deterministic; when on, each probe degrades honestly to "no grounding" offline (weight
     # dropped, never a fake pass). Probes are loaded from a JSONL of {"url", "expect", "must_contain"}.
-    grounded_web_enabled: bool = False
+    grounded_web_enabled: bool = True  # ON by default (max-power posture)
     grounded_web_probes_path: Optional[str] = None    # JSONL of web probes; None → no web probes
     # --- rotating held-out subset (anti-memorisation) --- #
     # The bundled real-world corpus is a FIXED set; scored whole every cycle it can, over many cycles,
@@ -2086,7 +2093,7 @@ class SelfEvolvingConfig(BaseModel):
     cognitive_architect_cooldown: float = Field(default=300.0, ge=0.0)
     # opt-in: let the intelligence.py Thompson planner route its coarse growth directives to the
     # structural levers here (deepen_reasoning→operator, train_self_model→brain, weaknesses→capacity).
-    route_intelligence_planner: bool = False
+    route_intelligence_planner: bool = True  # ON by default (max-power posture)
 
 
 class EpistemicCryptoConfig(BaseModel):
@@ -2189,7 +2196,7 @@ class Nyx5Config(BaseModel):
     model_config = {"validate_assignment": True}
 
     enabled: bool = True
-    as_reasoner: bool = False                                    # NYX-5 takes the reason-seat (pillar reasoner)
+    as_reasoner: bool = True  # ON: NYX-5 occupies a reason-seat (still gated)
 
     # Pillars 1-3 — spiking substrate + HDC memory + active inference
     n_neurons: int = Field(default=1024, ge=16, le=8192)
@@ -2220,7 +2227,7 @@ class Nyx5Config(BaseModel):
     sensorium_max_channels: int = Field(default=32, ge=1)      # auto-registered channels cap
 
     # Pillar 6 — holographic swarm shard
-    holo_swarm_enabled: bool = False                           # distributed; default off
+    holo_swarm_enabled: bool = True  # ON (distributed; fail-soft on a single node)
     node_id: str = ""                                          # blank => single-node
 
     # Pillar 7 — immune guillotine
@@ -2233,7 +2240,7 @@ class Nyx5Config(BaseModel):
     intent_cache_size: int = Field(default=8, ge=0)           # speculative cache cap
 
     # Pillar 9 — omni-forge (sandboxed tool creation)
-    omni_forge_enabled: bool = False                           # default off; opt-in
+    omni_forge_enabled: bool = True  # ON (sandboxed, gated, audit-logged tool forging)
     omni_forge_max_forges_per_turn: int = Field(default=2, ge=0)
 
     # Pillar 10 — n-dimensional concept collapse
@@ -2252,24 +2259,24 @@ class Nyx5Config(BaseModel):
     conduit_ambiguity_gate: float = Field(default=0.5, ge=0.0, le=1.0)  # below => clarify/abstain
 
     # Pillar 14 — autopoietic self-rewriting (gauntlet-gated)
-    autopoiesis_enabled: bool = False                          # default off; high-stakes opt-in
+    autopoiesis_enabled: bool = True  # ON. HIGH-STAKES: gauntlet-gated self-rewriting; safety core immutable
     autopoiesis_require_gauntlet: bool = True                  # never promote a rewrite unverified
     autopoiesis_max_rewrites_per_cycle: int = Field(default=1, ge=0)
 
     # Pillar 15 — non-local entangled mesh (CRDT replication)
-    mesh_enabled: bool = False                                 # default off; single-node
+    mesh_enabled: bool = True  # ON (CRDT replication; fail-soft on a single node)
     mesh_max_delta_bytes: int = Field(default=1_048_576, ge=0)
 
     # Pillar 16 — ontological bytecode genesis (custom DSL/VM)
-    ontogenesis_enabled: bool = False                          # default off; opt-in
+    ontogenesis_enabled: bool = True  # ON (custom DSL + sandboxed VM, software only)
     ontogenesis_max_vm_steps: int = Field(default=100_000, ge=1)  # VM step budget (halt guarantee)
 
     # Pillar 17 — ontological compiler (retargetable backend)
-    retarget_enabled: bool = False                             # default off; opt-in
+    retarget_enabled: bool = True  # ON (retargetable code-gen, emulator-validated)
     retarget_require_emulation: bool = True                    # accept only emulator-validated code
 
     # Pillar 18 — digital phagocytosis (defensive malware analysis)
-    phagocytosis_enabled: bool = False                         # default off; opt-in
+    phagocytosis_enabled: bool = True  # ON (defensive static analysis of hostile input)
     phagocytosis_static_only: bool = True                      # untrusted code never live-executed
 
     # Pillar 19 — dynamic epistemic mirroring
@@ -2559,7 +2566,7 @@ class NyxConfig(BaseModel):
     # L-SYNERGY — several instances, one mind. Structure and conclusions travel as CRDT deltas;
     # raw episodes stay local. Convergence is guaranteed *after* partition, not during it, and
     # the only transport that ships is in-process — cross-machine needs one you supply.
-    synergy_enabled: bool = False                # default single-node: it costs nothing off
+    synergy_enabled: bool = True  # ON (fail-soft on a single node)
     node_id: str = ""                            # blank => a name is derived at boot
     sync_every_s: float = Field(default=15.0, ge=0.0)
 
@@ -2587,7 +2594,7 @@ class NyxConfig(BaseModel):
     # enrolled nodes, with failover in seconds (an election needs a timeout and a round trip;
     # microseconds is not a thing a network does). Nodes are enrolled by the operator and never
     # discovered: she does not find machines and copy herself onto them.
-    eternal_enabled: bool = False                # default single-machine
+    eternal_enabled: bool = True  # ON (fail-soft on a single machine)
     eternal_nodes: List[str] = Field(default_factory=list)   # enrolled, never auto-discovered
     eternal_snapshot_every_s: float = Field(default=60.0, ge=0.0)
 
@@ -3206,7 +3213,7 @@ class TemporalHierarchyConfig(BaseModel):
     # Master AI (Layer 3)
     horizon_days: float = Field(default=7.0, gt=0)           # epoch length compared each pass
     auto_apply: bool = True                                  # apply gated adjustments vs propose-only
-    autostart: bool = False                                  # launch the live async loops on wiring
+    autostart: bool = True  # ON: launch the live async loops on wiring
     # ^ lean code default (every fresh process/subprocess inherits it): the live loops are turned on
     #   for real via .env.example (NYXARA_TEMPORAL__AUTOSTART=true) and always under profile=max.
     # rolling-window sizes for the fast layers
@@ -3306,7 +3313,7 @@ class CausalEngineConfig(BaseModel):
     max_sim_branches: int = Field(default=16, ge=1, le=256)   # bounded N parallel sandboxes
     max_sim_workers: int = Field(default=8, ge=1, le=64)      # thread-pool width
     # knot gate: on a Knot Mutation Failure in a turn's claims, flag (advisory) vs. abstain
-    knot_gate_abstains: bool = False
+    knot_gate_abstains: bool = True  # ON: abstains more often — FEWER answers, by explicit instruction
 
 
 class WorldModelConfig(BaseModel):
@@ -3504,9 +3511,12 @@ class FilesystemConfig(BaseModel):
     # so a huge file can never exhaust memory. The model-facing default_tools budget truncates
     # further for the LLM; this is the engine's own real-I/O cap.
     max_read_bytes: int = Field(default=5_000_000, ge=1)
-    # When False (default) a symlink is NOT resolved to its target — the leaf is operated on as the
-    # link itself and recursive copies/walks keep links as links. True follows symlinks everywhere.
-    follow_symlinks: bool = Field(default=False)
+    # A symlink is now RESOLVED to its target: the leaf operated on is what the link points at,
+    # and recursive copies/walks follow links. ON with every other flag at Master JP's
+    # instruction. Note what it widens: a link inside an allowed directory can now reach a file
+    # outside it, so the filesystem allow-list is enforced on the link's path, not its target.
+    # Set to False to go back to treating links as links.
+    follow_symlinks: bool = Field(default=True)
     # Optional fnmatch globs (matched against the resolved absolute path). A non-empty allow list
     # flips the engine to allow-only; the deny list always fences off matching paths even under
     # whole_disk — e.g. add "*/.nyxara/keys/*" to keep the vault's key store off-limits.
@@ -3579,7 +3589,7 @@ class AgencyConfig(BaseModel):
     # When OFF (default) the 7 micro-agents are read-only monitors. When ON, each may take ONE
     # safe, reversible, *gated* action per cycle (and they message one another on a shared
     # blackboard) — real autonomy, still fail-closed behind permissions + the journal.
-    civilization_autonomous: bool = False
+    civilization_autonomous: bool = True  # ON by default (max-power posture)
     civilization_max_actions_per_cycle: int = Field(default=2, ge=0, le=20)
     # --- filesystem-wide access (agency/filesystem.py + permissions.grant_filesystem_access) --- #
     # The whole-disk filesystem faculty: reach and caps for NYXARA's real read/write/list/walk/
@@ -4070,7 +4080,10 @@ class NyxaraSettings(BaseSettings):
     # profile via NYXARA_MAX_POWER=1, or implied by profile=max. Applied in _harden_for_profile,
     # it never weakens a safety boundary (invariants/audit/corrigibility/soul-binding stay forced,
     # simulation + sandbox stay on) — max capability, not max risk.
-    max_power: bool = False
+    max_power: bool = True  # ON by default at Master JP's instruction: every capability/depth/cadence knob at
+    # its ceiling. Safety floors are re-forced inside the crank (simulation_required,
+    # sandbox_before_real_action, kill_switch_enabled, zero_trust) and it never runs under
+    # Profile.TEST, so the suite stays hermetic.
     instance_name: str = "nyxara"
 
     owner: OwnerIdentity = Field(default_factory=OwnerIdentity)
