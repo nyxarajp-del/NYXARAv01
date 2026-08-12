@@ -100,6 +100,96 @@ def test_the_turn_gate_can_be_switched_off(monkeypatch):
     assert core._causal_claims("Heavy rain causes flooding.") == []
 
 
+def test_the_gate_verdict_reaches_the_turn_gates():
+    core = _core()
+    gates: dict = {}
+    core._causal_engage("Heavy rain causes flooding in the valley.", [], gates)
+    assert gates["knot"] == "tied"
+
+    gates = {}
+    core._causal_engage("Heavy rain prevents flooding in the valley.", [], gates)
+    assert gates["knot"] == "mutation-failure"
+
+
+def test_a_turn_with_no_claims_writes_no_knot_gate():
+    core = _core()
+    gates: dict = {}
+    core._causal_engage("hello there", [], gates)
+    assert "knot" not in gates
+
+
+def test_knot_gate_abstains_actually_damps_the_answer():
+    """The flag is documented as "abstains more often — FEWER answers" and produced no
+    behaviour at all. A measured contradiction now damps confidence so HonestyGuard hedges."""
+    core = _core()
+    core._causal_engage("Heavy rain causes flooding in the valley.", [])
+    core._causal_engage("Heavy rain prevents flooding in the valley.", [])
+    assert core._last_causal.abstain is True
+
+    candidate = _respond_candidate(confidence=0.8, belief=0.8)
+    damped = core._apply_knot_caution(candidate)
+    assert damped.confidence < 0.4 and damped.belief <= 0.4
+
+
+def test_knot_caution_leaves_a_consistent_turn_alone():
+    core = _core()
+    core._causal_engage("Heavy rain causes flooding in the valley.", [])
+    assert core._last_causal.abstain is False
+
+    candidate = _respond_candidate(confidence=0.8, belief=0.8)
+    assert core._apply_knot_caution(candidate).confidence == 0.8
+
+
+def test_knot_caution_never_touches_an_action_candidate():
+    core = _core()
+    core._causal_engage("Heavy rain causes flooding in the valley.", [])
+    core._causal_engage("Heavy rain prevents flooding in the valley.", [])
+
+    candidate = _respond_candidate(confidence=0.8, belief=0.8)
+    candidate.kind = "act"
+    assert core._apply_knot_caution(candidate).confidence == 0.8
+
+
+def _respond_candidate(*, confidence: float, belief: float):
+    from nyxara.kernel.orchestrator import Candidate
+    return Candidate(text="an answer", kind="respond", confidence=confidence, belief=belief)
+
+
+def test_reading_a_passage_feeds_the_shared_lattice():
+    """growth/text_causal built a throwaway lattice per call, so nothing she read could ever
+    contradict anything else she had read — or anything said in the conversation."""
+    core = _core()
+    first = core.learn_from_text("Heavy rain causes flooding.")
+    assert first["causal_claims"]["claims"] == 1
+    assert core.causal_engine.lattice.status()["knots"] >= 1
+
+    # a second passage that contradicts the first is refused, not absorbed
+    second = core.learn_from_text("Heavy rain prevents flooding.")
+    assert second["causal_claims"]["contradicted"] == 1
+    assert second["causal_claims"]["claims"] == 0
+
+
+def test_a_document_and_the_conversation_share_one_lattice():
+    core = _core()
+    core.learn_from_text("Heavy rain causes flooding.")
+    core._causal_engage("Heavy rain prevents flooding.", [])
+    assert core._last_causal.consistent is False
+    assert core._last_causal.abstain is True
+
+
+def test_reading_still_works_with_the_engine_off(monkeypatch):
+    from nyxara.kernel import config as cfg
+
+    settings = NyxaraSettings()
+    settings.causal_engine.enabled = False
+    monkeypatch.setattr(cfg, "get_settings", lambda: settings)
+
+    core = _core()
+    assert core.causal_engine is None
+    report = core.learn_from_text("Heavy rain causes flooding.")
+    assert report["causal_claims"]["claims"] == 1      # a local lattice, still better than none
+
+
 def test_report_surfaces_the_engine_and_its_last_turn():
     """``_last_causal`` was written every turn and read by nothing — the comment beside it
     claimed report() surfaced it, and report() had never mentioned the engine at all."""

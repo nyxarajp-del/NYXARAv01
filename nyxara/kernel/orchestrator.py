@@ -2277,7 +2277,8 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — seeding is best-effort
             pass
 
-    def _causal_engage(self, text: str, thoughts: List[str]) -> None:
+    def _causal_engage(self, text: str, thoughts: List[str],
+                       gates: Optional[Dict[str, str]] = None) -> None:
         """Per-turn CAUSAL pass on the hot path: field-resonance retrieval, the **causal-knot
         gate** over the turn's own claims, and a live phase-shift on a genuine gap. Cheap,
         LLM-free, and advisory — it enriches the workspace and flags a Knot Mutation Failure but
@@ -2290,6 +2291,8 @@ class NyxaraCore:
             claims = self._causal_claims(text)
             et = engine.turn(text, claims=claims or None, commit=bool(claims))
             self._last_causal = et
+            if gates is not None and et.knot_check is not None:
+                gates["knot"] = "mutation-failure" if not et.consistent else "tied"
             if not et.consistent:
                 # CAUSAL·2 firing for real: this turn's prose contradicts what the lattice
                 # already holds, which is the honest hallucination signal the gate exists for.
@@ -6255,7 +6258,7 @@ class NyxaraCore:
         self._nyx_tick(safe_text)
         # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
         # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
-        self._causal_engage(safe_text, thoughts)
+        self._causal_engage(safe_text, thoughts, gates)
         # Conscience: a consequentialist / deontological / virtue reading of what was asked,
         # with the disagreement between them left visible rather than laundered into one
         # confident verdict (mind/moral.py). Colour-only — it annotates gates["moral"] and
@@ -7006,6 +7009,9 @@ class NyxaraCore:
         candidate = self._within_budget("hallucination_caution",
                                         lambda c: self._apply_hallucination_caution(stimulus, c),
                                         candidate)
+        # CAUSAL·2 — a Knot Mutation Failure this turn is a *measured* contradiction, not a
+        # heuristic risk zone, so it damps harder than the caution above.
+        candidate = self._within_budget("knot_caution", self._apply_knot_caution, candidate)
         candidate = self._within_budget("arbitrate",
                                         lambda c: self._arbitrate(stimulus, c, enriched),
                                         candidate)
@@ -7456,6 +7462,39 @@ class NyxaraCore:
                 f"hallucination caution: {', '.join(domains)} (risk {risk:.0%}) — "
                 f"confidence {current:.2f}→{damped:.2f}, will hedge",
                 salience=0.5, confidence=damped)
+        except Exception:  # noqa: BLE001 — caution is advisory, never fatal
+            return candidate
+        return candidate
+
+    def _apply_knot_caution(self, candidate: Candidate) -> Candidate:
+        """CAUSAL·2 — make ``knot_gate_abstains`` mean what its config says it means.
+
+        The flag is documented as "abstains more often — FEWER answers, by explicit
+        instruction", and for a long time it produced no behaviour at all. A Knot Mutation
+        Failure is a *measured* contradiction against the live lattice — stronger evidence than
+        the domain heuristic in :meth:`_apply_hallucination_caution` — so it damps confidence
+        and belief harder, and the existing HonestyGuard then hedges or abstains rather than
+        asserting a claim she has just proved inconsistent.
+
+        It damps; it does not refuse. Refusing stays with the shield, oversight, corrigibility
+        and permission gates, which are still the only things that can say no. Best-effort."""
+        et = getattr(self, "_last_causal", None)
+        if et is None or not getattr(et, "abstain", False):
+            return candidate
+        if getattr(candidate, "kind", "respond") != "respond":
+            return candidate
+        try:
+            current = float(getattr(candidate, "confidence", 0.7) or 0.7)
+            damped = round(_clamp01(current * 0.4), 3)
+            candidate.confidence = damped
+            belief = getattr(candidate, "belief", None)
+            if belief is not None:
+                candidate.belief = round(_clamp01(min(float(belief), 0.4)), 3)
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"knot caution: this turn's causal claim contradicts the lattice — "
+                f"confidence {current:.2f}→{damped:.2f}, will hedge or abstain",
+                salience=0.7, confidence=damped)
         except Exception:  # noqa: BLE001 — caution is advisory, never fatal
             return candidate
         return candidate
@@ -10069,6 +10108,13 @@ class NyxaraCore:
                                  salience=0.5)
         except Exception:  # noqa: BLE001
             pass
+        # mine the passage's causal claims into the *shared* knot lattice, so a document that
+        # contradicts what she already holds is caught rather than absorbed. growth/text_causal
+        # otherwise builds a throwaway lattice per call and only ever sees one passage.
+        try:
+            report["causal_claims"] = self._causal_read(text)
+        except Exception:  # noqa: BLE001 — claim mining is a capability, never required
+            pass
         # also ground the nouns in the same passage (perceptual meaning, best-effort)
         try:
             grounding = self._symbol_grounder().learn_from_text(text)
@@ -10080,6 +10126,28 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — grounding is a capability, never required
             pass
         return report
+
+    def _causal_read(self, text: str) -> Dict[str, Any]:
+        """Mine a passage's causal claims into the live lattice + causal world model.
+
+        Uses the *shared* lattice from the CAUSAL engine rather than the throwaway one
+        ``growth.text_causal`` builds per call, so a passage contradicting an earlier passage —
+        or contradicting the conversation — is refused instead of quietly absorbed. Falls back
+        to a local lattice when the engine is off, which is still better than nothing."""
+        from nyxara.growth.text_causal import learn_from_text as mine_claims
+
+        engine = getattr(self, "causal_engine", None)
+        lattice = getattr(engine, "lattice", None) if engine is not None else None
+        rep = mine_claims(text, model=self.causal_world_model, lattice=lattice)
+        out = {"claims": len(rep.claims), "contradicted": rep.contradicted,
+               "registered": rep.registered, "defeated": rep.defeated}
+        if rep.contradicted:
+            self.mind.record(
+                ThoughtKind.INFERENCE,
+                f"read {rep.contradicted} causal claim(s) that contradict what she already "
+                f"holds — refused, not absorbed: {rep.contradictions[0][:140]}",
+                salience=0.7)
+        return out
 
     def bootstrap(self, task: str) -> Dict[str, Any]:
         """Self-bootstrap a solution to ``task`` she doesn't yet know (Environment-Driven Learning).
