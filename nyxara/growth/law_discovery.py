@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import math
 import os
 import random
@@ -652,6 +653,26 @@ def _period_of(values: Sequence[float], step_dt: float) -> Optional[float]:
 # --------------------------------------------------------------------------- #
 # The engine
 # --------------------------------------------------------------------------- #
+
+def _name_parts(name: str) -> set:
+    """Whole-word pieces of an identifier: ``fall_distance`` -> {fall_distance, fall, distance}.
+
+    Used instead of a raw substring test. ``recall`` scored a target hit with
+    ``target in t or t in target``, and a two-way substring match over short words is barely a
+    match at all: "is" is inside "fall_d(is)tance", so *any* sentence containing "is" scored the
+    falling-body law at full relevance. Observed end to end — "the status is good" was answered
+    with "From my own experiments I discovered the law fall_distance = 0.5197·(g·(t)²)...",
+    carrying verified=True, because the law itself was genuinely derived. It simply had nothing
+    to do with what was asked.
+
+    Pieces shorter than three characters are dropped: they are the ones that match everything.
+    """
+    low = str(name or "").lower()
+    parts = {low}
+    parts.update(p for p in re.split(r"[^a-z0-9]+", low) if len(p) >= 3)
+    parts.discard("")
+    return parts
+
 class LawDiscoveryEngine:
     """Discovers governing symbolic laws from data and from experiments NYXARA runs herself.
 
@@ -1666,7 +1687,7 @@ class LawDiscoveryEngine:
             target = str(law.target).lower()
             names = [str(v).lower() for v in law.var_names]
             score = 0.0
-            if target and (target in tokens or any(target in t or t in target for t in tokens)):
+            if target and (tokens & _name_parts(target)):
                 score += 2.0
             matched_vars = sum(1 for v in names if v and v in tokens)
             score += float(matched_vars)
