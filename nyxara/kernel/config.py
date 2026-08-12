@@ -3859,6 +3859,17 @@ class WebConfig(BaseModel):
     user_agent: str = "NYXARA/1.0 (+https://nyxara.ai)"
     max_redirects: int = Field(default=20, ge=0, le=50)
 
+    # The master switch for outbound HTTP. ON everywhere except TEST, where it is forced off:
+    # the TEST branch below says "tests run hermetically: never reach the network", and until
+    # this existed nothing made that true. tests/growth/test_autolearn.py reached the real web —
+    # run_validation -> benchmark -> core.process -> _maybe_bootstrap -> explorer -> researcher
+    # -> web_fetch -> httpx — and hung there, in four threads at once, on every run including
+    # main's. A suite whose result depends on a network is not a suite.
+    #
+    # Off means the fetchers return an honest blocked result, exactly as the SSRF guard's does;
+    # nothing raises and no caller learns a new failure mode.
+    enabled: bool = True
+
     # access posture: unrestricted reach. allow_private=True turns the SSRF guard OFF so
     # loopback/private/link-local hosts are reachable. injection_scan keeps untrusted page
     # text sanitised (defense in depth; does not reduce reach).
@@ -4232,6 +4243,11 @@ class NyxaraSettings(BaseSettings):
             # tests build their own settings and inject a fake binding instead.
             self.llm.litertlm_enabled = False
             self.llm.litertlm_auto_download = False
+            # The sentence above was an intention, not a mechanism: the LLM rungs were sealed and
+            # the web was not, so her researcher still dialled out from inside the suite. Sealing
+            # it here rather than in each caller means one switch governs every path to fd-level
+            # HTTP — search, fetch and http_request alike.
+            self.web.enabled = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so

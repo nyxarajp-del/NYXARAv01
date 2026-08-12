@@ -52,6 +52,15 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
+# Outbound HTTP. `Profile.TEST` says "tests run hermetically: never reach the network", and the
+# suite does not run under that profile — the same gap the foundry note below describes — so the
+# sentence was true of a profile nobody used. It reached the real web through
+# `run_validation -> benchmark -> core.process -> _maybe_bootstrap -> explorer -> researcher ->
+# web_fetch -> httpx`, in four threads at once, and `tests/growth/test_autolearn.py` hung there on
+# every run including main's. Off means the fetchers return a blocked result the same way the SSRF
+# guard's does, so no caller learns a new failure mode. Tests that want a transport inject a fake
+# one (tests/senses/test_web.py) and are unaffected.
+os.environ.setdefault("NYXARA_WEB__ENABLED", "false")
 # The model foundry TRAINS. `AutonomicLoop._maybe_grow` -> `GrowthEngine.run` -> `improve_self` ->
 # `Foundry.self_improve` -> `train_candidate` -> `model.train_on(steps=train_steps)` is real
 # backprop, in pure NumPy, and it ran on every autonomic tick the suite drove — so a test that

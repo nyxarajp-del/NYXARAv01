@@ -351,8 +351,10 @@ class WebFetcher:
     def __init__(self, *, transport: Optional[Transport] = None, governor: Any = None,
                  allow_private: bool = False, max_bytes: int = 5_000_000,
                  timeout: float = 15.0, cache: bool = True,
-                 user_agent: str = DEFAULT_USER_AGENT, max_redirects: int = 20) -> None:
+                 user_agent: str = DEFAULT_USER_AGENT, max_redirects: int = 20,
+                 enabled: bool = True) -> None:
         self.user_agent = user_agent
+        self.enabled = enabled
         self.allow_private = allow_private
         self.max_redirects = max(0, int(max_redirects))
         # the default transport carries our descriptive UA and re-vets each redirect hop with
@@ -371,6 +373,11 @@ class WebFetcher:
     # ---- URL safety ---- #
     def _vet_url(self, url: str) -> Optional[str]:
         """Return a rejection reason, or None if the URL is allowed."""
+        # Checked first, and here rather than in each caller, so one switch covers every path
+        # that reaches fd-level HTTP. It reads as a rejection reason like the SSRF guard's, so
+        # callers already handle it and nothing learns a new failure mode.
+        if not self.enabled:
+            return "web access is disabled for this profile"
         p = urlparse(url)
         if p.scheme not in ("http", "https"):
             return f"scheme {p.scheme!r} not allowed (only http/https)"
