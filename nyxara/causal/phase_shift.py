@@ -29,7 +29,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from nyxara.causal.causal_knots import CONCORDANT, KnotLattice, KnotMutationFailure
+from nyxara.causal.causal_knots import (CONCORDANT, TRUTH_ANCHOR, KnotLattice,
+                                        KnotMutationFailure)
 from nyxara.causal.field_resonance import ResonanceField
 
 __all__ = ["PhaseShift", "PhaseShiftMutator"]
@@ -105,7 +106,7 @@ class PhaseShiftMutator:
         field_bank.imprint(label, trigger, weight=0.5,
                            payload={"origin": "phase_shift", "at": shift.at})
         try:
-            lattice.tie(label, "⊤", CONCORDANT, reason="tentative phase-shift anchor")
+            lattice.tie(label, TRUTH_ANCHOR, CONCORDANT, reason="tentative phase-shift anchor")
         except KnotMutationFailure as f:
             # the new anchor contradicts known truth — refuse to crystallise a lie
             field_bank.forget(label)

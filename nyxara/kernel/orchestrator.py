@@ -2278,16 +2278,29 @@ class NyxaraCore:
             pass
 
     def _causal_engage(self, text: str, thoughts: List[str]) -> None:
-        """Per-turn CAUSAL pass on the hot path: field-resonance retrieval + a live phase-shift
-        on a genuine gap. Cheap, LLM-free, and advisory — it enriches the workspace with the most
-        resonant concept (or notes a newly crystallised one) but never blocks or alters the turn.
+        """Per-turn CAUSAL pass on the hot path: field-resonance retrieval, the **causal-knot
+        gate** over the turn's own claims, and a live phase-shift on a genuine gap. Cheap,
+        LLM-free, and advisory — it enriches the workspace and flags a Knot Mutation Failure but
+        never blocks or alters the turn; refusing stays the gates' job alone.
         Any failure is swallowed: the engine is a capability, never a point of fragility."""
         engine = getattr(self, "causal_engine", None)
         if engine is None:
             return
         try:
-            et = engine.turn(text, top=getattr(engine, "resonate_top", 3))
+            claims = self._causal_claims(text)
+            et = engine.turn(text, claims=claims or None, commit=bool(claims))
             self._last_causal = et
+            if not et.consistent:
+                # CAUSAL·2 firing for real: this turn's prose contradicts what the lattice
+                # already holds, which is the honest hallucination signal the gate exists for.
+                detail = ((et.knot_check or {}).get("failure") or {}).get("message", "")
+                t = self.mind.record(
+                    ThoughtKind.INFERENCE,
+                    f"knot mutation failure — causal claim contradicts the lattice"
+                    f"{': ' + detail[:160] if detail else ''}"
+                    f"{' (abstain advised)' if et.abstain else ''}",
+                    salience=0.8)
+                thoughts.append(t)
             if et.resonance:
                 top = et.resonance[0]
                 t = self.mind.record(
@@ -2303,6 +2316,26 @@ class NyxaraCore:
                 thoughts.append(t)
         except Exception:  # noqa: BLE001 — advisory only, never breaks a turn
             pass
+
+    @staticmethod
+    def _causal_claims(text: str) -> List[tuple]:
+        """Mine this turn's prose for signed causal claims to run past the knot gate.
+
+        The deterministic cue grammar in :mod:`nyxara.growth.text_causal` — no LLM, same text
+        always yields the same claims. Most turns yield none, and that costs a regex sweep.
+        Best-effort throughout: the gate is a capability, never a way to break a turn."""
+        try:
+            from nyxara.kernel.config import get_settings
+            if not bool(getattr(get_settings().causal_engine, "knot_gate_on_turns", True)):
+                return []
+        except Exception:  # noqa: BLE001 — default to on if config is unavailable
+            pass
+        try:
+            from nyxara.growth.text_causal import extract_claims
+            claims, _sentences, _defeated = extract_claims(text, source="turn")
+            return [(c.cause, c.effect, c.polarity) for c in claims]
+        except Exception:  # noqa: BLE001 — extraction is best-effort
+            return []
 
     def _maybe_start_life(self) -> None:
         """Start beating automatically in real use, so she is alive every second in every

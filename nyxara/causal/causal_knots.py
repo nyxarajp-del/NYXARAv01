@@ -116,7 +116,14 @@ class KnotMutationFailure(Exception):
 class KnotLattice:
     """A signed causal graph kept perpetually balanced by rejecting contradictions."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, capacity: int = 0) -> None:
+        # ``capacity`` bounds how many strands are retained (0 = unbounded, the historical
+        # behaviour). A lattice fed from a live conversation grows forever otherwise, so any
+        # always-on wiring needs a ceiling. Compaction drops the *oldest* strands and rebuilds
+        # the parity structure from what is left — honest and stated: a contradiction with a
+        # claim that has aged out of the window is no longer caught.
+        self.capacity = int(capacity)
+        self._compactions = 0
         self._parent: Dict[str, str] = {}
         self._parity: Dict[str, int] = {}   # parity (0/1) of a node relative to its parent
         self._rank: Dict[str, int] = {}
@@ -200,6 +207,20 @@ class KnotLattice:
         self._knots.append(knot)
         self._adj.setdefault(knot.cause, []).append((knot.effect, knot.sign))
         self._adj.setdefault(knot.effect, []).append((knot.cause, knot.sign))
+        if self.capacity and len(self._knots) > self.capacity:
+            self._compact()
+
+    def _compact(self) -> None:
+        """Rebuild from the newest half of the strands, releasing the aged-out ones."""
+        keep = self._knots[-max(1, self.capacity // 2):]
+        self._parent, self._parity, self._rank = {}, {}, {}
+        self._adj, self._knots = {}, []
+        self._compactions += 1
+        for k in keep:
+            try:
+                self.tie(k.cause, k.effect, k.sign, reason=k.reason)
+            except KnotMutationFailure:  # pragma: no cover — kept strands were mutually consistent
+                continue
 
     def _explain(self, cause: str, effect: str) -> List[str]:
         """BFS over accepted strands to reconstruct a path cause→…→effect (the cycle)."""
@@ -260,7 +281,7 @@ class KnotLattice:
         return verdict
 
     def _clone(self) -> "KnotLattice":
-        c = KnotLattice()
+        c = KnotLattice()          # never inherit the cap: a dry run must not compact anything
         c._parent = dict(self._parent)
         c._parity = dict(self._parity)
         c._rank = dict(self._rank)
@@ -277,4 +298,5 @@ class KnotLattice:
 
     def status(self) -> Dict[str, Any]:
         return {"knots": len(self._knots), "nodes": len(self._parent),
-                "components": len({self._find(n)[0] for n in self._parent})}
+                "components": len({self._find(n)[0] for n in self._parent}),
+                "capacity": self.capacity, "compactions": self._compactions}

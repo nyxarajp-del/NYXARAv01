@@ -65,6 +65,41 @@ def test_heartbeat_beat_ticks_the_thermodynamic_monitor():
     assert after == before + 1
 
 
+def test_the_knot_gate_actually_runs_on_a_real_turn():
+    """CAUSAL·2 was built, tested and then never called: the hot path passed no claims at all,
+    so a Knot Mutation Failure could not happen in production no matter what was said."""
+    core = _core()
+    core._causal_engage("Heavy rain causes flooding in the valley.", [])
+    first = core._last_causal
+    assert first.committed == 1                 # the claim was mined and tied in
+
+    thoughts: list = []
+    core._causal_engage("Heavy rain prevents flooding in the valley.", thoughts)
+    second = core._last_causal
+    assert second.consistent is False           # contradicts the previous turn
+    assert second.abstain is True
+    assert thoughts                             # and she says so in the workspace
+
+
+def test_turns_without_a_causal_claim_stay_clean():
+    core = _core()
+    assert core._causal_claims("hello, how are you today") == []
+    core._causal_engage("hello, how are you today", [])
+    assert core._last_causal.consistent is True
+    assert core._last_causal.knot_check is None
+
+
+def test_the_turn_gate_can_be_switched_off(monkeypatch):
+    from nyxara.kernel import config as cfg
+
+    settings = NyxaraSettings()
+    settings.causal_engine.knot_gate_on_turns = False
+    monkeypatch.setattr(cfg, "get_settings", lambda: settings)
+
+    core = _core()
+    assert core._causal_claims("Heavy rain causes flooding.") == []
+
+
 def test_config_flag_disables_the_engine(monkeypatch):
     from nyxara.kernel import config as cfg
 

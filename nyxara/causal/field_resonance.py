@@ -149,11 +149,21 @@ class ResonanceField:
         else:
             vec = embed_field(text if text is not None else label, dim=self.dim)
         cf = ConceptField(label=label, vector=vec, payload=payload, weight=float(weight))
-        if label not in self._fields:
-            self._order.append(label)
+        # Re-imprinting is a *use*: refresh recency, or the concept just rewritten becomes the
+        # next one evicted — the exact inverse of the bounded-bank policy this claims to be.
+        self._touch(label)
         self._fields[label] = cf
         self._evict_if_needed()
         return cf
+
+    def _touch(self, label: str) -> None:
+        """Move ``label`` to the young end of the eviction order."""
+        if label in self._fields:
+            try:
+                self._order.remove(label)
+            except ValueError:      # pragma: no cover — order/fields drifted apart
+                pass
+        self._order.append(label)
 
     def imprint_many(self, items: Mapping[str, Any]) -> int:
         """Imprint ``{label: text}`` (or ``{label: (text, payload)}``) in one call."""
@@ -182,7 +192,7 @@ class ResonanceField:
     def resonate(self, query: str, *, top: int = 3,
                  vector: Optional[Sequence[float]] = None) -> List[ResonanceHit]:
         """Resonate ``query`` against the bank; return the top hits above the floor."""
-        if not self._fields:
+        if not self._fields or top <= 0:
             return []
         qvec = list(map(float, vector)) if vector is not None else embed_field(query, dim=self.dim)
         hits: List[ResonanceHit] = []
@@ -192,7 +202,7 @@ class ResonanceField:
             if score >= self.resonance_floor:
                 hits.append(ResonanceHit(cf.label, score, weighted, cf.payload))
         hits.sort(key=lambda h: h.weighted, reverse=True)
-        return hits[:max(1, top)]
+        return hits[:top]
 
     def best(self, query: str) -> Optional[ResonanceHit]:
         """The single most-resonant concept, or ``None`` if nothing clears the floor."""
@@ -208,6 +218,7 @@ class ResonanceField:
         cf = self._fields.get(label)
         if cf is not None:
             cf.weight = min(cap, cf.weight + by)
+            self._touch(label)      # a field that proved useful is not the one to evict next
 
     # -- introspection ------------------------------------------------------ #
     def __len__(self) -> int:
