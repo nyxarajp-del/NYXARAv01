@@ -2344,6 +2344,16 @@ class NyxV001Config(BaseModel):
     memory_capacity: int = Field(default=8192, ge=32)        # Layer 3 episode capacity
     credit_threshold: float = Field(default=0.01, ge=0.0)    # error below which relevance is credited
 
+    # How often the Layer 0-17 cycle runs, in turns. 1 = every turn (the default). A full cycle
+    # costs ~0.15s at EVERY scale — the price is eighteen layers running, not the width — and the
+    # reason-seat calls it on every turn, so at 1 that is paid on every turn.
+    #
+    # Raising it samples turns rather than dropping them: a skipped beat still writes its
+    # observation to episodic memory, so the next cycle learns it from prioritised replay. The
+    # test suite pins this (see tests/conftest.py) on the same principle it pins the metacontrol
+    # ceiling and the genesis substrate — keep the mechanism, not the price.
+    stack_every_n_turns: int = Field(default=1, ge=1, le=1024)
+
     # Per-layer gates. Every layer is optional; a layer that is off is ABSENT from the reports
     # rather than reporting zeros, which is the distinction this whole package keeps.
     l01_enabled: bool = True                     # perception

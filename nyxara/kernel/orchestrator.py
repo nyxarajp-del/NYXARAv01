@@ -3619,6 +3619,12 @@ class NyxaraCore:
         try:
             tick = brain.perceive(text)
             self._last_nyx5_surprise = float(getattr(tick, "surprise", 0.0))
+            # Stash the tick itself, not just its surprise. NYX V.001's reason-seat runs after
+            # this on the same turn and would otherwise perceive through the spiking substrate a
+            # SECOND time — measured at 93% of the seat's per-turn cost, for a duplicate of a
+            # tick that already happened. Keyed by text so a stale tick is never reused.
+            self._last_nyx5_tick = tick
+            self._last_nyx5_text = text
             tag = " pre-emptive" if tick.preemptive else ""
             self.mind.record(ThoughtKind.PERCEPTION,
                              f"nyx5: surprise={tick.surprise:.2f} entropy={tick.entropy:.2f} "

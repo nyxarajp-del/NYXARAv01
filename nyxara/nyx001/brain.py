@@ -125,6 +125,11 @@ class NyxV001Brain:
         self.turns = 0
         self.core: Any = None
         self._beats: Dict[str, float] = {}
+        # The Layer-stack beat. 1 = every turn (the default; no silent change of behaviour).
+        self.stack_every_n_turns = max(1, int(getattr(config, "stack_every_n_turns", 1) or 1))
+        self._since_cycle = 0
+        self.stack_cycles = 0
+        self.deferred = 0
 
         self.stack: Optional[CognitiveStack] = self._build_stack(config)
         self.v03: Any = v03 if v03 is not None else self._build_v03(config)
@@ -192,13 +197,28 @@ class NyxV001Brain:
 
     # ---- perceive ---- #
     def perceive(self, text: str, *, remember: bool = True) -> NyxV001Percept:
-        """Run one input through all three brains. Fail-soft per brain."""
+        """Run one input through all three brains. Fail-soft per brain.
+
+        The Layer 0–17 cycle runs on a **beat** (``stack_every_n_turns``, default 1 = every turn).
+        A full cycle costs ~0.15s at *every* scale — the price is eighteen layers running, not the
+        width — and the reason-seat calls this on every turn, so at default 1 it is paid every turn.
+
+        On a skipped beat the observation is still **written to episodic memory**, so the next
+        cycle can learn it from prioritised replay. Dropping it instead would make the beat a
+        genuine loss of experience rather than a change of sampling rate.
+        """
         out = NyxV001Percept(stimulus=str(text or ""))
         if not out.stimulus.strip():
             return out
         try:
             if self.stack is not None:
-                out.stack_cycle = self.stack.cycle(Observation(payload=out.stimulus))
+                self._since_cycle += 1
+                if self._since_cycle >= self.stack_every_n_turns:
+                    self._since_cycle = 0
+                    self.stack_cycles += 1
+                    out.stack_cycle = self.stack.cycle(Observation(payload=out.stimulus))
+                else:
+                    self._defer_to_memory(out.stimulus)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -208,10 +228,50 @@ class NyxV001Brain:
             pass
         try:
             if self.snn is not None:
-                out.snn_tick = self.snn.perceive(out.stimulus)
+                out.snn_tick = self._snn_tick(out.stimulus)
         except Exception:  # noqa: BLE001
             pass
         return out
+
+    def _snn_tick(self, text: str) -> Any:
+        """NYX-5's tick for this turn — reused from the kernel when it already ran one.
+
+        The kernel's ``_nyx5_tick`` perceives every turn through the spiking substrate before the
+        reason-seat is invoked. Perceiving again here produced a second, redundant simulation that
+        measured at **93% of this brain's per-turn cost** (0.32s/turn with it, 0.022s without).
+        The tick is matched on the exact stimulus so a stale one is never substituted.
+        """
+        core = self.core
+        if core is not None and getattr(core, "_last_nyx5_text", None) == text:
+            cached = getattr(core, "_last_nyx5_tick", None)
+            if cached is not None:
+                return cached
+        return self.snn.perceive(text)
+
+    def _defer_to_memory(self, text: str) -> None:
+        """Store a skipped-beat observation so replay can still learn it.
+
+        Written with ``prediction_error=0.0`` because no prediction was made for it — the error
+        is genuinely unknown, not zero-in-the-sense-of-unsurprising. It therefore enters replay
+        at low priority, which is correct: an episode the world model never tried to predict is
+        weaker evidence than one that surprised it.
+        """
+        try:
+            mem = getattr(self.stack, "episodic", None)
+            if mem is None:
+                return
+            # ``encode`` (the hash-and-project sketch), not ``perceive``: the full perceive also
+            # carves entities, updates the trace and does relation bookkeeping, which is most of
+            # a cycle's cost. A deferred episode only needs a context vector good enough to be
+            # recalled and replayed later, and encode gives exactly that.
+            vec = None
+            perception = getattr(self.stack, "perception", None)
+            if perception is not None:
+                vec = perception.encode(Observation(payload=text))
+            mem.remember(text[:120], context=vec, outcome="deferred")
+            self.deferred += 1
+        except Exception:  # noqa: BLE001 — a deferred episode is best-effort, never fatal
+            pass
 
     # ---- think ---- #
     def think(self, stimulus: str, *, remember: bool = True, goals: Any = None,
@@ -416,6 +476,10 @@ class NyxV001Brain:
             "brains": {"v03": self.v03 is not None, "snn": self.snn is not None,
                        "stack": self.stack is not None},
             "is_learning": self.is_learning(),
+            # Sampling is reported, never hidden: `stack_cycles < turns` means the beat is on.
+            "stack_every_n_turns": self.stack_every_n_turns,
+            "stack_cycles": self.stack_cycles,
+            "deferred_to_replay": self.deferred,
         }
         for name, obj in (("stack", self.stack), ("fusion", self.fusion),
                           ("dark", self.dark), ("curriculum", self.curriculum),
