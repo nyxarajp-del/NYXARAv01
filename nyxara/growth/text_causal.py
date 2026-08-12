@@ -184,6 +184,8 @@ class TextCausalReport:
     contradicted: int = 0              # claims refused by the knot lattice
     registered: int = 0                # links written onto the CausalWorldModel
     contradictions: List[str] = field(default_factory=list)
+    # one record per retraction: what was un-tied, and the sentence that un-said it
+    retractions: List[Dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [f"· text-causal: {len(self.claims)} claim(s) from {self.sentences} sentence(s); "
@@ -203,7 +205,8 @@ class TextCausalReport:
         return {"sentences": self.sentences, "claims": [c.to_dict() for c in self.claims],
                 "defeated": self.defeated, "corrections": self.corrections,
                 "retracted": self.retracted, "contradicted": self.contradicted,
-                "registered": self.registered, "contradictions": list(self.contradictions)}
+                "registered": self.registered, "contradictions": list(self.contradictions),
+                "retractions": [dict(r) for r in self.retractions]}
 
 
 def _sentences(text: str) -> List[str]:
@@ -294,13 +297,23 @@ def claims_to_graph(claims: Sequence[CausalClaim], *, model: Any = None,
             if claim.corrective:
                 # The speaker said this instead of what they said before, so un-tie the old
                 # strand first. Only the pair being corrected is touched; everything else the
-                # lattice holds survives the rebuild.
+                # lattice holds survives the rebuild. The quoted sentence rides along as the
+                # reason, so the lattice's own log can say who un-said what.
+                report.corrections += 1
                 try:
-                    removed = lattice.retract(claim.cause, claim.effect)
-                    report.corrections += 1
+                    before = _lattice_strands(lattice, claim.cause, claim.effect)
+                    removed = lattice.retract(claim.cause, claim.effect,
+                                              reason=f"retracted by: {claim.quote}")
                     report.retracted += removed
-                except Exception:  # noqa: BLE001 — an older lattice may not retract; then the
-                    report.corrections += 1   # tie below simply refuses, as it did before
+                    if removed:
+                        report.retractions.append({
+                            "cause": claim.cause, "effect": claim.effect,
+                            "by": claim.quote, "source": claim.source,
+                            "new_polarity": claim.polarity, "removed": before})
+                except TypeError:  # pragma: no cover — a lattice predating the reason kwarg
+                    report.retracted += lattice.retract(claim.cause, claim.effect)
+                except Exception:  # noqa: BLE001 — a lattice that cannot retract at all: the
+                    pass                       # tie below simply refuses, as it did before
             try:
                 # pass the lattice's own sign constants rather than a bool or a raw int
                 lattice.tie(claim.cause, claim.effect, claim.polarity, reason=claim.cue)
@@ -351,6 +364,16 @@ def _register_claims(model: Any, claims: Sequence[CausalClaim]) -> int:
         except Exception:  # noqa: BLE001
             continue
     return written
+
+
+def _lattice_strands(lattice: Any, cause: str, effect: str) -> List[Dict[str, Any]]:
+    """The strands a retraction is about to remove, captured for the audit trail."""
+    pair = {(cause, effect), (effect, cause)}
+    try:
+        return [k.to_dict() for k in lattice._knots      # noqa: SLF001 — reading for the record
+                if (k.cause, k.effect) in pair]
+    except Exception:  # noqa: BLE001 — a lattice without that internal is still usable
+        return []
 
 
 def _may_supersede(claim: CausalClaim, existing: Any) -> bool:

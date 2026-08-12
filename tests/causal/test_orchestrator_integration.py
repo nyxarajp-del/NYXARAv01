@@ -156,6 +156,61 @@ def test_reading_reports_retractions_separately():
     assert claims["corrections"] == 1 and claims["retracted"] == 1
 
 
+def _retraction_notes(core) -> list:
+    return [e.payload.get("note", "") for e in core.journal._entries
+            if "causal retraction" in e.payload.get("note", "")]
+
+
+def test_a_retraction_on_the_turn_path_is_journalled():
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    core._causal_engage("Actually caffeine reduces my focus.", [])
+
+    notes = _retraction_notes(core)
+    assert len(notes) == 1
+    note = notes[0]
+    assert "(turn)" in note
+    assert "'caffeine' ~ 'my focus'" in note
+    assert "concordant" in note                      # what was un-tied
+    assert "Actually caffeine reduces my focus." in note   # and on whose say-so
+    assert core.journal.verify() is True             # the hash chain still holds
+
+
+def test_a_retraction_on_the_reading_path_is_journalled():
+    core = _core()
+    core.learn_from_text("Heavy rain causes flooding.")
+    report = core.learn_from_text("Actually heavy rain prevents flooding.")
+
+    notes = _retraction_notes(core)
+    assert len(notes) == 1 and "(reading)" in notes[0]
+    assert report["causal_claims"]["retractions"][0]["by"] == \
+        "Actually heavy rain prevents flooding."
+
+
+def test_nothing_is_journalled_when_nothing_is_retracted():
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    core._causal_engage("Actually sleep improves my focus.", [])   # a correction of nothing
+    assert _retraction_notes(core) == []
+
+
+def test_report_spells_out_the_recent_retractions():
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    core._causal_engage("Actually caffeine reduces my focus.", [])
+
+    recent = core.report()["causal"]["recent_retractions"]
+    assert len(recent) == 1
+    assert recent[0]["removed"][0]["relation"] == "concordant"
+    assert "Actually caffeine reduces" in recent[0]["reason"]
+
+
+def test_report_omits_recent_retractions_when_there_are_none():
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    assert "recent_retractions" not in core.report()["causal"]
+
+
 def test_a_correction_in_a_document_updates_what_the_conversation_holds():
     core = _core()
     core.learn_from_text("Heavy rain causes flooding.")

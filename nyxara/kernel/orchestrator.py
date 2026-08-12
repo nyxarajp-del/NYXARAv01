@@ -2294,7 +2294,17 @@ class NyxaraCore:
             for claim in claims:
                 if claim.corrective:
                     try:
-                        engine.lattice.retract(claim.cause, claim.effect)
+                        removed = engine.lattice.retract(
+                            claim.cause, claim.effect,
+                            reason=f"retracted by: {claim.quote}")
+                        if removed:
+                            # the lattice just logged exactly what it un-tied — reuse that
+                            # rather than keeping a second, thinner copy of the same facts
+                            logged = (engine.lattice.retractions(limit=1) or [{}])[-1]
+                            self._journal_retraction_record(
+                                {"cause": claim.cause, "effect": claim.effect,
+                                 "by": claim.quote, "new_polarity": claim.polarity,
+                                 "removed": logged.get("removed", [])}, via="turn")
                     except Exception:  # noqa: BLE001 — retraction is best-effort
                         pass
             tuples = [(c.cause, c.effect, c.polarity) for c in claims]
@@ -2327,6 +2337,26 @@ class NyxaraCore:
                     salience=0.6)
                 thoughts.append(t)
         except Exception:  # noqa: BLE001 — advisory only, never breaks a turn
+            pass
+
+    def _journal_retraction_record(self, record: Dict[str, Any], *, via: str) -> None:
+        """Write one retraction into the hash-chained journal. Never raises.
+
+        Un-tying a claim is the one destructive edit the causal subsystem makes to itself, so it
+        belongs in the append-only record beside the autonomous actions — not only in the
+        lattice's own in-memory ring, which a restart loses. What was un-tied, on whose sentence,
+        and through which path."""
+        if self.journal is None:
+            return
+        try:
+            old = record.get("removed") or []
+            was = ", ".join(str(k.get("relation", k)) for k in old) or "nothing"
+            self.journal.note(
+                f"causal retraction ({via}): un-tied {record.get('cause')!r} ~ "
+                f"{record.get('effect')!r} [{was}] and replaced it with "
+                f"{'concordant' if record.get('new_polarity', 1) > 0 else 'discordant'} — "
+                f"on: {str(record.get('by', ''))[:160]}")
+        except Exception:  # noqa: BLE001 — the audit trail never breaks a turn
             pass
 
     @staticmethod
@@ -10152,7 +10182,10 @@ class NyxaraCore:
         rep = mine_claims(text, model=self.causal_world_model, lattice=lattice)
         out = {"claims": len(rep.claims), "contradicted": rep.contradicted,
                "registered": rep.registered, "defeated": rep.defeated,
-               "corrections": rep.corrections, "retracted": rep.retracted}
+               "corrections": rep.corrections, "retracted": rep.retracted,
+               "retractions": [dict(r) for r in rep.retractions]}
+        for record in rep.retractions:
+            self._journal_retraction_record(record, via="reading")
         if rep.contradicted:
             self.mind.record(
                 ThoughtKind.INFERENCE,
@@ -11609,6 +11642,10 @@ class NyxaraCore:
                 rep["causal"] = self.causal_engine.status()
                 if self._last_causal is not None:
                     rep["causal"]["last_turn"] = self._last_causal.to_dict()
+                # the destructive edits, spelled out — a count alone cannot be audited
+                recent = self.causal_engine.lattice.retractions(limit=5)
+                if recent:
+                    rep["causal"]["recent_retractions"] = recent
             except Exception:  # noqa: BLE001 — the causal report is best-effort
                 pass
         if self.reflector is not None:

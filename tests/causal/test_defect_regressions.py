@@ -174,6 +174,39 @@ def test_retract_un_ties_a_pair_and_leaves_the_rest_standing():
         lattice.tie("x", "y", 1)
 
 
+def test_every_retraction_is_recorded_with_what_it_removed():
+    """Un-tying is the one destructive edit here; a bare counter cannot be audited."""
+    lattice = KnotLattice()
+    lattice.tie("caffeine", "focus", 1, reason="increases")
+    lattice.retract("caffeine", "focus", reason="retracted by: actually it reduces focus")
+
+    log = lattice.retractions()
+    assert len(log) == 1
+    entry = log[0]
+    assert (entry["cause"], entry["effect"]) == ("caffeine", "focus")
+    assert entry["reason"] == "retracted by: actually it reduces focus"
+    assert entry["at"] > 0
+    assert entry["removed"] == [{"cause": "caffeine", "effect": "focus", "sign": 1,
+                                 "relation": "concordant", "reason": "increases"}]
+
+
+def test_a_no_op_retraction_writes_no_record():
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1)
+    assert lattice.retract("q", "z", reason="nothing to un-say") == 0
+    assert lattice.retractions() == []
+
+
+def test_the_retraction_log_is_bounded():
+    lattice = KnotLattice()
+    for i in range(300):
+        lattice.tie(f"n{i}", f"m{i}", 1)
+        lattice.retract(f"n{i}", f"m{i}", reason=f"r{i}")
+    log = lattice.retractions(limit=1000)
+    assert len(log) == 256                       # the ring holds, memory does not grow
+    assert log[-1]["reason"] == "r299"           # and it keeps the newest
+
+
 def test_retract_is_direction_agnostic():
     lattice = KnotLattice()
     lattice.tie("a", "b", 1)

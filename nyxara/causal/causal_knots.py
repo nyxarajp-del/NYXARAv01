@@ -29,6 +29,7 @@ superposed via :mod:`nyxara.quantum.superposition_states` rather than bluff.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
@@ -125,6 +126,8 @@ class KnotLattice:
         self.capacity = int(capacity)
         self._compactions = 0
         self._retractions = 0
+        # A bounded audit trail of every un-tying: destructive edits must stay findable.
+        self._retraction_log: Deque[Dict[str, Any]] = deque(maxlen=256)
         self._parent: Dict[str, str] = {}
         self._parity: Dict[str, int] = {}   # parity (0/1) of a node relative to its parent
         self._rank: Dict[str, int] = {}
@@ -231,7 +234,7 @@ class KnotLattice:
             except KnotMutationFailure:  # pragma: no cover — survivors were mutually consistent
                 continue
 
-    def retract(self, cause: str, effect: str) -> int:
+    def retract(self, cause: str, effect: str, *, reason: str = "") -> int:
         """Un-tie every strand between ``cause`` and ``effect``. Returns how many were removed.
 
         This is how a claim stops being held. It exists because a speaker who corrects
@@ -240,17 +243,28 @@ class KnotLattice:
         update or absorb a contradiction. Direction-agnostic: a strand ties two nodes, and the
         pair is what is being un-said.
 
-        Stated plainly: retraction is destructive and unlogged beyond the counter. Anything that
-        can retract can erase a claim the lattice was relying on, so callers must only offer it
-        where a retraction was actually expressed.
+        Retraction is destructive: anything that can retract can erase a claim the lattice was
+        relying on. So every call is **recorded** — what was un-tied, its original sign and
+        reason, and why it was un-tied — readable back through :meth:`retractions`. Callers must
+        still only offer it where a retraction was actually expressed; the log makes a wrong one
+        findable afterwards rather than silent.
         """
         pair = {(cause, effect), (effect, cause)}
-        keep = [k for k in self._knots if (k.cause, k.effect) not in pair]
-        removed = len(self._knots) - len(keep)
-        if removed:
-            self._rebuild(keep)
-            self._retractions += removed
-        return removed
+        keep, dropped = [], []
+        for k in self._knots:
+            (dropped if (k.cause, k.effect) in pair else keep).append(k)
+        if not dropped:
+            return 0
+        self._rebuild(keep)
+        self._retractions += len(dropped)
+        self._retraction_log.append({
+            "at": time.time(), "cause": cause, "effect": effect,
+            "reason": reason, "removed": [k.to_dict() for k in dropped]})
+        return len(dropped)
+
+    def retractions(self, *, limit: int = 20) -> List[Dict[str, Any]]:
+        """The most recent retractions — what was un-tied, and on whose say-so."""
+        return list(self._retraction_log)[-limit:]
 
     def _explain(self, cause: str, effect: str) -> List[str]:
         """BFS over accepted strands to reconstruct a path cause→…→effect (the cycle)."""
