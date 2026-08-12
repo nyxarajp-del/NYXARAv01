@@ -194,6 +194,21 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+#: Headroom against ``estimate_tokens`` being an estimate, plus the chat template's own markup.
+_CONTEXT_SAFETY_TOKENS = 256
+
+#: Runtime refusals that describe THIS request rather than the host. The runtime reports these
+#: through the same opaque ``send_message failed``, so the reason has to be read out of the text.
+_PER_REQUEST_FAILURES = ("too long", "exceeding the maximum number of tokens",
+                         "invalid_argument", "resource_exhausted")
+
+
+def _is_per_request_failure(detail: str) -> bool:
+    """Whether a send failure is about this request and so must not take the rung off the ladder."""
+    low = (detail or "").lower()
+    return any(marker in low for marker in _PER_REQUEST_FAILURES)
+
+
 # --------------------------------------------------------------------------- #
 # Provider base
 # --------------------------------------------------------------------------- #
@@ -897,15 +912,67 @@ class LiteRTLMProvider(LLMProviderBase):
 
         # the last user turn is what we SEND; everything before it is conversation history
         send_at = max((i for i, (r, _) in enumerate(turns) if r is Role.USER), default=len(turns) - 1)
+        prompt = turns[send_at][1]
+        system, prior = self._fit_context(system, turns[:send_at], prompt, req)
+
         history: List[Any] = []
         if system:
             history.append(litert_lm.Message.system(system))
-        for role, content in turns[:send_at]:
+        for role, content in prior:
             if role is Role.USER:
                 history.append(litert_lm.Message.user(content))
             else:
                 history.append(litert_lm.Message.model(litert_lm.Contents.of(content)))
-        return history, turns[send_at][1]
+        return history, prompt
+
+    def _fit_context(self, system: str, prior: List[Tuple[Role, str]], prompt: str,
+                     req: LLMRequest) -> Tuple[str, List[Tuple[Role, str]]]:
+        """Trim the turn to the model's context window, and return what is left to send.
+
+        Gemma 4 here takes 4096 tokens. NYXARA's callers do not know that: ``NyxaraReasoner``
+        composes a system text out of her identity, recalled memories, the self-model summary and
+        domain expertise, and an ordinary turn measured 4552. The runtime then refuses the whole
+        request with ``INVALID_ARGUMENT: Input token ids are too long``.
+
+        That refusal used to arrive as a *template* failure (see :meth:`_send`), which is how a
+        prompt that was merely too long took her primary brain off the ladder for the rest of the
+        process. Fixing the diagnosis there stops the false latch; this stops the overflow.
+
+        Trimming happens on the raw strings, before any ``litert_lm.Message`` is built. The first
+        version of this measured the built messages with :meth:`_extract_text`, which reads the
+        *response* shape and returns "" for a Message — so every message costed zero, nothing was
+        ever over budget, and the trim silently did nothing at all.
+
+        What goes first: the oldest prior turns, then the tail of the system text. Identity and
+        instructions are written at the head of that text and the recalled context that follows is
+        what makes it large, so cutting from the end keeps the part that shapes the answer. The
+        question itself is never trimmed — a fluent answer to a truncated question is worse than
+        no answer, because it looks right.
+        """
+        try:
+            limit = int(getattr(self.settings.llm, "litertlm_context_tokens", 4096))
+            reserve = int(getattr(req, "max_tokens", 0) or 0)
+            budget = limit - reserve - _CONTEXT_SAFETY_TOKENS
+            if budget <= 0:
+                return system, prior
+            fixed = estimate_tokens(prompt)
+            prior = list(prior)
+
+            def _cost() -> int:
+                return (fixed + (estimate_tokens(system) if system else 0)
+                        + sum(estimate_tokens(c) for _, c in prior))
+
+            if _cost() <= budget:
+                return system, prior
+            while prior and _cost() > budget:
+                prior.pop(0)
+            if _cost() <= budget or not system:
+                return system, prior
+            room = max(0, budget - fixed)
+            log.debug("litertlm: system text trimmed to fit the %d-token context", limit)
+            return (system[:room * 4] if room else ""), prior
+        except Exception:  # noqa: BLE001 — a trim that fails must not lose the turn
+            return system, prior
 
     def _templates(self) -> List[Tuple[str, Optional[str]]]:
         """The chat templates to try, best-known first. ``None`` means the model's embedded one.
@@ -970,7 +1037,15 @@ class LiteRTLMProvider(LLMProviderBase):
                 detail += " | runtime said: " + " / ".join(said)
         except Exception:  # noqa: BLE001
             pass
-        if self._template_name is None:
+        if _is_per_request_failure(detail):
+            # Not every refusal is structural, and latching the ones that are not cost her the
+            # whole rung. An over-long prompt ("Input token ids are too long … 4552 >= 4096") is a
+            # property of THIS request, not of the host: the next turn, with fewer memories
+            # recalled, goes through. Observed: one long turn latched ``_dead``, and every
+            # question after it in that process was answered by the n-gram floor — which reads
+            # like a broken brain rather than one oversized prompt. Re-probe next time instead.
+            self._template_name = self._template = None
+        elif self._template_name is None:
             self._dead = f"no usable chat template ({detail})"
             log.warning("litertlm: no chat template this build accepts — taking the rung off the "
                         "ladder until reset: %s", detail)

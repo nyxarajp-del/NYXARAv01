@@ -413,6 +413,13 @@ class LLMConfig(BaseModel):
     # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
     litertlm_cache_dir: Optional[Path] = None
     litertlm_top_k: int = Field(default=40, ge=1)
+    # The model's context window, in tokens. Her callers do not know it: NyxaraReasoner composes a
+    # system text from identity + recalled memories + the self-model + domain expertise, and an
+    # ordinary turn measured 4552 tokens against Gemma 4's 4096. The runtime refuses the whole
+    # request at that point, so mind/llm.py trims history (then the system text) to fit rather than
+    # losing the turn. Lower it for a smaller model; raising it past what the weights accept only
+    # moves the refusal back into the runtime.
+    litertlm_context_tokens: int = Field(default=4096, ge=512)
     # The runtime's shared library declares a hard dependency on the Vulkan LOADER
     # (``libvulkan.so.1``) even on the CPU backend, yet imports no symbol from it. On a host without
     # that loader the whole rung is unloadable. mind/vulkan_shim.py generates a 344-byte stub
