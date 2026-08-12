@@ -225,14 +225,24 @@ class KnotLattice:
         Parity union-find has no un-union: the parity of every node is entangled with the order
         the links arrived in. Replaying the survivors is O(n·α(n)) and exact, where surgery on
         the parent array would not be.
+
+        Goes straight at the union rather than through :meth:`tie`: these knots were already
+        normalised and accepted once, so re-deriving their signs, re-allocating a record for each
+        and running the failure machinery is pure overhead on a path that runs per retraction.
         """
         self._parent, self._parity, self._rank = {}, {}, {}
         self._adj, self._knots = {}, []
         for k in knots:
-            try:
-                self.tie(k.cause, k.effect, k.sign, reason=k.reason)
-            except KnotMutationFailure:  # pragma: no cover — survivors were mutually consistent
+            want = 0 if k.sign == CONCORDANT else 1
+            rc, pc = self._find(k.cause)
+            re_, pe = self._find(k.effect)
+            if rc != re_:
+                self._union(rc, pc, re_, pe, want)
+            elif (pc ^ pe) != want:  # pragma: no cover — survivors were mutually consistent
                 continue
+            self._knots.append(k)
+            self._adj.setdefault(k.cause, []).append((k.effect, k.sign))
+            self._adj.setdefault(k.effect, []).append((k.cause, k.sign))
 
     def retract(self, cause: str, effect: str, *, reason: str = "") -> int:
         """Un-tie every strand between ``cause`` and ``effect``. Returns how many were removed.
