@@ -194,8 +194,21 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-#: Headroom against ``estimate_tokens`` being an estimate, plus the chat template's own markup.
+#: Headroom against ``_context_tokens`` being an estimate, plus the chat template's own markup.
 _CONTEXT_SAFETY_TOKENS = 256
+
+#: Chars per token when sizing a prompt against a hard context limit. ``estimate_tokens`` uses 4,
+#: which is the right average for English prose and the wrong number for this job: her system text
+#: is markdown bullets, newlines and punctuation, which tokenize denser. Measured against the
+#: runtime's own count, a fit computed at 4 still arrived as 4356 tokens over a 4096 limit — the
+#: trim ran, reported success, and the request was refused anyway. Sizing is not averaging: being
+#: wrong low costs the whole turn, being wrong high costs a few dropped memories.
+_CONTEXT_CHARS_PER_TOKEN = 3.0
+
+
+def _context_tokens(text: str) -> int:
+    """Conservative token count for fitting a prompt to a hard context window."""
+    return int(len(text or "") / _CONTEXT_CHARS_PER_TOKEN) + 1
 
 #: Runtime refusals that describe THIS request rather than the host. The runtime reports these
 #: through the same opaque ``send_message failed``, so the reason has to be read out of the text.
@@ -955,12 +968,12 @@ class LiteRTLMProvider(LLMProviderBase):
             budget = limit - reserve - _CONTEXT_SAFETY_TOKENS
             if budget <= 0:
                 return system, prior
-            fixed = estimate_tokens(prompt)
+            fixed = _context_tokens(prompt)
             prior = list(prior)
 
             def _cost() -> int:
-                return (fixed + (estimate_tokens(system) if system else 0)
-                        + sum(estimate_tokens(c) for _, c in prior))
+                return (fixed + (_context_tokens(system) if system else 0)
+                        + sum(_context_tokens(c) for _, c in prior))
 
             if _cost() <= budget:
                 return system, prior
@@ -970,7 +983,8 @@ class LiteRTLMProvider(LLMProviderBase):
                 return system, prior
             room = max(0, budget - fixed)
             log.debug("litertlm: system text trimmed to fit the %d-token context", limit)
-            return (system[:room * 4] if room else ""), prior
+            keep = int(room * _CONTEXT_CHARS_PER_TOKEN)
+            return (system[:keep] if keep else ""), prior
         except Exception:  # noqa: BLE001 — a trim that fails must not lose the turn
             return system, prior
 

@@ -40,6 +40,20 @@ _INSTALLED = False
 # startup; these are the parts that explain a failure.
 _SIGNALS = ("INTERNAL:", "Failed to", "error:", "ERROR:", "FATAL", "Check failed")
 
+#: Markers that identify a line as NYXARA's OWN log output rather than the runtime's. The ring
+#: buffer is fd 2, which Python's logging also writes to, so without this her reports feed back
+#: into the next report she composes.
+_OURS = ("runtime said:", "could not render a turn", "nyxara.", "taking the rung off the ladder")
+
+#: No single quoted runtime line is worth more than this. The runtime is terse; anything longer
+#: is a sign of exactly the nesting this module now refuses to take part in.
+_MAX_LINE = 400
+
+
+def _is_ours(line: str) -> bool:
+    """Whether a captured line is NYXARA's own logging rather than the runtime's stderr."""
+    return any(marker in line for marker in _OURS)
+
 
 def _drain(read_fd: int, passthrough_fd: int) -> None:
     """Copy the runtime's stderr into the ring buffer and on to the real stderr."""
@@ -101,13 +115,20 @@ def interesting(limit: int = 4) -> List[str]:
     """
     out: List[str] = []
     for line in reversed(recent(120)):
+        if _is_ours(line):
+            # The buffer is fd 2, and Python's own logging writes there too — so every warning
+            # this text is folded into comes straight back in. Each failure then quoted the
+            # previous one inside itself, the dedup below never fired because each line was
+            # genuinely new, and the message doubled per turn: a handful of turns produced a
+            # 246 MB log. Only the runtime's own words belong here; hers are already reported.
+            continue
         if any(sig in line for sig in _SIGNALS):
             cleaned = line.strip()
             # drop the "E0000 00:00:1785942277.643173 29363 engine.cc:1619] " preamble
             if "] " in cleaned:
                 cleaned = cleaned.split("] ", 1)[1]
             if cleaned and cleaned not in out:
-                out.append(cleaned)
+                out.append(cleaned[:_MAX_LINE])
             if len(out) >= limit:
                 break
     out.reverse()
