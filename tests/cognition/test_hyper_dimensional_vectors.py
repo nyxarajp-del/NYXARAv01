@@ -257,7 +257,12 @@ def test_core_ingests_turns_into_latent_space():
     core = NyxaraCore()
     core.process("market trends in technology stocks", authority=Authority.OWNER)
     core.process("energy sector and oil price behaviour", authority=Authority.OWNER)
-    assert len(core.hyperdimensional) == 2
+    # The latent space is SHARED: turns are ingested as ``turn:<n>:…`` and induced rules as
+    # ``rule::<hash>``. This asserted ``len(...) == 2`` on the whole store, so it broke the moment
+    # she induced a rule during either turn — nothing to do with whether turns were ingested.
+    # Count the turn entries, which is what this test is actually about.
+    turns = [k for k in core.hyperdimensional._corpus if k.startswith("turn:")]
+    assert len(turns) == 2, f"expected 2 ingested turns, got {turns}"
     # a repeated stimulus is recognised — not novel — once it has been seen
     seen = core.latent_novelty("market trends in technology stocks")
     assert not seen.is_novel

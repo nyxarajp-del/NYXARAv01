@@ -1312,6 +1312,66 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         brain = _brain()
         return brain.stats() if brain is not None else _off("ENABLED")
 
+    # --- NYX V.001 (nyxara/nyx001/) — the primary brain, all three minds ------ #
+    def _brain001() -> Any:
+        return getattr(core, "nyx001", None)
+
+    def _off001() -> dict:
+        return {"available": False,
+                "reason": "NYX V.001 is disabled (NYXARA_NYX001__ENABLED=false)."}
+
+    @app.get("/v1/nyx001/status", dependencies=auth)
+    def nyx001_status() -> dict:
+        """All three brains at once, and whether the from-scratch substrate is actually learning."""
+        brain = _brain001()
+        return brain.stats() if brain is not None else _off001()
+
+    @app.post("/v1/nyx001/think", dependencies=auth)
+    def nyx001_think(req: NyxThinkRequest) -> dict:
+        """One fused cycle: three brains vote, the control law decides. Deliberation only.
+
+        It never runs a tool and never acts — as with ``/v1/nyx/think``, this is the brain
+        thinking out loud, not the kernel doing anything.
+        """
+        brain = _brain001()
+        if brain is None:
+            return _off001()
+        return brain.think(req.stimulus, remember=req.remember).to_dict()
+
+    @app.get("/v1/nyx001/layers", dependencies=auth)
+    def nyx001_layers() -> dict:
+        """Layers 0-17: what each measured this run. A disabled layer is absent, not zeroed."""
+        brain = _brain001()
+        if brain is None:
+            return _off001()
+        stack = getattr(brain, "stack", None)
+        if stack is None:
+            return {"available": False,
+                    "reason": "the Layer 0-17 stack is disabled "
+                              "(NYXARA_NYX001__LAYERS_ENABLED=false)."}
+        return stack.stats()
+
+    @app.get("/v1/nyx001/stage", dependencies=auth)
+    def nyx001_stage() -> dict:
+        """Where she is on the Stage 0-10 childhood — measured live, never scheduled."""
+        brain = _brain001()
+        if brain is None:
+            return _off001()
+        return brain.develop() or {"available": False,
+                                   "reason": "the childhood curriculum is disabled."}
+
+    @app.get("/v1/nyx001/score", dependencies=auth)
+    def nyx001_score() -> dict:
+        """The intelligence index (G,M,R,P,T,L,U,A,C). Unmeasured components report null."""
+        brain = _brain001()
+        if brain is None:
+            return _off001()
+        try:
+            from nyxara.nyx001.metrics import IntelligenceIndex
+            return IntelligenceIndex().measure(brain).to_dict()
+        except Exception:  # noqa: BLE001 — measurement is a capability, never a hard dependency
+            return {"available": False, "reason": "metrics unavailable"}
+
     @app.post("/v1/nyx/think", dependencies=auth)
     def nyx_think(req: NyxThinkRequest) -> dict:
         """One full cycle — who bid, who won, how sure, and whether it was actually checked.

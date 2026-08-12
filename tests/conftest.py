@@ -75,6 +75,16 @@ os.environ.setdefault("NYXARA_FOUNDRY__ENABLED", "false")
 # down the deterministic floor and stop the suite from exercising the reasoning path at all. Same
 # rationale as pinning the genesis substrate above — keep the mechanism, not the price.
 os.environ.setdefault("NYXARA_METACONTROL__MAX_SECONDS_CEILING", "6")
+# NYX V.001's Layer 0-17 cycle (nyxara/nyx001/) runs inside the OUTERMOST reason-seat, so at its
+# default of every turn it is paid on every turn of every test — ~0.15s each, at every scale,
+# because the cost is eighteen layers running rather than the width. Measured: the growth-heavy
+# kernel tests went from 24s to 35s with it in the seat.
+#
+# Sample the beat rather than disabling the stack: a skipped beat still writes its observation to
+# episodic memory, so replay keeps learning from it and the mechanism stays exercised. Exactly the
+# rationale used for the metacontrol ceiling above and the genesis substrate below — keep the
+# mechanism, not the price. tests/nyx001 builds its own stacks and is unaffected.
+os.environ.setdefault("NYXARA_NYX001__STACK_EVERY_N_TURNS", "8")
 # L-OMNI (nyx/omni.py) reads NYXARA's own source, lowers hot numeric functions to C, compiles
 # them and swaps them into the *live process*. ON for real runs at Master JP's instruction, and
 # the same hermetic rationale as every flag above applies to the suite: a test asserting that the

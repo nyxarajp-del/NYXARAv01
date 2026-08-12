@@ -22,6 +22,38 @@ import pytest
 from nyxara.kernel.config import reload_settings
 from nyxara.kernel.orchestrator import NyxaraCore
 
+# Every test here drives ``idle_maintenance``, and that is what makes them the slowest in the
+# suite: each pass does real work, chiefly ``sim/physics_world.physics_stream`` training a
+# pure-Python world model. They amplify roughly 9x when run late in a full suite rather than alone
+# (35s isolated, past 300s in-suite). PRE-EXISTING: verified by running tests/kernel on ``main``
+# with identical flags, where the same tests overrun the same ceiling.
+#
+# The amplification IS diagnosed, and the numbers are here so the next attempt starts from data.
+# A per-test probe over one tests/kernel run (threads / live objects / RSS, sampled every 10th
+# test) measured:
+#
+#     test  1  :  2 threads    303,514 objects    318 MB
+#     test 30  : 18 threads  2,011,838 objects  1,640 MB
+#     test 80  : 21 threads  2,874,734 objects  2,040 MB
+#
+# So the process ends a single directory holding ~2.9M live objects and 2 GB resident. The auto-
+# start guards (``_maybe_start_life``, ``_maybe_start_perception``) DO hold the background threads
+# off under pytest — verified directly: three cores built inside a test start zero extra threads.
+# What accumulates is the cores belonging to tests that deliberately start those loops to assert
+# they work and never stop them; each surviving thread pins its whole ``NyxaraCore`` graph.
+#
+# What did NOT work, so it is not retried blindly: an autouse fixture that walked
+# ``threading.enumerate()`` after each test, set any stop Event it could find and forced a
+# ``gc.collect()``. It stopped nothing — the Event lives on the ``Heartbeat``/perception object,
+# not on the ``Thread`` — and the collect over 2.4M objects cost ~2s per test, making the suite
+# materially SLOWER (0.13s → 2.0s on short tests). The real fix needs the owning objects, e.g. a
+# registry of live cores that tests can be torn down through.
+#
+# Until then the override is a mitigation, applied per module rather than per test because marking
+# them one at a time simply moves the breach to whichever is next-slowest — which is exactly what
+# happened after the first mark.
+pytestmark = pytest.mark.timeout(1200)
+
 # Enable the continuous wire with a small cadence, but keep every heavy/self-modifying sub-engine
 # OFF so the idle growth pass is fast and writes nothing to disk.
 _ENV = {
@@ -67,6 +99,7 @@ def test_growth_engine_absent_when_growth_disabled():
 
 # -------------------- the suite seals it OFF (hermetic) -------------------- #
 def test_continuous_is_off_by_default_in_the_suite():
+    """Six idle passes must not run the growth tower. See the module-level timeout note."""
     nyx = NyxaraCore()
     for _ in range(6):
         report = nyx.idle_maintenance()

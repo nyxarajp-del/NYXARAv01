@@ -148,9 +148,21 @@ def test_entropy_is_reported_as_the_expected_free_energy_proxy(brain):
 
 # -------------------- wired into the kernel -------------------- #
 def test_the_kernel_installs_nyx_in_the_reason_seat():
+    """NYX V.01-.03 holds a seat in the chain — since NYX V.001, not the outermost one.
+
+    NYX V.001 (``nyxara/nyx001/``) now wraps this seat, exactly as this seat wraps Nyx5Reasoner.
+    What the wiring guarantees, and what this asserts, is that NyxReasoner is *installed*; which
+    seat is outermost is asserted in ``tests/kernel/test_nyx001_wiring.py``.
+    """
     from nyxara.kernel.orchestrator import NyxaraCore
     core = NyxaraCore()
-    assert type(core.reasoner).__name__ == "NyxReasoner"
+    chain, node = [], core.reasoner
+    for _ in range(8):                           # bounded walk; the chain is short by construction
+        chain.append(type(node).__name__)
+        node = getattr(node, "base", None)
+        if node is None:
+            break
+    assert "NyxReasoner" in chain, f"NYX V.01-.03 fell out of the reason-seat chain: {chain}"
 
 
 def test_a_turn_through_the_seat_still_passes_the_gate_and_keeps_the_axioms():

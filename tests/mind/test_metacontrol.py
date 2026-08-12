@@ -120,10 +120,26 @@ def test_high_stakes_never_fast_path():
 
 
 def test_hard_gets_deep_budget():
+    """A hard turn buys more of every resource than an easy one — relative to the ceiling in force.
+
+    This asserted ``max_seconds > 60.0`` and could never pass: ``tests/conftest.py`` pins
+    ``NYXARA_METACONTROL__MAX_SECONDS_CEILING=6`` for the whole suite on purpose, so no plan
+    anywhere in these tests may exceed six seconds. The test was asserting against an absolute
+    its own harness forbids. What "deep budget" actually means is *deeper than the easy path* and
+    *up against whatever ceiling applies*, which is the same relative form the module's own
+    self-test at ``metacontrol.py`` uses.
+    """
     mc = _controller()
+    easy = mc.plan(EASY)
     plan = mc.plan(HARD, novelty=1.0, recall_strength=0.0, competence=0.0)
     assert plan.entry_rung >= 2
-    assert plan.max_seconds > 60.0
+    assert plan.entry_rung > easy.entry_rung
+    assert plan.max_rung >= easy.max_rung
+    assert plan.samples >= easy.samples
+    # it spends the whole allowance it is permitted, whatever that allowance has been set to
+    ceiling = float(mc._cfgv("max_seconds_ceiling", 600.0))
+    assert abs(plan.max_seconds - min(ceiling, 300.0)) < 1e-6, \
+        f"hard did not reach its ceiling: {plan.max_seconds} of {ceiling}"
 
 
 def test_calibration_loop_corrects_overconfident_easiness():

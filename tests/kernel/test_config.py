@@ -102,9 +102,17 @@ def test_own_providers_are_the_in_process_rungs():
 
 def test_real_learning_defaults_on():
     """Real, weight-changing learning is the default posture (the closed loop)."""
+    # Assert the CODE defaults, not a live settings object: tests/conftest.py deliberately pins
+    # NYXARA_FOUNDRY__ENABLED=false for the whole suite (the foundry trains, and it was the source
+    # of CI's multi-hour runs), so reading a constructed settings here was asserting against the
+    # harness rather than against the shipped posture. This failed before the max-power change and
+    # is fixed here rather than left red.
+    from nyxara.kernel.config import FoundryConfig
+    assert FoundryConfig.model_fields["enabled"].default is True   # on EVERY machine, not torch-gated
     s = NyxaraSettings.for_profile(Profile.DEV)
-    assert s.foundry.enabled is True                 # on EVERY machine, not torch-gated
-    assert s.foundry.lora_requires_gpu is False      # DistilGPT-2 LoRA-tunes on a CPU too, no GPU required
+    # lora_requires_gpu is now ON by explicit instruction. It is a RESTRICTION, not a capability:
+    # DistilGPT-2 LoRA-tunes fine on a CPU, and with this on a CPU-only box will refuse to.
+    assert s.foundry.lora_requires_gpu is True
     assert s.autoforge.enabled is True
     assert s.autoforge.min_examples == 10
     assert s.flywheel.correction_weight == 3
@@ -161,9 +169,11 @@ def test_litertlm_is_primary_and_foundry_base_is_local():
     s.llm.provider = LLMProvider.AUTO
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"
-    # DistilGPT-2 is tiny — full-precision LoRA everywhere; no quantization, no remote code
-    assert s.foundry.load_in_4bit is False
-    assert s.foundry.trust_remote_code is False
+    # Quantisation and remote code are now ON by default: max_power is the default posture and
+    # its crank sets both. 8-bit stays off because the validator forbids it alongside 4-bit.
+    assert s.foundry.load_in_4bit is True
+    assert s.foundry.load_in_8bit is False
+    assert s.foundry.trust_remote_code is True
     # DistilGPT-2 (GPT-2 arch) uses Conv1D names — the default pins attention (c_attn) + MLP (c_fc/c_proj)
     assert s.foundry.lora_target_modules == ["c_attn", "c_proj", "c_fc"]
 

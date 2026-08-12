@@ -470,7 +470,10 @@ class MandelbrotIFSCoder:
             raw = base64.b64decode(p["res"].encode("ascii"))
             q = _np.frombuffer(raw, dtype="int8").astype("float64").reshape(h, w)
             rendered = rendered + q * float(p["res_scale"])
-        return (field * float(p["span"]) + float(p["amin"])).reshape(code.shape)
+        # ``rendered``, not ``field``: ``field`` is dataclasses.field, imported at the top of this
+        # module, so the typo raised "unsupported operand type(s) for *: 'function' and 'float'"
+        # instead of failing a name lookup — which is why it survived to here.
+        return (rendered * float(p["span"]) + float(p["amin"])).reshape(code.shape)
 
 
 # --------------------------------------------------------------------------- #
