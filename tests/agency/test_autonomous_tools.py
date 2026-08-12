@@ -140,22 +140,48 @@ def test_explicit_review_mode_param_overrides_config():
 
 
 # -------------------- end-to-end: process() acts without escalating -------------------- #
-def test_process_acts_on_autonomous_tool_without_approval():
-    from nyxara.kernel.orchestrator import Candidate, Disposition, NyxaraCore
+def _risky_tool_core(reversible):
+    from nyxara.kernel.orchestrator import Candidate, NyxaraCore
 
     class RiskyToolReasoner:
-        """Proposes a HIGH-risk irreversible tool call in one step."""
+        """Proposes a HIGH-risk tool call in one step."""
 
         def __call__(self, stimulus, focus=None):
             return Candidate(text="run a shell command", kind="act",
                              capability=Capability.PROC_EXEC, risk=RiskTier.HIGH,
-                             reversible=False, confidence=0.9, belief=0.9,
+                             reversible=reversible, confidence=0.9, belief=0.9,
                              tool="now", tool_args={},
                              rationale="needs a risky tool")
 
-    core = NyxaraCore(reasoner=RiskyToolReasoner())
-    r = core.process("do the risky thing", authority=Authority.AUTONOMOUS)
+    return NyxaraCore(reasoner=RiskyToolReasoner())
+
+
+def test_process_acts_on_autonomous_tool_without_approval():
+    from nyxara.kernel.orchestrator import Disposition
+
+    r = _risky_tool_core(reversible=True).process(
+        "do the risky thing", authority=Authority.AUTONOMOUS)
     # under SOVEREIGN oversight + full_control permission, the risky autonomous action is NOT
     # escalated for approval — the kernel disposes ACT
     assert r.disposition is Disposition.ACT
     assert "permission" in r.gates and r.gates["oversight"] == "allowed"
+
+
+def test_sovereignty_stops_at_the_irreversible_high_stakes_act():
+    """The one clause the SOVEREIGN grant does not waive, and why.
+
+    ``autonomous_tools`` says "stop asking me whether you are sure enough", so the initiative
+    governor's *confidence* and *reversibility* thresholds are waived for an autonomous turn.
+    ``high_stakes_irreversible`` is not one of them: waiving it let an AUTONOMOUS turn execute
+    what the Master's OWN turn had escalated (``planning/decide.py::Governance.waivable``), which
+    is autonomy outranking its owner. Escalation here must come from *initiative* — oversight
+    still reports ``allowed``, proving nothing was queued by the review gate.
+    """
+    from nyxara.kernel.orchestrator import Disposition
+
+    r = _risky_tool_core(reversible=False).process(
+        "do the risky thing", authority=Authority.AUTONOMOUS)
+    assert r.disposition is Disposition.ESCALATE
+    assert r.gates["oversight"] == "allowed"
+    assert r.gates["permission"] == "grant"
+    assert r.gates["initiative"] == "ask"

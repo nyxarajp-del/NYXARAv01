@@ -38,8 +38,21 @@ def test_a_quorum_needs_nodes_and_a_way_to_reach_them():
     assert got.durable is False and "quorum needs" in got.reason
 
 
-def test_the_brain_does_not_build_it_by_default():
-    assert NyxBrain(get_settings().nyx).eternal is None
+def test_the_brain_builds_it_by_default_and_it_stays_inert_alone():
+    """``eternal_enabled`` ships ON, and on one machine that still costs nothing.
+
+    The flag was flipped to True at the field default; this assertion was left behind saying
+    the opposite. Building it is now correct — what makes the default safe is not the absence
+    of the faculty but its inertness, which the two tests above pin: a lone node reports
+    ``available() is False`` and its ``beat()`` is None.
+    """
+    assert get_settings().nyx.eternal_enabled is True
+    assert NyxBrain(get_settings().nyx).eternal is not None
+
+
+def test_the_brain_omits_it_when_the_flag_is_off():
+    cfg = get_settings().nyx.model_copy(update={"eternal_enabled": False})
+    assert NyxBrain(cfg).eternal is None
 
 
 # -------------------- signed -------------------- #

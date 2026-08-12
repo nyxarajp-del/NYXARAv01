@@ -79,10 +79,35 @@ def test_installer_requires_owner_authority():
         grant_privilege_escalation(pol, authority=Authority.AUTONOMOUS)
 
 
-# -------------------- config: OFF by default -------------------- #
-def test_privilege_escalation_off_by_default():
-    from nyxara.kernel.config import get_settings
-    assert get_settings().agency.privilege_escalation is False
+# -------------------- config: ON at max power, still declinable -------------------- #
+def test_privilege_escalation_on_by_default_under_max_power():
+    """Root is live out of the box, because ``max_power`` ships ON at the Master's instruction.
+
+    The *field* default stays False — a deployment that turns max_power off does not silently
+    inherit root — but the crank raises it, so a stock NYXARA reaches privileged OS operations
+    on her own initiative from first boot.
+    """
+    from nyxara.kernel.config import AgencyConfig, get_settings
+    s = get_settings()
+    assert s.max_power is True
+    assert AgencyConfig().privilege_escalation is False   # the bare field default
+    assert s.agency.privilege_escalation is True          # what max_power actually hands her
+
+
+def test_privilege_escalation_can_still_be_declined(monkeypatch):
+    """The documented off-switch must really switch it off.
+
+    ``max_power`` used to overwrite this field unconditionally, so the env var parsed, landed in
+    the model and was then stomped — leaving no way to decline root on your own machine.
+    """
+    monkeypatch.setenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", "false")
+    from nyxara.kernel import config as cfg
+    cfg.reload_settings()
+    try:
+        assert cfg.get_settings().agency.privilege_escalation is False
+    finally:
+        monkeypatch.delenv("NYXARA_AGENCY__PRIVILEGE_ESCALATION", raising=False)
+        cfg.reload_settings()
 
 
 def test_orchestrator_omits_privilege_grant_when_autonomy_dialed_down(monkeypatch):

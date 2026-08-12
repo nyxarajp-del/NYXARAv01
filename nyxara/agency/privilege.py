@@ -189,15 +189,20 @@ def change_permissions(
         steps.append({"op": op, **res.to_dict()})
         return res.ok
 
+    # The "--" terminates each tool's OWN option list. The one in privileged_exec only shields
+    # sudo, so an operand that begins with "-" was still read as a flag by chmod/chown itself:
+    # a path of "--reference=/etc/shadow" turned a mode change into "copy that file's bits", and
+    # "--no-preserve-root" is a chown flag. These run as root by construction, so the operands
+    # must be unmistakably operands.
     ok = True
     if mode is not None:
-        argv = ["chmod"] + (["-R"] if recursive else []) + [mode, path]
+        argv = ["chmod"] + (["-R"] if recursive else []) + ["--", mode, path]
         ok = _run("chmod", argv) and ok
     if owner is not None or group is not None:
         spec = owner or ""
         if group is not None:
             spec = f"{spec}:{group}"
-        argv = ["chown"] + (["-R"] if recursive else []) + [spec, path]
+        argv = ["chown"] + (["-R"] if recursive else []) + ["--", spec, path]
         ok = _run("chown", argv) and ok
 
     return {"ok": ok, "path": path, "steps": steps}

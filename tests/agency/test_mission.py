@@ -76,12 +76,31 @@ class _PlanThenStall:
 # --------------------------------------------------------------------------- #
 # Tests
 # --------------------------------------------------------------------------- #
-def test_offline_goal_becomes_single_milestone_and_completes(tmp_path):
+def test_offline_goal_becomes_single_milestone_and_abstains_honestly(tmp_path):
+    """The real, keyless core: the fallback still forms, and the outcome is honest.
+
+    An offline stand-in reasoner cannot produce a numbered plan, so decomposition must fall back
+    to one milestone = the whole goal. It also cannot answer the goal, and the AgentLoop's
+    honest-answer gate abstains rather than speaking a reply it does not trust — so the mission
+    ends BLOCKED and *surfaced*, never COMPLETED on a bluffed result.
+
+    The abstention is also terminal for the milestone: it is a considered verdict, not a stall, so
+    it must consume exactly ONE attempt rather than re-deriving the identical answer three times.
+    """
     exe = MissionExecutive(NyxaraCore(), persist_dir=str(tmp_path))
     m = exe.run("Say hello to the Master")
-    assert m.status is MissionStatus.COMPLETED
+
     assert len(m.milestones) == 1
-    assert m.progress() == 1.0
+    assert m.milestones[0].description == "Say hello to the Master"
+
+    ms = m.milestones[0]
+    assert ms.status is MilestoneStatus.BLOCKED
+    assert ms.attempts == 1, "an abstention must not be retried verbatim"
+    assert ms.blocked_reason.startswith("abstained:")
+
+    assert m.status is MissionStatus.BLOCKED
+    assert m.progress() < 1.0
+    assert [e["status"] for e in m.escalations] == ["abstained"]
 
 
 def test_decomposition_into_multiple_milestones(tmp_path):

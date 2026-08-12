@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from nyxara.agency.default_tools import build_default_tools
 from nyxara.agency.permissions import (
     Authority,
@@ -73,6 +75,22 @@ def test_protected_pid_guard_refuses_init():
 def test_protected_pid_guard_refuses_self():
     r = SystemControl().terminate_process(os.getpid())
     assert r["ok"] is False and "own process" in r["error"]
+
+
+@pytest.mark.parametrize("pid", [0, -1, -2, -os.getpgrp()])
+def test_broadcast_pids_are_refused(pid):
+    """A non-positive PID is a broadcast, and no single-process guard can cover it.
+
+    ``os.kill(-1, …)`` signals every process the caller may signal; ``0`` and ``-n`` signal a whole
+    process group. None of them equals NYXARA's own PID, so ``protect_self`` let them through —
+    and her process sits inside the blast radius, so `kill_process(-1)` under her default
+    root-enabled posture took out the machine, herself, and with her /scram and the audit feed.
+    Emptying ``protected_pids`` must not reopen it: the refusal is structural, not config.
+    """
+    for sc in (SystemControl(), SystemControl(protected_pids=[])):
+        r = sc.kill_process(pid)
+        assert r["ok"] is False
+        assert "non-positive" in r["error"], r["error"]
 
 
 def test_signal_missing_process_is_data():

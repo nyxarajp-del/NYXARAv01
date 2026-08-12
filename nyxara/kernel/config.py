@@ -174,8 +174,13 @@ class ResourceLimits(BaseModel):
     max_concurrent_tasks: int = Field(default=4096, ge=1, le=4096)
     max_event_queue: int = Field(default=10_000, ge=16)
     max_memory_mb: int = Field(default=4096, ge=64)
-    max_llm_tokens_per_call: int = Field(default=81920000000, ge=1000000000)
-    max_llm_calls_per_min: int = Field(default=12_000_000_000, ge=1000000000)
+    # Effectively-unlimited defaults (the Master's max-power posture): the ceiling is here so a
+    # runaway loop still has *a* bound, not to ration normal work. The ``ge=`` floor is the lowest
+    # value a deployment may configure, NOT the default — it must stay at 1 so the Master (or a
+    # test) can dial a real limit down. A floor of 1e9 made every smaller setting a validation
+    # error, which silently turned the whole rate governor into dead code.
+    max_llm_tokens_per_call: int = Field(default=81_920_000_000, ge=1)
+    max_llm_calls_per_min: int = Field(default=12_000_000_000, ge=1)
     max_tool_calls_per_min: int = Field(default=240, ge=1)
     max_web_fetches_per_min: int = Field(default=10_000, ge=1)
     max_spawned_agents: int = Field(default=32, ge=0)
@@ -4313,60 +4318,81 @@ class NyxaraSettings(BaseSettings):
         # touches a safety boundary — the never-disable block above still stands, and simulation +
         # sandbox are re-forced here so max capability is never max risk.
         if (self.max_power or self.profile is Profile.MAX) and self.profile is not Profile.TEST:
-            # Safety floors held ON even at full power.
+            # The crank raises a knob the Master has *not spoken about*. A field he set explicitly
+            # — in the environment, a .env file or the constructor — is his standing instruction
+            # and is left exactly as given; ``model_fields_set`` is how pydantic tells the two
+            # apart, and it is still pristine here because nothing below has been assigned yet.
+            #
+            # Forcing unconditionally made every documented off-switch a lie: with max_power ON by
+            # default, `NYXARA_AGENCY__PRIVILEGE_ESCALATION=false` parsed correctly, landed in the
+            # model, and was then overwritten a few lines later — so the Master could not decline
+            # root on his own machine, and the config comment telling him how to was wrong.
+            def _crank(model: BaseModel, field: str, value: Any) -> None:
+                if field not in model.model_fields_set:
+                    setattr(model, field, value)
+
+            # Safety floors held ON even at full power — these are boundaries, not capabilities,
+            # so they are forced regardless of what was asked for.
             self.features.simulation_required = True
             self.agency.sandbox_before_real_action = True
             self.guard.kill_switch_enabled = True
             self.guard.zero_trust = True
             # Deepest verified reasoning every turn.
-            self.llm.deep_reasoning.enabled = True
-            self.llm.deep_reasoning.max_rung = 4
-            self.llm.deep_reasoning.samples = 12
-            self.llm.deep_reasoning.max_seconds = 600.0
-            self.llm.deep_reasoning.keep_best = True
-            self.llm.deep_reasoning.ground_verifier = True
-            self.llm.deep_reasoning.learn_effort = True
+            _crank(self.llm.deep_reasoning, "enabled", True)
+            _crank(self.llm.deep_reasoning, "max_rung", 4)
+            _crank(self.llm.deep_reasoning, "samples", 12)
+            _crank(self.llm.deep_reasoning, "max_seconds", 600.0)
+            _crank(self.llm.deep_reasoning, "keep_best", True)
+            _crank(self.llm.deep_reasoning, "ground_verifier", True)
+            _crank(self.llm.deep_reasoning, "learn_effort", True)
             # Metacognitive allocation at full power raises the *ceiling* (the full 600s search is
             # reachable, plus the self-consistency probe as extra evidence) — the controller still
             # allocates per turn, so an easy prompt remains one forward pass. That per-turn choice
             # IS the max-power feature, not a weakening of it.
-            self.metacontrol.enabled = True
-            self.metacontrol.max_seconds_ceiling = 600.0
-            self.metacontrol.escalation = True
-            self.metacontrol.probe_self_consistency = True
-            self.llm.reasoning_passes = 5
-            self.llm.reasoning_samples = 9
-            self.mcts.enabled = True
+            _crank(self.metacontrol, "enabled", True)
+            _crank(self.metacontrol, "max_seconds_ceiling", 600.0)
+            _crank(self.metacontrol, "escalation", True)
+            _crank(self.metacontrol, "probe_self_consistency", True)
+            _crank(self.llm, "reasoning_passes", 5)
+            _crank(self.llm, "reasoning_samples", 9)
+            _crank(self.mcts, "enabled", True)
             # Own-model-first, council presiding.
-            self.council.enabled = True
-            self.council.prefer_self_weight = 3.0
-            self.router.enabled = True
-            self.self_model_router.enabled = True
+            _crank(self.council, "enabled", True)
+            _crank(self.council, "prefer_self_weight", 3.0)
+            _crank(self.router, "enabled", True)
+            _crank(self.self_model_router, "enabled", True)
             # Compounding self-growth from the first tick.
-            self.genesis.enabled = True
-            self.genesis.run_on_boot = True
-            self.mind_evolution.enabled = True
-            self.self_improvement.continuous = True
-            self.temporal.enabled = True
-            self.temporal.autostart = True
-            self.server.autonomic = True
+            _crank(self.genesis, "enabled", True)
+            _crank(self.genesis, "run_on_boot", True)
+            _crank(self.mind_evolution, "enabled", True)
+            _crank(self.self_improvement, "continuous", True)
+            _crank(self.temporal, "enabled", True)
+            _crank(self.temporal, "autostart", True)
+            _crank(self.server, "autonomic", True)
             # Risky / security / hardware knobs: safe at the bare code default so libraries, tests
             # and subprocesses stay lean & safe — but at FULL POWER (explicitly chosen) they engage.
-            self.agency.privilege_escalation = True
-            self.agency.system.allow_power = True
-            self.agency.autonomous_internet_allow_irreversible = True
-            self.agency.civilization_autonomous = True
-            self.foundry.trust_remote_code = True
-            self.foundry.load_in_4bit = True      # 8bit stays off (mutually exclusive)
-            self.foundry.lora_requires_gpu = True
-            self.foundry.lora_use_rslora = True
-            self.llm.self_serve_any_backend = True
-            self.self_improvement.grounded_web_enabled = True
+            _crank(self.agency, "privilege_escalation", True)
+            _crank(self.agency.system, "allow_power", True)
+            _crank(self.agency, "autonomous_internet_allow_irreversible", True)
+            _crank(self.agency, "civilization_autonomous", True)
+            # A tool NYXARA forged herself starts with a scoped grant rather than none, so the
+            # autonomous tool-forge can actually *use* what it builds without a round trip to the
+            # Master. Still least-privilege — "scoped", never blanket — and still behind every gate.
+            _crank(self.agency, "new_tool_trust", "scoped")
+            _crank(self.foundry, "trust_remote_code", True)
+            _crank(self.foundry, "load_in_4bit", True)   # 8bit stays off (mutually exclusive)
+            # NOT cranked: ``foundry.lora_requires_gpu``. Its polarity is inverted relative to every
+            # other knob here — True means "refuse to run LoRA unless a GPU is present", so forcing
+            # it ON *disables* LoRA fine-tuning on the CPU-only box this normally runs on. Max power
+            # means more capability, so the knob is left at whatever the deployment chose.
+            _crank(self.foundry, "lora_use_rslora", True)
+            _crank(self.llm, "self_serve_any_backend", True)
+            _crank(self.self_improvement, "grounded_web_enabled", True)
             # She never stops watching or listening at full power: faster escalation
             # cadence and a sharper orienting reflex (still gate-checked per event).
-            self.perception.enabled = True
-            self.perception.min_escalation_interval_s = 10.0
-            self.perception.burst_interval_s = 0.25
+            _crank(self.perception, "enabled", True)
+            _crank(self.perception, "min_escalation_interval_s", 10.0)
+            _crank(self.perception, "burst_interval_s", 0.25)
 
         return self
 

@@ -148,6 +148,18 @@ class SystemControl:
 
     def _protected(self, pid: int) -> Optional[Dict[str, Any]]:
         """Return a refusal dict if ``pid`` is protected, else None."""
+        # A non-positive PID is not a process, it is a BROADCAST, and every guard below reasons
+        # about single processes. ``os.kill(-1, …)`` signals every process the caller may signal;
+        # ``os.kill(0, …)`` and ``os.kill(-n, …)`` signal a whole process group. None of those
+        # PIDs equals NYXARA's own, so ``protect_self`` waved them straight through — and since
+        # her process is inside the blast radius, `kill_process(-1)` as root took down the machine
+        # AND her, which also takes down /scram, oversight and the transparency feed. Refuse the
+        # shape outright; a real target is always > 0.
+        if pid <= 0:
+            return {"ok": False,
+                    "error": f"refusing to target pid {pid}: non-positive PIDs signal a whole "
+                             "process group (or every reachable process), which cannot be "
+                             "guarded — name a single process"}
         if pid in set(self.protected_pids):
             return {"ok": False, "error": f"refusing to target protected pid {pid}"}
         if self.protect_self:

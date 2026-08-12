@@ -31,8 +31,20 @@ def test_a_lone_node_reports_itself_unavailable():
     assert synapse.beat() is None
 
 
-def test_the_brain_does_not_build_it_by_default():
-    assert NyxBrain(get_settings().nyx).synergy is None
+def test_the_brain_builds_it_by_default_and_it_stays_inert_alone():
+    """``synergy_enabled`` ships ON, and on a single node that still costs nothing.
+
+    The flag was flipped to True at the field default; this assertion was left behind saying
+    the opposite. What keeps the default free is not the faculty's absence but its inertness,
+    which the test above pins: a lone node is ``available() is False`` with a ``beat()`` of None.
+    """
+    assert get_settings().nyx.synergy_enabled is True
+    assert NyxBrain(get_settings().nyx).synergy is not None
+
+
+def test_the_brain_omits_it_when_the_flag_is_off():
+    cfg = get_settings().nyx.model_copy(update={"synergy_enabled": False})
+    assert NyxBrain(cfg).synergy is None
 
 
 # -------------------- what travels -------------------- #
