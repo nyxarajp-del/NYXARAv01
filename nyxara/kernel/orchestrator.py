@@ -7192,13 +7192,23 @@ class NyxaraCore:
                         observed = max(observed, float(gen.latency_s))
         except Exception:  # noqa: BLE001 — observation must never break a turn
             observed = 0.0
-        if observed > 0.0:
-            return max(1.0, observed * 2.0)     # headroom for a slower-than-usual reply
+        # ``min_generation_budget_s`` is a MINIMUM, and until now it was only a fallback: it was
+        # read solely when there were no observations, so any measurement at all — however
+        # unrepresentative — silently replaced it. The ledger records every generation, including
+        # the cheap internal ones, and `observed` is their max. Measured here: turns kept dying on
+        # a 15.0 s deadline (7.5 s observed x 2) with the minimum configured at 240 s, and every
+        # knowledge question fell to the deterministic scaffold. Setting the knob changed nothing,
+        # which is the worst way for a knob to be wrong.
+        #
+        # A floor that a measurement can lower is not a floor. Both paths now respect it.
         try:
             from nyxara.kernel.config import get_settings
-            return max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
+            floor = max(1.0, float(get_settings().metacontrol.min_generation_budget_s))
         except Exception:  # noqa: BLE001
-            return 30.0
+            floor = 30.0
+        if observed > 0.0:
+            return max(floor, observed * 2.0)   # headroom for a slower-than-usual reply
+        return floor
 
     @staticmethod
     def _deadline_share() -> float:
