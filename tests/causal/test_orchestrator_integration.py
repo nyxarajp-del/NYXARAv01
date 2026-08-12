@@ -100,6 +100,32 @@ def test_the_turn_gate_can_be_switched_off(monkeypatch):
     assert core._causal_claims("Heavy rain causes flooding.") == []
 
 
+def test_report_surfaces_the_engine_and_its_last_turn():
+    """``_last_causal`` was written every turn and read by nothing — the comment beside it
+    claimed report() surfaced it, and report() had never mentioned the engine at all."""
+    core = _core()
+    core._causal_engage("Heavy rain causes flooding in the valley.", [])
+    core._causal_engage("Heavy rain prevents flooding in the valley.", [])
+
+    causal = core.report().get("causal")
+    assert causal is not None
+    assert causal["knot_gate_abstains"] is True
+    assert causal["lattice"]["knots"] == 1
+    assert causal["last_turn"]["consistent"] is False
+    assert causal["last_turn"]["abstain"] is True
+
+
+def test_report_omits_causal_when_the_engine_is_off(monkeypatch):
+    from nyxara.kernel import config as cfg
+
+    settings = NyxaraSettings()
+    settings.causal_engine.enabled = False
+    monkeypatch.setattr(cfg, "get_settings", lambda: settings)
+
+    core = _core()
+    assert "causal" not in core.report()
+
+
 def test_config_flag_disables_the_engine(monkeypatch):
     from nyxara.kernel import config as cfg
 

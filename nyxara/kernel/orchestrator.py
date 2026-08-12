@@ -11522,6 +11522,15 @@ class NyxaraCore:
                 rep["skill_rehearsal"] = self._skill_rehearsal.stats()
             except Exception:  # noqa: BLE001 — rehearsal stats are best-effort
                 pass
+        # the CAUSAL / OMNISCIENCE engine: its standing state plus what it contributed to the
+        # last turn — the resonance, and any Knot Mutation Failure the gate raised
+        if self.causal_engine is not None:
+            try:
+                rep["causal"] = self.causal_engine.status()
+                if self._last_causal is not None:
+                    rep["causal"]["last_turn"] = self._last_causal.to_dict()
+            except Exception:  # noqa: BLE001 — the causal report is best-effort
+                pass
         if self.reflector is not None:
             rep["episodes"] = len(self.reflector)
         if self.world_model is not None:
