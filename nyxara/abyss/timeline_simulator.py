@@ -28,13 +28,25 @@ the world-model factory, with a graceful fallback).
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from nyxara.mind.world_model import WorldModel, build_world_model
 from nyxara.sim.montecarlo import Estimate
 
-__all__ = ["ActionOutcome", "TimelineReport", "TimelineSimulator"]
+__all__ = ["ActionOutcome", "TimelineReport", "TimelineSimulator", "DEFAULT_NOISE_SCALE"]
+
+#: Default per-step divergence injected into numeric rollouts — the model-error term.
+#:
+#: This defaulted to ``0.0``, which quietly asserted that the learned world model predicts the
+#: next state *exactly*. The only divergence left was then the random continuation policy, so a
+#: pass over a single committed action collapsed to one trajectory repeated N times: identical
+#: ``p05`` and ``p95``, a zero-width confidence interval, and a "tail risk" equal to the mean
+#: because there was no tail. That is a confident-looking table of one future, which is precisely
+#: what this engine exists not to produce. Small enough not to swamp the learned dynamics, large
+#: enough that the futures are actually distinct. Pass ``noise_scale=0.0`` to opt back out.
+DEFAULT_NOISE_SCALE = 0.01
 
 State = Sequence[Any]
 RewardFn = Callable[[Any, Any, Any], float]
@@ -162,13 +174,27 @@ class TimelineSimulator:
     def simulate(self, start_state: State, candidate_actions: Sequence[Any], *,
                  branches: int = 1000, horizon: int = 8,
                  reward_fn: Optional[RewardFn] = None, goal_fn: Optional[GoalFn] = None,
-                 noise_scale: float = 0.0, risk_aversion: float = 0.5) -> TimelineReport:
+                 noise_scale: float = DEFAULT_NOISE_SCALE, risk_aversion: float = 0.5,
+                 budget_ms: Optional[float] = None) -> TimelineReport:
         """Branch ``start_state`` into ``branches`` futures and rank ``candidate_actions``.
 
         ``branches`` is the *total* number of futures, split evenly across the candidate
         actions (so "a thousand futures" means a thousand rollouts in all). Each action is
         scored by a **risk-aware** value ``mean_reward − risk_aversion · tail_risk``, where
         ``tail_risk`` is the CVaR of losses (the mean of the worst ~5% of its futures).
+
+        ``noise_scale`` is the model-error term, and it defaults to :data:`DEFAULT_NOISE_SCALE`
+        (on) rather than to zero. At zero the only thing that separates one future from another is
+        the random continuation policy, so the spread reported is the spread of *her own action
+        choices* and never of the model being wrong — and for a single candidate action it
+        vanishes entirely, leaving one trajectory counted N times. Pass ``0.0`` explicitly for a
+        noise-free pass. Noise is only ever applied to fully numeric states.
+
+        ``budget_ms`` caps wall-clock time. The allowance is split **evenly across the candidate
+        actions** so a clipped pass ranks them on comparable evidence instead of giving the first
+        action all the futures; every action always gets at least one rollout, and
+        :attr:`ActionOutcome.branches` reports what each one actually received. ``None`` (the
+        default) means no cap — the pass is then reproducible for a fixed seed.
         """
         actions = list(candidate_actions)
         start = tuple(start_state)
@@ -178,32 +204,43 @@ class TimelineSimulator:
                                   risk_aversion=risk_aversion)
 
         per_action = max(1, branches // len(actions))
+        # An even slice of the wall-clock allowance per action: a clipped pass must not hand the
+        # first action a thousand futures and the last one three, or the ranking compares noise.
+        slice_s = ((float(budget_ms) / 1000.0) / len(actions)
+                   if budget_ms is not None and budget_ms > 0.0 else None)
         outcomes: List[ActionOutcome] = []
         for i, a in enumerate(actions):
             rng = random.Random((self.seed * 1_000_003) ^ (i + 1))
             rewards: List[float] = []
             confs: List[float] = []
             hits = 0
-            for _ in range(per_action):
+            deadline = (time.monotonic() + slice_s) if slice_s is not None else None
+            for n in range(per_action):
                 total, mean_conf, reached = self._rollout(
                     start, a, actions, horizon, reward_fn, goal_fn, rng, noise_scale)
                 rewards.append(total)
                 confs.append(mean_conf)
                 hits += 1 if reached else 0
+                # always buy at least one future before the clock can stop us — a budget too
+                # small to imagine anything must still imagine something, not nothing.
+                if deadline is not None and n + 1 < per_action and time.monotonic() >= deadline:
+                    break
+            drawn = len(rewards)
             est = Estimate(rewards)
             # treat negative reward as loss; CVaR of losses = expected worst-tail damage
             loss_tail = Estimate([-r for r in rewards]).cvar(0.95)
             mean_conf = sum(confs) / len(confs) if confs else 0.0
-            goal_prob = hits / per_action
+            goal_prob = hits / drawn
             score = est.mean - risk_aversion * loss_tail
             outcomes.append(ActionOutcome(
                 action=a, expected_reward=est.mean, ci95=est.ci95(),
                 p05=est.percentile(5), p95=est.percentile(95), tail_risk=loss_tail,
                 goal_probability=goal_prob, mean_confidence=mean_conf,
-                branches=per_action, score=score))
+                branches=drawn, score=score))
 
         outcomes.sort(key=lambda o: o.score, reverse=True)
         best = outcomes[0]
+        total_drawn = sum(o.branches for o in outcomes)
 
         # honest overall confidence: blends learned-experience volume with how confident
         # the world model actually was along the best action's rollouts.
@@ -215,13 +252,13 @@ class TimelineSimulator:
         confidence = round(0.5 * data_conf + 0.5 * best.mean_confidence, 3)
 
         outcome = (
-            f"Simulated {per_action * len(actions)} futures over {horizon} steps across "
+            f"Simulated {total_drawn} futures over {horizon} steps across "
             f"{len(actions)} actions. Best: '{best.action}' "
             f"(E[reward]={best.expected_reward:.2f}, tail_risk={best.tail_risk:.2f}, "
             f"P(goal)={best.goal_probability:.2f}). Confidence {confidence:.2f}.")
 
         return TimelineReport(
-            start_state=start, total_branches=per_action * len(actions), horizon=horizon,
+            start_state=start, total_branches=total_drawn, horizon=horizon,
             best_action=best.action, action_rankings=outcomes, confidence=confidence,
             expected_outcome=outcome,
             goal_probability=(best.goal_probability if goal_fn is not None else None),

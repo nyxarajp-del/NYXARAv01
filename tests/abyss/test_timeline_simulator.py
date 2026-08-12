@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import random
+import time
 
 
 from nyxara.abyss.timeline_simulator import (
+    DEFAULT_NOISE_SCALE,
     ActionOutcome,
     TimelineReport,
     TimelineSimulator,
@@ -133,3 +135,63 @@ def test_default_world_model_built_when_none():
     # a fresh model has no experience → honest low confidence
     report = sim.simulate((0.0,), ["left", "right"], branches=100, horizon=3)
     assert report.confidence < 0.3
+
+
+# -------------------- divergence is on by default -------------------- #
+def test_divergence_is_injected_by_default():
+    """A pass over one committed action must still produce a *distribution* of futures.
+
+    With ``noise_scale=0`` the learned model is treated as exact, so every branch replays the
+    same trajectory: p05 == p95, a zero-width interval, and a "tail risk" that is just the mean.
+    """
+    sim = TimelineSimulator(world_model=_trained(), seed=0)
+    off = sim.simulate((5.0,), ["left"], branches=200, horizon=5,
+                       reward_fn=_home_reward, noise_scale=0.0).action_rankings[0]
+    assert off.p95 == off.p05                      # one future, counted 200 times
+    assert off.ci95[0] == off.ci95[1]
+
+    on = sim.simulate((5.0,), ["left"], branches=200, horizon=5,
+                      reward_fn=_home_reward).action_rankings[0]
+    assert on.p95 > on.p05                         # a real spread, by default
+    assert on.ci95[1] > on.ci95[0]
+
+
+def test_default_noise_scale_is_on():
+    assert DEFAULT_NOISE_SCALE > 0.0
+
+
+# -------------------- the wall-clock budget -------------------- #
+def test_budget_clips_the_branch_count():
+    sim = TimelineSimulator(world_model=_trained(), seed=0)
+    started = time.monotonic()
+    report = sim.simulate((5.0,), ["left", "right", "stay"], branches=200_000, horizon=8,
+                          reward_fn=_home_reward, budget_ms=250)
+    elapsed_ms = (time.monotonic() - started) * 1000.0
+    assert report.total_branches < 200_000         # the clock, not the ask, decided
+    assert elapsed_ms < 250 * 4                    # generous: it stopped rather than ran on
+    assert report.total_branches == sum(o.branches for o in report.action_rankings)
+
+
+def test_budget_is_split_evenly_so_the_ranking_stays_comparable():
+    """A clipped pass must not give the first action all the futures and the last one three."""
+    sim = TimelineSimulator(world_model=_trained(), seed=0)
+    report = sim.simulate((5.0,), ["left", "right", "stay"], branches=200_000, horizon=8,
+                          reward_fn=_home_reward, budget_ms=300)
+    drawn = [o.branches for o in report.action_rankings]
+    assert min(drawn) >= 1
+    assert max(drawn) <= 2 * min(drawn)             # comparable evidence per action
+
+
+def test_a_budget_too_small_still_imagines_something():
+    sim = TimelineSimulator(world_model=_trained(), seed=0)
+    report = sim.simulate((5.0,), ["left", "right"], branches=500, horizon=4,
+                          reward_fn=_home_reward, budget_ms=0.001)
+    assert report.best_action in ("left", "right")
+    assert all(o.branches >= 1 for o in report.action_rankings)
+
+
+def test_no_budget_means_every_branch_asked_for():
+    sim = TimelineSimulator(world_model=_trained(), seed=0)
+    report = sim.simulate((5.0,), ["left", "right"], branches=400, horizon=4,
+                          reward_fn=_home_reward)
+    assert report.total_branches == 400

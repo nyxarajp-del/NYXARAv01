@@ -3456,6 +3456,102 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — butterfly analysis is a capability, never required
             return None
 
+    def _abyss_state(self, state: Optional[Sequence[Any]]) -> Optional[tuple]:
+        """The state the abyss engines should reason over: the caller's, or — when they gave
+        none — the embodied agent's live one. Returns ``None`` when there is no state at all,
+        because imagining futures of a state she does not have is not foresight."""
+        if state is not None:
+            return tuple(state)
+        agent = getattr(self, "embodied_agent", None)
+        cur = getattr(agent, "state", None) if agent is not None else None
+        return tuple(cur) if cur else None
+
+    def simulate_futures(self, candidate_actions: Sequence[Any], *,
+                         state: Optional[Sequence[Any]] = None, branches: int = 512,
+                         horizon: int = 6, risk_aversion: float = 0.5,
+                         budget_ms: Optional[float] = None) -> Dict[str, Any]:
+        """Abyss · 1, Master-facing: branch the present into ``branches`` futures over the shared
+        world model and rank ``candidate_actions`` by risk-aware outcome.
+
+        The engine was reachable only from the embodied loop's private planner, so nothing
+        outside that loop could ask her what she sees ahead. Reports honestly rather than
+        confidently: too little lived experience and she says so instead of ranking noise.
+        Never raises into a turn.
+        """
+        sim = getattr(self, "timeline_simulator", None)
+        if sim is None:
+            return {"ok": False, "reason": "the timeline simulator is not available"}
+        actions = list(candidate_actions or [])
+        if len(actions) < 2:
+            return {"ok": False, "reason": "fewer than two actions — nothing to compare futures between"}
+        start = self._abyss_state(state)
+        if start is None:
+            return {"ok": False, "reason": "no state to imagine futures from"}
+        try:
+            learned = len(self.world_model)
+        except Exception:  # noqa: BLE001
+            learned = 0
+        if learned < 30:
+            return {"ok": False, "blind": True, "coverage": learned,
+                    "reason": (f"the world model has learned {learned} transitions (needs 30); "
+                               f"simulating would return zeros dressed as foresight")}
+        try:
+            report = sim.simulate(start, actions, branches=branches, horizon=horizon,
+                                  risk_aversion=risk_aversion, budget_ms=budget_ms)
+            out = {"ok": True, "blind": False, "coverage": learned}
+            out.update(report.to_dict())
+            return out
+        except Exception as exc:  # noqa: BLE001 — foresight is advisory, never fatal
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def butterfly_scan(self, *, state: Optional[Sequence[Any]] = None, horizon: int = 6,
+                       delta: float = 0.02, labels: Optional[Sequence[str]] = None,
+                       ) -> Dict[str, Any]:
+        """Abyss · 2, Master-facing: perturb each numeric dimension of the present in turn and
+        rank them by how far the tiny change cascades into the future.
+
+        Answers "which small detail of right now most controls what happens next?". Uses the
+        embodied agent's greedy policy as the rollout policy — the same one
+        :meth:`_butterfly_attend` uses — so the ranking measures the world, not the planner.
+        Never raises into a turn.
+        """
+        be = getattr(self, "butterfly_effect", None)
+        agent = getattr(self, "embodied_agent", None)
+        if be is None:
+            return {"ok": False, "reason": "the butterfly-effect engine is not available"}
+        if agent is None:
+            return {"ok": False, "reason": "no embodied policy to roll the futures forward with"}
+        start = self._abyss_state(state)
+        if start is None:
+            return {"ok": False, "reason": "no state to perturb"}
+        try:
+            learned = len(self.world_model)
+        except Exception:  # noqa: BLE001
+            learned = 0
+        if learned < 30:
+            return {"ok": False, "blind": True, "coverage": learned,
+                    "reason": (f"the world model has learned {learned} transitions (needs 30); "
+                               f"every dimension would look equally decisive")}
+        try:
+            def greedy(s: Any) -> str:
+                saved = agent.planner
+                agent.planner = None       # don't recurse into full timeline simulation per step
+                try:
+                    return agent.decide(s)
+                finally:
+                    agent.planner = saved
+
+            ranking = be.sensitivity(start, greedy, horizon=horizon, delta=delta, labels=labels)
+            if not ranking:
+                return {"ok": False, "reason": "no numeric dimension in this state to perturb"}
+            return {"ok": True, "blind": False, "coverage": learned,
+                    "state": list(start), "horizon": horizon, "delta": delta,
+                    "most_sensitive": ranking[0].to_dict(),
+                    "chaotic": ranking[0].is_chaotic,
+                    "ranking": [r.to_dict() for r in ranking]}
+        except Exception as exc:  # noqa: BLE001 — sensitivity analysis is advisory, never fatal
+            return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     def _build_dark_data_miner(self) -> Any:
         """Void · 1 — the dark-data miner: robust extraction of structure from noise,
         silence, gaps, and missing data."""
