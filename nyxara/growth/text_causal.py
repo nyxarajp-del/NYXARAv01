@@ -61,18 +61,37 @@ _DEFEATERS = re.compile(
 # The weak cues ("actually", "no wait") are anchored to the start of the sentence: mid-sentence
 # they are ordinary filler, and dropping every sentence containing the word "actually" would
 # cost far more real claims than it saves. The explicit retractions match anywhere.
+# Each alternative must consume the *whole* cue phrase: what is left after it is stripped
+# becomes the replacement claim, so a half-eaten cue would leave "kaha" or "wrong" glued to the
+# cause and mint a junk node.
 _CORRECTIONS = re.compile(
     r"^\s*(?:actually|correction|no[, ]+wait|wait[, ]+no|on second thought(?:s)?|"
-    r"scratch that|i meant|sorry[, ]+i meant)\b"
-    r"|\bi (?:was wrong|misspoke|take that back|stand corrected)\b"
-    r"|\b(?:my mistake|let me correct|to correct myself)\b"
-    r"|\bgalat (?:kaha|bola|tha)\b|\bmaine galat\b"
-    r"|(?:ग़लत|गलत)\s*(?:कहा|बोला|था)", re.I)
+    r"scratch that|sorry[, ]+i meant|i meant)"
+    r"|\bi (?:was wrong|misspoke|take that back|stand corrected)"
+    r"|\b(?:my mistake|let me correct(?: myself)?|to correct myself)"
+    r"|\b(?:maine\s+)?galat\s+(?:kaha|bola|tha)"
+    r"|(?:मैंने\s*)?(?:ग़लत|गलत)\s*(?:कहा|बोला|था)", re.I)
+
+# Punctuation and filler left dangling once the cue is removed ("Actually, X…" → "X…").
+_CUE_RESIDUE = re.compile(r"^[\s,;:.—-]+(?:that\s+|but\s+)?", re.I)
 
 
 def is_correction(sentence: str) -> bool:
     """True when a sentence retracts an earlier claim rather than asserting a new one."""
     return bool(_CORRECTIONS.search(sentence or ""))
+
+
+def strip_correction(sentence: str) -> str:
+    """Remove the retraction cue, leaving the claim the speaker is replacing it with.
+
+    ``"Actually, caffeine reduces my focus"`` → ``"caffeine reduces my focus"``. Returns the
+    sentence unchanged when it carries no cue.
+    """
+    match = _CORRECTIONS.search(sentence or "")
+    if match is None:
+        return sentence or ""
+    rest = (sentence[:match.start()] + " " + sentence[match.end():]).strip()
+    return _CUE_RESIDUE.sub("", rest).strip()
 
 # (name, pattern, cause_group, effect_group, polarity)
 _PATTERNS: Tuple[Tuple[str, "re.Pattern[str]", int, int, int], ...] = (
@@ -141,6 +160,7 @@ class CausalClaim:
     quote: str = ""
     source: str = ""
     confidence: float = _TEXT_CONFIDENCE
+    corrective: bool = False        # retracts an earlier claim rather than adding to them
 
     def as_tuple(self) -> Tuple[str, str, int]:
         """``(cause, effect, sign)`` — the shape :meth:`KnotLattice.check` takes."""
@@ -149,7 +169,7 @@ class CausalClaim:
     def to_dict(self) -> Dict[str, Any]:
         return {"cause": self.cause, "effect": self.effect, "cue": self.cue,
                 "polarity": self.polarity, "quote": self.quote, "source": self.source,
-                "confidence": round(self.confidence, 4)}
+                "confidence": round(self.confidence, 4), "corrective": self.corrective}
 
 
 @dataclass
@@ -159,7 +179,8 @@ class TextCausalReport:
     sentences: int = 0
     claims: List[CausalClaim] = field(default_factory=list)
     defeated: int = 0                  # concessive sentences skipped
-    corrections: int = 0               # retractions skipped ("actually, X prevents Y")
+    corrections: int = 0               # retractions read ("actually, X prevents Y")
+    retracted: int = 0                 # strands un-tied to make room for a correction
     contradicted: int = 0              # claims refused by the knot lattice
     registered: int = 0                # links written onto the CausalWorldModel
     contradictions: List[str] = field(default_factory=list)
@@ -167,7 +188,7 @@ class TextCausalReport:
     def summary(self) -> str:
         lines = [f"· text-causal: {len(self.claims)} claim(s) from {self.sentences} sentence(s); "
                  f"{self.defeated} concessive sentence(s) skipped, "
-                 f"{self.corrections} retraction(s) skipped, "
+                 f"{self.corrections} retraction(s) ({self.retracted} strand(s) un-tied), "
                  f"{self.contradicted} contradiction(s) refused"]
         for claim in self.claims[:10]:
             arrow = "→" if claim.polarity > 0 else "⊣"
@@ -181,7 +202,7 @@ class TextCausalReport:
     def to_dict(self) -> Dict[str, Any]:
         return {"sentences": self.sentences, "claims": [c.to_dict() for c in self.claims],
                 "defeated": self.defeated, "corrections": self.corrections,
-                "contradicted": self.contradicted,
+                "retracted": self.retracted, "contradicted": self.contradicted,
                 "registered": self.registered, "contradictions": list(self.contradictions)}
 
 
@@ -212,20 +233,24 @@ def extract_claims(text: str, *, source: str = "",
         clean = sentence.strip().rstrip(".!?")
         if not clean:
             continue
-        if _CORRECTIONS.search(clean):
-            # A retraction, not an assertion. Dropping it keeps a speaker correcting themselves
-            # from being read as a contradiction — the prior claim simply stands, unchallenged,
-            # because nothing here can tell which of the two the speaker now means.
-            defeated += 1
-            if report is not None:
-                report.corrections += 1
-            continue
+        # A retraction is not an assertion *and* not a contradiction: it replaces what was said
+        # before. Strip the cue and read what is left as the replacement claim, flagged so the
+        # gate retracts the old strand instead of refusing the new one.
+        corrective = bool(_CORRECTIONS.search(clean))
+        if corrective:
+            clean = strip_correction(clean)
+            if not clean:
+                defeated += 1                 # a bare "I was wrong." — nothing to put in its place
+                if report is not None:
+                    report.corrections += 1
+                continue
         if _DEFEATERS.search(clean):
             # "X does not cause Y" matches the causal pattern too — the concession must win.
             defeated += 1
             if report is not None:
                 report.defeated += 1
             continue
+        matched = False
         for cue, pattern, cause_group, effect_group, polarity in _PATTERNS:
             match = pattern.match(clean)
             if not match:
@@ -235,8 +260,15 @@ def extract_claims(text: str, *, source: str = "",
             if not cause or not effect or cause == effect:
                 continue
             claims.append(CausalClaim(cause=cause, effect=effect, cue=cue, polarity=polarity,
-                                      quote=sentence.strip()[:200], source=source))
+                                      quote=sentence.strip()[:200], source=source,
+                                      corrective=corrective))
+            matched = True
             break            # one claim per sentence: the first cue that fires is the reading
+        if corrective and not matched:
+            # a retraction with no readable causal claim behind it — still not an assertion
+            defeated += 1
+            if report is not None:
+                report.corrections += 1
     return claims, len(sentences), defeated
 
 
@@ -259,6 +291,16 @@ def claims_to_graph(claims: Sequence[CausalClaim], *, model: Any = None,
     accepted: List[CausalClaim] = []
     for claim in claims:
         if lattice is not None:
+            if claim.corrective:
+                # The speaker said this instead of what they said before, so un-tie the old
+                # strand first. Only the pair being corrected is touched; everything else the
+                # lattice holds survives the rebuild.
+                try:
+                    removed = lattice.retract(claim.cause, claim.effect)
+                    report.corrections += 1
+                    report.retracted += removed
+                except Exception:  # noqa: BLE001 — an older lattice may not retract; then the
+                    report.corrections += 1   # tie below simply refuses, as it did before
             try:
                 # pass the lattice's own sign constants rather than a bool or a raw int
                 lattice.tie(claim.cause, claim.effect, claim.polarity, reason=claim.cue)
@@ -279,7 +321,12 @@ def _register_claims(model: Any, claims: Sequence[CausalClaim]) -> int:
     """Write surviving claims onto a CausalWorldModel with full provenance (never raises).
 
     A pre-existing link is never overwritten: an edge measured from data outranks one asserted in
-    a sentence, and this must not be able to demote it."""
+    a sentence, and this must not be able to demote it.
+
+    The one exception is a **retraction**, and only over an edge that was itself asserted in text:
+    a speaker replacing what they said must be able to replace what their words wrote, or the
+    graph would keep quoting the sentence they just took back. A measured edge still wins — being
+    corrected about a claim is not evidence against a measurement."""
     try:
         from nyxara.mind.causal_world_model import CAUSAL, CausalLink
     except Exception:  # noqa: BLE001
@@ -291,7 +338,7 @@ def _register_claims(model: Any, claims: Sequence[CausalClaim]) -> int:
     written = 0
     for claim in claims:
         key = (claim.cause, claim.effect)
-        if key in links:
+        if key in links and not _may_supersede(claim, links[key]):
             continue          # measured evidence already holds this edge; assertions do not win
         try:
             links[key] = CausalLink(
@@ -304,6 +351,17 @@ def _register_claims(model: Any, claims: Sequence[CausalClaim]) -> int:
         except Exception:  # noqa: BLE001
             continue
     return written
+
+
+def _may_supersede(claim: CausalClaim, existing: Any) -> bool:
+    """True when ``claim`` is a retraction and ``existing`` is itself only a text assertion."""
+    if not claim.corrective:
+        return False
+    evidence = getattr(existing, "evidence", None) or {}
+    try:
+        return evidence.get("source") == "text_claim"
+    except AttributeError:      # pragma: no cover — an evidence blob that isn't a mapping
+        return False
 
 
 def learn_from_text(text: str, *, model: Any = None, source: str = "",

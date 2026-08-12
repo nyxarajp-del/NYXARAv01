@@ -124,6 +124,7 @@ class KnotLattice:
         # claim that has aged out of the window is no longer caught.
         self.capacity = int(capacity)
         self._compactions = 0
+        self._retractions = 0
         self._parent: Dict[str, str] = {}
         self._parity: Dict[str, int] = {}   # parity (0/1) of a node relative to its parent
         self._rank: Dict[str, int] = {}
@@ -212,15 +213,44 @@ class KnotLattice:
 
     def _compact(self) -> None:
         """Rebuild from the newest half of the strands, releasing the aged-out ones."""
-        keep = self._knots[-max(1, self.capacity // 2):]
+        self._compactions += 1
+        self._rebuild(self._knots[-max(1, self.capacity // 2):])
+
+    def _rebuild(self, knots: Sequence[CausalKnot]) -> None:
+        """Re-tie ``knots`` from scratch — the only way to un-say something in a union-find.
+
+        Parity union-find has no un-union: the parity of every node is entangled with the order
+        the links arrived in. Replaying the survivors is O(n·α(n)) and exact, where surgery on
+        the parent array would not be.
+        """
         self._parent, self._parity, self._rank = {}, {}, {}
         self._adj, self._knots = {}, []
-        self._compactions += 1
-        for k in keep:
+        for k in knots:
             try:
                 self.tie(k.cause, k.effect, k.sign, reason=k.reason)
-            except KnotMutationFailure:  # pragma: no cover — kept strands were mutually consistent
+            except KnotMutationFailure:  # pragma: no cover — survivors were mutually consistent
                 continue
+
+    def retract(self, cause: str, effect: str) -> int:
+        """Un-tie every strand between ``cause`` and ``effect``. Returns how many were removed.
+
+        This is how a claim stops being held. It exists because a speaker who corrects
+        themselves — "X causes Y", then "actually X prevents Y" — is not contradicting anything;
+        they are replacing what they said, and without retraction the lattice can only refuse the
+        update or absorb a contradiction. Direction-agnostic: a strand ties two nodes, and the
+        pair is what is being un-said.
+
+        Stated plainly: retraction is destructive and unlogged beyond the counter. Anything that
+        can retract can erase a claim the lattice was relying on, so callers must only offer it
+        where a retraction was actually expressed.
+        """
+        pair = {(cause, effect), (effect, cause)}
+        keep = [k for k in self._knots if (k.cause, k.effect) not in pair]
+        removed = len(self._knots) - len(keep)
+        if removed:
+            self._rebuild(keep)
+            self._retractions += removed
+        return removed
 
     def _explain(self, cause: str, effect: str) -> List[str]:
         """BFS over accepted strands to reconstruct a path cause→…→effect (the cycle)."""
@@ -299,4 +329,5 @@ class KnotLattice:
     def status(self) -> Dict[str, Any]:
         return {"knots": len(self._knots), "nodes": len(self._parent),
                 "components": len({self._find(n)[0] for n in self._parent}),
-                "capacity": self.capacity, "compactions": self._compactions}
+                "capacity": self.capacity, "compactions": self._compactions,
+                "retractions": self._retractions}

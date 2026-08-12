@@ -118,17 +118,22 @@ def test_a_turn_with_no_claims_writes_no_knot_gate():
     assert "knot" not in gates
 
 
-def test_a_self_correction_is_not_treated_as_a_contradiction():
+def test_a_self_correction_replaces_the_claim_instead_of_clashing():
     """"X causes Y" then "actually X prevents Y" is the Master updating, not a hallucination."""
     core = _core()
     core._causal_engage("Caffeine improves my focus.", [])
     assert core._last_causal.committed == 1
 
-    thoughts: list = []
-    core._causal_engage("Actually caffeine reduces my focus.", thoughts, {})
+    core._causal_engage("Actually caffeine reduces my focus.", [], {})
     et = core._last_causal
     assert et.consistent is True and et.abstain is False
-    assert et.knot_check is None            # the retraction never reached the gate
+    assert et.committed == 1                 # the correction went in, it was not merely dropped
+    assert core.causal_engine.lattice.status()["retractions"] == 1
+
+    # and what she now holds is the correction
+    lattice = core.causal_engine.lattice
+    assert lattice.check([("caffeine", "my focus", -1)]).consistent is True
+    assert lattice.check([("caffeine", "my focus", +1)]).consistent is False
 
     candidate = _respond_candidate(confidence=0.8, belief=0.8)
     assert core._apply_knot_caution(candidate).confidence == 0.8   # and nothing was damped
@@ -147,8 +152,20 @@ def test_reading_reports_retractions_separately():
     report = core.learn_from_text("Heavy rain causes flooding. "
                                   "Actually heavy rain prevents flooding.")
     claims = report["causal_claims"]
-    assert claims["claims"] == 1 and claims["contradicted"] == 0
-    assert claims["corrections"] == 1
+    assert claims["contradicted"] == 0
+    assert claims["corrections"] == 1 and claims["retracted"] == 1
+
+
+def test_a_correction_in_a_document_updates_what_the_conversation_holds():
+    core = _core()
+    core.learn_from_text("Heavy rain causes flooding.")
+    core.learn_from_text("Actually heavy rain prevents flooding.")
+
+    # the conversation now agrees with the corrected reading, and clashes with the old one
+    core._causal_engage("Heavy rain prevents flooding.", [])
+    assert core._last_causal.consistent is True
+    core._causal_engage("Heavy rain causes flooding.", [])
+    assert core._last_causal.consistent is False
 
 
 def test_knot_gate_abstains_actually_damps_the_answer():

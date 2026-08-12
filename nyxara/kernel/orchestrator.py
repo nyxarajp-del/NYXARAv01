@@ -2289,7 +2289,16 @@ class NyxaraCore:
             return
         try:
             claims = self._causal_claims(text)
-            et = engine.turn(text, claims=claims or None, commit=bool(claims))
+            # A retraction replaces what was said before, so un-tie the old strand first —
+            # otherwise the gate refuses the Master's own correction as a contradiction.
+            for claim in claims:
+                if claim.corrective:
+                    try:
+                        engine.lattice.retract(claim.cause, claim.effect)
+                    except Exception:  # noqa: BLE001 — retraction is best-effort
+                        pass
+            tuples = [(c.cause, c.effect, c.polarity) for c in claims]
+            et = engine.turn(text, claims=tuples or None, commit=bool(tuples))
             self._last_causal = et
             if gates is not None and et.knot_check is not None:
                 gates["knot"] = "mutation-failure" if not et.consistent else "tied"
@@ -2321,12 +2330,14 @@ class NyxaraCore:
             pass
 
     @staticmethod
-    def _causal_claims(text: str) -> List[tuple]:
+    def _causal_claims(text: str) -> List[Any]:
         """Mine this turn's prose for signed causal claims to run past the knot gate.
 
         The deterministic cue grammar in :mod:`nyxara.growth.text_causal` — no LLM, same text
         always yields the same claims. Most turns yield none, and that costs a regex sweep.
-        Best-effort throughout: the gate is a capability, never a way to break a turn."""
+        Returns :class:`~nyxara.growth.text_causal.CausalClaim` objects so the caller can see
+        which of them are retractions. Best-effort throughout: the gate is a capability, never a
+        way to break a turn."""
         try:
             from nyxara.kernel.config import get_settings
             if not bool(getattr(get_settings().causal_engine, "knot_gate_on_turns", True)):
@@ -2336,7 +2347,7 @@ class NyxaraCore:
         try:
             from nyxara.growth.text_causal import extract_claims
             claims, _sentences, _defeated = extract_claims(text, source="turn")
-            return [(c.cause, c.effect, c.polarity) for c in claims]
+            return list(claims)
         except Exception:  # noqa: BLE001 — extraction is best-effort
             return []
 
@@ -10141,7 +10152,7 @@ class NyxaraCore:
         rep = mine_claims(text, model=self.causal_world_model, lattice=lattice)
         out = {"claims": len(rep.claims), "contradicted": rep.contradicted,
                "registered": rep.registered, "defeated": rep.defeated,
-               "corrections": rep.corrections}
+               "corrections": rep.corrections, "retracted": rep.retracted}
         if rep.contradicted:
             self.mind.record(
                 ThoughtKind.INFERENCE,

@@ -153,6 +153,60 @@ def test_a_capped_lattice_stays_bounded_and_still_rejects_contradictions():
         fresh.tie("x", "y", -1)
 
 
+def test_retract_un_ties_a_pair_and_leaves_the_rest_standing():
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1)
+    lattice.tie("b", "c", 1)
+    lattice.tie("x", "y", -1)
+
+    with pytest.raises(KnotMutationFailure):
+        lattice.tie("a", "b", -1)
+
+    assert lattice.retract("a", "b") == 1
+    lattice.tie("a", "b", -1)                       # the replacement now goes in cleanly
+    assert len(lattice) == 3
+    assert lattice.status()["retractions"] == 1
+
+    # the parity of everything else survived the rebuild
+    with pytest.raises(KnotMutationFailure):
+        lattice.tie("b", "c", -1)
+    with pytest.raises(KnotMutationFailure):
+        lattice.tie("x", "y", 1)
+
+
+def test_retract_is_direction_agnostic():
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1)
+    assert lattice.retract("b", "a") == 1           # a strand ties a pair, not an arrow
+
+
+def test_retracting_something_never_tied_is_a_no_op():
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1)
+    assert lattice.retract("q", "z") == 0
+    assert len(lattice) == 1 and lattice.status()["retractions"] == 0
+
+
+def test_retract_removes_every_strand_between_the_pair():
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1, reason="first")
+    lattice.tie("a", "b", 1, reason="restated")     # consistent, so recorded again
+    assert len(lattice) == 2
+    assert lattice.retract("a", "b") == 2
+    assert len(lattice) == 0
+
+
+def test_retract_does_not_resurrect_transitive_parity():
+    """a—b and b—c both concordant force a—c concordant; dropping a—b must free that."""
+    lattice = KnotLattice()
+    lattice.tie("a", "b", 1)
+    lattice.tie("b", "c", 1)
+    assert lattice.check([("a", "c", -1)]).consistent is False
+
+    lattice.retract("a", "b")
+    assert lattice.check([("a", "c", -1)]).consistent is True
+
+
 def test_an_uncapped_lattice_is_still_the_default():
     lattice = KnotLattice()
     for i in range(200):

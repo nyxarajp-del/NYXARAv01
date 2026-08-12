@@ -195,12 +195,25 @@ def test_a_measured_link_carries_no_such_warning():
     "Maine galat kaha, caffeine reduces my focus.",
     "मैंने ग़लत कहा, caffeine reduces my focus.",
 ])
-def test_a_retraction_yields_no_claim(sentence):
-    from nyxara.growth.text_causal import extract_claims, is_correction
+def test_a_retraction_yields_the_replacement_claim(sentence):
+    """The cue is stripped and what remains is read as the claim replacing the earlier one."""
+    from nyxara.growth.text_causal import extract_claims, is_correction, strip_correction
 
     assert is_correction(sentence) is True
-    claims, _sentences, defeated = extract_claims(sentence)
-    assert claims == [] and defeated == 1
+    assert strip_correction(sentence) == "caffeine reduces my focus."
+
+    claims, _sentences, _defeated = extract_claims(sentence)
+    assert len(claims) == 1
+    claim = claims[0]
+    assert (claim.cause, claim.effect, claim.polarity) == ("caffeine", "my focus", -1)
+    assert claim.corrective is True
+
+
+def test_a_bare_retraction_with_nothing_behind_it_is_just_dropped():
+    from nyxara.growth.text_causal import learn_from_text
+
+    report = learn_from_text("I was wrong.")
+    assert report.claims == [] and report.corrections == 1 and report.retracted == 0
 
 
 @pytest.mark.parametrize("sentence", [
@@ -214,17 +227,35 @@ def test_an_ordinary_assertion_is_not_a_retraction(sentence):
     assert is_correction(sentence) is False
     claims, _sentences, _defeated = extract_claims(sentence)
     assert len(claims) == 1
+    assert claims[0].corrective is False
 
 
-def test_a_retraction_does_not_trip_the_contradiction_gate():
+def test_a_retraction_replaces_the_earlier_claim_instead_of_clashing_with_it():
     """"X causes Y" then "actually X prevents Y" is one speaker updating, not a clash."""
+    from nyxara.causal.causal_knots import KnotLattice
     from nyxara.growth.text_causal import learn_from_text
 
+    lattice = KnotLattice()
     report = learn_from_text("Caffeine improves my focus. "
-                             "Actually caffeine reduces my focus.")
+                             "Actually caffeine reduces my focus.", lattice=lattice)
     assert report.contradicted == 0
     assert report.corrections == 1
-    assert len(report.claims) == 1          # the first claim stands, unchallenged
+    assert report.retracted == 1            # the old strand was un-tied to make room
+
+    # what she now holds is the correction, not the thing that was taken back
+    assert lattice.check([("caffeine", "my focus", -1)]).consistent is True
+    assert lattice.check([("caffeine", "my focus", +1)]).consistent is False
+
+
+def test_a_retraction_only_un_ties_the_pair_it_names():
+    from nyxara.causal.causal_knots import KnotLattice
+    from nyxara.growth.text_causal import learn_from_text
+
+    lattice = KnotLattice()
+    lattice.tie("sleep", "focus", 1)
+    learn_from_text("Caffeine improves my focus. Actually caffeine reduces my focus.",
+                    lattice=lattice)
+    assert lattice.check([("sleep", "focus", -1)]).consistent is False   # untouched
 
 
 def test_a_real_contradiction_is_still_refused():
@@ -243,3 +274,35 @@ def test_the_report_counts_concessions_and_retractions_apart():
                              "Actually rain prevents flooding.")
     assert report.defeated == 1 and report.corrections == 1
     assert report.to_dict()["corrections"] == 1
+    assert report.to_dict()["retracted"] == 1
+
+
+def test_a_retraction_replaces_a_text_asserted_world_model_edge():
+    from nyxara.growth.text_causal import learn_from_text
+
+    model = CausalWorldModel()
+    learn_from_text("Caffeine improves my focus. Actually caffeine reduces my focus.",
+                    model=model)
+    link = model._links[("caffeine", "my focus")]
+    assert link.strength < 0                      # the correction is what the graph now holds
+    assert link.evidence["polarity"] == -1
+
+
+def test_a_retraction_cannot_overwrite_a_measured_edge():
+    """Being corrected about a claim is not evidence against a measurement."""
+    import random
+
+    from nyxara.growth.text_causal import learn_from_text
+
+    rng = random.Random(0)
+    rows = []
+    for _ in range(60):
+        rain = rng.gauss(0, 1)
+        rows.append({"rain": rain, "flood": 2.0 * rain + rng.gauss(0, 0.2)})
+    model = CausalWorldModel()
+    learn_causal_graph(["rain", "flood"], rows, model=model, order=["rain", "flood"])
+    before = model._links[("rain", "flood")].strength
+
+    learn_from_text("Actually rain prevents flood.", model=model)
+    after = model._links[("rain", "flood")]
+    assert after.measured is True and after.strength == before
