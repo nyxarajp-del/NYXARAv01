@@ -28,6 +28,7 @@ Pure standard library apart from the optional :mod:`paramiko` backend.
 from __future__ import annotations
 
 import ipaddress
+import os
 from typing import Any, Dict, Optional
 
 __all__ = ["ssh_login", "ssh_exec"]
@@ -73,6 +74,22 @@ def _connect(paramiko, host: str, port: int, username: str,
              password: Optional[str], key_path: Optional[str], timeout_s: float):
     """Open an authenticated SSH client. Raises paramiko/OS errors to the caller's try block."""
     client = paramiko.SSHClient()
+    # Load the machine's known_hosts BEFORE choosing a policy. AutoAddPolicy only fires for a host
+    # paramiko considers *unknown*; a host whose key is on file but no longer matches raises
+    # BadHostKeyException whatever the policy says. Without this call nothing was ever on file, so
+    # every host looked unknown, every key was auto-accepted, and the verification never happened
+    # even once — meaning an on-path attacker could impersonate a host NYXARA had used a hundred
+    # times and collect the Master's stored credential. Loading them keeps first contact
+    # frictionless (still auto-add) while making a CHANGED key a hard, reported failure.
+    for _load in ("load_system_host_keys", "load_host_keys"):
+        loader = getattr(client, _load, None)
+        if loader is None:
+            continue
+        try:
+            loader() if _load == "load_system_host_keys" else loader(
+                os.path.expanduser("~/.ssh/known_hosts"))
+        except Exception:  # noqa: BLE001 — a missing/unreadable known_hosts must not block a login
+            pass
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     connect_kw: Dict[str, Any] = {
         "hostname": host, "port": int(port), "username": username,

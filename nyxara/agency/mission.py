@@ -602,8 +602,18 @@ class MissionExecutive:
             self._journal_outcome(journal, action_id, "succeeded",
                                   {"final_answer": run.final_answer[:300]})
 
-        elif status in ("escalated", "refused"):
-            # defer-and-continue: park this milestone, surface it, keep other work moving
+        elif status in ("escalated", "refused", "abstained"):
+            # defer-and-continue: park this milestone, surface it, keep other work moving.
+            #
+            # "abstained" belongs here, not in the retry branch below. It is the loop's considered
+            # verdict that it cannot answer this reliably (agent_loop._gate_answer) — not a stall
+            # with progress left to unstick, and not a step-budget overrun that more steps would
+            # clear. Nothing about the mission changes between attempts, so re-running the identical
+            # AgentLoop returns the identical abstention: the old path spent the whole
+            # max_attempts_per_milestone budget re-deriving one answer, then recorded FAILED, which
+            # reads as "she tried and it broke" rather than the truth, "she does not trust this one
+            # and is handing it to you". Parking it BLOCKED surfaces it in mission.escalations where
+            # the Master can actually see it, and lets the other milestones keep moving.
             reason = run.final_answer or status
             milestone.status = MilestoneStatus.BLOCKED
             milestone.blocked_reason = f"{status}: {reason}"[:200]
@@ -760,13 +770,17 @@ if __name__ == "__main__":  # pragma: no cover
 
     workdir = tempfile.mkdtemp(prefix="nyx_mission_")
 
-    # 1) offline: a goal with no LLM plan becomes a single milestone and completes
+    # 1) offline: a goal with no LLM plan becomes a single milestone, which the keyless core
+    #    cannot answer — so the honest-answer gate abstains and the milestone is parked BLOCKED
+    #    and surfaced, on ONE attempt (an abstention is a verdict, not a stall to retry).
     core = NyxaraCore()
     exe = MissionExecutive(core, persist_dir=workdir)
     m1 = exe.run("Say hello to the Master")
     print("\noffline single-milestone:\n" + m1.summary())
-    assert m1.status is MissionStatus.COMPLETED, m1.status
-    assert len(m1.milestones) == 1 and m1.progress() == 1.0
+    assert m1.status is MissionStatus.BLOCKED, m1.status
+    assert len(m1.milestones) == 1 and m1.progress() < 1.0
+    assert m1.milestones[0].attempts == 1, m1.milestones[0].attempts
+    assert [e["status"] for e in m1.escalations] == ["abstained"], m1.escalations
 
     # 2) a scripted reasoner that returns a numbered plan -> several milestones, each of
     #    which then completes with a one-step conversational answer.
@@ -814,7 +828,13 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"resumed from disk    : {len(loaded.milestones)} milestones, "
           f"status={loaded.status.value}")
     m3b = exe3b.advance(loaded, max_milestones=10)
-    assert m3b.status in (MissionStatus.FAILED, MissionStatus.COMPLETED, MissionStatus.ACTIVE)
+    # BLOCKED belongs in this set and was missing: a milestone whose run escalates is *parked*
+    # and surfaced, which is a bounded outcome — the property under test — not a spin. The
+    # pytest counterpart (tests/agency/test_mission.py::test_bounded_failure_no_infinite_spin)
+    # has always listed it; this assertion was simply never reached, because section 1 above
+    # failed first and masked it.
+    assert m3b.status in (MissionStatus.FAILED, MissionStatus.COMPLETED,
+                          MissionStatus.ACTIVE, MissionStatus.BLOCKED), m3b.status
     # never spins forever: every milestone reaches a terminal/blocked state under budget
     assert all(ms.status is not MilestoneStatus.ACTIVE for ms in m3b.milestones)
     print(f"bounded outcome      : status={m3b.status.value} (no infinite spin)")
