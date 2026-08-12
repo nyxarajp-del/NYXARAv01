@@ -70,7 +70,10 @@ class WorldModel:
     """Layer 2. Predicts the next state, measures its error, and learns from it."""
 
     def __init__(self, substrate: Any, *, lr: float = 3e-3, action_dim: int = 16,
-                 hidden_mult: int = 2, history: int = 512, warmup: int = 4) -> None:
+                 hidden_mult: int = 2, history: int = 512, warmup: int = 4,
+                 rehearsal_enabled: bool = True, rehearsal_steps: int = 2,
+                 rehearsal_capacity: int = 512, ewc_enabled: bool = True,
+                 ewc_lambda: float = 25.0) -> None:
         self.substrate = substrate
         self.width = int(getattr(substrate, "width", 256))
         self.action_dim = int(action_dim)
@@ -81,6 +84,21 @@ class WorldModel:
         self.steps = 0
 
         self.lr = float(lr)
+        self.rehearsal_enabled = bool(rehearsal_enabled)
+        self.rehearsal_steps = int(rehearsal_steps)
+        self.rehearsal_capacity = int(rehearsal_capacity)
+        self.rehearsal_steps_run = 0
+        self.ewc_enabled = bool(ewc_enabled)
+        self.ewc_lambda = float(ewc_lambda)
+        self.consolidations = 0
+        self._anchor = None
+        self._fisher: list = []
+        self._fisher_accum: list = []
+        self._fisher_n = 0
+        self._buffer: List[Any] = []
+        self._seen = 0
+        self._rng = (substrate.stream("world_model_replay")
+                     if hasattr(substrate, "stream") else np.random.default_rng(0))
         self._errors: List[float] = []
         self._state: Any = None                  # h_t, the recurrent belief
         self._last_state: Any = None             # s_t, for the residual and for learning
@@ -119,6 +137,8 @@ class WorldModel:
             self._params = [self.w_in, self.b_in, self.a_raw, self.w_hid, self.b_hid,
                             self.w_out, self.b_out, self.g_norm]
             self.optimizer = AdaptiveOptimizer(self._params, lr=self.lr, clip=1.0)
+            self._fisher_accum = [np.zeros_like(p.data) for p in self._params]
+            self._fisher = [np.zeros_like(p.data) for p in self._params]
             if hasattr(self.substrate, "note_params"):
                 self.substrate.note_params(*self._params)
             self._built = True
@@ -219,6 +239,8 @@ class WorldModel:
                 pred, tgt.reshape(1, 1, -1)))
             self.optimizer.zero_grad()
             backward(loss.total)
+            self._accumulate_fisher()   # importance BEFORE the pull, so it measures the task
+            self._ewc_pull()
             self.optimizer.step(cognitive)
             err = float(loss.value)
             self._errors.append(err)
@@ -235,9 +257,148 @@ class WorldModel:
                     self._milestones = self._milestones[::2]
             self.steps += 1
             self._last_pred.error = err
+            self._remember_transition(self._last_state, self._last_action, tgt)
+            self._rehearse(cognitive)
             return err
         except Exception:  # noqa: BLE001 — a failed update is a lost lesson, never a broken turn
             return 0.0
+
+    # ---- rehearsal: the defence against catastrophic forgetting ---- #
+    def _remember_transition(self, s: Any, a: Any, s_next: Any) -> None:
+        """Keep a *reservoir* sample of every transition ever seen.
+
+        Reservoir sampling, not a ring buffer, and the distinction is the whole point. A ring
+        buffer holds the most RECENT ``n`` transitions — so after training on system B it contains
+        only B, and rehearsing from it defends nothing. A reservoir holds a uniform sample of the
+        entire history, so system A is still represented while B is being learned. That is what
+        makes this a defence against forgetting rather than a slightly longer batch.
+        """
+        if not self.rehearsal_enabled or s is None or s_next is None:
+            return
+        try:
+            self._seen += 1
+            # The recurrent state is stored WITH the transition. Without it, rehearsal replays
+            # every remembered step from a blank context — and the context is often the only
+            # thing that distinguishes two systems presenting the same s_t and expecting
+            # different s_{t+1}. Replaying stateless makes those samples mutually contradictory,
+            # so the model learns their average, which is worse than either. Measured: with
+            # h dropped, skill on A fell to 0.0 after learning B despite two-thirds of the
+            # reservoir still being A.
+            item = (np.asarray(s, dtype=np.float64).copy(),
+                    None if a is None else np.asarray(a, dtype=np.float64).copy(),
+                    np.asarray(s_next, dtype=np.float64).copy(),
+                    None if self._h_before is None else self._h_before.copy())
+            if len(self._buffer) < self.rehearsal_capacity:
+                self._buffer.append(item)
+                return
+            # replace with probability capacity/seen — keeps the sample uniform over all history
+            j = int(self._rng.integers(0, self._seen))
+            if j < self.rehearsal_capacity:
+                self._buffer[j] = item
+        except Exception:  # noqa: BLE001 — a lost sample is never worth breaking a step for
+            pass
+
+    def _rehearse(self, cognitive: Optional[CognitiveState] = None) -> int:
+        """Interleave gradient steps on remembered transitions. Returns how many ran.
+
+        Each rehearsal step is a full predict-and-learn on an OLD transition, run from a fresh
+        recurrent state so it does not disturb the live one. Without this the model is a pure
+        online learner: every step moves it toward the current distribution and nothing holds it
+        to the last one, which is exactly the shape of catastrophic forgetting.
+        """
+        if not self.rehearsal_enabled or not self._buffer:
+            return 0
+        n = 0
+        saved_state, saved_h = self._state, self._h_before
+        saved_last, saved_action = self._last_state, self._last_action
+        try:
+            for _ in range(max(0, int(self.rehearsal_steps))):
+                idx = int(self._rng.integers(0, len(self._buffer)))
+                s, a, s_next, h = self._buffer[idx]
+                pred, _ = self._forward(s, a if a is not None else self._encode_action(None), h)
+                loss = self.objective(prediction=self.objective.prediction_term(
+                    pred, s_next.reshape(1, 1, -1)))
+                self.optimizer.zero_grad()
+                backward(loss.total)
+                self._ewc_pull()
+                self.optimizer.step(cognitive)
+                self.rehearsal_steps_run += 1
+                n += 1
+            return n
+        except Exception:  # noqa: BLE001 — rehearsal is best-effort, never fatal
+            return n
+        finally:
+            # the live recurrent belief must survive rehearsal untouched
+            self._state, self._h_before = saved_state, saved_h
+            self._last_state, self._last_action = saved_last, saved_action
+
+    # ---- EWC: anchor what mattered, so the next task cannot overwrite it ---- #
+    def consolidate(self, *, task: str = "") -> Dict[str, Any]:
+        """Snapshot θ and freeze an importance estimate — the memory *write* of EWC.
+
+        Called at a task boundary. Importance is the accumulated squared gradient per weight (a
+        diagonal empirical Fisher), which is the standard estimator: a weight whose gradient was
+        consistently large mattered to what was just learned, and moving it is what destroys the
+        skill.
+
+        Rehearsal alone was measured as insufficient here — it improves retention monotonically
+        with its budget (A-error 0.104 at 2 steps, 0.072 at 8) but trades away plasticity on the
+        new task (0.67 → 0.53) and never got under the copy baseline. EWC attacks the same problem
+        from the other side: instead of re-showing old data, it makes the weights that carried the
+        old skill expensive to move.
+
+        Not reused from ``memory/elastic_synapses.py`` despite that module implementing full EWC:
+        its API is ``Mapping[str, float]`` — one named scalar per weight — and this model holds
+        NumPy arrays with tens of thousands of entries. Adapting arrays to per-scalar names would
+        have been slower and less clear than the dozen lines here.
+        """
+        if not self._built or not self.ewc_enabled:
+            return {}
+        try:
+            total = max(1, self._fisher_n)
+            self._anchor = [p.data.copy() for p in self._params]
+            self._fisher = [f / total for f in self._fisher_accum]
+            self._fisher_accum = [np.zeros_like(p.data) for p in self._params]
+            self._fisher_n = 0
+            self.consolidations += 1
+            return {"task": task, "consolidations": self.consolidations,
+                    "mean_importance": float(np.mean([float(f.mean()) for f in self._fisher]))}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _accumulate_fisher(self) -> None:
+        """Running Σg² per weight — the importance signal ``consolidate`` freezes."""
+        if not self.ewc_enabled:
+            return
+        try:
+            for i, p in enumerate(self._params):
+                if p.grad is not None:
+                    self._fisher_accum[i] += p.grad * p.grad
+            self._fisher_n += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _ewc_pull(self) -> None:
+        """Add λ·F·(θ−θ*) to each gradient: a force back toward the consolidated weights."""
+        if not self.ewc_enabled or self._anchor is None:
+            return
+        try:
+            for i, p in enumerate(self._params):
+                if p.grad is None:
+                    continue
+                p.grad = p.grad + self.ewc_lambda * self._fisher[i] * (p.data - self._anchor[i])
+        except Exception:  # noqa: BLE001
+            pass
+
+    def anchor_drift(self) -> Optional[float]:
+        """How far the weights have travelled from their anchor. ``None`` before consolidation."""
+        if self._anchor is None:
+            return None
+        try:
+            return float(sum(float(np.linalg.norm(p.data - a))
+                             for p, a in zip(self._params, self._anchor)))
+        except Exception:  # noqa: BLE001
+            return None
 
     # ---- imagination ---- #
     def rollout(self, state: Any, actions: Optional[List[Any]] = None, *,

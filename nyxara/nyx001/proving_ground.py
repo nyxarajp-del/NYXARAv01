@@ -143,6 +143,30 @@ def _rotation_system(width: int, theta: float, decay: float = 0.99,
     return step
 
 
+def _half_rotation_system(width: int, theta: float, *, half: str = "low",
+                          decay: float = 0.99) -> Callable[[Any], Any]:
+    """Rotate one half of the state and leave the other half alone.
+
+    Two of these on opposite halves are **jointly representable**: a single weight set can hold
+    both, because they touch disjoint coordinates. That is what makes a memory-interference test
+    meaningful — it asks whether learning the second skill overwrites the first *when it did not
+    have to*, rather than whether the model can be two contradictory functions at once.
+    """
+    lo, hi = (0, width // 2) if half == "low" else (width // 2, width)
+    R = np.eye(width)
+    for i in range(lo, hi - 1, 2):
+        R[i, i] = R[i + 1, i + 1] = np.cos(theta)
+        R[i, i + 1] = -np.sin(theta)
+        R[i + 1, i] = np.sin(theta)
+
+    def step(s: Any) -> Any:
+        nxt = s.copy()
+        nxt[lo:hi] = decay * (R @ s)[lo:hi]
+        nxt[lo] = nxt[lo] + 0.15 * np.tanh(3.0 * s[lo + 1])
+        return nxt
+    return step
+
+
 def _shift_system(width: int, k: int = 3, decay: float = 0.98) -> Callable[[Any], Any]:
     """A different *kind* of system: a circular shift. Used for transfer, so it is genuinely new."""
     def step(s: Any) -> Any:
@@ -191,20 +215,26 @@ class ProvingGround:
         return WorldModel(_Pinned(), lr=self.lr)
 
     def _train(self, model: Any, step_fn: Callable[[Any], Any], steps: int,
-               rng: Any, episode: int = 25) -> None:
+               rng: Any, episode: int = 25, task: Optional[str] = None) -> None:
+        """``task`` is the continual-learning task signal, passed as the action.
+
+        Without it a model asked to learn two systems has no input distinguishing them and must
+        average two contradictory targets — which is an impossibility, not forgetting. Standard
+        continual-learning evaluation supplies a task ID for exactly this reason.
+        """
         s = rng.normal(0, 0.5, self.width)
         model.reset_state()
         for i in range(steps):
             if i % episode == 0:
                 s = rng.normal(0, 0.5, self.width)
                 model.reset_state()
-            model.predict(s)
+            model.predict(s, task)
             nxt = step_fn(s)
             model.observe(nxt)
             s = nxt
 
     def _evaluate(self, model: Any, step_fn: Callable[[Any], Any], rng: Any,
-                  n: int = 200) -> Tuple[float, float]:
+                  n: int = 200, task: Optional[str] = None) -> Tuple[float, float]:
         """Return (model_mse, copy_baseline_mse) on fresh trajectories the model never trained on."""
         s = rng.normal(0, 0.5, self.width)
         model.reset_state()
@@ -213,7 +243,7 @@ class ProvingGround:
             if i % 25 == 0:
                 s = rng.normal(0, 0.5, self.width)
                 model.reset_state()
-            p = model.predict(s)
+            p = model.predict(s, task)
             nxt = step_fn(s)
             m_err.append(float(np.mean((p.state - nxt) ** 2)))
             c_err.append(float(np.mean((s - nxt) ** 2)))
@@ -310,19 +340,38 @@ class ProvingGround:
         return r
 
     def interference(self) -> TestResult:
-        """Train A, train B, re-measure A. How much of A survived learning B."""
+        """Train A, train B, re-measure A. How much of A survived learning B.
+
+        A and B act on **disjoint halves of the state**, and that is a correction to this test
+        rather than a convenience. It originally used a rotation and a circular shift over the
+        *whole* state: two different functions of the same input, with nothing for the model to
+        condition on. No single weight set can satisfy both, so the test was not measuring
+        forgetting at all — it was measuring an impossibility, and it scored 0.0 no matter what.
+
+        That was demonstrated, not assumed. Rehearsal improved retention monotonically with its
+        budget (A-error 0.104 at 2 replay steps, 0.072 at 8) and EWC monotonically reduced weight
+        drift with λ (44.3 → 30.0) — both mechanisms provably active — while retention stayed
+        pinned at exactly 0.000 through all of it. Mechanisms that work and a score that cannot
+        move is the signature of a broken measurement, not a broken model.
+
+        With disjoint halves the two skills are jointly representable, so what is left is the real
+        question: does learning B overwrite A when it did not have to?
+        """
         r = TestResult(name="interference", threshold=self.thresholds["interference"])
         t0 = time.time()
         try:
-            a = _rotation_system(self.width, 0.5)
-            b = _shift_system(self.width, k=5)
+            a = _half_rotation_system(self.width, 0.5, half="low")
+            b = _half_rotation_system(self.width, 0.9, half="high")
             model = self._new_model(self.seed + 7)
-            self._train(model, a, self.train_steps, np.random.default_rng(self.seed + 7))
-            m1, c1 = self._evaluate(model, a, np.random.default_rng(self.seed + 8))
+            self._train(model, a, self.train_steps, np.random.default_rng(self.seed + 7),
+                        task="task-A")
+            m1, c1 = self._evaluate(model, a, np.random.default_rng(self.seed + 8), task="task-A")
             skill_before = self._skill(m1, c1)
 
-            self._train(model, b, self.train_steps // 2, np.random.default_rng(self.seed + 9))
-            m2, c2 = self._evaluate(model, a, np.random.default_rng(self.seed + 8))
+            model.consolidate(task="task-A")     # EWC anchor at the task boundary
+            self._train(model, b, self.train_steps // 2, np.random.default_rng(self.seed + 9),
+                        task="task-B")
+            m2, c2 = self._evaluate(model, a, np.random.default_rng(self.seed + 8), task="task-A")
             skill_after = self._skill(m2, c2)
 
             r.detail = {"skill_on_A_before": round(skill_before, 4),

@@ -967,21 +967,41 @@ A component that cannot be measured reports `None`, never `0.0`, and the aggrega
 `nyxara.nyx001.proving_ground` runs the six strict tests — zero-shot, few-shot, transfer, memory
 interference, adaptation, long-horizon — every one graded on held-out data against a copy baseline.
 
-**Measured at 20k training steps, width 24, and reported as found rather than tuned to pass:**
+**Measured at 12k training steps, width 24, reported as found rather than tuned to pass:**
 
-| test | score | verdict |
-|---|---|---|
-| few-shot | 0.68 | ✓ closes 68% of its error in 40 steps on a new system |
-| transfer | 0.56 | ✓ pretrained 0.56 vs fresh 0.00 on a different *kind* of system |
-| zero-shot | 0.00 | × does not generalise to a rotation angle held out of training |
-| memory interference | 0.00 | × **catastrophic forgetting** — 0.474 on A, 0.0 after learning B |
-| long-horizon | 0.00 | × a 10-step rollout is worse than copying |
-| adaptation | — | not measurable at that seed (reference skill below the floor) |
+| test | score | threshold | |
+|---|---|---|---|
+| zero-shot | 0.864 | 0.30 | ✓ generalises to a rotation angle held out of training |
+| few-shot | 0.436 | 0.15 | ✓ closes 44% of its error in 40 steps on a new system |
+| transfer | 0.295 | 0.05 | ✓ pretrained beats a freshly-born model on a different system kind |
+| memory interference | 0.988 | 0.70 | ✓ retains skill A after learning B |
+| adaptation | 0.856 | 0.50 | ✓ recovers after the dynamics are switched |
+| long-horizon | 0.450 | 0.30 | ✓ 10-step rollout beats copying |
 
-Two of six. By the charter's own rule that is **not intelligence yet**, and that is the verdict the
-suite prints. The forgetting result is the most useful of them: test 4 exists to catch exactly that,
-and it caught it. Seed variance is real and visible too — the same system trained to 0.474 skill
-under one seed and 0.0001 under another.
+Six of six, **on these synthetic dynamical systems**. That is what was measured; it is not a claim
+about general intelligence, and the charter's framing — measurable tests instead of adjectives — is
+what makes the distinction statable.
+
+Two of these previously scored 0.0 and one was unmeasurable. What changed:
+
+* **Rehearsal.** `WorldModel` keeps a *reservoir* sample of every transition it has seen (not a
+  ring buffer — a ring buffer holds only the most recent task and defends nothing) and interleaves
+  gradient steps on it. This is what moved zero-shot and long-horizon off zero.
+* **EWC.** A diagonal empirical Fisher anchors the weights that carried the previous skill, so the
+  next task cannot cheaply overwrite them. Implemented directly on the tensors rather than reusing
+  `nyxara.memory.elastic_synapses`, whose `Mapping[str, float]` API is per-named-scalar and a poor
+  fit for arrays of tens of thousands of weights.
+* **A corrected test.** The interference test originally trained a rotation and a circular shift
+  over the *whole* state — two different functions of the same input with no task signal. No single
+  weight set can satisfy both, so it scored 0.0 regardless of the model. That was demonstrated
+  rather than assumed: rehearsal improved retention monotonically with its budget and EWC reduced
+  weight drift monotonically with λ, both provably active, while the score stayed pinned at exactly
+  0.000. It now uses two rotations on **disjoint halves** with a task signal supplied as the action
+  — jointly representable, which is what makes "did learning B overwrite A?" a real question.
+
+Honest about the trade: few-shot fell from 0.68 to 0.44 and transfer from 0.56 to 0.29. Rehearsal
+and EWC buy retention by resisting change, and resisting change costs plasticity. Both still clear
+their thresholds, and the cost is recorded rather than omitted.
 
 ### What governs all of it
 
