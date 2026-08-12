@@ -221,6 +221,42 @@ class Router:
         self.meta = MetaCognition(answer_threshold=self.cfg.threshold,
                                   abstain_below=self.cfg.abstain_below)
 
+    # ---- how good "good enough" has to be ---- #
+    def _strong_rung_available(self) -> bool:
+        """Is a stronger own rung reachable that this draft is NOT the one using?
+
+        Only ``litertlm`` counts: it is the one rung both markedly stronger than the learned
+        n-gram brain and reachable without forging anything. When it is what is drafting there is
+        nothing stronger to lose and this is False.
+        """
+        try:
+            from nyxara.mind.llm import LiteRTLMProvider
+            if not isinstance(self._self, LiteRTLMProvider) \
+                    and LiteRTLMProvider(self.settings).available():
+                return True
+        except Exception:  # noqa: BLE001 — an unreadable rung is simply "not available"
+            pass
+        # A configured teacher deliberately does NOT count. Extending this to teachers was tried
+        # and reverted: it raised the bar on the ordinary own-model-first path and broke
+        # test_draft_self_hands_off_a_confident_answer, which encodes the behaviour this router
+        # exists to provide. The trade being guarded here is her weak brain displacing her strong
+        # one, not her displacing the teacher — that second one is the whole point of the module.
+        return False
+
+    def _handoff_threshold(self) -> float:
+        """The bar this draft must clear, raised when something stronger is standing by.
+
+        The verifier cannot tell a correct short answer from a fluent empty one — 'Paris.' scores
+        0.585 and "The answer is clear." scores 0.792, the difference being word count alone. So
+        rather than pick a threshold that cannot exist, the bar moves with what a handoff costs:
+        nothing stronger reachable, and ``threshold`` stands; something stronger reachable, and a
+        well-formed non-answer is no longer enough to displace it.
+        """
+        base = float(self.cfg.threshold)
+        if not self._strong_rung_available():
+            return base
+        return max(base, float(getattr(self.cfg, "threshold_with_strong_rung", base)))
+
     # ---- availability ---- #
     def self_available(self) -> bool:
         try:
@@ -361,7 +397,7 @@ class Router:
                 confidence = float(self.verifier(prompt, own))
             except Exception:  # noqa: BLE001 — a failed own attempt simply defers downstream
                 own, confidence = None, 0.0
-            if own and confidence >= self.cfg.threshold:
+            if own and confidence >= self._handoff_threshold():
                 return RouterResult(own, "self", confidence, handed_off=True)
 
         # 2) metacognition decides: own / teacher / honest abstention — now informed by an
@@ -406,7 +442,7 @@ class Router:
         if not own:
             return None
         conf = float(self.verifier(prompt, own))
-        if conf >= self.cfg.threshold:
+        if conf >= self._handoff_threshold():
             return RouterResult(own, "self", conf, handed_off=True)
         return None
 

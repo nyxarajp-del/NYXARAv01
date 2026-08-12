@@ -1350,6 +1350,20 @@ class RouterConfig(BaseModel):
     enabled: bool = True
     # Minimum verifier score (0..1) for NYXARA to speak her own model's answer unaided.
     threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # The bar to clear when a STRONGER own rung is reachable but is not the one drafting.
+    #
+    # The verifier scores form — length, coherence, unique-word ratio — and cannot see whether an
+    # answer answers anything. Measured: 'Paris.' scores 0.585 and is refused, while "The answer
+    # is clear." scores 0.792 and is accepted; the entire difference is word count, because the
+    # coherence term is ~1.0 for any fluent sentence and carries 0.65 of the weight. No single
+    # threshold orders those two correctly, so a second one is used where the stakes differ.
+    #
+    # Handing off is a trade: her own voice for whatever the stronger rung would have said. When
+    # nothing stronger is reachable there is no trade and ``threshold`` stands. When there is,
+    # the weaker drafter has to be clearly good rather than merely well-formed — that is what
+    # this raises, and it is the difference between her answering from her own brain and her
+    # answering from her own brain *instead of* the 2.5 GB model already loaded beside it.
+    threshold_with_strong_rung: float = Field(default=0.85, ge=0.0, le=1.0)
     # An answer shorter than this many characters is never trusted (degenerate output).
     min_chars: int = Field(default=2, ge=0)
     # When the own answer fails the bar, fall back to the external teacher (else keep own).
