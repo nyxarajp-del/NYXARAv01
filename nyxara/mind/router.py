@@ -50,6 +50,16 @@ def _tokens(text: str) -> list:
 # The echo penalty was the right idea aimed one level too low: it catches a model parroting the
 # *prompt*, not one parroting the *scaffold*. A fixed prefix dilutes the overlap ratio enough to
 # slip under it — "I understand: Hii" is 33% prompt words, and the penalty starts at 60%.
+# The same trap, one layer up: her CALIBRATION qualifiers (observe/honesty.py::_qualifier) are
+# prepended to an answer before this verifier ever sees it. They are her own words about her own
+# confidence, not the drafting model's content — so counting them was the verifier scoring her
+# boilerplate and calling it quality. Worse, it scored *upward*: the qualifier adds length and
+# unique words, the two signals below that reward substance. Measured, "I'm certain that The
+# answer is clear." — a reply that says nothing — cleared the 0.6 threshold at **0.921**, higher
+# than the "I understand: Hii" case above, because the honesty layer had padded it.
+#
+# Longest-first below: "i'm confident that" must be tried before any shorter prefix that is its
+# own prefix, or the strip leaves a fragment behind and scores that instead.
 _SCAFFOLD_PREFIXES: Tuple[str, ...] = (
     "i understand:",       # _default_reasoner, conversational branch
     "perform:",            # _default_reasoner, command branch
@@ -57,6 +67,13 @@ _SCAFFOLD_PREFIXES: Tuple[str, ...] = (
     "the master says:",    # dialogue-template continuation (the n-gram's signature)
     "nyxara responds:",
     "nyxara:",
+    # observe/honesty.py::_qualifier — every rung of it
+    "i suspect, though i'm not sure, that",
+    "i doubt, but it's possible, that",
+    "i don't know whether",
+    "i'm confident that",
+    "i'm certain that",
+    "i think",
 )
 
 

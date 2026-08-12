@@ -6969,43 +6969,66 @@ class NyxaraCore:
         if (self.parallel_hypotheses <= 1 or len(framings) <= 1
                 or not self._reasoner_parallelizable()):
             return self._reason_once(stimulus, focus, memories)
-        import concurrent.futures as _cf
+        # DAEMON threads, deliberately, rather than a ThreadPoolExecutor.
+        #
+        # A Python thread cannot be interrupted, so the deadline bounds the TURN and not the work:
+        # stragglers run on and their results are discarded. That part is unchanged and is the
+        # honest trade — joining them would make the deadline decorative, and a single
+        # core.process() under DEV defaults costs 3 framings x 3 passes x 3 samples x 5 RSI
+        # iterations of model calls, which is how a turn could run for the better part of an hour.
+        #
+        # What changed is what a straggler costs at SHUTDOWN. ThreadPoolExecutor's workers are
+        # non-daemon and `concurrent.futures.thread` registers an atexit hook that joins every one
+        # of them, so `shutdown(wait=False)` released the pool and the interpreter still waited.
+        # Measured: a finished process held 232% CPU and 3.8 GB for 30 minutes and only reported
+        # completion when killed, with its work long done. The old comment here anticipated
+        # exactly this ("would keep its thread alive to interpreter exit") and accepted it.
+        #
+        # Daemon threads do not block interpreter exit, so the deadline now bounds the process too.
+        # The exposure that buys is narrow: a daemon thread is only killed abruptly AT shutdown,
+        # and a straggler's output is already discarded by the time it gets there — the turn's
+        # writes all happen on this thread, after the gate.
+        import queue as _queue
+        import threading as _threading
         results: List[tuple] = []
         deadline = self._parallel_deadline_s()
         timed_out = False
-        ex = _cf.ThreadPoolExecutor(max_workers=len(framings))
         try:
-            futs = {ex.submit(self._reason_once, stimulus, focus, mem): name
-                    for name, mem in framings}
-            for fut in _cf.as_completed(futs, timeout=deadline):
+            done: "_queue.Queue[tuple]" = _queue.Queue()
+
+            def _run(name: str, mem: List[Any]) -> None:
                 try:
-                    cand = fut.result()
-                except Exception:  # noqa: BLE001 — a failed thread just doesn't vote
-                    continue
+                    done.put((name, self._reason_once(stimulus, focus, mem)))
+                except Exception:  # noqa: BLE001 — a failed framing just doesn't vote
+                    done.put((name, None))
+
+            for name, mem in framings:
+                _threading.Thread(target=_run, args=(name, mem), daemon=True,
+                                  name=f"nyx-framing-{name}"[:48]).start()
+            end = time.monotonic() + deadline
+            for _ in range(len(framings)):
+                left = end - time.monotonic()
+                if left <= 0:
+                    timed_out = True
+                    break
+                try:
+                    name, cand = done.get(timeout=left)
+                except _queue.Empty:
+                    timed_out = True
+                    break
                 # A framing that returned nothing has not voted. Letting it through reached
                 # `_hypothesis_signature(None)` and took down the turn with an AttributeError —
                 # unreachable while the deadline was too short for any framing to finish, and
                 # immediate once it was long enough. Same rule as the turn ledger's: producing
                 # no answer is not the same as producing an answer, and neither is a crash.
                 if cand is not None and getattr(cand, "kind", None) is not None:
-                    results.append((futs[fut], cand))
-        except _cf.TimeoutError:
-            # The budget ran out. Vote with whatever arrived — a late framing is not worth an
-            # unbounded turn, and metacontrol already decided how long this question is worth.
-            self._note_deadline(deadline, len(results), len(framings))
-            timed_out = True
+                    results.append((name, cand))
+            if timed_out:
+                # The budget ran out. Vote with whatever arrived — a late framing is not worth an
+                # unbounded turn, and metacontrol already decided how long this question is worth.
+                self._note_deadline(deadline, len(results), len(framings))
         except Exception:  # noqa: BLE001 — never let concurrency break the turn
             return self._reason_once(stimulus, focus, memories)
-        finally:
-            # Do not join. A Python thread cannot be interrupted, so the deadline bounds the TURN,
-            # not the work: stragglers run on and their results are discarded. That is the honest
-            # trade — the alternative was `with ThreadPoolExecutor(...)`, whose __exit__ joins every
-            # worker and made the deadline decorative. A single core.process() under DEV defaults
-            # costs 3 framings x 3 passes x 3 samples x 5 RSI iterations of model calls, which is
-            # how a turn could run for the better part of an hour. Stragglers do finish and their
-            # threads drain, so this releases them rather than leaking them — but a framing that
-            # hung forever would keep its thread alive to interpreter exit, same as before.
-            ex.shutdown(wait=False, cancel_futures=True)
         if not results:
             if timed_out:
                 # Spending the budget and then paying the FULL cost again is the one move worse
