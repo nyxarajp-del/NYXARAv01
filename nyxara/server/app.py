@@ -222,6 +222,22 @@ class SynthesizeScenariosRequest(BaseModel):
     max_tests: Optional[int] = Field(default=None, ge=0, le=128)
 
 
+class AbyssTimelinesRequest(BaseModel):
+    actions: List[str]
+    state: Optional[List[float]] = None          # omitted ⇒ the embodied agent's live state
+    branches: int = Field(default=512, ge=2, le=100_000)
+    horizon: int = Field(default=6, ge=1, le=64)
+    risk_aversion: float = Field(default=0.5, ge=0.0, le=5.0)
+    budget_ms: Optional[float] = Field(default=None, gt=0.0)
+
+
+class AbyssButterflyRequest(BaseModel):
+    state: Optional[List[float]] = None          # omitted ⇒ the embodied agent's live state
+    horizon: int = Field(default=6, ge=1, le=64)
+    delta: float = Field(default=0.02, gt=0.0)
+    labels: Optional[List[str]] = None
+
+
 class ControlRequest(BaseModel):
     reason: str = ""
 
@@ -932,6 +948,22 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         # Invent her own measurable self-improvement targets — hard-filtered through the owner
         # alignment envelope (out-of-envelope targets rejected before adoption). No LLM.
         return core.self_direct(launch=req.launch)
+
+    @app.post("/v1/abyss/timelines", dependencies=auth)
+    def abyss_timelines(req: AbyssTimelinesRequest) -> dict:
+        # Abyss · 1 — branch the present into many futures over the shared world model and rank
+        # the candidate actions by risk-aware outcome (CVaR tail, not just the mean). Reports
+        # itself blind rather than ranking noise when the model has not learned enough.
+        return core.simulate_futures(req.actions, state=req.state, branches=req.branches,
+                                     horizon=req.horizon, risk_aversion=req.risk_aversion,
+                                     budget_ms=req.budget_ms)
+
+    @app.post("/v1/abyss/butterfly", dependencies=auth)
+    def abyss_butterfly(req: AbyssButterflyRequest = AbyssButterflyRequest()) -> dict:
+        # Abyss · 2 — perturb each numeric dimension of the present in turn and rank them by how
+        # far the tiny change cascades. Answers which small detail of now most controls next.
+        return core.butterfly_scan(state=req.state, horizon=req.horizon, delta=req.delta,
+                                   labels=req.labels)
 
     @app.post("/v1/synthesize-scenarios", dependencies=auth)
     def synthesize_scenarios(req: SynthesizeScenariosRequest = SynthesizeScenariosRequest()) -> dict:

@@ -176,3 +176,83 @@ def test_stats_report_whether_she_can_see_ahead(brain):
         pytest.skip("chronos disabled")
     stats = brain.stats()["chronos"]
     assert {"available", "coverage", "min_coverage"} <= set(stats)
+
+
+# -------------------- the kernel's model, not a private empty one -------------------- #
+class _FakeCore:
+    """Stands in for the kernel: all chronos needs from it is the shared world model."""
+
+    def __init__(self, model):
+        self.world_model = model
+
+
+def test_adopting_the_kernels_model_is_what_makes_foresight_possible(chronos):
+    """Left alone, chronos simulates over a model nothing in the cycle ever teaches."""
+    from nyxara.mind.world_model import WorldModel
+
+    shared = WorldModel()
+    assert chronos.adopt_world_model(shared) is True
+    assert chronos.world_model() is shared
+    assert chronos.available() is False              # shared, but not yet learned anything
+
+    # the kernel learns — from its embodied loop, not from chronos — and she can now see
+    rng = random.Random(0)
+    for _ in range(40):
+        x = rng.uniform(0.0, 1.0)
+        shared.observe((x,), "invest", (min(1.0, x + 0.6),), reward=0.6)
+        shared.observe((x,), "hold", (min(1.0, x + 0.05),), reward=0.05)
+    assert chronos.available() is True
+    assert chronos.explore(_opts("invest", "hold"), state=[0.3]).ran is True
+
+
+def test_an_unusable_model_is_refused_rather_than_adopted(chronos):
+    assert chronos.adopt_world_model(None) is False
+    assert chronos.adopt_world_model(object()) is False   # no __len__ ⇒ coverage() cannot read it
+    assert chronos.stats()["shared_world_model"] is False
+
+
+def test_a_private_model_is_never_reported_as_the_shared_one(chronos):
+    """Having *a* model is not the same as having the one that fills — say which."""
+    chronos.explore(_opts("invest", "hold"), state=[0.3])   # forces the lazy private build
+    assert chronos.world_model() is not None
+    assert chronos.stats()["shared_world_model"] is False
+
+
+def test_the_brain_hands_chronos_the_kernels_world_model(brain):
+    from nyxara.mind.world_model import WorldModel
+
+    if brain.chronos is None:
+        pytest.skip("chronos disabled")
+    shared = WorldModel()
+    brain.attach_kernel(core=_FakeCore(shared))
+    assert brain.chronos.world_model() is shared
+    assert brain.chronos.stats()["shared_world_model"] is True
+
+
+def test_attaching_a_kernel_without_a_model_leaves_her_own_alone(brain):
+    if brain.chronos is None:
+        pytest.skip("chronos disabled")
+    _teach(brain.chronos, better="memory", worse="graph")
+    before = brain.chronos.world_model()
+    brain.attach_kernel(core=_FakeCore(None))
+    assert brain.chronos.world_model() is before
+
+
+# -------------------- the time budget now bites -------------------- #
+def test_the_time_budget_bounds_the_pass(chronos):
+    _teach(chronos, better="invest", worse="hold")
+    chronos.max_branches = 200_000
+    chronos.budget_ms = 200.0
+    got = chronos.explore(_opts("invest", "hold"), state=[0.3])
+    assert got.ran is True
+    assert got.branches < 200_000                    # the clock decided, not the ask
+    assert got.clipped is True
+    assert got.elapsed_ms < 200 * 5                  # generous: it stopped rather than ran on
+
+
+def test_an_unclipped_pass_says_so(chronos):
+    _teach(chronos, better="invest", worse="hold")
+    got = chronos.explore(_opts("invest", "hold"), state=[0.3], branches=20)
+    assert got.ran is True and got.clipped is False
+    assert got.branches == 20
+    assert got.to_dict()["clipped"] is False

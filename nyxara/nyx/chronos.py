@@ -37,6 +37,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = ["Future", "Futures", "TemporalCausalMatrix"]
 
+#: Mirrors :data:`nyxara.abyss.timeline_simulator.DEFAULT_NOISE_SCALE`. Copied rather than
+#: imported so this module keeps its lazy, fail-soft relationship with the simulator — nothing
+#: in the nyx import chain should pull the world model in just to read one float.
+DEFAULT_NOISE_SCALE = 0.01
+
 # A decision asks what to *do*; a question asks what *is*. Only the first has futures.
 _DECISION = re.compile(
     r"\b(should|shall|ought|which (?:one|option|way)|better to|worth it|what do i do|"
@@ -71,7 +76,8 @@ class Futures:
     best: str = ""
     confidence: float = 0.0          # the simulator's own, not ours
     coverage: int = 0                # how much the world model has actually learned
-    branches: int = 0
+    branches: int = 0                # futures actually rolled, not futures asked for
+    clipped: bool = False            # the time budget cut the pass short of what was asked
     horizon: int = 0
     options: List[Future] = field(default_factory=list)
     elapsed_ms: float = 0.0
@@ -80,6 +86,7 @@ class Futures:
         return {"ran": self.ran, "blind": self.blind, "reason": self.reason,
                 "best": self.best, "confidence": round(self.confidence, 4),
                 "coverage": self.coverage, "branches": self.branches,
+                "clipped": self.clipped,
                 "horizon": self.horizon, "elapsed_ms": round(self.elapsed_ms, 2),
                 "options": [o.to_dict() for o in self.options]}
 
@@ -89,13 +96,20 @@ class TemporalCausalMatrix:
 
     def __init__(self, *, world_model: Any = None, max_branches: int = 256, horizon: int = 4,
                  budget_ms: float = 400.0, risk_aversion: float = 0.5,
-                 min_coverage: int = 8, seed: int = 42) -> None:
+                 min_coverage: int = 8, seed: int = 42,
+                 noise_scale: float = DEFAULT_NOISE_SCALE) -> None:
         self._world_model = world_model
         self._tried = world_model is not None
+        # Whether the model she sees ahead with came from outside — the kernel's shared one — or
+        # is the private one she builds for herself. Only the first can ever fill.
+        self._adopted = world_model is not None
         self.max_branches = max(1, int(max_branches))
         self.horizon = max(1, int(horizon))
         self.budget_ms = max(1.0, float(budget_ms))
         self.risk_aversion = float(risk_aversion)
+        # Divergence between the branches. At zero the rollouts of one option are the same
+        # trajectory repeated, and "many futures" is one future counted many times.
+        self.noise_scale = max(0.0, float(noise_scale))
         # Below this many learned transitions the model cannot say anything about the future,
         # and the simulator's zeros would look like findings.
         self.min_coverage = max(1, int(min_coverage))
@@ -122,6 +136,27 @@ class TemporalCausalMatrix:
             return is_command(stimulus)
         except Exception:  # noqa: BLE001 — the reader is a capability, never a dependency
             return False
+
+    def adopt_world_model(self, model: Any) -> bool:
+        """Take the kernel's **shared** world model as the one to see ahead with.
+
+        Left to itself this class builds a private model with :func:`build_world_model`, which is
+        born empty and — because nothing in the think-cycle calls :meth:`learn` — stays empty for
+        the life of the process. Foresight was therefore permanently ``blind``: honest, but never
+        able to become anything else. The kernel's model is the one that actually fills, from the
+        embodied loop's real transitions, so adopting it is what turns L-CHRONOS on. Called by
+        :meth:`~nyxara.nyx.brain.NyxBrain.attach_kernel`; returns whether the model was taken.
+        """
+        if model is None:
+            return False
+        try:
+            len(model)                     # must expose the surface `coverage()` reads
+        except Exception:  # noqa: BLE001 — an unusable model is not an improvement
+            return False
+        self._world_model = model
+        self._tried = True
+        self._adopted = True
+        return True
 
     def world_model(self) -> Any:
         if not self._tried:
@@ -179,10 +214,19 @@ class TemporalCausalMatrix:
 
             from nyxara.abyss.timeline_simulator import TimelineSimulator
             simulator = TimelineSimulator(self.world_model(), seed=self.seed)
-            out.branches = min(self.max_branches, int(branches or self.max_branches))
+            asked = min(self.max_branches, int(branches or self.max_branches))
+            # ``budget_ms`` was configured, stored and never consulted — a knob an operator could
+            # turn with nothing on the other end of it. It is now the simulator's wall-clock cap,
+            # so a slow model costs bounded time instead of unbounded time.
             report = simulator.simulate(list(state or [0.0]), labels,
-                                        branches=out.branches, horizon=self.horizon,
-                                        risk_aversion=self.risk_aversion)
+                                        branches=asked, horizon=self.horizon,
+                                        noise_scale=self.noise_scale,
+                                        risk_aversion=self.risk_aversion,
+                                        budget_ms=self.budget_ms)
+            # report what she actually rolled, not what she asked for: a clipped pass that still
+            # claimed the full budget would be a number that is not true.
+            out.branches = int(getattr(report, "total_branches", asked) or asked)
+            out.clipped = out.branches < asked
             out.ran = True
             out.best = str(getattr(report, "best_action", "") or "")
             out.confidence = float(getattr(report, "confidence", 0.0))
@@ -226,6 +270,10 @@ class TemporalCausalMatrix:
             coverage = self.coverage()
             return {"available": coverage >= self.min_coverage, "coverage": coverage,
                     "min_coverage": self.min_coverage, "max_branches": self.max_branches,
-                    "horizon": self.horizon, "risk_aversion": self.risk_aversion}
+                    "horizon": self.horizon, "risk_aversion": self.risk_aversion,
+                    "budget_ms": self.budget_ms, "noise_scale": self.noise_scale,
+                    # False means she is simulating over her own private model, which nothing
+                    # teaches — so `coverage` will stay where it is and she will stay blind.
+                    "shared_world_model": self._adopted}
         except Exception:  # noqa: BLE001
             return {"available": False}

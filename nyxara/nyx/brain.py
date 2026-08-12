@@ -1329,6 +1329,17 @@ class NyxBrain:
             if self.hands is not None and tools is not None:
                 self.hands._registry = tools
                 self.hands._tried_router = False
+            # Foresight had the same shape of gap as `hands`: L-CHRONOS was built, enabled and
+            # reachable, but simulated over a world model it built for itself — one that is born
+            # empty and that nothing in the think-cycle ever teaches. Every `explore()` therefore
+            # reported `blind` forever. The kernel's model is the one that actually fills, from
+            # the embodied loop's lived transitions, and it is the same model the abyss engines
+            # already use, so handing it over here is what makes her able to see ahead at all.
+            if self.chronos is not None and core is not None:
+                try:
+                    self.chronos.adopt_world_model(getattr(core, "world_model", None))
+                except Exception:  # noqa: BLE001 — she keeps her own model and stays honest
+                    pass
         except Exception:  # noqa: BLE001
             return
 
