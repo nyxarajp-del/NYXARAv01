@@ -147,11 +147,29 @@ def test_a_genuine_contradiction_is_still_caught_after_the_correction_rule():
     assert core._last_causal.abstain is True
 
 
+def test_learn_from_text_surfaces_the_causal_read(monkeypatch):
+    """The wiring only — with the grounders stubbed.
+
+    ``learn_from_text`` runs the LLM-backed language grounder, which is orders of magnitude
+    heavier than the claim mining this branch added and whose cost depends on whatever state
+    earlier tests left in the local model. Driving it here made this file's runtime a hostage to
+    the rest of the suite; the claim mining itself is covered against ``_causal_read`` directly.
+    """
+    core = _core()
+    monkeypatch.setattr(core, "_grounder",
+                        lambda: type("G", (), {"learn": lambda *a, **k: {"transitions": 0}})())
+    monkeypatch.setattr(core, "_symbol_grounder",
+                        lambda: type("S", (), {"learn_from_text": lambda *a, **k: {}})())
+
+    report = core.learn_from_text("Heavy rain causes flooding.")
+    assert report["causal_claims"]["claims"] == 1
+    assert core.causal_engine.lattice.status()["knots"] >= 1
+
+
 def test_reading_reports_retractions_separately():
     core = _core()
-    report = core.learn_from_text("Heavy rain causes flooding. "
-                                  "Actually heavy rain prevents flooding.")
-    claims = report["causal_claims"]
+    claims = core._causal_read("Heavy rain causes flooding. "
+                               "Actually heavy rain prevents flooding.")
     assert claims["contradicted"] == 0
     assert claims["corrections"] == 1 and claims["retracted"] == 1
 
@@ -178,13 +196,12 @@ def test_a_retraction_on_the_turn_path_is_journalled():
 
 def test_a_retraction_on_the_reading_path_is_journalled():
     core = _core()
-    core.learn_from_text("Heavy rain causes flooding.")
-    report = core.learn_from_text("Actually heavy rain prevents flooding.")
+    core._causal_read("Heavy rain causes flooding.")
+    claims = core._causal_read("Actually heavy rain prevents flooding.")
 
     notes = _retraction_notes(core)
     assert len(notes) == 1 and "(reading)" in notes[0]
-    assert report["causal_claims"]["retractions"][0]["by"] == \
-        "Actually heavy rain prevents flooding."
+    assert claims["retractions"][0]["by"] == "Actually heavy rain prevents flooding."
 
 
 def test_nothing_is_journalled_when_nothing_is_retracted():
@@ -213,8 +230,8 @@ def test_report_omits_recent_retractions_when_there_are_none():
 
 def test_a_correction_in_a_document_updates_what_the_conversation_holds():
     core = _core()
-    core.learn_from_text("Heavy rain causes flooding.")
-    core.learn_from_text("Actually heavy rain prevents flooding.")
+    core._causal_read("Heavy rain causes flooding.")
+    core._causal_read("Actually heavy rain prevents flooding.")
 
     # the conversation now agrees with the corrected reading, and clashes with the old one
     core._causal_engage("Heavy rain prevents flooding.", [])
@@ -264,19 +281,19 @@ def test_reading_a_passage_feeds_the_shared_lattice():
     """growth/text_causal built a throwaway lattice per call, so nothing she read could ever
     contradict anything else she had read — or anything said in the conversation."""
     core = _core()
-    first = core.learn_from_text("Heavy rain causes flooding.")
-    assert first["causal_claims"]["claims"] == 1
+    first = core._causal_read("Heavy rain causes flooding.")
+    assert first["claims"] == 1
     assert core.causal_engine.lattice.status()["knots"] >= 1
 
     # a second passage that contradicts the first is refused, not absorbed
-    second = core.learn_from_text("Heavy rain prevents flooding.")
-    assert second["causal_claims"]["contradicted"] == 1
-    assert second["causal_claims"]["claims"] == 0
+    second = core._causal_read("Heavy rain prevents flooding.")
+    assert second["contradicted"] == 1
+    assert second["claims"] == 0
 
 
 def test_a_document_and_the_conversation_share_one_lattice():
     core = _core()
-    core.learn_from_text("Heavy rain causes flooding.")
+    core._causal_read("Heavy rain causes flooding.")
     core._causal_engage("Heavy rain prevents flooding.", [])
     assert core._last_causal.consistent is False
     assert core._last_causal.abstain is True
@@ -291,8 +308,8 @@ def test_reading_still_works_with_the_engine_off(monkeypatch):
 
     core = _core()
     assert core.causal_engine is None
-    report = core.learn_from_text("Heavy rain causes flooding.")
-    assert report["causal_claims"]["claims"] == 1      # a local lattice, still better than none
+    claims = core._causal_read("Heavy rain causes flooding.")
+    assert claims["claims"] == 1                  # a local lattice, still better than none
 
 
 def test_report_surfaces_the_engine_and_its_last_turn():
