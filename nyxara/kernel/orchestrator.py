@@ -10140,7 +10140,8 @@ class NyxaraCore:
         lattice = getattr(engine, "lattice", None) if engine is not None else None
         rep = mine_claims(text, model=self.causal_world_model, lattice=lattice)
         out = {"claims": len(rep.claims), "contradicted": rep.contradicted,
-               "registered": rep.registered, "defeated": rep.defeated}
+               "registered": rep.registered, "defeated": rep.defeated,
+               "corrections": rep.corrections}
         if rep.contradicted:
             self.mind.record(
                 ThoughtKind.INFERENCE,

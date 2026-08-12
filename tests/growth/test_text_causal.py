@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nyxara.causal.causal_knots import CONCORDANT, DISCORDANT, _norm_sign
 from nyxara.growth.dataset_causal import learn_causal_graph
 from nyxara.growth.text_causal import (_normalize_label, claims_to_graph, extract_claims,
@@ -176,3 +178,68 @@ def test_a_measured_link_carries_no_such_warning():
     link = model.why("flood")[0]
     assert link.measured is True
     assert "ASSERTED" not in link.describe()
+
+
+# --------------------------------------------------------------------------- #
+# Retractions — a speaker correcting themselves is not a contradiction
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("sentence", [
+    "Actually caffeine reduces my focus.",
+    "Actually, caffeine reduces my focus.",
+    "I was wrong, caffeine reduces my focus.",
+    "Correction: caffeine reduces my focus.",
+    "No wait, caffeine reduces my focus.",
+    "My mistake, caffeine reduces my focus.",
+    "On second thought, caffeine reduces my focus.",
+    "I take that back, caffeine reduces my focus.",
+    "Maine galat kaha, caffeine reduces my focus.",
+    "मैंने ग़लत कहा, caffeine reduces my focus.",
+])
+def test_a_retraction_yields_no_claim(sentence):
+    from nyxara.growth.text_causal import extract_claims, is_correction
+
+    assert is_correction(sentence) is True
+    claims, _sentences, defeated = extract_claims(sentence)
+    assert claims == [] and defeated == 1
+
+
+@pytest.mark.parametrize("sentence", [
+    "Caffeine reduces my focus.",
+    "The drug actually reduces my focus.",        # mid-sentence filler, not a retraction
+    "Rain causes flooding.",
+])
+def test_an_ordinary_assertion_is_not_a_retraction(sentence):
+    from nyxara.growth.text_causal import extract_claims, is_correction
+
+    assert is_correction(sentence) is False
+    claims, _sentences, _defeated = extract_claims(sentence)
+    assert len(claims) == 1
+
+
+def test_a_retraction_does_not_trip_the_contradiction_gate():
+    """"X causes Y" then "actually X prevents Y" is one speaker updating, not a clash."""
+    from nyxara.growth.text_causal import learn_from_text
+
+    report = learn_from_text("Caffeine improves my focus. "
+                             "Actually caffeine reduces my focus.")
+    assert report.contradicted == 0
+    assert report.corrections == 1
+    assert len(report.claims) == 1          # the first claim stands, unchallenged
+
+
+def test_a_real_contradiction_is_still_refused():
+    from nyxara.growth.text_causal import learn_from_text
+
+    report = learn_from_text("Caffeine improves my focus. Caffeine reduces my focus.")
+    assert report.contradicted == 1
+    assert report.corrections == 0
+
+
+def test_the_report_counts_concessions_and_retractions_apart():
+    from nyxara.growth.text_causal import learn_from_text
+
+    report = learn_from_text("Rain causes flooding. "
+                             "Despite the rain, flooding causes damage. "
+                             "Actually rain prevents flooding.")
+    assert report.defeated == 1 and report.corrections == 1
+    assert report.to_dict()["corrections"] == 1

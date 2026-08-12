@@ -118,6 +118,39 @@ def test_a_turn_with_no_claims_writes_no_knot_gate():
     assert "knot" not in gates
 
 
+def test_a_self_correction_is_not_treated_as_a_contradiction():
+    """"X causes Y" then "actually X prevents Y" is the Master updating, not a hallucination."""
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    assert core._last_causal.committed == 1
+
+    thoughts: list = []
+    core._causal_engage("Actually caffeine reduces my focus.", thoughts, {})
+    et = core._last_causal
+    assert et.consistent is True and et.abstain is False
+    assert et.knot_check is None            # the retraction never reached the gate
+
+    candidate = _respond_candidate(confidence=0.8, belief=0.8)
+    assert core._apply_knot_caution(candidate).confidence == 0.8   # and nothing was damped
+
+
+def test_a_genuine_contradiction_is_still_caught_after_the_correction_rule():
+    core = _core()
+    core._causal_engage("Caffeine improves my focus.", [])
+    core._causal_engage("Caffeine reduces my focus.", [])
+    assert core._last_causal.consistent is False
+    assert core._last_causal.abstain is True
+
+
+def test_reading_reports_retractions_separately():
+    core = _core()
+    report = core.learn_from_text("Heavy rain causes flooding. "
+                                  "Actually heavy rain prevents flooding.")
+    claims = report["causal_claims"]
+    assert claims["claims"] == 1 and claims["contradicted"] == 0
+    assert claims["corrections"] == 1
+
+
 def test_knot_gate_abstains_actually_damps_the_answer():
     """The flag is documented as "abstains more often — FEWER answers" and produced no
     behaviour at all. A measured contradiction now damps confidence so HonestyGuard hedges."""

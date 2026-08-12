@@ -23,6 +23,12 @@ between a useful layer and a confident liar:
   rather than both being absorbed into the weights.
 * Concessive sentences ("despite", "although", "no evidence that") are **defeaters**: they are
   detected and dropped, because the surface pattern in them points the wrong way.
+* **Retractions** ("actually…", "I was wrong", "maine galat kaha") are defeaters too, for a
+  different reason. A speaker correcting themselves is the one case where "X causes Y" followed
+  by "X prevents Y" is not a contradiction — it is one person updating. Read as an assertion it
+  would trip the knot gate and get an honest correction flagged as a probable hallucination.
+  Dropped, the prior claim simply stands: nothing in a cue grammar can tell which of the two the
+  speaker now means, and guessing would be worse than declining to guess.
 
 Depends on ``senses/nlp`` (sentence splitting, stdlib), ``causal/causal_knots`` (the contradiction
 gate) and ``mind/causal_world_model`` (the graph). Nothing imports back.
@@ -46,6 +52,27 @@ _TEXT_CONFIDENCE = 0.35
 _DEFEATERS = re.compile(
     r"\b(despite|although|though|even if|no evidence|not caused|does not cause|"
     r"doesn't cause|is not caused|unrelated to|contrary to|myth that)\b", re.I)
+
+# Sentences that *retract* something said earlier. A speaker correcting themselves is the one
+# case where "X causes Y" then "X prevents Y" is not a contradiction at all — it is the same
+# person updating. Left unhandled, the knot lattice reads the pair as a Knot Mutation Failure
+# and flags an honest correction as a probable hallucination.
+#
+# The weak cues ("actually", "no wait") are anchored to the start of the sentence: mid-sentence
+# they are ordinary filler, and dropping every sentence containing the word "actually" would
+# cost far more real claims than it saves. The explicit retractions match anywhere.
+_CORRECTIONS = re.compile(
+    r"^\s*(?:actually|correction|no[, ]+wait|wait[, ]+no|on second thought(?:s)?|"
+    r"scratch that|i meant|sorry[, ]+i meant)\b"
+    r"|\bi (?:was wrong|misspoke|take that back|stand corrected)\b"
+    r"|\b(?:my mistake|let me correct|to correct myself)\b"
+    r"|\bgalat (?:kaha|bola|tha)\b|\bmaine galat\b"
+    r"|(?:ग़लत|गलत)\s*(?:कहा|बोला|था)", re.I)
+
+
+def is_correction(sentence: str) -> bool:
+    """True when a sentence retracts an earlier claim rather than asserting a new one."""
+    return bool(_CORRECTIONS.search(sentence or ""))
 
 # (name, pattern, cause_group, effect_group, polarity)
 _PATTERNS: Tuple[Tuple[str, "re.Pattern[str]", int, int, int], ...] = (
@@ -132,6 +159,7 @@ class TextCausalReport:
     sentences: int = 0
     claims: List[CausalClaim] = field(default_factory=list)
     defeated: int = 0                  # concessive sentences skipped
+    corrections: int = 0               # retractions skipped ("actually, X prevents Y")
     contradicted: int = 0              # claims refused by the knot lattice
     registered: int = 0                # links written onto the CausalWorldModel
     contradictions: List[str] = field(default_factory=list)
@@ -139,6 +167,7 @@ class TextCausalReport:
     def summary(self) -> str:
         lines = [f"· text-causal: {len(self.claims)} claim(s) from {self.sentences} sentence(s); "
                  f"{self.defeated} concessive sentence(s) skipped, "
+                 f"{self.corrections} retraction(s) skipped, "
                  f"{self.contradicted} contradiction(s) refused"]
         for claim in self.claims[:10]:
             arrow = "→" if claim.polarity > 0 else "⊣"
@@ -151,7 +180,8 @@ class TextCausalReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"sentences": self.sentences, "claims": [c.to_dict() for c in self.claims],
-                "defeated": self.defeated, "contradicted": self.contradicted,
+                "defeated": self.defeated, "corrections": self.corrections,
+                "contradicted": self.contradicted,
                 "registered": self.registered, "contradictions": list(self.contradictions)}
 
 
@@ -164,11 +194,17 @@ def _sentences(text: str) -> List[str]:
         return [s for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
 
 
-def extract_claims(text: str, *, source: str = "") -> Tuple[List[CausalClaim], int, int]:
+def extract_claims(text: str, *, source: str = "",
+                   report: Optional["TextCausalReport"] = None
+                   ) -> Tuple[List[CausalClaim], int, int]:
     """Read causal claims out of prose. Returns ``(claims, n_sentences, n_defeated)``.
 
     Deterministic: the same text always yields the same claims, and each carries the sentence it
-    came from so nothing is asserted without a traceable quote."""
+    came from so nothing is asserted without a traceable quote.
+
+    ``n_defeated`` counts every sentence skipped — concessions and retractions alike. Pass a
+    ``report`` to have the two counted apart; the returned tuple keeps its historical shape.
+    """
     claims: List[CausalClaim] = []
     sentences = _sentences(text)
     defeated = 0
@@ -176,9 +212,19 @@ def extract_claims(text: str, *, source: str = "") -> Tuple[List[CausalClaim], i
         clean = sentence.strip().rstrip(".!?")
         if not clean:
             continue
+        if _CORRECTIONS.search(clean):
+            # A retraction, not an assertion. Dropping it keeps a speaker correcting themselves
+            # from being read as a contradiction — the prior claim simply stands, unchallenged,
+            # because nothing here can tell which of the two the speaker now means.
+            defeated += 1
+            if report is not None:
+                report.corrections += 1
+            continue
         if _DEFEATERS.search(clean):
             # "X does not cause Y" matches the causal pattern too — the concession must win.
             defeated += 1
+            if report is not None:
+                report.defeated += 1
             continue
         for cue, pattern, cause_group, effect_group, polarity in _PATTERNS:
             match = pattern.match(clean)
@@ -263,8 +309,9 @@ def _register_claims(model: Any, claims: Sequence[CausalClaim]) -> int:
 def learn_from_text(text: str, *, model: Any = None, source: str = "",
                     lattice: Any = None) -> TextCausalReport:
     """Extract causal claims from prose and fold the consistent ones into the graph."""
-    claims, n_sentences, defeated = extract_claims(text, source=source)
-    report = TextCausalReport(sentences=n_sentences, defeated=defeated)
+    report = TextCausalReport()
+    claims, n_sentences, _defeated = extract_claims(text, source=source, report=report)
+    report.sentences = n_sentences        # ``report`` already counted defeats and retractions
     return claims_to_graph(claims, model=model, lattice=lattice, report=report)
 
 
@@ -283,8 +330,7 @@ def learn_from_dataset_store(store_path: Any, *, model: Any = None,
 
     name = Path(str(store_path)).name
     for doc in load_dataset_docs(store_path, limit=limit):
-        claims, n_sentences, defeated = extract_claims(doc, source=name)
-        report.sentences += n_sentences
-        report.defeated += defeated
+        claims, n_sentences, _defeated = extract_claims(doc, source=name, report=report)
+        report.sentences += n_sentences   # ``report`` already counted defeats and retractions
         claims_to_graph(claims, model=model, lattice=lattice, report=report)
     return report
