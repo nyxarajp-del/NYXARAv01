@@ -4199,6 +4199,7 @@ class NyxaraSettings(BaseSettings):
         # a `nyxara-perception` thread regardless. A silently-ignored setting is worse than an
         # unsupported one: it reads as working.
         supplied_perception = set(self.perception.model_fields_set)
+        supplied_metacontrol = set(self.metacontrol.model_fields_set)
 
         # These can NEVER be disabled, in any profile.
         self.features.invariant_enforcement = True
@@ -4364,7 +4365,13 @@ class NyxaraSettings(BaseSettings):
             # allocates per turn, so an easy prompt remains one forward pass. That per-turn choice
             # IS the max-power feature, not a weakening of it.
             self.metacontrol.enabled = True
-            self.metacontrol.max_seconds_ceiling = 600.0
+            # Same rule as perception above, and the second proven case of this block ignoring
+            # explicit input. tests/conftest.py sets NYXARA_METACONTROL__MAX_SECONDS_CEILING=6
+            # specifically to stop the suite spending real deliberation time per turn, and
+            # documents why — and it read back as 600.0, because this line ran after the
+            # environment. The fix the suite already had was never in effect.
+            if "max_seconds_ceiling" not in supplied_metacontrol:
+                self.metacontrol.max_seconds_ceiling = 600.0
             self.metacontrol.escalation = True
             self.metacontrol.probe_self_consistency = True
             self.llm.reasoning_passes = 5
