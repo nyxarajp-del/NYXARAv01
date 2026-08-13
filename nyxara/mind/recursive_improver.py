@@ -247,8 +247,14 @@ class RecursiveImprover:
 # --------------------------------------------------------------------------- #
 import re as _re
 
-_SENT_SPLIT = _re.compile(r"(?<=[.!?])\s+")
-_WS = _re.compile(r"\s+")
+_SENT_SPLIT = _re.compile(r"(?<=[.!?])[ \t]+")
+# Horizontal whitespace only. This was ``\s+``, which collapsed NEWLINES into spaces and so
+# flattened every line-structured answer — a numbered plan, a bulleted list, a code block —
+# into one line. Line structure is content, not "runaway whitespace": ``agency/mission.py``
+# parses milestones with a per-line ``^\d+[.)]`` regex, so a three-step plan came back as one
+# milestone. Blank-line paragraph breaks are preserved below; runs of 3+ are capped at 2.
+_WS = _re.compile(r"[ \t]+")
+_BLANK_LINES = _re.compile(r"\n{3,}")
 _STOP = frozenset(
     "the a an of to in on for and or but is are was were be been being this that these "
     "those it its as at by with from into your you i we they he she them his her our my "
@@ -261,29 +267,40 @@ def _clean_text(text: str) -> str:
 
     Collapses runaway whitespace, de-stutters immediately repeated words, and drops
     duplicated adjacent sentences.  Idempotent: already-clean text returns unchanged.
+
+    Works line by line so line structure survives — see ``_WS`` for why that matters.
     """
     if not text:
         return text
-    collapsed = _WS.sub(" ", text).strip()
 
-    # de-stutter: drop a word that is identical (case-insensitive) to the one before it
-    words = collapsed.split(" ")
-    dest: List[str] = []
-    for w in words:
-        if dest and w.lower() == dest[-1].lower() and w.strip(".,!?;:").isalpha():
-            continue
-        dest.append(w)
-    deduped = " ".join(dest)
+    def _clean_line(line: str) -> str:
+        collapsed = _WS.sub(" ", line).strip()
+        if not collapsed:
+            return ""
+        # de-stutter: drop a word identical (case-insensitive) to the one before it
+        dest: List[str] = []
+        for w in collapsed.split(" "):
+            if dest and w.lower() == dest[-1].lower() and w.strip(".,!?;:").isalpha():
+                continue
+            dest.append(w)
+        deduped = " ".join(dest)
+        # drop duplicated adjacent sentences ("Paris is the capital. Paris is the capital.")
+        out: List[str] = []
+        for s in _SENT_SPLIT.split(deduped):
+            norm = s.strip().lower()
+            if out and norm and norm == out[-1].strip().lower():
+                continue
+            out.append(s)
+        return " ".join(p for p in out if p).strip()
 
-    # drop duplicated adjacent sentences ("Paris is the capital. Paris is the capital.")
-    sents = _SENT_SPLIT.split(deduped)
-    out: List[str] = []
-    for s in sents:
-        norm = s.strip().lower()
-        if out and norm and norm == out[-1].strip().lower():
+    lines = [_clean_line(ln) for ln in text.split("\n")]
+    # a duplicated adjacent LINE is the multi-line form of a duplicated adjacent sentence
+    kept: List[str] = []
+    for ln in lines:
+        if ln and kept and ln.lower() == kept[-1].lower():
             continue
-        out.append(s)
-    return " ".join(p for p in out if p).strip()
+        kept.append(ln)
+    return _BLANK_LINES.sub("\n\n", "\n".join(kept)).strip()
 
 
 def _derive_rationale(text: str, iteration: int) -> str:

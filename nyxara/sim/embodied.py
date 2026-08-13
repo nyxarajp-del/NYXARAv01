@@ -442,7 +442,6 @@ class EmbodiedAgent:
         base = 0.2 if fresh else 0.02
         curiosity = base + 0.4 * min(1.0, surprise.surprise) + (0.2 if nov else 0.0)
         self._note_novelty(1.0 if nov else 0.0)
-        self.binder.frame  # keep ref; maybe reset below
         self._maybe_reset_frame()
         bd = {"curiosity": curiosity}
         return curiosity, surprise.surprise, nov, bound.to_dict(), bd

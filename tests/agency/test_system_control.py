@@ -226,3 +226,33 @@ def test_process_signalling_escalates_under_bare_policy():
     reg = _registry(build_default_policy())
     res = reg.invoke("kill_process", {"pid": 2_000_000_000}, authority=Authority.AUTONOMOUS)
     assert not res.ok and res.requires_owner
+
+
+# --------------------------------------------------------------------------- #
+# Package-manager override (detect_package_manager)
+# --------------------------------------------------------------------------- #
+# The configured override was returned whether or not it existed on PATH: both branches of
+# `return X if shutil.which(X) else X` were identical, so the probe was dead code. A typo in
+# `package_manager` was then handed to `_package_action`, which — unlike `package_query` —
+# does not re-probe the binary, turning a config mistake into a raw exec failure instead of
+# the honest "no supported package manager found".
+def test_configured_package_manager_is_used_when_present():
+    sc = SystemControl(package_manager="pip")
+    assert sc.detect_package_manager() == "pip"    # pip is present in this interpreter's env
+
+
+def test_bogus_package_manager_override_falls_back_to_autodetect():
+    sc = SystemControl(package_manager="definitely-not-a-real-package-manager")
+    detected = sc.detect_package_manager()
+    assert detected != "definitely-not-a-real-package-manager", (
+        "an override that is not on PATH must not be handed on as if it were installed")
+
+
+def test_package_install_reports_honestly_for_a_bogus_override(tmp_path):
+    sc = SystemControl(package_manager="definitely-not-a-real-package-manager")
+    if sc.detect_package_manager() is not None:
+        # a real manager exists on this box, so the fallback found one — nothing more to assert
+        return
+    res = sc.package_install("some-package")
+    assert res.get("ok") is False
+    assert "no supported package manager" in str(res.get("error", "")).lower()

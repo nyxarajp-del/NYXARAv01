@@ -579,9 +579,16 @@ class SystemControl:
     # Package management — finally exercises the PKG_INSTALL capability
     # ------------------------------------------------------------------ #
     def detect_package_manager(self) -> Optional[str]:
-        """Return the first available system package manager (or the configured override)."""
-        if self.package_manager:
-            return self.package_manager if shutil.which(self.package_manager) else self.package_manager
+        """Return the first available system package manager (or the configured override).
+
+        The override is honoured only when it is actually on PATH. Both branches of this
+        ternary used to return it regardless, which made the ``which`` probe dead code: a
+        misconfigured ``package_manager`` was handed straight to ``_package_action``, which
+        (unlike ``package_query``) does not re-probe the binary, so the install surfaced as a
+        raw exec failure instead of the honest "no supported package manager found".
+        """
+        if self.package_manager and shutil.which(self.package_manager):
+            return self.package_manager
         for mgr in _PKG_MANAGERS:
             if shutil.which(mgr):
                 return mgr

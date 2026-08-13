@@ -125,8 +125,8 @@ class EpistemicLedger:
     def record(self, content: str, *, source: str = "self", confidence: float = 1.0,
                sensitivity: Any = Sensitivity.INTERNAL) -> KnowledgeEntry:
         """Sign a new fact/axiom/skill and append it to the chain (bound to the previous entry)."""
-        sens = Sensitivity(sensitivity).value if not isinstance(sensitivity, str) else \
-            Sensitivity(sensitivity).value
+        # Sensitivity() coerces a str member-value and a Sensitivity alike — one path suffices.
+        sens = Sensitivity(sensitivity).value
         entry = KnowledgeEntry(id=len(self.chain), content=str(content), source=str(source),
                                confidence=float(confidence), sensitivity=sens,
                                prev_hash=self._prev_hash, timestamp=time.time())
