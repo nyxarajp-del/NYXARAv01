@@ -141,3 +141,27 @@ def test_the_brain_survives_concurrent_turns():
     orphans = [(pre, post) for pre, targets in brain.fabric.out.items()
                for post in targets if pre not in brain.fabric.inn.get(post, set())]
     assert not orphans
+
+
+def test_a_disabled_foundry_is_not_trained_by_autoforge():
+    """`foundry.enabled` has to mean what it says on every path into the foundry.
+
+    AutoForge called foundry.self_improve() unconditionally, so idle maintenance ran real NumPy
+    training even with the foundry switched off — which is how a hermetic test run ended up
+    training a neural network until pytest-timeout killed the whole process.
+    """
+    from nyxara.growth.autoforge import AutoForge
+
+    class _Foundry:
+        """Fails loudly if it is ever asked to train."""
+
+        def self_improve(self, **_kw):
+            raise AssertionError("a disabled foundry must never be trained")
+
+    forge = AutoForge.__new__(AutoForge)
+    assert forge._foundry_enabled() is False, "the suite seals the foundry off"
+
+    # And the gate is what run_cycle actually consults: wire the exploding foundry in and the
+    # cycle must decline rather than call it.
+    forge.foundry = _Foundry()
+    assert forge._foundry_enabled() is False

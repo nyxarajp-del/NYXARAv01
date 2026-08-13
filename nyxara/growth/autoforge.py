@@ -80,6 +80,16 @@ class AutoForge:
         self._cycles: List[ForgeResult] = []
 
     # ---------------------------------------------------------------------- #
+    def _foundry_enabled(self) -> bool:
+        """Whether the foundry is switched on. Fail-OPEN: an unreadable config must not silently
+        disable real learning, which is the opposite failure and the more expensive one here."""
+        try:
+            from nyxara.kernel.config import get_settings
+            settings = getattr(self, "settings", None) or get_settings()
+            return bool(getattr(getattr(settings, "foundry", None), "enabled", True))
+        except Exception:  # noqa: BLE001
+            return True
+
     def run_cycle(self) -> ForgeResult:
         """Run one cycle: check the data threshold, then forge through the Foundry's gauntlet.
 
@@ -105,6 +115,17 @@ class AutoForge:
 
         if self.foundry is None:
             result.reason = "no foundry wired"
+            result.elapsed_ms = (time.monotonic() - t0) * 1000
+            self._cycles.append(result)
+            return result
+
+        # `foundry.enabled` has to mean what it says on EVERY path into the foundry, not only the
+        # ones that construct it. AutoForge called self_improve() unconditionally, so a deployment
+        # (or a hermetic test run) that had switched the foundry off still paid for real NumPy
+        # training the moment idle maintenance ran — a flag nothing reads is worse than an absent
+        # one. Reported as a skip rather than swallowed, so "it did not forge" stays visible.
+        if not self._foundry_enabled():
+            result.reason = "the foundry is disabled (foundry.enabled=false)"
             result.elapsed_ms = (time.monotonic() - t0) * 1000
             self._cycles.append(result)
             return result
