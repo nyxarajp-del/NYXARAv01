@@ -96,19 +96,30 @@ class Manifold:
 
     def __init__(self, *, dim: int = 10000, seed: int = 42,
                  min_margin: float = 0.08, learn_rate: float = 1.0,
-                 decay: float = 0.999, min_samples: int = 8) -> None:
+                 decay: float = 0.999, min_samples: int = 8,
+                 max_pairs: int = 512) -> None:
         self.dim = max(16, int(dim))
         self.seed = int(seed)
         self.min_margin = float(min_margin)
         self.learn_rate = float(learn_rate)
         self.decay = float(decay)
         self.min_samples = max(1, int(min_samples))
+        self.max_pairs = max(8, int(max_pairs))
 
         self._atoms: Dict[int, Any] = {}      # cell id -> its fixed hypervector (memoised)
-        self._w: Any = None                   # the transition map, built lazily
+        # The transition map is held in LOW-RANK form: the pairs (b, a) whose outer products it is
+        # the sum of. W = Σ aᵢbᵢᵀ, so Wx = Σ aᵢ(bᵢ·x) — exactly the same operator, computed from
+        # the pairs instead of from a materialised matrix. At the default dim the dense form is a
+        # 10000×10000 float32 (400 MB) that has to be allocated and swept on every single turn;
+        # this is ~10 MB and one small matmul. Same mathematics, three orders of magnitude less.
+        self._before: List[Any] = []
+        self._after: List[Any] = []
+        self._weights: List[float] = []
         self.samples = 0                      # transitions actually learned
         self.hits = 0                         # predictions that later proved right
         self.misses = 0
+        self._atom_index: List[int] = []      # cell ids, aligned with _atom_matrix rows
+        self._atom_matrix: Any = None         # stacked atoms, rebuilt when the pool changes
 
     # ---- atoms ----------------------------------------------------------- #
     def atom(self, cell_id: int) -> Any:
@@ -122,6 +133,8 @@ class Manifold:
         # recompute and nothing else.
         if len(self._atoms) > 65536:
             self._atoms.clear()
+            self._atom_matrix = None      # the stack is built from these; it must go with them
+            self._atom_index = []
         self._atoms[cell_id] = vec
         return vec
 
@@ -187,12 +200,28 @@ class Manifold:
     def _zeros(self) -> Any:
         return _np.zeros(self.dim, dtype=_np.int8) if _np is not None else [0] * self.dim
 
+    def _atoms_matrix(self, pool: Sequence[int]) -> Any:
+        """Stacked atoms for ``pool``, rebuilt only when the pool actually changes.
+
+        The fabric's cell set is stable across most turns, so caching this turns the per-turn cost
+        of decoding from "mint and stack every atom" into a single matrix multiply.
+        """
+        ids = list(pool)
+        if self._atom_matrix is None or self._atom_index != ids:
+            self._atom_matrix = _np.asarray([self.atom(c) for c in ids], dtype=_np.float32)
+            self._atom_index = ids
+        return self._atom_matrix
+
     # ---- the predictive half --------------------------------------------- #
     def learn_transition(self, before: Snapshot, after: Snapshot) -> None:
         """Teach the map that ``before`` was followed by ``after``. One online Hebbian step.
 
         ``W += η · after ⊗ beforeᵀ`` with a slow decay, so a regularity that stops holding fades
         instead of being defended forever. No gradient, no epochs, no stored dataset.
+
+        Stored as the pair rather than as a materialised matrix — see :meth:`__init__`. The oldest
+        pair is evicted past ``max_pairs``, which is a real bound: the map remembers a window of
+        recent dynamics, not everything it has ever seen, and :meth:`stats` reports the window.
         """
         try:
             if before is None or after is None or not before.cells or not after.cells:
@@ -200,26 +229,36 @@ class Manifold:
             if _np is None:
                 self.samples += 1     # the pure-Python floor records evidence but does not predict
                 return
-            b = _np.asarray(before.vector, dtype=_np.float32)
-            a = _np.asarray(after.vector, dtype=_np.float32)
-            if self._w is None:
-                self._w = _np.zeros((self.dim, self.dim), dtype=_np.float32)
-            if self.decay < 1.0:
-                self._w *= self.decay
-            # outer(a, b) — the standard heteroassociative construction
-            self._w += self.learn_rate * _np.outer(a, b) / float(self.dim)
+            if self.decay < 1.0 and self._weights:
+                self._weights = [w * self.decay for w in self._weights]
+            self._before.append(_np.asarray(before.vector, dtype=_np.int8))
+            self._after.append(_np.asarray(after.vector, dtype=_np.int8))
+            self._weights.append(self.learn_rate)
+            if len(self._before) > self.max_pairs:
+                # Drop the weakest, not simply the oldest: decay already means an old pair that
+                # kept being reinforced outranks a recent one that did not.
+                worst = min(range(len(self._weights)), key=lambda i: self._weights[i])
+                for seq in (self._before, self._after, self._weights):
+                    del seq[worst]
             self.samples += 1
         except Exception:  # noqa: BLE001 — learning never breaks a beat
             return
 
     def predict(self, before: Snapshot) -> Any:
-        """The snapshot the map expects to follow ``before``. ``None`` when it cannot say."""
+        """The snapshot the map expects to follow ``before``. ``None`` when it cannot say.
+
+        ``Wx = Σ aᵢ(bᵢ·x)`` — one matmul against the stored ``before`` vectors to get the
+        coefficients, one weighted sum of the ``after`` vectors to get the result.
+        """
         try:
-            if _np is None or self._w is None or before is None or not before.cells:
+            if _np is None or not self._before or before is None or not before.cells:
                 return None
-            b = _np.asarray(before.vector, dtype=_np.float32)
-            raw = self._w @ b
-            return raw
+            x = _np.asarray(before.vector, dtype=_np.float32)
+            B = _np.asarray(self._before, dtype=_np.float32)      # (n, dim)
+            A = _np.asarray(self._after, dtype=_np.float32)       # (n, dim)
+            w = _np.asarray(self._weights, dtype=_np.float32)     # (n,)
+            coeff = (B @ x) * w / float(self.dim)                 # (n,)
+            return A.T @ coeff                                    # (dim,)
         except Exception:  # noqa: BLE001
             return None
 
@@ -253,11 +292,13 @@ class Manifold:
                 out.reason = "no candidate cells to decode onto"
                 return out
             norm = float(_np.linalg.norm(raw)) or 1.0
-            scored: List[Tuple[float, int]] = []
-            for cid in pool:
-                atom = _np.asarray(self.atom(cid), dtype=_np.float32)
-                scored.append((float(_np.dot(raw, atom)) / (norm * math.sqrt(self.dim)), cid))
-            scored.sort(reverse=True)
+            # One matmul over the stacked atoms rather than a dot product per cell in Python.
+            # Decoding is the hot path — it runs on every anticipate, against every cell the
+            # fabric holds — and the loop form made it the dominant cost of a whole turn.
+            matrix = self._atoms_matrix(pool)
+            sims = (matrix @ raw) / (norm * math.sqrt(self.dim))
+            order = _np.argsort(-sims)
+            scored: List[Tuple[float, int]] = [(float(sims[i]), pool[i]) for i in order]
             top = scored[:max(1, int(k))]
             out.cells = [cid for _s, cid in top]
             # The margin is the gap between the weakest winner and the strongest loser. A cluster
@@ -322,7 +363,7 @@ class Manifold:
     def stats(self) -> Dict[str, Any]:
         total = self.hits + self.misses
         return {"dim": self.dim, "samples": self.samples, "atoms_cached": len(self._atoms),
-                "has_map": self._w is not None, "hits": self.hits, "misses": self.misses,
+                "pairs": len(self._before), "max_pairs": self.max_pairs, "hits": self.hits, "misses": self.misses,
                 "accuracy": round(self.hits / total, 4) if total else None,
                 "numpy": _np is not None}
 

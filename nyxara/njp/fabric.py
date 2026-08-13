@@ -69,6 +69,7 @@ class SettleResult:
     """One settle: which cells fired, in what order, and what it cost."""
 
     trace: List[Tuple[int, ...]] = field(default_factory=list)   # firing set per step
+    seed: Tuple[int, ...] = ()        # the externally driven cells, IN INPUT ORDER
     steps: int = 0
     quiescent: bool = False           # settled on its own rather than hitting the cap
     ms: float = 0.0
@@ -309,6 +310,13 @@ class Fabric:
                 out.anticipated = self.manifold.precognition(
                     seed_snapshot, candidates=list(self.cells.keys()))
 
+            # The externally driven cells DID fire — that is what stimulation means — so they are
+            # step 0 of the trace. Without this a cold fabric could never grow: plasticity reads
+            # the trace, the trace comes from propagation, and propagation needs the synapses that
+            # do not exist yet. Recording the drive breaks that circle honestly.
+            out.seed = driving
+            out.trace.append(driving)
+
             cap = int(max_steps) if max_steps is not None else self.max_settle_steps
             for _ in range(cap):
                 fired = self.step(driving)
@@ -413,6 +421,14 @@ class Fabric:
                     for i in res.trace[t + 1]:
                         if j != i:
                             pairs.append((j, i))
+            # The seed is the one place where order inside a single step is real information:
+            # the input arrived as a sequence, and "gravity" preceding "apple" is evidence the
+            # propagated steps do not carry (cells firing on the same tick have no order at all).
+            # This is also what gives a cold fabric its first structure to propagate through.
+            for k in range(len(res.seed) - 1):
+                j, i = res.seed[k], res.seed[k + 1]
+                if j != i:
+                    pairs.append((j, i))
         except Exception:  # noqa: BLE001
             pass
         return pairs
