@@ -1629,7 +1629,11 @@ class NyxaraCore:
             brain = self._self_brain()
             if brain is None:
                 return {"ok": False, "error": "no own brain is loaded to speculate with"}
-            head = build_latent_head(brain)
+            # mtp_enabled must be ON here: the MTP heads ARE the speculation. Built with the
+            # LatentHeadConfig defaults (all objectives off) `head.mtp` is None and
+            # measure_speculative_speedup returns a zeroed report every time — the measurement
+            # this method exists to make could never actually run.
+            head = build_latent_head(brain, mtp_enabled=True)
             report = measure_speculative_speedup(brain, head, prompt, max_tokens=int(max_tokens))
             return report.to_dict() if hasattr(report, "to_dict") else {"ok": True}
         except Exception as exc:  # noqa: BLE001 — heavy/optional; report the failure as data

@@ -98,8 +98,8 @@ from nyxara.nyx.workspace import Deliberation, NyxWorkspace
 
 # ---- NYX V.03 — one mind, one drive, and capability she manufactures ---- #
 from nyxara.nyx.ascent import (
-    Artifact, Ascent, AscentRun, Candidate, Judgement, Problem, SolutionLibrary, Verdict,
-    Verifier, VerifierRegistry,
+    Artifact, Ascent, AscentRun, Candidate, Judgement, Problem, SolutionLibrary,
+    Verdict as AscentVerdict, Verifier, VerifierRegistry,
 )
 from nyxara.nyx.atlas import Atlas, CallSite, ModuleEntry, Symbol
 from nyxara.nyx.automata import Analysis, Lattice, LifeRule, Pattern, Rule
@@ -195,7 +195,7 @@ __all__ = [
     # L-HOMEOSTAT — active inference as the single drive; it requests structure, never mutates
     "Homeostat", "SelfSensor", "Beat", "StructuralRequest",
     # L-ASCENT — capability = search x verifier x time; no verifier, no ascent
-    "Ascent", "AscentRun", "SolutionLibrary", "Artifact", "Verdict", "Verifier",
+    "Ascent", "AscentRun", "SolutionLibrary", "Artifact", "AscentVerdict", "Verifier",
     "VerifierRegistry", "Candidate", "Judgement", "Problem",
     # TELOS — a frontier mined from her own faults, gated by owner alignment before adoption
     "Telos", "OpenProblem", "TelosStep",

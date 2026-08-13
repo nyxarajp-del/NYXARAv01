@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from nyxara.nyx5.active_inference import PreemptiveSuggestion, SurpriseMeter
 from nyxara.nyx5.anticipation import ProactiveAnticipator
+from nyxara.nyx5.autopoiesis import AutopoieticRewriter
 from nyxara.nyx5.axiom_forge import SubAxiomaticEngine
 from nyxara.nyx5.chrono import ChronoDilator
 from nyxara.nyx5.concept_space import ConceptCollapser
@@ -27,10 +28,16 @@ from nyxara.nyx5.conduit import SymbioticConduit
 from nyxara.nyx5.continuum import NarrativeContinuum
 from nyxara.nyx5.dialectic import SovereignDialectic
 from nyxara.nyx5.hd_memory import HDMemory
+from nyxara.nyx5.holo_swarm import HolographicShard
 from nyxara.nyx5.immune import ImmuneGuillotine
 from nyxara.nyx5.intent import IntentSymbiote
+from nyxara.nyx5.mesh import EntangledMesh
 from nyxara.nyx5.mirroring import EpistemicMirror
 from nyxara.nyx5.negentropy import NegentropyMaintainer
+from nyxara.nyx5.omni_forge import OmniForge
+from nyxara.nyx5.ontogenesis import OntologicalBytecodeGenesis
+from nyxara.nyx5.phagocytosis import DigitalPhagocyte
+from nyxara.nyx5.retarget import OntologicalCompiler
 from nyxara.nyx5.sensorium import PolymorphicSensorium
 from nyxara.nyx5.snn import SpikeResponse, SpikingNetwork
 from nyxara.nyx5.threading import AnticipatoryThreads
@@ -98,6 +105,30 @@ class Nyx5Brain:
         self.anticipator = ProactiveAnticipator(
             lookahead=c.anticipation_lookahead) if c.anticipation_enabled else None
 
+        # Pillars 6, 9, 14, 15, 16, 17 and 18. The docstring above has always claimed the brain
+        # owns these; until now it did not build them, so their config flags
+        # (holo_swarm/omni_forge/autopoiesis/mesh/ontogenesis/retarget/phagocytosis_enabled) were
+        # decorative — nothing read them and flipping one changed nothing. Same fail-soft,
+        # config-gated construction as every faculty above.
+        self.swarm = HolographicShard(c.node_id, dim=c.hd_dim,
+                                      seed=c.seed) if c.holo_swarm_enabled else None
+        # The forge keeps its own default-deny permission gate: the kernel supplies the real one.
+        self.omni_forge = OmniForge(
+            max_forges_per_turn=c.omni_forge_max_forges_per_turn) if c.omni_forge_enabled else None
+        self.autopoiesis = AutopoieticRewriter(
+            require_gauntlet=c.autopoiesis_require_gauntlet,
+            max_rewrites_per_cycle=c.autopoiesis_max_rewrites_per_cycle,
+        ) if c.autopoiesis_enabled else None
+        self.mesh = EntangledMesh(c.node_id or "node0",
+                                  max_delta_bytes=c.mesh_max_delta_bytes) if c.mesh_enabled else None
+        self.ontogenesis = OntologicalBytecodeGenesis(
+            max_vm_steps=c.ontogenesis_max_vm_steps) if c.ontogenesis_enabled else None
+        self.retarget = OntologicalCompiler(
+            require_emulation=c.retarget_require_emulation,
+            max_steps=c.ontogenesis_max_vm_steps) if c.retarget_enabled else None
+        self.phagocyte = DigitalPhagocyte(
+            static_only=c.phagocytosis_static_only) if c.phagocytosis_enabled else None
+
     # ---- text -> neurons / spikes (deterministic hashing) ---- #
     def _neurons(self, text: str) -> List[int]:
         toks = [t for t in (text or "").lower().split() if t]
@@ -140,11 +171,24 @@ class Nyx5Brain:
         except Exception:  # noqa: BLE001
             return None
 
+    # Every optional faculty this facade owns, in pillar order. The roster is the single place
+    # that says what the brain is made of — stats() reports from it, so a faculty that is added
+    # here shows up in the report, and one that is off is absent rather than reporting zeros.
+    _FACULTIES = ("chrono", "sensorium", "immune", "intent", "concept", "axioms", "negentropy",
+                  "conduit", "mirror", "continuum", "threads", "voice", "dialectic",
+                  "anticipator", "swarm", "omni_forge", "autopoiesis", "mesh", "ontogenesis",
+                  "retarget", "phagocyte")
+
+    def faculties(self) -> List[str]:
+        """The faculties actually built on this brain — what is live, not what was configured."""
+        return [name for name in self._FACULTIES if getattr(self, name, None) is not None]
+
     def stats(self) -> Dict[str, Any]:
         try:
             s = self.net.stats()
             s["memories"] = len(self.memory)
             s["as_reasoner"] = bool(getattr(self.config, "as_reasoner", False))
+            s["faculties"] = self.faculties()
             return s
         except Exception:  # noqa: BLE001
             return {}

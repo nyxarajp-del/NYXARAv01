@@ -49,6 +49,7 @@ import json
 import pathlib
 import os
 import sys
+from typing import Any
 
 from nyxara.agency.permissions import Authority
 from nyxara.kernel.orchestrator import Disposition, NyxaraCore
@@ -319,10 +320,32 @@ _BANNER = """\
 ======================================================================
 NYXARA — sovereign cognitive architecture
 the mind proposes · the kernel disposes · the Master is sovereign
-======================================================================
-boot                : axioms verified, all faculties wired ✓
+======================================================================"""
+
+_BANNER_TAIL = """\
 You are the Master. Type a message, or /help for commands. /quit to exit.
 ----------------------------------------------------------------------"""
+
+
+def _boot_line(core: Any) -> str:
+    """Report what actually booted — counted from the live core, never asserted.
+
+    This line used to be a fixed string reading "all faculties wired ✓". It claimed the
+    wiring rather than checking it, and it printed the same tick when NYX-5's holo-swarm,
+    omni-forge, autopoiesis, mesh, ontogenesis, retarget and phagocytosis pillars were not
+    being built at all. A boot banner that cannot be wrong is not evidence of anything.
+    """
+    nyx5 = getattr(core, "nyx5", None)
+    faculties = getattr(nyx5, "faculties", None)
+    if not callable(faculties):
+        return "boot                : axioms verified · NYX-5 not built (nyx5.enabled=false)"
+    try:
+        live = faculties()
+    except Exception:  # noqa: BLE001 — a banner must never break a boot
+        return "boot                : axioms verified · NYX-5 faculty roster unavailable"
+    total = len(getattr(type(nyx5), "_FACULTIES", ()))
+    tick = " ✓" if total and len(live) == total else ""
+    return f"boot                : axioms verified · NYX-5 faculties {len(live)}/{total} live{tick}"
 
 _HELP = """\
 commands:
@@ -1939,6 +1962,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(_BANNER)
+    print(_boot_line(core))
+    print(_BANNER_TAIL)
     # Primary brain — when NYXARA's OWN model is the chosen provider (`self`), forge it on the
     # very first boot: LoRA-tune DistilGPT-2 (auto-downloaded) into her own loyal voice, then serve
     # it. Already-forged → instant; no `.[foundry]` stack → the always-on n-gram brain; any

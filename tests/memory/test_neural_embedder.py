@@ -80,7 +80,14 @@ def test_persistence_round_trip():
     # weights are rounded to 5 decimals on disk, so embeddings match to ~1e-4
     assert fresh.embed(text) == pytest.approx(emb.embed(text), abs=1e-3)
     assert fresh.space_version == emb.space_version
-    assert fresh.semantic_grade == pytest.approx(emb.semantic_grade)
+    # to_dict() rounds the grade to 6 decimals, so the round-trip error is up to 5e-7. approx's
+    # DEFAULT tolerance is relative (rel=1e-6), and the grade here is small — 2e-5 early in
+    # training, saturating at 0.3 — so that default asks for ~1e-11 and the rounding alone
+    # breaks it. This passed only on a machine fast enough to saturate the grade inside the
+    # 0.8s budget; a loaded CI runner trains fewer steps, lands on an arbitrary value, and goes
+    # red on serialization rounding rather than on anything real. Pin the tolerance to the
+    # precision actually written to disk, as the weight assertion above already does.
+    assert fresh.semantic_grade == pytest.approx(emb.semantic_grade, abs=1e-6)
 
 
 def test_load_rejects_mismatched_geometry():
