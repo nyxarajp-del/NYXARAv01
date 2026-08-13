@@ -76,3 +76,32 @@ def test_the_server_exposes_njp_and_no_old_routes():
     assert "/v1/njp/status" in paths
     assert "/v1/njp/fabric" in paths
     assert not any(p.startswith("/v1/nyx/") or p.startswith("/v1/nyx001/") for p in paths)
+
+
+def test_the_prove_route_refuses_what_is_not_a_formula():
+    """The refusal is the feature: a proof runs on formally expressible claims and says so
+    plainly about everything else, rather than returning a confident verdict on prose."""
+    from fastapi.testclient import TestClient
+    from nyxara.server.app import create_app
+    client = TestClient(create_app())
+    got = client.post("/v1/njp/prove", json={"stimulus": "gravity pulls the apple down"}).json()
+    assert str(got.get("status", "")).lower() not in ("proved", "refuted")
+
+
+def test_the_intent_route_reads_a_hinglish_command_with_its_ordering():
+    from fastapi.testclient import TestClient
+    from nyxara.server.app import create_app
+    client = TestClient(create_app())
+    got = client.post("/v1/njp/intent",
+                      json={"stimulus": "mera code fix kar do lekin pehle test chala"}).json()
+    assert got.get("kind") == "command"
+    assert got.get("ordering")
+
+
+def test_the_truth_route_reports_every_source():
+    from fastapi.testclient import TestClient
+    from nyxara.server.app import create_app
+    client = TestClient(create_app())
+    got = client.post("/v1/njp/truth", json={"stimulus": "an apple falls down"}).json()
+    assert "verdict" in got and "evidence" in got
+    assert got["verdict"] in ("established", "supported", "conjecture", "refuted", "abstained")

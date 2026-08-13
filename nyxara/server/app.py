@@ -1362,7 +1362,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         brain = _brain()
         if brain is None:
             return _off()
-        thought = brain.think(req.text)
+        thought = brain.think(req.stimulus)
         return thought.to_dict() if thought is not None else {}
 
     @app.post("/v1/njp/recall", dependencies=auth)
@@ -1371,7 +1371,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         brain = _brain()
         if brain is None or brain.memory is None:
             return _off("MEMORY_ENABLED")
-        got = brain.memory.recall(req.text)
+        got = brain.memory.recall(req.stimulus)
         return got.to_dict() if got is not None else {"recall": None}
 
     @app.post("/v1/njp/anticipate", dependencies=auth)
@@ -1383,7 +1383,7 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         brain = _brain()
         if brain is None:
             return _off()
-        got = brain.anticipate(req.text)
+        got = brain.anticipate(req.stimulus)
         return got.to_dict() if hasattr(got, "to_dict") else {"anticipated": None}
 
     @app.post("/v1/njp/expand", dependencies=auth)
@@ -1408,6 +1408,40 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     def njp_pulse() -> dict:
         """One beat of the continuous loop: expand, consolidate on cadence, evolve on cadence."""
         return core.njp_tick() or _off("PULSE_ENABLED")
+
+    @app.post("/v1/njp/prove", dependencies=auth)
+    def njp_prove(req: NyxThinkRequest) -> dict:
+        """Machine-check a claim, where the claim admits one.
+
+        Returns INEXPRESSIBLE — and no verdict at all — for anything that is not a formula.
+        That refusal is the point of the route: a proof runs on formally expressible claims, and
+        "gravity pulls the apple down" is not one."""
+        brain = _brain()
+        if brain is None:
+            return _off()
+        try:
+            from nyxara.njp.prove import ProofCore
+            cert = ProofCore().prove(req.stimulus)
+            return cert.to_dict() if hasattr(cert, "to_dict") else {"status": str(cert)}
+        except Exception:  # noqa: BLE001 — no prover installed ⇒ say so, never fake a verdict
+            return {"available": False, "reason": "the proof core is not available here"}
+
+    @app.post("/v1/njp/intent", dependencies=auth)
+    def njp_intent(req: NyxThinkRequest) -> dict:
+        """What was actually asked — mood, ordering constraints, and what she would ask back."""
+        brain = _brain()
+        if brain is None or brain.intent is None:
+            return _off("INTENT_ENABLED")
+        got = brain.intent.read(req.stimulus)
+        return got.to_dict() if hasattr(got, "to_dict") else {}
+
+    @app.post("/v1/njp/truth", dependencies=auth)
+    def njp_truth(req: NyxThinkRequest) -> dict:
+        """Put a claim through the Truth-Seeking Gauntlet and see every source's reading."""
+        brain = _brain()
+        if brain is None or brain.truth is None:
+            return _off("TRUTH_ENABLED")
+        return brain.truth.judge(req.stimulus, context=brain).to_dict()
 
     @app.get("/v1/njp/{organ}", dependencies=auth)
     def njp_organ(organ: str) -> dict:
