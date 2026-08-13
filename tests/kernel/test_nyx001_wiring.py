@@ -26,7 +26,7 @@ def _clean_env():
     for k in list(saved):
         os.environ.pop(k, None)
     # toy scale: these test WIRING, not learning capacity, and medium would pay minutes per boot
-    # for nothing they assert. tests/nyx001/test_proving_ground.py is where scale is exercised.
+    # for nothing they assert. tests/nyx001/test_metrics.py is where the proving ground runs.
     os.environ["NYXARA_NYX001__SCALE"] = "toy"
     reload_settings()
     yield
@@ -146,3 +146,94 @@ def test_default_scale_is_medium():
     reload_settings()
     from nyxara.kernel.config import get_settings
     assert get_settings().nyx001.scale == "medium"
+
+
+def test_the_heartbeat_actually_runs_in_the_live_loop():
+    """``nyx001_tick`` existed and had no caller anywhere in the process.
+
+    The dark core never pulsed, compression and meta-learning never ran outside a test, and the
+    curriculum only re-measured on the every-16th-turn path inside ``think`` — so the three
+    faculties that make NYX V.001 more than three brains in a bag were off in practice while
+    every config flag said they were on.
+    """
+    core = _core()
+    for i in range(4):
+        core.process(f"alpha beta gamma {i}")
+    before = core.nyx001.dark.pulses
+    core.idle_maintenance()
+    assert core.nyx001.dark.pulses > before, "idle maintenance did not beat NYX V.001's heart"
+
+
+def test_the_heartbeat_does_not_beat_v03_twice():
+    """Idle maintenance ticks core.nyx directly for its wondering report, then ticks NYX V.001."""
+    core = _core()
+    calls = []
+    original = core.nyx001.v03.tick
+
+    def counted(*a, **kw):
+        calls.append(1)
+        return original(*a, **kw)
+
+    core.nyx001.v03.tick = counted
+    core.idle_maintenance()
+    assert len(calls) <= 1, f"V.01-.03 deliberated {len(calls)} times in one idle pass"
+
+
+def test_track_b_is_reachable_from_a_booted_core():
+    """The four Track B modules were constructed by nothing: no config gate, no owner, no route."""
+    core = _core()
+    cortex = core.nyx001.stack.lingua
+    assert cortex is not None, "Track B is not wired into the stack"
+    for i in range(8):
+        core.nyx001.stack.cycle(f"alpha beta gamma delta {i}")
+    st = cortex.stats()
+    assert st["reads"] > 0, "Track B is present but the cycle never feeds it"
+    assert st["tokenizer"]["observed"] > 0
+    assert st["grounding"]["groundings"] > 0, "words were never bound to a concept"
+
+
+def test_track_b_can_be_turned_off_cleanly():
+    os.environ["NYXARA_NYX001__LINGUA_ENABLED"] = "false"
+    reload_settings()
+    core = _core()
+    assert core.nyx001 is not None
+    assert core.nyx001.stack.lingua is None
+    assert core.nyx001.stack.cycle("alpha beta").failed == [], "losing Track B broke the stack"
+
+
+def test_track_b_is_not_counted_as_an_eighteenth_layer():
+    """Track A is Layers 0-17; Track B is a modality. The charter keeps them apart."""
+    core = _core()
+    stack = core.nyx001.stack
+    assert "lingua" not in stack.layers()
+    assert stack.stats()["active_layers"] == 18
+
+
+def test_language_refuses_to_run_ahead_of_concepts():
+    """Environment → Perception → Concepts → World Model → Language, enforced not documented."""
+    from nyxara.nyx001.layers.l00_substrate import Substrate
+    from nyxara.nyx001.lingua.cortex import LanguageCortex
+
+    cortex = LanguageCortex(Substrate(seed=3, rung="toy"))
+    for _ in range(10):
+        cortex.read("alpha beta gamma", concept=None)      # no concept has formed yet
+    assert cortex.vocabulary() == [], "grounded a word with no concept to ground it in"
+    assert cortex.meaning("alpha") is None
+
+
+def test_the_tick_config_is_actually_read():
+    """tick_enabled/consolidate_every_s/develop_every_s were declared and read by nothing."""
+    os.environ["NYXARA_NYX001__TICK_ENABLED"] = "false"
+    reload_settings()
+    core = _core()
+    assert core.nyx001 is not None
+    assert core.nyx001_tick() == {}, "the heartbeat ran with tick_enabled=false"
+
+
+def test_tick_intervals_come_from_config():
+    os.environ["NYXARA_NYX001__CONSOLIDATE_EVERY_S"] = "123.0"
+    os.environ["NYXARA_NYX001__DEVELOP_EVERY_S"] = "456.0"
+    reload_settings()
+    core = _core()
+    assert core.nyx001.consolidate_every_s == 123.0
+    assert core.nyx001.develop_every_s == 456.0

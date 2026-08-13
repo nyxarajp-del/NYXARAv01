@@ -83,7 +83,7 @@ class WorldModel:
         self.available = bool(HAS_NUMPY)
         self.steps = 0
 
-        self.lr = float(lr)
+        self._lr = float(lr)
         self.rehearsal_enabled = bool(rehearsal_enabled)
         self.rehearsal_steps = int(rehearsal_steps)
         self.rehearsal_capacity = int(rehearsal_capacity)
@@ -114,6 +114,27 @@ class WorldModel:
         self.optimizer: Optional[AdaptiveOptimizer] = None
         self._build()
 
+    # ---- the learning rate, as one number rather than two ---- #
+    @property
+    def lr(self) -> float:
+        """The rate the optimizer is actually stepping at.
+
+        A plain attribute here was a **dead knob**. ``_build`` passes it to the optimizer once
+        and never reads it again, so Layer 17 — which lists ``world_model.lr`` as the first of
+        its ten mutable targets — could set it, log a rollout, and change nothing about how the
+        model learns. Layer 13 avoided the trap only by writing ``optimizer.lr`` directly. The
+        property makes the two impossible to disagree.
+        """
+        opt = getattr(self, "optimizer", None)
+        return float(opt.lr) if opt is not None else self._lr
+
+    @lr.setter
+    def lr(self, value: float) -> None:
+        self._lr = float(value)
+        opt = getattr(self, "optimizer", None)
+        if opt is not None:
+            opt.lr = float(value)
+
     # ---- F_θ ---- #
     def _build(self) -> None:
         if not self.available:
@@ -136,7 +157,7 @@ class WorldModel:
             self.g_norm = ones(self.width)
             self._params = [self.w_in, self.b_in, self.a_raw, self.w_hid, self.b_hid,
                             self.w_out, self.b_out, self.g_norm]
-            self.optimizer = AdaptiveOptimizer(self._params, lr=self.lr, clip=1.0)
+            self.optimizer = AdaptiveOptimizer(self._params, lr=self._lr, clip=1.0)
             self._fisher_accum = [np.zeros_like(p.data) for p in self._params]
             self._fisher = [np.zeros_like(p.data) for p in self._params]
             if hasattr(self.substrate, "note_params"):

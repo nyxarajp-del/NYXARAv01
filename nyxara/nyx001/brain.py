@@ -19,6 +19,11 @@ the moment → collect a vote from each → fuse under the control law → self-
 return. Every stage is config-gated and fail-soft: a faculty that is off is absent, a faculty that
 raises degrades to a null result, and the turn always completes.
 
+**And one beat of** :meth:`tick` **is** the other half of her life: the dark core pulses (choosing
+what is most worth knowing next), the stack consolidates (compression and meta-learning), and the
+childhood curriculum re-measures itself. It is driven by the kernel's idle maintenance rather than
+by a turn, because a mind that only thinks when spoken to is not autonomous.
+
 **What is never claimed.** ``verifiable`` is set only when V.02's proof core or an induced rule
 that predicted a held-out demonstration produced the answer — never by the Layer stack, which has
 no verifier, and never by NYX-5, which produces colour rather than derivations. The Layer stack is
@@ -127,6 +132,13 @@ class NyxV001Brain:
         self._beats: Dict[str, float] = {}
         # The Layer-stack beat. 1 = every turn (the default; no silent change of behaviour).
         self.stack_every_n_turns = max(1, int(getattr(config, "stack_every_n_turns", 1) or 1))
+        # The heartbeat's own settings, read from config rather than hard-coded. `tick_enabled`,
+        # `consolidate_every_s` and `develop_every_s` were declared in NyxV001Config and read by
+        # nothing: tick() carried literal 30.0 and 60.0, so an operator who set either got no
+        # change and no warning. A config field that nothing reads is worse than an absent one.
+        self.tick_enabled = bool(getattr(config, "tick_enabled", True)) if config else True
+        self.consolidate_every_s = float(getattr(config, "consolidate_every_s", 30.0) or 30.0)
+        self.develop_every_s = float(getattr(config, "develop_every_s", 60.0) or 60.0)
         self._since_cycle = 0
         self.stack_cycles = 0
         self.deferred = 0
@@ -411,19 +423,27 @@ class NyxV001Brain:
             pass
 
     # ---- the heartbeat ---- #
-    def tick(self, *, oversight: Any = None) -> Dict[str, Any]:
-        """One beat of autonomous life: the dark core pulses, the stack consolidates."""
+    def tick(self, *, oversight: Any = None, tick_v03: bool = True) -> Dict[str, Any]:
+        """One beat of autonomous life: the dark core pulses, the stack consolidates.
+
+        ``tick_v03`` lets a caller that has *already* beaten V.01-.03's own heartbeat skip it
+        here. The kernel's idle maintenance does exactly that — it ticks ``core.nyx`` directly
+        for its wondering report — and without this the same beat would run twice per idle pass,
+        which is wasted work and two unrelated wonderings charged to one beat.
+        """
         out: Dict[str, Any] = {}
+        if not self.tick_enabled:
+            return out
         try:
             if self.dark is not None:
                 p: Pulse = self.dark.pulse()
                 out["dark"] = p.to_dict()
-            if self.stack is not None and self._slow("consolidate", 30.0):
+            if self.stack is not None and self._slow("consolidate", self.consolidate_every_s):
                 out["consolidate"] = self.stack.consolidate()
-            if self.curriculum is not None and self._slow("develop", 60.0):
+            if self.curriculum is not None and self._slow("develop", self.develop_every_s):
                 self.curriculum.assess()
                 out["stage"] = self.curriculum.stage
-            if self.v03 is not None and hasattr(self.v03, "tick"):
+            if tick_v03 and self.v03 is not None and hasattr(self.v03, "tick"):
                 step = self.v03.tick(oversight=oversight)
                 if step is not None:
                     out["v03"] = step.to_dict() if hasattr(step, "to_dict") else str(step)

@@ -9103,6 +9103,35 @@ class NyxaraCore:
                     report["nyx_learned"] = step.learned
         except Exception:  # noqa: BLE001 — background thinking never breaks upkeep
             pass
+        # 0b) NYX V.001's own heartbeat: the dark core pulses (curiosity + contradiction +
+        # critique + self-model as ONE drive, choosing what is most worth knowing next), the
+        # Layer 0-17 stack consolidates (compression + meta-learning), and the Stage 0-10
+        # childhood re-measures itself.
+        #
+        # This call had NO caller anywhere in the process. `core.nyx001_tick()` existed, the
+        # config carried `tick_enabled`/`consolidate_every_s`/`develop_every_s`, and nothing ever
+        # ran it — so in a live NYXARA the dark core never pulsed once, compression and
+        # meta-learning never ran outside a test, and the curriculum only re-measured on the
+        # every-16th-turn path inside `think`. The three faculties that make NYX V.001 more than
+        # three brains in a bag were, in practice, off.
+        #
+        # `tick_v03=False`: V.01-.03's beat was already run immediately above, and its wondering
+        # report is read from there. Beating it twice per idle pass would be pure waste.
+        try:
+            brain001 = getattr(self, "nyx001", None)
+            if brain001 is not None:
+                beat = brain001.tick(oversight=self.oversight, tick_v03=False)
+                if beat:
+                    dark = beat.get("dark") or {}
+                    chosen = dark.get("chosen") or {}
+                    if chosen:
+                        report["nyx001_wants"] = f"{chosen.get('kind')} → {chosen.get('target')}"
+                    if beat.get("consolidate") is not None:
+                        report["nyx001_consolidated"] = beat["consolidate"]
+                    if beat.get("stage") is not None:
+                        report["nyx001_stage"] = beat["stage"]
+        except Exception:  # noqa: BLE001 — the heartbeat never breaks upkeep
+            pass
         # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
         if self.dream_session is not None:
             try:

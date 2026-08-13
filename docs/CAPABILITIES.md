@@ -908,6 +908,7 @@ NYX V.001 is the merge. It is the object `NyxaraCore` holds as `self.nyx001`, an
 | NYX V.01/.02/.03 | `nyxara.nyx.brain` | the concept graph, holographic memory, global workspace, specialists, superposition, and every V.02/V.03 faculty |
 | NYX-5 | `nyxara.nyx5.nyx5_brain` | the event-driven spiking simulation, HDC long-term memory, active-inference surprise meter |
 | Layers 0–17 | `nyxara.nyx001.layers` | a from-scratch cognitive stack that inherits **no** pretrained intelligence |
+| Track B | `nyxara.nyx001.lingua` | the language substrate — a sibling of the eighteen, reached only after concepts exist |
 
 `core.nyx` and `core.nyx5` remain valid and are **identity views** into it (`core.nyx is
 core.nyx001.v03`), so the references and tests that predate the merge keep working while ownership
@@ -938,6 +939,29 @@ modality — the Layer stack does not read from it.
 tokenizer segments nothing until experience teaches it merges; Layer 1's encoder is a hash sketch,
 so early perception is lexical rather than semantic. This is a working cognitive system at medium
 scale. It is **not a language model** and does not compete with one.
+
+### Track B — language, and only after concepts
+
+`nyxara.nyx001.lingua.cortex` assembles the four Track B modules — the online byte tokenizer, the
+dynamic embedding `z_t = f(x_t, c_t, m_t, g_t, u_t)`, the selective state-space scan, and
+word→concept grounding — and hangs off `stack.lingua`. It is a **sibling of Layers 0–17, not an
+eighteenth layer**: `CognitiveStack.layers()` still returns exactly eighteen, because Track A is
+the cognitive architecture and Track B is a modality.
+
+The charter's ordering — Environment → Perception → Concepts → World Model → Language — is
+enforced rather than documented. The cortex is fed from the cycle only *after* Layer 4 has
+assigned a concept, and binds words only to that concept, so before concepts exist nothing is
+grounded and `meaning()` returns `None` for every word. `Grounding` then refuses a meaning until
+support **and** exclusivity both clear their thresholds, so a word met once, or spread evenly
+across eleven concepts, is reported as ungrounded rather than resolved to a best-of-a-bad-set.
+
+**What it costs, measured.** The scan dominates: at medium scale (256/4) ~17 ms at 8 tokens,
+~42 ms at 16, ~92 ms at 32, against ~2.7 ms for tokenization and grounding together — so Track B
+roughly doubles a full cycle. Per stack it is a build of 98 ms → 386 ms and ~46 MB more resident,
+almost all of it the 8192×256 embedding table and the four scan blocks.
+`stats()["timings_ms"]["lingua"]` reports its share every run, and
+`NYXARA_NYX001__LINGUA_SEQUENCE_ENABLED=false` drops the scan alone while keeping the two parts
+that actually accumulate learned state.
 
 ### Fusion — one thought from three
 

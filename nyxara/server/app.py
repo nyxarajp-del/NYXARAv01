@@ -1392,6 +1392,26 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         return brain.develop() or {"available": False,
                                    "reason": "the childhood curriculum is disabled."}
 
+    @app.get("/v1/nyx001/lingua", dependencies=auth)
+    def nyx001_lingua() -> dict:
+        """Track B: what she has segmented and what she has actually grounded.
+
+        Language is last by construction — before Layer 4 has formed concepts the vocabulary is
+        empty and every word reports no meaning, which is the charter's ordering rather than a
+        failure.
+        """
+        brain = _brain001()
+        if brain is None:
+            return _off001()
+        stack = getattr(brain, "stack", None)
+        cortex = getattr(stack, "lingua", None) if stack is not None else None
+        if cortex is None:
+            return {"available": False,
+                    "reason": "Track B is disabled (NYXARA_NYX001__LINGUA_ENABLED=false)."}
+        out = cortex.stats()
+        out["vocabulary"] = cortex.vocabulary()[:64]
+        return out
+
     @app.get("/v1/nyx001/score", dependencies=auth)
     def nyx001_score() -> dict:
         """The intelligence index (G,M,R,P,T,L,U,A,C). Unmeasured components report null."""

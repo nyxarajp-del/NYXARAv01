@@ -85,6 +85,12 @@ class MetaLearner:
         self._strategies: Dict[str, Strategy] = {}
         self._current: Optional[str] = None
         self._trial_start: Optional[Tuple[float, int]] = None    # (error, steps) at trial start
+        # Monotonic, never ``len(self._strategies)``: _retire_worst removes a strategy from the
+        # middle of the range, so the length falls back onto a name still in use and the next
+        # mutation would overwrite a live strategy — discarding its measured trial record and
+        # crediting the newcomer's rewards to it. UCB1 over a corrupted record is worse than no
+        # meta-learning at all.
+        self._next_name = 1
         self.trials = 0
         self.mutations = 0
         self._rng = getattr(substrate, "stream", lambda _n: None)("meta_learning")
@@ -157,7 +163,8 @@ class MetaLearner:
                 factor = 1.0 + (rng.uniform(-self.mutation, self.mutation) if rng is not None
                                 else 0.0)
                 params[k] = float(min(hi, max(lo, v * factor)))
-            name = f"s{len(self._strategies)}"
+            name = f"s{self._next_name}"
+            self._next_name += 1
             s = Strategy(name=name, params=params)
             self._strategies[name] = s
             self.mutations += 1
@@ -248,5 +255,9 @@ class MetaLearner:
                 mean = item.get("mean_reward")
                 s.total_reward = float(mean) * s.trials if mean is not None else 0.0
                 self._strategies[name] = s
+                # Restart the counter past every restored name, so a reloaded learner cannot
+                # mint a name that a strategy in the sidecar is already using.
+                if name.startswith("s") and name[1:].isdigit():
+                    self._next_name = max(self._next_name, int(name[1:]) + 1)
         except Exception:  # noqa: BLE001
             pass

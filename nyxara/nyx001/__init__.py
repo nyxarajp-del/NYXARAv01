@@ -21,6 +21,14 @@ generator in :mod:`nyxara.nyx001.substrate.init`, and the sequence mechanism is 
 state-space scan, not attention. NYXARA's existing language ladder is untouched and stays a
 separate, optional modality: the Layer stack does not read from it.
 
+**Track B** (:mod:`nyxara.nyx001.lingua`) is the language substrate, and it is a *sibling* of
+Layers 0–17 rather than an eighteenth layer — ``CognitiveStack.layers()`` returns exactly the
+eighteen it always did. :class:`~nyxara.nyx001.lingua.cortex.LanguageCortex` assembles the four
+Track B modules and hangs off ``stack.lingua``, fed from the cycle once Layer 4 has assigned a
+concept. The charter's ordering is enforced there rather than documented: a word binds only to a
+concept the system already formed, so before concepts exist nothing is grounded and ``meaning()``
+returns ``None`` for every word.
+
 **What that costs, stated plainly.** A system that inherits nothing knows nothing at birth. Layer
 1's encoder is a hash sketch, so early perception is lexical rather than semantic; concepts that
 track meaning only emerge after the world model has learned what predicts what. This is the
@@ -42,7 +50,15 @@ from nyxara.nyx001.brain import NyxV001Brain, NyxV001Percept, NyxV001Thought
 from nyxara.nyx001.dark_core import DarkCore, Impulse, Pulse
 from nyxara.nyx001.development import Curriculum, STAGES, Stage, StageState
 from nyxara.nyx001.fusion import Fused, Fusion, Vote
-from nyxara.nyx001.lingua import DynamicEmbedding, Grounding, SequenceModel, Tokenizer
+from nyxara.nyx001.lingua import (
+    DynamicEmbedding,
+    Grounding,
+    LanguageCortex,
+    SequenceModel,
+    Tokenizer,
+)
+from nyxara.nyx001.metrics import Component, IndexReport, IntelligenceIndex
+from nyxara.nyx001.proving_ground import ProvingGround, ProvingReport
 from nyxara.nyx001.reasoner import NyxV001Reasoner
 from nyxara.nyx001.layers import (
     ActiveLearning,
@@ -80,7 +96,9 @@ __all__ = [
     "Fusion", "Fused", "Vote", "DarkCore", "Pulse", "Impulse",
     "Curriculum", "Stage", "StageState", "STAGES",
     # Track B
-    "Tokenizer", "DynamicEmbedding", "SequenceModel", "Grounding",
+    "Tokenizer", "DynamicEmbedding", "SequenceModel", "Grounding", "LanguageCortex",
+    # measurement
+    "IntelligenceIndex", "IndexReport", "Component", "ProvingGround", "ProvingReport",
     # the stack
     "CognitiveStack", "CycleResult", "Observation",
     "Substrate", "Perception", "WorldModel", "EpisodicMemory", "SemanticMemory",
