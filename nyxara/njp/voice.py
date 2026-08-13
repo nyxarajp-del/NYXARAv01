@@ -213,7 +213,7 @@ class Dialogue:
         answered from its own priors, which is exactly the smuggling this guards against.
         """
         try:
-            from nyxara.nyx.graph import concepts_in
+            from nyxara.njp.tongue import concepts_in
             wanted = set(concepts_in(content))
             if not wanted:
                 return True

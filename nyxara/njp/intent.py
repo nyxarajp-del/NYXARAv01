@@ -49,7 +49,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.nyx.lingua import Lingua, content_tokens, tokenize
+from nyxara.njp.tongue import Lingua, content_tokens, tokenize
 
 __all__ = ["Reading", "Intent", "IntentReader", "KINDS"]
 

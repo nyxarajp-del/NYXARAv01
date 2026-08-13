@@ -337,8 +337,8 @@ class Prover:
             return None
         # z3's global context is not thread-safe — and *building* an expression touches it just
         # as solving does — while this is reachable from a reasoning turn the orchestrator runs
-        # on a thread pool. See nyxara.nyx.theorem_prover.Z3_LOCK.
-        from nyxara.nyx.theorem_prover import Z3_LOCK
+        # on a thread pool. See nyxara.njp.prove.Z3_LOCK.
+        from nyxara.njp.prove import Z3_LOCK
         try:
             with Z3_LOCK:
                 names = sorted(set(re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", claim.statement)))

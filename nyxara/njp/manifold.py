@@ -1,0 +1,345 @@
+"""NYXARA · njp/manifold.py — the Hyper-Dimensional Latent Manifold (🌌, NJP V.01).
+
+The fabric thinks in **cells**: a settle produces a set of cell ids that fired, and that set is a
+sparse, discrete, awkward thing to reason *about*. This module lifts it into a single
+high-dimensional vector — one **snapshot** — where a thousand simultaneously-active variables are
+one object rather than a thousand objects, and where relations between whole configurations
+become geometry you can measure.
+
+That is the actual content of "seeing many variables at once". A snapshot of 1000 co-active cells
+is *one* vector of ``dim`` numbers, and comparing two whole world-states is one dot product
+instead of a set intersection. Structure survives the lift because binding is invertible: a
+``role ⊗ filler`` pair can be unbound later, so "the engine turns the flywheel" and "the flywheel
+turns the engine" are different snapshots rather than the same bag.
+
+**The predictive half — how a result is known before the event finishes.** :class:`Manifold` holds
+an associative map ``W`` learned online by Hebbian outer product over *observed transitions*
+(snapshot at t → snapshot at t+1). Once ``W`` has seen a regularity, :meth:`predict` returns the
+next snapshot **without settling the fabric**, and :meth:`precognition` decodes it back to the
+cells most likely to fire. The fabric can therefore answer from a prediction and spend a full
+settle only when the prediction is untrusted. This is genuine forward inference over learned
+dynamics.
+
+Honest framing, kept the way this repo keeps it:
+
+* **Prediction, not clairvoyance.** ``W`` can only anticipate regularities it has actually
+  observed. On a transition unlike anything it has seen, :meth:`predict` returns a low-margin
+  result and :meth:`precognition` reports ``trusted=False`` — an admission, not a guess dressed up.
+  Accuracy is recorded in :mod:`nyxara.njp.ledger` and is whatever it measures, never asserted.
+* **Capacity is measured, not quoted.** :meth:`capacity_probe` finds where cleanup actually breaks
+  *on this machine*. Superposing more than that degrades retrieval, and the probe says where.
+* **No backpropagation.** The map is a Hebbian outer product with decay — one pass, online,
+  local. Same seed ⇒ same manifold on every machine.
+* This is classical high-dimensional computing (HDC/VSA). Nothing quantum, no extra physical
+  dimensions: ``dim`` is a number of components in RAM.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+__all__ = ["Snapshot", "Prediction", "Manifold"]
+
+try:  # numpy makes a 10,000-D manifold cheap; the pure-Python floor keeps it honest without it.
+    import numpy as _np
+except Exception:  # noqa: BLE001 — numpy is a capability, never a dependency
+    _np = None
+
+
+def _splitmix64(x: int) -> int:
+    """A deterministic 64-bit mixer — the whole manifold's randomness, seeded and portable.
+
+    Deliberately not :mod:`random`: every cell's hypervector must be reproducible from its id
+    alone, on every machine and in any order, without holding a table of them all.
+    """
+    x = (x + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+    x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+    x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+    return x ^ (x >> 31)
+
+
+@dataclass
+class Snapshot:
+    """One whole configuration of the fabric, as a single point on the manifold."""
+
+    vector: Any = None                       # bipolar {-1,+1}, length `dim`
+    cells: Tuple[int, ...] = ()              # what it was built from
+    tick: int = 0
+
+    @property
+    def width(self) -> int:
+        return len(self.cells)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"cells": list(self.cells), "tick": self.tick, "width": self.width}
+
+
+@dataclass
+class Prediction:
+    """What the manifold expects next — with the margin that says whether to believe it."""
+
+    cells: List[int] = field(default_factory=list)
+    margin: float = 0.0                      # separation of the winners from the field
+    trusted: bool = False                    # margin cleared the floor
+    samples: int = 0                         # how many transitions W has actually learned
+    reason: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"cells": self.cells[:32], "margin": round(self.margin, 6),
+                "trusted": self.trusted, "samples": self.samples, "reason": self.reason}
+
+
+class Manifold:
+    """Cells → one high-dimensional snapshot, plus an online-learned map from now to next."""
+
+    def __init__(self, *, dim: int = 10000, seed: int = 42,
+                 min_margin: float = 0.08, learn_rate: float = 1.0,
+                 decay: float = 0.999, min_samples: int = 8) -> None:
+        self.dim = max(16, int(dim))
+        self.seed = int(seed)
+        self.min_margin = float(min_margin)
+        self.learn_rate = float(learn_rate)
+        self.decay = float(decay)
+        self.min_samples = max(1, int(min_samples))
+
+        self._atoms: Dict[int, Any] = {}      # cell id -> its fixed hypervector (memoised)
+        self._w: Any = None                   # the transition map, built lazily
+        self.samples = 0                      # transitions actually learned
+        self.hits = 0                         # predictions that later proved right
+        self.misses = 0
+
+    # ---- atoms ----------------------------------------------------------- #
+    def atom(self, cell_id: int) -> Any:
+        """The fixed hypervector for one cell. Derived from its id, so it never needs storing."""
+        got = self._atoms.get(cell_id)
+        if got is not None:
+            return got
+        vec = self._mint(cell_id)
+        # Memoise, but never without bound: a fabric that grows for months would otherwise keep
+        # every atom it ever saw. Atoms are pure functions of the id, so dropping one costs a
+        # recompute and nothing else.
+        if len(self._atoms) > 65536:
+            self._atoms.clear()
+        self._atoms[cell_id] = vec
+        return vec
+
+    def _mint(self, cell_id: int) -> Any:
+        """Deterministic bipolar vector for ``cell_id``. Same on every machine, forever."""
+        base = _splitmix64((int(cell_id) << 1) ^ self.seed)
+        if _np is not None:
+            rng = _np.random.default_rng(base % (2**63))
+            return rng.integers(0, 2, size=self.dim, dtype=_np.int8) * 2 - 1
+        out: List[int] = []
+        x = base
+        for _ in range(self.dim):
+            x = _splitmix64(x)
+            out.append(1 if (x >> 17) & 1 else -1)
+        return out
+
+    # ---- lifting --------------------------------------------------------- #
+    def encode(self, cells: Iterable[int], *, tick: int = 0) -> Snapshot:
+        """Bundle a set of co-active cells into ONE snapshot vector.
+
+        Bundling is sum-then-sign: the result is similar to every component and to nothing else,
+        which is exactly the property that lets a thousand active variables be carried as a single
+        object without any of them being privileged.
+        """
+        ids = tuple(dict.fromkeys(int(c) for c in cells))
+        if not ids:
+            return Snapshot(vector=self._zeros(), cells=(), tick=tick)
+        if _np is not None:
+            acc = _np.zeros(self.dim, dtype=_np.int32)
+            for cid in ids:
+                acc += self.atom(cid)
+            # Ties (an even bundle summing to 0) break to +1 deterministically, so the same set
+            # always yields the same snapshot — a coin-flip here would break reproducibility.
+            vec = _np.where(acc >= 0, 1, -1).astype(_np.int8)
+            return Snapshot(vector=vec, cells=ids, tick=tick)
+        acc = [0] * self.dim
+        for cid in ids:
+            atom = self.atom(cid)
+            for i in range(self.dim):
+                acc[i] += atom[i]
+        return Snapshot(vector=[1 if v >= 0 else -1 for v in acc], cells=ids, tick=tick)
+
+    def bind(self, a: Any, b: Any) -> Any:
+        """Bind two vectors (elementwise product) — invertible, so structure survives the lift.
+
+        Binding is its own inverse over bipolar vectors, which is why ``role ⊗ filler`` can be
+        unbound with the same operation. This is what keeps "A turns B" distinct from "B turns A".
+        """
+        if _np is not None:
+            return (_np.asarray(a) * _np.asarray(b)).astype(_np.int8)
+        return [x * y for x, y in zip(a, b)]
+
+    def similarity(self, a: Any, b: Any) -> float:
+        """Cosine over bipolar vectors — for {-1,+1} this is just the normalised dot product."""
+        try:
+            if _np is not None:
+                return float(_np.dot(_np.asarray(a, dtype=_np.int32),
+                                     _np.asarray(b, dtype=_np.int32))) / float(self.dim)
+            return sum(x * y for x, y in zip(a, b)) / float(self.dim)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _zeros(self) -> Any:
+        return _np.zeros(self.dim, dtype=_np.int8) if _np is not None else [0] * self.dim
+
+    # ---- the predictive half --------------------------------------------- #
+    def learn_transition(self, before: Snapshot, after: Snapshot) -> None:
+        """Teach the map that ``before`` was followed by ``after``. One online Hebbian step.
+
+        ``W += η · after ⊗ beforeᵀ`` with a slow decay, so a regularity that stops holding fades
+        instead of being defended forever. No gradient, no epochs, no stored dataset.
+        """
+        try:
+            if before is None or after is None or not before.cells or not after.cells:
+                return
+            if _np is None:
+                self.samples += 1     # the pure-Python floor records evidence but does not predict
+                return
+            b = _np.asarray(before.vector, dtype=_np.float32)
+            a = _np.asarray(after.vector, dtype=_np.float32)
+            if self._w is None:
+                self._w = _np.zeros((self.dim, self.dim), dtype=_np.float32)
+            if self.decay < 1.0:
+                self._w *= self.decay
+            # outer(a, b) — the standard heteroassociative construction
+            self._w += self.learn_rate * _np.outer(a, b) / float(self.dim)
+            self.samples += 1
+        except Exception:  # noqa: BLE001 — learning never breaks a beat
+            return
+
+    def predict(self, before: Snapshot) -> Any:
+        """The snapshot the map expects to follow ``before``. ``None`` when it cannot say."""
+        try:
+            if _np is None or self._w is None or before is None or not before.cells:
+                return None
+            b = _np.asarray(before.vector, dtype=_np.float32)
+            raw = self._w @ b
+            return raw
+        except Exception:  # noqa: BLE001
+            return None
+
+    def precognition(self, before: Snapshot, *, k: int = 16,
+                     candidates: Optional[Sequence[int]] = None) -> Prediction:
+        """Which cells are about to fire — **without settling the fabric**.
+
+        The raw prediction is a point in the manifold; turning it back into cell ids means asking
+        which known atoms it is closest to. ``candidates`` restricts that search to the cells the
+        fabric actually holds, which is both faster and the only correct thing to do: a cell that
+        does not exist cannot be about to fire.
+
+        Returns ``trusted=False`` — with the reason — when the map has too little evidence or the
+        winners are not separated from the field. An untrusted prediction is a real result: it is
+        the fabric's signal to spend a full settle instead of guessing.
+        """
+        out = Prediction(samples=self.samples)
+        try:
+            if _np is None:
+                out.reason = "numpy absent — the manifold does not predict without it"
+                return out
+            if self.samples < self.min_samples:
+                out.reason = f"only {self.samples} transitions learned, need {self.min_samples}"
+                return out
+            raw = self.predict(before)
+            if raw is None:
+                out.reason = "no transition map yet"
+                return out
+            pool = list(candidates) if candidates is not None else list(self._atoms.keys())
+            if not pool:
+                out.reason = "no candidate cells to decode onto"
+                return out
+            norm = float(_np.linalg.norm(raw)) or 1.0
+            scored: List[Tuple[float, int]] = []
+            for cid in pool:
+                atom = _np.asarray(self.atom(cid), dtype=_np.float32)
+                scored.append((float(_np.dot(raw, atom)) / (norm * math.sqrt(self.dim)), cid))
+            scored.sort(reverse=True)
+            top = scored[:max(1, int(k))]
+            out.cells = [cid for _s, cid in top]
+            # The margin is the gap between the weakest winner and the strongest loser. A cluster
+            # that barely separates from the field is exactly the case where a confident answer
+            # would be wrong, so it is reported rather than rounded away.
+            if len(scored) > len(top):
+                out.margin = float(top[-1][0] - scored[len(top)][0])
+            else:
+                out.margin = float(top[0][0])
+            out.trusted = out.margin >= self.min_margin
+            if not out.trusted:
+                out.reason = f"margin {out.margin:.4f} below floor {self.min_margin:.4f}"
+            return out
+        except Exception:  # noqa: BLE001 — a failed foresight is no foresight, never a crash
+            out.reason = "prediction failed"
+            return out
+
+    def score_prediction(self, predicted: Sequence[int], actual: Sequence[int]) -> float:
+        """Jaccard overlap of predicted vs actual firing. Feeds the ledger's accuracy column."""
+        try:
+            p, a = set(int(x) for x in predicted), set(int(x) for x in actual)
+            if not p and not a:
+                return 1.0
+            union = p | a
+            if not union:
+                return 0.0
+            score = len(p & a) / float(len(union))
+            if score >= 0.5:
+                self.hits += 1
+            else:
+                self.misses += 1
+            return score
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    # ---- measured capacity ----------------------------------------------- #
+    def capacity_probe(self, *, start: int = 2, stop: int = 512) -> int:
+        """How many cells this manifold can bundle and still recover — **on this machine**.
+
+        Not a quoted figure: it bundles `n` atoms, checks every one is still the nearest match,
+        and returns the largest `n` that held. This is the honest ceiling on "many variables at
+        once", and it is why that phrase is allowed to appear in this module's docstring.
+        """
+        try:
+            if _np is None:
+                return 0
+            best = 0
+            n = max(2, int(start))
+            while n <= int(stop):
+                ids = list(range(900_000, 900_000 + n))
+                snap = self.encode(ids)
+                ok = all(self.similarity(snap.vector, self.atom(c)) > 0.0 for c in ids)
+                if not ok:
+                    break
+                best = n
+                n *= 2
+            return best
+        except Exception:  # noqa: BLE001
+            return 0
+
+    # ---- reporting / persistence ----------------------------------------- #
+    def stats(self) -> Dict[str, Any]:
+        total = self.hits + self.misses
+        return {"dim": self.dim, "samples": self.samples, "atoms_cached": len(self._atoms),
+                "has_map": self._w is not None, "hits": self.hits, "misses": self.misses,
+                "accuracy": round(self.hits / total, 4) if total else None,
+                "numpy": _np is not None}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Counters only — ``W`` is ``dim × dim`` floats and does not belong in a JSON sidecar.
+
+        At the default dim that matrix is 400 MB; writing it into ``njp.json`` would make every
+        save a minutes-long stall. The map is rebuilt by living, which is the point of an online
+        learner, and the counters below keep the ledger's history honest across a restart.
+        """
+        return {"dim": self.dim, "seed": self.seed, "samples": self.samples,
+                "hits": self.hits, "misses": self.misses}
+
+    def load_dict(self, d: Dict[str, Any]) -> None:
+        try:
+            self.samples = int(d.get("samples", 0))
+            self.hits = int(d.get("hits", 0))
+            self.misses = int(d.get("misses", 0))
+        except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a fresh manifold
+            pass

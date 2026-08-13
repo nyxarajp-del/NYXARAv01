@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
     "Token", "Register", "LinguaRead", "Lingua",
-    "tokenize", "content_tokens", "script_of", "detect_language",
+    "tokenize", "content_tokens", "concepts_in", "script_of", "detect_language",
     "transliterate", "roman_key", "register_of", "is_function_word",
 ]
 
@@ -518,10 +518,10 @@ def is_function_word(word: str) -> bool:
 def content_tokens(text: str, *, cap: int = 32, min_len: int = 2) -> List[str]:
     """Concept labels: content words, lowercased, order kept, duplicates dropped.
 
-    This is the replacement for the V.01 ASCII-only extractor, and it is what
-    :func:`nyxara.nyx.graph.concepts_in` now calls. Numbers, emoji, punctuation and function
-    words in any of the three registers are excluded — a measurement is not a concept, and
-    grammar is not structure.
+    This is the replacement for the V.01 ASCII-only extractor, and :func:`concepts_in`
+    below is the fail-soft wrapper every caller should use. Numbers, emoji, punctuation and
+    function words in any of the three registers are excluded — a measurement is not a
+    concept, and grammar is not structure.
     """
     try:
         out: List[str] = []
@@ -814,3 +814,57 @@ class Lingua:
             return True
         except Exception:  # noqa: BLE001 — a corrupt sidecar must never block boot
             return False
+
+
+# --------------------------------------------------------------------------- #
+# The concept extractor every caller outside this module should use
+# --------------------------------------------------------------------------- #
+_ASCII_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9\-']*")
+
+# Words that carry no conceptual weight. They would otherwise become the hubs of anything built
+# on top of this, since they co-occur with everything. Deliberately small: a stop-list, not an
+# ontology. Only reached when the full tokenizer above fails.
+_ASCII_STOP = frozenset("""
+a an the and or but if then than that this these those there here of to in on at by for with
+from as is am are was were be been being do does did done have has had having i you he she it
+we they me him her us them my your his its our their not no yes so such very just only also
+what which who whom whose when where why how can could shall should will would may might must
+""".split())
+
+
+def concepts_in(text: str, *, cap: int = 32) -> List[str]:
+    """Candidate concept labels from ``text`` — the script-aware extractor with a floor under it.
+
+    Moved here from the deleted concept-graph module, which is where it always belonged: this is
+    tokenization, and this file is the tongue. :func:`content_tokens` above does the real work
+    across Devanagari, Cyrillic, Han and the rest; the ASCII path below is the fallback, so a
+    failure in the tokenizer degrades to lexical extraction rather than to an empty turn.
+    """
+    try:
+        got = content_tokens(text, cap=cap)
+        if got:
+            return got
+    except Exception:  # noqa: BLE001 — the full tongue is a capability, never a dependency
+        pass
+    return _ascii_concepts_in(text, cap=cap)
+
+
+def _ascii_concepts_in(text: str, *, cap: int = 32) -> List[str]:
+    """The ASCII-only floor. Kept so extraction never returns nothing because of a tokenizer bug."""
+    try:
+        out: List[str] = []
+        seen = set()
+        for tok in _ASCII_TOKEN_RE.findall((text or "").lower()):
+            if len(tok) < 2 or tok in _ASCII_STOP or tok in seen:
+                continue
+            # A bare number is a measurement, not a concept. Without this, ambient telemetry
+            # ("host mem rose to 0.0906") mints a fresh concept for every decimal it ever sees.
+            if tok.isdigit():
+                continue
+            seen.add(tok)
+            out.append(tok)
+            if len(out) >= cap:
+                break
+        return out
+    except Exception:  # noqa: BLE001 — extraction never breaks a turn
+        return []
