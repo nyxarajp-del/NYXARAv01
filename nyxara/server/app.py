@@ -403,7 +403,7 @@ class NyxCausalRequest(BaseModel):
 
 class NyxGoalRequest(BaseModel):
     request: str
-    # Same rule as /v1/nyx/act: decompose and price by default, execute only when asked.
+    # Same rule as /v1/njp routes: decompose and price by default, execute only when asked.
     run: bool = False
 
 
@@ -1327,402 +1327,133 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         return run_generalization_benchmark().to_dict()
 
     # ----------------------------------------------------------------------- #
-    # NYX V.01 — the unified brain (nyxara/nyx/). Every route degrades to a 404-shaped
-    # payload rather than an error when the brain is disabled, and none of them can move a
-    # turn past the sovereign gate: /v1/chat is still the only way to *act*.
+    # NJP V.01 — the brain (nyxara/njp/). Every route degrades to a 404-shaped payload
+    # rather than an error when the brain is disabled, and none of them can move a turn past
+    # the sovereign gate: /v1/chat is still the only way to *act*.
     # ----------------------------------------------------------------------- #
     def _brain() -> Any:
-        return getattr(core, "nyx", None)
+        return getattr(core, "njp", None)
 
-    def _off(flag: str) -> dict:
+    def _off(flag: str = "ENABLED") -> dict:
         return {"available": False,
-                "reason": f"NYX V.01 faculty is disabled (NYXARA_NYX__{flag}=false)."}
+                "reason": f"NJP V.01 is disabled (NYXARA_NJP__{flag}=false)."}
 
-    @app.get("/v1/nyx/status", dependencies=auth)
-    def nyx_status() -> dict:
-        """Her brain measured, not described: graph shape, memory load, every faculty's state."""
+    @app.get("/v1/njp/status", dependencies=auth)
+    def njp_status() -> dict:
+        """Her brain measured, not described: fabric shape, every organ, and whether she grows."""
         brain = _brain()
-        return brain.stats() if brain is not None else _off("ENABLED")
+        return brain.stats() if brain is not None else _off()
 
-    # --- NYX V.001 (nyxara/nyx001/) — the primary brain, all three minds ------ #
-    def _brain001() -> Any:
-        return getattr(core, "nyx001", None)
+    @app.get("/v1/njp/fabric", dependencies=auth)
+    def njp_fabric() -> dict:
+        """The automaton itself: cells, synapses, mean degree, and the growth counters."""
+        brain = _brain()
+        return brain.fabric.stats() if brain is not None else _off()
 
-    def _off001() -> dict:
-        return {"available": False,
-                "reason": "NYX V.001 is disabled (NYXARA_NYX001__ENABLED=false)."}
+    @app.get("/v1/njp/ledger", dependencies=auth)
+    def njp_ledger() -> dict:
+        """Then vs now. Whether she is actually more than she was, as numbers."""
+        brain = _brain()
+        return brain.report() if brain is not None else _off("LEDGER_ENABLED")
 
-    @app.get("/v1/nyx001/status", dependencies=auth)
-    def nyx001_status() -> dict:
-        """All three brains at once, and whether the from-scratch substrate is actually learning."""
-        brain = _brain001()
-        return brain.stats() if brain is not None else _off001()
-
-    @app.post("/v1/nyx001/think", dependencies=auth)
-    def nyx001_think(req: NyxThinkRequest) -> dict:
-        """One fused cycle: three brains vote, the control law decides. Deliberation only.
-
-        It never runs a tool and never acts — as with ``/v1/nyx/think``, this is the brain
-        thinking out loud, not the kernel doing anything.
-        """
-        brain = _brain001()
+    @app.post("/v1/njp/think", dependencies=auth)
+    def njp_think(req: NyxThinkRequest) -> dict:
+        """One whole turn — and the fabric is measurably larger when it returns."""
+        brain = _brain()
         if brain is None:
-            return _off001()
-        return brain.think(req.stimulus, remember=req.remember).to_dict()
+            return _off()
+        thought = brain.think(req.stimulus)
+        return thought.to_dict() if thought is not None else {}
 
-    @app.get("/v1/nyx001/layers", dependencies=auth)
-    def nyx001_layers() -> dict:
-        """Layers 0-17: what each measured this run. A disabled layer is absent, not zeroed."""
-        brain = _brain001()
+    @app.post("/v1/njp/recall", dependencies=auth)
+    def njp_recall(req: NyxThinkRequest) -> dict:
+        """Content-addressed recall. No token window is consulted."""
+        brain = _brain()
+        if brain is None or brain.memory is None:
+            return _off("MEMORY_ENABLED")
+        got = brain.memory.recall(req.stimulus)
+        return got.to_dict() if got is not None else {"recall": None}
+
+    @app.post("/v1/njp/anticipate", dependencies=auth)
+    def njp_anticipate(req: NyxThinkRequest) -> dict:
+        """What she expects next, WITHOUT settling the fabric.
+
+        Comes back ``trusted=false`` with a reason when the manifold has not earned the
+        prediction — an unearned foresight is reported as absent, never spent."""
+        brain = _brain()
         if brain is None:
-            return _off001()
-        stack = getattr(brain, "stack", None)
-        if stack is None:
-            return {"available": False,
-                    "reason": "the Layer 0-17 stack is disabled "
-                              "(NYXARA_NYX001__LAYERS_ENABLED=false)."}
-        return stack.stats()
+            return _off()
+        got = brain.anticipate(req.stimulus)
+        return got.to_dict() if hasattr(got, "to_dict") else {"anticipated": None}
 
-    @app.get("/v1/nyx001/stage", dependencies=auth)
-    def nyx001_stage() -> dict:
-        """Where she is on the Stage 0-10 childhood — measured live, never scheduled."""
-        brain = _brain001()
+    @app.post("/v1/njp/expand", dependencies=auth)
+    def njp_expand() -> dict:
+        """Run one plasticity pass now: potentiate, grow, prune, mint cells if warranted."""
+        brain = _brain()
         if brain is None:
-            return _off001()
-        return brain.develop() or {"available": False,
-                                   "reason": "the childhood curriculum is disabled."}
+            return _off()
+        got = brain.fabric.expand()
+        return got.to_dict() if got is not None else {}
 
-    @app.get("/v1/nyx001/lingua", dependencies=auth)
-    def nyx001_lingua() -> dict:
-        """Track B: what she has segmented and what she has actually grounded.
+    @app.post("/v1/njp/evolve", dependencies=auth)
+    def njp_evolve() -> dict:
+        """One self-rewrite attempt: measure, propose, verify the claim, keep or roll back.
 
-        Language is last by construction — before Layer 4 has formed concepts the vocabulary is
-        empty and every word reports no meaning, which is the charter's ordering rather than a
-        failure.
-        """
-        brain = _brain001()
+        Refuses when oversight is paused or scrammed, and when the standing authorisation to
+        enact is not set. Every outcome is journalled."""
+        got = core.njp_evolve()
+        return got.to_dict() if hasattr(got, "to_dict") else _off("EVOLVE_ENABLED")
+
+    @app.post("/v1/njp/pulse", dependencies=auth)
+    def njp_pulse() -> dict:
+        """One beat of the continuous loop: expand, consolidate on cadence, evolve on cadence."""
+        return core.njp_tick() or _off("PULSE_ENABLED")
+
+    @app.post("/v1/njp/prove", dependencies=auth)
+    def njp_prove(req: NyxThinkRequest) -> dict:
+        """Machine-check a claim, where the claim admits one.
+
+        Returns INEXPRESSIBLE — and no verdict at all — for anything that is not a formula.
+        That refusal is the point of the route: a proof runs on formally expressible claims, and
+        "gravity pulls the apple down" is not one."""
+        brain = _brain()
         if brain is None:
-            return _off001()
-        stack = getattr(brain, "stack", None)
-        cortex = getattr(stack, "lingua", None) if stack is not None else None
-        if cortex is None:
-            return {"available": False,
-                    "reason": "Track B is disabled (NYXARA_NYX001__LINGUA_ENABLED=false)."}
-        out = cortex.stats()
-        out["vocabulary"] = cortex.vocabulary()[:64]
-        return out
-
-    @app.get("/v1/nyx001/score", dependencies=auth)
-    def nyx001_score() -> dict:
-        """The intelligence index (G,M,R,P,T,L,U,A,C). Unmeasured components report null."""
-        brain = _brain001()
-        if brain is None:
-            return _off001()
+            return _off()
         try:
-            from nyxara.nyx001.metrics import IntelligenceIndex
-            return IntelligenceIndex().measure(brain).to_dict()
-        except Exception:  # noqa: BLE001 — measurement is a capability, never a hard dependency
-            return {"available": False, "reason": "metrics unavailable"}
+            from nyxara.njp.prove import ProofCore
+            cert = ProofCore().prove(req.stimulus)
+            return cert.to_dict() if hasattr(cert, "to_dict") else {"status": str(cert)}
+        except Exception:  # noqa: BLE001 — no prover installed ⇒ say so, never fake a verdict
+            return {"available": False, "reason": "the proof core is not available here"}
 
-    @app.post("/v1/nyx/think", dependencies=auth)
-    def nyx_think(req: NyxThinkRequest) -> dict:
-        """One full cycle — who bid, who won, how sure, and whether it was actually checked.
-
-        This is deliberation only. It never runs a tool and never acts.
-        """
+    @app.post("/v1/njp/intent", dependencies=auth)
+    def njp_intent(req: NyxThinkRequest) -> dict:
+        """What was actually asked — mood, ordering constraints, and what she would ask back."""
         brain = _brain()
-        if brain is None:
-            return _off("ENABLED")
-        return brain.think(req.stimulus, remember=req.remember).to_dict()
-
-    @app.post("/v1/nyx/recall", dependencies=auth)
-    def nyx_recall(req: NyxRecallRequest) -> dict:
-        """Content-addressed recall. No token window is consulted, because there is not one."""
-        brain = _brain()
-        if brain is None:
-            return _off("ENABLED")
-        got = brain.recall(req.cue, k=req.k)
-        return got.to_dict() if got is not None else {"hit": None, "candidates": []}
-
-    @app.post("/v1/nyx/ground", dependencies=auth)
-    def nyx_ground(req: NyxGroundRequest) -> dict:
-        """What she actually has behind a word — or an honest report that she has nothing."""
-        brain = _brain()
-        if brain is None:
-            return _off("ENABLED")
-        got = brain.understanding(req.word)
-        return got.to_dict() if got is not None else _off("GROUND_ENABLED")
-
-    @app.post("/v1/nyx/chronos", dependencies=auth)
-    def nyx_chronos(req: NyxChronosRequest) -> dict:
-        """How many futures she ran for a decision, which survived most of them, and the entropy."""
-        brain = _brain()
-        chronos = getattr(brain, "chronos", None) if brain is not None else None
-        if chronos is None:
-            return _off("CHRONOS_ENABLED")
-        thought = brain.think(req.decision, remember=False)
-        return {"applies": chronos.applies(req.decision),
-                "futures": thought.futures.to_dict() if thought.futures is not None else None,
-                "answer": thought.answer, "entropy": round(thought.entropy, 4),
-                "stats": chronos.stats()}
-
-    @app.post("/v1/nyx/discover", dependencies=auth)
-    def nyx_discover() -> dict:
-        """One investigation: probe a sandbox, derive a law, check it on withheld trials."""
-        brain = _brain()
-        if brain is None or getattr(brain, "episteme", None) is None:
-            return _off("EPISTEME_ENABLED")
-        finding = brain.discover(oversight=getattr(core, "oversight", None))
-        return {"finding": finding.to_dict() if finding is not None else None,
-                "stats": brain.episteme.stats()}
-
-    @app.post("/v1/nyx/optimise", dependencies=auth)
-    def nyx_optimise() -> dict:
-        """L-OMNI: read her own source, lower a hot function to C, verify it, swap it in.
-
-        Gauntlet-verified and reversible — the Python source is never written, so a restart
-        always restores it. Refuses the constitutional core, and stops when oversight does.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "omni", None) is None:
-            return _off("OMNI_ENABLED")
-        got = core.nyx_optimise()
-        return {"attempt": got.to_dict() if got is not None else None,
-                "stats": brain.omni.stats()}
-
-    # ----------------------------------------------------------------------- #
-    # NYX V.02 — the nineteen. Same rule as above: these are *faculties*, not a second way
-    # to act. /v1/nyx/act and /v1/nyx/goal are the only two that can touch the world, both
-    # go through the registry's unchanged pipeline and the consequence gate, and both
-    # default to saying what she WOULD do rather than doing it.
-    #
-    # Registered before the ``{faculty}`` catch-all below, because FastAPI matches in
-    # registration order and a literal path declared after it would never be reached.
-    # ----------------------------------------------------------------------- #
-    def _faculty(name: str) -> Any:
-        brain = _brain()
-        return getattr(brain, name, None) if brain is not None else None
-
-    @app.post("/v1/nyx/intent", dependencies=auth)
-    def nyx_intent(req: NyxTextRequest) -> dict:
-        """What was actually asked for: mood, actions, ordering, negation, what is unclear.
-
-        A parser, not a mind-reader. When two readings stay live it returns **both** with a
-        clarifying question, rather than picking one and hoping.
-        """
-        got = _brain().intent_of(req.text) if _brain() is not None else None
-        if got is None:
+        if brain is None or brain.intent is None:
             return _off("INTENT_ENABLED")
-        return {**got.to_dict(), "clarifying_question": got.clarifying_question()}
+        got = brain.intent.read(req.stimulus)
+        return got.to_dict() if hasattr(got, "to_dict") else {}
 
-    @app.post("/v1/nyx/reason", dependencies=auth)
-    def nyx_reason(req: NyxTextRequest) -> dict:
-        """Work down the tiers, and see which one answered — with its label, not just its text."""
-        got = _brain().reason_about(req.text) if _brain() is not None else None
-        if got is None:
-            return _off("REASON_ENABLED")
-        return got.to_dict()
-
-    @app.post("/v1/nyx/learn", dependencies=auth)
-    def nyx_learn(req: NyxTextRequest) -> dict:
-        """Induce a *procedure* from demonstrations in this turn and answer its probe.
-
-        In-context learning: no weight is updated anywhere, and outside the operation set
-        she refuses in plain words and names the set.
-        """
-        got = _brain().learn_from(req.text) if _brain() is not None else None
-        if got is None:
-            return _off("ICL_ENABLED")
-        return got.to_dict()
-
-    @app.post("/v1/nyx/author", dependencies=auth)
-    def nyx_author(req: NyxAuthorRequest) -> dict:
-        """Prose in, verified code out — or a refusal that names what was not derived.
-
-        Every stage of the gauntlet is on the reply, so the caller sees *where* it stopped.
-        """
+    @app.post("/v1/njp/truth", dependencies=auth)
+    def njp_truth(req: NyxThinkRequest) -> dict:
+        """Put a claim through the Truth-Seeking Gauntlet and see every source's reading."""
         brain = _brain()
-        if brain is None or getattr(brain, "author", None) is None:
-            return _off("AUTHOR_ENABLED")
-        got = brain.author_code(req.spec, name=req.name, load=req.load,
-                                oversight=getattr(core, "oversight", None))
-        return got.to_dict() if got is not None else _off("AUTHOR_ENABLED")
+        if brain is None or brain.truth is None:
+            return _off("TRUTH_ENABLED")
+        return brain.truth.judge(req.stimulus, context=brain).to_dict()
 
-    @app.post("/v1/nyx/act", dependencies=auth)
-    def nyx_act(req: NyxActRequest) -> dict:
-        """Reach for a tool, through the registry's unchanged pipeline. Never around it.
-
-        ``dry_run`` defaults to **true**: the reply says which tool she would pick, what the
-        consequence gate decided and why, without running anything.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "hands", None) is None:
-            return _off("HANDS_ENABLED")
-        got = brain.act(req.request, tool=req.tool, args=dict(req.args),
-                        oversight=getattr(core, "oversight", None), dry_run=req.dry_run)
-        return got.to_dict() if got is not None else _off("HANDS_ENABLED")
-
-    @app.post("/v1/nyx/axiom", dependencies=auth)
-    def nyx_axiom(req: NyxAxiomRequest) -> dict:
-        """Write a new axiom system down, then check whether it holds together.
-
-        A model found proves consistency **at that size**; no model found proves nothing,
-        and is reported as exactly that.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "axiom", None) is None:
-            return _off("AXIOM_ENABLED")
-        got = brain.invent_axioms(req.problem, name=req.name)
-        return got.to_dict() if got is not None else _off("AXIOM_ENABLED")
-
-    @app.post("/v1/nyx/evolve", dependencies=auth)
-    def nyx_evolve(req: NyxEvolveRequest) -> dict:
-        """One budgeted change to the constants she thinks with — gauntleted and reversible.
-
-        ``force`` runs her now instead of waiting for the cadence. It does **not** waive the
-        sample floor: below it she declines, and a step taken with the floor waived carries
-        ``measured: false`` so its score is never mistaken for evidence.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "omega", None) is None:
-            return _off("OMEGA_ENABLED")
-        got = brain.evolve(oversight=getattr(core, "oversight", None), force=req.force,
-                           ignore_sample_floor=req.ignore_sample_floor)
-        return {"step": got.to_dict() if got is not None else None,
-                "stats": brain.omega.stats()}
-
-    @app.post("/v1/nyx/prove", dependencies=auth)
-    def nyx_prove(req: NyxTextRequest) -> dict:
-        """A machine-checked verdict, or an honest report that the claim admits none.
-
-        Most of what she says is not formally expressible; for those this returns
-        INEXPRESSIBLE rather than inventing a verdict, and that refusal is the point.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "prover", None) is None:
-            return _off("PROVER_ENABLED")
-        got = brain.prove(req.text)
-        return got.to_dict() if got is not None else _off("PROVER_ENABLED")
-
-    @app.post("/v1/nyx/debate", dependencies=auth)
-    def nyx_debate(req: NyxDebateRequest) -> dict:
-        """Her Skeptic attacks a claim: it survives, it survives weakened, or she abstains."""
-        brain = _brain()
-        if brain is None or getattr(brain, "dialectic", None) is None:
-            return _off("DIALECTIC_ENABLED")
-        got = brain.debate(req.claim, confidence=req.confidence, verified=req.verified)
-        return got.to_dict() if got is not None else _off("DIALECTIC_ENABLED")
-
-    @app.post("/v1/nyx/causal", dependencies=auth)
-    def nyx_causal(req: NyxCausalRequest) -> dict:
-        """Would the effect still happen if she intervened? ``do(X)`` beside the co-occurrence.
-
-        An unidentified pair says so. Identification rests on the graph and the assumptions
-        behind it, so the strategy, the confounder and the confidence all ride on the reply.
-        """
-        brain = _brain()
-        if brain is None or getattr(brain, "causal", None) is None:
-            return _off("CAUSAL_ENABLED")
-        got = brain.why_causal(req.cause, req.effect, question=req.question)
-        return got.to_dict() if got is not None else _off("CAUSAL_ENABLED")
-
-    @app.post("/v1/nyx/goal", dependencies=auth)
-    def nyx_goal(req: NyxGoalRequest) -> dict:
-        """One command → a DAG with a risk class and a way back priced per node.
-
-        ``run`` defaults to **false**: the reply is the plan and its priced risks, and
-        nothing has happened. With ``run=true`` a node she cannot finish keeps its reason
-        and the plan reports itself *incomplete* rather than done.
-        """
-        brain = _brain()
-        goals = getattr(brain, "goals", None) if brain is not None else None
-        if goals is None:
-            return _off("GOALS_ENABLED")
-        plan = brain.decompose(req.request)
-        if plan is None:
-            return _off("GOALS_ENABLED")
-        if not req.run:
-            return {"plan": plan.to_dict(), "run": None}
-        got = goals.run(plan, oversight=getattr(core, "oversight", None))
-        return {"plan": plan.to_dict(), "run": got.to_dict()}
-
-    @app.get("/v1/nyx/agenda", dependencies=auth)
-    def nyx_agenda() -> dict:
-        """Goals she wrote herself, how far each has got, and what she is stuck on."""
-        agenda = _faculty("agenda")
-        if agenda is None:
-            return _off("AGENDA_ENABLED")
-        got = _brain().briefing()
-        return {"briefing": got.to_dict() if got is not None else None,
-                "goals": [goal.to_dict() for goal in agenda.open_goals()],
-                "stats": agenda.stats()}
-
-    @app.get("/v1/nyx/stream/digest", dependencies=auth)
-    def nyx_stream_digest() -> dict:
-        """What arrived while you were away, compressed at four scales at once."""
-        stream = _faculty("stream")
-        if stream is None:
-            return _off("STREAM_ENABLED")
-        digests = _brain().digest(force=True)
-        return {"digests": {name: digest.to_dict() for name, digest in digests.items()},
-                "briefing": _brain().catch_up(), "stats": stream.stats()}
-
-    @app.websocket("/v1/nyx/telepathy")
-    async def nyx_telepathy(socket: WebSocket) -> None:
-        """Meaning as structure, both ways — the tokenizer is never involved.
-
-        **There is no mind reading here and none is claimed.** What is real is that past the
-        frame nothing is lost: send ``{"frame": {...}}`` and the concepts and role→filler
-        bindings go straight into semantics and the graph; send ``{"emit": true}`` and her
-        own state comes back as a frame for another node to consume without prose.
-        """
-        if token is not None and socket.query_params.get("token") != token:
-            await socket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-        await socket.accept()
-        try:
-            while True:
-                data = await socket.receive_json()
-                brain = _brain()
-                telepathy = getattr(brain, "telepathy", None) if brain is not None else None
-                if telepathy is None:
-                    await socket.send_json(_off("TELEPATHY_ENABLED"))
-                    continue
-                if data.get("emit"):
-                    frame = brain.emit_frame()
-                    await socket.send_json(
-                        {"frame": frame.to_dict() if frame is not None else None})
-                    continue
-                frame = data.get("frame")
-                if not isinstance(frame, dict):
-                    await socket.send_json(
-                        {"error": "send {\"frame\": {...}} or {\"emit\": true}"})
-                    continue
-                got = brain.receive_frame(frame)
-                await socket.send_json(
-                    got.to_dict() if got is not None
-                    else {"error": "that frame carried nothing I could take in"})
-        except WebSocketDisconnect:
-            return
-
-    @app.get("/v1/nyx/{faculty}", dependencies=auth)
-    def nyx_faculty(faculty: str) -> dict:
-        """Read-only state for one faculty, V.01 or V.02. Never acts, never changes anything."""
+    @app.get("/v1/njp/{organ}", dependencies=auth)
+    def njp_organ(organ: str) -> dict:
+        """Read-only state for one organ. Never acts, never changes anything."""
         brain = _brain()
         if brain is None:
-            return _off("ENABLED")
-        attribute = {"hive": "synergy"}.get(faculty, faculty)
-        if attribute not in ("omni", "aura", "will", "nexus", "synergy", "eternal", "car",
-                             "ground", "metacog", "dialogue", "chronos", "episteme",
-                             # NYX V.02
-                             "lingua", "semantics", "icl", "intent", "reason", "hands",
-                             "author", "consequence", "axiom", "omega", "telepathy",
-                             "prover", "vsa", "causal", "weaver", "dialectic", "stream",
-                             "goals", "agenda"):
-            return {"available": False, "reason": f"no NYX faculty named {faculty!r}."}
-        part = getattr(brain, attribute, None)
+            return _off()
+        if organ not in ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger"):
+            return {"available": False, "reason": f"no NJP organ named {organ!r}."}
+        part = getattr(brain, organ, None)
         if part is None:
-            return _off(f"{attribute.upper()}_ENABLED")
+            return _off(f"{organ.upper()}_ENABLED")
         return part.stats()
 
     @app.websocket("/v1/ws")

@@ -20,6 +20,12 @@ os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_TUNING", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_LLM_EDITS", "false")
 os.environ.setdefault("NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT", "false")
+# NJP rewrites its own SOURCE on disk under a gauntlet (njp/evolve.py), ON by default in live
+# DEV/PROD runs under the Master's standing authorisation. A hermetic suite must never edit the
+# real tree, so seal the self-editor off for the whole suite — same rationale as the flags above.
+# The fabric still grows and still consolidates, which is what the NJP tests are about; a test
+# that wants enactment builds its own settings and points the optimizer at a tmp_path.
+os.environ.setdefault("NYXARA_NJP__EVOLVE_ENABLED", "false")
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # Learning-rule synthesis (growth/rule_synth.py) INVENTS a new weight-update rule when the fixed
 # learner stalls and, with autonomous_enact, installs it into the live learner. Searching/measuring
@@ -123,6 +129,16 @@ os.environ.setdefault("NYXARA_NYX__OMNI_HOT_SWAP", "false")
 # tests/kernel/test_build_order_wiring.py opts back in explicitly to pin both the construction
 # order and the flag itself.
 os.environ.setdefault("NYXARA_ROLE_COUNCIL__ENABLED", "false")
+# THE SUITE MUST NOT TOUCH THE NETWORK. `_maybe_bootstrap` fires whenever a turn's confidence
+# falls below the bootstrap floor and runs the Infinite Explorer, which scrapes DuckDuckGo and
+# Wikipedia live (orchestrator._maybe_bootstrap -> explorer.explore -> researcher._search).
+# Profiled here, that is 11.5s of a 15s turn spent in _ssl do_handshake alone, and behind a proxy
+# that stalls TLS it does not finish at all — which is what made tests/eval/test_eval_cli.py and
+# tests/growth/test_autolearn.py hang until pytest-timeout killed the whole run, taking the rest
+# of the suite with them. The explorer's OFFLINE path (deterministic recipe synthesis) still runs
+# and is still covered; only live fetching is sealed. A test that wants the network stubs its own
+# transport.
+os.environ.setdefault("NYXARA_FEATURES__WEB_ACCESS", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

@@ -414,8 +414,7 @@ commands:
   /thermal           thermal/compute pressure as something she FEELS, not merely measures
   /replay [save]     the deterministic tape of this run — /replay save writes it for step-for-step replay
   /save              persist long-term memory to disk now
-  /nyx001 [sub]      NYX V.001 — her PRIMARY brain (all three); /nyx001 help
-  /nyx [sub]         NYX V.01 — her brain; /nyx help for the family
+  /njp [sub]         NJP V.01 — her brain; /njp help for the family
   /quit              leave the console"""
 
 # disposition -> short glyph for the status line
@@ -441,820 +440,150 @@ def _print_result(result) -> None:
     print(line)
 
 
-_NYX_HELP = """\
-/nyx                       her brain at a glance — graph, memory, faculties, voice
-/nyx self                  what she can truthfully say about herself, from live numbers
-/nyx think <text>          one full cycle, shown: who bid, who won, how sure, was it checked
-/nyx why                   why the last thought went the way it did
-/nyx recall <cue>          content-addressed recall — no token window is consulted
-/nyx ground <word>         what she actually has behind a word (or that she has nothing)
-/nyx lingua [text]         her tongue: scripts and languages she has met — or read one turn
-/nyx semantics [a] [b]     meaning: nearest concepts, or one pair — with the rung and grade
-/nyx teach <a> <b>         tell her two words are the same thing (the relational rung)
-/nyx skills                procedures she induced from demonstrations, and whether they transfer
-/nyx intent <text>         what she thinks you asked for: mood, ordering, what is unclear
-/nyx reason <question>     work down the tiers — and see which one answered, and its label
-/nyx hands                 the toolset she can see, and her measured record with each
-/nyx author <spec>         write code from a spec — through the gauntlet, or a named refusal
-/nyx consequence <action>  what would happen if she did it — before she does it
-/nyx axiom <description>   write a new axiom system down, and check whether it holds together
-/nyx omega [evolve|evolve!|rollback]  the constants she thinks with — and what she measured them to
-/nyx agenda [pursue|brief|goal <x>|veto <id>]  her own goals — what, why, and how far
-/nyx telepathy [emit|<text>]  meaning as structure — and the shorthand she learned from you
-/nyx prove <claim>         a machine-checked verdict, or an honest 'that is not a formula'
-/nyx analogy <a:b::c>      zero-shot analogy over structures she holds
-/nyx why-causal <x> <y>    would y still happen if she intervened on x — do(x) beside the weight
-/nyx weave [<a> <b> <type>]  typed edges laid over the graph, and the schema changes she made
-/nyx debate <claim>        her Skeptic attacks it — survive, weaken, or abstain
-/nyx stream [brief]        what arrived while you were away, compressed at four scales
-/nyx goal <command>        decompose one command into a DAG, price its risk, and run it
-/nyx wonder                one self-directed thought, right now
-/nyx car                   her between-prompts thinking: cadence, steps, what she last wondered
-/nyx aura                  what is arriving on its own — streams, what landed, what was refused
-/nyx discover              run one investigation now: probe a sandbox, derive, check, promote
-/nyx nexus                 the notation she minted for herself — and its translation back
-/nyx omni                  where she is slow, what she rewrote in C, and how to undo it
-/nyx omni forge            read herself and attempt one rewrite now (verified, reversible)
-/nyx omni rollback         put every Python function back — always available
-/nyx hive                  other instances: what converged, and whether there is a wire at all
-/nyx eternal               durability: enrolled nodes, leader, signed snapshots
-  --- NYX V.03 --------------------------------------------------------------
-  /nyx monad                  six brains as one mind: one workspace, one memory
-  /nyx surprise [beats]       the one drive — free energy, and any structural request
-  /nyx ascend [domain]        search a checkable domain; no verifier ⇒ honest refusal
-  /nyx library                proven artifacts, each with the certificate behind it
-  /nyx telos [advance]        the frontier she mined from her own faults
-  /nyx omniscient [pulse]     ingestion coverage, lag and drops
-  /nyx ask <question>         answered from what was already ingested — no live search
-  /nyx automata [steps]       local rules only; emergence measured, never claimed
-  /nyx atlas                  index her own body
-  /nyx find <symbol>          where it lives; ambiguity is shown, not resolved
-  /nyx craft rename <a> <b>   staged, dry-run refactor across the blast radius
-  /nyx craft harden <path>    generate tests that had to pass first
-  /nyx craft triage <log>     a CI log turned into typed failures
-"""
+_NJP_HELP = """\
+/njp                       her brain at a glance — fabric, organs, and whether she is growing
+/njp fabric                the automaton: cells, synapses, mean degree, growth counters
+/njp think <text>          one whole turn — the fabric is measurably larger when it returns
+/njp recall <cue>          content-addressed recall — no token window is consulted
+/njp anticipate <text>     what she expects next WITHOUT settling; says so when unearned
+/njp expand                run one plasticity pass now: potentiate, grow, prune, mint
+/njp ledger                then vs now — is she actually more than she was, in numbers
+/njp truth <claim>         put a claim through the Truth-Seeking Gauntlet, see every source
+/njp soul                  what she has learned you want without being told, and how sure
+/njp evolve                one self-rewrite attempt: verify the claim, keep it or roll back
+/njp pulse                 one beat of the continuous loop
+/njp help                  this list"""
 
 
-_NYX001_HELP = """/nyx001                    all three brains at a glance — and whether she is learning
-/nyx001 layers             Layers 0-17: which ran, what each measured
-/nyx001 stage              the Stage 0-10 childhood — measured, never scheduled
-/nyx001 dark               one pulse of the dark core: what she wants to know next
-/nyx001 lingua [word]      Track B: what she has actually grounded — or one word's meaning
-/nyx001 think <text>       one fused cycle — three brains vote, one thought comes out
-/nyx001 score              the intelligence index (G,M,R,P,T,L,U,A,C), with sample counts
-/nyx001 prove              the six strict tests: zero-shot, few-shot, transfer,
-                           interference, adaptation, long-horizon
-"""
-
-
-def _nyx001_command(core: NyxaraCore, arg: str) -> None:
-    """The ``/nyx001`` family — a window into NYX V.001, the primary brain."""
-    brain = getattr(core, "nyx001", None)
+def _njp_command(core: NyxaraCore, arg: str) -> None:
+    """The ``/njp`` family — a window into NJP V.01, her brain."""
+    brain = getattr(core, "njp", None)
     if brain is None:
-        print("NYX V.001 is disabled (NYXARA_NYX001__ENABLED=false).")
+        print("NJP V.01 is disabled (NYXARA_NJP__ENABLED=false).")
         return
-
-    sub, _, rest = arg.partition(" ")
-    sub, rest = sub.strip().lower(), rest.strip()
-
-    if sub in ("help", "?"):
-        print(_NYX001_HELP)
-        return
+    parts = (arg or "").strip().split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
 
     if not sub:
-        st = brain.stats()
-        brains = st.get("brains", {})
-        print(f"NYX V.001 — turns {st.get('turns', 0)}")
-        print(f"  V.01/.02/.03 : {'aboard' if brains.get('v03') else 'absent'}")
-        print(f"  NYX-5        : {'aboard' if brains.get('snn') else 'absent'}")
-        print(f"  Layers 0-17  : {'aboard' if brains.get('stack') else 'absent'}")
-        learning = st.get("is_learning")
-        print(f"  learning     : {'yes' if learning else ('not yet measurable' if learning is None else 'no')}")
-        cur = st.get("curriculum") or {}
-        if cur:
-            print(f"  childhood    : {cur.get('summary', '—')}")
+        stats = brain.stats()
+        fab = stats.get("fabric", {})
+        print(f"NJP V.01 — {fab.get('cells', 0)} cells, {fab.get('synapses', 0)} synapses, "
+              f"mean degree {fab.get('mean_degree', 0)}")
+        print(f"  turns {stats.get('turns', 0)} · expansions {fab.get('expansions', 0)} · "
+              f"grown {fab.get('grown_total', 0)} · pruned {fab.get('pruned_total', 0)}")
+        growing = fab.get("growing")
+        print(f"  growing: {growing}" if growing else
+              "  growing: not yet — nothing has been expanded")
+        err = fab.get("recent_prediction_error")
+        print(f"  self-prediction error: {err}" if err is not None else
+              "  self-prediction error: not yet measured")
+        for organ in ("truth", "soulsync", "evolve", "pulse"):
+            if organ in stats:
+                print(f"  {organ}: {stats[organ]}")
         return
-
-    if sub == "layers":
-        stack = getattr(brain, "stack", None)
-        if stack is None:
-            print("the Layer 0-17 stack is disabled (NYXARA_NYX001__LAYERS_ENABLED=false).")
-            return
-        st = stack.stats()
-        print(f"cycles {st.get('cycles', 0)} · active layers {st.get('active_layers', 0)}/18")
-        print(f"learning curve: {st.get('learning_curve')}")
-        for name in ("perception", "world_model", "episodic", "semantic", "curiosity",
-                     "reasoning", "contradiction", "compression", "resource",
-                     "active_learning", "self_improvement"):
-            if name in st:
-                print(f"  {name:18s} {st[name]}")
+    if sub in ("help", "?"):
+        print(_NJP_HELP)
         return
-
-    if sub == "stage":
-        rep = brain.develop()
-        if not rep:
-            print("the childhood curriculum is disabled.")
-            return
-        print(rep.get("summary", "—"))
-        for s in rep.get("states", []):
-            mark = "✓" if s["active"] else ("·" if s["measured"] is None else "×")
-            measured = "—" if s["measured"] is None else f"{s['measured']:.3f}"
-            print(f"  {mark} stage {s['number']:2d} {s['name']:24s} {measured} / {s['threshold']}")
+    if sub == "fabric":
+        for key, val in brain.fabric.stats().items():
+            print(f"  {key}: {val}")
         return
-
-    if sub == "dark":
-        dark = getattr(brain, "dark", None)
-        if dark is None:
-            print("the dark core is disabled.")
-            return
-        p = dark.pulse()
-        if p.starved:
-            print("the dark core has nothing to pursue — no experience yet.")
-            return
-        c = p.chosen
-        print(f"drive {p.drive:.4f} · {c.kind} → {c.target}")
-        print(f"  because: {c.rationale}")
-        print(f"  made {p.hypotheses_made} hypotheses, {p.attacks_made} attacks, "
-              f"{p.destroyed} destroyed")
-        return
-
-    if sub == "lingua":
-        stack = getattr(brain, "stack", None)
-        cortex = getattr(stack, "lingua", None) if stack is not None else None
-        if cortex is None:
-            print("Track B is disabled (NYXARA_NYX001__LINGUA_ENABLED=false).")
-            return
-        if rest:
-            meaning = cortex.meaning(rest)
-            print(f"'{rest}' → {meaning}" if meaning
-                  else f"'{rest}' has not earned a grounding — no meaning to report")
-            return
-        st = cortex.stats()
-        tok, gnd = st.get("tokenizer", {}), st.get("grounding", {})
-        print(f"reads {st.get('reads', 0)} · vocabulary {tok.get('vocab_size', 0)} "
-              f"({tok.get('learned', 0)} learned, {tok.get('evicted', 0)} evicted)")
-        cov = gnd.get("coverage")
-        print(f"grounded {gnd.get('grounded', 0)} of {gnd.get('tokens_seen', 0)} words seen"
-              + (f" · coverage {cov:.2f}" if cov is not None else " · coverage not yet knowable"))
-        words = cortex.vocabulary()[:12]
-        print(f"  words she can actually mean: {', '.join(words) if words else '(none yet)'}")
-        seq = st.get("sequence")
-        if seq:
-            print(f"  {seq.get('mechanism')} · state {seq.get('state_norm')}")
-        return
-
     if sub == "think":
         if not rest:
-            print("usage: /nyx001 think <text>")
+            print("usage: /njp think <text>")
             return
-        t = brain.think(rest)
-        print(t.answer or "(no answer — none of the three brains produced content)")
-        if t.fused is not None:
-            print(f"  [{'verified' if t.verifiable else 'plausible'}] "
-                  f"confidence {t.confidence:.2f} · agreement {t.fused.agreement:.2f}"
-                  + (" · CONTESTED" if t.contested else ""))
-            print(f"  {t.fused.reason}")
+        before = brain.fabric.n_synapses
+        thought = brain.think(rest)
+        after = brain.fabric.n_synapses
+        print(f"  answer     : {thought.answer or '(nothing she could honestly say)'}")
+        judged = thought.judgement
+        print(f"  verdict    : {judged.verdict if judged else 'unjudged'} "
+              f"(confidence {thought.confidence:.2f})")
+        print(f"  assertable : {thought.assertable}")
+        print(f"  synapses   : {before} -> {after}  ({after - before:+d})")
+        if thought.growth is not None:
+            g = thought.growth
+            print(f"  growth     : grown {g.grown}, potentiated {g.potentiated}, "
+                  f"pruned {g.pruned}, born {g.born}")
+        print(f"  took       : {thought.ms:.2f} ms")
         return
-
-    if sub == "score":
-        try:
-            from nyxara.nyx001.metrics import IntelligenceIndex
-        except Exception:  # noqa: BLE001
-            print("metrics unavailable.")
+    if sub == "recall":
+        if brain.memory is None:
+            print("her long-term memory is off (NYXARA_NJP__MEMORY_ENABLED=false).")
             return
-        rep = IntelligenceIndex().measure(brain)
-        print(rep.render())
+        got = brain.memory.recall(rest)
+        print(f"  {got.to_dict() if got is not None else 'nothing came back'}")
         return
-
-    if sub == "prove":
-        try:
-            from nyxara.nyx001.proving_ground import ProvingGround
-        except Exception:  # noqa: BLE001
-            print("the proving ground is unavailable.")
-            return
-        print("running the six strict tests — this trains from scratch and takes a while…")
-        rep = ProvingGround().run_all(brain)
-        print(rep.render())
-        return
-
-    print(f"unknown /nyx001 subcommand: {sub!r}. Try /nyx001 help.")
-
-
-def _nyx_command(core: NyxaraCore, arg: str) -> None:
-    """The ``/nyx`` family — a window into NYX V.01 (nyxara/nyx/)."""
-    brain = getattr(core, "nyx", None)
-    if brain is None:
-        print("NYX V.01 is disabled (NYXARA_NYX__ENABLED=false).")
-        return
-
-    sub, _, rest = arg.partition(" ")
-    sub, rest = sub.strip().lower(), rest.strip()
-
-    if sub in ("help", "?"):
-        print(_NYX_HELP)
-    elif sub == "self":
-        report = brain.about_self()
-        if report is None:
-            print("self-measurement is disabled (NYXARA_NYX__SELFMODEL_ENABLED=false).")
-        else:
-            print(report.describe())
-            print()
-            print(json.dumps(report.to_dict(), indent=2, default=str))
-    elif sub == "think":
-        if not rest:
-            print("usage: /nyx think <text>")
-            return
-        _print_thought(brain.think(rest))
-    elif sub == "why":
-        traces = brain.why(k=3)
-        if not traces:
-            print("nothing thought about yet.")
-        for trace in traces:
-            print(json.dumps(trace.to_dict(), indent=2, default=str))
-    elif sub == "recall":
-        if not rest:
-            print("usage: /nyx recall <cue>")
-            return
-        got = brain.recall(rest)
-        if got is None or got.hit is None:
-            print("nothing came back.")
-        else:
-            mark = "" if got.decided else "  (not confident)"
-            print(f"{got.hit.key} [{got.hit.kind}] {got.score:.2f}{mark}\n  {got.hit.text}")
-            for key, weight in got.associated:
-                print(f"  ↳ {key} ({weight:.2f})")
-    elif sub == "ground":
-        if not rest:
-            print("usage: /nyx ground <word>")
-            return
-        got = brain.understanding(rest)
+    if sub == "anticipate":
+        got = brain.anticipate(rest)
         if got is None:
-            print("grounding is disabled (NYXARA_NYX__GROUND_ENABLED=false).")
-        elif not got.grounded:
-            print(f"'{rest}' is still just a word to me — I have nothing behind it.")
-        else:
-            print(got.explanation)
-            print(f"  fires across {got.depth} senses, confidence {got.confidence:.2f}")
-            if got.neighbours:
-                near = ", ".join(f"{n} ({s:.2f})" for n, s in got.neighbours)
-                print(f"  nearest in meaning: {near}")
-    elif sub == "lingua":
-        lingua = getattr(brain, "lingua", None)
-        if lingua is None:
-            print("her tongue is off (NYXARA_NYX__LINGUA_ENABLED=false) — "
-                  "she reads ASCII only, as V.01 did.")
-        elif not rest:
-            print(json.dumps(lingua.stats(), indent=2, default=str, ensure_ascii=False))
-        else:
-            read = lingua.read(rest)
-            print(f"language : {read.primary}"
-                  f"{'  (code-mixed)' if read.code_mixed else ''}"
-                  f"{'  (Hinglish)' if read.hinglish else ''}")
-            print(f"scripts  : {', '.join(f'{s}×{n}' for s, n in read.scripts.items()) or '—'}")
-            print(f"register : {', '.join(read.register.markers) or 'neutral'}"
-                  f"  (formality {read.register.formality:.2f})")
-            print(f"concepts : {', '.join(read.concepts) or '— nothing but grammar'}")
-            bridged = [f"{c} → {k}" for c, k in read.keys.items() if k and k != c]
-            if bridged:
-                print(f"bridge   : {'; '.join(bridged[:8])}")
-    elif sub == "semantics":
-        space = getattr(brain, "semantics", None)
-        if space is None:
-            print("her semantic space is off (NYXARA_NYX__SEMANTICS_ENABLED=false) — "
-                  "concepts are bare labels again, as in V.01.")
-        elif not rest:
-            print(json.dumps(space.stats(), indent=2, default=str, ensure_ascii=False))
-        else:
-            words = rest.split()
-            if len(words) >= 2:
-                print(space.describe(words[0], words[1]))
-            else:
-                near = space.similar(words[0], k=8, candidates=list(brain.graph.nodes) or None)
-                if not near:
-                    print(f"nothing is near '{words[0]}' that I can justify. "
-                          f"That is ignorance, not a measurement of zero — "
-                          f"rungs available: {space.rungs_available()}")
-                for label, score, rung in near:
-                    print(f"  {label:24} {score:.3f}   [{rung}]")
-    elif sub == "teach":
-        words = rest.split()
-        if len(words) < 2:
-            print("usage: /nyx teach <word> <word>")
-        elif brain.teach_meaning(words[0], words[1]):
-            print(f"held: '{words[0]}' and '{words[1]}' are the same thing.")
-            print(brain.semantics.describe(words[0], words[1]))
-        else:
-            print("could not hold that (semantics disabled, or the two words are the same).")
-    elif sub == "analogy":
-        vsa = getattr(brain, "vsa", None)
-        if vsa is None:
-            print("vector-symbolic structure is off (NYXARA_NYX__VSA_ENABLED=false).")
-        elif not rest:
-            print(vsa.describe())
-        else:
-            spec = rest.strip("\"'").replace("::", ":")
-            parts = [p.strip() for p in spec.split(":") if p.strip()]
-            if len(parts) != 3:
-                print("usage: /nyx analogy <a>:<b>::<c>")
-            else:
-                got = brain.analogy(*parts)
-                if got is None:
-                    print("vector-symbolic structure is unavailable.")
-                else:
-                    print(f"{parts[0]} : {parts[1]} :: {parts[2]} : "
-                          f"{got.filler if got.trusted else '?'}")
-                    print(f"  margin {got.margin:.3f}  trusted={got.trusted}")
-                    print(f"  {got.note}")
-    elif sub == "prove":
-        prover = getattr(brain, "prover", None)
-        if prover is None:
-            print("the proof core is off (NYXARA_NYX__PROVER_ENABLED=false).")
-        elif not rest:
-            print(prover.describe())
-        else:
-            got = brain.prove(rest.strip("\"'"))
-            print(got.render() if got is not None else "the proof core is unavailable.")
-    elif sub == "telepathy":
-        stream = getattr(brain, "telepathy", None)
-        action = rest.strip()
-        if stream is None:
-            print("the vector channel is off (NYXARA_NYX__TELEPATHY_ENABLED=false).")
-        elif action.lower() == "emit":
-            frame = brain.emit_frame()
-            print(json.dumps(frame.to_dict(), indent=2, default=str, ensure_ascii=False)
-                  if frame is not None else "nothing to emit.")
-        elif action:
-            got = stream.expand(action)
-            if got is not None:
-                print(got.note)
-            else:
-                short = stream.observe(action)
-                print(f"noted. I have a shorthand for that now: {short.trigger!r}"
-                      if short is not None
-                      else "noted — say it a few more times and I will offer you a shorthand.")
-        else:
-            print(stream.describe())
-    elif sub == "why-causal":
-        causal = getattr(brain, "causal", None)
-        words = rest.split()
-        if causal is None:
-            print("the causal engine is off (NYXARA_NYX__CAUSAL_ENABLED=false) — every arrow "
-                  "is back to being an association.")
-        elif len(words) < 2:
-            print("usage: /nyx why-causal <cause> <effect>")
-            print(causal.describe())
-        else:
-            got = brain.why_causal(words[0], words[1], question=rest)
-            print(got.render() if got is not None else "the causal engine is unavailable.")
-    elif sub == "weave":
-        weaver = getattr(brain, "weaver", None)
-        words = rest.split()
-        if weaver is None:
-            print("the graph weaver is off (NYXARA_NYX__WEAVER_ENABLED=false) — the graph keeps "
-                  "one untyped edge kind.")
-        elif len(words) >= 2:
-            edge = brain.weave(words[0], words[1],
-                               type=(words[2] if len(words) > 2 else "co-occurs"))
-            print(edge.render() if edge is not None
-                  else "not laid — an unknown type is a candidate until it has support.")
-        else:
-            print(weaver.describe())
-    elif sub == "debate":
-        dialectic = getattr(brain, "dialectic", None)
-        if dialectic is None:
-            print("adversarial self-dialogue is off (NYXARA_NYX__DIALECTIC_ENABLED=false) — "
-                  "the winner ships unattacked.")
-        elif not rest:
-            print(json.dumps({k: v for k, v in dialectic.stats().items() if k != "note"},
-                             indent=2, default=str))
-        else:
-            got = brain.debate(rest.strip("\"\'"))
-            print(got.render() if got is not None else "the dialectic is unavailable.")
-    elif sub == "stream":
-        stream = getattr(brain, "stream", None)
-        if stream is None:
-            print("the perpetual stream is off (NYXARA_NYX__STREAM_ENABLED=false) — events "
-                  "accumulate and never compress.")
-        elif rest.strip().lower() in ("brief", "briefing", ""):
-            print(brain.catch_up() or "nothing to report.")
-        else:
-            brain.digest(force=True)
-            print(stream.describe())
-    elif sub == "goal":
-        goals = getattr(brain, "goals", None)
-        if goals is None:
-            print("the goal tree is off (NYXARA_NYX__GOALS_ENABLED=false) — a command is one "
-                  "action, never a plan.")
-        elif not rest:
-            print(goals.describe())
-        else:
-            made = brain.decompose(rest.strip("\"\'"))
-            if made is None:
-                print("the goal tree is unavailable.")
-            else:
-                print(made.render())
-                print()
-                got = goals.run(made, oversight=getattr(core, "oversight", None))
-                print(got.render())
-                print()
-                print(made.render())
-    elif sub == "agenda":
-        agenda = getattr(brain, "agenda", None)
-        action, _, arg = rest.strip().partition(" ")
-        action, arg = action.lower(), arg.strip()
-        if agenda is None:
-            print("her own agenda is off (NYXARA_NYX__AGENDA_ENABLED=false) — she thinks one "
-                  "thought at a time and forgets it.")
-        elif action == "pursue":
-            step = brain.pursue(oversight=getattr(core, "oversight", None), force=True)
-            print(json.dumps(step.to_dict(), indent=2, default=str) if step is not None
-                  else "she did not act — nothing open, or oversight stopped her.")
-        elif action == "brief":
-            got = brain.briefing()
-            print(got.text if got is not None else "no briefing available.")
-        elif action == "goal" and arg:
-            goal = brain.set_goal(arg)
-            print(f"taken on: {goal.render()}" if goal is not None else "could not take it on.")
-        elif action == "veto" and arg:
-            print("dropped." if agenda.veto(arg) else "no goal with that id.")
-        else:
-            print(agenda.describe())
-            print()
-            print(json.dumps({k: v for k, v in agenda.stats().items() if k != "note"},
-                             indent=2, default=str))
-    elif sub == "omega":
-        kernel = getattr(brain, "omega", None)
-        action = rest.strip().lower()
-        if kernel is None:
-            print("self-evolution is off (NYXARA_NYX__OMEGA_ENABLED=false) — her constants "
-                  "stay whatever was typed.")
-        elif action in ("evolve", "evolve!"):
-            # "evolve" waives the cadence — run now. "evolve!" additionally waives the sample
-            # floor, which is a different and much larger thing to waive, so it needs its own
-            # word rather than riding along on "run now".
-            step = brain.evolve(oversight=getattr(core, "oversight", None), force=True,
-                                ignore_sample_floor=action.endswith("!"))
-            print(step.render() if step is not None else "self-evolution is unavailable.")
-            if step is not None and step.reason:
-                print(f"  {step.reason}")
-            if step is not None and step.status == "skipped" and "fitting noise" in step.reason:
-                print("  (/nyx omega evolve! runs anyway — the step is then marked UNMEASURED)")
-        elif action == "rollback":
-            print("knobs restored." if kernel.rollback() else "no rollback point to restore.")
-        else:
-            print(kernel.describe())
-    elif sub == "axiom":
-        genesis = getattr(brain, "axiom", None)
-        if genesis is None:
-            print("axiom genesis is off (NYXARA_NYX__AXIOM_ENABLED=false).")
-        elif not genesis.available():
-            print("z3 is not installed, so consistency cannot be checked — and an axiom "
-                  "system nobody checked is not a result.")
-        elif not rest:
-            print(json.dumps(genesis.stats(), indent=2, default=str))
-        else:
-            got = brain.invent_axioms(rest.strip("\"'"))
-            print(got.render() if got is not None else "axiom genesis is unavailable.")
-    elif sub == "consequence":
-        gate = getattr(brain, "consequence", None)
-        if gate is None:
-            print("the consequence gate is off (NYXARA_NYX__CONSEQUENCE_ENABLED=false) — "
-                  "she acts without looking ahead.")
-        elif not rest:
-            print(json.dumps(gate.stats(), indent=2, default=str))
-        else:
-            parts = rest.strip("\"'").split()
-            action = parts[0]
-            args = {}
-            for token in parts[1:]:
-                if "=" in token:
-                    key, _, value = token.partition("=")
-                    args[key] = value
-            got = brain.foresee(action, args)
-            print(got.render() if got is not None else "foresight is unavailable.")
-    elif sub == "author":
-        author = getattr(brain, "author", None)
-        if author is None:
-            print("code authoring is off (NYXARA_NYX__AUTHOR_ENABLED=false).")
-        elif not rest:
-            print(author.describe())
-            print()
-            print(json.dumps(author.stats(), indent=2, default=str))
-        else:
-            got = brain.author_code(rest.strip("\"'"),
-                                    oversight=getattr(core, "oversight", None))
-            print(got.render() if got is not None else "authoring is unavailable.")
-            if got is not None and got.ok and got.source:
-                print("\n--- what she wrote ---")
-                print(got.source)
-    elif sub == "hands":
-        hands = getattr(brain, "hands", None)
-        if hands is None:
-            print("tool agency is off (NYXARA_NYX__HANDS_ENABLED=false).")
-        else:
-            print(hands.describe())
-            print()
-            stats = hands.stats()
-            print(json.dumps({k: v for k, v in stats.items() if k != "record"},
-                             indent=2, default=str))
-            if stats.get("record"):
-                print("track record:")
-                print(json.dumps(stats["record"], indent=2, default=str))
-    elif sub == "reason":
-        reasoner = getattr(brain, "reason", None)
-        if reasoner is None:
-            print("open-domain reasoning is off (NYXARA_NYX__REASON_ENABLED=false) — "
-                  "outside four domains she is silent again.")
-        elif not rest:
-            print(json.dumps(reasoner.stats(), indent=2, default=str, ensure_ascii=False))
-        else:
-            print(reasoner.solve(rest.strip("\"'")).render())
-    elif sub == "intent":
-        reader = getattr(brain, "intent", None)
-        if reader is None:
-            print("intent reading is off (NYXARA_NYX__INTENT_ENABLED=false) — "
-                  "she is back to the opener regex.")
-        elif not rest:
-            print(json.dumps(reader.stats(), indent=2, default=str, ensure_ascii=False))
-        else:
-            got = reader.read(rest.strip("\"'"))
-            print(reader.describe(got))
-            ask = got.clarifying_question()
-            if ask:
-                print(f"\nshe would ask: {ask}")
-    elif sub == "skills":
-        learner = getattr(brain, "icl", None)
-        if learner is None:
-            print("in-context learning is off (NYXARA_NYX__ICL_ENABLED=false).")
-        else:
-            print(learner.describe())
-            print()
-            print(json.dumps(learner.stats(), indent=2, default=str))
-    elif sub in ("hive", "eternal"):
-        part = getattr(brain, "synergy" if sub == "hive" else "eternal", None)
-        if part is None:
-            flag = "SYNERGY_ENABLED" if sub == "hive" else "ETERNAL_ENABLED"
-            print(f"this is a single {'node' if sub == 'hive' else 'machine'} "
-                  f"(NYXARA_NYX__{flag}=false).")
-        else:
-            stats = part.stats()
-            print(json.dumps(stats, indent=2, default=str))
-            if not stats.get("available"):
-                print("\nnot active: the logic is here, but no transport is attached. "
-                      "Only an in-process transport ships; cross-machine needs one you supply "
-                      "(see nyxara.nyx.synergy.Transport).")
-    elif sub == "nexus":
-        nexus = getattr(brain, "nexus", None)
-        if nexus is None:
-            print("she is not minting notation (NYXARA_NYX__NEXUS_ENABLED=false).")
-        elif not nexus.notations:
-            print("she has not minted any notation yet — try /nyx discover first.")
-        else:
-            for name, notation in nexus.notations.items():
-                glyphs = ", ".join(f"{c}={g}" for c, g in notation.symbols.items())
-                print(f"{name}: {glyphs}")
-            for statement in nexus.statements[-3:]:
-                print(f"\n  she writes : {statement.written}")
-                print(f"  it runs    : {statement.realised} -> {statement.value}"
-                      f"  ({len(statement.program)} instructions)")
-                print(f"  reaches you: {nexus.translate(statement)}")
-    elif sub == "discover":
-        discovery = getattr(brain, "episteme", None)
-        if discovery is None:
-            print("autonomous discovery is off (NYXARA_NYX__EPISTEME_ENABLED=false).")
-        elif not discovery.available():
-            print("there is nothing she can experiment on.")
-        else:
-            got = brain.discover(oversight=getattr(core, "oversight", None))
-            print(json.dumps(got.to_dict() if got else None, indent=2, default=str))
-            print("\nheld as fact:", json.dumps(discovery.promoted, indent=2))
-            if discovery.conjectures:
-                print("still only conjecture:", json.dumps(discovery.conjectures, indent=2))
-    elif sub == "omni":
-        _nyx_omni(core, brain, rest.strip().lower())
-    elif sub == "aura":
-        field_ = getattr(brain, "aura", None)
-        if field_ is None:
-            print("ambient awareness is off (NYXARA_NYX__AURA_ENABLED=false).")
-        elif not field_.streams:
-            print("nothing is registered — she is not watching anything yet.")
-        else:
-            print(json.dumps(field_.stats(), indent=2, default=str))
-    elif sub in ("wonder", "car"):
-        if sub == "wonder":
-            step = brain.wonder(oversight=getattr(core, "oversight", None))
-            print(json.dumps(step.to_dict() if step else None, indent=2, default=str))
-        else:
-            car = getattr(brain, "car", None)
-            if car is None:
-                print("between-prompts thinking is off (NYXARA_NYX__CAR_ENABLED=false).")
-            else:
-                print(json.dumps(car.stats(), indent=2, default=str))
-    elif not sub:
-        print(json.dumps(brain.stats(), indent=2, default=str))
-    # ---- NYX V.03 ---------------------------------------------------- #
-    elif sub == "monad":
-        _nyx_v03_report(getattr(brain, "monad", None), "monad",
-                        "one workspace, one memory — the six brains as one mind")
-    elif sub == "surprise":
-        homeostat = getattr(brain, "homeostat", None)
-        if homeostat is None:
-            print("homeostat is disabled (NYXARA_NYX__HOMEOSTAT_ENABLED=false).")
-        else:
-            beats = int(rest) if rest.isdigit() else 50
-            for _ in range(max(1, beats)):
-                homeostat.step()
-            print(homeostat.summary())
-            print()
-            print(json.dumps(homeostat.stats(), indent=2, default=str))
-    elif sub == "ascend":
-        _nyx_ascend(brain, rest)
-    elif sub == "library":
-        ascent = getattr(brain, "ascent", None)
-        if ascent is None:
-            print("ascent is disabled (NYXARA_NYX__ASCENT_ENABLED=false).")
-        else:
-            print(ascent.summary())
-    elif sub == "telos" or sub == "frontier":
-        telos = getattr(brain, "telos", None)
-        if telos is None:
-            print("telos is disabled (NYXARA_NYX__TELOS_ENABLED=false).")
-        else:
-            telos.refresh()
-            if sub == "telos" and rest == "advance":
-                print(json.dumps(telos.advance().to_dict(), indent=2, default=str))
-            print(telos.summary())
-    elif sub == "omniscient":
-        omni_stream = getattr(brain, "omniscient", None)
-        if omni_stream is None:
-            print("omniscient is disabled (NYXARA_NYX__OMNISCIENT_ENABLED=false).")
-        else:
-            if rest == "pulse":
-                print(json.dumps(omni_stream.pulse(force=True), indent=2, default=str))
-            print(omni_stream.summary())
-    elif sub == "ask":
-        omni_stream = getattr(brain, "omniscient", None)
-        if omni_stream is None or not rest:
-            print("usage: /nyx ask <question>   (answers from what was already ingested)")
-        else:
-            answer = omni_stream.ask(rest)
-            if not answer.facts:
-                print("nothing ingested about that — and nothing invented.")
-            else:
-                age_h = answer.age_s / 3600.0
-                print(f"as of {age_h:.1f}h ago, from {', '.join(answer.sources)} "
-                      f"(no live search):")
-                for fact in answer.facts:
-                    print(f"  · {fact.subject} —{fact.predicate}→ {fact.object}")
-    elif sub == "automata":
-        _nyx_automata(rest)
-    elif sub == "atlas":
-        atlas = getattr(brain, "atlas", None)
-        if atlas is None:
-            print("atlas is disabled (NYXARA_NYX__ATLAS_ENABLED=false).")
-        else:
-            print(json.dumps(atlas.refresh(), indent=2, default=str))
-            print(atlas.summary())
-    elif sub == "find":
-        atlas = getattr(brain, "atlas", None)
-        if atlas is None or not rest:
-            print("usage: /nyx find <symbol>")
-        else:
-            if not atlas.modules:
-                atlas.refresh()
-            hits = atlas.find(rest)
-            if not hits:
-                print(f"{rest!r} is not in the index — and nothing is guessed.")
-            for symbol in hits:
-                print(f"  {symbol.kind:<9} {symbol.dotted}  →  {symbol.location}")
-    elif sub == "craft":
-        _nyx_craft(brain, rest)
-    else:
-        print(f"unknown: /nyx {sub}\n{_NYX_HELP}")
-
-
-def _nyx_v03_report(faculty: Any, name: str, blurb: str) -> None:
-    """Print one V.03 faculty's own report, or say plainly that it is switched off."""
-    if faculty is None:
-        print(f"{name} is disabled (NYXARA_NYX__{name.upper()}_ENABLED=false).")
-        return
-    print(f"{blurb}\n")
-    summary = getattr(faculty, "summary", None)
-    if callable(summary):
-        print(summary())
-        print()
-    print(json.dumps(faculty.stats(), indent=2, default=str))
-
-
-def _nyx_ascend(brain: Any, rest: str) -> None:
-    """Search a checkable domain for something she does not already have."""
-    ascent = getattr(brain, "ascent", None)
-    if ascent is None:
-        print("ascent is disabled (NYXARA_NYX__ASCENT_ENABLED=false).")
-        return
-    from nyxara.nyx.ascent import Problem
-
-    domain = rest.strip() or "expression"
-    if domain not in ascent.registry.domains():
-        print(f"no verifier for domain {domain!r} — checkable domains are "
-              f"{ascent.registry.domains()}. Nothing is scored without one.")
-        return
-    # A demonstration problem stated only as examples: the answer is nowhere in this file.
-    problem = Problem(name=f"{domain}-demo", domain=domain, variables=("x",),
-                      examples=(((1,), 2), ((2,), 5), ((3,), 10)),
-                      holdout=(((7,), 50), ((11,), 122)))
-    run = ascent.ascend(problem)
-    print(json.dumps(run.to_dict(), indent=2, default=str))
-    if run.solved:
-        print(f"\nfound by search, checked against held-out cases: {run.artifact.statement}")
-
-
-def _nyx_automata(rest: str) -> None:
-    """Run a lattice and report what was measured — never what it looked like."""
-    from nyxara.nyx.automata import LIFE, Lattice
-
-    parts = rest.split()
-    steps = int(parts[-1]) if parts and parts[-1].isdigit() else 60
-    glider = [[0] * 16 for _ in range(16)]
-    for y, x in ((0, 1), (1, 2), (2, 0), (2, 1), (2, 2)):
-        glider[y][x] = 1
-    lattice = Lattice(grid=glider, rule=LIFE).run(max(1, steps))
-    print(lattice.render())
-    print()
-    print(json.dumps(lattice.stats(), indent=2, default=str))
-
-
-def _nyx_craft(brain: Any, rest: str) -> None:
-    """The staged coding facade — every stage reported, whether it ran or not."""
-    craft = getattr(brain, "craft", None)
-    if craft is None:
-        print("craft is disabled (NYXARA_NYX__CRAFT_ENABLED=false).")
-        return
-    job, _, args = rest.partition(" ")
-    job, args = job.strip().lower(), args.strip()
-    atlas = getattr(brain, "atlas", None)
-    if atlas is not None and not atlas.modules:
-        atlas.refresh()
-
-    if job == "rename":
-        old, _, new = args.partition(" ")
-        if not old or not new:
-            print("usage: /nyx craft rename <old> <new>   (always a dry run from the console)")
+            print("  nothing to anticipate from yet")
             return
-        print(craft.rename(old.strip(), new.strip(), dry_run=True).summary())
-    elif job == "harden":
-        if not args:
-            print("usage: /nyx craft harden <path.py>")
-            return
-        print(craft.harden(args, dry_run=True).summary())
-    elif job == "triage":
-        if not args:
-            print("usage: /nyx craft triage <path-to-ci-log>")
-            return
-        try:
-            log = pathlib.Path(args).read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            print(f"cannot read {args}: {exc}")
-            return
-        print(craft.triage(log).summary())
-    else:
-        print("usage: /nyx craft {rename|harden|triage} ...")
-
-
-
-def _nyx_omni(core: NyxaraCore, brain, action: str) -> None:
-    """``/nyx omni`` — what she has rewritten of herself, and the undo that is always there."""
-    omni = getattr(brain, "omni", None)
-    if omni is None:
-        print("she is not rewriting herself (NYXARA_NYX__OMNI_ENABLED=false).")
+        d = got.to_dict() if hasattr(got, "to_dict") else got
+        print(f"  {d}")
         return
-    if action == "rollback":
-        print(f"put back {omni.rollback_all()} function(s) — pure Python again.")
+    if sub == "expand":
+        rep = brain.fabric.expand()
+        print(f"  {rep.to_dict()}")
         return
-    if action == "forge":
-        got = brain.optimise(oversight=getattr(core, "oversight", None))
-        if got is None:
-            print("nothing to attempt: no toolchain, the hourly budget is spent, "
-                  "or every candidate she can read has already been tried.")
-        else:
-            print(json.dumps(got.to_dict(), indent=2, default=str))
+    if sub == "ledger":
+        report = brain.report()
+        if not report:
+            print("the ledger is off (NYXARA_NJP__LEDGER_ENABLED=false).")
+            return
+        for key, val in report.items():
+            print(f"  {key}: {val}")
         return
-
-    stats = omni.stats()
-    print(json.dumps(stats, indent=2, default=str))
-    if not stats.get("available"):
-        print("\nnot active: no gcc/clang/cc or rustc on PATH, or the live swap is off. "
-              "The layer is a clean no-op — nothing is faked.")
-    candidates = omni.scan()[:5]
-    if candidates:
-        print("\nof herself, these could become C kernels:")
-        for kernel in candidates:
-            print(f"  {kernel.target:<48} {kernel.reason}")
-    else:
-        print("\nshe has found nothing of herself narrow enough to compile — most of her is "
-              "orchestration, where a C kernel has nothing to win.")
-    print("\nevery adoption is reversible: the Python source is never written, so a restart "
-          "or /nyx omni rollback restores it.")
+    if sub == "truth":
+        if brain.truth is None:
+            print("the gauntlet is off (NYXARA_NJP__TRUTH_ENABLED=false) — "
+                  "nothing is being verified, and nothing claims to be.")
+            return
+        if not rest:
+            print("usage: /njp truth <claim>")
+            return
+        judged = brain.truth.judge(rest, context=brain)
+        print(f"  verdict   : {judged.verdict} (confidence {judged.confidence:.2f})")
+        print(f"  assertable: {judged.assertable}")
+        for ev in judged.evidence:
+            mark = "REFUTES" if ev.refutes else ("supports" if ev.supports else "notes")
+            print(f"    {ev.source:12s} {mark:9s} {ev.detail}")
+        if not judged.evidence:
+            print("    no source could speak to this at all")
+        return
+    if sub == "soul":
+        if brain.soul is None:
+            print("the intent-refinement loop is off (NYXARA_NJP__SOULSYNC_ENABLED=false).")
+            return
+        stats = brain.soul.stats()
+        res = stats.get("resonance")
+        # None, never a default number: "no evidence yet" and "perfectly in sync" must not read
+        # the same in a report the Master is using to decide whether to trust her.
+        shown = res if res is not None else "not yet measured — no anticipation staked"
+        print(f"  resonance: {shown}")
+        print(f"  learned {stats['active_preferences']} standing preference(s) "
+              f"from your corrections:")
+        for pref in stats.get("top", []):
+            print(f"    '{pref['want']}' (support {pref['support']}, "
+                  f"confidence {pref['confidence']})")
+        if not stats.get("top"):
+            print("    none yet — everything she knows about you, you taught by correcting her")
+        return
+    if sub == "evolve":
+        step = core.njp_evolve()
+        if step is None:
+            print("self-rewriting is off, or oversight is paused.")
+            return
+        print(f"  target     : {step.target or '(none named)'}")
+        print(f"  proposed   : {step.proposed}")
+        print(f"  kept       : {step.kept} · rolled back: {step.rolled_back}")
+        print(f"  reason     : {step.reason}")
+        return
+    if sub == "pulse":
+        print(f"  {core.njp_tick()}")
+        return
+    print(f"unknown /njp subcommand: {sub!r}. Try /njp help.")
 
 
 def _print_thought(thought) -> None:
@@ -1928,10 +1257,8 @@ def _handle_command(core: NyxaraCore, line: str) -> bool:
             print(f"recording: {len(rec.entries)} entries this run "
                   f"(cap {core._REPLAY_MAX_ENTRIES}, then rotated)")
             print("/replay save   writes the tape so this run can be replayed step-for-step.")
-    elif cmd == "nyx":
-        _nyx_command(core, arg)
-    elif cmd == "nyx001":
-        _nyx001_command(core, arg)
+    elif cmd == "njp":
+        _njp_command(core, arg)
     elif cmd == "save":
         # one unified checkpoint: memory + self-model + prior + reward learner + EWC anchors
         # + trained embedder + generative brain — everything she has learned, in one place.

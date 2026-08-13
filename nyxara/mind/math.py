@@ -187,21 +187,21 @@ class MathEngine:
     @staticmethod
     def real(name: str):
         MathEngine._require_z3_static()
-        from nyxara.nyx.theorem_prover import Z3_LOCK
+        from nyxara.njp.prove import Z3_LOCK
         with Z3_LOCK:            # building an expression touches z3's global context too
             return _z3.Real(name)
 
     @staticmethod
     def int_(name: str):
         MathEngine._require_z3_static()
-        from nyxara.nyx.theorem_prover import Z3_LOCK
+        from nyxara.njp.prove import Z3_LOCK
         with Z3_LOCK:            # building an expression touches z3's global context too
             return _z3.Int(name)
 
     @staticmethod
     def bool_(name: str):
         MathEngine._require_z3_static()
-        from nyxara.nyx.theorem_prover import Z3_LOCK
+        from nyxara.njp.prove import Z3_LOCK
         with Z3_LOCK:            # building an expression touches z3's global context too
             return _z3.Bool(name)
 
@@ -209,8 +209,8 @@ class MathEngine:
         """Check satisfiability of Z3 constraints; return (sat, model-as-dict)."""
         self._require_z3()
         # z3's global context is not thread-safe; the orchestrator reasons on a thread pool.
-        # See nyxara.nyx.theorem_prover.Z3_LOCK.
-        from nyxara.nyx.theorem_prover import Z3_LOCK
+        # See nyxara.njp.prove.Z3_LOCK.
+        from nyxara.njp.prove import Z3_LOCK
         with Z3_LOCK:
             s = _z3.Solver()
             for c in constraints:
@@ -224,8 +224,8 @@ class MathEngine:
     def prove(self, claim: Any, assumptions: Sequence[Any] = ()) -> bool:
         """Prove ``claim`` valid under ``assumptions`` (unsat of assumptions ∧ ¬claim)."""
         self._require_z3()
-        from nyxara.nyx.theorem_prover import Z3_LOCK
-        with Z3_LOCK:                       # see nyxara.nyx.theorem_prover.Z3_LOCK
+        from nyxara.njp.prove import Z3_LOCK
+        with Z3_LOCK:                       # see nyxara.njp.prove.Z3_LOCK
             s = _z3.Solver()
             for a in assumptions:
                 s.add(a)

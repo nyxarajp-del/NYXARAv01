@@ -68,7 +68,13 @@ class AutoForge:
 
     def __init__(self, foundry: Any = None, distiller: Any = None,
                  flywheel: Any = None, min_examples: int = 10,
-                 eval_threshold: float = 0.6) -> None:
+                 eval_threshold: float = 0.6, enabled: bool = True) -> None:
+        # Whether this forge may actually TRAIN. Wiring and training are separate decisions: the
+        # kernel still builds AutoForge when the foundry is switched off, so the wiring stays
+        # inspectable, but a disabled forge must not run real training on the idle beat. Defaults
+        # to True so a caller that hands in its own foundry has already made the decision and is
+        # never second-guessed by ambient config.
+        self.enabled = bool(enabled)
         self.foundry = foundry
         self.distiller = distiller
         # her OWN lived, verified experience (growth/flywheel.py) — counted toward the trigger
@@ -105,6 +111,14 @@ class AutoForge:
 
         if self.foundry is None:
             result.reason = "no foundry wired"
+            result.elapsed_ms = (time.monotonic() - t0) * 1000
+            self._cycles.append(result)
+            return result
+
+        # Reported as a skip rather than swallowed, so "it did not forge" stays visible in the
+        # cycle record instead of looking like a cycle that found nothing to do.
+        if not self.enabled:
+            result.reason = "the forge is disabled (foundry.enabled=false)"
             result.elapsed_ms = (time.monotonic() - t0) * 1000
             self._cycles.append(result)
             return result

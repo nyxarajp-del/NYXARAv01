@@ -621,22 +621,14 @@ class NyxaraCore:
         # farther than τ from everything known births a node at the hyperbolic barycenter of the
         # active cluster, and edges adapt Hebbianly from each turn's real outcome. Advisory.
         self.hyperbolic_manifold = self._build_hyperbolic_manifold()
-        # NYX-5 — the neuromorphic brain: an event-driven spiking-network *simulation* (LIF neurons,
-        # STDP local learning, live-graph structural plasticity) with 10,000-D long-term memory and
-        # active-inference surprise. Colour-only by default; it can occupy the reason-seat when
-        # ``nyx5.as_reasoner`` is set (still gated by the sovereign kernel). Advisory — never a gate.
-        self.nyx5 = self._build_nyx5()
-        # NYX V.01 — the unified brain (nyxara/nyx/): a concept graph that rewires itself, and a
-        # content-addressed associative memory that has no token context window. It composes what
-        # already exists rather than replacing it, and — like every other faculty — it only
-        # proposes: its candidates still pass the identical, unchanged sovereign gate.
-        self.nyx = self._build_nyx()
-        # NYX V.001 — the PRIMARY brain (nyxara/nyx001/): V.01/.02/.03 + NYX-5 + the from-scratch
-        # Layer 0-17 cognitive stack, fused. When it builds it takes OWNERSHIP of the two brains
-        # above — ``self.nyx`` and ``self.nyx5`` are rebound to point *into* it, so the 131
-        # existing references and 73 test files keep working unchanged while the owner changes.
-        # It only ever proposes; every candidate still passes the identical, unchanged gate.
-        self.nyx001 = self._build_nyx001()
+        # NJP V.01 — the brain (nyxara/njp/): a Fluid Neural Automata. One local law for every
+        # cell and no written behaviour; the cells and the wiring are both grown. It expands after
+        # every turn (synaptogenesis, pruning, and neurogenesis when it cannot predict itself),
+        # lifts each settled state into a hyper-dimensional manifold so it can anticipate before
+        # settling, refuses to state what its Truth-Seeking Gauntlet did not establish, learns the
+        # Master's unsaid half, and rewrites its own source under a reversible gauntlet. It only
+        # ever proposes: every candidate still passes the identical, unchanged sovereign gate.
+        self.njp = self._build_njp()
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
@@ -2103,63 +2095,26 @@ class NyxaraCore:
                                   llm_reasoner=base, use_council=use_council)
         except Exception:  # noqa: BLE001 — degrade to the LLM/deterministic reasoner
             reasoner = base
-        # NYX-5 reason-seat (opt-in): when ``nyx5.as_reasoner`` is set, the neuromorphic brain occupies
-        # the reason-seat, wrapping the reasoner above for the linguistic surface and driving it with
-        # spiking-substrate + active-inference signals. It only ever PROPOSES — every candidate still
-        # flows through the unchanged, fail-closed gate. The mind proposes; the kernel disposes.
-        try:
-            from nyxara.kernel.config import get_settings
-            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            brain = getattr(self, "nyx5", None)
-            if brain is not None and getattr(getattr(settings, "nyx5", None), "as_reasoner", False):
-                from nyxara.nyx5 import Nyx5Reasoner
-                reasoner = Nyx5Reasoner(base=reasoner, brain=brain,
-                                        free_energy=getattr(self, "free_energy", None),
-                                        predictive=getattr(self, "predictive", None))
-        except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
-            pass
-        # NYX V.01 reason-seat (on by default): the unified brain wraps whatever reasoner was
-        # assembled above and supplies the *content* of a reply when its own cycle — grounded
-        # recall, a checked derivation, the collapsed superposition — has something better to
-        # say. It only ever PROPOSES: risk, capability and every corrigibility flag are left
-        # exactly as the base set them, and the candidate still passes the identical fail-closed
-        # gate. NYX V.02 lets it FILL an empty tool field — never replace a tool the base chose,
+        # NJP V.01 reason-seat (on by default): the brain wraps whatever reasoner was assembled
+        # above and supplies the *content* of a reply when its own cycle has something better to
+        # say. It only ever PROPOSES: risk, reversible, capability and every corrigibility flag
+        # are left exactly as the base set them, and the candidate still passes the identical
+        # fail-closed gate. It may FILL an empty tool field — never replace a tool the base chose,
         # and never change what that tool is allowed to do: the gate reads the tool's own
-        # registered capability and risk, not anything the seat wrote. The mind proposes; the
-        # kernel disposes.
+        # registered capability and risk, not anything the seat wrote. It will not overwrite a
+        # reply with a claim the Truth-Seeking Gauntlet did not establish, and it never takes over
+        # an action candidate. The mind proposes; the kernel disposes.
         try:
             from nyxara.kernel.config import get_settings
             settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            nyx = getattr(self, "nyx", None)
-            if nyx is not None and getattr(getattr(settings, "nyx", None), "as_reasoner", False):
-                from nyxara.nyx.reasoner import NyxReasoner
-                reasoner = NyxReasoner(
-                    base=reasoner, brain=nyx,
-                    may_propose_tools=getattr(getattr(settings, "nyx", None),
-                                              "reasoner_may_propose_tools", True))
-        except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
-            pass
-        # NYX V.001 reason-seat (on by default): the PRIMARY brain wraps the whole chain assembled
-        # above — base → NyxaraReasoner → Nyx5Reasoner → NyxReasoner → here. It supplies the reply's
-        # *content* when its fused cycle (V.01-.03 + NYX-5 + the Layer 0-17 stack, under the
-        # verifiable-beats-probabilistic control law) has something better to say.
-        #
-        # NOTHING HERE LOOSENS ANYTHING. It may write text, confidence, belief, efe and rationale,
-        # and may FILL an empty tool field — never replace a tool the base chose. It never touches
-        # risk, reversible, capability or the three corrigibility flags, never takes over an action
-        # candidate, and leaves the base's text alone when the three brains disagree. The candidate
-        # passes the identical, unchanged, fail-closed gate. The mind proposes; the kernel disposes.
-        try:
-            from nyxara.kernel.config import get_settings
-            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            cfg001 = getattr(settings, "nyx001", None)
-            brain001 = getattr(self, "nyx001", None)
-            if brain001 is not None and getattr(cfg001, "as_reasoner", False):
-                from nyxara.nyx001.reasoner import NyxV001Reasoner
-                return NyxV001Reasoner(
-                    base=reasoner, brain=brain001,
-                    may_propose_tools=getattr(cfg001, "reasoner_may_propose_tools", True),
-                    min_confidence=getattr(cfg001, "reasoner_min_confidence", 0.25))
+            cfg = getattr(settings, "njp", None)
+            brain = getattr(self, "njp", None)
+            if brain is not None and getattr(cfg, "as_reasoner", False):
+                from nyxara.njp.reasoner import NJPReasoner
+                return NJPReasoner(
+                    base=reasoner, brain=brain,
+                    may_propose_tools=getattr(cfg, "reasoner_may_propose_tools", True),
+                    min_confidence=getattr(cfg, "reasoner_min_confidence", 0.25))
         except Exception:  # noqa: BLE001 — the reason-seat swap never breaks the working mind
             pass
         return reasoner
@@ -3767,269 +3722,124 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — the manifold is a capability, never required
             return None
 
-    def _build_nyx5(self) -> Any:
-        """Build the NYX-5 neuromorphic brain (guarded). Honest: a spiking-network *simulation* on
-        commodity silicon — not neuromorphic hardware, no backpropagation. A capability, never a
-        hard dependency; disabled cleanly when ``nyx5.enabled`` is false."""
-        try:
-            from nyxara.kernel.config import get_settings
-            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            cfg = getattr(settings, "nyx5", None)
-            if cfg is None or not cfg.enabled:
-                return None
-            from nyxara.nyx5 import Nyx5Brain
-            return Nyx5Brain(cfg)
-        except Exception:  # noqa: BLE001 — the neuromorphic brain is a capability, never required
-            return None
+    # ---- NJP V.01 — the brain (nyxara/njp/) ---- #
+    def _build_njp(self) -> Any:
+        """Build NJP V.01, NYXARA's one brain, and hand it the live toolset.
 
-    # ---- NYX-5 neuromorphic brain — advisory public API ---- #
-    def nyx5_perceive(self, text: str) -> Any:
-        """Perceive ``text`` through the spiking substrate (learns by STDP), returning a Nyx5Tick."""
-        brain = getattr(self, "nyx5", None)
-        if brain is None:
-            return None
-        try:
-            return brain.perceive(text)
-        except Exception:  # noqa: BLE001 — advisory, never fatal
-            return None
-
-    def nyx5_recall(self, query: str, *, threshold: float = 0.0) -> Any:
-        """Recall the nearest stored NYX-5 memory to ``query`` (a CleanupResult or None)."""
-        brain = getattr(self, "nyx5", None)
-        try:
-            return brain.recall(query, threshold=threshold) if brain is not None else None
-        except Exception:  # noqa: BLE001
-            return None
-
-    def nyx5_stats(self) -> Dict[str, Any]:
-        """A snapshot of the NYX-5 brain (spikes, synapses, memories) — or {} when absent."""
-        brain = getattr(self, "nyx5", None)
-        try:
-            return brain.stats() if brain is not None else {}
-        except Exception:  # noqa: BLE001
-            return {}
-
-    def _nyx5_tick(self, text: str) -> None:
-        """Colour-only PERCEIVE tick: perceive the turn through the spiking substrate so STDP learns
-        continuously, and let high surprise colour attention/affect. It MUST NOT alter disposition,
-        gate, or candidate scores — advisory, best-effort, never fatal."""
-        brain = getattr(self, "nyx5", None)
-        if brain is None or not text:
-            return
-        try:
-            tick = brain.perceive(text)
-            self._last_nyx5_surprise = float(getattr(tick, "surprise", 0.0))
-            # Stash the tick itself, not just its surprise. NYX V.001's reason-seat runs after
-            # this on the same turn and would otherwise perceive through the spiking substrate a
-            # SECOND time — measured at 93% of the seat's per-turn cost, for a duplicate of a
-            # tick that already happened. Keyed by text so a stale tick is never reused.
-            self._last_nyx5_tick = tick
-            self._last_nyx5_text = text
-            tag = " pre-emptive" if tick.preemptive else ""
-            self.mind.record(ThoughtKind.PERCEPTION,
-                             f"nyx5: surprise={tick.surprise:.2f} entropy={tick.entropy:.2f} "
-                             f"spikes={tick.n_spikes}{tag}",
-                             salience=_clamp01(tick.surprise))
-            if tick.preemptive and self.affect is not None:
-                self.affect.note_novelty(magnitude=_clamp01(tick.surprise))
-        except Exception:  # noqa: BLE001 — the neuromorphic tick is best-effort, never fatal
-            pass
-
-    # ---- NYX V.01 — the unified brain (nyxara/nyx/) ---- #
-    def _build_nyx(self) -> Any:
-        """Build NYX V.01 (guarded). A capability, never a hard dependency; cleanly absent when
-        ``nyx.enabled`` is false."""
-        try:
-            from nyxara.kernel.config import get_settings
-            settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            cfg = getattr(settings, "nyx", None)
-            if cfg is None or not cfg.enabled:
-                return None
-            from nyxara.nyx.brain import NyxBrain
-            brain = NyxBrain(cfg)
-            # NYX V.02: hand her the live toolset and knowledge base. Her brain was never given
-            # them, which is why `nyxara.nyx.hands` describes itself as closing a *wiring* gap
-            # rather than a permission one — the tools were always there and always allowed.
-            try:
-                brain.attach_kernel(tools=getattr(self, "tools", None),
-                                    knowledge=getattr(self, "knowledge", None),
-                                    core=self)
-            except Exception:  # noqa: BLE001 — a brain without hands still thinks
-                pass
-            return brain
-        except Exception:  # noqa: BLE001 — NYX V.01 is a capability, never required
-            return None
-
-    # ---- NYX V.001 — the primary brain (nyxara/nyx001/) ---- #
-    def _build_nyx001(self) -> Any:
-        """Build NYX V.001 and hand it the two brains already built.
-
-        On success ``self.nyx`` and ``self.nyx5`` are **rebound to NYX V.001's own instances**, so
-        every existing caller keeps working and there is exactly one of each brain in the process
-        rather than two. If NYX V.001 declines (disabled, or its build fails), the originals are
-        left exactly as they were and the mind runs as it did before.
+        Without ``attach_kernel`` the brain has no sight of the tool registry, which was a pure
+        wiring gap in the previous brains and is not repeated here: a mind that cannot see what
+        tools exist cannot propose one, however much permission it has.
         """
         try:
             from nyxara.kernel.config import get_settings
             settings = self.settings if getattr(self, "settings", None) is not None else get_settings()
-            cfg = getattr(settings, "nyx001", None)
-            if cfg is None or not cfg.enabled:
+            cfg = getattr(settings, "njp", None)
+            if cfg is None or not getattr(cfg, "enabled", True):
                 return None
-            from nyxara.nyx001.brain import NyxV001Brain
-            # Adopt the two brains already built above rather than letting NYX V.001 build its
-            # own. Without this every boot constructed NyxBrain and Nyx5Brain TWICE and threw one
-            # of each away — pure waste, paid again by every test that constructs a core.
-            brain = NyxV001Brain(cfg, v03=getattr(self, "nyx", None),
-                                 snn=getattr(self, "nyx5", None))
+            from nyxara.njp.brain import NJPBrain
+            brain = NJPBrain(cfg)
             try:
                 brain.attach_kernel(tools=getattr(self, "tools", None),
                                     knowledge=getattr(self, "knowledge", None),
                                     core=self)
             except Exception:  # noqa: BLE001 — a brain without hands still thinks
                 pass
-            # Ownership transfer. Only rebind what NYX V.001 actually built: with `v03_enabled`
-            # or `snn_enabled` off it holds None there, and clobbering a working brain with None
-            # would silently disable a faculty the operator did not turn off.
-            if getattr(brain, "v03", None) is not None:
-                self.nyx = brain.v03
-            elif getattr(self, "nyx", None) is not None:
-                brain.v03 = self.nyx          # she declined to build one; adopt the existing one
-            if getattr(brain, "snn", None) is not None:
-                self.nyx5 = brain.snn
-            elif getattr(self, "nyx5", None) is not None:
-                brain.snn = self.nyx5
             return brain
-        except Exception:  # noqa: BLE001 — NYX V.001 is a capability, never required
+        except Exception:  # noqa: BLE001 — NJP is a capability, never required
             return None
 
-    def nyx001_think(self, stimulus: str) -> Any:
-        """One full NYX V.001 cycle: three brains perceive, vote, and fuse into one thought."""
-        brain = getattr(self, "nyx001", None)
+    def njp_think(self, stimulus: str) -> Any:
+        """One full NJP turn: read, anticipate, settle, ground, judge, expand."""
+        brain = getattr(self, "njp", None)
         try:
             return brain.think(stimulus) if brain is not None else None
         except Exception:  # noqa: BLE001 — advisory, never fatal
             return None
 
-    def nyx001_learn(self, observation: Any, **kwargs: Any) -> Any:
-        """One learning cycle through the from-scratch Layer 0-17 stack."""
-        brain = getattr(self, "nyx001", None)
-        try:
-            return brain.learn(observation, **kwargs) if brain is not None else None
-        except Exception:  # noqa: BLE001
-            return None
-
-    def nyx001_develop(self) -> Dict[str, Any]:
-        """Where she actually is on the Stage 0-10 childhood — measured, never scheduled."""
-        brain = getattr(self, "nyx001", None)
-        try:
-            return (brain.develop() or {}) if brain is not None else {}
-        except Exception:  # noqa: BLE001
-            return {}
-
-    def nyx001_is_learning(self) -> Any:
-        """Is the from-scratch substrate's prediction error actually falling? ``None`` if unknown."""
-        brain = getattr(self, "nyx001", None)
-        try:
-            return brain.is_learning() if brain is not None else None
-        except Exception:  # noqa: BLE001
-            return None
-
-    def nyx001_stats(self) -> Dict[str, Any]:
-        """A snapshot of all three brains at once — or {} when NYX V.001 is absent."""
-        brain = getattr(self, "nyx001", None)
-        try:
-            return brain.stats() if brain is not None else {}
-        except Exception:  # noqa: BLE001
-            return {}
-
-    def nyx001_tick(self, *, oversight: Any = None) -> Dict[str, Any]:
-        """One beat: the dark core pulses, the stack consolidates, the curriculum re-measures."""
-        brain = getattr(self, "nyx001", None)
-        try:
-            return brain.tick(oversight=oversight) if brain is not None else {}
-        except Exception:  # noqa: BLE001
-            return {}
-
-    def nyx_perceive(self, text: str) -> Any:
-        """Perceive ``text`` through NYX V.01 (rewires the graph), returning a NyxPercept."""
-        brain = getattr(self, "nyx", None)
+    def njp_perceive(self, text: str) -> Any:
+        """Stimulate the fabric with ``text`` and settle it, returning an NJPPercept."""
+        brain = getattr(self, "njp", None)
         try:
             return brain.perceive(text) if brain is not None else None
-        except Exception:  # noqa: BLE001 — advisory, never fatal
+        except Exception:  # noqa: BLE001
             return None
 
-    def nyx_recall(self, cue: str, *, k: int = 5) -> Any:
-        """Content-addressed recall from NYX V.01 — no token window is consulted."""
-        brain = getattr(self, "nyx", None)
+    def njp_recall(self, cue: str, *, k: int = 5) -> Any:
+        """Content-addressed recall — no token window is consulted."""
+        brain = getattr(self, "njp", None)
         try:
-            return brain.recall(cue, k=k) if brain is not None else None
-        except Exception:  # noqa: BLE001 — advisory, never fatal
+            return brain.memory.recall(cue, k=k) if brain is not None and brain.memory else None
+        except Exception:  # noqa: BLE001
             return None
 
-    def nyx_related(self, concept: str, *, k: int = 8) -> List[Any]:
-        """What NYX V.01's concept graph currently associates with ``concept``."""
-        brain = getattr(self, "nyx", None)
+    def njp_anticipate(self, text: str = "") -> Any:
+        """What she expects next, WITHOUT settling — or ``None`` when it is not yet earned."""
+        brain = getattr(self, "njp", None)
         try:
-            return brain.related(concept, k=k) if brain is not None else []
+            return brain.anticipate(text) if brain is not None else None
         except Exception:  # noqa: BLE001
-            return []
+            return None
 
-    def nyx_gaps(self, *, k: int = 5) -> List[str]:
-        """Concepts NYX keeps meeting but has never connected — the edge of her knowing."""
-        brain = getattr(self, "nyx", None)
+    def njp_expand(self, *, outcome: float = 1.0) -> Any:
+        """Run one plasticity pass now: potentiate, grow, prune, and mint cells if warranted."""
+        brain = getattr(self, "njp", None)
         try:
-            return brain.gaps(k=k) if brain is not None else []
+            return brain.fabric.expand(outcome=outcome) if brain is not None else None
         except Exception:  # noqa: BLE001
-            return []
+            return None
 
-    def nyx_optimise(self) -> Any:
-        """One L-OMNI attempt: read her own source, lower a hot function to C, verify, swap.
+    def njp_evolve(self) -> Any:
+        """One self-rewrite attempt: measure herself, propose, verify the claim, keep or roll back.
 
-        Gauntlet-verified and reversible — the Python source is never written, so a restart or
-        ``brain.omni.rollback_all()`` always restores it. Oversight is honoured: a paused or
-        scrammed mind does not recompile itself.
+        Gauntleted and reversible. Oversight is honoured — a paused or scrammed mind does not
+        rewrite itself — and enactment additionally needs the standing authorisation.
         """
-        brain = getattr(self, "nyx", None)
+        brain = getattr(self, "njp", None)
         try:
-            return (brain.optimise(oversight=getattr(self, "oversight", None))
-                    if brain is not None else None)
+            evolver = getattr(brain, "evolver", None) if brain is not None else None
+            if evolver is None:
+                return None
+            return evolver.beat(oversight=getattr(self, "oversight", None), force=True)
         except Exception:  # noqa: BLE001 — self-optimisation is never fatal
             return None
 
-    def nyx_stats(self) -> Dict[str, Any]:
-        """A snapshot of NYX V.01 (graph shape, memory load) — or {} when absent."""
-        brain = getattr(self, "nyx", None)
+    def njp_ledger(self) -> Dict[str, Any]:
+        """Then vs now — whether she is actually more than she was, in numbers."""
+        brain = getattr(self, "njp", None)
+        try:
+            return (brain.report() or {}) if brain is not None else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def njp_stats(self) -> Dict[str, Any]:
+        """A snapshot of the fabric and every organ attached to it — or {} when NJP is absent."""
+        brain = getattr(self, "njp", None)
         try:
             return brain.stats() if brain is not None else {}
         except Exception:  # noqa: BLE001
             return {}
 
-    def _nyx_tick(self, text: str) -> None:
-        """Colour-only PERCEIVE tick: rewire the concept graph and lay down the turn in
-        content-addressed memory. It MUST NOT alter disposition, gate, or candidate scores —
-        advisory, best-effort, never fatal."""
-        brain = getattr(self, "nyx", None)
-        if brain is None or not text:
+    def njp_tick(self, *, oversight: Any = None) -> Dict[str, Any]:
+        """One beat of the continuous pulse: expand, consolidate on cadence, evolve on cadence."""
+        brain = getattr(self, "njp", None)
+        try:
+            if brain is None:
+                return {}
+            return brain.tick(oversight=oversight if oversight is not None
+                              else getattr(self, "oversight", None))
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _njp_tick(self, text: str) -> None:
+        """Perceive one live turn through the fabric, so ambient traffic still grows her."""
+        brain = getattr(self, "njp", None)
+        if brain is None or not str(text or "").strip():
             return
         try:
-            p = brain.perceive(text)
-            if p is None:
-                return
-            self._last_nyx_novelty = float(p.novelty)
-            born = f", {len(p.born)} new" if p.born else ""
-            recalled = ""
-            if p.recall is not None and p.recall.hit is not None and p.recall.decided:
-                recalled = f", recalled {p.recall.hit.key}"
-            self.mind.record(ThoughtKind.PERCEPTION,
-                             f"nyx: {len(p.concepts)} concepts, {p.strengthened} links"
-                             f"{born}{recalled}",
-                             salience=_clamp01(0.2 + 0.6 * p.novelty))
-            if p.born and self.affect is not None:
-                self.affect.note_novelty(magnitude=_clamp01(p.novelty))
-        except Exception:  # noqa: BLE001 — the NYX tick is best-effort, never fatal
+            brain.think(str(text))
+        except Exception:  # noqa: BLE001 — perception is advisory, never fatal
             pass
 
-    # ---- hyperdimensional latent space (Cognition · 1) — advisory public API ---- #
     def map_latent_space(self, data: Any, *, name: Optional[str] = None) -> Any:
         """Lift ``data`` (text / record dict / feature vector / sequence) into the 10,000-D
         latent space; store it under ``name`` if given. Returns the hypervector, or None."""
@@ -6029,7 +5839,11 @@ class NyxaraCore:
                 except Exception:  # noqa: BLE001 — counting is best-effort
                     flywheel = None
             foundry = Foundry()
+            # Wired either way so the wiring stays inspectable, but only allowed to TRAIN
+            # when the foundry is switched on — without this, idle maintenance ran real
+            # NumPy training on a foundry the operator had explicitly disabled.
             return AutoForge(foundry=foundry, distiller=None, flywheel=flywheel,
+                             enabled=bool(getattr(get_settings().foundry, "enabled", True)),
                              min_examples=cfg.min_examples, eval_threshold=cfg.eval_threshold)
         except Exception:  # noqa: BLE001 — autoforge is a capability, never required
             return None
@@ -6324,11 +6138,10 @@ class NyxaraCore:
         # NYX-5 neuromorphic tick: perceive the turn through the spiking substrate so STDP learns
         # continuously (no train/infer split) and surprise colours attention. Colour-only — it never
         # touches disposition or the gate.
-        self._nyx5_tick(safe_text)
         # NYX V.01 tick: the concept graph rewires from this turn (Hebbian co-activation, disuse
         # decay, structural growth) and the turn is laid down in content-addressed memory, whose
         # recall has no token window. Colour-only — it never touches disposition or the gate.
-        self._nyx_tick(safe_text)
+        self._njp_tick(safe_text)
         # CAUSAL engine: field-resonance retrieval of the most relevant concepts, and a live
         # phase-shift that crystallises new structure on a genuine gap (causal/, advisory)
         self._causal_engage(safe_text, thoughts, gates)
@@ -9104,32 +8917,25 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — background thinking never breaks upkeep
             pass
         # 0b) NYX V.001's own heartbeat: the dark core pulses (curiosity + contradiction +
-        # critique + self-model as ONE drive, choosing what is most worth knowing next), the
-        # Layer 0-17 stack consolidates (compression + meta-learning), and the Stage 0-10
-        # childhood re-measures itself.
-        #
-        # This call had NO caller anywhere in the process. `core.nyx001_tick()` existed, the
-        # config carried `tick_enabled`/`consolidate_every_s`/`develop_every_s`, and nothing ever
-        # ran it — so in a live NYXARA the dark core never pulsed once, compression and
-        # meta-learning never ran outside a test, and the curriculum only re-measured on the
-        # every-16th-turn path inside `think`. The three faculties that make NYX V.001 more than
-        # three brains in a bag were, in practice, off.
-        #
-        # `tick_v03=False`: V.01-.03's beat was already run immediately above, and its wondering
-        # report is read from there. Beating it twice per idle pass would be pure waste.
+        # NJP's continuous pulse, on the idle beat: fold in everything lived since the last
+        # pass, consolidate on its own cadence, and attempt one self-rewrite on the slowest one.
+        # Oversight is passed through, so a paused or scrammed mind neither grows nor rewrites
+        # itself. This is what makes growth continuous rather than only per-conversation.
         try:
-            brain001 = getattr(self, "nyx001", None)
-            if brain001 is not None:
-                beat = brain001.tick(oversight=self.oversight, tick_v03=False)
+            brain = getattr(self, "njp", None)
+            if brain is not None:
+                beat = brain.tick(oversight=self.oversight)
                 if beat:
-                    dark = beat.get("dark") or {}
-                    chosen = dark.get("chosen") or {}
-                    if chosen:
-                        report["nyx001_wants"] = f"{chosen.get('kind')} → {chosen.get('target')}"
-                    if beat.get("consolidate") is not None:
-                        report["nyx001_consolidated"] = beat["consolidate"]
-                    if beat.get("stage") is not None:
-                        report["nyx001_stage"] = beat["stage"]
+                    if beat.get("grown"):
+                        report["njp_grown_synapses"] = beat["grown"]
+                    if beat.get("born"):
+                        report["njp_new_cells"] = beat["born"]
+                    if beat.get("generation") is not None:
+                        report["njp_generation"] = beat["generation"]
+                    if beat.get("evolved"):
+                        report["njp_evolved"] = beat["evolved"].get("reason", "")
+                    if beat.get("blocked"):
+                        report["njp_blocked"] = beat["blocked"]
         except Exception:  # noqa: BLE001 — the heartbeat never breaks upkeep
             pass
         # 1) dream replay — Level 12: dream session (replay + Dream State consolidation)
@@ -12034,8 +11840,7 @@ class NyxaraCore:
             self._save_prediction_prior(target)
             self._save_knowledge_graph(target)
             self._save_learned_faculties(target)
-            self._save_nyx5(target)
-            self._save_nyx(target)
+            self._save_njp(target)
             self._save_manifold(target)
             self._survival_backup(target)
             self._write_genesis_seed(target)
@@ -12106,8 +11911,7 @@ class NyxaraCore:
             self._load_prediction_prior(target)
             self._load_knowledge_graph(target)
             self._load_learned_faculties(target)
-            self._load_nyx5(target)
-            self._load_nyx(target)
+            self._load_njp(target)
             self._load_manifold(target)
             if not os.path.exists(target):
                 return 0
@@ -12149,67 +11953,34 @@ class NyxaraCore:
         except Exception:  # noqa: BLE001 — best-effort
             pass
 
-    def _nyx5_path(self, memory_target: str) -> str:
-        """The NYX-5 brain sidecar (learned synapse weights + HD memory keys) lives next to memory."""
+    def _njp_path(self, memory_target: str) -> str:
+        """The NJP sidecar (the whole grown fabric, ledger and learned preferences) lives next to
+        memory. This file is the reason tomorrow's brain is today's brain rather than a fresh one."""
         import os
-        return os.path.join(os.path.dirname(memory_target), "nyx5.json")
+        return os.path.join(os.path.dirname(memory_target), "njp.json")
 
-    def _save_nyx5(self, memory_target: str) -> None:
-        brain = getattr(self, "nyx5", None)
+    def _save_njp(self, memory_target: str) -> None:
+        brain = getattr(self, "njp", None)
         if brain is None:
             return
         try:
             import json
             import os
-            path = self._nyx5_path(memory_target)
+            path = self._njp_path(memory_target)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(brain.to_dict(), fh)
         except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
             pass
 
-    def _load_nyx5(self, memory_target: str) -> None:
-        brain = getattr(self, "nyx5", None)
+    def _load_njp(self, memory_target: str) -> None:
+        brain = getattr(self, "njp", None)
         if brain is None:
             return
         try:
             import json
             import os
-            path = self._nyx5_path(memory_target)
-            if not os.path.exists(path):
-                return
-            with open(path, "r", encoding="utf-8") as fh:
-                brain.load_dict(json.load(fh))
-        except Exception:  # noqa: BLE001 — a corrupt/absent sidecar must never block boot
-            pass
-
-    def _nyx_path(self, memory_target: str) -> str:
-        """The NYX V.01 sidecar (concept graph + content-addressed traces) lives next to memory."""
-        import os
-        return os.path.join(os.path.dirname(memory_target), "nyx.json")
-
-    def _save_nyx(self, memory_target: str) -> None:
-        brain = getattr(self, "nyx", None)
-        if brain is None:
-            return
-        try:
-            import json
-            import os
-            path = self._nyx_path(memory_target)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(brain.to_dict(), fh)
-        except Exception:  # noqa: BLE001 — persistence is best-effort, never fatal
-            pass
-
-    def _load_nyx(self, memory_target: str) -> None:
-        brain = getattr(self, "nyx", None)
-        if brain is None:
-            return
-        try:
-            import json
-            import os
-            path = self._nyx_path(memory_target)
+            path = self._njp_path(memory_target)
             if not os.path.exists(path):
                 return
             with open(path, "r", encoding="utf-8") as fh:
