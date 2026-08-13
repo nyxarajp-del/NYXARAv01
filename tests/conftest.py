@@ -94,6 +94,21 @@ os.environ.setdefault("NYXARA_NYX001__STACK_EVERY_N_TURNS", "8")
 # that forge for real (tests/nyx/test_omni.py) build their own compiler with hot_swap=True and
 # point it at a module in tmp_path, never at the live package.
 os.environ.setdefault("NYXARA_NYX__OMNI_HOT_SWAP", "false")
+# Level 4, the six-role internal council (mind/role_council.py), is a SECOND full deliberation
+# layered on top of the one the turn already did — it convenes six personas and re-competes their
+# synthesis against the base hypothesis on every 'respond' turn. Measured on this tree: ~+4.8s
+# per turn, ~2.5x the whole suite's runtime, and CI was already being cancelled at 2h40m.
+#
+# It is ON for live DEV/PROD (that is the point of Level 4) and sealed here for the same
+# hermetic/compute rationale as the metacontrol ceiling and the nyx001 stack sampling above —
+# keep the mechanism, not the price. Level 3 (recursive_improver) is deliberately NOT sealed:
+# measured at ~0s, it costs the suite nothing.
+#
+# Note this switch only started working in this change: `_build_role_council` hardcoded its
+# settings and never read `settings.role_council.enabled`, so the flag was connected to nothing.
+# tests/kernel/test_build_order_wiring.py opts back in explicitly to pin both the construction
+# order and the flag itself.
+os.environ.setdefault("NYXARA_ROLE_COUNCIL__ENABLED", "false")
 
 from nyxara.kernel.config import reload_settings  # noqa: E402 — must follow the env setup above
 

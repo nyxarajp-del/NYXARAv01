@@ -1032,7 +1032,7 @@ class GenesisNumpyModel(BaseLanguageModel):
                 ("_meta",)) and not k.startswith("_"))
         # restore the requires_grad / non-Tensor metadata exactly
         for k, v in meta.get("aux_params", {}).items():
-            self.params[k] = v if not isinstance(v, list) or not k.endswith("_steps") else v
+            self.params[k] = v
         # _meta tensors are scalars without grad
         for k in list(self.params):
             if k.endswith("_meta") and isinstance(self.params[k], Tensor):

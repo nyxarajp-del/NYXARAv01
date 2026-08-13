@@ -209,6 +209,8 @@ class GlobalWorkspace:
         self.weights = weights or SalienceWeights()
         self._bus = bus
         self._broadcast_topic = broadcast_topic
+        # Strong refs to fallback publish tasks (see _publish); the loop only refs them weakly.
+        self._pending_publishes: "set" = set()
 
         self._candidates: Dict[str, Content] = {}
         self._goals: Dict[str, float] = {}                 # tag -> weight (top-down)
@@ -372,7 +374,12 @@ class GlobalWorkspace:
                 import asyncio
 
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._bus.publish(ev))
+                # Keep a strong reference: the loop holds only a weak one, so an unreferenced
+                # task can be collected before it runs — losing the very broadcast this
+                # fallback exists to guarantee. Dropped again once it completes.
+                task = loop.create_task(self._bus.publish(ev))
+                self._pending_publishes.add(task)
+                task.add_done_callback(self._pending_publishes.discard)
             except RuntimeError:
                 pass
 

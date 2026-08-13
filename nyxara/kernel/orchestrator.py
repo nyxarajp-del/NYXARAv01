@@ -583,13 +583,9 @@ class NyxaraCore:
         # arbitration cycle, and surfaces the top-N winners to the reason step.
         self.workspace = self._build_workspace()
         self.thought_gen = self._build_thought_gen()
-        # Level 3 — Recursive Self Improvement: after the initial candidate is proposed,
-        # run N iterations of critique→improve→re-score and return the best answer.
-        self.recursive_improver = self._build_recursive_improver()
-        # Level 4 — Internal Role Council: six role-personas (Scientist, Engineer,
-        # Strategist, Critic, Security Officer, Philosopher) each examine significant
-        # turns independently; their synthesis competes with the base hypothesis.
-        self.role_council = self._build_role_council()
+        # Levels 3 and 4 (recursive_improver / role_council) are built AFTER the reasoner —
+        # see just below its assignment. Both borrow ``self.reasoner.llm``, which does not
+        # exist yet at this point in __init__.
         # Level 5 — World Simulator: before acting, NYXARA imagines the consequences
         # (sandbox dry-run + world-model rollout) and upgrades risk tier if needed.
         self.world_simulator = self._build_world_simulator()
@@ -893,6 +889,18 @@ class NyxaraCore:
         self.reasoner = reasoner or self._build_reasoner(
             llm, use_council, self.skills, self.soul, self.narrative,
             self_model=getattr(self, "self_model", None))
+        # Level 3 — Recursive Self Improvement: after the initial candidate is proposed,
+        # run N iterations of critique→improve→re-score and return the best answer.
+        # Level 4 — Internal Role Council: six role-personas (Scientist, Engineer,
+        # Strategist, Critic, Security Officer, Philosopher) each examine significant
+        # turns independently; their synthesis competes with the base hypothesis.
+        #
+        # Both are built HERE, not earlier: each reads ``self.reasoner.llm``, so running them
+        # before the reasoner existed raised AttributeError inside their builders' blanket
+        # ``except Exception`` and silently returned None — Levels 3 and 4 were dead on every
+        # boot, and ``strategic_intelligence`` below (which composes the council) got None too.
+        self.recursive_improver = self._build_recursive_improver()
+        self.role_council = self._build_role_council()
         # Recursive Mind-Evolution: evolves *how she thinks* (the reasoning strategy itself),
         # generation by generation, measured on the real benchmark and gated by the character
         # lock. Built after the reasoner so it can borrow the live LLM; a promoted generation is
@@ -3391,7 +3399,9 @@ class NyxaraCore:
             from nyxara.mind.recursive_improver import RecursiveImprover
             from nyxara.kernel.config import get_settings
             n = getattr(get_settings().llm, "recursive_improvement_iterations", 5)
-            llm = getattr(self.reasoner, "llm", None)
+            # getattr on SELF as well: if this is ever called before the reasoner is assigned,
+            # the faculty still builds (LLM-less) instead of vanishing into the except below.
+            llm = getattr(getattr(self, "reasoner", None), "llm", None)
             return RecursiveImprover(llm=llm, n_iterations=n)
         except Exception:  # noqa: BLE001 — recursive improvement is a capability, never required
             return None
@@ -3482,11 +3492,28 @@ class NyxaraCore:
 
     def _build_role_council(self) -> Any:
         """Level 4 — the six-role internal council (Scientist/Engineer/Strategist/
-        Critic/Security Officer/Philosopher) that examines significant turns."""
+        Critic/Security Officer/Philosopher) that examines significant turns.
+
+        Honours ``settings.role_council`` (same pattern as ``_build_swarm``). That config block
+        existed, was attached to ``NyxaraSettings`` and documented — but nothing read it: the
+        council was constructed with hardcoded 256/30.0 and ``enabled`` was never consulted, so
+        ``NYXARA_ROLE_COUNCIL__ENABLED=false`` was a switch connected to nothing. The council is
+        a SECOND full deliberation on every respond turn, so an off-switch that works is what
+        makes its cost the owner's choice.
+        """
         try:
+            from nyxara.kernel.config import get_settings
             from nyxara.mind.role_council import RoleCouncil
-            llm = getattr(self.reasoner, "llm", None)
-            return RoleCouncil(llm=llm, max_tokens=256, timeout_s=30.0)
+            settings = self.settings if getattr(self, "settings", None) is not None \
+                else get_settings()
+            cfg = getattr(settings, "role_council", None)
+            if not bool(getattr(cfg, "enabled", True)):
+                return None
+            # getattr on SELF as well — see _build_recursive_improver for why.
+            llm = getattr(getattr(self, "reasoner", None), "llm", None)
+            return RoleCouncil(llm=llm,
+                               max_tokens=int(getattr(cfg, "max_tokens_per_role", 256)),
+                               timeout_s=float(getattr(cfg, "timeout_s", 30.0)))
         except Exception:  # noqa: BLE001 — role council is a capability, never required
             return None
 
@@ -4405,9 +4432,14 @@ class NyxaraCore:
                         kind=TriggerKind.MAINTENANCE, capability=Capability.REMOTE_EXEC,
                         risk=RiskTier.HIGH, reversibility=0.4, confidence=0.7,
                         benefit={"owner_benefit": 1.0, "competence": 0.3},
-                        action=(lambda s=spec, g=goal_name: self._run_initiative_action(
-                            f"ssh {label}", label,
-                            lambda s=s, g=g: self._autonomous_remote_check(s, g)))))
+                        # ``label`` is bound as a default too: the action lambda is stored on the
+                        # Initiative and invoked long after this loop ends, so a free variable
+                        # would resolve to the LAST host for every initiative — journalling each
+                        # autonomous SSH reach under the wrong host's name (Rule 6 auditability).
+                        action=(lambda s=spec, g=goal_name, lb=label:
+                                self._run_initiative_action(
+                                    f"ssh {lb}", lb,
+                                    lambda s=s, g=g: self._autonomous_remote_check(s, g)))))
                 return out
 
             # 6) self-coding detector — automatic code execution: when NYXARA has a concrete

@@ -357,7 +357,8 @@ def _numbers(text: str) -> List[Fraction]:
     for tok in _NUM_RE.findall(text or ""):
         try:
             tok = tok.replace(" ", "")
-            out.append(Fraction(tok) if "/" in tok else Fraction(tok))
+            # Fraction() parses "a/b" and decimal strings alike, so no branch is needed.
+            out.append(Fraction(tok))
         except Exception:  # noqa: BLE001
             continue
     return out

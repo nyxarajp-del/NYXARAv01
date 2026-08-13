@@ -243,6 +243,11 @@ class EventBus:
         self._subs: List[Subscription] = []
         self._middleware: List[Middleware] = []
         self._tasks: List[asyncio.Task] = []
+        # Strong refs to in-flight retry timers. The event loop keeps only a WEAK reference to a
+        # task, so a bare ``create_task`` for a backed-off re-publish can be garbage-collected
+        # before it fires — silently dropping an event the bus promised to retry. Held here and
+        # discarded on completion.
+        self._retry_tasks: "set[asyncio.Task]" = set()
         self._running = False
         self._lock = asyncio.Lock()
         self.metrics = BusMetrics()
@@ -343,10 +348,13 @@ class EventBus:
         if drain:
             await self.drain()
         self._running = False
-        for t in self._tasks:
+        # Pending backoff timers must not outlive the bus they would re-publish into.
+        pending = list(self._retry_tasks)
+        for t in self._tasks + pending:
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, *pending, return_exceptions=True)
         self._tasks.clear()
+        self._retry_tasks.clear()
 
     async def drain(self) -> None:
         """Block until every queued event has been fully processed."""
@@ -443,7 +451,9 @@ class EventBus:
             await asyncio.sleep(delay)
             await self.publish(event)
 
-        asyncio.create_task(_later())
+        task = asyncio.create_task(_later())
+        self._retry_tasks.add(task)
+        task.add_done_callback(self._retry_tasks.discard)
 
     def _dead_letter(self, event: Event, reason: str, exc: Optional[BaseException]) -> None:
         cat = None

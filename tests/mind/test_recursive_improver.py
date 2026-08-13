@@ -124,3 +124,38 @@ def test_improve_never_lowers_score_below_initial():
     initial = _score_candidate(c)
     out = _improver().improve("Capital of France?", c)
     assert _score_candidate(out) >= initial
+
+
+# --------------------------------------------------------------------------- #
+# _clean_text must repair whitespace WITHOUT destroying line structure
+# --------------------------------------------------------------------------- #
+# The collapse regex was ``\s+``, which folded newlines into spaces — so every line-structured
+# answer (a numbered plan, a bulleted list, a code block) came back as a single line. Level 3
+# was dead at boot for an unrelated reason, which is the only thing that kept this invisible:
+# with it live, ``agency/mission.py`` parsed a three-milestone plan as one milestone, because
+# its parser anchors on ``^\d+[.)]`` per line.
+def test_clean_text_preserves_a_numbered_list():
+    src = "1. Gather the facts\n2. Draft the brief\n3. Deliver to the Master"
+    assert _clean_text(src) == src
+
+
+def test_clean_text_preserves_bulleted_lines():
+    src = "- alpha\n- beta\n- gamma"
+    assert _clean_text(src) == src
+
+
+def test_clean_text_still_collapses_horizontal_runs_inside_a_line():
+    assert _clean_text("1. Gather   the\tfacts\n2. Draft") == "1. Gather the facts\n2. Draft"
+
+
+def test_clean_text_keeps_paragraph_breaks_but_caps_runaway_blank_lines():
+    assert _clean_text("First para.\n\n\n\n\nSecond para.") == "First para.\n\nSecond para."
+
+
+def test_clean_text_drops_a_duplicated_adjacent_line():
+    assert _clean_text("1. Gather\n1. Gather\n2. Draft") == "1. Gather\n2. Draft"
+
+
+def test_clean_text_is_idempotent_on_multiline_input():
+    src = "1. Gather the facts\n2. Draft the brief"
+    assert _clean_text(_clean_text(src)) == src
