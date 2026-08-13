@@ -105,3 +105,39 @@ def test_the_truth_route_reports_every_source():
     got = client.post("/v1/njp/truth", json={"stimulus": "an apple falls down"}).json()
     assert "verdict" in got and "evidence" in got
     assert got["verdict"] in ("established", "supported", "conjecture", "refuted", "abstained")
+
+
+def test_the_brain_survives_concurrent_turns():
+    """The kernel runs hypothesis framings in parallel against this one brain object.
+
+    NJPReasoner.__call__ takes **kwargs, so `_reasoner_parallelizable` returns True and several
+    threads call think() on the same instance at once. A fabric is one organism: without
+    serialising, two turns rewire the adjacency dicts simultaneously — which corrupts them, and
+    iterating one while another mutates raises outright.
+    """
+    import threading
+
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    errors = []
+
+    def worker(n: int) -> None:
+        try:
+            for k in range(20):
+                brain.think(f"thread {n} turn {k} gravity apple moon earth")
+        except Exception as exc:  # noqa: BLE001 — the point of the test is that none escape
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors[:3]
+    assert brain.turns == 160
+    # every forward edge must have its matching reverse index, or a prune can resurrect a synapse
+    orphans = [(pre, post) for pre, targets in brain.fabric.out.items()
+               for post in targets if pre not in brain.fabric.inn.get(post, set())]
+    assert not orphans

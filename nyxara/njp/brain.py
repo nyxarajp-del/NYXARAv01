@@ -36,6 +36,7 @@ Master is sovereign.
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -148,6 +149,15 @@ class NJPBrain:
         self.tools: Any = None
         self.knowledge: Any = None
         self.replay: List[str] = []
+        # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
+        # which this one does — so three threads call think() on this same object at once. A
+        # fabric is one organism: two thoughts rewiring it simultaneously corrupt the adjacency
+        # dicts (and iterating one while another mutates it raises outright). Held for the whole
+        # turn rather than per-mutation, because a turn is the unit that must be coherent: an
+        # expand() that potentiates pairs from a settle another thread has already overwritten is
+        # not a partial result, it is a wrong one. Re-entrant so resolve() can be called from
+        # inside a turn.
+        self._lock = threading.RLock()
 
         self.fabric = self._build_fabric(c)
         self.ledger = Ledger() if self._gate("ledger", True) else None
@@ -290,33 +300,44 @@ class NJPBrain:
         """Stimulate the fabric with a turn, settle it, and bring back grounded context."""
         out = NJPPercept(stimulus=str(text or ""))
         try:
-            if not out.stimulus.strip():
+          with self._lock:
+                if not out.stimulus.strip():
+                    return out
+                out.concepts = self.concepts(out.stimulus)
+                out.cells = self.encode(out.stimulus)
+                if not out.cells:
+                    return out
+
+                # Ask what usually follows this BEFORE settling — the pre-cognitive read.
+                out.anticipated = self.fabric.anticipate(out.cells)
+
+                self.fabric.stimulate(out.cells)
+                out.settled = self.fabric.settle()
+
+                if self.memory is not None:
+                    try:
+                        out.recall = self.memory.recall(out.stimulus,
+                                                        k=self._cfg("recall_k", 5))
+                    except Exception:  # noqa: BLE001
+                        out.recall = None
                 return out
-            out.concepts = self.concepts(out.stimulus)
-            out.cells = self.encode(out.stimulus)
-            if not out.cells:
-                return out
-
-            # Ask what usually follows this BEFORE settling — the pre-cognitive read.
-            out.anticipated = self.fabric.anticipate(out.cells)
-
-            self.fabric.stimulate(out.cells)
-            out.settled = self.fabric.settle()
-
-            if self.memory is not None:
-                try:
-                    out.recall = self.memory.recall(out.stimulus,
-                                                    k=self._cfg("recall_k", 5))
-                except Exception:  # noqa: BLE001
-                    out.recall = None
-            return out
         except Exception:  # noqa: BLE001 — a perceive failure never breaks a turn
             return out
 
     # ---- the turn --------------------------------------------------------- #
     def think(self, stimulus: str, *, remember: bool = True,
               outcome: float = 1.0) -> NJPThought:
-        """One whole turn: read → anticipate → perceive → ground → judge → expand."""
+        """One whole turn: read → anticipate → perceive → ground → judge → expand.
+
+        Serialised: see :attr:`_lock`. The kernel may call this from several framing threads at
+        once, and a turn has to be atomic against the fabric or the growth it records describes a
+        state that never existed.
+        """
+        with self._lock:
+            return self._think(stimulus, remember=remember, outcome=outcome)
+
+    def _think(self, stimulus: str, *, remember: bool = True,
+               outcome: float = 1.0) -> NJPThought:
         out = NJPThought(stimulus=str(stimulus or ""))
         t0 = time.perf_counter()
         try:
@@ -420,13 +441,14 @@ class NJPBrain:
     def resolve(self, thought: Any, *, correct: float) -> None:
         """Tell the brain how a turn actually turned out. Drives plasticity and the soul-sync."""
         try:
-            settled = getattr(getattr(thought, "percept", None), "settled", None)
-            if settled is not None:
-                # Map correctness onto the plasticity signal: right reinforces what fired, wrong
-                # weakens it. This is the only place an outcome becomes structure.
-                self.fabric.expand(outcome=(float(correct) * 2.0 - 1.0), result=settled)
-            if self.soul is not None:
-                self.soul.confirm(corrected=(float(correct) < 0.5))
+          with self._lock:
+                settled = getattr(getattr(thought, "percept", None), "settled", None)
+                if settled is not None:
+                    # Map correctness onto the plasticity signal: right reinforces what fired, wrong
+                    # weakens it. This is the only place an outcome becomes structure.
+                    self.fabric.expand(outcome=(float(correct) * 2.0 - 1.0), result=settled)
+                if self.soul is not None:
+                    self.soul.confirm(corrected=(float(correct) < 0.5))
         except Exception:  # noqa: BLE001
             pass
 
@@ -466,7 +488,8 @@ class NJPBrain:
         try:
             if self.pulse is None:
                 return {}
-            return self.pulse.beat(oversight=oversight).to_dict()
+            with self._lock:
+                return self.pulse.beat(oversight=oversight).to_dict()
         except Exception:  # noqa: BLE001 — a background beat never raises into the loop
             return {}
 
