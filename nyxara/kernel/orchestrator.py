@@ -5839,7 +5839,11 @@ class NyxaraCore:
                 except Exception:  # noqa: BLE001 — counting is best-effort
                     flywheel = None
             foundry = Foundry()
+            # Wired either way so the wiring stays inspectable, but only allowed to TRAIN
+            # when the foundry is switched on — without this, idle maintenance ran real
+            # NumPy training on a foundry the operator had explicitly disabled.
             return AutoForge(foundry=foundry, distiller=None, flywheel=flywheel,
+                             enabled=bool(getattr(get_settings().foundry, "enabled", True)),
                              min_examples=cfg.min_examples, eval_threshold=cfg.eval_threshold)
         except Exception:  # noqa: BLE001 — autoforge is a capability, never required
             return None

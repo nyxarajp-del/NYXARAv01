@@ -68,7 +68,13 @@ class AutoForge:
 
     def __init__(self, foundry: Any = None, distiller: Any = None,
                  flywheel: Any = None, min_examples: int = 10,
-                 eval_threshold: float = 0.6) -> None:
+                 eval_threshold: float = 0.6, enabled: bool = True) -> None:
+        # Whether this forge may actually TRAIN. Wiring and training are separate decisions: the
+        # kernel still builds AutoForge when the foundry is switched off, so the wiring stays
+        # inspectable, but a disabled forge must not run real training on the idle beat. Defaults
+        # to True so a caller that hands in its own foundry has already made the decision and is
+        # never second-guessed by ambient config.
+        self.enabled = bool(enabled)
         self.foundry = foundry
         self.distiller = distiller
         # her OWN lived, verified experience (growth/flywheel.py) — counted toward the trigger
@@ -80,16 +86,6 @@ class AutoForge:
         self._cycles: List[ForgeResult] = []
 
     # ---------------------------------------------------------------------- #
-    def _foundry_enabled(self) -> bool:
-        """Whether the foundry is switched on. Fail-OPEN: an unreadable config must not silently
-        disable real learning, which is the opposite failure and the more expensive one here."""
-        try:
-            from nyxara.kernel.config import get_settings
-            settings = getattr(self, "settings", None) or get_settings()
-            return bool(getattr(getattr(settings, "foundry", None), "enabled", True))
-        except Exception:  # noqa: BLE001
-            return True
-
     def run_cycle(self) -> ForgeResult:
         """Run one cycle: check the data threshold, then forge through the Foundry's gauntlet.
 
@@ -119,13 +115,10 @@ class AutoForge:
             self._cycles.append(result)
             return result
 
-        # `foundry.enabled` has to mean what it says on EVERY path into the foundry, not only the
-        # ones that construct it. AutoForge called self_improve() unconditionally, so a deployment
-        # (or a hermetic test run) that had switched the foundry off still paid for real NumPy
-        # training the moment idle maintenance ran — a flag nothing reads is worse than an absent
-        # one. Reported as a skip rather than swallowed, so "it did not forge" stays visible.
-        if not self._foundry_enabled():
-            result.reason = "the foundry is disabled (foundry.enabled=false)"
+        # Reported as a skip rather than swallowed, so "it did not forge" stays visible in the
+        # cycle record instead of looking like a cycle that found nothing to do.
+        if not self.enabled:
+            result.reason = "the forge is disabled (foundry.enabled=false)"
             result.elapsed_ms = (time.monotonic() - t0) * 1000
             self._cycles.append(result)
             return result

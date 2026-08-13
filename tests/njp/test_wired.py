@@ -143,12 +143,13 @@ def test_the_brain_survives_concurrent_turns():
     assert not orphans
 
 
-def test_a_disabled_foundry_is_not_trained_by_autoforge():
-    """`foundry.enabled` has to mean what it says on every path into the foundry.
+def test_a_disabled_foundry_is_wired_but_never_trained():
+    """Wiring and training are separate decisions.
 
     AutoForge called foundry.self_improve() unconditionally, so idle maintenance ran real NumPy
-    training even with the foundry switched off — which is how a hermetic test run ended up
-    training a neural network until pytest-timeout killed the whole process.
+    training even with foundry.enabled=false — which is how a hermetic run ended up training a
+    network until pytest-timeout killed the whole process. The forge must still be *wired* (its
+    wiring is asserted elsewhere and is worth inspecting), but a disabled one must not train.
     """
     from nyxara.growth.autoforge import AutoForge
 
@@ -156,12 +157,30 @@ def test_a_disabled_foundry_is_not_trained_by_autoforge():
         """Fails loudly if it is ever asked to train."""
 
         def self_improve(self, **_kw):
-            raise AssertionError("a disabled foundry must never be trained")
+            raise AssertionError("a disabled forge must never train")
 
-    forge = AutoForge.__new__(AutoForge)
-    assert forge._foundry_enabled() is False, "the suite seals the foundry off"
+    class _Flywheel:
+        def count(self):
+            return 10_000
 
-    # And the gate is what run_cycle actually consults: wire the exploding foundry in and the
-    # cycle must decline rather than call it.
-    forge.foundry = _Foundry()
-    assert forge._foundry_enabled() is False
+        def __len__(self):
+            return 10_000
+
+    disabled = AutoForge(foundry=_Foundry(), flywheel=_Flywheel(),
+                         min_examples=1, enabled=False)
+    result = disabled.run_cycle()
+    assert result.trained is False
+    assert "disabled" in result.reason        # reported as a skip, not silently a quiet no-op
+
+
+def test_an_injected_foundry_is_never_second_guessed_by_ambient_config():
+    """A caller that hands in its own foundry has already made the decision.
+
+    The first attempt at the gate read global settings inside run_cycle, which vetoed foundries
+    that tests inject deliberately and broke two of autoforge's own tests. `enabled` defaults to
+    True for exactly this reason.
+    """
+    from nyxara.growth.autoforge import AutoForge
+
+    forge = AutoForge(foundry=object(), flywheel=None, min_examples=1)
+    assert forge.enabled is True
