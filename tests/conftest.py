@@ -20,6 +20,12 @@ os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_TUNING", "false")
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__ALLOW_LLM_EDITS", "false")
 os.environ.setdefault("NYXARA_SELF_OPTIMIZATION__AUTONOMOUS_ENACT", "false")
+# NJP rewrites its own SOURCE on disk under a gauntlet (njp/evolve.py), ON by default in live
+# DEV/PROD runs under the Master's standing authorisation. A hermetic suite must never edit the
+# real tree, so seal the self-editor off for the whole suite — same rationale as the flags above.
+# The fabric still grows and still consolidates, which is what the NJP tests are about; a test
+# that wants enactment builds its own settings and points the optimizer at a tmp_path.
+os.environ.setdefault("NYXARA_NJP__EVOLVE_ENABLED", "false")
 os.environ.setdefault("NYXARA_MIND_EVOLUTION__AUTONOMOUS_ENACT", "false")
 # Learning-rule synthesis (growth/rule_synth.py) INVENTS a new weight-update rule when the fixed
 # learner stalls and, with autonomous_enact, installs it into the live learner. Searching/measuring

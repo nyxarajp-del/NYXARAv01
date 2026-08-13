@@ -128,8 +128,12 @@ class PulseEngine:
             rep.ms = (time.perf_counter() - t0) * 1000.0
             self.last = rep
             return rep
-        if not force and not self._due("pulse", self.every_s):
+        if not self._due("pulse", self.every_s) and not force:
             return rep
+        # A forced beat IS a beat, so it restarts the cadence. Without stamping the mark here the
+        # next unforced call sees no previous beat and runs immediately, letting one extra pass
+        # slip through right after every forced one.
+        self._marks["pulse"] = time.monotonic()
         try:
             self.beats += 1
             rep.beat = self.beats

@@ -1,0 +1,78 @@
+"""NJP is wired into the running system — and the three old brains are genuinely gone."""
+
+from __future__ import annotations
+
+import importlib
+
+import pytest
+
+from nyxara.kernel.config import get_settings
+from nyxara.kernel.orchestrator import NyxaraCore
+
+
+@pytest.fixture(scope="module")
+def core() -> NyxaraCore:
+    return NyxaraCore()
+
+
+@pytest.mark.parametrize("module", ["nyxara.nyx", "nyxara.nyx5", "nyxara.nyx001"])
+def test_the_old_brains_are_gone(module: str):
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module)
+
+
+def test_the_old_brain_handles_are_gone(core: NyxaraCore):
+    for attr in ("nyx", "nyx5", "nyx001"):
+        assert not hasattr(core, attr), f"core.{attr} should no longer exist"
+
+
+def test_njp_is_built_and_is_the_reason_seat(core: NyxaraCore):
+    assert core.njp is not None
+    assert type(core.reasoner).__name__ == "NJPReasoner"
+
+
+def test_the_settings_carry_njp_and_not_the_old_sections():
+    settings = get_settings()
+    assert settings.njp.enabled is True
+    for gone in ("nyx", "nyx5", "nyx001"):
+        assert not hasattr(settings, gone)
+
+
+def test_self_editing_is_sealed_off_under_test():
+    """A hermetic suite must never edit the live source tree."""
+    assert get_settings().njp.evolve_enabled is False
+
+
+def test_a_turn_through_the_kernel_grows_the_fabric(core: NyxaraCore):
+    """The claim, end to end through the real orchestrator."""
+    before = core.njp.fabric.n_synapses
+    core.njp_think("gravity pulls the apple toward the ground")
+    assert core.njp.fabric.n_synapses > before
+
+
+def test_the_kernel_exposes_the_growth_surface(core: NyxaraCore):
+    assert "fabric" in core.njp_stats()
+    assert core.njp_expand() is not None
+    assert isinstance(core.njp_ledger(), dict)
+    assert isinstance(core.njp_tick(), dict)
+
+
+def test_the_sidecar_round_trips_through_the_kernel(core: NyxaraCore, tmp_path):
+    """njp.json is why tomorrow's brain is today's brain."""
+    target = str(tmp_path / "memory.json")
+    core.njp_think("the moon orbits the earth")
+    grown = core.njp.fabric.n_synapses
+    core._save_njp(target)
+
+    fresh = NyxaraCore()
+    assert fresh.njp.fabric.n_synapses != grown or grown == 0
+    fresh._load_njp(target)
+    assert fresh.njp.fabric.n_synapses == grown
+
+
+def test_the_server_exposes_njp_and_no_old_routes():
+    from nyxara.server.app import create_app
+    paths = {r.path for r in create_app().routes if hasattr(r, "path")}
+    assert "/v1/njp/status" in paths
+    assert "/v1/njp/fabric" in paths
+    assert not any(p.startswith("/v1/nyx/") or p.startswith("/v1/nyx001/") for p in paths)

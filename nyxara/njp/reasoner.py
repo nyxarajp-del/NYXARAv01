@@ -39,7 +39,7 @@ kernel's unchanged, fail-closed gate exactly like any other.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 __all__ = ["NJPReasoner"]
 
@@ -52,14 +52,17 @@ class NJPReasoner:
     """The outermost reason-seat. Supplies content; never touches the safety envelope."""
 
     def __init__(self, base: Callable[..., Any], brain: Any, *,
-                 may_propose_tools: bool = True, min_confidence: float = 0.25) -> None:
+                 may_propose_tools: bool = True, min_confidence: float = 0.25,
+                 novelty_damping: float = 0.75) -> None:
         self.base = base
         self.brain = brain
         self.may_propose_tools = bool(may_propose_tools)
         self.min_confidence = float(min_confidence)
+        self.novelty_damping = float(novelty_damping)
         self.turns = 0
         self.took_over = 0
         self.annotated = 0
+        self.tempered = 0
         self.proposed_tools = 0
 
     def __call__(self, stimulus: str, focus: Any = None, *args: Any, **kwargs: Any) -> Any:
@@ -73,18 +76,26 @@ class NJPReasoner:
                 return self._annotate_only(candidate)
 
             thought = self.brain.think(stimulus, remember=True)
-            if thought is None or not str(getattr(thought, "answer", "") or "").strip():
+            if thought is None:
                 return candidate
 
-            # An unestablished claim annotates but never overwrites.
+            # Having nothing of her own to say is NOT a reason to leave the base's number alone —
+            # it is the strongest reason to discount it. An early return here would skip tempering
+            # in exactly the case it exists for: a cold or surprised brain, where the base's
+            # confident-sounding reply is least likely to be checkable.
+            if not str(getattr(thought, "answer", "") or "").strip():
+                self.annotated += 1
+                return self._temper(candidate, thought)
+
+            # An unestablished claim annotates but never overwrites — and tempers the confidence.
             if not thought.assertable:
                 self.annotated += 1
-                return self._set(candidate, rationale=self._rationale(thought, took_over=False))
+                return self._temper(candidate, thought)
 
             base_conf = float(getattr(candidate, "confidence", 0.0) or 0.0)
             if thought.confidence < max(self.min_confidence, base_conf):
                 self.annotated += 1
-                return self._set(candidate, rationale=self._rationale(thought, took_over=False))
+                return self._temper(candidate, thought)
 
             self.took_over += 1
             out = self._set(candidate, text=thought.answer,
@@ -113,6 +124,38 @@ class NJPReasoner:
         except Exception:  # noqa: BLE001
             pass
         return candidate
+
+    def _temper(self, candidate: Any, thought: Any) -> Any:
+        """Discount a confident-looking reply by how unfamiliar the turn actually was to her.
+
+        This is the seat's most important behaviour and it only ever moves confidence **down**.
+        The base reasoner reports how sure *it* is; it has no way to know whether NJP recognised
+        the situation at all. On a turn the fabric could not anticipate — a cold brain, or simply
+        something it has never met — a canned, fluent-sounding reply arrives carrying the base's
+        full confidence, and downstream honesty gates (``AgentLoop._gate_answer``) let it through
+        because the number looks fine. That is exactly the confident-but-wrong answer those gates
+        exist to catch.
+
+        So: ``reported = base × (1 − novelty × damping)``. Novelty is 1.0 when the manifold had no
+        trusted prediction for the turn, and falls as she comes to recognise it, so the discount
+        disappears on familiar ground rather than permanently muting her. Raising is impossible
+        here by construction — the factor is never above 1.
+        """
+        try:
+            percept = getattr(thought, "percept", None)
+            if percept is None:
+                return self._set(candidate, rationale=self._rationale(thought, took_over=False))
+            base_conf = float(getattr(candidate, "confidence", 0.0) or 0.0)
+            factor = max(0.0, 1.0 - float(percept.novelty) * self.novelty_damping)
+            tempered = base_conf * factor
+            if tempered < base_conf:
+                self.tempered += 1
+                return self._set(candidate, confidence=tempered,
+                                 rationale=self._rationale(thought, took_over=False,
+                                                           novelty=percept.novelty))
+            return self._set(candidate, rationale=self._rationale(thought, took_over=False))
+        except Exception:  # noqa: BLE001 — a failed temper leaves the base's number alone
+            return candidate
 
     def _annotate_only(self, candidate: Any) -> Any:
         """For action candidates: say what NJP thinks, change nothing else."""
@@ -151,13 +194,18 @@ class NJPReasoner:
             pass
 
     @staticmethod
-    def _rationale(thought: Any, *, took_over: bool) -> str:
+    def _rationale(thought: Any, *, took_over: bool,
+                   novelty: Optional[float] = None) -> str:
         """Honest, short, and names the verdict rather than implying a stronger one."""
         try:
             judgement = getattr(thought, "judgement", None)
             verdict = getattr(judgement, "verdict", "unjudged") if judgement else "unjudged"
             verb = "answered" if took_over else "concurred"
             note = (f"[NJP V.01] {verb} ({verdict}, confidence {thought.confidence:.2f})")
+            if novelty is not None:
+                # Say that the number was moved, and why — a silently discounted confidence is
+                # the same opacity this seat exists to remove.
+                note += f"; confidence discounted, novelty {novelty:.2f}"
             reading = getattr(thought, "reading", None)
             if reading is not None and getattr(reading, "has_latent", False):
                 wants = "; ".join(w.want for w in reading.latent[:2])
@@ -169,5 +217,6 @@ class NJPReasoner:
 
     def stats(self) -> dict:
         return {"turns": self.turns, "took_over": self.took_over,
-                "annotated": self.annotated, "proposed_tools": self.proposed_tools,
+                "annotated": self.annotated, "tempered": self.tempered,
+                "proposed_tools": self.proposed_tools,
                 "takeover_rate": round(self.took_over / self.turns, 4) if self.turns else None}

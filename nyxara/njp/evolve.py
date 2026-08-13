@@ -80,15 +80,29 @@ def _permitted(oversight: Any) -> bool:
 
 
 def is_protected(target: str) -> bool:
-    """Is this file or name part of the constitutional core? Fail-closed on any doubt."""
+    """Is this file or name part of the constitutional core? Fail-closed on any doubt.
+
+    Accepts **either** a filesystem path (``.../nyxara/kernel/rules.py``) or a dotted module name
+    (``nyxara.kernel.rules``), because the two reach here from different callers: the optimizer
+    works in paths, the profiler works in module names. Checking only path form let
+    ``nyxara.kernel.rules`` through as a rewrite candidate — the constitutional core, nominated by
+    the profiler purely for being slow. Both forms are normalised to the same shape before the
+    comparison so neither spelling can slip past.
+    """
     try:
         low = str(target or "").replace("\\", "/").lower()
         if not low:
             return True
+        # A dotted module name becomes a path so one set of rules covers both spellings.
+        if "/" not in low and "." in low:
+            low = low.replace(".", "/") + ".py"
         if any(low.endswith(rel) or rel in low for rel in _PROTECTED_RELPATHS):
             return True
         stem = low.rsplit("/", 1)[-1].replace(".py", "")
-        return any(name in stem for name in _PROTECTED_NAMES)
+        if any(name in stem for name in _PROTECTED_NAMES):
+            return True
+        # The whole guard package is off limits, not only the three files named above.
+        return "/guard/" in low or low.endswith("/guard.py")
     except Exception:  # noqa: BLE001 — cannot tell ⇒ protected
         return True
 
