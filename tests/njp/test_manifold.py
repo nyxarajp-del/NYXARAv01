@@ -88,3 +88,33 @@ def test_the_transition_map_stays_bounded():
         m.learn_transition(m.encode([i, i + 1]), m.encode([i + 2, i + 3]))
     assert m.stats()["pairs"] <= 16
     assert m.samples == 100
+
+
+def test_an_unfamiliar_query_is_refused_even_when_the_answer_looks_clean():
+    """The map returns *something* for any input; separation alone cannot catch that.
+
+    Learn one transition thoroughly, then ask about something entirely unrelated. The winners
+    still separate cleanly from a field the map never had reason to distinguish — so without the
+    familiarity guard this comes back trusted, which is a fluent answer to a question it has no
+    experience of.
+    """
+    m = Manifold(dim=4096, seed=7, min_samples=2)
+    known = m.encode([1, 2, 3])
+    for _ in range(12):
+        m.learn_transition(known, m.encode([4, 5, 6]))
+
+    stranger = m.encode([9001, 9002, 9003])
+    got = m.precognition(stranger, k=3, candidates=[1, 2, 3, 4, 5, 6])
+    assert got.trusted is False
+    assert got.familiarity < m.min_familiarity
+    assert "nothing like this" in got.reason
+
+    # ...and the query it HAS seen still goes through.
+    familiar = m.precognition(known, k=3, candidates=[1, 2, 3, 4, 5, 6])
+    assert familiar.trusted is True
+    assert familiar.familiarity > 0.9
+
+
+def test_familiarity_is_zero_before_anything_is_learned():
+    m = Manifold(dim=1024, seed=7)
+    assert m.familiarity(m.encode([1, 2, 3])) == 0.0

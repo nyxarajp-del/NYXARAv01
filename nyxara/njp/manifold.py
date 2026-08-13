@@ -22,10 +22,14 @@ dynamics.
 
 Honest framing, kept the way this repo keeps it:
 
-* **Prediction, not clairvoyance.** ``W`` can only anticipate regularities it has actually
-  observed. On a transition unlike anything it has seen, :meth:`predict` returns a low-margin
-  result and :meth:`precognition` reports ``trusted=False`` — an admission, not a guess dressed up.
-  Accuracy is recorded in :mod:`nyxara.njp.ledger` and is whatever it measures, never asserted.
+* **Prediction, not clairvoyance.** The map can only anticipate regularities it has actually
+  observed, and it is guarded on **two** independent counts, because either alone lets a fluent
+  wrong answer through. *Margin* asks whether the winners separate from the field. *Familiarity*
+  asks whether this query resembles anything ever learned — a heteroassociative map returns
+  something for any input, so a clean-looking answer to a question it has no experience of is its
+  natural failure mode, and separation cannot catch that. Either floor unmet ⇒ ``trusted=False``
+  **with the reason**: an admission, not a guess dressed up. Accuracy is recorded in
+  :mod:`nyxara.njp.ledger` and is whatever it measures, never asserted.
 * **Capacity is measured, not quoted.** :meth:`capacity_probe` finds where cleanup actually breaks
   *on this machine*. Superposing more than that degrades retrieval, and the probe says where.
 * **No backpropagation.** The map is a Hebbian outer product with decay — one pass, online,
@@ -82,13 +86,15 @@ class Prediction:
 
     cells: List[int] = field(default_factory=list)
     margin: float = 0.0                      # separation of the winners from the field
-    trusted: bool = False                    # margin cleared the floor
+    familiarity: float = 0.0                 # how like anything it has actually seen the query is
+    trusted: bool = False                    # margin AND familiarity both cleared their floors
     samples: int = 0                         # how many transitions W has actually learned
     reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"cells": self.cells[:32], "margin": round(self.margin, 6),
-                "trusted": self.trusted, "samples": self.samples, "reason": self.reason}
+                "familiarity": round(self.familiarity, 6), "trusted": self.trusted,
+                "samples": self.samples, "reason": self.reason}
 
 
 class Manifold:
@@ -97,7 +103,7 @@ class Manifold:
     def __init__(self, *, dim: int = 10000, seed: int = 42,
                  min_margin: float = 0.08, learn_rate: float = 1.0,
                  decay: float = 0.999, min_samples: int = 8,
-                 max_pairs: int = 512) -> None:
+                 max_pairs: int = 512, min_familiarity: float = 0.15) -> None:
         self.dim = max(16, int(dim))
         self.seed = int(seed)
         self.min_margin = float(min_margin)
@@ -105,6 +111,7 @@ class Manifold:
         self.decay = float(decay)
         self.min_samples = max(1, int(min_samples))
         self.max_pairs = max(8, int(max_pairs))
+        self.min_familiarity = float(min_familiarity)
 
         self._atoms: Dict[int, Any] = {}      # cell id -> its fixed hypervector (memoised)
         # The transition map is held in LOW-RANK form: the pairs (b, a) whose outer products it is
@@ -244,6 +251,22 @@ class Manifold:
         except Exception:  # noqa: BLE001 — learning never breaks a beat
             return
 
+    def familiarity(self, before: Snapshot) -> float:
+        """How like anything the map has actually learned this query is — 0.0 … 1.0.
+
+        The best cosine against any stored ``before`` vector. This is the difference between
+        "I have seen this situation" and "I can produce an output for this situation", and only
+        the first of those licenses a prediction.
+        """
+        try:
+            if _np is None or not self._before or before is None or not before.cells:
+                return 0.0
+            x = _np.asarray(before.vector, dtype=_np.float32)
+            B = _np.asarray(self._before, dtype=_np.float32)
+            return float(_np.max(B @ x)) / float(self.dim)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
     def predict(self, before: Snapshot) -> Any:
         """The snapshot the map expects to follow ``before``. ``None`` when it cannot say.
 
@@ -283,6 +306,19 @@ class Manifold:
             if self.samples < self.min_samples:
                 out.reason = f"only {self.samples} transitions learned, need {self.min_samples}"
                 return out
+            # Has anything like this ever been seen? A heteroassociative map returns *something*
+            # for any input, so a confident-looking answer to a question it has no experience of
+            # is its natural failure mode. Separation of the winners cannot catch that — the
+            # winners separate cleanly from a field the map has simply never had reason to
+            # distinguish. Familiarity of the QUERY is the honest guard, and it is what turns a
+            # genuinely novel input into "I do not know this" rather than a fluent guess.
+            out.familiarity = self.familiarity(before)
+            if out.familiarity < self.min_familiarity:
+                out.reason = (f"nothing like this has been seen "
+                              f"(familiarity {out.familiarity:.3f} "
+                              f"below {self.min_familiarity:.3f})")
+                return out
+
             raw = self.predict(before)
             if raw is None:
                 out.reason = "no transition map yet"
@@ -299,15 +335,22 @@ class Manifold:
             sims = (matrix @ raw) / (norm * math.sqrt(self.dim))
             order = _np.argsort(-sims)
             scored: List[Tuple[float, int]] = [(float(sims[i]), pool[i]) for i in order]
-            top = scored[:max(1, int(k))]
+            k = max(1, min(int(k), len(scored)))
+            top = scored[:k]
             out.cells = [cid for _s, cid in top]
-            # The margin is the gap between the weakest winner and the strongest loser. A cluster
-            # that barely separates from the field is exactly the case where a confident answer
-            # would be wrong, so it is reported rather than rounded away.
-            if len(scored) > len(top):
-                out.margin = float(top[-1][0] - scored[len(top)][0])
+            # The margin is how far the winners stand off from the field: mean(winners) −
+            # mean(everyone else). Deliberately NOT the gap between the weakest winner and the
+            # strongest loser — that measures one adjacent pair, so it collapses toward zero
+            # whenever k approaches the pool size, and reported an untrustworthy 0.0014 on a
+            # prediction that was in fact clean. A cluster that genuinely separates scores high
+            # however many cells the fabric happens to hold.
+            rest = scored[k:]
+            if rest:
+                top_mean = sum(s for s, _c in top) / float(len(top))
+                rest_mean = sum(s for s, _c in rest) / float(len(rest))
+                out.margin = float(top_mean - rest_mean)
             else:
-                out.margin = float(top[0][0])
+                out.margin = float(sum(s for s, _c in top) / float(len(top)))
             out.trusted = out.margin >= self.min_margin
             if not out.trusted:
                 out.reason = f"margin {out.margin:.4f} below floor {self.min_margin:.4f}"
@@ -363,6 +406,7 @@ class Manifold:
     def stats(self) -> Dict[str, Any]:
         total = self.hits + self.misses
         return {"dim": self.dim, "samples": self.samples, "atoms_cached": len(self._atoms),
+                "min_familiarity": self.min_familiarity,
                 "pairs": len(self._before), "max_pairs": self.max_pairs, "hits": self.hits, "misses": self.misses,
                 "accuracy": round(self.hits / total, 4) if total else None,
                 "numpy": _np is not None}

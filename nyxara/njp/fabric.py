@@ -359,8 +359,13 @@ class Fabric:
         to settle properly instead. Foresight that has not been earned is reported as absent.
         """
         try:
-            snap = self.manifold.encode(cell_ids, tick=self.tick)
-            return self.manifold.precognition(snap, candidates=list(self.cells.keys()))
+            ids = list(cell_ids)
+            snap = self.manifold.encode(ids, tick=self.tick)
+            # Ask for about as many cells as a turn like this actually lights up, rather than a
+            # fixed count: predicting sixteen when four fire pads the answer with near-misses and
+            # drags the separation down. The seed width is the fabric's own best estimate of that.
+            k = max(4, min(len(ids) * 2, 64))
+            return self.manifold.precognition(snap, k=k, candidates=list(self.cells.keys()))
         except Exception:  # noqa: BLE001
             return Prediction(reason="anticipation failed")
 
