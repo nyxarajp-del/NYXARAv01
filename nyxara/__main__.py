@@ -499,6 +499,7 @@ _NYX001_HELP = """/nyx001                    all three brains at a glance — an
 /nyx001 layers             Layers 0-17: which ran, what each measured
 /nyx001 stage              the Stage 0-10 childhood — measured, never scheduled
 /nyx001 dark               one pulse of the dark core: what she wants to know next
+/nyx001 lingua [word]      Track B: what she has actually grounded — or one word's meaning
 /nyx001 think <text>       one fused cycle — three brains vote, one thought comes out
 /nyx001 score              the intelligence index (G,M,R,P,T,L,U,A,C), with sample counts
 /nyx001 prove              the six strict tests: zero-shot, few-shot, transfer,
@@ -575,6 +576,31 @@ def _nyx001_command(core: NyxaraCore, arg: str) -> None:
         print(f"  because: {c.rationale}")
         print(f"  made {p.hypotheses_made} hypotheses, {p.attacks_made} attacks, "
               f"{p.destroyed} destroyed")
+        return
+
+    if sub == "lingua":
+        stack = getattr(brain, "stack", None)
+        cortex = getattr(stack, "lingua", None) if stack is not None else None
+        if cortex is None:
+            print("Track B is disabled (NYXARA_NYX001__LINGUA_ENABLED=false).")
+            return
+        if rest:
+            meaning = cortex.meaning(rest)
+            print(f"'{rest}' → {meaning}" if meaning
+                  else f"'{rest}' has not earned a grounding — no meaning to report")
+            return
+        st = cortex.stats()
+        tok, gnd = st.get("tokenizer", {}), st.get("grounding", {})
+        print(f"reads {st.get('reads', 0)} · vocabulary {tok.get('vocab_size', 0)} "
+              f"({tok.get('learned', 0)} learned, {tok.get('evicted', 0)} evicted)")
+        cov = gnd.get("coverage")
+        print(f"grounded {gnd.get('grounded', 0)} of {gnd.get('tokens_seen', 0)} words seen"
+              + (f" · coverage {cov:.2f}" if cov is not None else " · coverage not yet knowable"))
+        words = cortex.vocabulary()[:12]
+        print(f"  words she can actually mean: {', '.join(words) if words else '(none yet)'}")
+        seq = st.get("sequence")
+        if seq:
+            print(f"  {seq.get('mechanism')} · state {seq.get('state_norm')}")
         return
 
     if sub == "think":

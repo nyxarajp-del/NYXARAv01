@@ -28,9 +28,11 @@ modality. Track B does not read from it, and it does not read from Track B.
 
 from __future__ import annotations
 
+from nyxara.nyx001.lingua.cortex import LanguageCortex, Reading
 from nyxara.nyx001.lingua.dynamic_embedding import DynamicEmbedding
 from nyxara.nyx001.lingua.grounding import Binding, Grounding
 from nyxara.nyx001.lingua.sequence import SequenceModel
 from nyxara.nyx001.lingua.tokenizer import Tokenizer
 
-__all__ = ["Tokenizer", "DynamicEmbedding", "SequenceModel", "Grounding", "Binding"]
+__all__ = ["Tokenizer", "DynamicEmbedding", "SequenceModel", "Grounding", "Binding",
+           "LanguageCortex", "Reading"]

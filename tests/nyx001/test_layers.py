@@ -525,3 +525,86 @@ def test_stack_round_trips_through_a_sidecar():
 
 def test_stack_reports_none_for_learning_before_it_can_say():
     assert CognitiveStack(_Cfg()).is_learning() is None
+
+
+# --------------------------------------------------------------------------- #
+# Regressions
+# --------------------------------------------------------------------------- #
+def test_concept_names_are_never_reused_after_one_is_dropped(sub):
+    """Names came from ``len(self._concepts)``, which is not monotonic.
+
+    A merge or a sweep removes a concept from the middle of the range, the length falls back onto
+    a name still in use, and the next create SILENTLY REPLACED a live concept — while every
+    succession count and hypothesis still naming it now referred to something else.
+    """
+    mem = SemanticMemory(sub, radius=0.99, merge_at=0.95)
+    from nyxara.nyx001.layers.types import Experience
+
+    def unit(i):
+        v = np.zeros(sub.width)
+        v[i] = 1.0
+        return v
+
+    for i in range(4):
+        mem.absorb(Experience(key=f"e{i}", context=unit(i)))
+    assert set(mem._concepts) == {"c0", "c1", "c2", "c3"}
+    mem._concepts.pop("c1")                      # what _sweep/_maybe_merge do to a middle concept
+    mem._sums.pop("c1")
+    survivors = {n: list(c.members) for n, c in mem._concepts.items()}
+
+    fresh = mem.absorb(Experience(key="e9", context=unit(9)))
+    assert fresh is not None and fresh.name not in survivors, \
+        f"reused the live name {fresh.name!r} and destroyed the concept holding it"
+    for name, members in survivors.items():
+        assert mem._concepts[name].members == members, f"concept {name} was clobbered"
+
+
+def test_succession_counts_stay_bounded(sub):
+    """A store that only grows is a leak in a process meant to run for months."""
+    mem = SemanticMemory(sub, radius=0.99, merge_at=1.1, max_succession=64)
+    from nyxara.nyx001.layers.types import Experience
+    rng = np.random.default_rng(5)
+    for i in range(400):
+        mem.absorb(Experience(key=f"e{i}", context=rng.normal(0, 1, sub.width)))
+    assert len(mem._succession) <= 64, f"succession grew to {len(mem._succession)}"
+
+
+def test_meta_learner_never_reuses_a_strategy_name(sub):
+    """``len(self._strategies)`` is not monotonic once _retire_worst removes a middle entry."""
+    ml = MetaLearner(sub, max_strategies=4, min_trials=1)
+    for _ in range(3):
+        ml.mutate()
+    for n in ("s1", "s2", "s3"):
+        ml._strategies[n].trials = 1
+        ml._strategies[n].total_reward = float(n[1])
+    ml._strategies["s1"].total_reward = -99.0            # make s1 the one that gets retired
+    kept = {n: s.total_reward for n, s in ml._strategies.items() if n != "s1"}
+
+    ml.mutate()
+    for name, reward in kept.items():
+        assert name in ml._strategies, f"{name} vanished"
+        assert ml._strategies[name].total_reward == reward, \
+            f"{name}'s measured record was overwritten by a newly minted strategy"
+
+
+def test_world_model_lr_is_not_a_dead_knob(sub):
+    """Layer 17 lists ``world_model.lr`` first among its mutable targets.
+
+    It was a plain attribute the optimizer read exactly once at build time, so a rollout could
+    change it, log a success, and alter nothing about how the model actually learns.
+    """
+    wm = WorldModel(sub, lr=3e-3)
+    assert wm.optimizer.lr == pytest.approx(3e-3)
+    wm.lr = 0.02
+    assert wm.optimizer.lr == pytest.approx(0.02), "the learning rate never reached the optimizer"
+    assert wm.lr == pytest.approx(0.02)
+
+
+def test_every_layer_17_target_actually_exists():
+    """A mutable target naming an absent attribute is a knob that silently never fires."""
+    from nyxara.nyx001.layers.l17_self_improve import _MUTABLE
+    layers = CognitiveStack(_Cfg()).layers()
+    for target in _MUTABLE:
+        name, attr = target.split(".", 1)
+        assert name in layers, f"{target} names a layer that is not in layers()"
+        assert hasattr(layers[name], attr), f"{target} names an attribute that does not exist"

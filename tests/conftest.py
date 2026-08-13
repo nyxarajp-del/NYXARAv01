@@ -85,6 +85,20 @@ os.environ.setdefault("NYXARA_METACONTROL__MAX_SECONDS_CEILING", "6")
 # rationale used for the metacontrol ceiling above and the genesis substrate below — keep the
 # mechanism, not the price. tests/nyx001 builds its own stacks and is unaffected.
 os.environ.setdefault("NYXARA_NYX001__STACK_EVERY_N_TURNS", "8")
+# Track B's selective scan (nyx001/lingua/sequence.py). Measured at medium scale, which is what
+# the suite boots at: the scan is ~17ms at 8 tokens and ~92ms at 32, roughly DOUBLING a cycle, and
+# it adds ~290ms and ~46MB to every CognitiveStack construction — paid by every test that builds
+# a core, on a suite that was already being cancelled at 2h40m.
+#
+# Seal the SCAN only, not Track B: the tokenizer and the word→concept grounding stay on, so the
+# two halves that actually accumulate learned state are still exercised everywhere, and only the
+# half with no objective training it yet is sealed. Same rationale as the metacontrol ceiling and
+# the stack sampling above — keep the mechanism, not the price.
+#
+# The tests that exist to prove Track B works are unaffected: tests/nyx001 builds its own cortex
+# directly, and tests/kernel/test_nyx001_wiring.py clears every NYXARA_NYX001__ var in its fixture
+# and runs at toy scale, where the whole track costs ~4ms.
+os.environ.setdefault("NYXARA_NYX001__LINGUA_SEQUENCE_ENABLED", "false")
 # L-OMNI (nyx/omni.py) reads NYXARA's own source, lowers hot numeric functions to C, compiles
 # them and swaps them into the *live process*. ON for real runs at Master JP's instruction, and
 # the same hermetic rationale as every flag above applies to the suite: a test asserting that the

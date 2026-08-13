@@ -167,3 +167,88 @@ def test_describe_runs_the_ordering_backwards(sub):
 
 def test_grounding_coverage_is_none_before_anything_is_seen(sub):
     assert Grounding(sub).coverage() is None
+
+
+# --------------------------------------------------------------------------- #
+# Regressions
+# --------------------------------------------------------------------------- #
+def test_tokenizer_ids_stay_a_bijection_after_eviction():
+    """Eviction used to rewind ``_next_id`` onto ids that were still in use.
+
+    The counter then walked forward over live symbols and reassigned them, so several pairs
+    ended up mapped to one id. Measured before the fix at a bounded vocabulary: 81 pairs sharing
+    6 ids.
+    """
+    t = Tokenizer(max_vocab=262, merge_at=2)
+    rng = np.random.default_rng(0)
+    for _ in range(400):
+        t.encode("".join(rng.choice(list("abcdefghij"), 20)))
+    assert t.evicted > 0, "the bound was never reached; this test proved nothing"
+    assert sorted(t._merges.values()) == sorted(t._inverse), \
+        "two pairs share one id — encode and decode no longer agree"
+
+
+def test_tokenizer_roundtrip_survives_eviction():
+    """The lossless claim has to hold at the bound, not only below it.
+
+    The existing round-trip test uses a vocabulary large enough never to evict. With eviction
+    running, every one of 50 round trips failed before the fix.
+    """
+    t = Tokenizer(max_vocab=262, merge_at=2)
+    rng = np.random.default_rng(1)
+    corpus = ["".join(rng.choice(list("abcdefghij"), 20)) for _ in range(400)]
+    for s in corpus:
+        t.encode(s)
+    assert t.evicted > 0
+    for s in corpus[:50]:
+        assert t.decode(t.encode(s, learn=False)) == s, f"lossy after eviction on {s!r}"
+
+
+def test_tokenizer_never_evicts_a_symbol_another_merge_is_built_from():
+    """Expanding a merge whose component was dropped cannot recover the original bytes.
+
+    Only roots of the merge forest — symbols nothing else expands into — may be evicted.
+    """
+    t = Tokenizer(max_vocab=262, merge_at=2)
+    rng = np.random.default_rng(2)
+    for _ in range(400):
+        t.encode("".join(rng.choice(list("abcde"), 24)))
+    referenced = {c for pair in t._inverse.values() for c in pair if c >= 256}
+    assert referenced <= set(t._inverse), "a live merge references an evicted symbol"
+
+
+def test_sequence_state_stays_bounded_across_many_calls(sub):
+    """The carried state must enter the scan at t=0 only.
+
+    Broadcasting it across all T timesteps re-injects it every step and the scan sums those
+    geometrically, so ``forward(carry=True)`` compounds without bound. Measured before the fix:
+    ``state_norm`` 2.6e+139 after 120 calls, with GELU overflowing to inf.
+    """
+    seq = SequenceModel(sub, depth=2)
+    emb = DynamicEmbedding(sub, vocab=256)
+    ctx = np.random.default_rng(0).normal(0, 1, sub.width)
+    for _ in range(200):
+        seq.forward(emb.embed_sequence([1, 2, 3, 4, 5, 6, 7, 8], context=ctx))
+    norm = seq.state_norm()
+    assert norm is not None and np.isfinite(norm), f"state diverged: {norm}"
+    assert norm < 1e4, f"state is finite but exploding: {norm}"
+
+
+def test_sequence_decay_gate_still_receives_gradient(sub):
+    """Masking t>0 must remove the extra injections, not the term that teaches the gate."""
+    from nyxara.nyx001.substrate import autograd as A
+    from nyxara.nyx001.substrate import backward
+
+    seq = SequenceModel(sub, depth=2)
+    emb = DynamicEmbedding(sub, vocab=256)
+    ctx = np.random.default_rng(0).normal(0, 1, sub.width)
+    seq.forward(emb.embed_sequence([1, 2, 3], context=ctx))     # establish a carried state
+    out = seq.forward(emb.embed_sequence([4, 5, 6], context=ctx))
+    for b in seq._blocks:
+        b["a_raw"].zero_grad()
+    total = A.matmul(A.reshape(out, (3, sub.width)), A.constant(np.ones((sub.width, 1))))
+    backward(A.reshape(total, (1, 3)))
+    for b in seq._blocks:
+        g = b["a_raw"].grad
+        assert g is not None and float(np.abs(g).sum()) > 0.0, \
+            "the decay gate is detached again — the recurrence is decorative"

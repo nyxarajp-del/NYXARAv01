@@ -49,6 +49,12 @@ class Tokenizer:
         self._counts: Dict[Tuple[int, int], float] = {}
         self._uses: Dict[int, float] = {}
         self._next_id = 256
+        # Ids freed by eviction, held for exact reuse. `_next_id` only ever moves FORWARD over
+        # ids that were never issued; a freed id comes back through here. Rewinding `_next_id`
+        # to the victim instead made the counter walk back over ids that were still live, so two
+        # different pairs ended up mapped to one id and `decode` stopped being the inverse of
+        # `encode` — measured at 100% round-trip failure once eviction started.
+        self._free: List[int] = []
         self.observed = 0
         self.learned = 0
         self.evicted = 0
@@ -109,28 +115,45 @@ class Tokenizer:
             self._counts = dict(keep[: self.max_pairs // 2])
 
     def _promote(self, pair: Tuple[int, int]) -> None:
-        if self._next_id >= self.max_vocab:
+        if not self._free and self._next_id >= self.max_vocab:
             if not self._evict():
                 return
-        mid = self._next_id
-        self._next_id += 1
+        if self._free:
+            mid = self._free.pop()
+        else:
+            mid = self._next_id
+            self._next_id += 1
         self._merges[pair] = mid
         self._inverse[mid] = pair
         self._uses[mid] = float(self.merge_at)
         self.learned += 1
 
     def _evict(self) -> bool:
-        """Drop the least-used learned symbol. Bytes are never evictable."""
+        """Drop the least-used learned symbol. Bytes are never evictable.
+
+        A symbol that another live merge is *built out of* is never chosen: expanding a merge
+        whose component has been dropped cannot recover the original bytes, so evicting one
+        would make every symbol above it decode to rubbish. Only **roots** of the merge forest
+        are evictable — symbols nothing else expands into — which is what keeps :meth:`decode`
+        the exact inverse of :meth:`encode`.
+
+        This cannot wedge: a non-empty forest always has at least one root, so as long as any
+        learned symbol exists there is always something evictable.
+        """
         learned = [i for i in self._inverse if i >= 256]
         if not learned:
             return False
-        victim = min(learned, key=lambda i: self._uses.get(i, 0.0))
+        component_of = {c for p in self._inverse.values() for c in p if c >= 256}
+        roots = [i for i in learned if i not in component_of]
+        if not roots:
+            return False
+        victim = min(roots, key=lambda i: self._uses.get(i, 0.0))
         pair = self._inverse.pop(victim, None)
         if pair is not None:
             self._merges.pop(pair, None)
         self._uses.pop(victim, None)
         self.evicted += 1
-        self._next_id = victim          # reuse the freed id
+        self._free.append(victim)       # freed for exact reuse; never rewind _next_id
         return True
 
     # ---- decode ---- #
@@ -187,5 +210,8 @@ class Tokenizer:
                 pair = (int(a), int(b))
                 self._merges[pair] = int(mid)
                 self._inverse[int(mid)] = pair
+            # Rebuild the free list from the gap between what was issued and what survived, so a
+            # restored tokenizer allocates exactly like the one that was saved.
+            self._free = [i for i in range(256, self._next_id) if i not in self._inverse]
         except Exception:  # noqa: BLE001
             pass

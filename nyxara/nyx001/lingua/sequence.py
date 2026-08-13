@@ -112,10 +112,25 @@ class SequenceModel:
         sel = A.sigmoid(A.add(A.matmul(zn, block["w_sel"]), block["b_sel"]))
         proj = A.mul(A.matmul(zn, block["w_in"]), sel)
         if h_prev is not None:
-            # carried through the GRAPH so the decay gate receives gradient. Detaching this is
-            # what made the same recurrence decorative in Layer 2 before it was fixed.
-            seed = A.mul(A.constant(h_prev.reshape(1, 1, -1)), gate)
-            proj = A.add(proj, seed)
+            # The carried state enters at t=0 ONLY. `diag_scan` starts from h=0 and computes
+            # h_t = a⊙h_{t-1} + proj_t, so seeding it means adding a⊙h_prev to the FIRST
+            # timestep — after which the scan propagates it forward on its own.
+            #
+            # Broadcasting the seed across all T steps instead re-injects the previous state at
+            # every timestep, and the scan then sums those injections geometrically: with a≈0.93
+            # and T=16 one call returns a state ~14× the one it was given, so `forward(carry=True)`
+            # compounds without bound. Measured before this fix: state_norm 2.6e+139 after 120
+            # calls, with GELU overflowing to inf. Layer 2 writes the same seed unmasked and is
+            # correct there only because it scans a single timestep, where "all T" and "t=0" are
+            # the same thing — which is why this was inherited without being noticed.
+            #
+            # The seed still goes through the GRAPH so the decay gate keeps receiving gradient;
+            # zeroing t>0 removes injections, not the ∂loss/∂gate term that teaches it how long
+            # to remember.
+            tlen = int(z.data.shape[1])
+            seed = np.zeros((1, tlen, self.width), dtype=np.float64)
+            seed[:, 0, :] = np.asarray(h_prev, dtype=np.float64).reshape(1, -1)
+            proj = A.add(proj, A.mul(A.constant(seed), gate))
         h = A.diag_scan(proj, gate)                                  # (1,T,W)
         hid = A.gelu(A.add(A.matmul(h, block["w_hid"]), block["b_hid"]))
         out = A.add(A.matmul(hid, block["w_out"]), block["b_out"])

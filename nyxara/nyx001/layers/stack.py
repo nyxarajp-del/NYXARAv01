@@ -24,6 +24,12 @@ so the learning dynamics are genuinely driven by the system's own appraisal — 
 the error and the cycle continues. A cognitive architecture where perception can kill planning is
 not modular, whatever its diagram says.
 
+``stack.lingua`` is Track B (:mod:`nyxara.nyx001.lingua`) — the language substrate, held here as a
+**sibling of the eighteen rather than a nineteenth member of them**. :meth:`layers` excludes it on
+purpose: Track A is the cognitive architecture and Track B is a modality, and the charter keeps
+the two apart. It is fed from :meth:`cycle` only after Layer 4 has assigned a concept, so a word
+can never be bound to structure the system has not formed for itself.
+
 :meth:`is_learning` is the honest bottom line. It reports whether the world model's error is
 actually falling, and returns ``None`` — not ``False`` — when there is not yet enough evidence to
 say. Everything else this stack claims rests on that number.
@@ -81,6 +87,7 @@ class CycleResult:
     answer: str = ""
     reports: List[LayerReport] = field(default_factory=list)
     cognitive: Optional[CognitiveState] = None
+    reading: Any = None                     # Track B's pass over this turn's text, when it ran
 
     @property
     def ran(self) -> List[str]:
@@ -97,6 +104,7 @@ class CycleResult:
                 "difficulty": round(self.difficulty, 4), "concept": self.concept,
                 "ran": self.ran, "failed": self.failed,
                 "cognitive": self.cognitive.to_dict() if self.cognitive else None,
+                "reading": self.reading.to_dict() if hasattr(self.reading, "to_dict") else None,
                 "reports": [r.to_dict() for r in self.reports]}
 
 
@@ -132,6 +140,10 @@ class CognitiveStack:
         self.active_learning = ActiveLearning(self.substrate) if g("l16") else None
         self.self_improvement = SelfImprovement(
             self.substrate, enabled=g("l17")) if g("l17") else None
+        # Track B — the language substrate. A SIBLING of Layers 0-17, not an eighteenth layer:
+        # ``layers()`` still returns exactly the eighteen it always did. It was previously
+        # constructed by nothing at all, so the whole track was unreachable in a running system.
+        self.lingua = self._build_lingua(config) if g("lingua") else None
 
     # ---- config helpers ---- #
     def _gate(self, name: str) -> bool:
@@ -142,6 +154,18 @@ class CognitiveStack:
             return float(getattr(self.config, name, default))
         except Exception:  # noqa: BLE001
             return default
+
+    def _build_lingua(self, config: Any) -> Any:
+        """Track B, built from its own config keys. A track that declines is absent, not broken."""
+        try:
+            from nyxara.nyx001.lingua.cortex import LanguageCortex
+            return LanguageCortex(
+                self.substrate,
+                max_tokens=int(self._f("lingua_max_tokens", 32.0)),
+                sequence_enabled=bool(getattr(config, "lingua_sequence_enabled", True))
+                if config else True)
+        except Exception:  # noqa: BLE001 — a mind without a tongue still thinks
+            return None
 
     def layers(self) -> Dict[str, Any]:
         """The live layers by name — what Layer 17 reconfigures and what stats() walks."""
@@ -210,6 +234,12 @@ class CognitiveStack:
         if self.semantic is not None and episode is not None:
             concept = self._run(out, 4, lambda: self.semantic.absorb(episode)) or concept
             out.concept = getattr(concept, "name", out.concept)
+
+        # Track B — language, and only now. It reads the concept Layer 4 has just assigned, so a
+        # word can only ever be bound to structure the system already formed for itself. Run
+        # before Layer 9 purely so `out.reading` is populated for anything downstream that asks.
+        if self.lingua is not None and isinstance(getattr(obs, "payload", None), str):
+            out.reading = self._read_language(obs, state, recall, concept, out)
 
         # L9 — where is there progress to be had
         if self.curiosity is not None:
@@ -309,6 +339,36 @@ class CognitiveStack:
                                            calibration=cal)
 
     # ---- internals ---- #
+    def _read_language(self, obs: Any, state: Any, recall: Any, concept: Any,
+                       out: CycleResult) -> Any:
+        """One Track B pass, fed the same live signals every other consumer reads.
+
+        ``z_t = f(x_t, c_t, m_t, g_t, u_t)`` is only meaningfully dynamic if the situation signals
+        are real ones, so ``c_t`` is Layer 1's state vector, ``m_t`` is Layer 3's best recalled
+        context, and ``u_t`` is Layer 2's measured uncertainty. Handing it zeros would make the
+        embedding a lookup table with extra steps — the failure ``drift()`` exists to measure.
+
+        ``g_t`` is deliberately **not** supplied. The cycle's ``goal`` is a string; the embedding
+        wants a vector in the substrate's space, and there is nothing here that honestly projects
+        one into the other. Passing the goal through a hash would be inventing a signal, so the
+        term is left absent — which is the same rule the rest of this package keeps for a quantity
+        it cannot yet measure.
+        """
+        t0 = time.time()
+        try:
+            best = getattr(recall, "best", None) if recall is not None else None
+            return self.lingua.read(str(obs.payload), concept=concept, context=state,
+                                    memory=getattr(best, "context", None),
+                                    uncertainty=out.uncertainty)
+        except Exception:  # noqa: BLE001 — a mind without a tongue still thinks
+            return None
+        finally:
+            # Timed like a layer even though it is not one: the scan is the most expensive thing
+            # added to the cycle, and a cost that does not appear in `timings_ms` is a cost
+            # nobody can find. It stays out of `reports` so `ran`/`failed` still name layers only.
+            self._timings["lingua"] = self._timings.get("lingua", 0.0) \
+                + (time.time() - t0) * 1000.0
+
     def _test_succession(self, out: CycleResult) -> None:
         """Check last cycle's "A precedes B" claims against the concept that actually arrived.
 
@@ -376,6 +436,7 @@ class CognitiveStack:
             "is_learning": self.is_learning(),
             "learning_curve": self.learning_curve(),
             "active_layers": len(self.layers()) + 1,
+            "lingua": None,                 # Track B: a sibling, reported but not counted as one
             "timings_ms": {k: round(v, 2) for k, v in
                            sorted(self._timings.items(), key=lambda kv: kv[1], reverse=True)[:8]},
         }
@@ -384,6 +445,11 @@ class CognitiveStack:
                 out[name] = layer.stats()
             except Exception:  # noqa: BLE001
                 out[name] = {"error": "stats failed"}
+        if self.lingua is not None:
+            try:
+                out["lingua"] = self.lingua.stats()
+            except Exception:  # noqa: BLE001
+                out["lingua"] = {"error": "stats failed"}
         return out
 
     def to_dict(self) -> Dict[str, Any]:
@@ -393,6 +459,11 @@ class CognitiveStack:
                 d[name] = layer.to_dict()
             except Exception:  # noqa: BLE001
                 continue
+        if self.lingua is not None:
+            try:
+                d["lingua"] = self.lingua.to_dict()
+            except Exception:  # noqa: BLE001
+                pass
         return d
 
     def load_dict(self, d: Dict[str, Any]) -> None:
@@ -403,5 +474,7 @@ class CognitiveStack:
                 payload = d.get(name)
                 if payload and hasattr(layer, "load_dict"):
                     layer.load_dict(payload)
+            if self.lingua is not None and d.get("lingua"):
+                self.lingua.load_dict(d["lingua"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born stack
             pass

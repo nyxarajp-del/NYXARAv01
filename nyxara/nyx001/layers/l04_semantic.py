@@ -58,17 +58,26 @@ class SemanticMemory:
     """Layer 4. Forms concepts from repeated structure, and relations between concepts."""
 
     def __init__(self, substrate: Any, *, radius: float = 0.55, min_support: int = 3,
-                 max_concepts: int = 512, merge_at: float = 0.9) -> None:
+                 max_concepts: int = 512, merge_at: float = 0.9,
+                 max_succession: int = 8192) -> None:
         self.substrate = substrate
         self.width = int(getattr(substrate, "width", 256))
         self.radius = float(radius)
         self.min_support = int(min_support)
         self.max_concepts = int(max_concepts)
         self.merge_at = float(merge_at)
+        self.max_succession = int(max_succession)
         self._concepts: Dict[str, Concept] = {}
         self._sums: Dict[str, Any] = {}
         self._succession: Dict[str, float] = {}
         self._last_concept: Optional[str] = None
+        # Names are drawn from a monotonic counter, never from ``len(self._concepts)``. A merge
+        # or a sweep removes a concept from the middle of the range, so the length falls back
+        # onto a name that is still in use and the next create would SILENTLY REPLACE a live
+        # concept — its centroid, support, coherence and members all gone, while every
+        # succession count, hypothesis and grounding still pointing at that name now refers to
+        # something else entirely. A counter that only moves forward cannot collide.
+        self._next_name = 0
         self._n = 0
         self.swept = 0
 
@@ -129,7 +138,8 @@ class SemanticMemory:
             self._sweep()
             if len(self._concepts) >= self.max_concepts:
                 return None
-        name = f"c{len(self._concepts)}"
+        name = f"c{self._next_name}"
+        self._next_name += 1
         c = Concept(name=name, centroid=v.copy(), support=1, coherence=1.0,
                     members=[exp.key] if exp.key else [], born=time.time())
         self._concepts[name] = c
@@ -167,7 +177,24 @@ class SemanticMemory:
         if self._last_concept and self._last_concept != name:
             key = f"{self._last_concept}\x00{name}"
             self._succession[key] = self._succession.get(key, 0.0) * 0.995 + 1.0
+            if len(self._succession) > self.max_succession:
+                self._prune_succession()
         self._last_concept = name
+
+    def _prune_succession(self) -> None:
+        """Drop transitions naming a concept that no longer exists, then the weakest.
+
+        Merges and sweeps retire concept names, and the transitions that mentioned them can never
+        become theories again — :meth:`theories` requires both endpoints to be live. Left alone
+        they accumulate forever in a process that is meant to run for months, so the dead ones go
+        first and only then is the weakest half of what remains cut.
+        """
+        live = {k: w for k, w in self._succession.items()
+                if all(part in self._concepts for part in k.split("\x00", 1))}
+        if len(live) > self.max_succession // 2:
+            keep = sorted(live.items(), key=lambda kv: kv[1], reverse=True)
+            live = dict(keep[: self.max_succession // 2])
+        self._succession = live
 
     def theories(self, *, k: int = 8, floor: float = 2.0) -> List[Dict[str, Any]]:
         """Concept pairs that keep appearing in succession. Statistical, and labelled as such."""

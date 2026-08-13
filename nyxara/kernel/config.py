@@ -2386,6 +2386,31 @@ class NyxV001Config(BaseModel):
     l16_enabled: bool = True                     # active learning + environment interaction
     l17_enabled: bool = True                     # controlled self-improvement (fail-closed)
 
+    # Track B — the language substrate (nyxara/nyx001/lingua/). A SIBLING of Layers 0-17, not an
+    # eighteenth layer: an online byte tokenizer that learns its own merges, a dynamic embedding
+    # z_t = f(x_t, c_t, m_t, g_t, u_t), a selective state-space scan (never attention), and
+    # word→concept grounding that refuses to report a meaning a word has not earned.
+    #
+    # Language is LAST, and that ordering is enforced rather than documented: the cortex binds
+    # words only to a concept Layer 4 has already assigned, so before concepts exist nothing is
+    # grounded and `meaning()` returns None for every word.
+    #
+    # THE PRICE, measured at medium scale (256/4) rather than left to be discovered:
+    #   per cycle  — the scan is ~17 ms at 8 tokens, ~42 ms at 16, ~92 ms at 32; tokenization and
+    #                grounding together are ~2.7 ms. Track B roughly DOUBLES a full cycle.
+    #   per stack  — build 98 ms → 386 ms, and ~46 MB more resident, almost all of it the
+    #                vocab×width embedding table (8192×256) and the four scan blocks.
+    # `stack.stats()["timings_ms"]["lingua"]` reports its share of every run.
+    #
+    # `lingua_max_tokens` caps the sequence length (the scan is linear in it, so this is a
+    # ceiling on the worst case, not the typical cost — a tokenizer that has learned its merges
+    # usually returns far fewer). Setting `lingua_sequence_enabled=false` drops the scan alone
+    # and keeps tokenization and grounding — the two that actually accumulate learned state, and
+    # together the cheap 2.7 ms.
+    lingua_enabled: bool = True                  # Track B as a whole
+    lingua_sequence_enabled: bool = True         # the selective state-space scan specifically
+    lingua_max_tokens: int = Field(default=32, ge=1, le=4096)
+
     # The faculties that only exist once the three minds are together.
     fusion_enabled: bool = True                  # one thought from three, verifiable-beats-guess
     dark_core_enabled: bool = True               # curiosity+contradiction+critique+self as ONE drive
