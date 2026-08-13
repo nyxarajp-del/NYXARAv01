@@ -303,6 +303,12 @@ class Manifold:
             if _np is None:
                 out.reason = "numpy absent — the manifold does not predict without it"
                 return out
+            # Familiarity is measured FIRST and on every path, including the ones that decline.
+            # It is not only a gate here: callers read it as a graded "how well do I know this"
+            # signal, and a version that stayed 0.0 until the evidence floor was crossed would
+            # make that signal a step function — indistinguishable from total ignorance right up
+            # to the moment it isn't.
+            out.familiarity = self.familiarity(before)
             if self.samples < self.min_samples:
                 out.reason = f"only {self.samples} transitions learned, need {self.min_samples}"
                 return out
@@ -312,7 +318,6 @@ class Manifold:
             # winners separate cleanly from a field the map has simply never had reason to
             # distinguish. Familiarity of the QUERY is the honest guard, and it is what turns a
             # genuinely novel input into "I do not know this" rather than a fluent guess.
-            out.familiarity = self.familiarity(before)
             if out.familiarity < self.min_familiarity:
                 out.reason = (f"nothing like this has been seen "
                               f"(familiarity {out.familiarity:.3f} "

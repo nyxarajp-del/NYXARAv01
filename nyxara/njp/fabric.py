@@ -75,7 +75,8 @@ class SettleResult:
     ms: float = 0.0
     snapshot: Optional[Snapshot] = None
     anticipated: Optional[Prediction] = None    # what was predicted BEFORE this ran
-    prediction_score: Optional[float] = None    # how right that prediction turned out to be
+    prediction_score: Optional[float] = None    # how right a TRUSTED prediction turned out to be
+    surprise: float = 1.0                       # how wrong she was about herself, 0.0 … 1.0
 
     @property
     def fired(self) -> Tuple[int, ...]:
@@ -91,6 +92,7 @@ class SettleResult:
                 "n_fired": len(self.fired), "ms": round(self.ms, 3),
                 "prediction_score": (round(self.prediction_score, 4)
                                      if self.prediction_score is not None else None),
+                "surprise": round(self.surprise, 4),
                 "anticipated": (self.anticipated.to_dict()
                                 if self.anticipated is not None else None)}
 
@@ -330,12 +332,20 @@ class Fabric:
             fired_all = out.fired
             out.snapshot = self.manifold.encode(fired_all or driving, tick=self.tick)
 
-            if out.anticipated is not None and out.anticipated.trusted:
-                out.prediction_score = self.manifold.score_prediction(
-                    out.anticipated.cells, fired_all)
-                self._errors.append(1.0 - out.prediction_score)
-                if len(self._errors) > self.neurogenesis_window * 4:
-                    del self._errors[:-self.neurogenesis_window * 4]
+            # Surprise: how far what actually fired differed from what she expected to fire. This
+            # is measured on EVERY settle, not only on trusted ones — "I was confident and wrong"
+            # and "I had no expectation at all" are both genuine surprise, and a mind that only
+            # scored itself when it already trusted itself could never notice the second. It is
+            # the fabric's own read on how well it models itself, and the reason-seat discounts
+            # confidence by it.
+            if out.anticipated is not None and out.anticipated.cells:
+                overlap = self.manifold.score_prediction(out.anticipated.cells, fired_all)
+                out.surprise = max(0.0, min(1.0, 1.0 - overlap))
+                if out.anticipated.trusted:
+                    out.prediction_score = overlap
+                    self._errors.append(out.surprise)
+                    if len(self._errors) > self.neurogenesis_window * 4:
+                        del self._errors[:-self.neurogenesis_window * 4]
 
             # Teach the manifold what actually followed what, so the next anticipate is better.
             if self._prev_snapshot is not None and out.snapshot is not None:

@@ -72,11 +72,24 @@ class NJPPercept:
 
     @property
     def novelty(self) -> float:
-        """How much of this turn the fabric had no prediction for — 0.0 familiar … 1.0 new."""
+        """How unlike anything she knows this turn was — 0.0 familiar … 1.0 wholly new.
+
+        Read straight off the manifold's familiarity, which is **graded and always measured**.
+        Deliberately not ``settled.surprise``: that is the sharper signal about *this* turn and it
+        feeds neurogenesis, but as a confidence discount it is far too blunt — it sits at 1.0 for
+        every genuinely new prompt, including ordinary ones she answers perfectly well, and
+        discounting those into abstention makes her useless rather than honest.
+        Keying it on whether the prediction was *trusted* instead made this a step function: it
+        sat at a flat 1.0 through every turn below the evidence floor, so a brain that was
+        steadily learning still reported total ignorance right up to the moment it crossed. That
+        matters because the reason-seat discounts confidence by this number — a step function
+        there means she is uniformly, maximally unsure and then abruptly is not, rather than
+        growing into confidence as she actually comes to recognise the ground.
+        """
         ant = self.anticipated
-        if ant is None or not ant.trusted:
+        if ant is None:
             return 1.0
-        return max(0.0, 1.0 - float(ant.margin))
+        return max(0.0, min(1.0, 1.0 - float(ant.familiarity)))
 
     def to_dict(self) -> Dict[str, Any]:
         return {"stimulus": self.stimulus[:200], "concepts": self.concepts[:32],
