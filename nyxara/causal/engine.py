@@ -52,11 +52,14 @@ class EngineTurn:
     phase_shift: Optional[Dict[str, Any]] = None
     gap: bool = False
     consistent: bool = True
+    committed: int = 0      # strands tied into the live lattice this turn
+    abstain: bool = False   # the knot gate recommends abstaining (advisory to the caller)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"query": self.query[:120], "resonance": self.resonance,
                 "knot_check": self.knot_check, "phase_shift": self.phase_shift,
-                "gap": self.gap, "consistent": self.consistent}
+                "gap": self.gap, "consistent": self.consistent,
+                "committed": self.committed, "abstain": self.abstain}
 
 
 # --------------------------------------------------------------------------- #
@@ -72,7 +75,7 @@ class CausalEngine:
             dim=_get(s, "field_dim", 512),
             capacity=_get(s, "field_capacity", 4096),
             resonance_floor=_get(s, "resonance_floor", 0.15))
-        self.lattice = KnotLattice()
+        self.lattice = KnotLattice(capacity=_get(s, "knot_capacity", 20000))
         self.thermo = ThermodynamicMonitor(
             window=_get(s, "thermo_window", 64),
             spike_z=_get(s, "spike_z", 2.5),
@@ -84,16 +87,25 @@ class CausalEngine:
         self.compressor = HyperGraphCompressor()
         self.simulator = SelfSimulationRace(
             max_branches=_get(s, "max_sim_branches", 16),
-            max_workers=_get(s, "max_sim_workers", 8))
+            max_workers=_get(s, "max_sim_workers", 8),
+            timeout_s=_get(s, "sim_timeout_s", 30.0) or None)   # 0 ⇒ wait indefinitely
         self.resonate_top = _get(s, "resonate_top", 3)
-        self.knot_gate_abstains = _get(s, "knot_gate_abstains", False)
-        self._beat_thermo = _get(s, "beat_thermo", True)
+        # ON by default, matching CausalEngineConfig. The engine's own fallback used to say
+        # ``False``, so anything constructing it without settings silently ran with the gate's
+        # verdict switched off.
+        self.knot_gate_abstains = _get(s, "knot_gate_abstains", True)
+        self.beat_thermo = _get(s, "beat_thermo", True)
         self._turns = 0
 
+    @property
+    def _beat_thermo(self) -> bool:
+        """Back-compat alias — :mod:`nyxara.void.heartbeat` read the private name."""
+        return self.beat_thermo
+
     # -- hot path ----------------------------------------------------------- #
-    def resonate(self, query: str, *, top: int = 3) -> List[ResonanceHit]:
+    def resonate(self, query: str, *, top: Optional[int] = None) -> List[ResonanceHit]:
         """Field-interference retrieval of the most relevant concepts."""
-        return self.field.resonate(query, top=top)
+        return self.field.resonate(query, top=self.resonate_top if top is None else top)
 
     def imprint(self, label: str, text: Optional[str] = None, **kw: Any) -> None:
         """Teach the field a concept (so future queries can resonate with it)."""
@@ -116,15 +128,26 @@ class CausalEngine:
 
     def turn(self, query: str, *,
              claims: Optional[Sequence[Tuple[str, str, Any]]] = None,
-             top: int = 3) -> EngineTurn:
-        """Run the whole cheap per-turn flow and return what the engine contributed."""
+             top: Optional[int] = None, commit: bool = False) -> EngineTurn:
+        """Run the whole cheap per-turn flow and return what the engine contributed.
+
+        ``top`` defaults to the configured :attr:`resonate_top` rather than a hard-coded 3, so a
+        caller that never passes it still gets the width the Master configured. With ``commit``
+        the turn's claims are tied into the *live* lattice when they check out — that is what
+        lets a contradiction be caught **across** turns and not just within one.
+        """
         self._turns += 1
         hits = self.resonate(query, top=top)
         et = EngineTurn(query=query, resonance=[h.to_dict() for h in hits])
         if claims:
-            check = self.verify_knots(claims)
+            check = self.commit_knots(claims) if commit else self.verify_knots(claims)
             et.knot_check = check.to_dict()
             et.consistent = check.consistent
+            if check.consistent and commit:
+                et.committed = check.tied
+            # The gate's whole purpose: a Knot Mutation Failure is a probable causal
+            # hallucination, and with the flag on the engine says so out loud.
+            et.abstain = bool(self.knot_gate_abstains and not check.consistent)
         if not hits:
             et.gap = True
             shift = self.phase_shift_if_gap(query, reason="resonance gap on this turn")
@@ -185,6 +208,9 @@ class CausalEngine:
     def status(self) -> Dict[str, Any]:
         return {
             "turns": self._turns,
+            "resonate_top": self.resonate_top,
+            "knot_gate_abstains": self.knot_gate_abstains,
+            "beat_thermo": self.beat_thermo,
             "field": self.field.status(),
             "lattice": self.lattice.status(),
             "thermo": self.thermo.status(),

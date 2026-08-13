@@ -29,6 +29,7 @@ superposed via :mod:`nyxara.quantum.superposition_states` rather than bluff.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
@@ -116,7 +117,17 @@ class KnotMutationFailure(Exception):
 class KnotLattice:
     """A signed causal graph kept perpetually balanced by rejecting contradictions."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, capacity: int = 0) -> None:
+        # ``capacity`` bounds how many strands are retained (0 = unbounded, the historical
+        # behaviour). A lattice fed from a live conversation grows forever otherwise, so any
+        # always-on wiring needs a ceiling. Compaction drops the *oldest* strands and rebuilds
+        # the parity structure from what is left — honest and stated: a contradiction with a
+        # claim that has aged out of the window is no longer caught.
+        self.capacity = int(capacity)
+        self._compactions = 0
+        self._retractions = 0
+        # A bounded audit trail of every un-tying: destructive edits must stay findable.
+        self._retraction_log: Deque[Dict[str, Any]] = deque(maxlen=256)
         self._parent: Dict[str, str] = {}
         self._parity: Dict[str, int] = {}   # parity (0/1) of a node relative to its parent
         self._rank: Dict[str, int] = {}
@@ -200,6 +211,70 @@ class KnotLattice:
         self._knots.append(knot)
         self._adj.setdefault(knot.cause, []).append((knot.effect, knot.sign))
         self._adj.setdefault(knot.effect, []).append((knot.cause, knot.sign))
+        if self.capacity and len(self._knots) > self.capacity:
+            self._compact()
+
+    def _compact(self) -> None:
+        """Rebuild from the newest half of the strands, releasing the aged-out ones."""
+        self._compactions += 1
+        self._rebuild(self._knots[-max(1, self.capacity // 2):])
+
+    def _rebuild(self, knots: Sequence[CausalKnot]) -> None:
+        """Re-tie ``knots`` from scratch — the only way to un-say something in a union-find.
+
+        Parity union-find has no un-union: the parity of every node is entangled with the order
+        the links arrived in. Replaying the survivors is O(n·α(n)) and exact, where surgery on
+        the parent array would not be.
+
+        Goes straight at the union rather than through :meth:`tie`: these knots were already
+        normalised and accepted once, so re-deriving their signs, re-allocating a record for each
+        and running the failure machinery is pure overhead on a path that runs per retraction.
+        """
+        self._parent, self._parity, self._rank = {}, {}, {}
+        self._adj, self._knots = {}, []
+        for k in knots:
+            want = 0 if k.sign == CONCORDANT else 1
+            rc, pc = self._find(k.cause)
+            re_, pe = self._find(k.effect)
+            if rc != re_:
+                self._union(rc, pc, re_, pe, want)
+            elif (pc ^ pe) != want:  # pragma: no cover — survivors were mutually consistent
+                continue
+            self._knots.append(k)
+            self._adj.setdefault(k.cause, []).append((k.effect, k.sign))
+            self._adj.setdefault(k.effect, []).append((k.cause, k.sign))
+
+    def retract(self, cause: str, effect: str, *, reason: str = "") -> int:
+        """Un-tie every strand between ``cause`` and ``effect``. Returns how many were removed.
+
+        This is how a claim stops being held. It exists because a speaker who corrects
+        themselves — "X causes Y", then "actually X prevents Y" — is not contradicting anything;
+        they are replacing what they said, and without retraction the lattice can only refuse the
+        update or absorb a contradiction. Direction-agnostic: a strand ties two nodes, and the
+        pair is what is being un-said.
+
+        Retraction is destructive: anything that can retract can erase a claim the lattice was
+        relying on. So every call is **recorded** — what was un-tied, its original sign and
+        reason, and why it was un-tied — readable back through :meth:`retractions`. Callers must
+        still only offer it where a retraction was actually expressed; the log makes a wrong one
+        findable afterwards rather than silent.
+        """
+        pair = {(cause, effect), (effect, cause)}
+        keep, dropped = [], []
+        for k in self._knots:
+            (dropped if (k.cause, k.effect) in pair else keep).append(k)
+        if not dropped:
+            return 0
+        self._rebuild(keep)
+        self._retractions += len(dropped)
+        self._retraction_log.append({
+            "at": time.time(), "cause": cause, "effect": effect,
+            "reason": reason, "removed": [k.to_dict() for k in dropped]})
+        return len(dropped)
+
+    def retractions(self, *, limit: int = 20) -> List[Dict[str, Any]]:
+        """The most recent retractions — what was un-tied, and on whose say-so."""
+        return list(self._retraction_log)[-limit:]
 
     def _explain(self, cause: str, effect: str) -> List[str]:
         """BFS over accepted strands to reconstruct a path cause→…→effect (the cycle)."""
@@ -260,7 +335,7 @@ class KnotLattice:
         return verdict
 
     def _clone(self) -> "KnotLattice":
-        c = KnotLattice()
+        c = KnotLattice()          # never inherit the cap: a dry run must not compact anything
         c._parent = dict(self._parent)
         c._parity = dict(self._parity)
         c._rank = dict(self._rank)
@@ -277,4 +352,6 @@ class KnotLattice:
 
     def status(self) -> Dict[str, Any]:
         return {"knots": len(self._knots), "nodes": len(self._parent),
-                "components": len({self._find(n)[0] for n in self._parent})}
+                "components": len({self._find(n)[0] for n in self._parent}),
+                "capacity": self.capacity, "compactions": self._compactions,
+                "retractions": self._retractions}

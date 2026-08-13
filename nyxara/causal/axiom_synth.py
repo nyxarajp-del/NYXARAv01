@@ -263,12 +263,25 @@ class AxiomSynthesizer:
             checked += 1
         return ProofResult(True, "exhaustive", f"verified over {checked} points of {names}")
 
-    def prove_sympy(self, expr: Expr, reference_expr: str) -> ProofResult:
-        """Symbolic proof over all reals via sympy: candidate ≡ reference."""
+    def prove_sympy(self, expr: Expr, reference_expr: str,
+                    variables: Optional[Sequence[str]] = None) -> ProofResult:
+        """Symbolic proof over all reals via sympy: candidate ≡ reference.
+
+        Every variable is bound to a plain :class:`sympy.Symbol` *before* parsing. Without that
+        binding ``sympify`` resolves bare names against sympy's own namespace, so a candidate over
+        a variable named ``I`` parses as the imaginary unit and ``I*I ≡ -1`` comes back **proved**
+        — a false certificate for a rule that is simply untrue of the integer variable it names.
+        The same trap sits on ``E``, ``pi``, ``oo``, ``N``, ``S``, ``beta``, ``gamma`` and friends.
+        Declared variables shadow all of them.
+        """
         if _sympy is None:
             return ProofResult(False, "none", "sympy unavailable")
         try:
-            diff = _sympy.simplify(_sympy.sympify(expr.render()) - _sympy.sympify(reference_expr))
+            names = {n for n in (variables or ()) if n}
+            names.update(n.name for n in expr.nodes() if n.kind == "var" and n.name)
+            local = {n: _sympy.Symbol(n) for n in names}
+            diff = _sympy.simplify(_sympy.sympify(expr.render(), locals=local)
+                                   - _sympy.sympify(reference_expr, locals=local))
             if diff == 0:
                 return ProofResult(True, "sympy", f"{expr.render()} ≡ {reference_expr}")
             return ProofResult(False, "sympy", f"difference simplifies to {diff}")
@@ -304,7 +317,7 @@ class AxiomSynthesizer:
         fit = sum(1 for env, t in samples if self._safe_eq(expr, env, t))
         proof = ProofResult(False, "none", "no prover applicable")
         if reference_expr is not None:
-            proof = self.prove_sympy(expr, reference_expr)
+            proof = self.prove_sympy(expr, reference_expr, variables)
         if not proof.proved and z3_claim is not None:
             proof = self.prove_z3(z3_claim)
         if not proof.proved and reference_fn is not None and domain is not None:

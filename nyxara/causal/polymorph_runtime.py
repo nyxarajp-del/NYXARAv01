@@ -93,7 +93,19 @@ class PolymorphRuntime:
         self._rollbacks: int = 0
 
     def register(self, key: str, target: Any) -> PolymorphCell:
-        """Register a live component; hand the returned cell to callers as the entry point."""
+        """Register a live component; hand the returned cell to callers as the entry point.
+
+        Re-registering a key **retargets the existing cell** rather than minting a new one. A
+        fresh cell would strand every caller still holding the old one on the old implementation
+        — permanently, and past all later hot-swaps, which would report success while the live
+        call path never moved. The indirection only works if there is exactly one of it per key.
+        """
+        existing = self._cells.get(key)
+        if existing is not None:
+            with existing._lock:            # noqa: SLF001 — the cell's own swap primitive
+                existing._target = target   # noqa: SLF001
+                existing.generation += 1
+            return existing
         cell = PolymorphCell(target)
         self._cells[key] = cell
         return cell

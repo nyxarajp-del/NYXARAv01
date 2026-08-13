@@ -145,10 +145,24 @@ class HyperGraphCompressor:
 
     def query(self, blob: Dict[str, Any], subject: Optional[str] = None,
               predicate: Optional[str] = None) -> List[Triple]:
-        """Query the packed graph directly (no full decompress needed for a hub lookup)."""
+        """Query the packed graph directly (no full decompress needed for a hub lookup).
+
+        A filter that was *asked for* but names a symbol the graph has never seen narrows the
+        result to nothing. Collapsing that case into the same ``None`` that means "no filter"
+        made an unknown subject return the **entire** graph — the worst possible answer from a
+        lookup whose only honest reply is "I don't know that one".
+        """
         symbols: List[str] = blob["symbols"]
-        sid = symbols.index(subject) if subject in symbols else None
-        pid = symbols.index(predicate) if predicate in symbols else None
+        index: Dict[str, int] = {s: i for i, s in enumerate(symbols)}
+        sid = pid = None
+        if subject is not None:
+            sid = index.get(subject)
+            if sid is None:
+                return []
+        if predicate is not None:
+            pid = index.get(predicate)
+            if pid is None:
+                return []
         hits: List[Triple] = []
         for edge in blob["hyperedges"]:
             if sid is not None and edge[0] != sid:

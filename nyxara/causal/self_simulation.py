@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -92,6 +93,7 @@ class SelfSimulationRace:
         self.w_free_energy = float(w_free_energy)
         self.timeout_s = timeout_s
         self._races = 0
+        self._timeouts = 0
 
     def race(self, hypotheses: Sequence[Any],
              rollout: Callable[[Any], Tuple[Any, float]], *,
@@ -101,6 +103,11 @@ class SelfSimulationRace:
         ``rollout(h)`` runs one simulation and returns ``(outcome, free_energy)``. Optional
         ``verify(outcome)`` returns a score in ``[0, 1]``. The lowest-free-energy / best-verified
         branch wins.
+
+        With ``timeout_s`` set, the race collapses on the deadline over whichever branches
+        finished; the overrunning ones are marked failed with a timeout error and abandoned
+        (a Python thread cannot be killed, so they run themselves out harmlessly in the
+        background — they simply no longer hold up the verdict or touch it).
         """
         chosen = list(hypotheses)[: self.max_branches]
         if not chosen:
@@ -108,25 +115,43 @@ class SelfSimulationRace:
         self._races += 1
         branches: List[SimBranch] = [SimBranch(index=i, hypothesis=h) for i, h in enumerate(chosen)]
 
-        def _run(branch: SimBranch) -> SimBranch:
+        # The worker returns its result rather than writing the branch in place: a rollout that
+        # overran the deadline is still running when the verdict is built, and letting it touch
+        # the shared branch object would race the collapse it already lost.
+        def _run(hypothesis: Any) -> Dict[str, Any]:
             t0 = time.perf_counter()
             try:
-                outcome, fe = rollout(branch.hypothesis)
-                branch.outcome = outcome
-                branch.free_energy = float(fe)
-                branch.verification = float(verify(outcome)) if verify is not None else 1.0
-                branch.ok = True
+                outcome, fe = rollout(hypothesis)
+                verification = float(verify(outcome)) if verify is not None else 1.0
+                return {"ok": True, "outcome": outcome, "free_energy": float(fe),
+                        "verification": verification, "error": "",
+                        "duration_ms": (time.perf_counter() - t0) * 1000.0}
             except Exception as exc:  # noqa: BLE001 — the sandbox: a crash stays in its branch
-                branch.ok = False
-                branch.error = f"{type(exc).__name__}: {exc}"
-            branch.duration_ms = (time.perf_counter() - t0) * 1000.0
-            return branch
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
+                        "duration_ms": (time.perf_counter() - t0) * 1000.0}
 
         workers = max(1, min(self.max_workers, len(branches)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_run, b): b for b in branches}
-            for fut in as_completed(futures, timeout=self.timeout_s):
-                fut.result()
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            futures = {pool.submit(_run, b.hypothesis): b for b in branches}
+            try:
+                for fut in as_completed(futures, timeout=self.timeout_s):
+                    _apply(futures[fut], fut.result())
+            except FuturesTimeout:
+                # ``as_completed`` only *raises* on the deadline — on its own that both loses the
+                # branches that did land and still blocks in the executor's exit until every
+                # overrunning rollout finishes, so the timeout bounded nothing at all. Bank the
+                # finished branches, mark the rest timed-out, and stop waiting for them.
+                for fut, branch in futures.items():
+                    if fut.done() and not fut.cancelled():
+                        _apply(branch, fut.result())
+                    else:
+                        fut.cancel()
+                        self._timeouts += 1
+                        branch.ok = False
+                        branch.error = f"TimeoutError: exceeded timeout_s={self.timeout_s}"
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         self._score(branches)
         ok = [b for b in branches if b.ok]
@@ -148,12 +173,24 @@ class SelfSimulationRace:
 
     def status(self) -> Dict[str, Any]:
         return {"races": self._races, "max_branches": self.max_branches,
-                "max_workers": self.max_workers}
+                "max_workers": self.max_workers, "timeouts": self._timeouts,
+                "timeout_s": self.timeout_s}
 
 
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+def _apply(branch: SimBranch, result: Dict[str, Any]) -> None:
+    """Fold a worker's returned result onto its branch (main thread only)."""
+    branch.duration_ms = result.get("duration_ms", 0.0)
+    branch.error = result.get("error", "")
+    if result.get("ok"):
+        branch.outcome = result.get("outcome")
+        branch.free_energy = result["free_energy"]
+        branch.verification = result["verification"]
+        branch.ok = True
+
+
 def _short(obj: Any) -> str:
     s = repr(obj)
     return s if len(s) <= 80 else s[:77] + "..."

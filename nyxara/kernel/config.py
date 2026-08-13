@@ -3317,8 +3317,14 @@ class CausalEngineConfig(BaseModel):
     # self-simulation
     max_sim_branches: int = Field(default=16, ge=1, le=256)   # bounded N parallel sandboxes
     max_sim_workers: int = Field(default=8, ge=1, le=64)      # thread-pool width
+    # A wall-clock deadline for the whole race. ON: a rollout that hangs can no longer hold the
+    # decision open forever — the race collapses over the branches that did land and reports the
+    # rest as timed out. Set 0 to wait indefinitely.
+    sim_timeout_s: float = Field(default=30.0, ge=0.0)
     # knot gate: on a Knot Mutation Failure in a turn's claims, flag (advisory) vs. abstain
     knot_gate_abstains: bool = True  # ON: abstains more often — FEWER answers, by explicit instruction
+    knot_gate_on_turns: bool = True   # mine each turn's prose for causal claims and gate them
+    knot_capacity: int = Field(default=20000, ge=0)  # retained strands (0 = unbounded); oldest age out
 
 
 class WorldModelConfig(BaseModel):

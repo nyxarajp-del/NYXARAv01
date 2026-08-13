@@ -106,7 +106,12 @@ class ThermodynamicMonitor:
         return math.sqrt(max(0.0, self._m2 / (self._n - 1)))
 
     def _entropy(self) -> float:
-        """Shannon entropy (bits) of the recent-surprise magnitudes, histogrammed."""
+        """Shannon entropy (bits) of the recent-surprise magnitudes.
+
+        The window's magnitudes are normalised into a distribution directly — no binning — so a
+        window where one beat dominates reads near 0 and an evenly-spread one approaches
+        ``log2(window)``.
+        """
         if len(self._recent) < 2:
             return 0.0
         vals = [abs(v) for v in self._recent]
@@ -203,8 +208,23 @@ def _scalarise(x: Any) -> float:
     """Reduce a scalar or vector surprise to a single magnitude (L2 norm)."""
     if isinstance(x, (int, float)):
         return float(x)
+    # ``str`` is a Sequence in Python, so it has to be settled *before* the vector branch below.
+    # Otherwise "0.75" is walked character by character, ``float('.')`` raises, and the
+    # ValueError escapes ``observe`` — killing the beat instead of reading the number.
+    if isinstance(x, str):
+        try:
+            return float(x.strip())
+        except ValueError:
+            return 0.0
     if isinstance(x, Sequence):
-        return math.sqrt(sum(float(v) * float(v) for v in x))
+        total = 0.0
+        for v in x:
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue        # one unreadable component must not void the whole reading
+            total += fv * fv
+        return math.sqrt(total)
     try:
         return float(x)
     except (TypeError, ValueError):

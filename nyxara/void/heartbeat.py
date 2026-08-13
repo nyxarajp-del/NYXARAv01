@@ -175,8 +175,7 @@ class Heartbeat:
         if engine is None:
             return
         try:
-            settings = getattr(engine, "_beat_thermo", True)
-            if settings is False:
+            if getattr(engine, "beat_thermo", True) is False:
                 return
             engine.beat(core)
         except Exception:  # noqa: BLE001 — the thermodynamic loop is advisory; the heart beats on
