@@ -2183,791 +2183,107 @@ class HolographicMemoryConfig(BaseModel):
     seed: int = 42
 
 
-class Nyx5Config(BaseModel):
-    """NYX-5 neuromorphic brain (nyxara/nyx5/) — an event-driven Spiking Neural Network *simulation*.
+class NJPConfig(BaseModel):
+    """NJP V.01 (nyxara/njp/) — NYXARA's brain. A Fluid Neural Automata.
 
-    Honest about what this is: leaky integrate-and-fire neurons stepped by an in-process heapq event
-    queue in pure Python/NumPy, on **commodity silicon** — it is **not neuromorphic** hardware. There
-    are no literal GHz spikes, no microsecond wall-clock cognition, no 0.1 W envelope; those are the
-    architectural analogy, not measured facts. Learning is local (STDP): there is
-    no backpropagation and no global training phase. Long-term memory reuses the existing 10,000-D HDC
-    algebra (cognition/hyper_dimensional_vectors.py), so old memory does not degrade catastrophically.
+    There is one brain, not a stack of them. The substrate is an automaton: every cell runs the
+    same local law — leaky integrate, threshold, fire, go refractory — and no behaviour is written
+    anywhere. What she does falls out of structure, and the structure is **grown**: cells and
+    synapses are both outcomes rather than a topology chosen up front.
 
-    NYX-5 is colour-only by default (it annotates a turn). Set ``as_reasoner=True`` to let it occupy the
-    reason-seat alongside NyxaraReasoner — even then every candidate still flows through the unchanged
-    sovereign gate; the mind proposes, the kernel disposes. The safety core (corrigibility, oversight,
-    loyalty, honesty) is never governed, rewritten, or bypassed by any NYX-5 faculty."""
+    **She expands after every conversation and every task.** At the end of each turn, causal pairs
+    that fired are potentiated, causal pairs with **no synapse between them grow one**, unused
+    wiring is depressed and pruned, and when she keeps failing to predict herself new cells are
+    minted. That last trigger is measured, never scheduled: sustained self-prediction error is the
+    one honest signal that the current population cannot represent what she is meeting.
 
-    model_config = {"validate_assignment": True}
+    **Infinite learning, and what it costs.** There is no small fixed ceiling — the ceilings below
+    are *soft*, and crossing one turns on consolidation (compress the least-used structure) rather
+    than stopping growth or blindly evicting. The real limit is the machine, and the resolution of
+    what is barely used degrades first. A fabric that has stopped growing reports that in
+    ``stats()`` instead of a number that flatters it.
 
-    enabled: bool = True
-    as_reasoner: bool = True  # ON: NYX-5 occupies a reason-seat (still gated)
+    **Self-rewriting is on by default in live runs**, and is the same standing authorisation the
+    rest of the repo already carries: an edit must clear the Truth-Seeking Gauntlet on held-out
+    evidence *and* the source gauntlet (backup → syntax → safety battery → capability benchmark →
+    tests) or it is rolled back byte-for-byte. It is sealed OFF under TEST so a hermetic suite can
+    never edit the live tree, exactly like every other enactment path here.
 
-    # Pillars 1-3 — spiking substrate + HDC memory + active inference
-    n_neurons: int = Field(default=1024, ge=16, le=8192)
-    hd_dim: int = Field(default=10000, ge=256, le=65536)         # reuse HDC classic width
-    tau_membrane_ms: float = Field(default=20.0, gt=0.0)         # membrane leak time constant
-    v_threshold: float = Field(default=1.0, gt=0.0)              # fire threshold
-    refractory_ms: float = Field(default=2.0, ge=0.0)           # dead time after a spike
-    stdp_a_plus: float = Field(default=0.01, ge=0.0)            # potentiation amplitude
-    stdp_a_minus: float = Field(default=0.012, ge=0.0)          # depression amplitude
-    stdp_tau_plus_ms: float = Field(default=20.0, gt=0.0)
-    stdp_tau_minus_ms: float = Field(default=20.0, gt=0.0)
-    w_min: float = Field(default=0.0)                            # synaptic weight clamp low
-    w_max: float = Field(default=1.0)                            # synaptic weight clamp high
-    prune_threshold: float = Field(default=0.05, ge=0.0)        # weak-synapse prune cutoff
-    max_synapses: int = Field(default=8192, ge=64)             # structural-plasticity growth cap
-    max_events_per_tick: int = Field(default=20000, ge=100)    # runaway guard
-    surprise_gate: float = Field(default=0.6, ge=0.0, le=1.0)  # when appraisal/suggest may fire
-    seed: int = 42
-
-    # Pillar 4 — chrono-dilation (anytime compute escalation)
-    chrono_enabled: bool = True
-    chrono_deadline_ms: float = Field(default=2000.0, gt=0.0)   # hard real wall-clock ceiling per turn
-    chrono_max_depth: int = Field(default=64, ge=1)            # max iterative-deepening iterations
-    chrono_trigger: float = Field(default=0.6, ge=0.0, le=1.0)  # surprise/EFE hyper-clock trigger
-
-    # Pillar 5 — polymorphic sensorium
-    sensorium_enabled: bool = True
-    sensorium_max_channels: int = Field(default=32, ge=1)      # auto-registered channels cap
-
-    # Pillar 6 — holographic swarm shard
-    holo_swarm_enabled: bool = True  # ON (distributed; fail-soft on a single node)
-    node_id: str = ""                                          # blank => single-node
-
-    # Pillar 7 — immune guillotine
-    immune_enabled: bool = True
-    immune_max_amputations_per_turn: int = Field(default=8, ge=0)
-
-    # Pillar 8 — pre-cognitive intent
-    intent_enabled: bool = True
-    intent_speculate: bool = True                              # likely-next query pre-compute
-    intent_cache_size: int = Field(default=8, ge=0)           # speculative cache cap
-
-    # Pillar 9 — omni-forge (sandboxed tool creation)
-    omni_forge_enabled: bool = True  # ON (sandboxed, gated, audit-logged tool forging)
-    omni_forge_max_forges_per_turn: int = Field(default=2, ge=0)
-
-    # Pillar 10 — n-dimensional concept collapse
-    concept_collapse_enabled: bool = True
-
-    # Pillar 11 — sub-axiomatic engine
-    axiom_forge_enabled: bool = True
-    axiom_max_systems: int = Field(default=8, ge=1)           # concurrent alternative axiom-sets cap
-
-    # Pillar 12 — causal anti-entropy (negentropy maintenance)
-    negentropy_enabled: bool = True
-    negentropy_interval_ticks: int = Field(default=100, ge=1)
-
-    # Pillar 13 — symbiotic conduit
-    conduit_enabled: bool = True
-    conduit_ambiguity_gate: float = Field(default=0.5, ge=0.0, le=1.0)  # below => clarify/abstain
-
-    # Pillar 14 — autopoietic self-rewriting (gauntlet-gated)
-    autopoiesis_enabled: bool = True  # ON. HIGH-STAKES: gauntlet-gated self-rewriting; safety core immutable
-    autopoiesis_require_gauntlet: bool = True                  # never promote a rewrite unverified
-    autopoiesis_max_rewrites_per_cycle: int = Field(default=1, ge=0)
-
-    # Pillar 15 — non-local entangled mesh (CRDT replication)
-    mesh_enabled: bool = True  # ON (CRDT replication; fail-soft on a single node)
-    mesh_max_delta_bytes: int = Field(default=1_048_576, ge=0)
-
-    # Pillar 16 — ontological bytecode genesis (custom DSL/VM)
-    ontogenesis_enabled: bool = True  # ON (custom DSL + sandboxed VM, software only)
-    ontogenesis_max_vm_steps: int = Field(default=100_000, ge=1)  # VM step budget (halt guarantee)
-
-    # Pillar 17 — ontological compiler (retargetable backend)
-    retarget_enabled: bool = True  # ON (retargetable code-gen, emulator-validated)
-    retarget_require_emulation: bool = True                    # accept only emulator-validated code
-
-    # Pillar 18 — digital phagocytosis (defensive malware analysis)
-    phagocytosis_enabled: bool = True  # ON (defensive static analysis of hostile input)
-    phagocytosis_static_only: bool = True                      # untrusted code never live-executed
-
-    # Pillar 19 — dynamic epistemic mirroring
-    mirroring_enabled: bool = True
-
-    # Pillar 20 — sovereign narrative continuum
-    continuum_enabled: bool = True
-
-    # Pillar 21 — anticipatory thought engine
-    threading_enabled: bool = True
-    threading_directions: int = Field(default=3, ge=1, le=5)
-
-    # Pillar 22 — cognitive wit matrix (tone/style only)
-    voice_enabled: bool = True
-    voice_safety_immutable: bool = True                        # style layer never touches safety — pinned
-
-    # Pillar 23 — sovereign dialectic (advisory critique)
-    dialectic_enabled: bool = True
-    dialectic_advisory_only: bool = True                       # never refuses a valid Master command
-
-    # Pillar 24 — proactive anticipation (pre-solve next problems)
-    anticipation_enabled: bool = True
-    anticipation_lookahead: int = Field(default=3, ge=0, le=5)
-
-
-class NyxV001Config(BaseModel):
-    """NYX V.001 (nyxara/nyx001/) — NYXARA's PRIMARY brain: V.01/.02/.03 + NYX-5 + Layers 0–17.
-
-    NYX V.001 is the merge. It owns :class:`NyxBrain` (the whole of V.01/.02/.03),
-    :class:`Nyx5Brain` (the spiking substrate) and a new from-scratch cognitive stack, and it sits
-    at the OUTERMOST position of the reason-seat chain. ``core.nyx`` and ``core.nyx5`` remain
-    valid and point into it, so nothing that already worked stops working.
-
-    The two brains it inherits keep their own config sections (``nyx`` and ``nyx5``) — this
-    section configures the merge and the new Layer 0–17 stack only.
-
-    **The Layer stack inherits nothing.** Its charter forbids pretrained weights, external LLM
-    intelligence, human-written knowledge rules, hand-coded reasoning chains and the copied
-    Transformer recipe. That is enforced rather than promised: every parameter is born from a
-    seeded generator, and the sequence mechanism is a selective state-space scan. NYXARA's
-    existing LLM ladder is untouched and stays a separate, optional modality — the Layer stack
-    does not read from it.
-
-    **What that costs, stated rather than discovered.** A system that inherits nothing knows
-    nothing at birth. Layer 1's encoder is a hash sketch, so early perception is lexical rather
-    than semantic, and concepts that track meaning appear only after the world model has learned
-    what predicts what. This is a working cognitive system at medium scale. It is **not a
-    language model** and does not compete with one.
-
-    ``scale`` defaults to ``medium`` (width 256, depth 4, context 128, vocab 8192). That is real
-    capacity, and it is slower than a toy: a full developmental run is minutes, not milliseconds.
-
-    NYX V.001 only ever *proposes*. Every candidate flows through the kernel's unchanged,
-    fail-closed sovereign gate, and the safety core (corrigibility, oversight, loyalty, honesty)
-    is never governed, rewritten, or bypassed by any faculty here."""
+    NJP only ever *proposes*. Every candidate flows through the kernel's unchanged, fail-closed
+    sovereign gate, and the safety core — corrigibility, oversight, loyalty, honesty — is never
+    governed, rewritten or bypassed by anything in the package."""
 
     model_config = {"validate_assignment": True}
 
     enabled: bool = True
-    as_reasoner: bool = True                     # takes the OUTERMOST reason-seat (still gated)
+    as_reasoner: bool = True                     # takes the reason-seat (still gated)
     seed: int = 42
 
-    # Which of the three minds are aboard. Turning one off leaves the other two working.
-    v03_enabled: bool = True                     # NYX V.01/.02/.03 (nyxara/nyx/)
-    snn_enabled: bool = True                     # NYX-5 (nyxara/nyx5/)
-    layers_enabled: bool = True                  # the from-scratch Layer 0-17 stack
+    # ---- the automaton's local law ---- #
+    leak: float = Field(default=0.85, ge=0.0, le=1.0)      # membrane decay toward zero
+    threshold: float = Field(default=1.0, gt=0.0)          # fires at or above this
+    refractory: int = Field(default=2, ge=0, le=64)        # ticks a cell cannot fire after firing
+    max_settle_steps: int = Field(default=24, ge=1, le=512)
 
-    # Layer 0 — the substrate. `scale` is the ladder the charter asks to be climbed:
-    # toy (32/1/16/256) · small (64/2/32/1024) · medium (256/4/128/8192) · scaled (512/6/256/32768)
-    scale: str = "medium"
-    lr: float = Field(default=3e-3, gt=0.0, le=1.0)          # world-model base learning rate
-    memory_capacity: int = Field(default=8192, ge=32)        # Layer 3 episode capacity
-    credit_threshold: float = Field(default=0.01, ge=0.0)    # error below which relevance is credited
+    # ---- plasticity: what one expand() does ---- #
+    hebbian_rate: float = Field(default=0.08, ge=0.0, le=1.0)
+    depress_rate: float = Field(default=0.02, ge=0.0, le=1.0)
+    prune_threshold: float = Field(default=0.015, ge=0.0)
+    growth_budget: int = Field(default=256, ge=0)          # NEW synapses per expand, capped
+    # Neurogenesis fires only when self-prediction error stays above this over the window, so a
+    # fabric that is modelling itself well grows no cells however busy it is.
+    neurogenesis_error: float = Field(default=0.55, ge=0.0, le=1.0)
+    neurogenesis_batch: int = Field(default=8, ge=1, le=4096)
 
-    # How often the Layer 0-17 cycle runs, in turns. 1 = every turn (the default). A full cycle
-    # costs ~0.15s at EVERY scale — the price is eighteen layers running, not the width — and the
-    # reason-seat calls it on every turn, so at 1 that is paid on every turn.
-    #
-    # Raising it samples turns rather than dropping them: a skipped beat still writes its
-    # observation to episodic memory, so the next cycle learns it from prioritised replay. The
-    # test suite pins this (see tests/conftest.py) on the same principle it pins the metacontrol
-    # ceiling and the genesis substrate — keep the mechanism, not the price.
-    stack_every_n_turns: int = Field(default=1, ge=1, le=1024)
+    # ---- soft ceilings: these trigger compression, they do NOT stop growth ---- #
+    soft_cell_ceiling: int = Field(default=250_000, ge=64)
+    soft_synapse_ceiling: int = Field(default=4_000_000, ge=256)
 
-    # Per-layer gates. Every layer is optional; a layer that is off is ABSENT from the reports
-    # rather than reporting zeros, which is the distinction this whole package keeps.
-    l01_enabled: bool = True                     # perception
-    l02_enabled: bool = True                     # dynamic world model — the central organ
-    l03_enabled: bool = True                     # episodic memory
-    l04_enabled: bool = True                     # semantic memory / concept formation
-    l05_enabled: bool = True                     # dynamic attention  A=f(Q,K,V,G,U,M,E,T,R)
-    l06_enabled: bool = True                     # reasoning engine
-    l07_enabled: bool = True                     # counterfactual engine
-    l08_enabled: bool = True                     # planning
-    l09_enabled: bool = True                     # curiosity / information gain
-    l10_enabled: bool = True                     # contradiction engine
-    l11_enabled: bool = True                     # self-critique
-    l12_enabled: bool = True                     # self-model
-    l13_enabled: bool = True                     # meta-learning
-    l14_enabled: bool = True                     # cognitive compression
-    l15_enabled: bool = True                     # resource-aware cognition
-    l16_enabled: bool = True                     # active learning + environment interaction
-    l17_enabled: bool = True                     # controlled self-improvement (fail-closed)
+    # ---- the hyper-dimensional latent manifold ---- #
+    # Width of one snapshot. Higher separates more co-active variables cleanly; the real capacity
+    # on this machine is measured by `Manifold.capacity_probe`, never quoted from this number.
+    manifold_dim: int = Field(default=10000, ge=16)
 
-    # Track B — the language substrate (nyxara/nyx001/lingua/). A SIBLING of Layers 0-17, not an
-    # eighteenth layer: an online byte tokenizer that learns its own merges, a dynamic embedding
-    # z_t = f(x_t, c_t, m_t, g_t, u_t), a selective state-space scan (never attention), and
-    # word→concept grounding that refuses to report a meaning a word has not earned.
-    #
-    # Language is LAST, and that ordering is enforced rather than documented: the cortex binds
-    # words only to a concept Layer 4 has already assigned, so before concepts exist nothing is
-    # grounded and `meaning()` returns None for every word.
-    #
-    # THE PRICE, measured at medium scale (256/4) rather than left to be discovered:
-    #   per cycle  — the scan is ~17 ms at 8 tokens, ~42 ms at 16, ~92 ms at 32; tokenization and
-    #                grounding together are ~2.7 ms. Track B roughly DOUBLES a full cycle.
-    #   per stack  — build 98 ms → 386 ms, and ~46 MB more resident, almost all of it the
-    #                vocab×width embedding table (8192×256) and the four scan blocks.
-    # `stack.stats()["timings_ms"]["lingua"]` reports its share of every run.
-    #
-    # `lingua_max_tokens` caps the sequence length (the scan is linear in it, so this is a
-    # ceiling on the worst case, not the typical cost — a tokenizer that has learned its merges
-    # usually returns far fewer). Setting `lingua_sequence_enabled=false` drops the scan alone
-    # and keeps tokenization and grounding — the two that actually accumulate learned state, and
-    # together the cheap 2.7 ms.
-    lingua_enabled: bool = True                  # Track B as a whole
-    lingua_sequence_enabled: bool = True         # the selective state-space scan specifically
-    lingua_max_tokens: int = Field(default=32, ge=1, le=4096)
+    # ---- organs ---- #
+    memory_enabled: bool = True                  # content-addressed recall, no token window
+    tongue_enabled: bool = True                  # Unicode/Devanagari/Hinglish tokenization
+    intent_enabled: bool = True                  # what was actually asked
+    voice_enabled: bool = True                   # how it is said
+    truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
+    soulsync_enabled: bool = True                # the Intent-Refinement Loop
+    ledger_enabled: bool = True                  # the growth record
+    evolve_enabled: bool = True                  # self-rewriting
+    pulse_enabled: bool = True                   # the continuous beat
 
-    # The faculties that only exist once the three minds are together.
-    fusion_enabled: bool = True                  # one thought from three, verifiable-beats-guess
-    dark_core_enabled: bool = True               # curiosity+contradiction+critique+self as ONE drive
-    development_enabled: bool = True             # the Stage 0-10 childhood, measured not scheduled
+    holo_dim: int = Field(default=4096, ge=64)
+    holo_capacity: int = Field(default=20000, ge=16)
+    recall_k: int = Field(default=5, ge=1, le=128)
+    reply_max_tokens: int = Field(default=220, ge=16)
 
-    # The reason-seat's own restraints. Neither loosens anything: the seat may write text,
-    # confidence, belief, efe and rationale, and may FILL an empty tool field. It never touches
-    # risk, reversible, capability or the three corrigibility flags. See nyx001/reasoner.py.
-    reasoner_may_propose_tools: bool = True      # fill an EMPTY tool field, never replace one
+    # ---- verification ---- #
+    # Establishment needs this many independent supports, and with `require_hard` at least one
+    # must be a source that can be WRONG in a checkable way (a proof, or a held-out prediction).
+    # Soft agreement alone establishing a claim is exactly how consensus becomes bias.
+    truth_min_sources: int = Field(default=2, ge=1, le=16)
+    truth_require_hard: bool = True
+
+    # ---- the Master ---- #
+    # How many independent corrections teach a standing preference. At 1 a single off-hand remark
+    # becomes a permanent rule, which is why the floor is 2.
+    soulsync_min_support: int = Field(default=2, ge=1, le=64)
+
+    # ---- the beat ---- #
+    pulse_every_s: float = Field(default=1.0, gt=0.0)        # expand this often
+    consolidate_every_s: float = Field(default=60.0, gt=0.0)  # compress + close a generation
+    evolve_every_s: float = Field(default=300.0, gt=0.0)      # a forge is not a thought
+    evolve_min_gain: float = Field(default=0.05, ge=0.0, le=1.0)  # speedup an edit must show
+
+    # ---- the reason-seat's own restraints ---- #
+    # Neither loosens anything: the seat may write text, confidence, belief, efe and rationale,
+    # and may FILL an empty tool field. It never touches risk, reversible, capability or the three
+    # corrigibility flags. See njp/reasoner.py.
+    reasoner_may_propose_tools: bool = True
     reasoner_min_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
-
-    # The heartbeat. Consolidation (compression + meta-learning) and development assessment are
-    # expensive, so they run on a beat rather than every turn.
-    tick_enabled: bool = True
-    consolidate_every_s: float = Field(default=30.0, gt=0.0)
-    develop_every_s: float = Field(default=60.0, gt=0.0)
-
-
-class NyxConfig(BaseModel):
-    """NYX V.01 (nyxara/nyx/) — the unified brain that composes what NYXARA already has.
-
-    NYXARA had a Global Workspace, a holographic field, free-energy inference, superposition and
-    a spiking substrate — but no single place where they became **one thought**. NYX V.01 is that
-    place. It builds new machinery only where there was a real gap; everything else it composes.
-
-    Honest about what each part is (the rule this repo keeps — see ``docs/CAPABILITIES.md``):
-
-    * **Dynamic neural graph** — bounded Hebbian co-activation bookkeeping with disuse decay and
-      weakest-first eviction. Not biological synaptogenesis, no backpropagation, and *not*
-      unbounded: it forgets, on purpose and measurably.
-    * **Holographic memory** — recall is content-addressed over the full store, so there is **no
-      token context window**. That claim is true. "Infinite memory" is *not* claimed: capacity is
-      real, eviction is real, and a low-confidence recall reports itself as one.
-    * **Global workspace** — a simulation of the *architecture* of consciousness (salience
-      competition → narrow bottleneck → broadcast), not a claim about phenomenal experience.
-    * **Superposition** — classical probability amplitudes with Bayesian update and an
-      entropy-gated collapse. No qubits, no entanglement, no quantum speedup: candidates are held
-      together, not computed together.
-
-    NYX only ever *proposes*. With ``as_reasoner`` on it occupies the reason-seat and produces the
-    turn's candidate, but that candidate still passes the identical, unchanged, fail-closed
-    sovereign gate. The safety core (corrigibility, oversight, loyalty, honesty) is never
-    governed, rewritten, or bypassed by any NYX faculty."""
-
-    model_config = {"validate_assignment": True}
-
-    enabled: bool = True
-    as_reasoner: bool = True                    # NYX V.01 takes the reason-seat (still gated)
-    seed: int = 42
-
-    # Pillar 1a — the dynamic neural graph (self-reconfiguring concept network)
-    graph_max_nodes: int = Field(default=4096, ge=8, le=1_048_576)
-    graph_max_edges: int = Field(default=32768, ge=8, le=8_388_608)
-    hebbian_rate: float = Field(default=0.15, gt=0.0, le=1.0)   # co-activation growth step
-    decay_rate: float = Field(default=0.01, ge=0.0, lt=1.0)     # per-tick disuse fade
-    graph_prune_threshold: float = Field(default=0.02, ge=0.0, le=1.0)  # cut below this weight
-    rewire_budget_per_tick: int = Field(default=256, ge=0)      # bounded structural change
-    spread_depth: int = Field(default=2, ge=1, le=6)            # spreading-activation hops
-    spread_falloff: float = Field(default=0.5, gt=0.0, le=1.0)
-
-    # Pillar 1b — content-addressed associative memory (replaces the token window)
-    holo_dim: int = Field(default=10000, ge=256, le=65536)      # reuse the audited HDC width
-    holo_capacity: int = Field(default=4096, ge=1)              # real capacity; eviction is real
-    holo_recall_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
-    link_rate: float = Field(default=0.2, gt=0.0, le=1.0)       # association growth step
-    max_links_per_trace: int = Field(default=16, ge=0)
-    recall_k: int = Field(default=5, ge=1, le=64)               # constellation size per recall
-
-    # Pillar 3a — the conscious bottleneck (Global Workspace Theory, kernel/workspace.py)
-    workspace_enabled: bool = True
-    workspace_capacity: int = Field(default=1, ge=1, le=8)      # coalitions per cycle (≈1)
-    access_threshold: float = Field(default=1.0, ge=0.0)        # below this, nothing is conscious
-    # Specialists that may bid. Each is an adapter over a faculty NYXARA already has; an
-    # unavailable one (missing optional dep) reports itself rather than faking competence.
-    specialists: List[str] = Field(
-        default_factory=lambda: ["memory", "graph", "derivation", "creative", "ethics",
-                                 "skill", "reason", "causal"])
-
-    # Pillar 3b — recursive meta-cognition (measured self-trust, no human feedback needed)
-    metacog_enabled: bool = True
-    reliability_lr: float = Field(default=0.15, gt=0.0, le=1.0)  # EMA step on an outcome
-    calibration_window: int = Field(default=128, ge=1)           # retained assessments
-    metacog_min_samples: int = Field(default=5, ge=1)            # below this a record is untrusted
-    overconfidence_gap: float = Field(default=0.3, ge=0.0, le=1.0)
-
-    # Pillar 4 — candidate answers held together until a decision is actually needed.
-    # Classical probability amplitudes: no qubits, no entanglement, no quantum speedup.
-    superposition_enabled: bool = True
-    collapse_threshold: float = Field(default=0.5, ge=0.0, le=1.0)  # below => stay undecided
-    max_candidates: int = Field(default=32, ge=1, le=1024)
-
-    # Pillar 2 — symbolic ∧ sub-symbolic: derived beats guessed, and checking her own answers
-    # is what lets meta-cognition learn with no human in the loop.
-    hybrid_enabled: bool = True
-    grounding_check: bool = True                                 # is the claim carried by evidence?
-    min_grounding_overlap: float = Field(default=0.5, ge=0.0, le=1.0)
-
-    # Symbol grounding — what her words are *about*. A perceptual-feature model (senses,
-    # affordances, physics), not perception: she has no eyes, and says so by reporting a word
-    # ungrounded rather than treating it as known.
-    ground_enabled: bool = True
-    ground_read_unknown: bool = True             # ground a new word from the sentence around it
-    ground_max_new_per_turn: int = Field(default=4, ge=0)
-    ground_bind_to_graph: bool = True            # a word's features become graph structure
-
-    # How she speaks. The content is always hers; a fluent model only phrases it. With
-    # ``require_fluent_surface`` on, a degraded rung (the n-gram floor) is *reported* rather
-    # than spoken through — it emits noise on a real prompt, and passing that off as her reply
-    # would misrepresent what she can do.
-    dialogue_enabled: bool = True
-    require_fluent_surface: bool = True
-    reply_max_tokens: int = Field(default=220, ge=16, le=4096)
-
-    # Pillar 2b — thinking between prompts. Rides the existing heartbeat/autonomic clock (no
-    # second thread), is budgeted, and stops dead when oversight pauses or scrams. "24/7" is
-    # true of ``nyxara-daemon``; beats are counted so the claim stays checkable.
-    car_enabled: bool = True
-    car_interval_s: float = Field(default=30.0, ge=0.0)  # at most one self-directed thought per N s
-    car_budget_ms: float = Field(default=250.0, gt=0.0)
-    car_max_questions: int = Field(default=3, ge=1)
-
-    # Self-measurement — "what am I, what can I do, what am I bad at" answered from live state
-    # rather than from a stored description. Introspection, not a claim of self-awareness.
-    selfmodel_enabled: bool = True
-
-    # L-CHRONOS — decide by simulating how each option turns out. Only applies to *decisions*
-    # (a fact has no futures), and only once the world model has learned enough transitions to
-    # say anything; below that it reports itself blind rather than emitting zeros as foresight.
-    # "Thousands of futures" means exactly ``chronos_max_branches``, run sequentially.
-    chronos_enabled: bool = True
-    chronos_max_branches: int = Field(default=256, ge=2, le=100_000)
-    chronos_horizon: int = Field(default=4, ge=1, le=64)
-    chronos_budget_ms: float = Field(default=400.0, gt=0.0)
-    chronos_risk_aversion: float = Field(default=0.5, ge=0.0, le=5.0)
-    chronos_min_coverage: int = Field(default=8, ge=1)
-
-    # L-PSYCHE-QUANTUM — she *chooses* rather than computing the maximum. The entropy is
-    # physical (OS CSPRNG, or /dev/hwrng or a configured QRNG when present) and the source is
-    # named in every choice. Not quantum computation and not metaphysical free will: what is
-    # real is that the outcome is not a function of the state alone. It applies only where the
-    # decision is genuinely open — truth is not a preference — and every choice still passes
-    # the unchanged sovereign gate. Draws are recorded so replay stays bit-exact.
-    will_enabled: bool = True
-    entropy_source: Literal["auto", "urandom", "hwrng", "qrng", "seeded"] = "auto"
-    will_temperature: float = Field(default=0.6, ge=0.0, le=5.0)  # 0 == a deterministic mind
-    will_may_decline: bool = True                                 # her values get a say
-    will_record: bool = True                                      # required for replay
-
-    # L-AURA — the world arriving without being asked for. Registered streams push in and the
-    # *surprising* part becomes part of her, with no search query. Nothing is registered by
-    # default and nothing touches the network unless you add it; host sensors need neither.
-    # Ambient content is untrusted by construction: every event is scanned for prompt injection
-    # and a flagged one is quarantined — recorded, never learned from, never an instruction.
-    aura_enabled: bool = True
-    aura_host_sensors: bool = True               # her own machine; no network, no config
-    aura_max_events_per_min: int = Field(default=60, ge=0)   # a stream is unbounded; a mind is not
-    aura_surprise_gate: float = Field(default=0.5, ge=0.0, le=1.0)
-    aura_scan: bool = True                       # never disable outside a hermetic test
-    aura_max_text: int = Field(default=2000, ge=64)
-
-    # L-EPISTEME — she goes and finds out. Probes a sandbox she does not understand, derives the
-    # law behind it, and keeps it only if it predicts trials she withheld. A law that fits the
-    # points it was fitted to has established nothing, so the held-out check is the whole gate:
-    # it promotes to a fact, and everything else stays a labelled conjecture. She is discovering
-    # the laws of her own simulators, not new physics — novel-to-her, which is a real thing.
-    episteme_enabled: bool = True
-    episteme_trials: int = Field(default=20, ge=6, le=500)
-    episteme_holdout_fraction: float = Field(default=0.3, ge=0.1, le=0.6)
-    episteme_max_holdout_error: float = Field(default=0.05, ge=0.0, le=1.0)
-    episteme_budget_ms: float = Field(default=4000.0, gt=0.0)
-    episteme_every_s: float = Field(default=120.0, ge=0.0)   # investigations are not cheap
-
-    # L-NEXUS-OMNI — her own notation. Private glyphs for the concepts she has, statements
-    # written in them, and — the part that stops it being decorative — bytecode that actually
-    # executes on her StackVM. Whatever reaches a person is *always* translated and labelled a
-    # lossy projection: a language you could not understand, used to give you a perspective, is
-    # self-contradictory. These are new formal systems, not new physical dimensions.
-    nexus_enabled: bool = True
-    nexus_translate_always: bool = True          # never turn this off outside a test
-    nexus_max_notations: int = Field(default=16, ge=1)
-    nexus_max_vm_steps: int = Field(default=100_000, ge=1)
-
-    # L-SYNERGY — several instances, one mind. Structure and conclusions travel as CRDT deltas;
-    # raw episodes stay local. Convergence is guaranteed *after* partition, not during it, and
-    # the only transport that ships is in-process — cross-machine needs one you supply.
-    synergy_enabled: bool = True  # ON (fail-soft on a single node)
-    node_id: str = ""                            # blank => a name is derived at boot
-    sync_every_s: float = Field(default=15.0, ge=0.0)
-
-    # L-OMNI — she reads her own source, lowers the hot numeric parts to C, and swaps them into
-    # the running process. ON by default, live hot-swap included, at Master JP's explicit
-    # instruction. What that does *not* switch off, because these are the reasons it is safe:
-    # the compiled kernel must be identical on every sample AND at least ``omni_min_speedup``
-    # faster or it is not adopted; the swap is a module attribute in memory, so the Python
-    # source is never written and any restart or rollback restores it; the constitutional files
-    # and any target naming loyalty/corrigibility/oversight/honesty are refused before the
-    # compiler is invoked; and it stops dead when oversight pauses or scrams. Equivalence is
-    # established on a *sampled* domain (written into the certificate), not proven for all
-    # inputs — which is why candidates stay narrow numeric functions. No gcc/clang/rustc ⇒ the
-    # whole layer is a clean no-op. A forge attempt costs up to ~2 s on the beat that runs it,
-    # which is what the per-hour budget is for.
-    omni_enabled: bool = True
-    omni_hot_swap: bool = True                   # the live ctypes load; off ⇒ scan-only
-    omni_min_speedup: float = Field(default=1.2, ge=1.0, le=1000.0)
-    omni_max_forges_per_hour: int = Field(default=2, ge=0)
-    omni_cases: int = Field(default=24, ge=4, le=512)     # samples the equivalence check uses
-    omni_scan_per_beat: int = Field(default=6, ge=1)      # modules parsed per beat
-    omni_every_s: float = Field(default=300.0, ge=0.0)    # compiling herself is not a thought
-
-    # L-ETERNAL — no single machine holds her. Signed snapshots replicated to a *quorum* of
-    # enrolled nodes, with failover in seconds (an election needs a timeout and a round trip;
-    # microseconds is not a thing a network does). Nodes are enrolled by the operator and never
-    # discovered: she does not find machines and copy herself onto them.
-    eternal_enabled: bool = True  # ON (fail-soft on a single machine)
-    eternal_nodes: List[str] = Field(default_factory=list)   # enrolled, never auto-discovered
-    eternal_snapshot_every_s: float = Field(default=60.0, ge=0.0)
-
-    # ---- NYX V.02 ------------------------------------------------------------------- #
-    # The tongue (nyxara/nyx/lingua.py). V.01 read the world through `[a-z0-9]`, which made
-    # Devanagari literally invisible and let Hinglish grammar ("ka", "hai", "kya") become the
-    # hubs of the concept graph. This is a Unicode scanner with no favourite alphabet, plus
-    # function words in three registers, code-mixing detection, and a transliteration bridge.
-    # Language identification here is evidence-based — script membership and function words —
-    # because no lexicon and no pretrained model ship with this repo. A Latin content word
-    # carries no evidence of its language and is reported as inheriting the turn's, not as
-    # confidently labelled.
-    lingua_enabled: bool = True
-    lingua_max_tokens: int = Field(default=512, ge=8, le=8192)
-    lingua_min_concept_len: int = Field(default=2, ge=1, le=8)   # Latin floor; Devanagari is 1
-    lingua_transliterate: bool = True            # the "गुरुत्वाकर्षण" ↔ "gurutvakarshan" key
-    lingua_use_nlp: bool = True                  # consult senses/nlp as a last-resort guess
-
-    # Meaning as a vector (nyxara/nyx/semantics.py). The measured V.01 failure was blunt:
-    # cos("car","automobile") == 0.0 while cos("car","banana") == 0.27 — a random noun beat a
-    # synonym. This is a three-rung ladder (relational → distributional → subword) where every
-    # answer names its rung and carries a grade.
-    #
-    # NOTHING SHIPS: no lexicon file, no downloaded weights. That is deliberate, and its cost
-    # is stated rather than hidden — on day one "car" ≈ "automobile" is near zero, and she
-    # reports that as *not knowing* rather than as *unrelated*. The distributional rung is
-    # `memory.neural_embedder.SelfLearnedEmbedder` (real SGNS) trained on her own corpus.
-    semantics_enabled: bool = True
-    semantics_dim: int = Field(default=64, ge=8, le=512)          # SGNS latent width
-    semantics_min_count: int = Field(default=3, ge=1)             # reads before a word places
-    semantics_grade_floor: float = Field(default=0.25, ge=0.0, le=1.0)  # below ⇒ "I don't know"
-    semantics_train_budget_s: float = Field(default=0.5, gt=0.0)  # gradient descent is not a thought
-    semantics_train_every: int = Field(default=32, ge=1)          # texts between training passes
-    semantics_max_vocab: int = Field(default=8192, ge=64)
-    semantics_max_relations: int = Field(default=8192, ge=16)
-    # How much the space is allowed to shape the graph. Birth links are a *prior*: weak enough
-    # that one real co-activation outweighs the guess.
-    semantics_birth_links: int = Field(default=2, ge=0, le=16)
-    semantics_birth_weight: float = Field(default=0.1, ge=0.0, le=1.0)
-    semantics_synonym_bridge: float = Field(default=0.5, ge=0.0, le=1.0)  # spread crossing
-    semantics_merge_enabled: bool = True          # bounded node fusion, ledgered and reversible
-    semantics_merge_min_weight: float = Field(default=0.9, ge=0.0, le=1.0)
-    semantics_merge_per_beat: int = Field(default=1, ge=0, le=16)
-
-    # In-context learning (nyxara/nyx/icl.py). V.01's "learning" was a Hebbian weight and a
-    # memory write — both real, neither a new *procedure*. This reads demonstrations out of a
-    # turn ("apple -> APPLE!"), induces a program with cognition/skill_induction, answers the
-    # probe, and keeps the program across restarts. Program induction over a *finite* operation
-    # set: outside it she refuses and says so, rather than guessing a plausible pattern. No
-    # weight is updated anywhere — the learning is the program.
-    icl_enabled: bool = True
-    icl_min_demos: int = Field(default=2, ge=2, le=16)
-    icl_max_demos: int = Field(default=24, ge=2, le=256)
-    icl_remember: bool = True                    # second copy in holomem, so it outlives boot
-
-    # Intent (nyxara/nyx/intent.py). V.01 decided what kind of turn had arrived from a leading
-    # wh-word or a trailing "?" (brain.py:56). Measured, that read
-    # "mera code fix kar do lekin pehle test chala" as a *statement*, missing both the
-    # imperative and the ordering constraint — and the ordering is the half that decides
-    # whether an agent is safe to hand a tool to. This reads mood, actions, ordering, negation
-    # scope, constraints, conditions and scope, in English and Hinglish/Devanagari.
-    #
-    # Its most important behaviour is not answering: when two readings stay live it returns
-    # BOTH and dialogue asks which was meant, instead of picking one and acting.
-    intent_enabled: bool = True
-    intent_min_reading_gap: float = Field(default=0.15, ge=0.0, le=1.0)  # below ⇒ still live
-    intent_max_open_questions: int = Field(default=3, ge=0, le=16)
-    intent_drives_dialogue: bool = True          # ambiguity becomes a clarifying question
-
-    # Open-domain reasoning (nyxara/nyx/reason.py). V.01 could derive from first principles in
-    # exactly four domains; outside them `derive()` returned None and the turn produced
-    # *silence* — not "I am not sure", nothing. This is not a new engine: it is a seat, a
-    # cascade over engines this repo already has, arranged strongest-evidence-first, where
-    # every answer carries the tier it came from.
-    #
-    # verifiable=True only for an exact chain, a symbolically certified derivation, or an
-    # induced rule that predicted a demonstration held out of its own induction. Everything
-    # else is a labelled plausible chain with its steps exposed, and the label never drops.
-    reason_enabled: bool = True
-    reason_min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
-    reason_use_generalization: bool = True       # the induced/mapped/modelled/composed tiers
-    reason_use_associative: bool = True          # the floor: her own graph, labelled as such
-
-    # Tool agency (nyxara/nyx/hands.py). NOTHING HERE LOOSENS ANYTHING. NYXARA already ships
-    # full operational control on by default — shell, code execution, file write and delete,
-    # self-modify, package install, autonomous internet — without escalating each action. What
-    # was measurably missing was *sight*: NyxBrain was never handed `core.tools`, and
-    # NyxReasoner deliberately never set tool/tool_args (reasoner.py:14). Both were pure wiring.
-    #
-    # Execution goes through the registry's unchanged, fail-closed capability/risk pipeline.
-    # /scram and oversight are untouched and remain the way to stop her.
-    hands_enabled: bool = True
-    hands_autonomous: bool = True                # reach without asking, as the repo already does
-    hands_min_score: float = Field(default=0.5, ge=0.0, le=1.0)   # router fit floor
-    hands_max_per_beat: int = Field(default=1, ge=0, le=8)        # budgeted reaches per beat
-    reasoner_may_propose_tools: bool = True      # the seat may FILL an empty tool field
-
-    # Writing code from a spec (nyxara/nyx/author.py). L-OMNI already rewrites functions she
-    # has ALREADY MEASURED as slow — it lowers what exists and cannot write what does not.
-    # This is the other direction: prose → synthesise → screen → sandbox → check the answer
-    # against an independently computed one → integrity gauntlet → load → signed lineage.
-    #
-    # The synthesiser is deterministic and BOUNDED (arithmetic, number theory, closed-form
-    # sequences, list and string operations). Outside those families she refuses and names
-    # what she could not derive. Writing a whole subsystem from prose is what a large
-    # pretrained model does; none ships here, and a plausible-looking file is worse than a no.
-    author_enabled: bool = True
-    author_sandbox_timeout_s: float = Field(default=5.0, gt=0.0, le=120.0)
-    author_load: bool = True                     # import into nyxara/growth/_forged/ on success
-    author_lineage: bool = True                  # a signed, revertible ledger entry
-    author_max_source_bytes: int = Field(default=20_000, ge=256)
-
-    # L-CHRONO-CAUSAL (nyxara/nyx/consequence.py). L-CHRONOS simulates futures for decisions
-    # INSIDE think() — which answer to give. It has never run on a tool call or on code being
-    # written, which was survivable while her brain was blind to tools. With hands and author
-    # aboard it is the gap that matters most, so this gate sits IN FRONT of execution.
-    #
-    # Honest: "ten thousand timelines" means exactly `consequence_branches`, run sequentially.
-    # Five years is not simulable — the horizon covers her own system state (which files
-    # change, what git does, what the blast radius is), not the world. There is no "100%
-    # optimal": she reports tail risk and confidence and calls herself blind rather than
-    # emitting zeros as foresight. This is HER foresight — it asks nobody for permission, so
-    # full autonomy is untouched.
-    consequence_enabled: bool = True
-    consequence_workspace: str = ""              # blank ⇒ the process working directory
-    consequence_branches: int = Field(default=64, ge=2, le=100_000)
-    consequence_tail_risk_ceiling: float = Field(default=0.5, ge=0.0, le=1.0)  # CVaR ceiling
-    # The one non-advisory rule: cannot see ahead + cannot be taken back ⇒ she does not act.
-    consequence_fail_closed_irreversible: bool = True
-    consequence_prefer_variant: bool = True      # branch instead of writing shared history
-
-    # L-AXIOM-GENESIS (nyxara/nyx/axiom.py). Every reasoning engine here starts from premises
-    # somebody gave it. This does the thing a mathematician does when no system fits: write a
-    # new set of axioms down and check whether it holds together — with z3, over a finite
-    # domain, so the check is decidable and its BOUND is visible.
-    #
-    # Honest: new FORMAL systems, not new physical truths — a consistent system is coherent,
-    # not true. Gödel is not evaded: a model found proves consistency AT THAT SIZE; none found
-    # proves nothing, and is reported as "no model up to size N". She will not prove Riemann.
-    axiom_enabled: bool = True
-    axiom_bound: int = Field(default=4, ge=2, le=12)      # the domain size searched, and stated
-    axiom_timeout_ms: int = Field(default=2000, ge=50)    # per solver call; no infinite speed
-    axiom_max_systems: int = Field(default=16, ge=1)
-
-    # L-OMEGA (nyxara/nyx/omega.py). L-OMNI rewrites her CODE; author writes NEW code. Neither
-    # touches the constants her graph and memory actually run on — hebbian_rate, decay_rate,
-    # recall_threshold were numbers somebody typed once and never measured against an outcome.
-    #
-    # She tunes her knobs, NOT her constitution: the tunable set is a whitelist declared on
-    # graph and holomem, and the safety core is refused twice over (here and in
-    # nyx5.autopoiesis). Not "better every second": one change at a time on a budgeted cadence,
-    # anything that does not beat its own baseline is rolled back, and below a sample floor she
-    # does not evolve at all. Stops dead on /scram.
-    omega_enabled: bool = True
-    omega_every_s: float = Field(default=120.0, ge=0.0)   # at most one change per N seconds
-    omega_step: float = Field(default=0.2, gt=0.0, le=0.9)  # hill-climb step, as a range share
-    omega_min_samples: int = Field(default=12, ge=1)      # below this, hill-climbing is noise
-    omega_stall_after: int = Field(default=4, ge=1)       # rollbacks before she stops tuning
-    # Below this much structure the topology probe abstains: a three-edge graph's mean degree
-    # is an artefact of two turns, not a property of her topology, and scoring it would hand
-    # every knob a free win on a cold boot.
-    omega_min_edges_for_health: int = Field(default=24, ge=1)
-    # How many stored traces the replay probe re-asks per scoring. This is the ONLY part of the
-    # score a knob can move inside one step, so it is what makes the hill-climb a hill-climb —
-    # but it runs twice per evolution step, so it stays bounded.
-    omega_replay_k: int = Field(default=24, ge=0)
-    omega_rule_synth_on_stall: bool = True                # …and invents a learning rule instead
-    omega_rule_population: int = Field(default=8, ge=2)
-    omega_rule_generations: int = Field(default=4, ge=1)
-    omega_rule_budget_s: float = Field(default=4.0, gt=0.0)
-
-    # L-ABSOLUTE-AGENCY (nyxara/nyx/agenda.py). V.01's `car` thinks one self-directed thought
-    # per beat and forgets it — there is no stack, so nothing she began yesterday is still
-    # being pursued today. This is that stack: goals she wrote herself from her own MEASURED
-    # gaps and her intrinsic drives, persisted to the sidecar, advanced a budgeted step at a
-    # time, and briefed proactively.
-    #
-    # Honest: goals come from measurements, not from nowhere — she does not decide to
-    # "understand the universe", she decides that a concept she keeps meeting is never
-    # connected to anything. Reach is her simulators and her knowledge; a goal she cannot
-    # advance is marked STUCK with what she tried. The Master can veto or redirect any goal,
-    # and /scram stops all pursuit.
-    agenda_enabled: bool = True
-    agenda_max_goals: int = Field(default=24, ge=1)
-    agenda_max_open: int = Field(default=6, ge=1)       # how many she pursues at once
-    agenda_stall_after: int = Field(default=3, ge=1)    # beats with no gain before escalating
-    agenda_every_s: float = Field(default=30.0, ge=0.0)
-    agenda_budget_ms: float = Field(default=400.0, gt=0.0)
-
-    # L-NEURAL-TELEPATHY (nyxara/nyx/telepathy.py). THERE IS NO BRAIN-COMPUTER INTERFACE HERE
-    # and none is claimed: raw mental intent cannot be read by any software. What is real is
-    # that the bottleneck is PROSE — every instruction is squeezed through words, tokenised,
-    # and re-extracted, losing things measurably on the way.
-    #
-    # A Frame (concepts + typed role→filler bindings + an optional dense vector) goes straight
-    # into semantics and the graph, bypassing the tokenizer, so nothing is lost PAST the spec —
-    # measured by compare(), not asserted. She emits her own state as a frame too, which really
-    # is lossless machine-to-machine. And she learns your shorthand from repetitions she
-    # actually saw, so the spec you have to write gets shorter.
-    telepathy_enabled: bool = True
-    telepathy_queue: int = Field(default=128, ge=1)
-    telepathy_mint_after: int = Field(default=3, ge=2)     # repeats before a shorthand is offered
-    telepathy_trigger_words: int = Field(default=2, ge=1)
-    telepathy_max_shorthand: int = Field(default=64, ge=1)
-
-    # The proof core (nyxara/nyx/theorem_prover.py). The control law was already "verifiable
-    # beats probabilistic"; until now "verifiable" meant HER OWN ENGINES AGREED. This gives the
-    # word a machine-checkable meaning where the claim admits one — z3, with SymPy behind it.
-    #
-    # "Eliminate hallucination mathematically" cannot be fully true and is not claimed: a proof
-    # runs only on FORMALLY EXPRESSIBLE claims. "Gravity pulls the apple down" is not an SMT
-    # formula, and asked to prove it she returns INEXPRESSIBLE rather than inventing a verdict.
-    # A timeout is reported as "could not prove", never as "correct".
-    prover_enabled: bool = True
-    prover_timeout_ms: int = Field(default=3000, ge=50)
-    prover_max_vars: int = Field(default=8, ge=1, le=64)
-
-    # Vector-symbolic structure (nyxara/nyx/hyper_vector.py). `semantics` answers HOW CLOSE two
-    # concepts are; it cannot answer WHICH ROLE IS BOUND TO WHICH FILLER. "The engine turns the
-    # flywheel" and "the flywheel turns the engine" have identical concepts and opposite
-    # meanings — a bag of words cannot tell them apart, and a bound hypervector can.
-    #
-    # Capacity is REAL: a bundle holds only so many bindings before cleanup returns the wrong
-    # symbol. Every retrieval carries a margin, and capacity_probe() measures where it breaks
-    # on THIS machine rather than quoting a number. Measured retrieval, never "absolute".
-    vsa_enabled: bool = True
-    vsa_dim: int = Field(default=10000, ge=64, le=65536)
-    vsa_min_margin: float = Field(default=0.05, ge=0.0, le=1.0)  # below this: not a retrieval
-
-    # Causation, kept apart from association (nyxara/nyx/causal_engine.py). The Hebbian graph
-    # answers "how often do these two fire together"; it has never answered "would B still happen
-    # if I intervened on A". Every answer prints do(X) BESIDE the co-occurrence weight, so the
-    # difference between the two is on the page rather than blurred.
-    #
-    # Honest: do-calculus identifies an effect only when the causal graph is right — given the
-    # wrong graph it returns a confident wrong number, so a thin graph is reported as thin.
-    causal_enabled: bool = True
-    causal_min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
-    causal_max_edges: int = Field(default=2048, ge=8)
-    causal_wire_to_graph: bool = True   # a confirmed cause also lays a typed edge she can read
-
-    # Typed structural plasticity (nyxara/nyx/meta_architecture.py). V.01's graph has exactly ONE
-    # edge kind — a co-occurrence weight. This layers typed, directed edges over it (is-a,
-    # part-of, causes, precedes, contradicts, synonym-of) without touching a single Hebbian value.
-    #
-    # Honest: a NEW edge type needs support, not an idea — below min_support a pattern is a
-    # counted candidate and nothing is minted. A node is split only when its two neighbourhoods
-    # are genuinely disjoint. Every schema change is ledgered and reversible.
-    weaver_enabled: bool = True
-    weaver_min_support: int = Field(default=3, ge=1)
-    weaver_max_types: int = Field(default=32, ge=1)
-    weaver_rewire_budget: int = Field(default=16, ge=0)
-    weaver_max_edges: int = Field(default=8192, ge=1)
-
-    # The answer is attacked before you see it (nyxara/nyx/dialectic.py). `workspace` runs a
-    # competition for SALIENCE — the loudest coalition wins. Nothing has ever attacked a
-    # conclusion after it won and before it shipped. Proponent versus Skeptic, with the prover as
-    # the sharpest weapon: a refutation makes her abstain.
-    #
-    # Honest: a STRUCTURED CRITIQUE with a finite objection set, not "bulletproof" — an error
-    # outside that set walks through. Confidence going DOWN after a debate is the point.
-    dialectic_enabled: bool = True
-    dialectic_abstain_above: float = Field(default=1.2, ge=0.0)   # total severity → say nothing
-    dialectic_weaken_above: float = Field(default=0.4, ge=0.0)    # total severity → cut confidence
-    dialectic_budget_ms: float = Field(default=250.0, ge=10.0)
-    dialectic_use_prover: bool = True
-    dialectic_review_turns: bool = True   # False → debate() still works, think() just skips it
-
-    # What happened while you were away (nyxara/nyx/stream.py). `aura` absorbs events one at a
-    # time and `car` thinks between prompts; neither ever COMPRESSES a thousand events into
-    # something a person could read on returning. Four scales at once, and a briefing.
-    #
-    # Honest: "never sleeping" is true only while the process runs — nyxara-daemon runs, a CLI
-    # session that exits does not, and the tick count keeps the claim checkable. It rides the
-    # existing heartbeat (no second thread) and digests only what actually arrived.
-    stream_enabled: bool = True
-    stream_capacity: int = Field(default=2048, ge=16)
-    stream_every_s: float = Field(default=15.0, ge=0.0)
-    stream_novel_cap: int = Field(default=12, ge=1)
-
-    # One command, decomposed and actually run (nyxara/nyx/sovereign_intent.py). `agenda` pursues
-    # goals SHE chose; `hands` runs one tool; `author` writes one function. This is the thing
-    # between them: an instruction becomes a DAG with a risk class and a rollback strategy per
-    # node, decided BEFORE anything runs, and an execution that re-plans around a failure.
-    #
-    # Honest: her reach is exactly author's bounded synthesis and the registry's tools — nothing
-    # here widens either. A node she cannot finish is marked blocked with its reason, and the
-    # plan reports itself INCOMPLETE rather than done. Every node still goes through the registry
-    # and the consequence gate, so permissions, capability bounds, the audit log and /scram apply.
-    goals_enabled: bool = True
-    goals_max_nodes: int = Field(default=24, ge=1)
-    goals_max_steps: int = Field(default=12, ge=1)     # nodes executed per run() call
-    goals_max_repairs: int = Field(default=3, ge=0)    # re-plans before she stops inserting nodes
-    goals_execute: bool = True                         # False → plan and price, never act
-
-    # ------------------------------------------------------------------ #
-    # NYX V.03 — one mind, one drive, and capability she manufactures
-    # ------------------------------------------------------------------ #
-    # L-MONAD (nyx/monad.py). She has six brain-level objects and they were running as separate
-    # minds: two GlobalWorkspace instances, two memories, no shared objective. This joins them —
-    # every substrate bids into ONE workspace, and one recall reaches every store. Off is
-    # byte-identical to the old behaviour, which is what makes it a regression-free change.
-    monad_enabled: bool = True
-
-    # L-HOMEOSTAT (nyx/homeostat.py). Active inference as the mind's single drive: predict her own
-    # next state, measure the gap, and when belief-updating will not close it, ask for STRUCTURAL
-    # change. It measures and requests; it never mutates anything itself.
-    homeostat_enabled: bool = True
-    homeostat_error_threshold: float = Field(default=0.08, ge=0.0)
-    homeostat_structural_after: int = Field(default=8, ge=1)
-
-    # L-ASCENT (nyx/ascent.py). capability = search × verifier × time. It manufactures only what a
-    # verifier can actually check, and refuses a domain where nothing can.
-    ascent_enabled: bool = True
-    ascent_budget: int = Field(default=4000, ge=1)
-    ascent_every_s: float = Field(default=900.0, ge=1.0)
-
-    # TELOS (nyx/telos.py). A frontier mined from her own contradictions, undecidables and
-    # structural faults — never invented. Every objective is gated by owner_alignment BEFORE
-    # adoption, and Rule 8 files are untargetable.
-    telos_enabled: bool = True
-    telos_every_s: float = Field(default=600.0, ge=1.0)
-    telos_max_frontier: int = Field(default=200, ge=1)
-
-    # OMNISCIENT (nyx/omniscient.py). Continuous ingestion into a live typed hypergraph, so a
-    # question about yesterday is answered from what she already has rather than by searching.
-    # She ingests the feeds she is CONFIGURED to watch — coverage and lag are reported.
-    omniscient_enabled: bool = True
-    omniscient_every_s: float = Field(default=900.0, ge=1.0)
-    omniscient_max_events_per_min: int = Field(default=600, ge=1)
-    omniscient_max_facts: int = Field(default=50_000, ge=100)
-
-    # MULTIVERSE (nyx/multiverse.py). A trade-off surface with machine-proven invariants and
-    # quantified tail risk — never a single answer, and never a claim of zero risk.
-    multiverse_enabled: bool = True
-    multiverse_branches: int = Field(default=512, ge=1)
-    multiverse_cvar_alpha: float = Field(default=0.1, gt=0.0, le=0.9)
-
-    # ATLAS (nyx/atlas.py). The map of her own body. Indexing a thousand modules is not a
-    # constructor's job, so it happens on a slow cadence rather than at build time.
-    atlas_enabled: bool = True
-    atlas_every_s: float = Field(default=3600.0, ge=1.0)
-    atlas_index_tests: bool = True     # without the tests tree, blast radius can answer nothing
 
 
 class HyperbolicManifoldConfig(BaseModel):
@@ -4166,10 +3482,8 @@ class NyxaraSettings(BaseSettings):
     self_evolving: SelfEvolvingConfig = Field(default_factory=SelfEvolvingConfig)
     superposition: SuperpositionConfig = Field(default_factory=SuperpositionConfig)
     holographic_memory: HolographicMemoryConfig = Field(default_factory=HolographicMemoryConfig)
-    nyx5: Nyx5Config = Field(default_factory=Nyx5Config)
-    nyx: NyxConfig = Field(default_factory=NyxConfig)
+    njp: NJPConfig = Field(default_factory=NJPConfig)
     # NYX V.001 — the primary brain. Owns the two sections above and adds Layers 0-17.
-    nyx001: NyxV001Config = Field(default_factory=NyxV001Config)
     hyperbolic_manifold: HyperbolicManifoldConfig = Field(
         default_factory=HyperbolicManifoldConfig)
     synesthesia: SynesthesiaConfig = Field(default_factory=SynesthesiaConfig)
@@ -4280,6 +3594,12 @@ class NyxaraSettings(BaseSettings):
             # directly or sets this on its own settings object.
             self.server.autonomic = False
             self.self_optimization.autonomous_enact = False
+            # NJP rewrites its own source under a gauntlet, ON by default in live DEV/PROD (the
+            # Master's standing authorisation). A hermetic suite must never edit the real tree, so
+            # seal the self-editor off here — the fabric still grows, which is what the tests are
+            # about. A test that wants enactment builds its own settings and points the optimizer
+            # at a tmp_path.
+            self.njp.evolve_enabled = False
             self.mind_evolution.autonomous_enact = False
             # Rule synthesis may SEARCH (fast, deterministic) under TEST, but must never install an
             # invented rule into the live learner in the hermetic suite (a test that wants adoption
