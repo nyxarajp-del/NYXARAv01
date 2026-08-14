@@ -2257,6 +2257,10 @@ class NJPConfig(BaseModel):
     reason_enabled: bool = True                  # the ladder: intuition → … → proof
     self_model_enabled: bool = True              # measured capability map, not a brochure
     meta_enabled: bool = True                    # her own strategies as bandit arms
+    goals_enabled: bool = True                   # Mission → Goal → Subgoal → Task
+    curiosity_enabled: bool = True               # her own questions, priced by VOI
+    attention_enabled: bool = True               # the bottleneck: one thing wins the turn
+    environment_enabled: bool = True             # observe → act → outcome → learn
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2326,6 +2330,14 @@ class NJPConfig(BaseModel):
     # How often she tries a strategy other than her current best. Zero locks her into whatever
     # won first, which on thin evidence is close to arbitrary.
     meta_explore: float = Field(default=0.15, ge=0.0, le=1.0)
+
+    # ---- curiosity and attention ---- #
+    # EVPI below which a question is not worth asking. Without a floor she surfaces every trivial
+    # gap, and a mind that asks about everything is not curious, it is exhausting.
+    curiosity_min_value: float = Field(default=0.05, ge=0.0, le=1.0)
+    # How many things may reach awareness per cycle. Raising this does not make her think about
+    # more at once; it makes "attention" stop meaning anything.
+    attention_capacity: int = Field(default=1, ge=1, le=8)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark

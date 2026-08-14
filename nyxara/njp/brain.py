@@ -116,6 +116,7 @@ class NJPThought:
     growth: Optional[GrowthReport] = None
     cycle_id: str = ""
     ms: float = 0.0
+    focus: Any = None                          # what won the turn's attention, and what lost
     # What she is entitled to say about `answer`: known / believed / unknown. Carried beside the
     # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
     epistemic: str = "unknown"
@@ -144,7 +145,8 @@ class NJPThought:
                 "reading": self.reading.to_dict() if self.reading else None,
                 "intent": self.intent.to_dict() if hasattr(self.intent, "to_dict") else None,
                 "judgement": self.judgement.to_dict() if self.judgement else None,
-                "growth": self.growth.to_dict() if self.growth else None}
+                "growth": self.growth.to_dict() if self.growth else None,
+                "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
 class NJPBrain:
@@ -181,6 +183,10 @@ class NJPBrain:
         self.reasoner = self._build_reasoner(c)
         self.self_model = self._build_self_model(c)
         self.meta = self._build_meta(c)
+        self.goals = self._build_goals(c)
+        self.curiosity = self._build_curiosity(c)
+        self.attention = self._build_attention(c)
+        self.environment = self._build_environment(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -372,6 +378,59 @@ class NJPBrain:
                 meta.register("reason_depth", name, value)
             return meta
         except Exception:  # noqa: BLE001 — she keeps whatever settings she was built with
+            return None
+
+    def _build_goals(self, c: Any) -> Any:
+        """Mission → Goal → Subgoal → Task, with the economics that make plans comparable.
+
+        A flat list of goals is a to-do list. The structure is what lets a finished task advance a
+        mission; the economics are what let her choose between two plans that both sound good.
+        """
+        if not self._gate("goals", True):
+            return None
+        try:
+            from nyxara.njp.goals import GoalTree
+            return GoalTree()
+        except Exception:  # noqa: BLE001 — she acts on what she is asked, without a plan of her own
+            return None
+
+    def _build_curiosity(self, c: Any) -> Any:
+        """Her own questions, priced by what answering them is worth.
+
+        Which question to ask is a decision, not an appetite: expected value of information
+        against cost, so she asks what reduces uncertainty most per unit cost rather than whatever
+        occurred to her last.
+        """
+        if not self._gate("curiosity", True):
+            return None
+        try:
+            from nyxara.njp.curiosity import Curiosity
+            return Curiosity(self, min_value=self._cfg("curiosity_min_value", 0.05))
+        except Exception:  # noqa: BLE001 — she answers what she is asked and wonders nothing
+            return None
+
+    def _build_attention(self, c: Any) -> Any:
+        """The bottleneck. Every organ competes; exactly one wins the turn.
+
+        Handed to a caller as a pile, six organs' outputs are not integration — they are six
+        opinions and no cognition. Something has to lose.
+        """
+        if not self._gate("attention", True):
+            return None
+        try:
+            from nyxara.njp.attention import Attention
+            return Attention(self, capacity=self._cfg("attention_capacity", 1))
+        except Exception:  # noqa: BLE001 — every organ reports, and nothing arbitrates
+            return None
+
+    def _build_environment(self, c: Any) -> Any:
+        """observe → act → outcome → learn over real tool calls, via the repo's own model."""
+        if not self._gate("environment", True):
+            return None
+        try:
+            from nyxara.sim.envmodel import EnvironmentModel
+            return EnvironmentModel()
+        except Exception:  # noqa: BLE001 — she uses tools without modelling what they do
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -651,7 +710,12 @@ class NJPBrain:
             if remember and out.answer:
                 self._remember_turn(out)
 
-            # 7. an episode for the discoverer: what was present, and what she concluded. This
+            # 7. ATTEND — every organ bid, one won. This is where the turn stops being a pile of
+            # six opinions and becomes one thing she is actually thinking about.
+            if self.attention is not None:
+                out.focus = self.attention.attend(out)
+
+            # 8. an episode for the discoverer: what was present, and what she concluded. This
             # is the raw material abstractions are proposed from — one episode is never a
             # pattern, which is exactly why it is only recorded here and judged elsewhere.
             if self.discoverer is not None and out.percept is not None and out.answer:
@@ -660,7 +724,7 @@ class NJPBrain:
                 except Exception:  # noqa: BLE001
                     pass
 
-            # 8. EXPAND — the physical growth, after every single turn
+            # 9. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
 
             out.ms = (time.perf_counter() - t0) * 1000.0
@@ -982,7 +1046,9 @@ class NJPBrain:
                             ("pulse", self.pulse), ("grounding", self.grounder),
                             ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta)):
+                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("goals", self.goals), ("curiosity", self.curiosity),
+                            ("attention", self.attention)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -1009,7 +1075,9 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta)):
+                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("goals", self.goals), ("curiosity", self.curiosity),
+                            ("attention", self.attention)):
             if organ is None:
                 continue
             try:
@@ -1047,6 +1115,10 @@ class NJPBrain:
                 self.self_model.load_dict(d["self_model"])
             if d.get("meta") and self.meta is not None:
                 self.meta.load_dict(d["meta"])
+            if d.get("goals") and self.goals is not None:
+                self.goals.load_dict(d["goals"])
+            if d.get("curiosity") and self.curiosity is not None:
+                self.curiosity.load_dict(d["curiosity"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

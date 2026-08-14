@@ -417,6 +417,28 @@ class WorldView:
             return out
 
     # ---- reading ---------------------------------------------------------- #
+    def thin_regions(self, *, limit: int = 8) -> List[Tuple[str, int]]:
+        """Events she has seen, but not often enough to predict anything after them.
+
+        The honest definition of a gap in a causal model: something that *occurs* — so it is real
+        and she has met it — but whose consequences she has too few observations of to say
+        anything about. Events she has never seen at all are not gaps, they are simply outside her
+        experience, and listing those would make curiosity infinite.
+        """
+        out: List[Tuple[str, int]] = []
+        try:
+            for key, count in self._counts.items():
+                if count >= self.min_support * 3:
+                    continue          # seen often enough to have learned something
+                followers = sum((self._pairs.get(key) or {}).values())
+                if followers >= self.min_support:
+                    continue          # already predicts something from here
+                out.append((key, count))
+            out.sort(key=lambda kv: -kv[1])
+            return out[: max(0, int(limit))]
+        except Exception:  # noqa: BLE001
+            return out
+
     def history(self, *, limit: int = 20) -> List[Event]:
         """The most recent events, oldest first — the timeline she actually reasons over."""
         return self.events[-max(1, int(limit)):]

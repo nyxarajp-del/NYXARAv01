@@ -58,6 +58,14 @@ class PulseReport:
     grown: int = 0                    # NEW synapses this beat
     born: int = 0                     # NEW cells this beat
     consolidated: bool = False
+    # The slower timescales. Each is a real pass over a real organ, and each is None/0 when its
+    # cadence was not due — an absent number here means "not this beat", never "nothing happened".
+    memory_promoted: int = 0
+    memory_forgotten: int = 0
+    questions_raised: int = 0
+    abstractions_confirmed: int = 0
+    abstractions_refuted: int = 0
+    dreamed: bool = False
     generation: Optional[int] = None
     evolved: Optional[Dict[str, Any]] = None
     blocked: str = ""                 # non-empty when oversight refused the beat
@@ -66,6 +74,12 @@ class PulseReport:
     def to_dict(self) -> Dict[str, Any]:
         return {"beat": self.beat, "expanded": self.expanded, "grown": self.grown,
                 "born": self.born, "consolidated": self.consolidated,
+                "memory_promoted": self.memory_promoted,
+                "memory_forgotten": self.memory_forgotten,
+                "questions_raised": self.questions_raised,
+                "abstractions_confirmed": self.abstractions_confirmed,
+                "abstractions_refuted": self.abstractions_refuted,
+                "dreamed": self.dreamed,
                 "generation": self.generation, "evolved": self.evolved,
                 "blocked": self.blocked, "ms": round(self.ms, 3)}
 
@@ -74,11 +88,20 @@ class PulseEngine:
     """The continuous beat: expand often, consolidate sometimes, rewrite herself rarely."""
 
     def __init__(self, brain: Any, *, every_s: float = 1.0,
+                 wonder_every_s: float = 30.0, discover_every_s: float = 45.0,
+                 memory_every_s: float = 120.0, dream_every_s: float = 600.0,
                  consolidate_every_s: float = 60.0, evolve_every_s: float = 300.0,
                  queue_capacity: int = 4096, enabled: bool = True) -> None:
         self.brain = brain
         self.every_s = max(0.05, float(every_s))
         self.consolidate_every_s = max(1.0, float(consolidate_every_s))
+        # The slower timescales, fastest-first. Each is slower than the work it summarises:
+        # wondering about gaps is pointless more often than gaps appear, and dreaming over the
+        # same sixteen episodes every second would be replay without any new experience in it.
+        self.wonder_every_s = max(1.0, float(wonder_every_s))
+        self.discover_every_s = max(1.0, float(discover_every_s))
+        self.memory_every_s = max(1.0, float(memory_every_s))
+        self.dream_every_s = max(1.0, float(dream_every_s))
         self.evolve_every_s = max(1.0, float(evolve_every_s))
         self.enabled = bool(enabled)
 
@@ -164,7 +187,36 @@ class PulseEngine:
                         note="pulse")
                     rep.generation = gen.n
 
-            # 3. evolve — one self-rewrite attempt, on the slowest cadence
+            # 3. the slower timescales. Cognition does not run at one rate: perception and
+            # response are immediate, working reasoning is slower, memory consolidation slower
+            # still, and learning-how-to-learn slowest of all. Running these every beat would
+            # make them noise; running them never is what left them decorative.
+            if self._due("wonder", self.wonder_every_s):
+                curiosity = getattr(self.brain, "curiosity", None)
+                if curiosity is not None:
+                    rep.questions_raised = len(curiosity.wonder())
+
+            if self._due("discover", self.discover_every_s):
+                discoverer = getattr(self.brain, "discoverer", None)
+                if discoverer is not None:
+                    found = discoverer.discover()
+                    rep.abstractions_confirmed = found.confirmed
+                    rep.abstractions_refuted = found.refuted
+
+            if self._due("memory", self.memory_every_s):
+                levels = getattr(self.brain, "levels", None)
+                if levels is not None:
+                    moved = levels.consolidate()
+                    rep.memory_promoted = moved.promoted
+                    rep.memory_forgotten = moved.forgotten
+
+            # 4. dream — offline replay on the slowest cadence but one. Recent experience is
+            # re-run so predictions can be tested and contradictions surface without a live turn
+            # riding on the answer. Computational offline simulation; not conscious dreaming.
+            if self._due("dream", self.dream_every_s):
+                rep.dreamed = self._dream()
+
+            # 5. evolve — one self-rewrite attempt, on the slowest cadence
             if self._due("evolve", self.evolve_every_s):
                 evolver = getattr(self.brain, "evolver", None)
                 if evolver is not None:
@@ -181,6 +233,34 @@ class PulseEngine:
             self.last = rep
             return rep
 
+    def _dream(self) -> bool:
+        """Replay recent episodes offline, testing what she would have predicted.
+
+        Deliberately reuses the discoverer and the predictor rather than inventing a replay
+        engine: a "dream" that does not feed the same machinery a waking turn feeds would be a
+        decorative pass that changes nothing.
+        """
+        try:
+            levels = getattr(self.brain, "levels", None)
+            discoverer = getattr(self.brain, "discoverer", None)
+            if levels is None or discoverer is None:
+                return False
+            from nyxara.njp.levels import Level
+
+            replayed = 0
+            for entry in levels.at(Level.EPISODIC)[-16:]:
+                trace = levels.store.recall_key(entry.key) if levels.store else None
+                text = str(getattr(trace, "text", "") or "")
+                if not text:
+                    continue
+                levels.touch(entry.key)      # replay IS rehearsal — that is what it is for
+                replayed += 1
+            if replayed:
+                discoverer.discover()
+            return bool(replayed)
+        except Exception:  # noqa: BLE001 — a failed dream changes nothing
+            return False
+
     def stats(self) -> Dict[str, Any]:
         return {"enabled": self.enabled, "beats": self.beats, "expansions": self.expansions,
                 "queued": len(self.queue), "dropped": self.dropped,
@@ -188,4 +268,9 @@ class PulseEngine:
                 "every_s": self.every_s,
                 "consolidate_every_s": self.consolidate_every_s,
                 "evolve_every_s": self.evolve_every_s,
+                "timescales": {"pulse": self.every_s, "wonder": self.wonder_every_s,
+                               "discover": self.discover_every_s,
+                               "consolidate": self.consolidate_every_s,
+                               "memory": self.memory_every_s, "dream": self.dream_every_s,
+                               "evolve": self.evolve_every_s},
                 "last": self.last.to_dict() if self.last is not None else None}
