@@ -2399,6 +2399,18 @@ class NJPConfig(BaseModel):
     # re-crystallises everything and benchmarks the result.
     meta_cycle_every_turns: int = Field(default=25, ge=1, le=1000)
 
+    # ---- truth is not relevance (njp/relevance.py) ---- #
+    # Speech-act routing + the cognitive relevance gate. OFF restores the previous behaviour
+    # exactly: every turn gets the full recall→reason apparatus and whatever memory was nearest
+    # is attached to the reply — which is how "How are you NYXARA?" was answered with a verified
+    # pendulum-period law. Worth being able to switch, worth naming what switching it off costs.
+    relevance_enabled: bool = True
+    # R(memory | context) a recalled memory must clear before the reasoner may see it at all.
+    # Below this it is not down-weighted, it is not seen: a candidate set is something an
+    # optimiser eventually picks from, especially one that scores candidates by how *verified*
+    # they are. Raising this makes her terser and more literal; lowering it makes her associative.
+    relevance_threshold: float = Field(default=0.22, ge=0.0, le=1.0)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.
