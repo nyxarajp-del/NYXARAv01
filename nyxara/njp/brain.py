@@ -1373,9 +1373,22 @@ class NJPBrain:
 
     @staticmethod
     def _is_echo(thought: NJPThought) -> bool:
-        """Did this turn produce a paraphrase of the question instead of an answer?"""
+        """Did this turn hand the *question* back instead of answering it?
+
+        Scoped to turns that asked something, and that is not a detail. An acknowledgement of a
+        statement — "noted: Sara is a person" — is structurally identical to an echo and is not
+        one: it reports what she recorded, which is how a misparse becomes visible on the turn it
+        happens rather than three turns later. Blanking it (the first version of this did) meant
+        nothing was remembered on any statement turn, so nothing was ever promoted out of
+        episodic memory, and two integration tests that had been green went red. The failure this
+        check exists for is narrower than it first looks: *asked something, got the question
+        back*.
+        """
         try:
             from nyxara.njp.relevance import is_meta_commentary
+            grounding = getattr(thought.percept, "grounding", None)
+            if getattr(grounding, "triples", None):
+                return False        # she recorded something; saying so is not an echo
             return is_meta_commentary(thought.answer, thought.stimulus)
         except Exception:  # noqa: BLE001
             return False
