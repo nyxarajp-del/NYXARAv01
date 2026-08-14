@@ -178,6 +178,7 @@ class NJPBrain:
         self.predictor = self._build_predictor(c)
         self.levels = self._build_levels(c)
         self.discoverer = self._build_discoverer(c)
+        self.reasoner = self._build_reasoner(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -321,6 +322,24 @@ class NJPBrain:
                               min_precision=self._cfg("discover_min_precision", 0.7),
                               max_order=self._cfg("discover_max_order", 3))
         except Exception:  # noqa: BLE001 — she keeps her pairs, and forms no rules above them
+            return None
+
+    def _build_reasoner(self, c: Any) -> Any:
+        """Deliberate reasoning, at a depth the question deserves.
+
+        Associative recall answers instantly and is right about familiar things — and it was the
+        only mode she had, so a reflex and a conclusion were indistinguishable from outside. This
+        adds the deliberate half and, more importantly, the routing between them.
+        """
+        if not self._gate("reason", True):
+            return None
+        try:
+            from nyxara.njp.reason import Reasoner
+            return Reasoner(self,
+                            decide_margin=self._cfg("reason_decide_margin", 0.15),
+                            enough=self._cfg("reason_enough", 0.75),
+                            max_rung=self._cfg("reason_max_rung", "proof"))
+        except Exception:  # noqa: BLE001 — she answers associatively, at one depth, as before
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -920,7 +939,7 @@ class NJPBrain:
                             ("soulsync", self.soul), ("evolve", self.evolver),
                             ("pulse", self.pulse), ("grounding", self.grounder),
                             ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
-                            ("discover", self.discoverer)):
+                            ("discover", self.discoverer), ("reason", self.reasoner)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -946,7 +965,7 @@ class NJPBrain:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
-                            ("discover", self.discoverer)):
+                            ("discover", self.discoverer), ("reason", self.reasoner)):
             if organ is None:
                 continue
             try:

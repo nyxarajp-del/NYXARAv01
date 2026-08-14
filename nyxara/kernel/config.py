@@ -2254,6 +2254,7 @@ class NJPConfig(BaseModel):
     predict_enabled: bool = True                 # predict → observe → diagnose → repair
     levels_enabled: bool = True                  # working/episodic/semantic/procedural/self
     discover_enabled: bool = True                # propose abstractions, then try to falsify them
+    reason_enabled: bool = True                  # the ladder: intuition → … → proof
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2308,6 +2309,16 @@ class NJPConfig(BaseModel):
     # Antecedents per rule. The subset count explodes with this, and a rule with eight
     # antecedents describes one episode rather than a pattern.
     discover_max_order: int = Field(default=3, ge=2, le=8)
+
+    # ---- the reasoning ladder ---- #
+    # How far clear the winner must be before she commits. Two readings at 0.51 and 0.49 are a
+    # tie, and returning the first as an answer would invent a decision she has not made.
+    reason_decide_margin: float = Field(default=0.15, ge=0.0, le=1.0)
+    # Confidence at which a rung is good enough to stop descending. Running a proof engine over
+    # "what is my name" is not being careful, it is being broken.
+    reason_enough: float = Field(default=0.75, ge=0.0, le=1.0)
+    # The deepest rung she may reach: intuition | association | deliberation | verification | proof
+    reason_max_rung: str = "proof"
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark
