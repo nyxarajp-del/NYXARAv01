@@ -176,6 +176,7 @@ class NJPBrain:
         self.grounder = self._build_grounder(c)
         self.world = self._build_world(c)
         self.predictor = self._build_predictor(c)
+        self.levels = self._build_levels(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -285,6 +286,23 @@ class NJPBrain:
                              min_support=self._cfg("world_min_support", 3),
                              min_lift=self._cfg("world_min_lift", 0.15))
         except Exception:  # noqa: BLE001 — she reasons about facts, not about change
+            return None
+
+    def _build_levels(self, c: Any) -> Any:
+        """Five kinds of memory over the one content-addressed store.
+
+        The levels govern durability and promotion, not reachability: recall still reaches
+        everything, so a fact from fifty turns ago stays exactly as findable as the last one.
+        What changes is that a passing greeting and the Master's name no longer decay at the same
+        rate, and a claim that recurs from independent episodes is promoted to a fact.
+        """
+        if not self._gate("levels", True):
+            return None
+        try:
+            from nyxara.njp.levels import HierarchicalMemory
+            return HierarchicalMemory(self.memory,
+                                      forget_below=self._cfg("forget_below", 0.05))
+        except Exception:  # noqa: BLE001 — one undifferentiated pool still works, less well
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -561,13 +579,8 @@ class NJPBrain:
 
             # 6. remember the conclusion, not the question: storing a bare question would make it
             # its own best match and echo back as its own answer.
-            if remember and out.answer and self.memory is not None:
-                try:
-                    self.memory.remember(f"turn-{self.turns}", out.answer,
-                                         kind=("conclusion" if out.verified else "episode"),
-                                         cue=out.stimulus)
-                except Exception:  # noqa: BLE001
-                    pass
+            if remember and out.answer:
+                self._remember_turn(out)
 
             # 7. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
@@ -582,6 +595,45 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _remember_turn(self, thought: NJPThought) -> None:
+        """File this turn's conclusion at the level it belongs to.
+
+        The level is chosen from what the turn was *about*, not from how it was phrased. Anything
+        grounded to the Master or to NYXARA herself is autobiographical and therefore protected —
+        that is the level whose loss would change who she is, so it is not subject to forgetting
+        at all. Everything else is an episode, and becomes semantic only if it recurs.
+        """
+        try:
+            if self.levels is not None:
+                self.levels.remember(
+                    f"turn-{self.turns}", thought.answer,
+                    level=self._level_for(thought), cue=thought.stimulus,
+                    source=f"turn-{self.turns}")
+                return
+            if self.memory is not None:
+                self.memory.remember(f"turn-{self.turns}", thought.answer,
+                                     kind=("conclusion" if thought.verified else "episode"),
+                                     cue=thought.stimulus)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _level_for(thought: NJPThought) -> str:
+        """Which store this conclusion belongs in."""
+        try:
+            from nyxara.njp.grounding import SELF_ENTITY
+            from nyxara.njp.levels import Level
+
+            grounding = getattr(thought.percept, "grounding", None)
+            for triple in (getattr(grounding, "triples", None) or []):
+                subject = str(getattr(triple, "subject", ""))
+                if subject.startswith(SELF_ENTITY) or subject == "NYXARA":
+                    return Level.AUTOBIOGRAPHICAL
+            return Level.EPISODIC
+        except Exception:  # noqa: BLE001
+            from nyxara.njp.levels import Level
+            return Level.EPISODIC
 
     def _expand(self, thought: NJPThought, *, outcome: float) -> Optional[GrowthReport]:
         """Grow on this turn, synchronously, and return what actually changed.
@@ -840,7 +892,7 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("truth", self.truth),
                             ("soulsync", self.soul), ("evolve", self.evolver),
                             ("pulse", self.pulse), ("grounding", self.grounder),
-                            ("world", self.world), ("predict", self.predictor)):
+                            ("world", self.world), ("predict", self.predictor), ("levels", self.levels)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -865,7 +917,7 @@ class NJPBrain:
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
-                            ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor)):
+                            ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels)):
             if organ is None:
                 continue
             try:
@@ -895,6 +947,8 @@ class NJPBrain:
                 self.world.load_dict(d["world"])
             if d.get("predict") and self.predictor is not None:
                 self.predictor.load_dict(d["predict"])
+            if d.get("levels") and self.levels is not None:
+                self.levels.load_dict(d["levels"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

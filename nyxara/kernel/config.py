@@ -2252,6 +2252,7 @@ class NJPConfig(BaseModel):
     concepts_enabled: bool = True                # types discovered from experience, not declared
     world_enabled: bool = True                   # event → state → cause → consequence
     predict_enabled: bool = True                 # predict → observe → diagnose → repair
+    levels_enabled: bool = True                  # working/episodic/semantic/procedural/self
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2291,6 +2292,12 @@ class NJPConfig(BaseModel):
     world_min_support: int = Field(default=3, ge=1, le=1000)
     # And it must beat the rate at which the effect happens anyway: P(effect|cause) − P(effect).
     world_min_lift: float = Field(default=0.15, ge=0.0, le=1.0)
+
+    # ---- memory levels ---- #
+    # Retention below which a memory is dropped. A store that only accumulates degrades: every new
+    # item makes every existing retrieval slightly worse. Autobiographical memory is exempt —
+    # losing it would change who she is, which is not a memory-management decision.
+    forget_below: float = Field(default=0.05, ge=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark
