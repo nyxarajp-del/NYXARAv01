@@ -143,13 +143,24 @@ class Dialogue:
                 return out
             out.surface = self.surface()
             content = str(getattr(thought, "answer", "") or "").strip()
-            out.source = str(getattr(getattr(thought, "winner", None), "source", "") or "")
             out.confidence = float(getattr(thought, "confidence", 0.0))
-            out.decided = bool(getattr(thought, "decided", True))
             out.verified = bool(getattr(thought, "verified", False))
-            out.evidence = list(getattr(getattr(thought, "winner", None), "evidence", []) or [])
-            assessment = getattr(thought, "assessment", None)
-            out.why = list(getattr(assessment, "why", []) or [])
+            # Read the fields an NJPThought actually carries. These four used to be addressed at
+            # `thought.winner` and `thought.assessment` — a shape from the superseded NYX brains
+            # that NJPThought never had, so `getattr(..., None)` silently swallowed every one of
+            # them: source was always "", evidence and why were always empty, and `decided` was
+            # always True however unsure she really was. Silent because they degrade to falsy
+            # rather than raising, which is exactly how a wiring gap survives a test suite.
+            judgement = getattr(thought, "judgement", None)
+            out.source = str(getattr(judgement, "verdict", "") or "")
+            out.evidence = [e.source for e in (getattr(judgement, "evidence", None) or [])
+                            if getattr(e, "supports", False)]
+            out.why = [f"{e.source}: {e.detail}" for e in (getattr(judgement, "evidence", None) or [])
+                       if getattr(e, "detail", "")][:4]
+            # "Decided" is a claim about *her*, not about the gauntlet: an unestablished verdict is
+            # normal (most turns are), whereas two live readings of the instruction mean she
+            # genuinely does not know which question she was asked.
+            out.decided = not bool(getattr(getattr(thought, "intent", None), "ambiguous", False))
             self._read_register(out, thought, brain)
 
             # NYX V.02: when two readings of the instruction are still live, or she was asked
@@ -201,7 +212,12 @@ class Dialogue:
         try:
             if self.soul is None:
                 return None
-            return str(self.soul.voice().system_fragment)
+            # `system_fragment` is a method on VoiceProfile, not a property. Without the call this
+            # stringified the bound method — "<bound method VoiceProfile.system_fragment of ...>" —
+            # and handed *that* to the model as her system prompt. Tolerate both shapes so a
+            # future property does not silently reintroduce the same class of bug.
+            fragment = self.soul.voice().system_fragment
+            return str(fragment() if callable(fragment) else fragment)
         except Exception:  # noqa: BLE001
             return None
 
@@ -247,7 +263,10 @@ class Dialogue:
     def _read_register(reply: Reply, thought: Any, brain: Any) -> None:
         """Record how the turn was written — language and tone — from the tongue, if she has one."""
         try:
-            lingua = getattr(brain, "lingua", None)
+            # `brain.tongue` — NJPBrain names it that (brain.py:166). Reading `brain.lingua` here
+            # meant this returned before it read anything, so every reply came back with no
+            # language and no register however clearly the tongue had identified them.
+            lingua = getattr(brain, "tongue", None)
             stimulus = str(getattr(thought, "stimulus", "") or "")
             if lingua is None or not stimulus:
                 return
@@ -273,10 +292,16 @@ class Dialogue:
         return "\n".join(parts)
 
     def _nothing_to_say(self, thought: Any) -> str:
-        """Nothing reached awareness. Say that, with what she does have — never invent."""
+        """Nothing reached awareness. Say that, with what she does have — never invent.
+
+        The ungrounded concepts are read from the percept's own grounding result. This used to
+        look for ``percept.grounded``, an attribute NJPPercept does not have, so the list was
+        always empty and every silent turn gave the same bare sentence — hiding *which* words she
+        had failed to ground, which is the one detail that makes the admission useful.
+        """
         percept = getattr(thought, "percept", None)
-        grounded = getattr(percept, "grounded", None)
-        ungrounded = list(getattr(grounded, "ungrounded", []) or [])
+        grounded = getattr(percept, "grounding", None)
+        ungrounded = list(getattr(grounded, "ungrounded", None) or [])
         if ungrounded:
             return ("I do not have anything grounded to say about that yet — "
                     f"these are still just words to me: {', '.join(ungrounded[:6])}.")

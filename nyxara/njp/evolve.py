@@ -191,11 +191,16 @@ class SelfEvolver:
     def __init__(self, brain: Any = None, *, ledger: Any = None,
                  settings: Any = None, min_gain: float = 0.05,
                  holdout_samples: int = 8, every_s: float = 300.0,
+                 quality_tolerance: float = 0.02,
                  enabled: bool = True) -> None:
         self.brain = brain
         self.ledger = ledger
         self.settings = settings
         self.min_gain = float(min_gain)
+        # How much self-modelling accuracy an edit may cost while still counting as an improvement.
+        # Small and non-zero: exactly zero would reject edits over measurement noise, and anything
+        # generous turns "no worse" into a formality.
+        self.quality_tolerance = max(0.0, float(quality_tolerance))
         self.holdout_samples = max(2, int(holdout_samples))
         self.every_s = float(every_s)
         self.enabled = bool(enabled)
@@ -298,24 +303,46 @@ class SelfEvolver:
         vocabulary: they are narrow, reviewed, and already trusted by the optimizer's gauntlet.
         Larger refactors are deliberately not attempted here — a plausible-looking rewrite of a
         file she depends on is worse than no rewrite.
+
+        The route to those transforms is the repo's own scanner, not a hand-built stand-in.
+        :class:`~nyxara.growth.self_optimize.EditGenerator` dispatches on ``weakness.id`` (which
+        transform applies) and ``weakness.locus`` (``file:line`` — *where*), so a target it cannot
+        locate is a target it declines. Passing an object carrying ``file``/``module`` instead made
+        every call return ``None``: ``_kind_of`` read a missing ``id``, matched nothing, and the
+        whole advertised self-rewriting path was dead. So the real chain is used —
+        :meth:`~nyxara.growth.self_review.SelfReviewer.review_file` finds concrete findings in the
+        one file that is actually costing her, and :class:`~nyxara.growth.weakness.WeaknessSynthesizer`
+        turns them into ranked ``Weakness`` records with the ``id`` and ``locus`` the generator
+        needs.
+
+        Only ``deterministic`` strategies are taken here. The ``llm`` ones are genuine edits, but
+        they need an authoring model and a wider review than a latency beat should be starting on
+        its own initiative.
         """
         try:
-            from nyxara.growth.self_optimize import EditGenerator, SourceEdit
+            from nyxara.growth.self_optimize import EditGenerator
+            from nyxara.growth.self_review import SelfReviewer
+            from nyxara.growth.weakness import WeaknessSynthesizer
             path = self._module_path(cost.module)
             if path is None or not path.exists():
                 return None
             if is_protected(str(path)):
                 return None
-            before = path.read_text(encoding="utf-8")
-            weakness = type("Weakness", (), {
-                "file": str(path), "path": str(path), "module": cost.module,
-                "kind": "performance",
-                "detail": (f"{cost.module} is the module NJP spends most time in "
-                           f"({cost.mean_ms:.3f} ms mean over {cost.calls} calls)"),
-            })()
-            edit = EditGenerator().generate(weakness)
-            if edit is not None and getattr(edit, "changes", False):
-                return edit
+
+            findings = SelfReviewer().review_file(path)
+            if not findings:
+                return None
+            report = WeaknessSynthesizer().synthesize(
+                code=type("_CodeReport", (), {"findings": findings})())
+            # Severity order, so the worst real defect in the hot file is attempted first.
+            for weakness in report.ranked():
+                if getattr(weakness, "edit_strategy", "") != "deterministic":
+                    continue
+                if is_protected(str(getattr(weakness, "locus", "") or "")):
+                    continue
+                edit = EditGenerator().generate(weakness)
+                if edit is not None and getattr(edit, "changes", False):
+                    return edit
             # Nothing deterministic to change is a real, common outcome — say so by returning
             # None rather than inventing an edit to have something to do.
             return None
@@ -330,8 +357,9 @@ class SelfEvolver:
         that happened to motivate it.
         """
         try:
-            claim = (f"editing {cost.module} makes NJP faster without losing accuracy "
-                     f"(baseline {cost.mean_ms:.4f} ms over {cost.calls} calls)")
+            claim = (f"editing {cost.module} makes NJP faster without losing self-modelling "
+                     f"accuracy (baseline {cost.mean_ms:.4f} ms over {cost.calls} calls, "
+                     f"quality within {self.quality_tolerance:.3f})")
             holdout = self._holdout(cost)
             gauntlet = TruthGauntlet(
                 sources=[PredictiveSource(predictor=self._predict_gain, holdout=holdout,
@@ -341,40 +369,82 @@ class SelfEvolver:
         except Exception:  # noqa: BLE001
             return None
 
-    def _holdout(self, cost: ModuleCost) -> List[Tuple[str, float]]:
-        """Benchmark samples the edit was not tuned against.
+    def _holdout(self, cost: ModuleCost) -> List[Tuple[str, Any]]:
+        """Benchmark samples the edit was not tuned against, each with its pre-edit baseline.
 
         Drawn from the brain's own replay set when it has one; otherwise from the profiler's live
         record. With fewer than two, :class:`PredictiveSource` abstains and the edit is refused —
         which is the correct default, not a gap.
+
+        The baseline is measured **now**, before the edit is applied, and carries capability as
+        well as latency where the brain can report it. Measuring it after would compare the edited
+        code against itself and establish every claim put to it.
         """
         try:
             replay = getattr(self.brain, "replay", None)
+            rich = getattr(self.brain, "measure_capability", None)
             if replay:
-                return [(str(item), cost.mean_ms) for item in list(replay)[: self.holdout_samples]]
+                samples = [str(item) for item in list(replay)[: self.holdout_samples]]
+                if callable(rich):
+                    return [(s, dict(rich(s) or {})) for s in samples]
+                return [(s, cost.mean_ms) for s in samples]
             return [(cost.module, cost.mean_ms)
                     for _ in range(min(self.holdout_samples, max(0, cost.calls // 4)))]
         except Exception:  # noqa: BLE001
             return []
 
     def _predict_gain(self, claim: str, sample: Any) -> bool:
-        """Did this held-out sample actually get faster? Measured, never assumed.
+        """Did this held-out sample get faster **without getting worse**? Measured, never assumed.
 
-        Without a real re-measurement hook this returns False, so the claim fails and the edit is
-        refused. Refusing on absent evidence is the whole design: the alternative is a self-editor
-        that keeps changes it never checked.
+        Two conditions, both required, because either one alone is gameable:
+
+        * **faster** by at least ``min_gain`` — the claim the edit was proposed on;
+        * **no worse at modelling herself**, within ``quality_tolerance``. Speed on its own is a
+          objective a self-editor can satisfy by deleting the work: an edit that returns sooner
+          because it stopped settling properly is *not* an improvement, and without this second
+          reading it would pass the gauntlet and be kept.
+
+        Capability is read through :meth:`~nyxara.njp.brain.NJPBrain.measure_capability` when the
+        brain offers it, and falls back to the latency-only hook for anything that does not. Absent
+        evidence returns False and the edit is refused — the alternative is a self-editor that
+        keeps changes it never checked.
         """
         try:
+            _name, baseline = sample if isinstance(sample, tuple) else (sample, None)
+            if baseline is None:
+                return False
+
+            rich = getattr(self.brain, "measure_capability", None)
+            if callable(rich):
+                after = rich(_name) or {}
+                after_ms = float(after.get("ms", float("inf")))
+                after_quality = float(after.get("quality", 0.0))
+                baseline_ms, baseline_quality = self._baseline_pair(baseline)
+                faster = after_ms <= baseline_ms * (1.0 - self.min_gain)
+                # A baseline quality of 0.0 means "never measured", not "was terrible" — treat it
+                # as no constraint rather than as a bar every edit trivially clears.
+                no_worse = (baseline_quality <= 0.0
+                            or after_quality >= baseline_quality - self.quality_tolerance)
+                return bool(faster and no_worse)
+
             measure = getattr(self.brain, "measure_sample", None)
             if not callable(measure):
                 return False
-            _name, baseline_ms = sample if isinstance(sample, tuple) else (sample, None)
-            if baseline_ms is None:
-                return False
-            after_ms = float(measure(_name))
-            return after_ms <= float(baseline_ms) * (1.0 - self.min_gain)
+            baseline_ms, _ = self._baseline_pair(baseline)
+            return float(measure(_name)) <= baseline_ms * (1.0 - self.min_gain)
         except Exception:  # noqa: BLE001
             return False
+
+    @staticmethod
+    def _baseline_pair(baseline: Any) -> Tuple[float, float]:
+        """``(ms, quality)`` from a holdout baseline, which may carry either or both."""
+        try:
+            if isinstance(baseline, dict):
+                return (float(baseline.get("ms", float("inf"))),
+                        float(baseline.get("quality", 0.0)))
+            return float(baseline), 0.0
+        except Exception:  # noqa: BLE001
+            return float("inf"), 0.0
 
     def apply(self, edit: Any) -> Optional[Any]:
         """Hand the edit to the source gauntlet: backup → checks → keep or byte-exact rollback."""

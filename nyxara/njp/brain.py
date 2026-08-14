@@ -228,11 +228,29 @@ class NJPBrain:
             return None
 
     def _build_voice(self, c: Any) -> Any:
+        """Her voice, with her identity attached to it.
+
+        ``soul`` is passed because :meth:`~nyxara.njp.voice.Dialogue._voice` returns ``None``
+        without it, and a ``None`` voice fragment means the rendering prompt carries no identity
+        at all — a fluent model then phrases her content in its own default register rather than
+        hers. The LLM itself stays lazily resolved inside ``Dialogue`` (it is a ~2.4 GB on-device
+        engine; building the brain must not block on loading it).
+        """
         if not self._gate("voice", True):
             return None
         try:
             from nyxara.njp.voice import Dialogue
-            return Dialogue(max_tokens=self._cfg("reply_max_tokens", 220))
+            return Dialogue(max_tokens=self._cfg("reply_max_tokens", 220),
+                            soul=self._identity_soul())
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _identity_soul() -> Any:
+        """Her identity, for the voice fragment. Absent identity is a plainer voice, never a crash."""
+        try:
+            from nyxara.identity.soul import Soul
+            return Soul()
         except Exception:  # noqa: BLE001
             return None
 
@@ -481,6 +499,32 @@ class NJPBrain:
             return (time.perf_counter() - t0) * 1000.0
         except Exception:  # noqa: BLE001
             return float("inf")
+
+    def measure_capability(self, sample: Any) -> Dict[str, float]:
+        """Re-run one sample and report **both** what it cost and how well she did.
+
+        Speed alone is a bad objective for a self-editor: the fastest version of a mind is the one
+        that stops thinking. So the self-editor is given a capability reading alongside the
+        latency, and an edit that buys milliseconds by making her worse at modelling herself is
+        refused with the same machinery that refuses one that is simply slower.
+
+        ``quality`` is ``1 − surprise`` — how well the settle matched what she predicted of herself
+        before running it. It is the one accuracy signal available without a labelled task, and it
+        is measured on the same replay samples the latency is measured on.
+        """
+        out = {"ms": float("inf"), "quality": 0.0, "cells": 0.0, "synapses": 0.0}
+        try:
+            t0 = time.perf_counter()
+            percept = self.perceive(str(sample), remember=False)
+            out["ms"] = (time.perf_counter() - t0) * 1000.0
+            settled = getattr(percept, "settled", None)
+            if settled is not None:
+                out["quality"] = max(0.0, min(1.0, 1.0 - float(settled.surprise)))
+            out["cells"] = float(self.fabric.n_cells)
+            out["synapses"] = float(self.fabric.n_synapses)
+            return out
+        except Exception:  # noqa: BLE001
+            return out
 
     # ---- the beat --------------------------------------------------------- #
     def tick(self, *, oversight: Any = None) -> Dict[str, Any]:
