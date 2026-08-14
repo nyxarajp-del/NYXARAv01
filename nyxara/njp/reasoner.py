@@ -64,6 +64,7 @@ class NJPReasoner:
         self.annotated = 0
         self.tempered = 0
         self.proposed_tools = 0
+        self.vetoed = 0
 
     def __call__(self, stimulus: str, focus: Any = None, *args: Any, **kwargs: Any) -> Any:
         candidate = self.base(stimulus, focus, *args, **kwargs)
@@ -91,6 +92,16 @@ class NJPReasoner:
             if not thought.assertable:
                 self.annotated += 1
                 return self._temper(candidate, thought)
+
+            # Her own record can veto a takeover outright. A faculty this answer rests on that she
+            # is *measurably* poor at means the claim is not hers to state as fact, however
+            # confident the gauntlet's number looks — the number describes the claim, not the
+            # organ that produced it. This is the self-model with teeth: it stops being a report
+            # and starts deciding what she is entitled to say.
+            weak = self._weak_faculties(thought)
+            if weak:
+                self.vetoed += 1
+                return self._temper(candidate, thought, weak=weak)
 
             base_conf = float(getattr(candidate, "confidence", 0.0) or 0.0)
             if thought.confidence < max(self.min_confidence, base_conf):
@@ -125,7 +136,18 @@ class NJPReasoner:
             pass
         return candidate
 
-    def _temper(self, candidate: Any, thought: Any) -> Any:
+    def _weak_faculties(self, thought: Any) -> list:
+        """Faculties this answer rests on that her own counts say are unreliable."""
+        try:
+            model = getattr(self.brain, "self_model", None)
+            if model is None:
+                return []
+            kind = str(getattr(getattr(thought, "intent", None), "kind", "") or "question")
+            return list(model.unreliable_for(kind))
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _temper(self, candidate: Any, thought: Any, *, weak: Optional[list] = None) -> Any:
         """Discount a confident-looking reply by how unfamiliar the turn actually was to her.
 
         This is the seat's most important behaviour and it only ever moves confidence **down**.
@@ -143,11 +165,23 @@ class NJPReasoner:
         """
         try:
             percept = getattr(thought, "percept", None)
-            if percept is None:
-                return self._set(candidate, rationale=self._rationale(thought, took_over=False))
+            if weak:
+                note = (self._rationale(thought, took_over=False)
+                        + f"; not asserted — measurably unreliable at: {', '.join(weak)}")
+                if percept is None:
+                    return self._set(candidate, rationale=note)
             base_conf = float(getattr(candidate, "confidence", 0.0) or 0.0)
             factor = max(0.0, 1.0 - float(percept.novelty) * self.novelty_damping)
             tempered = base_conf * factor
+            if weak:
+                # A weak faculty caps the reported confidence as well as blocking the takeover:
+                # letting the base's number stand would leak the same over-confidence downstream
+                # through a different field.
+                self.tempered += 1
+                return self._set(candidate, confidence=min(tempered, 0.4),
+                                 rationale=(self._rationale(thought, took_over=False,
+                                                            novelty=percept.novelty)
+                                            + f"; unreliable at: {', '.join(weak)}"))
             if tempered < base_conf:
                 self.tempered += 1
                 return self._set(candidate, confidence=tempered,
@@ -218,5 +252,6 @@ class NJPReasoner:
     def stats(self) -> dict:
         return {"turns": self.turns, "took_over": self.took_over,
                 "annotated": self.annotated, "tempered": self.tempered,
+                "vetoed_by_self_model": self.vetoed,
                 "proposed_tools": self.proposed_tools,
                 "takeover_rate": round(self.took_over / self.turns, 4) if self.turns else None}

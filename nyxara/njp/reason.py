@@ -189,17 +189,26 @@ class Reasoner:
         self.undecided = 0
 
     # ---- the routing decision ---------------------------------------------- #
-    def depth_for(self, *, uncertainty: float, stakes: float = 0.5) -> str:
+    def depth_for(self, *, uncertainty: float, stakes: float = 0.5,
+                  task: str = "question") -> str:
         """How deep this question warrants going, before any work is done.
 
-        Both inputs matter and they are not interchangeable. High uncertainty on a trivial
-        question is not worth a proof; low uncertainty on a load-bearing one still is, because the
-        cost of being confidently wrong scales with what depends on it.
+        Three inputs, and they are not interchangeable. High uncertainty on a trivial question is
+        not worth a proof; low uncertainty on a load-bearing one still is, because the cost of
+        being confidently wrong scales with what depends on it.
+
+        The third is **her own measured competence**. A faculty this task leans on that she is
+        demonstrably poor at forces a deeper rung, because a shallow rung *is* a reflex, and a
+        reflex from a faculty that is wrong most of the time is the single most dangerous output
+        this system can produce. That reading comes from counts in
+        :class:`~nyxara.njp.selfmodel.SelfModel`, not from a mood — and it is what makes the
+        self-model consequential rather than a report nobody acts on.
         """
         try:
             uncertainty = max(0.0, min(1.0, float(uncertainty)))
             stakes = max(0.0, min(1.0, float(stakes)))
             demand = uncertainty * 0.6 + stakes * 0.4
+            demand = min(1.0, demand + self._incompetence_penalty(task))
             if demand < 0.2:
                 target = Rung.INTUITION
             elif demand < 0.4:
@@ -214,9 +223,26 @@ class Reasoner:
         except Exception:  # noqa: BLE001
             return Rung.ASSOCIATION
 
+    def _incompetence_penalty(self, task: str) -> float:
+        """How much deeper her own record says this task should be taken.
+
+        Only faculties that are *measurably* weak count. An untested faculty is not a weak one,
+        and letting inexperience deepen every search would make a cold brain grind through a proof
+        engine for "what is my name".
+        """
+        try:
+            model = getattr(self.brain, "self_model", None)
+            if model is None:
+                return 0.0
+            weak = model.unreliable_for(task)
+            return min(0.4, 0.2 * len(weak))
+        except Exception:  # noqa: BLE001
+            return 0.0
+
     # ---- the pass ----------------------------------------------------------- #
     def reason(self, problem: str, *, candidates: Optional[Sequence[Hypothesis]] = None,
-               uncertainty: float = 0.5, stakes: float = 0.5) -> Conclusion:
+               uncertainty: float = 0.5, stakes: float = 0.5,
+               task: str = "question") -> Conclusion:
         """Work the problem, descending only as far as it needs.
 
         The loop stops the moment an answer is good enough, which is what makes the ladder worth
@@ -229,7 +255,7 @@ class Reasoner:
             state.turns += 1
             self.passes += 1
 
-            target = self.depth_for(uncertainty=uncertainty, stakes=stakes)
+            target = self.depth_for(uncertainty=uncertainty, stakes=stakes, task=task)
             for hypothesis in (candidates or []):
                 self.propose(state, hypothesis)
 
