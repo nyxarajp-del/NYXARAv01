@@ -124,6 +124,11 @@ class NJPThought:
     # What closing the learning loop behind this turn actually changed. `None` when the
     # integration layer is switched off, which is a different thing from "it changed nothing".
     loop: Any = None
+    # What the Recursive Cognitive Field did with this turn: concepts formed, error diagnosed,
+    # and whether the diagnosis called for a coefficient or for restructuring what she can
+    # represent. `trial` is set only on the turns loop 2 comes round.
+    field: Any = None
+    trial: Any = None
 
     @property
     def confidence(self) -> float:
@@ -150,6 +155,8 @@ class NJPThought:
                 "judgement": self.judgement.to_dict() if self.judgement else None,
                 "growth": self.growth.to_dict() if self.growth else None,
                 "loop": self.loop.to_dict() if self.loop is not None else None,
+                "field": self.field.to_dict() if self.field is not None else None,
+                "trial": self.trial.to_dict() if self.trial is not None else None,
                 "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
@@ -202,9 +209,22 @@ class NJPBrain:
         self.soul = self._build_soul(c)
         self.evolver = self._build_evolver(c)
         self.pulse = self._build_pulse(c)
+        # ---- NJP V.04: the Recursive Cognitive Field and the organs it drives ---- #
+        # Concepts she invents rather than is given; a simulated universe she can intervene on;
+        # an experiment designer that measures information gain; and a belief ledger where every
+        # claim carries its own case. Built before `loop` and `field` because both read them.
+        self.genesis = self._build_concepts(c)
+        self.universe = self._build_universe(c)
+        self.designer = self._build_designer(c)
+        self.beliefs = self._build_beliefs(c)
+        self.metareason = self._build_metareason(c)
         # Last, because it registers repairs against organs built above it and reads them on
         # every turn. Without it the organs are all present and none of them hear from each other.
         self.loop = self._build_loop(c)
+        # After the loop, for the same reason the loop comes after `expand`: the field's
+        # self-critic reads the error the loop just scored, and a field that ran before it would
+        # be diagnosing the previous turn's mistake.
+        self.field = self._build_field(c)
 
     # ---- construction ----------------------------------------------------- #
     def _gate(self, name: str, default: bool = True) -> bool:
@@ -663,6 +683,161 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — without it the organs never close the loop
             return None
 
+    # ---- NJP V.04 organs ---------------------------------------------------- #
+    def _build_concepts(self, c: Any) -> Any:
+        """Concept Genesis: kinds invented from observations, and the compression they buy."""
+        if not self._gate("concepts", True):
+            return None
+        try:
+            from nyxara.njp.concepts import ConceptGenesis
+            return ConceptGenesis(
+                min_members=self._cfg("concept_min_members", 2),
+                similarity=self._cfg("concept_similarity", 0.34),
+                invariant_share=self._cfg("concept_invariant_share", 0.6),
+                cover=self._cfg("concept_cover", 0.45))
+        except Exception:  # noqa: BLE001 — without it she has facts and no kinds
+            return None
+
+    def _build_universe(self, c: Any) -> Any:
+        """The internal simulation universe. Takes the world model as its causal skeleton."""
+        if not self._gate("universe", True):
+            return None
+        try:
+            from nyxara.njp.universe import InternalUniverse
+            return InternalUniverse(world=self.world,
+                                    max_depth=self._cfg("universe_depth", 6))
+        except Exception:  # noqa: BLE001 — without it she can remember but not imagine
+            return None
+
+    def _build_designer(self, c: Any) -> Any:
+        """Curiosity as information gain: the experiment that most separates her hypotheses."""
+        if not self._gate("designer", True):
+            return None
+        try:
+            from nyxara.njp.universe import ExperimentDesigner
+            return ExperimentDesigner()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_beliefs(self, c: Any) -> Any:
+        """Self-model 2.0: one record per belief, carrying its own evidence and falsifier."""
+        if not self._gate("beliefs", True):
+            return None
+        try:
+            from nyxara.njp.beliefs import BeliefLedger
+            return BeliefLedger(self_model=self.self_model)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_metareason(self, c: Any) -> Any:
+        """Meta-reasoning: which way of thinking this problem calls for, learned from outcomes.
+
+        The strategies are bound to organs this brain already has, so nothing here re-implements
+        reasoning — it decides which existing reasoner runs. A strategy whose organ is absent is
+        simply not registered, and the chooser then has one fewer option rather than a broken one.
+        """
+        if not self._gate("metareason", True):
+            return None
+        try:
+            from nyxara.njp.metareason import MetaReasoner, ProblemKind
+            meta = MetaReasoner(meta_learner=self.meta, beliefs=self.beliefs, world=self.world)
+            if self.ladder is not None or self.reasoner is not None:
+                meta.register("ladder", (ProblemKind.SYMBOLIC, ProblemKind.CONTRADICTION),
+                              self._strategy_ladder, prior=0.6)
+            if self.world is not None:
+                meta.register("causal", (ProblemKind.CAUSAL,), self._strategy_causal, prior=0.6)
+            if self.universe is not None:
+                meta.register("simulate", (ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
+                              self._strategy_simulate, prior=0.5)
+            if self.grounder is not None:
+                meta.register("recall", (ProblemKind.FACTUAL,), self._strategy_recall, prior=0.7)
+            if self.self_model is not None or self.beliefs is not None:
+                meta.register("introspect", (ProblemKind.INTROSPECTIVE,),
+                              self._strategy_introspect, prior=0.6)
+            if self.designer is not None:
+                meta.register("experiment", (ProblemKind.EMPIRICAL,),
+                              self._strategy_experiment, prior=0.4)
+            return meta
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_field(self, c: Any) -> Any:
+        """The Recursive Cognitive Field — both loops, over the organs built above."""
+        if not self._gate("field", True):
+            return None
+        try:
+            from nyxara.njp.field import RecursiveCognitiveField
+            return RecursiveCognitiveField(
+                self, concepts=self.genesis, universe=self.universe,
+                designer=self.designer, beliefs=self.beliefs, meta=self.metareason,
+                crystallise_every=self._cfg("crystallise_every_turns", 4),
+                meta_every=self._cfg("meta_cycle_every_turns", 25))
+        except Exception:  # noqa: BLE001 — without it the new organs never learn from each other
+            return None
+
+    # ---- the strategies the meta-reasoner chooses between --------------------- #
+    def _strategy_recall(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            answer = self.grounder.answer(problem) if self.grounder is not None else None
+            return getattr(answer, "text", None) or getattr(answer, "object", None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_causal(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            subject = str(ctx.get("subject") or "").strip().lower()
+            if not subject or self.world is None:
+                return None
+            why = self.world.why(subject)
+            if not getattr(why, "explained", False):
+                return None
+            return ", ".join(c.cause for c in getattr(why, "causes", [])[:3])
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_simulate(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            variable = str(ctx.get("variable") or "").strip().lower()
+            if not variable or self.universe is None:
+                return None
+            out = self.universe.what_if(variable, ctx.get("value", 0.0))
+            if not out.answerable:
+                return None
+            return "; ".join(f"{d.variable}={d.after:.3f}" for d in out.changed()[:3])
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            if self.reasoner is None:
+                return None
+            conclusion = self.reasoner.reason(problem)
+            return getattr(conclusion, "claim", None) or getattr(conclusion, "answer", None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_introspect(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            if self.beliefs is None:
+                return None
+            unknown = self.beliefs.unknown()
+            known = self.beliefs.known()
+            return (f"{len(known)} beliefs held with evidence, "
+                    f"{len(unknown)} open or unsupported")
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_experiment(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        try:
+            if self.designer is None:
+                return None
+            experiment = self.designer.design()
+            if experiment is None:
+                return None
+            return f"run {experiment.name} (expected gain {experiment.gain:.3f} bits)"
+        except Exception:  # noqa: BLE001
+            return None
+
     def attach_kernel(self, *, tools: Any = None, knowledge: Any = None,
                       core: Any = None, graph: Any = None) -> None:
         """Take the live toolset, knowledge base and organs the kernel already builds.
@@ -831,14 +1006,18 @@ class NJPBrain:
             if self.attention is not None:
                 out.focus = self.attention.attend(out)
 
-            # 8. an episode for the discoverer: what was present, and what she concluded. This
+            # 8. an episode for the discoverer: what was present, and what followed from it. This
             # is the raw material abstractions are proposed from — one episode is never a
             # pattern, which is exactly why it is only recorded here and judged elsewhere.
-            if self.discoverer is not None and out.percept is not None and out.answer:
-                try:
-                    self.discoverer.observe(out.percept.concepts[:8], out.answer[:60])
-                except Exception:  # noqa: BLE001
-                    pass
+            #
+            # The consequent used to be `out.answer` and *only* `out.answer`, which meant that
+            # every turn in which the Master stated something rather than asked something
+            # recorded no episode at all. Measured over a 20-turn session of plain statements:
+            # 3 episodes, 0 abstractions, compression 1.0 — the compressor was being starved,
+            # not failing. A statement is the better raw material of the two: "aag se garmi" is
+            # an antecedent and a consequent already, whereas an answer is something she said.
+            if self.discoverer is not None and out.percept is not None:
+                self._observe_episodes(out)
 
             # 9. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
@@ -852,6 +1031,19 @@ class NJPBrain:
             if self.loop is not None:
                 out.loop = self.loop.close(out)
 
+            # 11. THE FIELD — form concepts from what was grounded, keep the simulated universe
+            # in step with the causal skeleton, and put this turn's error through the self-critic
+            # that decides between adjusting a coefficient and **restructuring what she can
+            # represent at all**. After the loop, because the critic reads the error the loop
+            # just scored; a field that ran before it would be diagnosing the previous turn.
+            if self.field is not None:
+                out.field = self.field.cycle(out)
+                # Loop 2 on its own slower count: evaluate herself, find what is limiting her,
+                # propose one bounded change, and let a held-out benchmark decide whether it
+                # survives. Reverted unless it strictly wins.
+                if self.field.due_for_meta():
+                    out.trial = self.field.meta_cycle()
+
             out.ms = (time.perf_counter() - t0) * 1000.0
             if self.ledger is not None:
                 self.ledger.observe_latency(out.ms)
@@ -862,6 +1054,43 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _observe_episodes(self, thought: NJPThought) -> None:
+        """Everything this turn offers the compressor, as ``antecedents → consequent`` episodes.
+
+        Three sources, in decreasing order of how directly they state a regularity:
+
+        1. **Grounded relations.** ``(subject, predicate, object)`` is already the shape the
+           discoverer wants — the subject and predicate are the condition, the object is what
+           follows. This is the source that was missing entirely.
+        2. **Stated laws.** A causal triple is the same thing said outright, and worth recording
+           under the bare cause as well, so "aag" alone becomes predictive of "garmi".
+        3. **Her own conclusion**, when she reached one. Kept last and kept honest: what she
+           concluded is evidence about her, not about the world, so it never displaces (1).
+        """
+        try:
+            percept = thought.percept
+            concepts = list(getattr(percept, "concepts", ()) or [])[:8]
+            grounding = getattr(percept, "grounding", None)
+            seen = 0
+            for triple in (getattr(grounding, "triples", None) or [])[:4]:
+                subject = str(getattr(triple, "subject", "") or "").strip().lower()
+                predicate = str(getattr(triple, "predicate", "") or "").strip().lower()
+                obj = str(getattr(triple, "object", "") or "").strip().lower()
+                if not subject or not predicate:
+                    continue
+                consequent = obj or predicate
+                antecedents = [subject, predicate] if obj else [subject]
+                self.discoverer.observe(antecedents, consequent)
+                seen += 1
+                # The cause on its own, so a regularity can be found over the cause rather than
+                # only over the exact sentence that stated it.
+                if obj and predicate in ("causes", "produces", "requires"):
+                    self.discoverer.observe([subject], consequent)
+            if not seen and concepts and thought.answer:
+                self.discoverer.observe(concepts, thought.answer[:60])
+        except Exception:  # noqa: BLE001 — a missed episode costs one sample, never the turn
+            pass
 
     def _prepare_evidence(self, thought: NJPThought) -> None:
         """Lay out what the gauntlet may read about *this* claim, and nothing else.
@@ -937,10 +1166,31 @@ class NJPBrain:
         again later and what stops her re-proposing a hypothesis already rejected.
         """
         try:
-            if self.reasoner is None:
-                return
             grounding = getattr(thought.percept, "grounding", None)
             if grounding is None or not getattr(grounding, "is_question", False):
+                return
+
+            # Choose *how* to think before thinking. The ladder is one strategy among several and
+            # it is the wrong one for a causal question or an empirical one — it was previously
+            # the only one, so every unanswered question got the same descent regardless of what
+            # kind of question it was. The meta-reasoner classifies first, picks the strategy
+            # that has actually been working for that kind, criticises what comes back, and takes
+            # a second opinion when the classification is close or the critic is unhappy.
+            if self.metareason is not None:
+                triples = list(getattr(grounding, "triples", None) or [])
+                context = {
+                    "grounded": bool(triples),
+                    "subject": (str(getattr(triples[0], "subject", "")) if triples else ""),
+                    "about_self": bool(getattr(thought.intent, "about_self", False)),
+                }
+                solution = self.metareason.solve(thought.stimulus, context=context)
+                if solution.assertable and solution.answer:
+                    thought.answer = str(solution.answer)
+                    return
+                # Not assertable is not nothing: the critic's defects are why she is not saying
+                # it, and they are the honest content of an unanswered turn.
+
+            if self.reasoner is None:
                 return
             novelty = float(getattr(thought.percept, "novelty", 0.5) or 0.5)
             conclusion = self.reasoner.reason(
@@ -1280,7 +1530,10 @@ class NJPBrain:
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
                             ("attention", self.attention), ("readout", self.readout),
-                            ("loop", self.loop)):
+                            ("loop", self.loop),
+                            ("concepts", self.genesis), ("universe", self.universe),
+                            ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("metareason", self.metareason), ("field", self.field)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -1309,7 +1562,10 @@ class NJPBrain:
                             ("discover", self.discoverer), ("reason", self.reasoner),
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
-                            ("attention", self.attention), ("readout", self.readout)):
+                            ("attention", self.attention), ("readout", self.readout),
+                            ("concepts", self.genesis), ("universe", self.universe),
+                            ("designer", self.designer), ("beliefs", self.beliefs),
+                            ("metareason", self.metareason), ("field", self.field)):
             if organ is None:
                 continue
             try:
@@ -1355,5 +1611,13 @@ class NJPBrain:
                 self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
+            # The V.04 organs. `concepts` rebuilds its whole hierarchy from the restored
+            # observations rather than trusting a stored one, so a sidecar written by an older
+            # clustering cannot resurrect concepts the current rules would never form.
+            for key, organ in (("concepts", self.genesis), ("universe", self.universe),
+                               ("designer", self.designer), ("beliefs", self.beliefs),
+                               ("metareason", self.metareason), ("field", self.field)):
+                if d.get(key) and organ is not None:
+                    organ.load_dict(d[key])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain
             pass
