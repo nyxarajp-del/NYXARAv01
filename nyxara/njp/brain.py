@@ -121,6 +121,9 @@ class NJPThought:
     # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
     epistemic: str = "unknown"
     epistemic_confidence: float = 0.0
+    # What closing the learning loop behind this turn actually changed. `None` when the
+    # integration layer is switched off, which is a different thing from "it changed nothing".
+    loop: Any = None
 
     @property
     def confidence(self) -> float:
@@ -146,6 +149,7 @@ class NJPThought:
                 "intent": self.intent.to_dict() if hasattr(self.intent, "to_dict") else None,
                 "judgement": self.judgement.to_dict() if self.judgement else None,
                 "growth": self.growth.to_dict() if self.growth else None,
+                "loop": self.loop.to_dict() if self.loop is not None else None,
                 "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
@@ -159,6 +163,11 @@ class NJPBrain:
         self.tools: Any = None
         self.knowledge: Any = None
         self.replay: List[str] = []
+        # What the gauntlet reads off this brain when it judges a claim. Refreshed per turn by
+        # `_prepare_evidence`; both are empty between turns, which is why an ungrounded claim
+        # gets no support rather than stale support from a previous one.
+        self.observations: List[str] = []
+        self.holdout: List[Any] = []
         # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
         # which this one does — so three threads call think() on this same object at once. A
         # fabric is one organism: two thoughts rewiring it simultaneously corrupt the adjacency
@@ -193,6 +202,9 @@ class NJPBrain:
         self.soul = self._build_soul(c)
         self.evolver = self._build_evolver(c)
         self.pulse = self._build_pulse(c)
+        # Last, because it registers repairs against organs built above it and reads them on
+        # every turn. Without it the organs are all present and none of them hear from each other.
+        self.loop = self._build_loop(c)
 
     # ---- construction ----------------------------------------------------- #
     def _gate(self, name: str, default: bool = True) -> bool:
@@ -554,14 +566,57 @@ class NJPBrain:
             return None
 
     def _build_truth(self, c: Any) -> Optional[TruthGauntlet]:
+        """The gauntlet, wired to evidence it can actually read.
+
+        It was built with its default sources and nothing else, and the defaults are inert by
+        design: :class:`~nyxara.njp.truth.PredictiveSource` needs a ``predictor`` and held-out
+        samples, and :class:`~nyxara.njp.truth.ObservationSource` reads ``context.observations``.
+        The brain supplied neither, so **no source could ever support a claim** — only refute one.
+        Measured over 113 turns: 108 claims judged, 0 established, and that zero was widely
+        readable as "she is being appropriately strict" when it actually meant the strictness was
+        never tested. A gate that cannot pass anything is not a gate, it is a wall.
+        """
         if not self._gate("truth", True):
             return None
         try:
-            return TruthGauntlet(min_sources=self._cfg("truth_min_sources", 2),
-                                 require_hard=self._cfg("truth_require_hard", True),
-                                 ledger=self.ledger)
+            from nyxara.njp.truth import (ConsistencySource, FormalSource, LedgerSource,
+                                          ObservationSource, PredictiveSource)
+            return TruthGauntlet(
+                sources=[
+                    FormalSource(),
+                    PredictiveSource(predictor=self._claim_survives,
+                                     min_samples=self._cfg("truth_min_holdout", 2)),
+                    ConsistencySource(),
+                    LedgerSource(ledger=self.ledger),
+                    ObservationSource(),
+                ],
+                min_sources=self._cfg("truth_min_sources", 2),
+                require_hard=self._cfg("truth_require_hard", True),
+                ledger=self.ledger)
         except Exception:  # noqa: BLE001 — without it nothing is verified, and nothing claims to be
             return None
+
+    @staticmethod
+    def _claim_survives(claim: str, sample: Any) -> bool:
+        """Does the claim agree with one **withheld** assertion of the same fact?
+
+        The samples handed to this are restatements of the very ``(subject, predicate)`` the claim
+        is about, drawn from turns *other* than the one that produced the claim — see
+        :meth:`_prepare_evidence`. So each is a genuine test: the claim was formed without it, and
+        it can disagree.
+
+        This is corroboration by independent restatement, not proof, and it is counted as *hard*
+        for the one reason the gauntlet cares about — it can be **surprised**. If the Master said
+        "Jay" once and "Raj" twice afterwards, the withheld samples disagree with the claim and
+        the source refutes it rather than shrugging. That is the same evidence standard
+        :meth:`nyxara.njp.levels.MemoryLevels.consolidate` already uses to promote an episode to
+        semantic memory, applied to the question of what she may state as fact.
+        """
+        try:
+            obj = str(getattr(sample, "object", "") or "").strip().lower()
+            return bool(obj) and obj in str(claim or "").lower()
+        except Exception:  # noqa: BLE001
+            return False
 
     def _build_soul(self, c: Any) -> Optional[SoulSync]:
         if not self._gate("soulsync", True):
@@ -591,6 +646,21 @@ class NJPBrain:
                                consolidate_every_s=self._cfg("consolidate_every_s", 60.0),
                                evolve_every_s=self._cfg("evolve_every_s", 300.0))
         except Exception:  # noqa: BLE001 — without it she grows only when spoken to
+            return None
+
+    def _build_loop(self, c: Any) -> Any:
+        """The integration layer: what makes the organs learn from each other rather than sit."""
+        if not self._gate("loop", True):
+            return None
+        try:
+            from nyxara.njp.integrate import LearningLoop
+            return LearningLoop(
+                self,
+                consolidate_every=self._cfg("consolidate_every_turns", 8),
+                discover_every=self._cfg("discover_every_turns", 12),
+                wonder_every=self._cfg("wonder_every_turns", 16),
+                train=self._cfg("train_readout", True))
+        except Exception:  # noqa: BLE001 — without it the organs never close the loop
             return None
 
     def attach_kernel(self, *, tools: Any = None, knowledge: Any = None,
@@ -697,6 +767,13 @@ class NJPBrain:
                 return out
             self.turns += 1
             out.cycle_id = f"njp-{self.turns}"
+            # Cleared at the top of the turn rather than only before a judgement, so the pools are
+            # never a turn out of date. `_prepare_evidence` runs just before the gauntlet and so
+            # nothing has ever *read* stale evidence — but leaving the previous turn's facts
+            # sitting on the brain makes the invariant unverifiable from outside, and an invariant
+            # nobody can check is one that quietly stops holding.
+            self.observations = []
+            self.holdout = []
 
             # 1. the Master's unsaid half, and what was actually asked
             if self.soul is not None:
@@ -711,21 +788,37 @@ class NJPBrain:
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
             out.answer = self._compose(out)
             self._set_epistemic(out)
-            # Register what she just committed to, so `resolve()` has something to score it
-            # against. Registered even when the answer is empty: "I don't know" is a real
-            # prediction about the world and being wrong about it is a real, diagnosable miss.
-            if self.predictor is not None:
-                try:
-                    self.predictor.predict(
-                        out.stimulus, out.answer or "<unknown>",
-                        confidence=out.epistemic_confidence,
-                        organ=("grounding" if getattr(
-                            getattr(out.percept, "grounding", None), "answer", None) else "fabric"))
-                except Exception:  # noqa: BLE001
-                    pass
+            # What she committed to is registered by :mod:`nyxara.njp.integrate`, not here.
+            #
+            # This used to call ``predictor.predict(out.stimulus, out.answer)`` directly, and the
+            # key was the raw stimulus — so the only thing that could ever have scored it was the
+            # identical sentence arriving again with the truth attached, which never happens.
+            # Measured over 113 turns: 113 predictions registered, 0 scored, and an "open" queue
+            # that only ever grew. A prediction that cannot in principle be observed is not a
+            # prediction; it is a counter going up.
+            #
+            # The loop registers two kinds that CAN be resolved: the manifold's pre-settle
+            # anticipation, scored against what actually fired microseconds later, and an unanswered
+            # question keyed on ``(subject, predicate)`` so the Master's later statement of that
+            # very fact is what grades it.
+
+            # 4b. DELIBERATE — a question that structure could not answer gets the ladder.
+            #
+            # Gated on "asked, and grounding came back empty" for a reason: descending five rungs
+            # for a question the graph answered outright is the "runs a proof engine over what is
+            # my name" failure the ladder module names in its own docstring. This way the
+            # reasoner can only ever add an answer where there was none, never overwrite one.
+            #
+            # Before this, `reason.passes` was 0 on every session — the ladder, the problem
+            # states, the rejected-hypothesis memory and the debate were all reachable only from
+            # tests. Curiosity's known-unknown gap reads `reasoner.problems`, so an unwired
+            # reasoner also meant she could never notice a question she had failed to answer.
+            if not out.answer:
+                self._deliberate(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
+                self._prepare_evidence(out)
                 out.judgement = self.truth.judge(out.answer, context=self)
 
             # 6. remember the conclusion, not the question: storing a bare question would make it
@@ -750,6 +843,15 @@ class NJPBrain:
             # 9. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
 
+            # 10. CLOSE THE LOOP — score what was predicted, diagnose what missed, route the
+            # repair to the organ that owns it, grade the faculties this turn exercised, take a
+            # gradient step, and run the slow organs when their turn-count comes round.
+            #
+            # After expand, deliberately: the growth report is part of what the turn produced, and
+            # a loop that ran before it would be scoring a fabric state that no longer exists.
+            if self.loop is not None:
+                out.loop = self.loop.close(out)
+
             out.ms = (time.perf_counter() - t0) * 1000.0
             if self.ledger is not None:
                 self.ledger.observe_latency(out.ms)
@@ -760,6 +862,94 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _prepare_evidence(self, thought: NJPThought) -> None:
+        """Lay out what the gauntlet may read about *this* claim, and nothing else.
+
+        Two pools, and the difference between them is the difference between soft and hard:
+
+        * :attr:`observations` — the independent record that bears on the claim. Grounded facts
+          and world events, **excluding the assertion this very turn just made**. Without that
+          exclusion a statement would corroborate itself: she would ground "my name is Jay",
+          immediately find "Master has_name Jay" in the record, and report that an outside source
+          agreed with her. One source counted twice is not two sources.
+        * :attr:`holdout` — restatements of the exact ``(subject, predicate)`` the claim is about,
+          from turns other than the one that produced it. These are withheld in the sense the
+          gauntlet requires: the claim was formed without them and they are free to disagree.
+
+        Both are cleared first. A claim she has no evidence about must come out of the gauntlet as
+        a conjecture, and leaving the previous turn's evidence lying around would quietly
+        establish it against facts that have nothing to do with it.
+        """
+        self.observations = []
+        self.holdout = []
+        try:
+            grounder = self.grounder
+            if grounder is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            mine = (getattr(grounding, "triples", None) or [])
+            # Excluded by **identity**, not by value. Excluding every triple that happens to say
+            # the same thing would throw away the Master's independent earlier statements of it,
+            # which are the only corroboration a restated fact can ever have.
+            current = {id(t) for t in mine}
+
+            for triples in grounder.facts.values():
+                for triple in triples:
+                    if triple.superseded or id(triple) in current:
+                        continue
+                    # The surface the Master actually wrote, where it was kept. That is what an
+                    # "independent recorded observation" is; the rendered triple is her own
+                    # paraphrase of it, and it also overlaps a short answer far worse — "Jay"
+                    # against "Master has_name Jay" scores 0.33 and misses the floor by a hair.
+                    self.observations.append(str(triple.text or "").strip() or
+                                             f"{triple.subject} {triple.predicate} {triple.object}")
+
+            # The held-out half: other assertions of whatever this turn is actually about.
+            for triple in mine:
+                key = (triple.subject.lower(), triple.predicate)
+                for prior in grounder.facts.get(key, []):
+                    if id(prior) not in current and not prior.superseded:
+                        self.holdout.append(prior)
+            # A question is about a fact she is reporting rather than asserting; the answer's own
+            # supporting triples are what it rests on, so their restatements are the held-out set.
+            answer = getattr(grounding, "answer", None)
+            for triple in (getattr(answer, "triples", None) or []):
+                key = (triple.subject.lower(), triple.predicate)
+                self.holdout.extend(t for t in grounder.facts.get(key, []) if not t.superseded)
+
+            self.observations = self.observations[:256]
+            self.holdout = self.holdout[:64]
+        except Exception:  # noqa: BLE001 — no evidence means no support, which is the safe default
+            self.observations = []
+            self.holdout = []
+
+    def _deliberate(self, thought: NJPThought) -> None:
+        """Work an unanswered question down the ladder, and take the answer only if it decided.
+
+        An undecided conclusion is left on the floor deliberately. :class:`~nyxara.njp.reason.
+        Reasoner` refuses to commit when its top two hypotheses are within ``decide_margin`` of
+        each other, and honouring that refusal is the whole value of having it — overwriting an
+        empty answer with the marginally higher of two indistinguishable guesses would convert an
+        honest "I don't know" into a confident coin-flip.
+
+        The problem state survives either way, which is what lets curiosity find the question
+        again later and what stops her re-proposing a hypothesis already rejected.
+        """
+        try:
+            if self.reasoner is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            if grounding is None or not getattr(grounding, "is_question", False):
+                return
+            novelty = float(getattr(thought.percept, "novelty", 0.5) or 0.5)
+            conclusion = self.reasoner.reason(
+                thought.stimulus, uncertainty=novelty,
+                stakes=self._cfg("reason_stakes", 0.5), task="question")
+            if conclusion is not None and conclusion.decided and conclusion.answer:
+                thought.answer = conclusion.answer
+        except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
+            pass
 
     def _remember_turn(self, thought: NJPThought) -> None:
         """File this turn's conclusion at the level it belongs to.
@@ -962,15 +1152,33 @@ class NJPBrain:
             pass
 
     def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> Any:
-        """Close the loop on this turn's expectation, with the evidence the diagnosis needs."""
+        """Close the loop on this turn's expectation, with the evidence the diagnosis needs.
+
+        The expectation is registered **here**, at the moment the Master grades the turn, rather
+        than speculatively when the turn was taken. Registering up front is what produced the
+        original symptom — 113 predictions, 0 scored — because most turns are never graded, so
+        every one of them left an expectation that nothing could ever observe. Registering on
+        arrival of the verdict means ``predictions`` counts things that were actually decided, and
+        an ungraded turn costs nothing.
+
+        What she is scored against is what she *said*; what says whether it was right is the
+        Master's ``correct``/``actual``. The two come from different places, which is the whole
+        requirement.
+        """
         try:
             stimulus = str(getattr(thought, "stimulus", "") or "")
             if not stimulus:
                 return None
             percept = getattr(thought, "percept", None)
             grounding = getattr(percept, "grounding", None)
+            key = f"{getattr(thought, 'cycle_id', '') or stimulus}:answer"
+            said = str(getattr(thought, "answer", "") or "")
+            self.predictor.predict(
+                key, said or "<unknown>",
+                confidence=float(getattr(thought, "epistemic_confidence", 0.0) or 0.0),
+                organ=("grounding" if getattr(grounding, "answer", None) else "fabric"))
             return self.predictor.observe(
-                stimulus,
+                key,
                 actual if actual is not None else ("correct" if correct >= 0.5 else "wrong"),
                 evidence={
                     "stimulus": stimulus,
@@ -1071,7 +1279,8 @@ class NJPBrain:
                             ("discover", self.discoverer), ("reason", self.reasoner),
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
-                            ("attention", self.attention), ("readout", self.readout)):
+                            ("attention", self.attention), ("readout", self.readout),
+                            ("loop", self.loop)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:

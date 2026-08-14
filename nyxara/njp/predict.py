@@ -86,6 +86,10 @@ class Outcome:
     confidence: float = 0.0
     organ: str = ""
     diagnosis: Optional["Diagnosis"] = None
+    # The evidence the diagnosis was drawn from, carried through to the repair. A repair that
+    # cannot see the turn it is fixing can only do something generic, and a generic repair is the
+    # thing the whole error taxonomy exists to avoid.
+    context: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def correct(self) -> bool:
@@ -226,14 +230,16 @@ class PredictionEngine:
             if pending is None:
                 return None
 
+            evidence = dict(evidence) if evidence else dict(pending.context)
             out = Outcome(key=pending.key, expected=pending.expected, actual=actual,
-                          confidence=pending.confidence, organ=pending.organ)
+                          confidence=pending.confidence, organ=pending.organ,
+                          context=evidence)
             out.error = max(0.0, min(1.0, 1.0 - _similarity(pending.expected, actual)))
             self.scored += 1
             if out.correct:
                 self.correct += 1
             else:
-                out.diagnosis = self.diagnose(out, evidence or dict(pending.context))
+                out.diagnosis = self.diagnose(out, evidence)
                 self.by_kind[out.diagnosis.kind] = self.by_kind.get(out.diagnosis.kind, 0) + 1
                 if learn:
                     self._repair(out)
