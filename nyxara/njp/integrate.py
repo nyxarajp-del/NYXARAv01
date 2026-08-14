@@ -109,6 +109,11 @@ class LoopReport:
     # error → repair
     diagnoses: Dict[str, int] = field(default_factory=dict)
     repaired: int = 0
+    # goals
+    goals_added: int = 0
+    goals_blocked: int = 0
+    goals_completed: int = 0
+    goals_open: int = 0
     # learning
     capabilities: int = 0
     trained: bool = False
@@ -143,6 +148,8 @@ class LoopReport:
                 "deferred": {"opened": self.deferred_opened, "resolved": self.deferred_resolved,
                              "open": self.deferred_open, "corrections": self.corrections},
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
+                "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
+                          "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
                 "trained": self.trained,
                 "loss": ([round(self.loss_before, 6), round(self.loss_after, 6)]
@@ -193,6 +200,7 @@ class LearningLoop:
             "deferred_opened": 0, "deferred_resolved": 0, "corrections": 0,
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
+            "goals_added": 0, "goals_completed": 0,
         }
 
         # Turn-to-turn carry. The readout learns "what fired then → what fires now", which needs
@@ -204,6 +212,10 @@ class LearningLoop:
         self._prev_snapshot: Any = None
         self._snapshot: Any = None
         self._deferred: Dict[str, _Deferred] = {}
+        # Which goal node stands for which of her own questions, so one question is one task and
+        # answering it completes that task rather than leaving a duplicate behind.
+        self._question_nodes: Dict[str, str] = {}
+        self._mission_nid: str = ""
 
         self._install_repairs()
 
@@ -345,6 +357,7 @@ class LearningLoop:
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
+            self._track_goals(thought, rep)
             self._observe_capabilities(thought, rep)
             self._train_readout(fired, rep)
             self._slow(rep)
@@ -552,6 +565,164 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             pass
 
+    # ---- goals ------------------------------------------------------------- #
+    def _track_goals(self, thought: Any, rep: LoopReport) -> None:
+        """Turn what she was *asked to do* into structure she can be held to.
+
+        :class:`~nyxara.njp.goals.GoalTree` was empty on every session — ``nodes = 0`` — and not
+        because goal-tracking was unimplemented. :class:`~nyxara.njp.intent.IntentReader` already
+        extracted ``goal``, ``actions``, ``ordering`` and ``polarity`` from every command, and
+        nothing consumed any of it. The ordering constraint is the one that matters most and was
+        being dropped: "pehle test chala phir code fix kar" is a *dependency*, and acting on the
+        second half before the first is the failure mode a tool-using agent must not have.
+
+        Two sources, both real, neither invented:
+
+        * a **command** from the Master becomes a goal with one task per action, and its ordering
+          pairs become genuine dependencies, so a task whose predecessor is unfinished reports
+          ``blocked`` rather than "not started";
+        * a **question she chose to investigate** becomes a task under her own standing mission,
+          because deciding to go and find something out is a commitment, and one she can then be
+          measured against.
+
+        A negated action ("mat karo", "don't") is deliberately **not** added. Recording something
+        she was told not to do as a thing to do is the worst possible reading of an instruction.
+        """
+        try:
+            tree = getattr(self.brain, "goals", None)
+            if tree is None:
+                return
+            self._goals_from_command(thought, tree, rep)
+            self._goals_from_curiosity(tree, rep)
+            rep.goals_open = len([n for n in tree.nodes.values()
+                                  if n.state in ("open", "active", "blocked")])
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _goals_from_command(self, thought: Any, tree: Any, rep: LoopReport) -> None:
+        """A command becomes a goal; its actions become tasks; its ordering becomes dependencies."""
+        try:
+            intent = getattr(thought, "intent", None)
+            if intent is None or str(getattr(intent, "kind", "")) != "command":
+                return
+            actions = [a for a in (getattr(intent, "actions", None) or [])
+                       if (getattr(intent, "polarity", None) or {}).get(a, True)]
+            goal_name = str(getattr(intent, "goal", "") or "").strip() or \
+                str(getattr(thought, "stimulus", ""))[:80]
+            if not goal_name:
+                return
+
+            goal = tree.add(goal_name, kind="goal",
+                            priority=float(getattr(intent, "confidence", 0.5) or 0.5),
+                            confidence=float(getattr(intent, "confidence", 0.5) or 0.5))
+            if goal is None:
+                return
+            rep.goals_added += 1
+
+            # Ordering pairs name actions, and dependencies are by node id, so the tasks have to
+            # exist before the constraint can be attached to any of them.
+            by_action: Dict[str, Any] = {}
+            for action in actions[:8]:
+                task = tree.add(str(action)[:80], parent=goal.nid, kind="task")
+                if task is not None:
+                    by_action[str(action)] = task
+                    rep.goals_added += 1
+
+            for before, after in (getattr(intent, "ordering", None) or [])[:8]:
+                first = self._task_for(before, by_action)
+                second = self._task_for(after, by_action)
+                if first is None or second is None or first.nid == second.nid:
+                    continue
+                if first.nid in second.dependencies:
+                    continue
+                second.dependencies.append(first.nid)
+                tree._refresh_blocked(second)
+                rep.goals_blocked += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _task_for(phrase: Any, by_action: Dict[str, Any]) -> Any:
+        """Which task an ordering endpoint refers to.
+
+        The two halves of an ordering constraint are *phrases* — "pehle **test chala** phir
+        **code fix kar**" yields ``("test chala", "code fix kar")`` — while the actions are the
+        verbs pulled out of them, ``["test", "chala", "fix", "kar"]``. Matching the two by string
+        equality therefore never matched anything, and every ordering constraint was silently
+        dropped: the tasks existed, none of them depended on any other, and "run the tests first"
+        was recorded as two unrelated jobs.
+
+        Longest action contained in the phrase wins, so "code fix kar" resolves to ``fix`` rather
+        than to a short accidental substring of it.
+        """
+        try:
+            low = str(phrase or "").lower()
+            if not low:
+                return None
+            best, best_len = None, 0
+            for action, task in by_action.items():
+                token = action.lower()
+                if token and token in low and len(token) > best_len:
+                    best, best_len = task, len(token)
+            return best
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _goals_from_curiosity(self, tree: Any, rep: LoopReport) -> None:
+        """A question she decided to investigate is a commitment, so it gets a node.
+
+        Only questions whose value-of-information decision was to **go and look** become tasks.
+        One she decided to act on what she already has, or to put to the Master, is not something
+        she has undertaken to do, and filling the tree with those would make ``nodes`` a count of
+        thoughts rather than of work.
+        """
+        try:
+            curiosity = getattr(self.brain, "curiosity", None)
+            if curiosity is None:
+                return
+            mission = self._own_mission(tree)
+            if mission is None:
+                return
+            for question in curiosity.open_questions()[:4]:
+                if str(getattr(question, "action", "")) not in ("gather", "investigate"):
+                    continue
+                name = str(getattr(question, "text", ""))[:80]
+                if not name or name in self._question_nodes:
+                    continue
+                task = tree.add(name, parent=mission.nid, kind="task",
+                                expected_value=float(getattr(question, "value", 0.5) or 0.5),
+                                cost=float(getattr(question, "cost", 0.2) or 0.2))
+                if task is not None:
+                    self._question_nodes[name] = task.nid
+                    rep.goals_added += 1
+
+            # A question that has since been answered is work that is genuinely finished.
+            for question in curiosity.questions.values():
+                name = str(getattr(question, "text", ""))[:80]
+                nid = self._question_nodes.get(name)
+                if nid and getattr(question, "resolved", False):
+                    if tree.complete(nid) is not None:
+                        rep.goals_completed += 1
+                    self._question_nodes.pop(name, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _own_mission(self, tree: Any) -> Any:
+        """Her one standing mission — understanding what she does not yet understand.
+
+        Created lazily and once. A mission node that exists before she has ever wondered anything
+        would be a slogan in the tree rather than a record of work.
+        """
+        try:
+            if self._mission_nid and self._mission_nid in tree.nodes:
+                return tree.nodes[self._mission_nid]
+            node = tree.mission("close the gaps in what I know", priority=0.6)
+            if node is not None:
+                self._mission_nid = node.nid
+            return node
+        except Exception:  # noqa: BLE001
+            return None
+
     # ---- the self-model ---------------------------------------------------- #
     def _observe_capabilities(self, thought: Any, rep: LoopReport) -> None:
         """Grade the faculties this turn actually exercised, and only those.
@@ -687,6 +858,8 @@ class LearningLoop:
             self.totals["consolidations"] += int(rep.consolidated)
             self.totals["discoveries"] += int(rep.discovered)
             self.totals["wonders"] += int(bool(rep.wondered))
+            self.totals["goals_added"] += rep.goals_added
+            self.totals["goals_completed"] += rep.goals_completed
         except Exception:  # noqa: BLE001
             pass
 

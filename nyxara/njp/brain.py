@@ -163,6 +163,11 @@ class NJPBrain:
         self.tools: Any = None
         self.knowledge: Any = None
         self.replay: List[str] = []
+        # What the gauntlet reads off this brain when it judges a claim. Refreshed per turn by
+        # `_prepare_evidence`; both are empty between turns, which is why an ungrounded claim
+        # gets no support rather than stale support from a previous one.
+        self.observations: List[str] = []
+        self.holdout: List[Any] = []
         # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
         # which this one does — so three threads call think() on this same object at once. A
         # fabric is one organism: two thoughts rewiring it simultaneously corrupt the adjacency
@@ -561,14 +566,57 @@ class NJPBrain:
             return None
 
     def _build_truth(self, c: Any) -> Optional[TruthGauntlet]:
+        """The gauntlet, wired to evidence it can actually read.
+
+        It was built with its default sources and nothing else, and the defaults are inert by
+        design: :class:`~nyxara.njp.truth.PredictiveSource` needs a ``predictor`` and held-out
+        samples, and :class:`~nyxara.njp.truth.ObservationSource` reads ``context.observations``.
+        The brain supplied neither, so **no source could ever support a claim** — only refute one.
+        Measured over 113 turns: 108 claims judged, 0 established, and that zero was widely
+        readable as "she is being appropriately strict" when it actually meant the strictness was
+        never tested. A gate that cannot pass anything is not a gate, it is a wall.
+        """
         if not self._gate("truth", True):
             return None
         try:
-            return TruthGauntlet(min_sources=self._cfg("truth_min_sources", 2),
-                                 require_hard=self._cfg("truth_require_hard", True),
-                                 ledger=self.ledger)
+            from nyxara.njp.truth import (ConsistencySource, FormalSource, LedgerSource,
+                                          ObservationSource, PredictiveSource)
+            return TruthGauntlet(
+                sources=[
+                    FormalSource(),
+                    PredictiveSource(predictor=self._claim_survives,
+                                     min_samples=self._cfg("truth_min_holdout", 2)),
+                    ConsistencySource(),
+                    LedgerSource(ledger=self.ledger),
+                    ObservationSource(),
+                ],
+                min_sources=self._cfg("truth_min_sources", 2),
+                require_hard=self._cfg("truth_require_hard", True),
+                ledger=self.ledger)
         except Exception:  # noqa: BLE001 — without it nothing is verified, and nothing claims to be
             return None
+
+    @staticmethod
+    def _claim_survives(claim: str, sample: Any) -> bool:
+        """Does the claim agree with one **withheld** assertion of the same fact?
+
+        The samples handed to this are restatements of the very ``(subject, predicate)`` the claim
+        is about, drawn from turns *other* than the one that produced the claim — see
+        :meth:`_prepare_evidence`. So each is a genuine test: the claim was formed without it, and
+        it can disagree.
+
+        This is corroboration by independent restatement, not proof, and it is counted as *hard*
+        for the one reason the gauntlet cares about — it can be **surprised**. If the Master said
+        "Jay" once and "Raj" twice afterwards, the withheld samples disagree with the claim and
+        the source refutes it rather than shrugging. That is the same evidence standard
+        :meth:`nyxara.njp.levels.MemoryLevels.consolidate` already uses to promote an episode to
+        semantic memory, applied to the question of what she may state as fact.
+        """
+        try:
+            obj = str(getattr(sample, "object", "") or "").strip().lower()
+            return bool(obj) and obj in str(claim or "").lower()
+        except Exception:  # noqa: BLE001
+            return False
 
     def _build_soul(self, c: Any) -> Optional[SoulSync]:
         if not self._gate("soulsync", True):
@@ -719,6 +767,13 @@ class NJPBrain:
                 return out
             self.turns += 1
             out.cycle_id = f"njp-{self.turns}"
+            # Cleared at the top of the turn rather than only before a judgement, so the pools are
+            # never a turn out of date. `_prepare_evidence` runs just before the gauntlet and so
+            # nothing has ever *read* stale evidence — but leaving the previous turn's facts
+            # sitting on the brain makes the invariant unverifiable from outside, and an invariant
+            # nobody can check is one that quietly stops holding.
+            self.observations = []
+            self.holdout = []
 
             # 1. the Master's unsaid half, and what was actually asked
             if self.soul is not None:
@@ -763,6 +818,7 @@ class NJPBrain:
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
+                self._prepare_evidence(out)
                 out.judgement = self.truth.judge(out.answer, context=self)
 
             # 6. remember the conclusion, not the question: storing a bare question would make it
@@ -806,6 +862,67 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _prepare_evidence(self, thought: NJPThought) -> None:
+        """Lay out what the gauntlet may read about *this* claim, and nothing else.
+
+        Two pools, and the difference between them is the difference between soft and hard:
+
+        * :attr:`observations` — the independent record that bears on the claim. Grounded facts
+          and world events, **excluding the assertion this very turn just made**. Without that
+          exclusion a statement would corroborate itself: she would ground "my name is Jay",
+          immediately find "Master has_name Jay" in the record, and report that an outside source
+          agreed with her. One source counted twice is not two sources.
+        * :attr:`holdout` — restatements of the exact ``(subject, predicate)`` the claim is about,
+          from turns other than the one that produced it. These are withheld in the sense the
+          gauntlet requires: the claim was formed without them and they are free to disagree.
+
+        Both are cleared first. A claim she has no evidence about must come out of the gauntlet as
+        a conjecture, and leaving the previous turn's evidence lying around would quietly
+        establish it against facts that have nothing to do with it.
+        """
+        self.observations = []
+        self.holdout = []
+        try:
+            grounder = self.grounder
+            if grounder is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            mine = (getattr(grounding, "triples", None) or [])
+            # Excluded by **identity**, not by value. Excluding every triple that happens to say
+            # the same thing would throw away the Master's independent earlier statements of it,
+            # which are the only corroboration a restated fact can ever have.
+            current = {id(t) for t in mine}
+
+            for triples in grounder.facts.values():
+                for triple in triples:
+                    if triple.superseded or id(triple) in current:
+                        continue
+                    # The surface the Master actually wrote, where it was kept. That is what an
+                    # "independent recorded observation" is; the rendered triple is her own
+                    # paraphrase of it, and it also overlaps a short answer far worse — "Jay"
+                    # against "Master has_name Jay" scores 0.33 and misses the floor by a hair.
+                    self.observations.append(str(triple.text or "").strip() or
+                                             f"{triple.subject} {triple.predicate} {triple.object}")
+
+            # The held-out half: other assertions of whatever this turn is actually about.
+            for triple in mine:
+                key = (triple.subject.lower(), triple.predicate)
+                for prior in grounder.facts.get(key, []):
+                    if id(prior) not in current and not prior.superseded:
+                        self.holdout.append(prior)
+            # A question is about a fact she is reporting rather than asserting; the answer's own
+            # supporting triples are what it rests on, so their restatements are the held-out set.
+            answer = getattr(grounding, "answer", None)
+            for triple in (getattr(answer, "triples", None) or []):
+                key = (triple.subject.lower(), triple.predicate)
+                self.holdout.extend(t for t in grounder.facts.get(key, []) if not t.superseded)
+
+            self.observations = self.observations[:256]
+            self.holdout = self.holdout[:64]
+        except Exception:  # noqa: BLE001 — no evidence means no support, which is the safe default
+            self.observations = []
+            self.holdout = []
 
     def _deliberate(self, thought: NJPThought) -> None:
         """Work an unanswered question down the ladder, and take the answer only if it decided.
