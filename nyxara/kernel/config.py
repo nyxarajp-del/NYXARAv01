@@ -2255,6 +2255,8 @@ class NJPConfig(BaseModel):
     levels_enabled: bool = True                  # working/episodic/semantic/procedural/self
     discover_enabled: bool = True                # propose abstractions, then try to falsify them
     reason_enabled: bool = True                  # the ladder: intuition → … → proof
+    self_model_enabled: bool = True              # measured capability map, not a brochure
+    meta_enabled: bool = True                    # her own strategies as bandit arms
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2319,6 +2321,11 @@ class NJPConfig(BaseModel):
     reason_enough: float = Field(default=0.75, ge=0.0, le=1.0)
     # The deepest rung she may reach: intuition | association | deliberation | verification | proof
     reason_max_rung: str = "proof"
+
+    # ---- metacognition ---- #
+    # How often she tries a strategy other than her current best. Zero locks her into whatever
+    # won first, which on thin evidence is close to arbitrary.
+    meta_explore: float = Field(default=0.15, ge=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark

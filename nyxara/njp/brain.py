@@ -179,6 +179,8 @@ class NJPBrain:
         self.levels = self._build_levels(c)
         self.discoverer = self._build_discoverer(c)
         self.reasoner = self._build_reasoner(c)
+        self.self_model = self._build_self_model(c)
+        self.meta = self._build_meta(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -340,6 +342,36 @@ class NJPBrain:
                             enough=self._cfg("reason_enough", 0.75),
                             max_rung=self._cfg("reason_max_rung", "proof"))
         except Exception:  # noqa: BLE001 — she answers associatively, at one depth, as before
+            return None
+
+    def _build_self_model(self, c: Any) -> Any:
+        """Her measured performance record — a capability map, not a brochure."""
+        if not self._gate("self_model", True):
+            return None
+        try:
+            from nyxara.njp.selfmodel import SelfModel
+            return SelfModel()
+        except Exception:  # noqa: BLE001 — she works without knowing how well she works
+            return None
+
+    def _build_meta(self, c: Any) -> Any:
+        """Her own strategies as bandit arms. Learning how to learn, measured."""
+        if not self._gate("meta", True):
+            return None
+        try:
+            from nyxara.njp.selfmodel import MetaLearner
+            meta = MetaLearner(self.self_model,
+                               explore=self._cfg("meta_explore", 0.15))
+            # The knobs she is allowed to tune on herself. Each value is a real setting that
+            # changes what a turn costs, so a win here is a measured win rather than a preference.
+            for name, value in (("shallow", 8), ("normal", 24), ("deep", 64)):
+                meta.register("settle_steps", name, value)
+            for name, value in (("narrow", 3), ("wide", 8)):
+                meta.register("recall_k", name, value)
+            for name, value in (("cheap", "association"), ("thorough", "verification")):
+                meta.register("reason_depth", name, value)
+            return meta
+        except Exception:  # noqa: BLE001 — she keeps whatever settings she was built with
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -828,19 +860,29 @@ class NJPBrain:
                 if self.soul is not None:
                     self.soul.confirm(corrected=(float(correct) < 0.5))
                 if self.predictor is not None:
-                    self._score_prediction(thought, correct=float(correct), actual=actual)
+                    outcome = self._score_prediction(thought, correct=float(correct),
+                                                     actual=actual)
+                    # The same attribution that routes a repair also updates the record of which
+                    # faculty keeps needing repairing — the error taxonomy paying twice.
+                    if self.self_model is not None and outcome is not None:
+                        self.self_model.observe_diagnosis(getattr(outcome, "diagnosis", None))
+                if self.self_model is not None and float(correct) >= 0.5:
+                    self.self_model.observe("grounding", 1.0) if getattr(
+                        getattr(thought, "percept", None), "grounding", None) else None
+                if self.meta is not None:
+                    self.meta.reward("settle_steps", float(correct))
         except Exception:  # noqa: BLE001
             pass
 
-    def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> None:
+    def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> Any:
         """Close the loop on this turn's expectation, with the evidence the diagnosis needs."""
         try:
             stimulus = str(getattr(thought, "stimulus", "") or "")
             if not stimulus:
-                return
+                return None
             percept = getattr(thought, "percept", None)
             grounding = getattr(percept, "grounding", None)
-            self.predictor.observe(
+            return self.predictor.observe(
                 stimulus,
                 actual if actual is not None else ("correct" if correct >= 0.5 else "wrong"),
                 evidence={
@@ -939,7 +981,8 @@ class NJPBrain:
                             ("soulsync", self.soul), ("evolve", self.evolver),
                             ("pulse", self.pulse), ("grounding", self.grounder),
                             ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
-                            ("discover", self.discoverer), ("reason", self.reasoner)):
+                            ("discover", self.discoverer), ("reason", self.reasoner),
+                            ("self_model", self.self_model), ("meta", self.meta)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -965,7 +1008,8 @@ class NJPBrain:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
-                            ("discover", self.discoverer), ("reason", self.reasoner)):
+                            ("discover", self.discoverer), ("reason", self.reasoner),
+                            ("self_model", self.self_model), ("meta", self.meta)):
             if organ is None:
                 continue
             try:
@@ -999,6 +1043,10 @@ class NJPBrain:
                 self.levels.load_dict(d["levels"])
             if d.get("discover") and self.discoverer is not None:
                 self.discoverer.load_dict(d["discover"])
+            if d.get("self_model") and self.self_model is not None:
+                self.self_model.load_dict(d["self_model"])
+            if d.get("meta") and self.meta is not None:
+                self.meta.load_dict(d["meta"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain
