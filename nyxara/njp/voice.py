@@ -143,13 +143,24 @@ class Dialogue:
                 return out
             out.surface = self.surface()
             content = str(getattr(thought, "answer", "") or "").strip()
-            out.source = str(getattr(getattr(thought, "winner", None), "source", "") or "")
             out.confidence = float(getattr(thought, "confidence", 0.0))
-            out.decided = bool(getattr(thought, "decided", True))
             out.verified = bool(getattr(thought, "verified", False))
-            out.evidence = list(getattr(getattr(thought, "winner", None), "evidence", []) or [])
-            assessment = getattr(thought, "assessment", None)
-            out.why = list(getattr(assessment, "why", []) or [])
+            # Read the fields an NJPThought actually carries. These four used to be addressed at
+            # `thought.winner` and `thought.assessment` — a shape from the superseded NYX brains
+            # that NJPThought never had, so `getattr(..., None)` silently swallowed every one of
+            # them: source was always "", evidence and why were always empty, and `decided` was
+            # always True however unsure she really was. Silent because they degrade to falsy
+            # rather than raising, which is exactly how a wiring gap survives a test suite.
+            judgement = getattr(thought, "judgement", None)
+            out.source = str(getattr(judgement, "verdict", "") or "")
+            out.evidence = [e.source for e in (getattr(judgement, "evidence", None) or [])
+                            if getattr(e, "supports", False)]
+            out.why = [f"{e.source}: {e.detail}" for e in (getattr(judgement, "evidence", None) or [])
+                       if getattr(e, "detail", "")][:4]
+            # "Decided" is a claim about *her*, not about the gauntlet: an unestablished verdict is
+            # normal (most turns are), whereas two live readings of the instruction mean she
+            # genuinely does not know which question she was asked.
+            out.decided = not bool(getattr(getattr(thought, "intent", None), "ambiguous", False))
             self._read_register(out, thought, brain)
 
             # NYX V.02: when two readings of the instruction are still live, or she was asked
@@ -167,11 +178,11 @@ class Dialogue:
             if out.surface.fluent or not self.require_fluent_surface:
                 rendered = self._render(content, thought)
                 if rendered:
-                    out.text, out.rendered = rendered, True
+                    out.text, out.rendered = self._hedge(rendered, thought), True
                     return out
 
             # No fluent surface (or rendering failed): say it in her own words, plainly.
-            out.text = self._plainly(content, out)
+            out.text = self._hedge(self._plainly(content, out), thought)
             return out
         except Exception:  # noqa: BLE001 — she always says something, never crashes mid-sentence
             out.text = str(getattr(thought, "answer", "") or "")
@@ -201,7 +212,12 @@ class Dialogue:
         try:
             if self.soul is None:
                 return None
-            return str(self.soul.voice().system_fragment)
+            # `system_fragment` is a method on VoiceProfile, not a property. Without the call this
+            # stringified the bound method — "<bound method VoiceProfile.system_fragment of ...>" —
+            # and handed *that* to the model as her system prompt. Tolerate both shapes so a
+            # future property does not silently reintroduce the same class of bug.
+            fragment = self.soul.voice().system_fragment
+            return str(fragment() if callable(fragment) else fragment)
         except Exception:  # noqa: BLE001
             return None
 
@@ -229,6 +245,14 @@ class Dialogue:
         Only fires on a *contradiction* or a genuinely live second reading. An under-specified
         detail is surfaced with the answer rather than in place of it: stopping to ask about
         every vague word would be its own kind of uselessness.
+
+        And an ambiguity she has already resolved is not an ambiguity. If grounding answered the
+        question from structure, the competing surface readings are moot — she knows what was
+        asked because she found what it was asking *for*. Without this check, "where do I live"
+        came back as *"I can read that two ways: it carries a Hindi imperative ending (85%), or it
+        opens with a question word (80%). Which one?"* — a false positive from a suffix rule, asked
+        of a Master whose answer she was holding the whole time. Asking a question you can answer
+        is worse than not asking one.
         """
         try:
             config = getattr(brain, "config", None)
@@ -239,6 +263,10 @@ class Dialogue:
                 return ""
             if not (intent.contradictions or intent.ambiguous):
                 return ""
+            answer = getattr(getattr(getattr(thought, "percept", None), "grounding", None),
+                             "answer", None)
+            if answer is not None and getattr(answer, "answered", False):
+                return ""
             return str(intent.clarifying_question() or "")
         except Exception:  # noqa: BLE001 — she answers rather than crashing on a parse
             return ""
@@ -247,7 +275,10 @@ class Dialogue:
     def _read_register(reply: Reply, thought: Any, brain: Any) -> None:
         """Record how the turn was written — language and tone — from the tongue, if she has one."""
         try:
-            lingua = getattr(brain, "lingua", None)
+            # `brain.tongue` — NJPBrain names it that (brain.py:166). Reading `brain.lingua` here
+            # meant this returned before it read anything, so every reply came back with no
+            # language and no register however clearly the tongue had identified them.
+            lingua = getattr(brain, "tongue", None)
             stimulus = str(getattr(thought, "stimulus", "") or "")
             if lingua is None or not stimulus:
                 return
@@ -256,6 +287,30 @@ class Dialogue:
             reply.register = read.register.to_dict()
         except Exception:  # noqa: BLE001 — tone is a garnish; it never costs a reply
             return
+
+    @staticmethod
+    def _hedge(text: str, thought: Any) -> str:
+        """Attach the epistemic caveat, if the claim has not earned the right to go bare.
+
+        Applied **after** rendering, never before. The caveat is framing, not content: folding it
+        into the content would make a faithful rendering look unfaithful (a model that answers
+        "Jay" has not dropped the claim just because it did not repeat the word "confidence"), and
+        it would also hand the caveat to the model as something it is free to reword.
+
+        A ``known`` claim is stated plainly — that is what establishment buys. A ``believed`` one
+        always carries its number, because "Jay" and "I think Jay" are different assertions and
+        the Master is entitled to know which one he is being given.
+        """
+        try:
+            state = str(getattr(thought, "epistemic", "") or "")
+            if not text or state != "believed":
+                return text
+            confidence = float(getattr(thought, "epistemic_confidence", 0.0) or 0.0)
+            if confidence <= 0.0:
+                return f"{text}\n(I believe this, but I am not certain.)"
+            return f"{text}\n(I believe this — confidence {confidence:.2f}, not established.)"
+        except Exception:  # noqa: BLE001 — a missing hedge is worse than a plain reply, but a
+            return text                # crash mid-sentence is worse than both
 
     def _plainly(self, content: str, reply: Reply) -> str:
         """Her own words, with the caveats that are actually true of this turn."""
@@ -273,10 +328,16 @@ class Dialogue:
         return "\n".join(parts)
 
     def _nothing_to_say(self, thought: Any) -> str:
-        """Nothing reached awareness. Say that, with what she does have — never invent."""
+        """Nothing reached awareness. Say that, with what she does have — never invent.
+
+        The ungrounded concepts are read from the percept's own grounding result. This used to
+        look for ``percept.grounded``, an attribute NJPPercept does not have, so the list was
+        always empty and every silent turn gave the same bare sentence — hiding *which* words she
+        had failed to ground, which is the one detail that makes the admission useful.
+        """
         percept = getattr(thought, "percept", None)
-        grounded = getattr(percept, "grounded", None)
-        ungrounded = list(getattr(grounded, "ungrounded", []) or [])
+        grounded = getattr(percept, "grounding", None)
+        ungrounded = list(getattr(grounded, "ungrounded", None) or [])
         if ungrounded:
             return ("I do not have anything grounded to say about that yet — "
                     f"these are still just words to me: {', '.join(ungrounded[:6])}.")

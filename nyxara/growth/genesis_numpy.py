@@ -46,7 +46,18 @@ try:  # NumPy is a hard NYXARA dependency, but stay honest if it is somehow abse
 except Exception:  # noqa: BLE001 — without NumPy this backend declines and the caller falls back
     _HAS_NUMPY = False
 
-__all__ = ["GenesisNumpyModel", "_HAS_NUMPY"]
+# The autodiff engine below is general-purpose and was invisible outside this file: `__all__`
+# named only the model, so every other part of the repo that wanted gradients had to write its own.
+# It is exported now because it is the real thing — reverse-mode, topologically ordered,
+# broadcast-aware — and a second copy of it beside a working one is pure duplication.
+__all__ = [
+    "GenesisNumpyModel", "_HAS_NUMPY",
+    # ---- the autodiff engine ----
+    "Tensor", "backward",
+    "matmul", "add", "mul", "scale", "add_const", "transpose_last2", "reshape",
+    "relu", "sigmoid", "silu", "gelu", "softmax_lastdim", "layernorm", "rmsnorm",
+    "embed", "shift_time", "diag_scan", "cross_entropy", "mean_entropy",
+]
 
 _UNK_TOK = "<unk>"
 

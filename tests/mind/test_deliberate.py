@@ -134,6 +134,15 @@ def _dev_settings(passes=2, samples=1):
     # These tests exercise the deliberate (think→decide→critique) path in isolation; MCTS deep
     # reasoning has its own suite (tests/mind/test_mcts_reasoner.py), so opt out here.
     s.mcts.enabled = False
+    # Same reason, and the one this fixture originally missed: both routers run BEFORE
+    # deliberation in `_reason` and return a finished candidate when they hand off to her own
+    # model, so deliberation never runs and the injected _ScriptLLM is never called. The test then
+    # sees whatever her own model said — which is not a deliberation bug, it is this fixture
+    # failing to isolate the path it names.
+    if getattr(s, "router", None) is not None:
+        s.router.enabled = False
+    if getattr(s, "self_model_router", None) is not None:
+        s.self_model_router.enabled = False
     return s
 
 

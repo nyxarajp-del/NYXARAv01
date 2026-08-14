@@ -417,6 +417,10 @@ class LLMConfig(BaseModel):
     # Where the runtime keeps compiled artifacts (a GPU/NPU backend recompiles the graph on first run
     # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
     litertlm_cache_dir: Optional[Path] = None
+    # The model's hard input+output window. The runtime enforces this and returns
+    # INVALID_ARGUMENT over it, which takes the rung off the ladder for the whole process — so
+    # prompts are budgeted against this rather than discovering it at send time.
+    litertlm_context_tokens: int = Field(default=4096, ge=256)
     litertlm_top_k: int = Field(default=40, ge=1)
     # The runtime's shared library declares a hard dependency on the Vulkan LOADER
     # (``libvulkan.so.1``) even on the CPU backend, yet imports no symbol from it. On a host without
@@ -2248,6 +2252,20 @@ class NJPConfig(BaseModel):
     memory_enabled: bool = True                  # content-addressed recall, no token window
     tongue_enabled: bool = True                  # Unicode/Devanagari/Hinglish tokenization
     intent_enabled: bool = True                  # what was actually asked
+    grounding_enabled: bool = True               # words → entities → relations → beliefs
+    concepts_enabled: bool = True                # types discovered from experience, not declared
+    world_enabled: bool = True                   # event → state → cause → consequence
+    predict_enabled: bool = True                 # predict → observe → diagnose → repair
+    levels_enabled: bool = True                  # working/episodic/semantic/procedural/self
+    discover_enabled: bool = True                # propose abstractions, then try to falsify them
+    reason_enabled: bool = True                  # the ladder: intuition → … → proof
+    self_model_enabled: bool = True              # measured capability map, not a brochure
+    meta_enabled: bool = True                    # her own strategies as bandit arms
+    goals_enabled: bool = True                   # Mission → Goal → Subgoal → Task
+    curiosity_enabled: bool = True               # her own questions, priced by VOI
+    attention_enabled: bool = True               # the bottleneck: one thing wins the turn
+    environment_enabled: bool = True             # observe → act → outcome → learn
+    readout_enabled: bool = True                 # the gradient-trained head (real backprop)
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2266,6 +2284,73 @@ class NJPConfig(BaseModel):
     # Soft agreement alone establishing a claim is exactly how consensus becomes bias.
     truth_min_sources: int = Field(default=2, ge=1, le=16)
     truth_require_hard: bool = True
+
+    # ---- grounding: what a word is *about* ---- #
+    # Confidence at which a corroborated claim may be stated as fact rather than quoted with its
+    # number. Below this she says "I believe X, confidence n" — a different assertion, deliberately.
+    grounding_known_floor: float = Field(default=0.75, ge=0.0, le=1.0)
+    # Whether a sentence the deterministic core cannot parse, that the fluent surface can, is
+    # generalised into a new extraction pattern. Off makes her parser fixed at what it shipped with.
+    grounding_learn_patterns: bool = True
+    # Minimum shared-feature overlap for the concept ladder to group two things under one concept.
+    # Higher splits hairs; lower collapses genuinely different kinds into one bucket.
+    concept_link_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+
+    # ---- the world: what happens, and why ---- #
+    # How far back a candidate cause may reach. Wider catches slower chains and admits more
+    # coincidence; the support and lift floors below are what keep that honest.
+    world_window: int = Field(default=4, ge=1, le=64)
+    # A cause must recur this often before it is called one — sequence alone is the weakest
+    # possible evidence, and without a floor the rooster causes the sunrise.
+    world_min_support: int = Field(default=3, ge=1, le=1000)
+    # And it must beat the rate at which the effect happens anyway: P(effect|cause) − P(effect).
+    world_min_lift: float = Field(default=0.15, ge=0.0, le=1.0)
+
+    # ---- memory levels ---- #
+    # Retention below which a memory is dropped. A store that only accumulates degrades: every new
+    # item makes every existing retrieval slightly worse. Autobiographical memory is exempt —
+    # losing it would change who she is, which is not a memory-management decision.
+    forget_below: float = Field(default=0.05, ge=0.0, le=1.0)
+
+    # ---- abstraction discovery ---- #
+    # Episodes a candidate rule must be fitted on, and the precision it must then hold at on
+    # episodes it never saw. A rule that only describes the data that suggested it is not a rule.
+    discover_min_support: int = Field(default=4, ge=2, le=1000)
+    discover_min_precision: float = Field(default=0.7, ge=0.0, le=1.0)
+    # Antecedents per rule. The subset count explodes with this, and a rule with eight
+    # antecedents describes one episode rather than a pattern.
+    discover_max_order: int = Field(default=3, ge=2, le=8)
+
+    # ---- the reasoning ladder ---- #
+    # How far clear the winner must be before she commits. Two readings at 0.51 and 0.49 are a
+    # tie, and returning the first as an answer would invent a decision she has not made.
+    reason_decide_margin: float = Field(default=0.15, ge=0.0, le=1.0)
+    # Confidence at which a rung is good enough to stop descending. Running a proof engine over
+    # "what is my name" is not being careful, it is being broken.
+    reason_enough: float = Field(default=0.75, ge=0.0, le=1.0)
+    # The deepest rung she may reach: intuition | association | deliberation | verification | proof
+    reason_max_rung: str = "proof"
+
+    # ---- metacognition ---- #
+    # How often she tries a strategy other than her current best. Zero locks her into whatever
+    # won first, which on thin evidence is close to arbitrary.
+    meta_explore: float = Field(default=0.15, ge=0.0, le=1.0)
+
+    # ---- curiosity and attention ---- #
+    # EVPI below which a question is not worth asking. Without a floor she surfaces every trivial
+    # gap, and a mind that asks about everything is not curious, it is exhausting.
+    curiosity_min_value: float = Field(default=0.05, ge=0.0, le=1.0)
+    # How many things may reach awareness per cycle. Raising this does not make her think about
+    # more at once; it makes "attention" stop meaning anything.
+    attention_capacity: int = Field(default=1, ge=1, le=8)
+
+    # ---- the gradient-trained readout ---- #
+    # Cells are hashed into a fixed slot width so the head keeps a stable input size while the
+    # fabric underneath grows. Collisions are real and reported; resizing the network on every
+    # act of neurogenesis would throw away everything learned so far.
+    readout_width: int = Field(default=512, ge=8)
+    readout_hidden: int = Field(default=128, ge=4)
+    readout_lr: float = Field(default=0.01, gt=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark

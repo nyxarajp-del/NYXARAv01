@@ -31,7 +31,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["PulseReport", "PulseEngine"]
 
@@ -58,6 +58,19 @@ class PulseReport:
     grown: int = 0                    # NEW synapses this beat
     born: int = 0                     # NEW cells this beat
     consolidated: bool = False
+    # The slower timescales. Each is a real pass over a real organ, and each is None/0 when its
+    # cadence was not due — an absent number here means "not this beat", never "nothing happened".
+    memory_promoted: int = 0
+    memory_forgotten: int = 0
+    questions_raised: int = 0
+    abstractions_confirmed: int = 0
+    abstractions_refuted: int = 0
+    dreamed: bool = False
+    # What the dream actually did. `dreamed` alone was a boolean that could be True while nothing
+    # changed; these are the numbers that say whether the pass was worth running.
+    replayed: int = 0
+    dream_loss_before: float = 0.0
+    dream_loss_after: float = 0.0
     generation: Optional[int] = None
     evolved: Optional[Dict[str, Any]] = None
     blocked: str = ""                 # non-empty when oversight refused the beat
@@ -66,6 +79,15 @@ class PulseReport:
     def to_dict(self) -> Dict[str, Any]:
         return {"beat": self.beat, "expanded": self.expanded, "grown": self.grown,
                 "born": self.born, "consolidated": self.consolidated,
+                "memory_promoted": self.memory_promoted,
+                "memory_forgotten": self.memory_forgotten,
+                "questions_raised": self.questions_raised,
+                "abstractions_confirmed": self.abstractions_confirmed,
+                "abstractions_refuted": self.abstractions_refuted,
+                "dreamed": self.dreamed, "replayed": self.replayed,
+                "dream_loss_before": round(self.dream_loss_before, 6),
+                "dream_loss_after": round(self.dream_loss_after, 6),
+                "dream_improved": self.dream_loss_after < self.dream_loss_before,
                 "generation": self.generation, "evolved": self.evolved,
                 "blocked": self.blocked, "ms": round(self.ms, 3)}
 
@@ -74,11 +96,23 @@ class PulseEngine:
     """The continuous beat: expand often, consolidate sometimes, rewrite herself rarely."""
 
     def __init__(self, brain: Any, *, every_s: float = 1.0,
+                 wonder_every_s: float = 30.0, discover_every_s: float = 45.0,
+                 memory_every_s: float = 120.0, dream_every_s: float = 600.0,
+                 dream_batch: int = 16, dream_epochs: int = 4,
                  consolidate_every_s: float = 60.0, evolve_every_s: float = 300.0,
                  queue_capacity: int = 4096, enabled: bool = True) -> None:
         self.brain = brain
         self.every_s = max(0.05, float(every_s))
         self.consolidate_every_s = max(1.0, float(consolidate_every_s))
+        # The slower timescales, fastest-first. Each is slower than the work it summarises:
+        # wondering about gaps is pointless more often than gaps appear, and dreaming over the
+        # same sixteen episodes every second would be replay without any new experience in it.
+        self.wonder_every_s = max(1.0, float(wonder_every_s))
+        self.discover_every_s = max(1.0, float(discover_every_s))
+        self.memory_every_s = max(1.0, float(memory_every_s))
+        self.dream_every_s = max(1.0, float(dream_every_s))
+        self.dream_batch = max(1, int(dream_batch))
+        self.dream_epochs = max(1, int(dream_epochs))
         self.evolve_every_s = max(1.0, float(evolve_every_s))
         self.enabled = bool(enabled)
 
@@ -164,7 +198,36 @@ class PulseEngine:
                         note="pulse")
                     rep.generation = gen.n
 
-            # 3. evolve — one self-rewrite attempt, on the slowest cadence
+            # 3. the slower timescales. Cognition does not run at one rate: perception and
+            # response are immediate, working reasoning is slower, memory consolidation slower
+            # still, and learning-how-to-learn slowest of all. Running these every beat would
+            # make them noise; running them never is what left them decorative.
+            if self._due("wonder", self.wonder_every_s):
+                curiosity = getattr(self.brain, "curiosity", None)
+                if curiosity is not None:
+                    rep.questions_raised = len(curiosity.wonder())
+
+            if self._due("discover", self.discover_every_s):
+                discoverer = getattr(self.brain, "discoverer", None)
+                if discoverer is not None:
+                    found = discoverer.discover()
+                    rep.abstractions_confirmed = found.confirmed
+                    rep.abstractions_refuted = found.refuted
+
+            if self._due("memory", self.memory_every_s):
+                levels = getattr(self.brain, "levels", None)
+                if levels is not None:
+                    moved = levels.consolidate()
+                    rep.memory_promoted = moved.promoted
+                    rep.memory_forgotten = moved.forgotten
+
+            # 4. dream — offline replay on the slowest cadence but one. Recent experience is
+            # re-run so predictions can be tested and contradictions surface without a live turn
+            # riding on the answer. Computational offline simulation; not conscious dreaming.
+            if self._due("dream", self.dream_every_s):
+                self._dream(rep)
+
+            # 5. evolve — one self-rewrite attempt, on the slowest cadence
             if self._due("evolve", self.evolve_every_s):
                 evolver = getattr(self.brain, "evolver", None)
                 if evolver is not None:
@@ -181,6 +244,75 @@ class PulseEngine:
             self.last = rep
             return rep
 
+    def _dream(self, rep: PulseReport) -> None:
+        """Offline replay that actually **trains**, and reports whether it helped.
+
+        This used to touch timestamps and re-run discovery — a pass that could report
+        ``dreamed=True`` while changing nothing that would ever affect an answer. Now it does the
+        thing replay is for: re-run what happened, ask the readout what it would predict *now*,
+        and backpropagate the difference.
+
+        The loss is measured before and after on the **same** batch, so a dream that did not help
+        says so rather than being credited for having run. Replay is still offline simulation —
+        that is what replay is — but it now changes weights instead of timestamps.
+        """
+        try:
+            levels = getattr(self.brain, "levels", None)
+            discoverer = getattr(self.brain, "discoverer", None)
+            readout = getattr(self.brain, "readout", None)
+            fabric = getattr(self.brain, "fabric", None)
+            if levels is None:
+                return
+            from nyxara.njp.levels import Level
+
+            # Both experiential levels. Autobiographical entries are episodes too — they are
+            # protected from *forgetting*, which is not a reason to exclude them from replay, and
+            # reading only EPISODIC meant a session that talked mostly about the Master replayed
+            # almost nothing.
+            episodes = (levels.at(Level.EPISODIC)
+                        + levels.at(Level.AUTOBIOGRAPHICAL))[-self.dream_batch:]
+            batch: List[Tuple[Sequence[int], Sequence[int]]] = []
+            for entry in episodes:
+                levels.touch(entry.key)      # replay IS rehearsal — that is what it is for
+                rep.replayed += 1
+                # (what fired, what fired next) straight off the trace the settle recorded.
+                trace = self._trace_for(entry, fabric)
+                batch.extend(trace)
+
+            if readout is not None and batch:
+                rep.dream_loss_before = readout.loss_on(batch)
+                for _ in range(self.dream_epochs):
+                    readout.train_step(batch)
+                rep.dream_loss_after = readout.loss_on(batch)
+
+            if discoverer is not None and rep.replayed:
+                discoverer.discover()
+            rep.dreamed = bool(rep.replayed)
+        except Exception:  # noqa: BLE001 — a failed dream changes nothing
+            pass
+
+    def _trace_for(self, entry: Any, fabric: Any) -> List[Tuple[Sequence[int], Sequence[int]]]:
+        """Consecutive firing steps from a replayed episode, as (before, after) pairs.
+
+        Re-settling the fabric would be the obvious approach and is the wrong one: it mutates the
+        live substrate during what is supposed to be an *offline* pass, so the dream would change
+        the very thing it is meant to be learning about.
+        """
+        out: List[Tuple[Sequence[int], Sequence[int]]] = []
+        try:
+            brain = self.brain
+            store = getattr(getattr(brain, "levels", None), "store", None)
+            trace_obj = store.recall_key(entry.key) if store is not None else None
+            text = str(getattr(trace_obj, "text", "") or "")
+            if not text or brain is None or not hasattr(brain, "encode"):
+                return out
+            cells = brain.encode(text)
+            for i in range(len(cells) - 1):
+                out.append(([cells[i]], [cells[i + 1]]))
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
     def stats(self) -> Dict[str, Any]:
         return {"enabled": self.enabled, "beats": self.beats, "expansions": self.expansions,
                 "queued": len(self.queue), "dropped": self.dropped,
@@ -188,4 +320,9 @@ class PulseEngine:
                 "every_s": self.every_s,
                 "consolidate_every_s": self.consolidate_every_s,
                 "evolve_every_s": self.evolve_every_s,
+                "timescales": {"pulse": self.every_s, "wonder": self.wonder_every_s,
+                               "discover": self.discover_every_s,
+                               "consolidate": self.consolidate_every_s,
+                               "memory": self.memory_every_s, "dream": self.dream_every_s,
+                               "evolve": self.evolve_every_s},
                 "last": self.last.to_dict() if self.last is not None else None}

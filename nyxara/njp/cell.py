@@ -14,7 +14,9 @@ differentiates one cell from another, and structure is grown, never declared.
 Honest framing, the rule this repo keeps (see ``docs/CAPABILITIES.md``):
 
 * This is a **leaky integrate-and-fire automaton on a graph**, simulated on commodity silicon.
-  It is not neuromorphic hardware and there is no backpropagation anywhere in NJP.
+  It is not neuromorphic hardware. **This cell's** own updates carry no gradient: a synapse
+  changes from its two endpoints alone. Gradient learning lives in :mod:`nyxara.njp.learn`, over
+  the fabric rather than inside it.
 * ``__slots__`` is not a micro-optimisation here. The fabric grows without a fixed ceiling, so
   a live NJP holds hundreds of thousands of these; a dict-per-cell would be most of the resident
   memory. This is the difference between growth that continues and growth that hits swap.

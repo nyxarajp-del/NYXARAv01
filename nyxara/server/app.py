@@ -1409,6 +1409,78 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         """One beat of the continuous loop: expand, consolidate on cadence, evolve on cadence."""
         return core.njp_tick() or _off("PULSE_ENABLED")
 
+    def _organ(name: str, flag: str) -> dict:
+        """One organ's report, or the same 404-shaped payload every njp route degrades to.
+
+        An organ that is switched off is *absent* rather than reporting zeros — the distinction
+        this whole package keeps, carried out to the wire so a caller can tell "off" from "idle".
+        """
+        brain = _brain()
+        if brain is None:
+            return _off("NJP_ENABLED")
+        organ = getattr(brain, name, None)
+        if organ is None:
+            return _off(flag)
+        try:
+            return organ.stats()
+        except Exception:  # noqa: BLE001
+            return {"error": f"{name} stats failed"}
+
+    @app.get("/v1/njp/grounding", dependencies=auth)
+    def njp_grounding() -> dict:
+        """Entities, relations and learned extraction patterns — what words became structure."""
+        return _organ("grounder", "GROUNDING_ENABLED")
+
+    @app.get("/v1/njp/world", dependencies=auth)
+    def njp_world() -> dict:
+        """Events, causal links and what she can explain."""
+        return _organ("world", "WORLD_ENABLED")
+
+    @app.get("/v1/njp/memory-levels", dependencies=auth)
+    def njp_memory_levels() -> dict:
+        """Working / episodic / semantic / procedural / autobiographical, with retention."""
+        return _organ("levels", "LEVELS_ENABLED")
+
+    @app.get("/v1/njp/discover", dependencies=auth)
+    def njp_discover() -> dict:
+        """Abstractions proposed, confirmed on held-out episodes, or refuted and deleted."""
+        return _organ("discoverer", "DISCOVER_ENABLED")
+
+    @app.get("/v1/njp/reason", dependencies=auth)
+    def njp_reason() -> dict:
+        """How deep she has been going, and how often she declined to decide."""
+        return _organ("reasoner", "REASON_ENABLED")
+
+    @app.get("/v1/njp/self", dependencies=auth)
+    def njp_self() -> dict:
+        """The measured capability map: what she is reliably good at, and what she is not."""
+        return _organ("self_model", "SELF_MODEL_ENABLED")
+
+    @app.get("/v1/njp/meta", dependencies=auth)
+    def njp_meta() -> dict:
+        """Her own strategies as bandit arms, and where compute is currently allocated."""
+        return _organ("meta", "META_ENABLED")
+
+    @app.get("/v1/njp/goals", dependencies=auth)
+    def njp_goals() -> dict:
+        """Mission → Goal → Subgoal → Task, with rolled-up progress and what is blocked."""
+        return _organ("goals", "GOALS_ENABLED")
+
+    @app.get("/v1/njp/curiosity", dependencies=auth)
+    def njp_curiosity() -> dict:
+        """Her own open questions, priced by expected value of information."""
+        return _organ("curiosity", "CURIOSITY_ENABLED")
+
+    @app.get("/v1/njp/attention", dependencies=auth)
+    def njp_attention() -> dict:
+        """What has been winning her attention, and what has been losing."""
+        return _organ("attention", "ATTENTION_ENABLED")
+
+    @app.get("/v1/njp/predict", dependencies=auth)
+    def njp_predict() -> dict:
+        """Prediction accuracy, and errors broken down by which organ they were blamed on."""
+        return _organ("predictor", "PREDICT_ENABLED")
+
     @app.post("/v1/njp/prove", dependencies=auth)
     def njp_prove(req: NyxThinkRequest) -> dict:
         """Machine-check a claim, where the claim admits one.

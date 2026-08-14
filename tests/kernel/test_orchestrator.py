@@ -134,10 +134,34 @@ def test_owner_conversation_acts():
 
 
 def test_response_is_honest_qualified():
+    """The spoken response goes through the HonestyGuard, and expresses uncertainty when there is
+    any — but a qualifier is only *prefixed* onto a short, claim-like statement.
+
+    This used to assert a bare prefix on every reply. `HonestyGuard.honest_statement` deliberately
+    stopped doing that (nyxara/observe/honesty.py): gluing "I think" onto a full fluent answer
+    breaks the grammar and poisons anything that learns from the text, so prose is calibrated in
+    place with a caveat when confidence is genuinely low. Asserting the old behaviour made this
+    fail against code that is working as designed, which is worse than not testing it — so it now
+    asserts the contract that actually holds.
+    """
+    from nyxara.observe.honesty import Claim, _reads_as_prose
+
     nyx = _core()
     r = nyx.process("the status is good", authority=Authority.OWNER)
-    # the spoken response carries an honesty qualifier
-    assert any(q in r.response for q in ("I'm confident", "I think", "I'm certain", "I suspect"))
+    assert r.response
+
+    qualifiers = ("I'm confident", "I think", "I'm certain", "I suspect", "not fully certain")
+    if _reads_as_prose(r.candidate.text):
+        # Prose: left readable, and hedged only when she is actually unsure.
+        if r.candidate.confidence < 0.5:
+            assert any(q in r.response for q in qualifiers)
+    else:
+        assert any(q in r.response for q in qualifiers)
+
+    # And the guard is genuinely wired: a short claim still gets its prefix.
+    spoken = nyx.honesty.honest_statement(
+        Claim("the task is done", expressed_confidence=0.7, belief=0.7, evidence=0.7))
+    assert any(q in spoken for q in qualifiers)
 
 
 # -------------------- owner command through the gates -------------------- #
