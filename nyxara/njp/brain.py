@@ -177,6 +177,7 @@ class NJPBrain:
         self.world = self._build_world(c)
         self.predictor = self._build_predictor(c)
         self.levels = self._build_levels(c)
+        self.discoverer = self._build_discoverer(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -303,6 +304,23 @@ class NJPBrain:
             return HierarchicalMemory(self.memory,
                                       forget_below=self._cfg("forget_below", 0.05))
         except Exception:  # noqa: BLE001 — one undifferentiated pool still works, less well
+            return None
+
+    def _build_discoverer(self, c: Any) -> Any:
+        """Where she proposes abstractions above her own episodes and tries to falsify them.
+
+        The world model finds cause -> effect between things already named. This finds the pattern
+        above that: when A + B + C keep arriving before D, the useful move is to hypothesise that
+        they *jointly* predict D and then test that on episodes it was never fitted to.
+        """
+        if not self._gate("discover", True):
+            return None
+        try:
+            from nyxara.njp.discover import Discoverer
+            return Discoverer(min_support=self._cfg("discover_min_support", 4),
+                              min_precision=self._cfg("discover_min_precision", 0.7),
+                              max_order=self._cfg("discover_max_order", 3))
+        except Exception:  # noqa: BLE001 — she keeps her pairs, and forms no rules above them
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -582,7 +600,16 @@ class NJPBrain:
             if remember and out.answer:
                 self._remember_turn(out)
 
-            # 7. EXPAND — the physical growth, after every single turn
+            # 7. an episode for the discoverer: what was present, and what she concluded. This
+            # is the raw material abstractions are proposed from — one episode is never a
+            # pattern, which is exactly why it is only recorded here and judged elsewhere.
+            if self.discoverer is not None and out.percept is not None and out.answer:
+                try:
+                    self.discoverer.observe(out.percept.concepts[:8], out.answer[:60])
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # 8. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
 
             out.ms = (time.perf_counter() - t0) * 1000.0
@@ -892,7 +919,8 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("truth", self.truth),
                             ("soulsync", self.soul), ("evolve", self.evolver),
                             ("pulse", self.pulse), ("grounding", self.grounder),
-                            ("world", self.world), ("predict", self.predictor), ("levels", self.levels)):
+                            ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
+                            ("discover", self.discoverer)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -917,7 +945,8 @@ class NJPBrain:
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
-                            ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels)):
+                            ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
+                            ("discover", self.discoverer)):
             if organ is None:
                 continue
             try:
@@ -949,6 +978,8 @@ class NJPBrain:
                 self.predictor.load_dict(d["predict"])
             if d.get("levels") and self.levels is not None:
                 self.levels.load_dict(d["levels"])
+            if d.get("discover") and self.discoverer is not None:
+                self.discoverer.load_dict(d["discover"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

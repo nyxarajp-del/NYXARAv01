@@ -2253,6 +2253,7 @@ class NJPConfig(BaseModel):
     world_enabled: bool = True                   # event → state → cause → consequence
     predict_enabled: bool = True                 # predict → observe → diagnose → repair
     levels_enabled: bool = True                  # working/episodic/semantic/procedural/self
+    discover_enabled: bool = True                # propose abstractions, then try to falsify them
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2298,6 +2299,15 @@ class NJPConfig(BaseModel):
     # item makes every existing retrieval slightly worse. Autobiographical memory is exempt —
     # losing it would change who she is, which is not a memory-management decision.
     forget_below: float = Field(default=0.05, ge=0.0, le=1.0)
+
+    # ---- abstraction discovery ---- #
+    # Episodes a candidate rule must be fitted on, and the precision it must then hold at on
+    # episodes it never saw. A rule that only describes the data that suggested it is not a rule.
+    discover_min_support: int = Field(default=4, ge=2, le=1000)
+    discover_min_precision: float = Field(default=0.7, ge=0.0, le=1.0)
+    # Antecedents per rule. The subset count explodes with this, and a rule with eight
+    # antecedents describes one episode rather than a pattern.
+    discover_max_order: int = Field(default=3, ge=2, le=8)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark
