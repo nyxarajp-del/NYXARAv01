@@ -174,6 +174,7 @@ class NJPBrain:
         self.intent = self._build_intent(c)
         self.ladder = self._build_ladder(c)
         self.grounder = self._build_grounder(c)
+        self.world = self._build_world(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -267,6 +268,22 @@ class NJPBrain:
                             known_floor=self._cfg("grounding_known_floor", 0.75),
                             learn_patterns=self._cfg("grounding_learn_patterns", True))
         except Exception:  # noqa: BLE001 — without it she is back to co-occurrence alone
+            return None
+
+    def _build_world(self, c: Any) -> Any:
+        """Her model of what *happens*, as distinct from what *is*.
+
+        Grounding holds facts; this holds events, causes and consequences. A mind with only the
+        first knows a snapshot and cannot answer "what happens next" or "why did that happen".
+        """
+        if not self._gate("world", True):
+            return None
+        try:
+            from nyxara.njp.world import WorldView
+            return WorldView(window=self._cfg("world_window", 4),
+                             min_support=self._cfg("world_min_support", 3),
+                             min_lift=self._cfg("world_min_lift", 0.15))
+        except Exception:  # noqa: BLE001 — she reasons about facts, not about change
             return None
 
     def _build_voice(self, c: Any) -> Any:
@@ -390,6 +407,14 @@ class NJPBrain:
                         out.grounding = self.grounder.ground(out.stimulus, intent=intent)
                     except Exception:  # noqa: BLE001
                         out.grounding = None
+
+                # A relation that *happened* goes on the timeline; one that *holds* stays a fact.
+                # Conflating them would put unchanging facts in causal order.
+                if self.world is not None and out.grounding is not None:
+                    try:
+                        self.world.from_grounding(out.grounding)
+                    except Exception:  # noqa: BLE001
+                        pass
 
                 out.cells = self.encode(out.stimulus)
                 if not out.cells:
@@ -697,7 +722,8 @@ class NJPBrain:
         out: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.stats()}
         for name, organ in (("ledger", self.ledger), ("truth", self.truth),
                             ("soulsync", self.soul), ("evolve", self.evolver),
-                            ("pulse", self.pulse), ("grounding", self.grounder)):
+                            ("pulse", self.pulse), ("grounding", self.grounder),
+                            ("world", self.world)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -722,7 +748,7 @@ class NJPBrain:
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
-                            ("grounding", self.grounder)):
+                            ("grounding", self.grounder), ("world", self.world)):
             if organ is None:
                 continue
             try:
@@ -748,6 +774,8 @@ class NJPBrain:
                 self.soul.load_dict(d["soulsync"])
             if d.get("grounding") and self.grounder is not None:
                 self.grounder.load_dict(d["grounding"])
+            if d.get("world") and self.world is not None:
+                self.world.load_dict(d["world"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

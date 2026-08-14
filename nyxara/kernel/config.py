@@ -2250,6 +2250,7 @@ class NJPConfig(BaseModel):
     intent_enabled: bool = True                  # what was actually asked
     grounding_enabled: bool = True               # words → entities → relations → beliefs
     concepts_enabled: bool = True                # types discovered from experience, not declared
+    world_enabled: bool = True                   # event → state → cause → consequence
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2279,6 +2280,16 @@ class NJPConfig(BaseModel):
     # Minimum shared-feature overlap for the concept ladder to group two things under one concept.
     # Higher splits hairs; lower collapses genuinely different kinds into one bucket.
     concept_link_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+
+    # ---- the world: what happens, and why ---- #
+    # How far back a candidate cause may reach. Wider catches slower chains and admits more
+    # coincidence; the support and lift floors below are what keep that honest.
+    world_window: int = Field(default=4, ge=1, le=64)
+    # A cause must recur this often before it is called one — sequence alone is the weakest
+    # possible evidence, and without a floor the rooster causes the sunrise.
+    world_min_support: int = Field(default=3, ge=1, le=1000)
+    # And it must beat the rate at which the effect happens anyway: P(effect|cause) − P(effect).
+    world_min_lift: float = Field(default=0.15, ge=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark
