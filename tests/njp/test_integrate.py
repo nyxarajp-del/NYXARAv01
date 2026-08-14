@@ -350,8 +350,14 @@ def test_the_fabric_accepts_an_error_from_outside_the_settle():
 
 # ---- the reasoner is reachable from a turn ----------------------------------------- #
 def test_an_unanswerable_question_descends_the_ladder(brain: NJPBrain):
+    """A question about something she was never told — no structure can answer it.
+
+    This used to use ``mera naam kya hai``, on the grounds that grounding had no answer for it.
+    It has one now, so the example had to change: an answerable question must *not* pay for the
+    ladder, and Hinglish being answerable is the point of the change that broke this test.
+    """
     brain.think("my name is Jay")
-    brain.think("mera naam kya hai")               # Hinglish — grounding has no answer for it
+    brain.think("who is Zoran")                    # never mentioned, in any language
     assert brain.stats()["reason"]["passes"] > 0
 
 

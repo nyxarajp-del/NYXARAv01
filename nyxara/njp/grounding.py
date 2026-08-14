@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -202,6 +203,20 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
     (r"^(?P<s>.+?)\s+(?:causes?|leads?\s+to)\s+(?P<o>.+)$", "causes"),
+    # Verb-final statements — the mirror of the question gap, and the reason closing that gap
+    # alone was not enough. Every pattern above assumes the English order "X <relation> is Y";
+    # Hinglish and Hindi put the copula last, "X ka <relation> Y **hai**". So the Master could
+    # finally *ask* "Ravi ka naam kya hai" and there was still nothing to find, because
+    # "Ravi ka naam Ravi Kumar hai" had never extracted. A language she can be questioned in but
+    # not told anything in is half a language.
+    (r"^(?:mera|meri|mere|मेरा|मेरी|मेरे)\s+(?P<p>\S+)\s+(?P<o>.+?)\s+(?:hai|hain|है|हैं)\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?P<p>\S+)\s+(?P<o>.+?)"
+     r"\s+(?:hai|hain|है|हैं)\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?P<o>.+?)\s+(?:me|mein|में)\s+(?:rehta|rehti|rahta|rahti|रहता|रहती)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "located_in"),
+    (r"^(?P<s>.+?)\s+(?P<o>.+?)\s+(?:me|mein|में)\s+(?:kaam|काम)\s+(?:karta|karti|करता|करती)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "works_at"),
+    (r"^(?P<s>.+?)\s+(?:ek|एक)\s+(?P<o>.+?)\s+(?:hai|hain|है|हैं)\s*$", "is_a"),
     # Happenings. Everything above this line is a relation that *holds*; everything below is one
     # that *happened*, and only these reach :data:`nyxara.njp.world._EVENT_PREDICATES` and become
     # events on a timeline. Measured before they existed: that predicate set listed twenty-one
@@ -234,17 +249,65 @@ _BECAUSE = re.compile(
     r"^(?P<effect>.+?)\s+(?:because(?:\s+of)?|since|kyunki|kyonki|isliye\s+ki)\s+(?P<cause>.+)$",
     re.IGNORECASE)
 
+# Wh-words that can open a turn. English only: this is the head-initial case, and every other
+# language here puts its wh-word somewhere else entirely.
+_WH_HEAD = frozenset({"what", "who", "where", "when", "why", "how", "which",
+                      "kya", "kaun", "kahan", "kahaan", "kab", "kyun", "kyon", "kaise",
+                      "क्या", "कौन", "कहाँ", "कहां", "कब", "क्यों", "कैसे"})
+
+# Markers that make a turn a question wherever they appear in it. Hindi and Hinglish are
+# verb-final with the wh-word *in situ* ("mera naam KYA hai"), so a head-word test is blind to
+# them; and an imperative ask ("batao", "tell me") is a question by function whatever its mood.
+_ASK_ANYWHERE = re.compile(
+    r"(?:\b(?:kya|kaun|kahan|kahaan|kab|kyun|kyon|kaise|kitna|kitne|kaunsa|kaunsi)\b"
+    r"|[क][्]?[य][ा]|कौन|कहाँ|कहां|कब|क्यों|कैसे|कितना"
+    r"|\b(?:batao|bataao|bata|bataiye|btao|batana)\b|बताओ|बताइए|बता"
+    r"|\btell\s+me\b|\bdo\s+you\s+know\b)",
+    re.IGNORECASE)
+
 # Question forms -> the predicate they are asking about. Same reasoning: a floor, not a ceiling.
+#
+# Ordering is load-bearing. A form that names BOTH a subject and a property ("Ravi ka naam kya
+# hai") must be tried before the generic one that names only a subject ("Ravi kya hai"), or the
+# generic reading swallows it and asks `is_a` about a person whose *name* was wanted.
 _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
+    # --- English ---
     (r"\bwhat\s+is\s+(?:my|mera|meri)\s+(?P<p>\w+)", ""),
     (r"\bwho\s+am\s+i\b", "has_name"),
     (r"\bwhat(?:'s| is)\s+(?:the\s+)?name\s+of\s+(?P<s>.+?)\??$", "has_name"),
+    (r"\btell\s+me\s+(?:my|mera|meri)\s+(?P<p>\w+)", ""),
+    (r"\btell\s+me\s+(?:the\s+)?(?P<p>\w+)\s+of\s+(?P<s>.+?)\??$", ""),
     (r"\bwhere\s+do(?:es)?\s+(?P<s>.+?)\s+live", "located_in"),
     (r"\bwhere\s+(?:am\s+i|do\s+i)\s+live", "located_in"),
+    (r"\bwhere\s+does\s+(?P<s>.+?)\s+work", "works_at"),
     (r"\bwhere\s+is\s+(?P<s>.+?)\??$", "located_in"),
     (r"\bwho\s+is\s+(?P<s>.+?)\??$", "is_a"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
     (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:do|own|like|know)", ""),
+
+    # --- Hinglish / Devanagari, wh-in-situ ---
+    # "mera naam kya hai" / "मेरा नाम क्या है" — the Master's own property.
+    (r"^(?:mera|meri|mere|मेरा|मेरी|मेरे)\s+(?P<p>\S+)\s+"
+     r"(?:kya|क्या)\s*(?:hai|hain|h|है|हैं)?\s*$", ""),
+    # "mera naam batao" / "मेरा नाम बताओ" — imperative ask, same fact.
+    (r"^(?:mera|meri|mere|मेरा|मेरी|मेरे)\s+(?P<p>\S+)\s+"
+     r"(?:batao|bataao|bata|bataiye|btao|batana|बताओ|बताइए|बता)", ""),
+    # "Ravi ka naam kya hai" — someone else's property, subject and property both named.
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?P<p>\S+)\s+"
+     r"(?:kya|क्या)\s*(?:hai|hain|h|है|हैं)?\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?P<p>\S+)\s+"
+     r"(?:batao|bataao|bata|bataiye|btao|batana|बताओ|बताइए|बता)", ""),
+    # "main kahan rehta hoon" / "Ravi kahan rehta hai" — location.
+    (r"^(?:main|mai|मैं)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:rehta|rehti|rahta|rahti|रहता|रहती)",
+     "located_in"),
+    (r"^(?P<s>.+?)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:kaam|काम)\s+(?:karta|karti|करता|करती)",
+     "works_at"),
+    (r"^(?P<s>.+?)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:rehta|rehti|rahta|rahti|रहता|रहती)",
+     "located_in"),
+    (r"^(?P<s>.+?)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:hai|है)", "located_in"),
+    # "Ravi kaun hai" / "Ravi kya hai" — the generic ask, deliberately last of the Hinglish set.
+    (r"^(?P<s>.+?)\s+(?:kaun|कौन)\s*(?:hai|hain|है|हैं)?\s*$", "is_a"),
+    (r"^(?P<s>.+?)\s+(?:kya|क्या)\s*(?:hai|hain|है|हैं)?\s*$", "is_a"),
 )
 
 _STRIP = re.compile(r"^[\s\"'`(\[]+|[\s\"'`)\].,!?;:]+$")
@@ -255,6 +318,27 @@ _ARTICLES = frozenset({"a", "an", "the", "ek"})
 # remark; the penalty is real so a contested answer stops sounding as sure as an uncontested one.
 _RECENCY_BONUS = 0.05
 _CONTESTED_PENALTY = 0.15
+
+
+def _norm_relation(raw: str) -> str:
+    """Normalise a relation name without deleting anything that carries meaning.
+
+    ``\\w`` is not enough here, and the reason is specific. A Devanagari syllable is a consonant
+    plus a *combining mark* — ``नाम`` is ``न`` + ``ा`` + ``म`` — and those marks are Unicode
+    category ``Mn``, which :meth:`str.isalnum` reports as False and ``\\w`` therefore does not
+    match. Normalising on ``\\w`` turned ``नाम`` into ``न_म``: not the empty string the ASCII
+    class produced, but just as unreachable, because nothing else ever spells it that way.
+
+    So marks are kept alongside letters and digits, and everything else collapses to a single
+    separator. This is a *naming* rule, applied identically to every script.
+    """
+    out: List[str] = []
+    for ch in str(raw or "").strip().lower():
+        if ch.isalnum() or ch == "_" or unicodedata.category(ch).startswith("M"):
+            out.append(ch)
+        else:
+            out.append("_")
+    return re.sub(r"_+", "_", "".join(out)).strip("_")
 
 
 def _clean(text: str) -> str:
@@ -558,8 +642,13 @@ class Grounder:
         while "what is my name" reads ``name``, and without folding them together she stores an
         answer she can never retrieve. Anything not listed passes through untouched; this decides
         what an edge is *called*, never what is true.
+
+        Normalised by :func:`_norm_relation` rather than on ``[a-z0-9]``. The ASCII class deleted
+        every Devanagari character outright, so ``"नाम"`` normalised to the empty string and came
+        back as ``related_to`` — she could not name the relation the Master had just asked about,
+        in the script he asked in. Folding a script into nothing is not normalisation.
         """
-        out = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+        out = _norm_relation(raw)
         return _PREDICATE_ALIASES.get(out, out) or "related_to"
 
     # ---- assertion and contradiction -------------------------------------- #
@@ -754,16 +843,39 @@ class Grounder:
     # ---- questions -------------------------------------------------------- #
     @staticmethod
     def _is_question(text: str, intent: Any = None) -> bool:
-        """Trust the intent reader when one is attached; fall back to the surface."""
+        """Trust the intent reader when one is attached; fall back to the surface.
+
+        The surface fallback used to read the **first word only**, which is a statement about
+        English rather than about questions. English is head-initial — "*what* is my name" — so a
+        head check finds the wh-word. Hindi and Hinglish are verb-final and leave the wh-word
+        *in situ*: "mera naam **kya** hai" has ``mera`` at the head, so the check returned False,
+        the turn was never treated as a question, and the answer path was never entered at all.
+        Measured: ``mera naam kya hai`` returned ``''`` while ``what is my name`` returned ``Jay``
+        — the same fact, reachable in one language and not the other.
+
+        So the Hinglish and Devanagari markers are searched for **anywhere** in the turn, which is
+        where that grammar actually puts them. This does not over-trigger on statements: a
+        statement of fact ("mera naam Jay hai") carries no wh-word, and it is the wh-word that is
+        being looked for, not the possessive.
+
+        Imperative requests are included on purpose. "tell me my name" and "mera naam batao" are
+        questions in every sense that matters here — they ask for a fact she may hold — and both
+        were previously read as statements and sent to the *extractor*, which tried to learn a
+        relation from them.
+        """
         try:
             if intent is not None and getattr(intent, "kind", "") == "question":
                 return True
             low = str(text or "").strip().lower()
+            if not low:
+                return False
             if low.endswith("?"):
                 return True
-            head = low.split()[0] if low.split() else ""
-            return head in {"what", "who", "where", "when", "why", "how", "which",
-                            "kya", "kaun", "kahan", "kab", "kyun", "kaise"}
+            head = low.split()[0]
+            if head in _WH_HEAD:
+                return True
+            # Wh-in-situ (Hinglish/Devanagari) and imperative asks, anywhere in the turn.
+            return bool(_ASK_ANYWHERE.search(low))
         except Exception:  # noqa: BLE001
             return False
 
@@ -843,6 +955,14 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "job": "works_at", "work": "works_at", "works": "works_at", "employer": "works_at",
     "owns": "owns", "own": "owns", "has": "owns",
     "kind": "is_a", "type": "is_a",
+    # The same relations as the Master actually writes them. A fold table that only speaks one
+    # language means a fact stored in English is unreachable from the question asked in Hinglish
+    # — which is precisely the gap this list exists to close, applied inconsistently.
+    "नाम": "has_name",
+    "ghar": "located_in", "shehar": "located_in", "sheher": "located_in", "shahar": "located_in",
+    "घर": "located_in", "शहर": "located_in", "जगह": "located_in", "jagah": "located_in",
+    "kaam": "works_at", "naukri": "works_at", "काम": "works_at", "नौकरी": "works_at",
+    "umar": "age", "उम्र": "age",
 }
 
 # Relations that can hold only one value at a time. A second value contradicts rather than adds.
