@@ -32,7 +32,7 @@ Honest framing, kept the way this repo keeps it:
   :mod:`nyxara.njp.ledger` and is whatever it measures, never asserted.
 * **Capacity is measured, not quoted.** :meth:`capacity_probe` finds where cleanup actually breaks
   *on this machine*. Superposing more than that degrades retrieval, and the probe says where.
-* **No backpropagation.** The map is a Hebbian outer product with decay — one pass, online,
+* **No backpropagation in this map.** It is a Hebbian outer product with decay — one pass, online,
   local. Same seed ⇒ same manifold on every machine.
 * This is classical high-dimensional computing (HDC/VSA). Nothing quantum, no extra physical
   dimensions: ``dim`` is a number of components in RAM.

@@ -187,6 +187,7 @@ class NJPBrain:
         self.curiosity = self._build_curiosity(c)
         self.attention = self._build_attention(c)
         self.environment = self._build_environment(c)
+        self.readout = self._build_readout(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -431,6 +432,28 @@ class NJPBrain:
             from nyxara.sim.envmodel import EnvironmentModel
             return EnvironmentModel()
         except Exception:  # noqa: BLE001 — she uses tools without modelling what they do
+            return None
+
+    def _build_readout(self, c: Any) -> Any:
+        """The gradient-trained head over the fabric.
+
+        Every update in the fabric is local — a synapse changes because its own two endpoints
+        fired, and nothing tells it what the network as a whole was trying to achieve. Local rules
+        cannot assign credit *through* a chain of activity to the thing that actually caused the
+        error. This is the other kind of learning, and it is additive: the fabric's plasticity is
+        untouched, and two learners now sit over one substrate.
+        """
+        if not self._gate("readout", True):
+            return None
+        try:
+            from nyxara.njp.learn import Readout, available
+            if not available():
+                return None      # no numpy ⇒ no gradients, and absent beats pretending
+            return Readout(width=self._cfg("readout_width", 512),
+                           hidden=self._cfg("readout_hidden", 128),
+                           lr=self._cfg("readout_lr", 0.01),
+                           seed=self._cfg("seed", 42))
+        except Exception:  # noqa: BLE001 — she keeps her local plasticity and learns no gradients
             return None
 
     def _build_predictor(self, c: Any) -> Any:
@@ -1048,7 +1071,7 @@ class NJPBrain:
                             ("discover", self.discoverer), ("reason", self.reasoner),
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
-                            ("attention", self.attention)):
+                            ("attention", self.attention), ("readout", self.readout)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -1077,7 +1100,7 @@ class NJPBrain:
                             ("discover", self.discoverer), ("reason", self.reasoner),
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
-                            ("attention", self.attention)):
+                            ("attention", self.attention), ("readout", self.readout)):
             if organ is None:
                 continue
             try:
@@ -1119,6 +1142,8 @@ class NJPBrain:
                 self.goals.load_dict(d["goals"])
             if d.get("curiosity") and self.curiosity is not None:
                 self.curiosity.load_dict(d["curiosity"])
+            if d.get("readout") and self.readout is not None:
+                self.readout.load_dict(d["readout"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

@@ -49,8 +49,11 @@ is wanted next. On day one it knows nothing and says so — everything it knows,
 correction. A latent want is surfaced so it can be declined, never acted on silently.
 
 Honest, as everywhere in this repo: this is a **simulation on commodity silicon**, not neuromorphic
-hardware, and there is **no backpropagation** anywhere in it — every update is local to a synapse
-and its two endpoints. Growth is real but the machine is finite: under pressure
+hardware. The **fabric's** own plasticity is entirely local — every synaptic update depends only
+on that synapse and its two endpoints, with no global error signal — and alongside it
+:mod:`nyxara.njp.learn` trains a readout head by **real reverse-mode backpropagation**, gradient-
+checked against finite differences. Two learners over one substrate: local rules that grow the
+structure, and gradients that read it. Growth is real but the machine is finite: under pressure
 :meth:`~nyxara.njp.fabric.Fabric.consolidate` compresses the least-used structure so learning
 continues, and a fabric that has stopped growing reports that rather than a number that flatters it.
 

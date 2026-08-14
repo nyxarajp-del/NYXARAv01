@@ -2261,6 +2261,7 @@ class NJPConfig(BaseModel):
     curiosity_enabled: bool = True               # her own questions, priced by VOI
     attention_enabled: bool = True               # the bottleneck: one thing wins the turn
     environment_enabled: bool = True             # observe → act → outcome → learn
+    readout_enabled: bool = True                 # the gradient-trained head (real backprop)
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2338,6 +2339,14 @@ class NJPConfig(BaseModel):
     # How many things may reach awareness per cycle. Raising this does not make her think about
     # more at once; it makes "attention" stop meaning anything.
     attention_capacity: int = Field(default=1, ge=1, le=8)
+
+    # ---- the gradient-trained readout ---- #
+    # Cells are hashed into a fixed slot width so the head keeps a stable input size while the
+    # fabric underneath grows. Collisions are real and reported; resizing the network on every
+    # act of neurogenesis would throw away everything learned so far.
+    readout_width: int = Field(default=512, ge=8)
+    readout_hidden: int = Field(default=128, ge=4)
+    readout_lr: float = Field(default=0.01, gt=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark

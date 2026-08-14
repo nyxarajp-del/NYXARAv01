@@ -31,7 +31,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["PulseReport", "PulseEngine"]
 
@@ -66,6 +66,11 @@ class PulseReport:
     abstractions_confirmed: int = 0
     abstractions_refuted: int = 0
     dreamed: bool = False
+    # What the dream actually did. `dreamed` alone was a boolean that could be True while nothing
+    # changed; these are the numbers that say whether the pass was worth running.
+    replayed: int = 0
+    dream_loss_before: float = 0.0
+    dream_loss_after: float = 0.0
     generation: Optional[int] = None
     evolved: Optional[Dict[str, Any]] = None
     blocked: str = ""                 # non-empty when oversight refused the beat
@@ -79,7 +84,10 @@ class PulseReport:
                 "questions_raised": self.questions_raised,
                 "abstractions_confirmed": self.abstractions_confirmed,
                 "abstractions_refuted": self.abstractions_refuted,
-                "dreamed": self.dreamed,
+                "dreamed": self.dreamed, "replayed": self.replayed,
+                "dream_loss_before": round(self.dream_loss_before, 6),
+                "dream_loss_after": round(self.dream_loss_after, 6),
+                "dream_improved": self.dream_loss_after < self.dream_loss_before,
                 "generation": self.generation, "evolved": self.evolved,
                 "blocked": self.blocked, "ms": round(self.ms, 3)}
 
@@ -90,6 +98,7 @@ class PulseEngine:
     def __init__(self, brain: Any, *, every_s: float = 1.0,
                  wonder_every_s: float = 30.0, discover_every_s: float = 45.0,
                  memory_every_s: float = 120.0, dream_every_s: float = 600.0,
+                 dream_batch: int = 16, dream_epochs: int = 4,
                  consolidate_every_s: float = 60.0, evolve_every_s: float = 300.0,
                  queue_capacity: int = 4096, enabled: bool = True) -> None:
         self.brain = brain
@@ -102,6 +111,8 @@ class PulseEngine:
         self.discover_every_s = max(1.0, float(discover_every_s))
         self.memory_every_s = max(1.0, float(memory_every_s))
         self.dream_every_s = max(1.0, float(dream_every_s))
+        self.dream_batch = max(1, int(dream_batch))
+        self.dream_epochs = max(1, int(dream_epochs))
         self.evolve_every_s = max(1.0, float(evolve_every_s))
         self.enabled = bool(enabled)
 
@@ -214,7 +225,7 @@ class PulseEngine:
             # re-run so predictions can be tested and contradictions surface without a live turn
             # riding on the answer. Computational offline simulation; not conscious dreaming.
             if self._due("dream", self.dream_every_s):
-                rep.dreamed = self._dream()
+                self._dream(rep)
 
             # 5. evolve — one self-rewrite attempt, on the slowest cadence
             if self._due("evolve", self.evolve_every_s):
@@ -233,33 +244,74 @@ class PulseEngine:
             self.last = rep
             return rep
 
-    def _dream(self) -> bool:
-        """Replay recent episodes offline, testing what she would have predicted.
+    def _dream(self, rep: PulseReport) -> None:
+        """Offline replay that actually **trains**, and reports whether it helped.
 
-        Deliberately reuses the discoverer and the predictor rather than inventing a replay
-        engine: a "dream" that does not feed the same machinery a waking turn feeds would be a
-        decorative pass that changes nothing.
+        This used to touch timestamps and re-run discovery — a pass that could report
+        ``dreamed=True`` while changing nothing that would ever affect an answer. Now it does the
+        thing replay is for: re-run what happened, ask the readout what it would predict *now*,
+        and backpropagate the difference.
+
+        The loss is measured before and after on the **same** batch, so a dream that did not help
+        says so rather than being credited for having run. Replay is still offline simulation —
+        that is what replay is — but it now changes weights instead of timestamps.
         """
         try:
             levels = getattr(self.brain, "levels", None)
             discoverer = getattr(self.brain, "discoverer", None)
-            if levels is None or discoverer is None:
-                return False
+            readout = getattr(self.brain, "readout", None)
+            fabric = getattr(self.brain, "fabric", None)
+            if levels is None:
+                return
             from nyxara.njp.levels import Level
 
-            replayed = 0
-            for entry in levels.at(Level.EPISODIC)[-16:]:
-                trace = levels.store.recall_key(entry.key) if levels.store else None
-                text = str(getattr(trace, "text", "") or "")
-                if not text:
-                    continue
+            # Both experiential levels. Autobiographical entries are episodes too — they are
+            # protected from *forgetting*, which is not a reason to exclude them from replay, and
+            # reading only EPISODIC meant a session that talked mostly about the Master replayed
+            # almost nothing.
+            episodes = (levels.at(Level.EPISODIC)
+                        + levels.at(Level.AUTOBIOGRAPHICAL))[-self.dream_batch:]
+            batch: List[Tuple[Sequence[int], Sequence[int]]] = []
+            for entry in episodes:
                 levels.touch(entry.key)      # replay IS rehearsal — that is what it is for
-                replayed += 1
-            if replayed:
+                rep.replayed += 1
+                # (what fired, what fired next) straight off the trace the settle recorded.
+                trace = self._trace_for(entry, fabric)
+                batch.extend(trace)
+
+            if readout is not None and batch:
+                rep.dream_loss_before = readout.loss_on(batch)
+                for _ in range(self.dream_epochs):
+                    readout.train_step(batch)
+                rep.dream_loss_after = readout.loss_on(batch)
+
+            if discoverer is not None and rep.replayed:
                 discoverer.discover()
-            return bool(replayed)
+            rep.dreamed = bool(rep.replayed)
         except Exception:  # noqa: BLE001 — a failed dream changes nothing
-            return False
+            pass
+
+    def _trace_for(self, entry: Any, fabric: Any) -> List[Tuple[Sequence[int], Sequence[int]]]:
+        """Consecutive firing steps from a replayed episode, as (before, after) pairs.
+
+        Re-settling the fabric would be the obvious approach and is the wrong one: it mutates the
+        live substrate during what is supposed to be an *offline* pass, so the dream would change
+        the very thing it is meant to be learning about.
+        """
+        out: List[Tuple[Sequence[int], Sequence[int]]] = []
+        try:
+            brain = self.brain
+            store = getattr(getattr(brain, "levels", None), "store", None)
+            trace_obj = store.recall_key(entry.key) if store is not None else None
+            text = str(getattr(trace_obj, "text", "") or "")
+            if not text or brain is None or not hasattr(brain, "encode"):
+                return out
+            cells = brain.encode(text)
+            for i in range(len(cells) - 1):
+                out.append(([cells[i]], [cells[i + 1]]))
+            return out
+        except Exception:  # noqa: BLE001
+            return out
 
     def stats(self) -> Dict[str, Any]:
         return {"enabled": self.enabled, "beats": self.beats, "expansions": self.expansions,

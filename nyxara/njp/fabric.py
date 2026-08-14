@@ -43,8 +43,13 @@ when the map has not earned it.
 
 Honest, as everywhere in this repo:
 
-* **Simulation on commodity silicon.** Not neuromorphic hardware. **No backpropagation** anywhere:
-  every update here is local to a synapse and its two endpoints.
+* **Real compute, and honest about the hardware.** The dynamics are genuine leaky
+  integrate-and-fire physics solved over real elapsed time, executed as vectorised numpy — not a
+  toy loop. It is still running on commodity silicon: ``stats()["backend"]`` names what is
+  actually live, and will say ``numpy`` until neuromorphic hardware exists to say otherwise.
+* **No backpropagation *in here*.** Every update in this file is local to a synapse and its two
+  endpoints; no global error signal reaches it. Gradient learning is a separate, additive organ
+  (:mod:`nyxara.njp.learn`) that reads this substrate without changing how it grows.
 * **Deterministic given a seed.** Same seed, same stimulus, same fabric — which is what makes
   "it grew" a checkable claim rather than an anecdote.
 * Every public method is **fail-soft**: on error it degrades to a null result rather than breaking
