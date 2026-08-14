@@ -150,3 +150,22 @@ def test_an_organ_that_is_off_is_absent():
     b = NJPBrain(_Off())
     assert b.curiosity is None
     assert "curiosity" not in b.stats()
+
+
+def test_one_atypical_peer_does_not_silence_the_question():
+    """A unanimous vote means one unusual peer wipes out the asymmetry entirely.
+
+    Measured: with Ravi and Sara employed, Amit not, and the Master (a name and a location, no
+    employer) also sharing `located_in`, a strict intersection collapsed to exactly the property
+    Amit already had — and she noticed nothing.
+    """
+    b = NJPBrain()
+    for line in ("my name is Jay", "I live in Mumbai",
+                 "Ravi lives in Delhi", "Ravi works at Infosys",
+                 "Sara lives in Chennai", "Sara works at Wipro",
+                 "Amit lives in Pune"):
+        b.think(line)
+    b.curiosity.wonder()
+    missing = [q for q in b.curiosity.open_questions() if q.gap == Gap.MISSING_RELATION]
+    assert missing, "an atypical peer silenced every missing-relation question"
+    assert any(q.predicate == "works_at" for q in missing)

@@ -8,9 +8,10 @@ questions, which is its own kind of useless.
 something she actually has:
 
 * a **known-unknown** — a question the reasoner could not answer and recorded as such;
-* a **missing relation** — an entity whose peers all have a property it lacks. If Ravi and Amit
-  both have an employer and Sara does not, that asymmetry is the question, and it was discovered
-  rather than declared;
+* a **missing relation** — an entity that lacks a property *most* of its peers have. If Ravi and
+  Sara both have an employer and Amit does not, that asymmetry is the question, and it was
+  discovered rather than declared. A majority rather than a unanimous vote, because peers are
+  rarely uniform and demanding that they are is demanding that she never notice anything;
 * a **repeated failure** — a prediction that keeps being wrong in the same way, read off the error
   record. Being wrong once is noise; being wrong the same way five times is a gap;
 * a **thin region** — somewhere the world model has too little coverage to predict at all.
@@ -85,6 +86,11 @@ class Question:
 _COST_ASK = 0.6
 _COST_GATHER = 0.15
 
+# Fraction of peers that must hold a property before its absence counts as a gap worth asking
+# about. Below a majority the "asymmetry" is just variation; at 1.0 a single atypical peer
+# silences every question.
+_PEER_MAJORITY = 0.6
+
 
 class Curiosity:
     """Finds her own gaps, and decides which one is worth closing."""
@@ -147,11 +153,11 @@ class Curiosity:
         return out
 
     def _from_missing_relations(self) -> List[Question]:
-        """An entity whose peers all have a property it lacks.
+        """An entity that lacks a property most of its peers have.
 
         This is the one that is genuinely *discovered*: nothing declares that a person ought to
         have an employer. It comes from noticing that the other entities carrying the same
-        relations carry this one too, and that this one does not.
+        relations mostly carry this one too, and that this one does not.
         """
         out: List[Question] = []
         try:
@@ -170,10 +176,21 @@ class Curiosity:
                          if s != subject and len(p & predicates) >= 1]
                 if len(peers) < 2:
                     continue
-                # A property every peer has and this one does not.
-                common: Set[str] = set(peers[0])
-                for peer in peers[1:]:
-                    common &= peer
+                # A property MOST peers have and this one does not.
+                #
+                # Deliberately a majority rather than a universal intersection. Requiring every
+                # peer to share the property means one atypical peer silences the question
+                # entirely: with Ravi and Sara both employed, Amit not, and the Master (who has a
+                # name but no employer) also sharing `located_in`, the intersection collapses to
+                # exactly the property Amit already has, and the real asymmetry disappears.
+                # Peers are rarely uniform, and demanding that they are is demanding that she
+                # never notice anything.
+                tally: Dict[str, int] = {}
+                for peer in peers:
+                    for predicate in peer:
+                        tally[predicate] = tally.get(predicate, 0) + 1
+                needed = max(2, int(len(peers) * _PEER_MAJORITY + 0.5))
+                common = {p for p, n in tally.items() if n >= needed}
                 for missing in sorted(common - predicates)[:2]:
                     out.append(Question(
                         text=f"what is {subject}'s {missing.replace('_', ' ')}?",
