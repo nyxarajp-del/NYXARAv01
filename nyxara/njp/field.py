@@ -236,6 +236,8 @@ class RecursiveCognitiveField:
         # not allowed to trigger one twice running. Without this, a subject she genuinely cannot
         # classify would restructure her whole concept system on every turn it is mentioned.
         self._last_restructured: str = ""
+        # The most recent benchmark score, so `stats()` can report it without paying for it.
+        self._last_benchmark: float = 0.0
 
         self.cycles = 0
         self.restructures = 0
@@ -720,6 +722,12 @@ class RecursiveCognitiveField:
         :attr:`_holdout`, and the two never mix. That separation is the only reason a benchmark
         win here is evidence of anything: a model evaluated on what shaped it will always look
         like it is improving.
+
+        Re-crystallises first, so the score reflects the configuration as it stands rather than
+        whatever the last cycle happened to leave behind. That makes this **expensive**, which is
+        why :meth:`stats` reports :attr:`_last_benchmark` instead of calling it — a reporting
+        method that silently rebuilds the concept hierarchy is a performance bug waiting for the
+        concept count to grow, and reporting should never have side effects in the first place.
         """
         if self.concepts is None or not self._holdout:
             return 0.0
@@ -736,7 +744,8 @@ class RecursiveCognitiveField:
             # concept covers everything and compresses nothing; a concept per observation
             # compresses nothing and covers everything.
             ratio = self.concepts.compression()
-            return round(0.5 * coverage + 0.5 * min(1.0, (ratio - 1.0) / 2.0), 6)
+            self._last_benchmark = round(0.5 * coverage + 0.5 * min(1.0, (ratio - 1.0) / 2.0), 6)
+            return self._last_benchmark
         except Exception:  # noqa: BLE001
             return 0.0
 
@@ -782,7 +791,9 @@ class RecursiveCognitiveField:
             "experiments_designed": self.experiments_designed,
             "errors": dict(self.errors_diagnosed),
             "samples": len(self._samples), "holdout": len(self._holdout),
-            "benchmark": self.benchmark(),
+            # The last score computed, not a fresh one: see `benchmark`. 0.0 means loop 2 has not
+            # run yet, which is a different thing from a configuration that scored zero.
+            "benchmark": self._last_benchmark,
             "meta_trials": len(self.trials),
             "meta_accepted": self.accepted_trials,
             "meta_gain": round(sum(t.gain for t in accepted), 5),
