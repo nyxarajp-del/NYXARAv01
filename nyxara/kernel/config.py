@@ -2370,6 +2370,35 @@ class NJPConfig(BaseModel):
     reasoner_may_propose_tools: bool = True
     reasoner_min_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
 
+    # ---- NJP V.04: the Recursive Cognitive Field (njp/field.py) ---- #
+    # Intelligence as representing the world, experimenting on the representation, and
+    # RESTRUCTURING the representation when prediction fails. Each organ gates independently, so
+    # a deployment that wants concepts without self-modification gets exactly that.
+    concepts_enabled: bool = True       # Concept Genesis (njp/concepts.py)
+    universe_enabled: bool = True       # the internal simulation universe (njp/universe.py)
+    designer_enabled: bool = True       # information-gain experiment design
+    beliefs_enabled: bool = True        # the belief ledger (njp/beliefs.py)
+    metareason_enabled: bool = True     # reasoning-strategy selection (njp/metareason.py)
+    field_enabled: bool = True          # both loops (njp/field.py)
+
+    # How alike two observations must be to be the same kind. The floor is not 0: at zero
+    # everything resembles everything and every concept formed asserts nothing. A restructure may
+    # move this within a band around the configured value, never past it.
+    concept_similarity: float = Field(default=0.34, ge=0.05, le=0.95)
+    # Fraction of a cluster's members that must carry a feature for it to be INVARIANT — what the
+    # concept actually claims. Below this a concept over-claims and excludes its own members.
+    concept_invariant_share: float = Field(default=0.6, ge=0.1, le=1.0)
+    concept_cover: float = Field(default=0.45, ge=0.05, le=1.0)   # coverage that counts as "explained"
+    concept_min_members: int = Field(default=2, ge=2, le=64)      # one example is an anecdote
+    # How far a `do()` propagates through the learned causal graph. A cycle in a learned graph is
+    # real; unbounded propagation around one is not.
+    universe_depth: int = Field(default=6, ge=1, le=16)
+    crystallise_every_turns: int = Field(default=4, ge=1, le=64)  # re-form concepts this often
+    # Loop 2 — evaluate herself, find the bottleneck, propose one bounded change, and revert it
+    # unless it strictly wins on a HELD-OUT benchmark. Slower than loop 1 by design: it
+    # re-crystallises everything and benchmarks the result.
+    meta_cycle_every_turns: int = Field(default=25, ge=1, le=1000)
+
 
 class HyperbolicManifoldConfig(BaseModel):
     """Self-mutating hyperbolic concept manifold (mind/hyperbolic_manifold.py) — Rule 4.

@@ -42,6 +42,49 @@ Every outcome it scores against is independent of the prediction it scores — p
 or the Master's own sentence — because a mind that grades its guesses against its own later
 guesses is not learning, it is agreeing with itself.
 
+**She restructures what she can represent, not only what she believes.** :mod:`nyxara.njp.field`
+is the Recursive Cognitive Field, and it runs two loops. The fast one is the cognitive cycle::
+
+    REALITY → PERCEPTION → CONCEPT FORMATION → WORLD MODEL → CAUSAL HYPOTHESES
+            → SIMULATION → PREDICTION → OUTCOME → ERROR
+            → SELF-CRITIC → { reweight | RESTRUCTURE } → NEW HYPOTHESES → ↺
+
+The junction is the self-critic. An error whose cause is the wrong coefficient is refitted; an
+error whose cause is that her concept system *cannot express what she just met* restructures the
+concept system itself. The slow loop is the interesting one: evaluate herself, find the organ
+actually limiting her, propose one bounded change to it, and revert it unless a **held-out**
+benchmark and an adversarial battery both say it won. Reality decides which version survives.
+
+**Concepts are invented, and the compression is measured.** :mod:`nyxara.njp.concepts` runs
+``observations → similarity → invariants → prototype → concept → hierarchy``, with the taxonomy
+*derived* by subsumption rather than declared, and superordinates found where a single property
+is shared very widely. Whether it worked is a minimum-description-length ratio, not an opinion: a
+concept set that does not pay for itself scores at or below 1.0 and says so.
+
+**She intervenes on a model of the world, not just remembers it.** :mod:`nyxara.njp.universe`
+holds variables joined by *fitted* relations, each with its own ``R²``, and implements the real
+do-operator — setting a variable severs its incoming arrows, so "if I halve this plant's water"
+is a different question from "plants that got little water were small". Answers outside the
+observed range come back with confidence decayed by how far they reach. A direction observational
+data genuinely cannot settle is reported as ambiguous rather than guessed.
+
+**Curiosity is information gain.** :class:`~nyxara.njp.universe.ExperimentDesigner` computes, for
+each candidate experiment, the mutual information between the hypothesis set and that
+experiment's outcome. An experiment every live hypothesis predicts identically scores exactly
+zero bits however interesting it looks, and she does not run it.
+
+**Every belief carries its own case.** :mod:`nyxara.njp.beliefs` answers what she knows, what she
+does not, why she believes it, what would falsify it, and how reliable she has actually been in
+that domain — the last as a Brier score over her own past confidences, applied through
+``temper`` so a stated 0.9 where 0.9 has meant 0.6 comes out as 0.6. Soft evidence has a ceiling:
+being told a thing ten times never reaches what one observation earns.
+
+**She chooses how to think before thinking.** :mod:`nyxara.njp.metareason` classifies a problem,
+picks the strategy that has been working for that kind, criticises what comes back against the
+specific ways *that kind* of answer goes wrong, and takes a second opinion when the classification
+is close. Two processes disagreeing lowers confidence rather than being averaged into a
+confident-sounding middle no process produced.
+
 **She keeps learning, and it survives.** :mod:`nyxara.njp.pulse` beats continuously — expand every
 pulse, consolidate slowly, evolve slowest — driven by the kernel's own clock rather than a thread
 of its own. The whole fabric is written to a sidecar, so the brain that wakes up is the brain that
@@ -83,8 +126,44 @@ Master is sovereign.
 
 from __future__ import annotations
 
+from nyxara.njp.beliefs import (
+    Belief,
+    BeliefLedger,
+    EvidenceKind,
+    Reliability,
+    Revision,
+    Support,
+)
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.cell import Cell
+from nyxara.njp.concepts import Concept, ConceptGenesis, Coverage, GenesisReport, Observation
+from nyxara.njp.field import (
+    Bottleneck,
+    CycleReport,
+    Diagnosis,
+    ErrorClass,
+    Modification,
+    RecursiveCognitiveField,
+    Trial,
+)
+from nyxara.njp.metareason import (
+    Classification,
+    Critique,
+    MetaReasoner,
+    ProblemClassifier,
+    ProblemKind,
+    Solution,
+)
+from nyxara.njp.universe import (
+    CounterfactualResult,
+    Experiment,
+    ExperimentDesigner,
+    InternalUniverse,
+    Relation,
+    Rollout,
+    StateDelta,
+)
+from nyxara.njp.universe import Hypothesis as UniverseHypothesis
 from nyxara.njp.evolve import EvolutionStep, ModuleCost, Profiler, SelfEvolver
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
@@ -125,4 +204,12 @@ __all__ = [
     "Ledger", "Generation", "ErrorMemory", "ErrorRecord",
     "SelfEvolver", "Profiler", "ModuleCost", "EvolutionStep",
     "PulseEngine", "PulseReport",
+    # NJP V.04 — the Recursive Cognitive Field and the organs it drives
+    "ConceptGenesis", "Concept", "Observation", "Coverage", "GenesisReport",
+    "InternalUniverse", "Relation", "StateDelta", "CounterfactualResult", "Rollout",
+    "ExperimentDesigner", "Experiment", "UniverseHypothesis",
+    "BeliefLedger", "Belief", "Support", "Revision", "Reliability", "EvidenceKind",
+    "MetaReasoner", "ProblemClassifier", "ProblemKind", "Classification", "Critique", "Solution",
+    "RecursiveCognitiveField", "CycleReport", "Diagnosis", "ErrorClass",
+    "Bottleneck", "Modification", "Trial",
 ]

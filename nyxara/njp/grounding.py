@@ -229,6 +229,71 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"\s+(?P<o>.+)$", ""),
     (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened)"
      r"\s*$", ""),
+
+    # --- Processes: the general statements a world model is actually built out of ------------ #
+    #
+    # Everything above this line records a *particular* happening ("the glass broke") or a
+    # *particular* fact ("the Master's name is Jay"). Neither is what "water boils at 100" is.
+    # A process statement is a standing claim about how the world works, and it is the only kind
+    # of sentence from which a causal model can be built without waiting for the same accident to
+    # happen three times.
+    #
+    # This was the measured bottleneck, not a nicety: over a real 20-turn session in the Master's
+    # own Hinglish, `world.events` and `world.observations` were both exactly 0 and
+    # `world.causal_links` was 0 — because "pani ubalne se bhaap banti hai" matched nothing at
+    # all, and a world model with no intake cannot be wrong, cannot be surprised, and therefore
+    # cannot learn. The patterns below are ordered longest-construction-first so a specific
+    # reading is never swallowed by a general one.
+
+    # "X ubal kar Y banta hai" — a process named by the participle that drives it.
+    (r"^(?P<s>.+?)\s+\S+\s+(?:kar|कर)\s+(?P<o>.+?)\s+"
+     r"(?:banta|banti|bante|hota|hoti|hote|बनता|बनती|होता|होती)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
+    # "X se Y banta/hota/nikalta hai" — the ablative "se" is Hinglish's plainest causal marker.
+    (r"^(?P<s>.+?)\s+(?:se|से)\s+(?P<o>.+?)\s+"
+     r"(?:banta|banti|bante|hota|hoti|hote|aata|aati|aate|milta|milti|milte|"
+     r"nikalta|nikalti|badhta|badhti|badhte|"
+     # The process verbs belong here too. "garmi se pani ubalta hai" is a causal claim about
+     # heat, not a bare report that water boils — reading it as the latter throws away the one
+     # word in the sentence that says *why*.
+     r"ubalta|ubalti|pighalta|pighalti|jalta|jalti|marta|marti|girta|girti|ugta|ugti|"
+     r"बनता|बनती|होता|होती|आता|आती|मिलता|मिलती|निकलता|बढ़ता|बढ़ती|उबलता|पिघलता)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
+    # "bina X (ke) Y marta hai" — a requirement stated through its own violation. The groups are
+    # deliberately reversed: the sentence leads with what is missing, but the *subject* of the
+    # requirement is the thing that fails without it.
+    (r"^(?:bina|बिना)\s+(?P<o>.+?)\s+(?:ke\s+|के\s+)?(?P<s>\S+(?:\s+\S+)?)\s+"
+     r"(?:marta|marti|mar|rukta|rukti|nahi|nahin|नहीं|मरता|मरती|रुकता)\b.*$", "requires"),
+    # "X ko Y chahiye" — the same requirement stated positively.
+    (r"^(?P<s>.+?)\s+(?:ko|को)\s+(?P<o>.+?)\s+"
+     r"(?:chahiye|chaahiye|chahiyee|चाहिए)\s*(?:hai|hain|है)?\s*$", "requires"),
+    # "X Y deta hai" — production, the transitive process. Tried after "se" so
+    # "aag se garmi milti hai" reads as causation rather than as a bare give.
+    (r"^(?P<s>.+?)\s+(?P<o>.+?)\s+(?:deta|deti|dete|banata|banati|"
+     r"देता|देती|बनाता|बनाती)\s*(?:hai|hain|है|हैं)?\s*$", "produces"),
+    # "pani 100 degree par ubalta hai" / "water boils at 100 degrees" — a threshold, the most
+    # quantitative thing the Master is likely to say, and the one a simulation can actually use.
+    (r"^(?P<s>.+?)\s+(?P<q>-?\d+(?:\.\d+)?)\s*"
+     r"(?:degree|degrees|°\s*c|celsius|डिग्री)?\s*(?:par|pe|pr|पर)\s+"
+     r"(?P<v>ubalta|ubalti|pighalta|pighalti|jamta|jamti|jalta|jalti|"
+     r"उबलता|उबलती|पिघलता|पिघलती|जमता)\s*(?:hai|hain|है|हैं)?\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?P<v>boils|melts|freezes|evaporates|condenses)\s+at\s+"
+     r"(?P<q>-?\d+(?:\.\d+)?)\s*(?:degrees?|°\s*c|celsius|c)?\s*$", ""),
+    # Bare Hinglish process verbs, verb-final and intransitive.
+    (r"^(?P<s>.+?)\s+(?P<v>ubalta|ubalti|pighalta|pighalti|jalta|jalti|girta|girti|"
+     r"tutta|tutti|badhta|badhti|marta|marti|ugta|ugti|"
+     r"उबलता|उबलती|पिघलता|पिघलती|जलता|जलती|गिरता|गिरती|बढ़ता|बढ़ती|मरता|मरती)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", ""),
+    # English present-tense processes. Intransitive only — the transitive ones are relations
+    # ("X needs Y") and are handled just below as such.
+    (r"^(?P<s>.+?)\s+(?P<v>boils|melts|freezes|burns|grows|dies|falls|rises|"
+     r"evaporates|condenses|expands|contracts)\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?:needs?|requires?)\s+(?P<o>.+)$", "requires"),
+    # ``makes`` is present-tense production and belongs here; ``made`` is a past happening and is
+    # matched above as an event. Splitting them by tense is not pedantry — "the engine makes
+    # heat" is a standing property of engines and "Ravi made dinner" is a thing that occurred
+    # once, and putting the first on a timeline loses the mechanism it states.
+    (r"^(?P<s>.+?)\s+(?:produces?|makes|emits?|releases?|gives?\s+off)\s+(?P<o>.+)$", "produces"),
 )
 
 # Surface verb → the canonical predicate it is recorded under, so "fall"/"fell"/"gir gaya" all
@@ -239,6 +304,23 @@ _EVENT_VERBS: Dict[str, str] = {
     "received": "received", "made": "made", "opened": "opened", "closed": "closed",
     "broke": "broke", "started": "started", "stopped": "stopped", "fell": "fell",
     "crashed": "crashed", "failed": "failed", "happened": "happened",
+    # Processes. Hinglish and English surfaces of the same physical change collapse onto one
+    # predicate, which is the whole point of this table: "ubalta" and "boils" are not two
+    # phenomena, and recording them separately would halve the evidence for each and stop either
+    # from ever clearing `min_support`.
+    "ubalta": "boils", "ubalti": "boils", "उबलता": "boils", "उबलती": "boils",
+    "boils": "boils",
+    "pighalta": "melts", "pighalti": "melts", "पिघलता": "melts", "पिघलती": "melts",
+    "melts": "melts",
+    "jamta": "freezes", "jamti": "freezes", "जमता": "freezes", "freezes": "freezes",
+    "jalta": "burns", "jalti": "burns", "जलता": "burns", "जलती": "burns", "burns": "burns",
+    "girta": "falls", "girti": "falls", "गिरता": "falls", "गिरती": "falls", "falls": "falls",
+    "tutta": "breaks", "tutti": "breaks",
+    "badhta": "grows", "badhti": "grows", "बढ़ता": "grows", "बढ़ती": "grows", "grows": "grows",
+    "ugta": "grows", "ugti": "grows",
+    "marta": "dies", "marti": "dies", "मरता": "dies", "मरती": "dies", "dies": "dies",
+    "rises": "rises", "evaporates": "evaporates", "condenses": "condenses",
+    "expands": "expands", "contracts": "contracts",
 }
 
 # "X because Y" — the one construction that states a cause outright rather than leaving it to be
@@ -486,6 +568,12 @@ class Grounder:
             predicate = pattern.predicate or verb or _clean(groups.get("p", "") or "")
             subject = self.resolve(groups.get("s") or SELF_ENTITY)
             obj = _clean(groups.get("o", "") or "")
+            # A threshold statement ("water boils at 100") names no object but does name the
+            # number the process turns on. Dropping it would reduce the sentence to "water
+            # boils" — true, useless, and unusable by any simulation, which needs the value to
+            # answer "and at 40?". The quantity IS the object of a threshold.
+            if not obj:
+                obj = _clean(groups.get("q", "") or "")
             # An intransitive happening genuinely has no object — "the glass broke" is complete.
             # Demanding one here is what kept every such sentence unextracted.
             if not predicate or (not obj and not verb):

@@ -71,6 +71,17 @@ class Event:
                 "preconditions": self.preconditions[:8], "effects": self.effects[:8]}
 
 
+def _key_of(name: str) -> str:
+    """Normalise a thing's name to the same shape :attr:`Event.key` produces for a bare action.
+
+    A stated law names *things* ("aag", "garmi"), an event names a *happening* ("boils:100").
+    Both end up as keys in one table, so the only discipline needed is that the same thing
+    written two ways lands on one key — otherwise "Aag" and "aag " are two causes with half the
+    evidence each and neither ever clears a threshold.
+    """
+    return " ".join(str(name or "").strip().lower().split())
+
+
 @dataclass
 class CausalLink:
     """``cause → effect``, with the evidence that distinguishes it from coincidence."""
@@ -81,6 +92,12 @@ class CausalLink:
     cause_total: int = 0       # times the cause happened at all
     effect_total: int = 0      # times the effect happened at all
     observations: int = 0      # total events observed, for the base rate
+    # Times the link was *stated* as a standing law ("aag se garmi milti hai") rather than
+    # inferred from two things happening near each other. Kept as its own number, never folded
+    # into `together`, because the two are different evidence: coincidence needs repetition to
+    # mean anything, testimony does not — and testimony can be wrong in ways coincidence cannot.
+    stated: int = 0
+    refuted: int = 0           # times an observation contradicted the stated law
 
     @property
     def conditional(self) -> float:
@@ -99,18 +116,41 @@ class CausalLink:
 
     @property
     def causal(self) -> bool:
-        """Enough repetition, and a real margin over the base rate."""
+        """Enough repetition and a real margin over the base rate — or a law she was told.
+
+        The second clause is not a loosening of the first. Waiting for three coincidences before
+        "fire causes heat" may be believed is the right rule for two events that merely co-occur
+        and the wrong one for a general law the Master stated outright: the statement is direct
+        evidence about the mechanism, not a sample from it. So a stated law counts from the first
+        telling — and is dropped the moment anything refutes it, which is a standard coincidence
+        is never held to. Testimony is admitted earlier and falsified harder.
+        """
+        if self.refuted:
+            return False
+        if self.stated:
+            return True
         return self.cause_total >= _MIN_SUPPORT and self.lift >= _MIN_LIFT
 
     @property
     def strength(self) -> float:
-        return max(0.0, min(1.0, self.lift))
+        """How much to lean on this link. A stated law starts high but never at certainty."""
+        if self.refuted:
+            return 0.0
+        observed = max(0.0, min(1.0, self.lift))
+        if not self.stated:
+            return observed
+        # Repetition of a telling raises confidence with diminishing returns and stops short of
+        # 1.0: being told a thing many times is not the same as it being true.
+        told = 1.0 - (0.5 ** self.stated)
+        return max(observed, min(0.95, 0.5 + 0.45 * told))
 
     def to_dict(self) -> Dict[str, Any]:
         return {"cause": self.cause, "effect": self.effect, "together": self.together,
                 "conditional": round(self.conditional, 4),
                 "base_rate": round(self.base_rate, 4), "lift": round(self.lift, 4),
-                "causal": self.causal, "support": self.cause_total}
+                "causal": self.causal, "support": self.cause_total,
+                "stated": self.stated, "refuted": self.refuted,
+                "strength": round(self.strength, 4)}
 
 
 @dataclass
@@ -198,6 +238,10 @@ class WorldView:
         # different count from `_pairs`. Deriving one from the other gives negative occurrences.
         self._preceded: Dict[str, Dict[str, int]] = {}
         self._counts: Dict[str, int] = {}       # event-key -> times observed
+        # cause-key -> effect-key -> times the link was STATED as a standing law, and times an
+        # observation refuted it. Separate from `_pairs` on purpose: see `CausalLink.stated`.
+        self._stated: Dict[str, Dict[str, int]] = {}
+        self._refuted: Dict[str, Dict[str, int]] = {}
         self._observations = 0
         self.dynamics = dynamics if dynamics is not None else self._build_dynamics()
 
@@ -272,6 +316,15 @@ class WorldView:
         out: List[Event] = []
         try:
             for triple in (getattr(result, "triples", None) or []):
+                # A *law* is neither of the two. "aag se garmi milti hai" did not happen at a
+                # time and is not a property of a particular fire — it is a claim about how fire
+                # and heat are related, and it is the only kind of sentence from which a causal
+                # model can be built without waiting for the same accident three times. Routed
+                # first, because some of these predicates would otherwise fall through as facts
+                # and the mechanism they describe would be lost.
+                if triple.predicate in _LAW_PREDICATES:
+                    self.state_law(triple.subject, triple.object, kind=triple.predicate)
+                    continue
                 if triple.predicate not in _EVENT_PREDICATES:
                     continue
                 out.append(self.observe(Event(
@@ -282,6 +335,39 @@ class WorldView:
             return out
 
     # ---- causes ----------------------------------------------------------- #
+    def state_law(self, cause: str, effect: str, *, kind: str = "causes") -> CausalLink:
+        """Record a standing law the Master (or a source) stated outright.
+
+        This is the intake the world model did not have, and its absence is why
+        ``world.causal_links`` sat at 0 through sessions in which the Master explained how things
+        work in plain sentences. Every other route in here waits for two things to *happen* near
+        each other; a general claim about mechanism never happens at all, so it was invisible.
+
+        A law is not an event: nothing goes on the timeline and `observations` does not move.
+        Only the belief that this cause produces this effect gets stronger.
+        """
+        cause = _key_of(cause)
+        effect = _key_of(effect)
+        if not cause or not effect or cause == effect:
+            return CausalLink(cause=cause, effect=effect)
+        bucket = self._stated.setdefault(cause, {})
+        bucket[effect] = bucket.get(effect, 0) + 1
+        # A requirement is the same claim read from the other end: "the plant needs water" says
+        # that *absence* of water produces death, so the link that carries predictive weight runs
+        # from the requirement to the thing requiring it. Recorded under its own direction so
+        # `why()` can answer both "why did it die" and "what does it need".
+        if kind == "requires":
+            back = self._stated.setdefault(effect, {})
+            back[cause] = back.get(cause, 0)  # registers the pair without double-counting it
+        return self.link(cause, effect)
+
+    def refute_law(self, cause: str, effect: str) -> CausalLink:
+        """Record an observation that contradicted a stated law. One is enough to kill it."""
+        cause, effect = _key_of(cause), _key_of(effect)
+        bucket = self._refuted.setdefault(cause, {})
+        bucket[effect] = bucket.get(effect, 0) + 1
+        return self.link(cause, effect)
+
     def link(self, cause: str, effect: str) -> CausalLink:
         """The evidence for one candidate ``cause → effect``, computed fresh."""
         return CausalLink(
@@ -289,24 +375,38 @@ class WorldView:
             together=self._pairs.get(cause, {}).get(effect, 0),
             cause_total=self._counts.get(cause, 0),
             effect_total=self._counts.get(effect, 0),
-            observations=self._observations)
+            observations=self._observations,
+            stated=self._stated.get(cause, {}).get(effect, 0),
+            refuted=self._refuted.get(cause, {}).get(effect, 0))
 
     def links(self, *, causal_only: bool = True) -> List[CausalLink]:
         """Every candidate link, strongest first. ``causal_only`` applies support and lift."""
         out: List[CausalLink] = []
         try:
-            for cause, effects in self._pairs.items():
-                for effect in effects:
-                    got = self.link(cause, effect)
-                    if causal_only and not self._is_causal(got):
-                        continue
-                    out.append(got)
-            out.sort(key=lambda c: c.lift, reverse=True)
+            # Both intakes, deduplicated: a link can be *observed* (it kept happening), *stated*
+            # (she was told the law), or both — and a link she was told about but has never seen
+            # is exactly the one worth surfacing, because it is the one she can go and test.
+            seen: set = set()
+            for source in (self._pairs, self._stated):
+                for cause, effects in source.items():
+                    for effect in effects:
+                        if (cause, effect) in seen:
+                            continue
+                        seen.add((cause, effect))
+                        got = self.link(cause, effect)
+                        if causal_only and not self._is_causal(got):
+                            continue
+                        out.append(got)
+            out.sort(key=lambda c: c.strength, reverse=True)
             return out
         except Exception:  # noqa: BLE001
             return out
 
     def _is_causal(self, link: CausalLink) -> bool:
+        if link.refuted:
+            return False
+        if link.stated:
+            return True
         return link.cause_total >= self.min_support and link.lift >= self.min_lift
 
     def why(self, effect: str) -> Explanation:
@@ -453,6 +553,8 @@ class WorldView:
             "events": len(self.events), "observations": self._observations,
             "event_kinds": len(self._counts),
             "candidate_links": sum(len(v) for v in self._pairs.values()),
+            "stated_laws": sum(len(v) for v in self._stated.values()),
+            "refuted_laws": sum(len(v) for v in self._refuted.values()),
             "causal_links": len(causal),
             "strongest": causal[0].to_dict() if causal else None,
             "dynamics": (self.dynamics.stats() if self.dynamics is not None
@@ -467,6 +569,8 @@ class WorldView:
                        for e in self.events[-self.capacity:]],
             "pairs": {c: dict(e) for c, e in self._pairs.items()},
             "preceded": {e: dict(c) for e, c in self._preceded.items()},
+            "stated": {c: dict(e) for c, e in self._stated.items()},
+            "refuted": {c: dict(e) for c, e in self._refuted.items()},
             "counts": dict(self._counts), "observations": self._observations,
             "seq": self._seq,
         }
@@ -485,6 +589,10 @@ class WorldView:
                            for c, e in (d.get("pairs") or {}).items()}
             self._preceded = {str(e): {str(k): int(v) for k, v in (c or {}).items()}
                               for e, c in (d.get("preceded") or {}).items()}
+            self._stated = {str(c): {str(k): int(v) for k, v in (e or {}).items()}
+                            for c, e in (d.get("stated") or {}).items()}
+            self._refuted = {str(c): {str(k): int(v) for k, v in (e or {}).items()}
+                             for c, e in (d.get("refuted") or {}).items()}
             self._counts = {str(k): int(v) for k, v in (d.get("counts") or {}).items()}
             self._observations = int(d.get("observations", 0))
             self._seq = int(d.get("seq", len(self.events)))
@@ -495,7 +603,20 @@ class WorldView:
 # Relations that describe something *happening* rather than something *being*. Only these become
 # events; the rest are facts and belong in the graph, where they are not on a timeline.
 _EVENT_PREDICATES = frozenset({
-    "causes", "caused", "led_to", "leads_to", "broke", "fell", "opened", "closed",
+    "broke", "fell", "opened", "closed",
     "started", "stopped", "failed", "crashed", "sent", "received", "bought", "sold",
     "did", "made", "went", "came", "happened",
+    # Processes. "the water boiled" is a happening in exactly the sense the timeline means, and
+    # it is what a stated law predicts — so the two intakes meet here: the law says water boils,
+    # the timeline records that it did, and the difference between them is learning.
+    "boils", "melts", "freezes", "burns", "grows", "dies", "rises", "breaks",
+    "evaporates", "condenses", "expands", "contracts",
+})
+
+# Predicates that state a standing law rather than a happening. These go to `state_law`, never on
+# the timeline. `causes` moved here from the event set: "X causes Y" was being recorded as a
+# single event named "causes:Y" whose actor was thrown away, so the one predicate that literally
+# names a causal relation contributed nothing to the causal model.
+_LAW_PREDICATES = frozenset({
+    "causes", "caused", "led_to", "leads_to", "produces", "requires", "needs", "emits",
 })
