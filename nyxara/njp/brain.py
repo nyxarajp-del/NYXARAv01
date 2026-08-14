@@ -121,6 +121,9 @@ class NJPThought:
     # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
     epistemic: str = "unknown"
     epistemic_confidence: float = 0.0
+    # What closing the learning loop behind this turn actually changed. `None` when the
+    # integration layer is switched off, which is a different thing from "it changed nothing".
+    loop: Any = None
 
     @property
     def confidence(self) -> float:
@@ -146,6 +149,7 @@ class NJPThought:
                 "intent": self.intent.to_dict() if hasattr(self.intent, "to_dict") else None,
                 "judgement": self.judgement.to_dict() if self.judgement else None,
                 "growth": self.growth.to_dict() if self.growth else None,
+                "loop": self.loop.to_dict() if self.loop is not None else None,
                 "focus": self.focus.to_dict() if self.focus is not None else None}
 
 
@@ -193,6 +197,9 @@ class NJPBrain:
         self.soul = self._build_soul(c)
         self.evolver = self._build_evolver(c)
         self.pulse = self._build_pulse(c)
+        # Last, because it registers repairs against organs built above it and reads them on
+        # every turn. Without it the organs are all present and none of them hear from each other.
+        self.loop = self._build_loop(c)
 
     # ---- construction ----------------------------------------------------- #
     def _gate(self, name: str, default: bool = True) -> bool:
@@ -593,6 +600,21 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — without it she grows only when spoken to
             return None
 
+    def _build_loop(self, c: Any) -> Any:
+        """The integration layer: what makes the organs learn from each other rather than sit."""
+        if not self._gate("loop", True):
+            return None
+        try:
+            from nyxara.njp.integrate import LearningLoop
+            return LearningLoop(
+                self,
+                consolidate_every=self._cfg("consolidate_every_turns", 8),
+                discover_every=self._cfg("discover_every_turns", 12),
+                wonder_every=self._cfg("wonder_every_turns", 16),
+                train=self._cfg("train_readout", True))
+        except Exception:  # noqa: BLE001 — without it the organs never close the loop
+            return None
+
     def attach_kernel(self, *, tools: Any = None, knowledge: Any = None,
                       core: Any = None, graph: Any = None) -> None:
         """Take the live toolset, knowledge base and organs the kernel already builds.
@@ -711,18 +733,33 @@ class NJPBrain:
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
             out.answer = self._compose(out)
             self._set_epistemic(out)
-            # Register what she just committed to, so `resolve()` has something to score it
-            # against. Registered even when the answer is empty: "I don't know" is a real
-            # prediction about the world and being wrong about it is a real, diagnosable miss.
-            if self.predictor is not None:
-                try:
-                    self.predictor.predict(
-                        out.stimulus, out.answer or "<unknown>",
-                        confidence=out.epistemic_confidence,
-                        organ=("grounding" if getattr(
-                            getattr(out.percept, "grounding", None), "answer", None) else "fabric"))
-                except Exception:  # noqa: BLE001
-                    pass
+            # What she committed to is registered by :mod:`nyxara.njp.integrate`, not here.
+            #
+            # This used to call ``predictor.predict(out.stimulus, out.answer)`` directly, and the
+            # key was the raw stimulus — so the only thing that could ever have scored it was the
+            # identical sentence arriving again with the truth attached, which never happens.
+            # Measured over 113 turns: 113 predictions registered, 0 scored, and an "open" queue
+            # that only ever grew. A prediction that cannot in principle be observed is not a
+            # prediction; it is a counter going up.
+            #
+            # The loop registers two kinds that CAN be resolved: the manifold's pre-settle
+            # anticipation, scored against what actually fired microseconds later, and an unanswered
+            # question keyed on ``(subject, predicate)`` so the Master's later statement of that
+            # very fact is what grades it.
+
+            # 4b. DELIBERATE — a question that structure could not answer gets the ladder.
+            #
+            # Gated on "asked, and grounding came back empty" for a reason: descending five rungs
+            # for a question the graph answered outright is the "runs a proof engine over what is
+            # my name" failure the ladder module names in its own docstring. This way the
+            # reasoner can only ever add an answer where there was none, never overwrite one.
+            #
+            # Before this, `reason.passes` was 0 on every session — the ladder, the problem
+            # states, the rejected-hypothesis memory and the debate were all reachable only from
+            # tests. Curiosity's known-unknown gap reads `reasoner.problems`, so an unwired
+            # reasoner also meant she could never notice a question she had failed to answer.
+            if not out.answer:
+                self._deliberate(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -750,6 +787,15 @@ class NJPBrain:
             # 9. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
 
+            # 10. CLOSE THE LOOP — score what was predicted, diagnose what missed, route the
+            # repair to the organ that owns it, grade the faculties this turn exercised, take a
+            # gradient step, and run the slow organs when their turn-count comes round.
+            #
+            # After expand, deliberately: the growth report is part of what the turn produced, and
+            # a loop that ran before it would be scoring a fabric state that no longer exists.
+            if self.loop is not None:
+                out.loop = self.loop.close(out)
+
             out.ms = (time.perf_counter() - t0) * 1000.0
             if self.ledger is not None:
                 self.ledger.observe_latency(out.ms)
@@ -760,6 +806,33 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _deliberate(self, thought: NJPThought) -> None:
+        """Work an unanswered question down the ladder, and take the answer only if it decided.
+
+        An undecided conclusion is left on the floor deliberately. :class:`~nyxara.njp.reason.
+        Reasoner` refuses to commit when its top two hypotheses are within ``decide_margin`` of
+        each other, and honouring that refusal is the whole value of having it — overwriting an
+        empty answer with the marginally higher of two indistinguishable guesses would convert an
+        honest "I don't know" into a confident coin-flip.
+
+        The problem state survives either way, which is what lets curiosity find the question
+        again later and what stops her re-proposing a hypothesis already rejected.
+        """
+        try:
+            if self.reasoner is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            if grounding is None or not getattr(grounding, "is_question", False):
+                return
+            novelty = float(getattr(thought.percept, "novelty", 0.5) or 0.5)
+            conclusion = self.reasoner.reason(
+                thought.stimulus, uncertainty=novelty,
+                stakes=self._cfg("reason_stakes", 0.5), task="question")
+            if conclusion is not None and conclusion.decided and conclusion.answer:
+                thought.answer = conclusion.answer
+        except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
+            pass
 
     def _remember_turn(self, thought: NJPThought) -> None:
         """File this turn's conclusion at the level it belongs to.
@@ -962,15 +1035,33 @@ class NJPBrain:
             pass
 
     def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> Any:
-        """Close the loop on this turn's expectation, with the evidence the diagnosis needs."""
+        """Close the loop on this turn's expectation, with the evidence the diagnosis needs.
+
+        The expectation is registered **here**, at the moment the Master grades the turn, rather
+        than speculatively when the turn was taken. Registering up front is what produced the
+        original symptom — 113 predictions, 0 scored — because most turns are never graded, so
+        every one of them left an expectation that nothing could ever observe. Registering on
+        arrival of the verdict means ``predictions`` counts things that were actually decided, and
+        an ungraded turn costs nothing.
+
+        What she is scored against is what she *said*; what says whether it was right is the
+        Master's ``correct``/``actual``. The two come from different places, which is the whole
+        requirement.
+        """
         try:
             stimulus = str(getattr(thought, "stimulus", "") or "")
             if not stimulus:
                 return None
             percept = getattr(thought, "percept", None)
             grounding = getattr(percept, "grounding", None)
+            key = f"{getattr(thought, 'cycle_id', '') or stimulus}:answer"
+            said = str(getattr(thought, "answer", "") or "")
+            self.predictor.predict(
+                key, said or "<unknown>",
+                confidence=float(getattr(thought, "epistemic_confidence", 0.0) or 0.0),
+                organ=("grounding" if getattr(grounding, "answer", None) else "fabric"))
             return self.predictor.observe(
-                stimulus,
+                key,
                 actual if actual is not None else ("correct" if correct >= 0.5 else "wrong"),
                 evidence={
                     "stimulus": stimulus,
@@ -1071,7 +1162,8 @@ class NJPBrain:
                             ("discover", self.discoverer), ("reason", self.reasoner),
                             ("self_model", self.self_model), ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
-                            ("attention", self.attention), ("readout", self.readout)):
+                            ("attention", self.attention), ("readout", self.readout),
+                            ("loop", self.loop)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:

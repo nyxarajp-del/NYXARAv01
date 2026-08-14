@@ -24,6 +24,24 @@ capability benchmark → tests → **keep, or roll back byte-for-byte**.
 :meth:`~nyxara.njp.evolve.SelfEvolver.accelerate` separately lowers hot numeric functions to
 verified C kernels and hot-swaps them in memory.
 
+**The organs learn from each other, and that is newer than the organs.**
+:mod:`nyxara.njp.integrate` closes the loop behind every turn::
+
+    INPUT → GROUNDING → WORLD STATE → PREDICTION → OBSERVATION
+          → ERROR → DIAGNOSIS → CORRECTION → MEMORY → ABSTRACTION → NEW PREDICTION
+
+Before it, every algorithm named on this page was written, tested and reachable — and over a real
+113-turn session ``world.events``, ``predict.scored``, ``levels.consolidations``,
+``discover.passes``, ``curiosity.passes`` and ``readout.steps`` were all exactly **zero**. Nothing
+was missing except the caller: the slow half of cognition hung off the pulse's wall clock, which
+does not tick in the paths a brain is actually used from. The loop scores the manifold's
+pre-settle anticipation against what actually fired, leaves an unanswered question **open** until
+the Master states the fact that grades it, routes each diagnosed miss to the organ that owns the
+repair, and runs consolidation, abstraction and curiosity on turn counts rather than seconds.
+Every outcome it scores against is independent of the prediction it scores — physics at ``t+1``,
+or the Master's own sentence — because a mind that grades its guesses against its own later
+guesses is not learning, it is agreeing with itself.
+
 **She keeps learning, and it survives.** :mod:`nyxara.njp.pulse` beats continuously — expand every
 pulse, consolidate slowly, evolve slowest — driven by the kernel's own clock rather than a thread
 of its own. The whole fabric is written to a sidecar, so the brain that wakes up is the brain that
@@ -69,6 +87,7 @@ from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.cell import Cell
 from nyxara.njp.evolve import EvolutionStep, ModuleCost, Profiler, SelfEvolver
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
+from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
 from nyxara.njp.pulse import PulseEngine, PulseReport
@@ -92,6 +111,8 @@ __all__ = [
     "NJPBrain", "NJPPercept", "NJPThought", "NJPReasoner",
     # the automaton
     "Cell", "Fabric", "GrowthReport", "SettleResult",
+    # the loop that makes the organs learn from each other
+    "LearningLoop", "LoopReport",
     # the manifold
     "Manifold", "Prediction", "Snapshot",
     # verification

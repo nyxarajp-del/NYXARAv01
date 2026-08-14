@@ -202,7 +202,37 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
     (r"^(?P<s>.+?)\s+(?:causes?|leads?\s+to)\s+(?P<o>.+)$", "causes"),
+    # Happenings. Everything above this line is a relation that *holds*; everything below is one
+    # that *happened*, and only these reach :data:`nyxara.njp.world._EVENT_PREDICATES` and become
+    # events on a timeline. Measured before they existed: that predicate set listed twenty-one
+    # kinds of happening and the extractor could produce exactly one of them (``causes``), so
+    # `world.events` was structurally pinned at zero no matter what the Master said. These are
+    # last in the list deliberately — a happening never shadows a fact, and none of the fact
+    # patterns above match an intransitive past tense, so ordering costs nothing here.
+    (r"^(?P<s>.+?)\s+(?P<v>went|came)\s+to\s+(?P<o>.+)$", ""),
+    (r"^(?P<s>.+?)\s+(?P<v>bought|sold|sent|received|made|opened|closed|broke|started|stopped)"
+     r"\s+(?P<o>.+)$", ""),
+    (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened)"
+     r"\s*$", ""),
 )
+
+# Surface verb → the canonical predicate it is recorded under, so "fall"/"fell"/"gir gaya" all
+# become one event kind. Without this, tense alone would split one happening into several kinds
+# and nothing would ever recur often enough to become a cause.
+_EVENT_VERBS: Dict[str, str] = {
+    "went": "went", "came": "came", "bought": "bought", "sold": "sold", "sent": "sent",
+    "received": "received", "made": "made", "opened": "opened", "closed": "closed",
+    "broke": "broke", "started": "started", "stopped": "stopped", "fell": "fell",
+    "crashed": "crashed", "failed": "failed", "happened": "happened",
+}
+
+# "X because Y" — the one construction that states a cause outright rather than leaving it to be
+# inferred from repetition. Split before extraction so BOTH halves are grounded on their own and
+# the causal claim is recorded between them. Hinglish "kyunki"/"kyonki" included because the
+# Master writes in it and an English-only causal reader is blind to half of what he says.
+_BECAUSE = re.compile(
+    r"^(?P<effect>.+?)\s+(?:because(?:\s+of)?|since|kyunki|kyonki|isliye\s+ki)\s+(?P<cause>.+)$",
+    re.IGNORECASE)
 
 # Question forms -> the predicate they are asking about. Same reasoning: a floor, not a ceiling.
 _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
@@ -348,6 +378,14 @@ class Grounder:
         low = _clean(text)
         if not low:
             return out
+
+        # "X because Y" states a cause outright. Ground each half on its own and record the claim
+        # between them, so the sentence yields the happening *and* the causal link rather than
+        # falling through every pattern and yielding nothing — which is what it did before.
+        causal = _BECAUSE.match(low)
+        if causal is not None:
+            return self._extract_causal(causal, text)
+
         for pattern in list(self.patterns):
             try:
                 match = self._rx(pattern.regex).match(low)
@@ -358,11 +396,15 @@ class Grounder:
                 continue
             groups = match.groupdict()
             # An empty seed predicate means the surface named it ("my colour is blue"), so the
-            # relation itself is read out of the sentence rather than assumed.
-            predicate = pattern.predicate or _clean(groups.get("p", "") or "")
+            # relation itself is read out of the sentence rather than assumed. A `v` group means
+            # the pattern matched a *happening*, and the verb itself is the predicate.
+            verb = _EVENT_VERBS.get(_clean(groups.get("v", "") or "").lower(), "")
+            predicate = pattern.predicate or verb or _clean(groups.get("p", "") or "")
             subject = self.resolve(groups.get("s") or SELF_ENTITY)
             obj = _clean(groups.get("o", "") or "")
-            if not predicate or not obj:
+            # An intransitive happening genuinely has no object — "the glass broke" is complete.
+            # Demanding one here is what kept every such sentence unextracted.
+            if not predicate or (not obj and not verb):
                 pattern.misses += 1
                 continue
             pattern.hits += 1
@@ -373,6 +415,42 @@ class Grounder:
             break
         self._prune_patterns()
         return out
+
+    def _extract_causal(self, match: Any, text: str) -> List[GroundedTriple]:
+        """``X because Y`` → both halves grounded, plus the ``causes`` link between them.
+
+        The head of each half is its extracted subject where the half parsed, and the cleaned
+        clause itself where it did not. That mixed granularity is deliberate: refusing to record
+        the link unless *both* halves parse cleanly would discard the causal claim — the one part
+        of the sentence that is stated outright rather than inferred — because of a parser gap on
+        the other side of the conjunction. A coarse entity that :mod:`nyxara.njp.world` can count
+        beats a link that was never recorded.
+        """
+        out: List[GroundedTriple] = []
+        try:
+            effect_text = _clean(match.group("effect") or "")
+            cause_text = _clean(match.group("cause") or "")
+            if not effect_text or not cause_text:
+                return out
+
+            def _half(clause: str) -> Tuple[List[GroundedTriple], str]:
+                # Recurses through `_extract`, so a half is parsed by exactly the same rules as a
+                # standalone sentence. `_BECAUSE` cannot re-match a half that has no "because" in
+                # it, so this terminates after one level.
+                triples = self._extract(clause)
+                head = triples[0].subject if triples else clause
+                return triples, head
+
+            effect_triples, effect_head = _half(effect_text)
+            cause_triples, cause_head = _half(cause_text)
+            out.extend(cause_triples)
+            out.extend(effect_triples)
+            out.append(GroundedTriple(
+                subject=cause_head, predicate="causes", object=effect_head,
+                confidence=0.85, source="causal-clause", text=text))
+            return out
+        except Exception:  # noqa: BLE001 — an unparsed causal sentence grounds to nothing
+            return out
 
     def _extract_deep(self, text: str) -> List[GroundedTriple]:
         """Ask the fluent surface for a sentence the core could not parse.

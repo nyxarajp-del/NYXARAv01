@@ -540,6 +540,25 @@ class Fabric:
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
 
+    def note_error(self, error: float) -> None:
+        """Record a prediction error from *outside* the settle, into the same window.
+
+        Neurogenesis reads this window and mints cells when it stays high, on the reasoning that
+        persistent failure to predict is the one honest signal of insufficient capacity. A miss
+        diagnosed by :mod:`nyxara.njp.predict` as a *perception* failure is exactly that evidence
+        and had no way to reach here — the window was fed only by the fabric's own self-scoring,
+        so an organ that noticed she could not represent an input could not act on it.
+
+        Bounded identically to the in-settle path, so an external caller cannot flood the window
+        and force growth that the fabric's own measurements do not support.
+        """
+        try:
+            self._errors.append(max(0.0, min(1.0, float(error))))
+            if len(self._errors) > self.neurogenesis_window * 4:
+                del self._errors[:-self.neurogenesis_window * 4]
+        except Exception:  # noqa: BLE001
+            pass
+
     def _note_recent(self, rows: Any) -> None:
         """Keep a bounded, insertion-ordered window of what has fired lately.
 
