@@ -2251,6 +2251,7 @@ class NJPConfig(BaseModel):
     grounding_enabled: bool = True               # words → entities → relations → beliefs
     concepts_enabled: bool = True                # types discovered from experience, not declared
     world_enabled: bool = True                   # event → state → cause → consequence
+    predict_enabled: bool = True                 # predict → observe → diagnose → repair
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop

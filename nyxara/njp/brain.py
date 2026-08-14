@@ -175,6 +175,7 @@ class NJPBrain:
         self.ladder = self._build_ladder(c)
         self.grounder = self._build_grounder(c)
         self.world = self._build_world(c)
+        self.predictor = self._build_predictor(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -285,6 +286,76 @@ class NJPBrain:
                              min_lift=self._cfg("world_min_lift", 0.15))
         except Exception:  # noqa: BLE001 — she reasons about facts, not about change
             return None
+
+    def _build_predictor(self, c: Any) -> Any:
+        """The predict → observe → diagnose → repair loop, with repairs wired to real organs.
+
+        The repairs are what make the diagnosis worth computing. Classifying an error as
+        ``grounding`` and then feeding the same scalar back into everything would be a more
+        expensive way to learn nothing.
+        """
+        if not self._gate("predict", True):
+            return None
+        try:
+            from nyxara.njp.predict import ErrorKind, PredictionEngine
+            engine = PredictionEngine(self)
+            engine.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
+            engine.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
+            engine.register_repair(ErrorKind.MEMORY, self._repair_memory)
+            engine.register_repair(ErrorKind.REASONING, self._repair_reasoning)
+            return engine
+        except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
+            return None
+
+    # ---- the repairs, one per error kind ---------------------------------- #
+    def _repair_grounding(self, outcome: Any) -> bool:
+        """A sentence that should have grounded and did not: try again with the fluent surface.
+
+        This is the one place the slow deep parse is worth its seconds — she already knows the
+        cheap path failed, so the cost is paid only on a measured miss, and a successful parse
+        also induces a pattern so the same sentence shape is cheap next time.
+        """
+        try:
+            if self.grounder is None:
+                return False
+            text = str(getattr(outcome, "key", "") or "")
+            return bool(self.grounder.ground(text, deep=True).grounded)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_world(self, outcome: Any) -> bool:
+        """What she expected to follow did not: record what actually did."""
+        try:
+            if self.world is None:
+                return False
+            from nyxara.njp.world import Event
+            self.world.observe(Event(action=str(getattr(outcome, "actual", "") or "")))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_memory(self, outcome: Any) -> bool:
+        """The answer was on record and was not retrieved: re-file it under the cue that missed."""
+        try:
+            if self.memory is None:
+                return False
+            self.memory.remember(f"repair-{self.turns}", str(getattr(outcome, "actual", "")),
+                                 kind="conclusion", cue=str(getattr(outcome, "key", "")))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_reasoning(self, outcome: Any) -> bool:
+        """Right facts, wrong conclusion: record it so the gauntlet weighs it against the next one."""
+        try:
+            if self.ledger is None or not hasattr(self.ledger, "errors"):
+                return False
+            self.ledger.errors.record(str(getattr(outcome, "key", "")),
+                                      verdict="wrong conclusion from correct facts",
+                                      truth=str(getattr(outcome, "actual", "")))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     def _build_voice(self, c: Any) -> Any:
         """Her voice, with her identity attached to it.
@@ -471,6 +542,18 @@ class NJPBrain:
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
             out.answer = self._compose(out)
             self._set_epistemic(out)
+            # Register what she just committed to, so `resolve()` has something to score it
+            # against. Registered even when the answer is empty: "I don't know" is a real
+            # prediction about the world and being wrong about it is a real, diagnosable miss.
+            if self.predictor is not None:
+                try:
+                    self.predictor.predict(
+                        out.stimulus, out.answer or "<unknown>",
+                        confidence=out.epistemic_confidence,
+                        organ=("grounding" if getattr(
+                            getattr(out.percept, "grounding", None), "answer", None) else "fabric"))
+                except Exception:  # noqa: BLE001
+                    pass
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -627,8 +710,16 @@ class NJPBrain:
             return ""
 
     # ---- feedback --------------------------------------------------------- #
-    def resolve(self, thought: Any, *, correct: float) -> None:
-        """Tell the brain how a turn actually turned out. Drives plasticity and the soul-sync."""
+    def resolve(self, thought: Any, *, correct: float, actual: Any = None) -> None:
+        """Tell the brain how a turn actually turned out.
+
+        Drives plasticity, the soul-sync, and — when the turn registered a prediction — the
+        diagnosis. The scalar reaches the fabric as before; what is new is that the *diagnosis*
+        reaches whichever organ actually produced the mistake. "She was wrong" is nearly useless
+        as a training signal: it is the same string whether she misheard the question, retrieved
+        the wrong memory, or reasoned badly from correct facts, and feeding it to every organ at
+        once mostly teaches all of them to be vaguely less confident.
+        """
         try:
           with self._lock:
                 settled = getattr(getattr(thought, "percept", None), "settled", None)
@@ -638,6 +729,32 @@ class NJPBrain:
                     self.fabric.expand(outcome=(float(correct) * 2.0 - 1.0), result=settled)
                 if self.soul is not None:
                     self.soul.confirm(corrected=(float(correct) < 0.5))
+                if self.predictor is not None:
+                    self._score_prediction(thought, correct=float(correct), actual=actual)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _score_prediction(self, thought: Any, *, correct: float, actual: Any) -> None:
+        """Close the loop on this turn's expectation, with the evidence the diagnosis needs."""
+        try:
+            stimulus = str(getattr(thought, "stimulus", "") or "")
+            if not stimulus:
+                return
+            percept = getattr(thought, "percept", None)
+            grounding = getattr(percept, "grounding", None)
+            self.predictor.observe(
+                stimulus,
+                actual if actual is not None else ("correct" if correct >= 0.5 else "wrong"),
+                evidence={
+                    "stimulus": stimulus,
+                    "concepts": list(getattr(percept, "concepts", None) or []),
+                    "triples": list(getattr(grounding, "triples", None) or []),
+                    # A turn that stated a fact and grounded nothing is the grounder's miss, and
+                    # this is what distinguishes it from a turn that had no fact to state.
+                    "expected_triples": bool(
+                        grounding is not None and not getattr(grounding, "is_question", False)),
+                    "facts_correct": bool(getattr(grounding, "triples", None)),
+                })
         except Exception:  # noqa: BLE001
             pass
 
@@ -723,7 +840,7 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("truth", self.truth),
                             ("soulsync", self.soul), ("evolve", self.evolver),
                             ("pulse", self.pulse), ("grounding", self.grounder),
-                            ("world", self.world)):
+                            ("world", self.world), ("predict", self.predictor)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -748,7 +865,7 @@ class NJPBrain:
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
-                            ("grounding", self.grounder), ("world", self.world)):
+                            ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor)):
             if organ is None:
                 continue
             try:
@@ -776,6 +893,8 @@ class NJPBrain:
                 self.grounder.load_dict(d["grounding"])
             if d.get("world") and self.world is not None:
                 self.world.load_dict(d["world"])
+            if d.get("predict") and self.predictor is not None:
+                self.predictor.load_dict(d["predict"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain
