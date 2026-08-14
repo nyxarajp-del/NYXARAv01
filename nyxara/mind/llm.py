@@ -189,6 +189,12 @@ class LLMResponse:
                 "latency_s": round(self.latency_s, 4), "request_id": self.request_id}
 
 
+# Slack left between the budgeted prompt and the hard window. `estimate_tokens` is a ~4-chars/token
+# approximation, and an approximation that guesses low by even a few percent turns a fitted prompt
+# back into the INVALID_ARGUMENT this budgeting exists to prevent.
+_CONTEXT_SAFETY_TOKENS = 192
+
+
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token) for budgeting and native usage."""
     return max(1, len(text) // 4)
@@ -907,6 +913,108 @@ class LiteRTLMProvider(LLMProviderBase):
                 history.append(litert_lm.Message.model(litert_lm.Contents.of(content)))
         return history, turns[send_at][1]
 
+    def _fit_context(self, litert_lm: Any, history: List[Any], prompt: str,
+                     req: LLMRequest) -> Tuple[List[Any], str]:
+        """Trim the prompt to what the model can actually accept.
+
+        Gemma-4-E2B here has a 4096-token window and the runtime enforces it hard: over the limit
+        it returns ``INVALID_ARGUMENT: Input token ids are too long``, the rung is taken off the
+        ladder, and every later turn silently falls back to the n-gram floor. Nothing in the stack
+        budgeted against that, so a normal turn — system prompt plus grounded context plus history
+        — sailed past it and the 2.4 GB model was effectively unusable for real work while
+        appearing to be installed and healthy.
+
+        What gets cut, in order, and why:
+
+        1. **history first** — oldest turns are the least load-bearing thing in the window, and
+           conversation state lives in :mod:`nyxara.njp.memory` rather than here anyway;
+        2. **then the system prompt's middle**, keeping its head and tail — the head carries her
+           identity and the tail carries the task instructions, and losing either changes what she
+           is being asked to do;
+        3. **the user's actual message last**, and only if it alone exceeds the window.
+
+        Room is reserved for the completion, because the limit is on input *plus* output.
+        """
+        try:
+            window = int(getattr(self.settings.llm, "litertlm_context_tokens", 4096))
+            budget = window - int(req.max_tokens) - _CONTEXT_SAFETY_TOKENS
+            if budget <= 0:
+                budget = max(256, window // 2)
+
+            def size(text: str) -> int:
+                return estimate_tokens(text)
+
+            def total(hist: List[Any], tail: str) -> int:
+                return sum(size(self._message_text(m)) for m in hist) + size(tail)
+
+            if total(history, prompt) <= budget:
+                return history, prompt
+
+            # 1. drop the oldest non-system turns until it fits
+            trimmed = list(history)
+            while len(trimmed) > 1 and total(trimmed, prompt) > budget:
+                cut = next((i for i, m in enumerate(trimmed)
+                            if not self._is_system(m)), None)
+                if cut is None:
+                    break
+                trimmed.pop(cut)
+
+            if total(trimmed, prompt) <= budget:
+                log.info("litertlm: trimmed %d history turn(s) to fit the %d-token window",
+                         len(history) - len(trimmed), window)
+                return trimmed, prompt
+
+            # 2. shrink the system prompt from the middle, keeping head and tail
+            system_idx = next((i for i, m in enumerate(trimmed) if self._is_system(m)), None)
+            if system_idx is not None:
+                text = self._message_text(trimmed[system_idx])
+                room = max(0, budget - size(prompt))
+                if room > 0 and size(text) > room:
+                    keep = room * 4                     # back to characters
+                    head, tail = text[: keep // 2], text[-(keep // 2):]
+                    trimmed[system_idx] = litert_lm.Message.system(
+                        f"{head}\n…[trimmed to fit the model's context window]…\n{tail}")
+                    log.warning("litertlm: system prompt trimmed to fit the %d-token window",
+                                window)
+
+            # 3. last resort — the message itself is bigger than the window
+            if total(trimmed, prompt) > budget:
+                keep_chars = max(256, (budget - _CONTEXT_SAFETY_TOKENS) * 4)
+                if len(prompt) > keep_chars:
+                    prompt = prompt[: keep_chars // 2] + "\n…[trimmed]…\n" + prompt[-(keep_chars // 2):]
+                    log.warning("litertlm: the request itself exceeded the context window "
+                                "and was trimmed")
+            return trimmed, prompt
+        except Exception:  # noqa: BLE001 — a failed trim sends the original and lets the runtime say so
+            return history, prompt
+
+    @staticmethod
+    def _is_system(message: Any) -> bool:
+        try:
+            role = getattr(message, "role", "")
+            return str(getattr(role, "value", role)).lower() == "system"
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _message_text(message: Any) -> str:
+        """The text carried by a litert_lm Message.
+
+        Read through ``to_json()`` rather than off an attribute. The payload lives under
+        ``contents`` (a ``Contents`` object), not ``content``, and guessing the attribute name
+        returned "" for every message — which made the whole context budget measure zero, pass its
+        own check trivially, and trim nothing at all. ``to_json`` is the build's own documented
+        shape: ``{"role": ..., "content": [{"type": "text", "text": ...}]}``.
+        """
+        try:
+            payload = message.to_json()
+            parts = payload.get("content") or []
+            if isinstance(parts, str):
+                return parts
+            return " ".join(str(p.get("text", "")) for p in parts if isinstance(p, dict))
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _templates(self) -> List[Tuple[str, Optional[str]]]:
         """The chat templates to try, best-known first. ``None`` means the model's embedded one.
 
@@ -986,6 +1094,7 @@ class LiteRTLMProvider(LLMProviderBase):
                            context={"provider": self.name})
         engine = self._get_engine(litert_lm)
         history, prompt = self._history(req, litert_lm)
+        history, prompt = self._fit_context(litert_lm, history, prompt, req)
         cfg = self.settings.llm
         sampler = litert_lm.SamplerConfig(
             top_k=int(getattr(cfg, "litertlm_top_k", 40)),

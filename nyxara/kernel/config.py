@@ -417,6 +417,10 @@ class LLMConfig(BaseModel):
     # Where the runtime keeps compiled artifacts (a GPU/NPU backend recompiles the graph on first run
     # and caches it here). ``None`` -> beside the weights, in ``litertlm-cache/``.
     litertlm_cache_dir: Optional[Path] = None
+    # The model's hard input+output window. The runtime enforces this and returns
+    # INVALID_ARGUMENT over it, which takes the rung off the ladder for the whole process — so
+    # prompts are budgeted against this rather than discovering it at send time.
+    litertlm_context_tokens: int = Field(default=4096, ge=256)
     litertlm_top_k: int = Field(default=40, ge=1)
     # The runtime's shared library declares a hard dependency on the Vulkan LOADER
     # (``libvulkan.so.1``) even on the CPU backend, yet imports no symbol from it. On a host without
