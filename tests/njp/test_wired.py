@@ -184,3 +184,46 @@ def test_an_injected_foundry_is_never_second_guessed_by_ambient_config():
 
     forge = AutoForge(foundry=object(), flywheel=None, min_examples=1)
     assert forge.enabled is True
+
+
+# --------------------------------------------------------------------------- #
+# NJP V.02 — the brain is no longer an island
+# --------------------------------------------------------------------------- #
+def test_the_grounder_sees_the_kernels_knowledge_graph(core: NyxaraCore):
+    """Without this everything she grounds lands in a private store the system cannot see."""
+    assert core.njp.grounder is not None
+    assert core.njp.grounder.graph is core.knowledge_graph
+
+
+def test_the_concept_ladder_is_built(core: NyxaraCore):
+    assert core.njp.ladder is not None
+
+
+def test_a_grounded_fact_reaches_the_shared_graph(core: NyxaraCore):
+    before = len(core.knowledge_graph)
+    core.njp_think("Ravi works at Infosys")
+    assert len(core.knowledge_graph) > before
+
+
+def test_the_brain_answers_through_the_kernel(core: NyxaraCore):
+    core.njp_think("my name is Jay")
+    assert "Jay" in (core.njp_think("what is my name").answer or "")
+
+
+def test_the_new_organs_have_config_gates():
+    settings = get_settings()
+    assert settings.njp.grounding_enabled is True
+    assert settings.njp.concepts_enabled is True
+
+
+def test_an_organ_that_is_off_is_absent_not_zeroed():
+    """The package's standing rule: a disabled organ must not report fabricated zeros."""
+    from nyxara.njp.brain import NJPBrain
+
+    class _Off:
+        grounding_enabled = False
+        concepts_enabled = False
+
+    brain = NJPBrain(_Off())
+    assert brain.grounder is None and brain.ladder is None
+    assert "grounding" not in brain.stats()

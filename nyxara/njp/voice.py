@@ -178,11 +178,11 @@ class Dialogue:
             if out.surface.fluent or not self.require_fluent_surface:
                 rendered = self._render(content, thought)
                 if rendered:
-                    out.text, out.rendered = rendered, True
+                    out.text, out.rendered = self._hedge(rendered, thought), True
                     return out
 
             # No fluent surface (or rendering failed): say it in her own words, plainly.
-            out.text = self._plainly(content, out)
+            out.text = self._hedge(self._plainly(content, out), thought)
             return out
         except Exception:  # noqa: BLE001 — she always says something, never crashes mid-sentence
             out.text = str(getattr(thought, "answer", "") or "")
@@ -245,6 +245,14 @@ class Dialogue:
         Only fires on a *contradiction* or a genuinely live second reading. An under-specified
         detail is surfaced with the answer rather than in place of it: stopping to ask about
         every vague word would be its own kind of uselessness.
+
+        And an ambiguity she has already resolved is not an ambiguity. If grounding answered the
+        question from structure, the competing surface readings are moot — she knows what was
+        asked because she found what it was asking *for*. Without this check, "where do I live"
+        came back as *"I can read that two ways: it carries a Hindi imperative ending (85%), or it
+        opens with a question word (80%). Which one?"* — a false positive from a suffix rule, asked
+        of a Master whose answer she was holding the whole time. Asking a question you can answer
+        is worse than not asking one.
         """
         try:
             config = getattr(brain, "config", None)
@@ -254,6 +262,10 @@ class Dialogue:
             if intent is None:
                 return ""
             if not (intent.contradictions or intent.ambiguous):
+                return ""
+            answer = getattr(getattr(getattr(thought, "percept", None), "grounding", None),
+                             "answer", None)
+            if answer is not None and getattr(answer, "answered", False):
                 return ""
             return str(intent.clarifying_question() or "")
         except Exception:  # noqa: BLE001 — she answers rather than crashing on a parse
@@ -275,6 +287,30 @@ class Dialogue:
             reply.register = read.register.to_dict()
         except Exception:  # noqa: BLE001 — tone is a garnish; it never costs a reply
             return
+
+    @staticmethod
+    def _hedge(text: str, thought: Any) -> str:
+        """Attach the epistemic caveat, if the claim has not earned the right to go bare.
+
+        Applied **after** rendering, never before. The caveat is framing, not content: folding it
+        into the content would make a faithful rendering look unfaithful (a model that answers
+        "Jay" has not dropped the claim just because it did not repeat the word "confidence"), and
+        it would also hand the caveat to the model as something it is free to reword.
+
+        A ``known`` claim is stated plainly — that is what establishment buys. A ``believed`` one
+        always carries its number, because "Jay" and "I think Jay" are different assertions and
+        the Master is entitled to know which one he is being given.
+        """
+        try:
+            state = str(getattr(thought, "epistemic", "") or "")
+            if not text or state != "believed":
+                return text
+            confidence = float(getattr(thought, "epistemic_confidence", 0.0) or 0.0)
+            if confidence <= 0.0:
+                return f"{text}\n(I believe this, but I am not certain.)"
+            return f"{text}\n(I believe this — confidence {confidence:.2f}, not established.)"
+        except Exception:  # noqa: BLE001 — a missing hedge is worse than a plain reply, but a
+            return text                # crash mid-sentence is worse than both
 
     def _plainly(self, content: str, reply: Reply) -> str:
         """Her own words, with the caveats that are actually true of this turn."""

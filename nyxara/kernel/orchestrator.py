@@ -632,6 +632,11 @@ class NyxaraCore:
         # Level 6 — Knowledge Graph Brain: structured triples complement vector recall.
         self.knowledge_graph = self._build_knowledge_graph() if enable_memory else None
         self._graph_populator: Any = None  # initialised lazily with the graph
+        # NJP grounds language into this graph, and the graph is built *after* the brain — so the
+        # handover happens here rather than in `_build_njp`. Without it everything she grounds
+        # lands in the grounder's own in-process store: correct, but invisible to the rest of the
+        # system and gone on restart.
+        self._attach_njp_organs()
         # Level 7 — Skill Factory: detect recurring goals and auto-create composite skills.
         self.skill_factory = self._build_skill_factory() if enable_skills else None
         # Skill Expansion — a prerequisite DAG of skills with proficiency that the live loop
@@ -3747,6 +3752,25 @@ class NyxaraCore:
             return brain
         except Exception:  # noqa: BLE001 — NJP is a capability, never required
             return None
+
+    def _attach_njp_organs(self) -> None:
+        """Hand NJP the organs this kernel already builds, once they exist.
+
+        NJP is not meant to be an island. Everything passed here is a real, tested subsystem the
+        kernel constructs anyway; before this the brain could see only ``tools`` and ``knowledge``,
+        so it re-derived in private what the kernel already had — or simply went without.
+        Every argument is optional and a missing one leaves that organ genuinely absent.
+        """
+        brain = getattr(self, "njp", None)
+        if brain is None:
+            return
+        try:
+            brain.attach_kernel(tools=getattr(self, "tools", None),
+                                knowledge=getattr(self, "knowledge", None),
+                                core=self,
+                                graph=getattr(self, "knowledge_graph", None))
+        except Exception:  # noqa: BLE001 — a brain without organs still thinks
+            pass
 
     def njp_think(self, stimulus: str) -> Any:
         """One full NJP turn: read, anticipate, settle, ground, judge, expand."""

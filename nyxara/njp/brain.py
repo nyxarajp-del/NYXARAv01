@@ -70,6 +70,9 @@ class NJPPercept:
     settled: Optional[SettleResult] = None
     recall: Any = None
     anticipated: Optional[Prediction] = None
+    # What the turn grounded to: entities, relations, and the words that reached neither. The
+    # fabric's cell ids say what fired with what; this says what any of it was *about*.
+    grounding: Any = None
 
     @property
     def novelty(self) -> float:
@@ -96,7 +99,8 @@ class NJPPercept:
         return {"stimulus": self.stimulus[:200], "concepts": self.concepts[:32],
                 "n_cells": len(self.cells), "novelty": round(self.novelty, 4),
                 "settled": self.settled.to_dict() if self.settled else None,
-                "anticipated": self.anticipated.to_dict() if self.anticipated else None}
+                "anticipated": self.anticipated.to_dict() if self.anticipated else None,
+                "grounding": self.grounding.to_dict() if self.grounding is not None else None}
 
 
 @dataclass
@@ -112,6 +116,10 @@ class NJPThought:
     growth: Optional[GrowthReport] = None
     cycle_id: str = ""
     ms: float = 0.0
+    # What she is entitled to say about `answer`: known / believed / unknown. Carried beside the
+    # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
+    epistemic: str = "unknown"
+    epistemic_confidence: float = 0.0
 
     @property
     def confidence(self) -> float:
@@ -164,6 +172,8 @@ class NJPBrain:
         self.memory = self._build_memory(c)
         self.tongue = self._build_tongue(c)
         self.intent = self._build_intent(c)
+        self.ladder = self._build_ladder(c)
+        self.grounder = self._build_grounder(c)
         self.voice = self._build_voice(c)
         self.truth = self._build_truth(c)
         self.soul = self._build_soul(c)
@@ -225,6 +235,38 @@ class NJPBrain:
             from nyxara.njp.intent import IntentReader
             return IntentReader(lingua=self.tongue)
         except Exception:  # noqa: BLE001
+            return None
+
+    def _build_ladder(self, c: Any) -> Any:
+        """The concept ladder — where types are *discovered* rather than declared.
+
+        Nothing in NJP ever says "Jay is a person". Instances arrive with the relations they take
+        part in as features, and the ladder's own agglomeration finds that the things with a name
+        and a location form one group and the places form another. A hand-written type table would
+        know that on turn one and never learn anything afterwards.
+        """
+        if not self._gate("concepts", True):
+            return None
+        try:
+            from nyxara.cognition.concept_formation import AbstractionLadder
+            return AbstractionLadder(link_threshold=self._cfg("concept_link_threshold", 0.2))
+        except Exception:  # noqa: BLE001 — she grounds without forming concepts, less well
+            return None
+
+    def _build_grounder(self, c: Any) -> Any:
+        """Language → concepts → entities → relations → beliefs. The organ that lets her answer.
+
+        Built with the local ladder; the kernel's KnowledgeGraph is attached later by
+        :meth:`attach_kernel`, because the brain is constructed before the kernel finishes wiring.
+        """
+        if not self._gate("grounding", True):
+            return None
+        try:
+            from nyxara.njp.grounding import Grounder
+            return Grounder(ladder=self.ladder,
+                            known_floor=self._cfg("grounding_known_floor", 0.75),
+                            learn_patterns=self._cfg("grounding_learn_patterns", True))
+        except Exception:  # noqa: BLE001 — without it she is back to co-occurrence alone
             return None
 
     def _build_voice(self, c: Any) -> Any:
@@ -295,11 +337,25 @@ class NJPBrain:
             return None
 
     def attach_kernel(self, *, tools: Any = None, knowledge: Any = None,
-                      core: Any = None) -> None:
-        """Take the live toolset and knowledge base. Without this her brain is blind to tools."""
+                      core: Any = None, graph: Any = None) -> None:
+        """Take the live toolset, knowledge base and organs the kernel already builds.
+
+        Without this her brain is blind to tools — and, before ``graph`` was passed, blind to the
+        kernel's :class:`~nyxara.memory.graph.KnowledgeGraph` too, so everything she grounded lived
+        in a private store the rest of the system could not see and that did not survive a restart.
+
+        Every argument is optional and an absent organ is genuinely absent, not stubbed: the
+        grounder falls back to its own in-process store, which is what keeps a bare ``NJPBrain()``
+        useful in a test and on a cold boot.
+        """
         self.tools = tools
         self.knowledge = knowledge
         self.core = core
+        try:
+            if graph is not None and self.grounder is not None:
+                self.grounder.graph = graph
+        except Exception:  # noqa: BLE001 — a brain that cannot see the graph still thinks
+            pass
 
     # ---- encoding --------------------------------------------------------- #
     def concepts(self, text: str) -> List[str]:
@@ -314,7 +370,8 @@ class NJPBrain:
         return [_cell_id(tok) for tok in self.concepts(text)]
 
     # ---- perception ------------------------------------------------------- #
-    def perceive(self, text: str, *, remember: bool = True) -> NJPPercept:
+    def perceive(self, text: str, *, remember: bool = True,
+                 intent: Any = None) -> NJPPercept:
         """Stimulate the fabric with a turn, settle it, and bring back grounded context."""
         out = NJPPercept(stimulus=str(text or ""))
         try:
@@ -322,6 +379,18 @@ class NJPBrain:
                 if not out.stimulus.strip():
                     return out
                 out.concepts = self.concepts(out.stimulus)
+
+                # Ground BEFORE settling. The fabric's answer to a turn is co-activation; the
+                # grounder's is structure, and a question that structure can answer should be
+                # answered from it rather than from whatever happened to fire. Cheap enough to sit
+                # in every turn — the fluent surface is not consulted here (`deep` stays off),
+                # because that call is seconds, and seconds do not belong in a perceive.
+                if self.grounder is not None:
+                    try:
+                        out.grounding = self.grounder.ground(out.stimulus, intent=intent)
+                    except Exception:  # noqa: BLE001
+                        out.grounding = None
+
                 out.cells = self.encode(out.stimulus)
                 if not out.cells:
                     return out
@@ -374,8 +443,9 @@ class NJPBrain:
                     out.intent = None
 
             # 2-4. perceive and ground
-            out.percept = self.perceive(out.stimulus, remember=remember)
+            out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
             out.answer = self._compose(out)
+            self._set_epistemic(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -423,27 +493,103 @@ class NJPBrain:
             return None
 
     def _compose(self, thought: NJPThought) -> str:
-        """What she can honestly say about this turn, from recall and from what settled.
+        """What she can honestly say about this turn, answering from structure where there is any.
 
         Deliberately plain. This brain's contribution is *what is true and what fired*, not
         fluency; :mod:`nyxara.njp.voice` phrases it when a fluent surface is installed, and says so
         when one is not rather than letting a fallback babble in her name.
+
+        Order matters. A grounded answer comes first and alone, because it is the only thing here
+        that actually answers the question that was asked. Everything below it is context about
+        the turn, and context concatenated onto an answer reads as hedging.
+
+        What this used to emit instead is worth naming: on a familiar turn it returned *"this
+        usually leads to 4 familiar activations"* — a true statement about her own manifold, and
+        not in any sense a reply. A brain reporting its own activation counts to the Master is the
+        clearest possible symptom of having no content to report.
         """
         try:
+            grounding = thought.percept.grounding if thought.percept else None
+
+            # 1. She was asked something and the structure knows the answer.
+            #
+            # The bare claim is returned, with no hedge attached. The epistemic state travels
+            # beside it on the thought and :mod:`nyxara.njp.voice` applies the caveat after
+            # rendering. Writing "Jay (I believe this, confidence 0.90)" here instead made the
+            # hedge part of the *content*, and the voice's faithfulness check — which asks whether
+            # a rendering still covers the content it was given — then demanded the model echo the
+            # words "believe" and "confidence" back. A model that answered the question perfectly
+            # with "Jay" was scored as having wandered off, and every correct fluent rendering was
+            # discarded. Content and epistemic framing are different layers; keep them apart.
+            answer = getattr(grounding, "answer", None)
+            if answer is not None and answer.answered:
+                return str(answer.text)[:1000]
+
+            # 2. She was asked something and genuinely does not know. Say that — do not fall
+            # through to recall and offer a loosely-related memory as though it were an answer.
+            if getattr(grounding, "is_question", False):
+                return ""
+
             bits: List[str] = []
+            # 3. She was told something and it landed. Confirm what was actually understood, so a
+            # misparse is visible to the Master on the turn it happens rather than three turns later.
+            triples = list(getattr(grounding, "triples", None) or [])
+            if triples:
+                learned = "; ".join(f"{t.subject} {t.predicate.replace('_', ' ')} {t.object}"
+                                    for t in triples[:3])
+                bits.append(f"noted: {learned}")
+            for prior, now in list(getattr(grounding, "contradictions", None) or [])[:1]:
+                bits.append(f"this contradicts what I had ({prior.object}); "
+                            f"I have revised it to {now.object}")
+
             rec = thought.percept.recall if thought.percept else None
             best = getattr(rec, "best", None) if rec is not None else None
             if best is not None and getattr(best, "text", ""):
                 bits.append(str(best.text))
-            ant = thought.percept.anticipated if thought.percept else None
-            if ant is not None and ant.trusted:
-                bits.append(f"this usually leads to {len(ant.cells)} familiar activations")
             if thought.reading is not None and thought.reading.has_latent:
                 wants = "; ".join(w.want for w in thought.reading.latent[:2])
                 bits.append(f"you usually also want: {wants}")
             return " — ".join(bits)[:1000]
         except Exception:  # noqa: BLE001
             return ""
+
+    @staticmethod
+    def _set_epistemic(thought: NJPThought) -> None:
+        """Record which of the three states this turn's answer is in.
+
+        ``KNOWN`` and ``BELIEVED`` are different assertions and ``UNKNOWN`` is not an assertion at
+        all. Keeping them apart on the thought is what lets the voice say "Jay", "I think Jay" and
+        "I don't know" as three genuinely different replies rather than one string with optional
+        decoration.
+        """
+        try:
+            from nyxara.njp.grounding import Epistemic
+            grounding = getattr(thought.percept, "grounding", None)
+            answer = getattr(grounding, "answer", None)
+            if answer is not None and answer.answered:
+                thought.epistemic = answer.state
+                thought.epistemic_confidence = float(answer.confidence)
+                return
+            # An acknowledgement is not a claim about the world. "noted: Master has name Jay"
+            # reports what she just recorded, and she is not uncertain about her own record —
+            # hedging it with "I believe this, but I am not certain" would be false modesty about
+            # the one thing she does know for sure.
+            if getattr(grounding, "triples", None):
+                thought.epistemic = Epistemic.KNOWN
+                thought.epistemic_confidence = 1.0
+                return
+            # No grounded answer: known only if the gauntlet established what she did say.
+            if thought.answer and thought.verified:
+                thought.epistemic = Epistemic.KNOWN
+                thought.epistemic_confidence = thought.confidence
+            elif thought.answer:
+                thought.epistemic = Epistemic.BELIEVED
+                thought.epistemic_confidence = thought.confidence
+            else:
+                thought.epistemic = Epistemic.UNKNOWN
+                thought.epistemic_confidence = 0.0
+        except Exception:  # noqa: BLE001
+            pass
 
     def converse(self, text: str) -> Any:
         """Think, then say it. Her content; a fluent surface only phrases it."""
@@ -551,7 +697,7 @@ class NJPBrain:
         out: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.stats()}
         for name, organ in (("ledger", self.ledger), ("truth", self.truth),
                             ("soulsync", self.soul), ("evolve", self.evolver),
-                            ("pulse", self.pulse)):
+                            ("pulse", self.pulse), ("grounding", self.grounder)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -575,7 +721,8 @@ class NJPBrain:
     # ---- persistence ------------------------------------------------------ #
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
-        for name, organ in (("ledger", self.ledger), ("soulsync", self.soul)):
+        for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
+                            ("grounding", self.grounder)):
             if organ is None:
                 continue
             try:
@@ -599,6 +746,8 @@ class NJPBrain:
                 self.ledger.load_dict(d["ledger"])
             if d.get("soulsync") and self.soul is not None:
                 self.soul.load_dict(d["soulsync"])
+            if d.get("grounding") and self.grounder is not None:
+                self.grounder.load_dict(d["grounding"])
             if d.get("memory") and self.memory is not None and hasattr(self.memory, "load_dict"):
                 self.memory.load_dict(d["memory"])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

@@ -2248,6 +2248,8 @@ class NJPConfig(BaseModel):
     memory_enabled: bool = True                  # content-addressed recall, no token window
     tongue_enabled: bool = True                  # Unicode/Devanagari/Hinglish tokenization
     intent_enabled: bool = True                  # what was actually asked
+    grounding_enabled: bool = True               # words → entities → relations → beliefs
+    concepts_enabled: bool = True                # types discovered from experience, not declared
     voice_enabled: bool = True                   # how it is said
     truth_enabled: bool = True                   # the Truth-Seeking Gauntlet
     soulsync_enabled: bool = True                # the Intent-Refinement Loop
@@ -2266,6 +2268,17 @@ class NJPConfig(BaseModel):
     # Soft agreement alone establishing a claim is exactly how consensus becomes bias.
     truth_min_sources: int = Field(default=2, ge=1, le=16)
     truth_require_hard: bool = True
+
+    # ---- grounding: what a word is *about* ---- #
+    # Confidence at which a corroborated claim may be stated as fact rather than quoted with its
+    # number. Below this she says "I believe X, confidence n" — a different assertion, deliberately.
+    grounding_known_floor: float = Field(default=0.75, ge=0.0, le=1.0)
+    # Whether a sentence the deterministic core cannot parse, that the fluent surface can, is
+    # generalised into a new extraction pattern. Off makes her parser fixed at what it shipped with.
+    grounding_learn_patterns: bool = True
+    # Minimum shared-feature overlap for the concept ladder to group two things under one concept.
+    # Higher splits hairs; lower collapses genuinely different kinds into one bucket.
+    concept_link_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
 
     # ---- the Master ---- #
     # How many independent corrections teach a standing preference. At 1 a single off-hand remark
