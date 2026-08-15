@@ -14,6 +14,27 @@ the optimizer at a ``tmp_path`` file, never the live package.
 from __future__ import annotations
 
 import os
+import tempfile
+
+# --- the suite must not READ the Master's live state either (set before anything imports) --- #
+# Hermeticity is symmetric, and only the writing half was sealed. `PathsConfig.root` defaults to
+# `~/.nyxara`, and the per-process scratch root that exists for exactly this purpose only engages
+# under `Profile.TEST` — while the suite runs under DEV, so it engaged never. The result is a
+# suite whose outcome depends on the machine's history: a live NYXARA (or an earlier run of these
+# very tests) leaves a promoted self-model, a learned causal graph and a fitted difficulty
+# calibrator on disk, and the next run reads them.
+#
+# Measured here: `tests/kernel/test_metacontrol_wiring.py` asserts a freshly-built core has a
+# calibrator with 0 samples and found 145, left by earlier runs — so every turn was scored
+# "extreme difficulty" and the easy-turn allocation test failed too. Both pass on a clean home
+# and fail on a dirty one, which is the definition of a test that is measuring the wrong thing.
+#
+# Set rather than `setdefault`-ed from the real home: an operator who exports NYXARA_HOME to
+# point at a live install would otherwise hand the suite that install to read and write. An
+# explicit test home is still honoured.
+os.environ.setdefault("NYXARA_TEST_HOME",
+                      tempfile.mkdtemp(prefix=f"nyxara-suite-{os.getpid()}-"))
+os.environ["NYXARA_HOME"] = os.environ["NYXARA_TEST_HOME"]
 
 # --- force a hermetic, non-self-modifying posture for the whole suite (set before import) --- #
 os.environ.setdefault("NYXARA_SELF_IMPROVEMENT__AUTONOMOUS_ENACT", "false")

@@ -556,6 +556,33 @@ class ComplementaryLearningSystem:
         """Freeze the cortex's EWC anchors so what it has learned resists being overwritten."""
         self.neocortex.learner.consolidate()
 
+    # ---- learning-to-learn: the invented update rule (capability #11) ---- #
+    #
+    # These three are pure delegation to the cortical learner, and their absence was a real
+    # capability regression rather than a missing convenience. :mod:`nyxara.growth.rule_synth`
+    # invents a new weight-update rule and adopts it by calling ``core.learner.install_rule``;
+    # when the kernel's learner became a :class:`ComplementaryLearningSystem` that method stopped
+    # existing, so an invented rule had nowhere to go. The synthesis pass still ran, still
+    # measured, and then quietly installed nothing.
+    #
+    # The rule goes to the **neocortex**, not the hippocampus: it governs how a consolidated
+    # weight moves, which is the slow store's business. The fast store is episodic and is meant
+    # to be overwritten. Character safety is untouched — a rule is a scalar function of numeric
+    # inputs with no access to feature names, so IMMUTABLE_VALUES remains the sole gate on *what*
+    # may be learned; this changes only *how* a weight moves.
+    @property
+    def update_rule(self) -> Optional[Any]:
+        """The active weight-update rule (``None`` = the incumbent SGD+EWC delta)."""
+        return self.neocortex.learner.update_rule
+
+    def install_rule(self, rule: Optional[Any]) -> None:
+        """Install an invented update rule into the cortical learner. Reversible."""
+        self.neocortex.learner.install_rule(rule)
+
+    def rollback_rule(self) -> None:
+        """Restore the incumbent rule. The other half of what makes adoption safe."""
+        self.neocortex.learner.rollback_rule()
+
     # ---- adaptive forgetting probe ---- #
     def _maybe_probe(self, action: str, features: Features, reward: float, task: str) -> None:
         """Keep a small, task-diverse held-out set to measure drift (one exemplar per new task)."""
