@@ -358,6 +358,11 @@ class WebFetcher:
         # the default transport carries our descriptive UA and re-vets each redirect hop with
         # the fetcher's own SSRF posture; injected transports keep the plain
         # (url, timeout, max_bytes) contract used by tests.
+        # Whether this fetcher can reach the real network at all. An injected transport is a
+        # fake — a test's stub or a sandbox's recorder — and is never gated by
+        # ``features.web_access``, because that flag is about touching the outside world and an
+        # injected transport does not. Only the default transport does.
+        self._live = transport is None
         self._transport = transport or (
             lambda u, t, m: _default_transport(
                 u, t, m, user_agent=self.user_agent,
@@ -367,6 +372,35 @@ class WebFetcher:
         self.timeout = timeout
         self._cache: Dict[str, FetchResult] = {} if cache else None  # type: ignore
         self.scanner = InjectionScanner()
+
+    def _vet_feature(self) -> str:
+        """Honour ``features.web_access`` here, at the doorway every live fetch goes through.
+
+        The flag existed and exactly one caller respected it — :mod:`nyxara.growth.explorer`.
+        :mod:`nyxara.senses.search`, :mod:`nyxara.growth.acquire` and everything downstream
+        reached the network regardless, so "the suite must not touch the network" was true of one
+        route out of five. ``tests/conftest.py`` documents the consequence and it reproduces
+        exactly: a live TLS handshake behind a stalling proxy never returns, pytest-timeout kills
+        the worker, and the rest of the run dies with it.
+
+        A feature flag that only one of five paths checks is not a feature flag. Checked at the
+        fetcher because every route — the search backends included — fetches through this object,
+        so one check seals all of them.
+
+        Two things it deliberately does not do. It does not touch **injected** transports: a test
+        that supplies its own fake is not touching the outside world, and gating it broke six
+        ``tests/senses`` cases on the first attempt at this. And it changes nothing in production,
+        where ``web_access`` defaults to ``True`` — autonomous acquisition is unaffected.
+        """
+        if not self._live:
+            return ""
+        try:
+            from nyxara.kernel.config import get_settings
+            if not bool(getattr(get_settings().features, "web_access", True)):
+                return "web access disabled (features.web_access)"
+        except Exception:  # noqa: BLE001 — no settings ⇒ no opinion, never a block
+            return ""
+        return ""
 
     # ---- URL safety ---- #
     def _vet_url(self, url: str) -> Optional[str]:
@@ -390,7 +424,7 @@ class WebFetcher:
 
     # ---- fetch ---- #
     def fetch(self, url: str, *, refresh: bool = False) -> FetchResult:
-        reason = self._vet_url(url)
+        reason = self._vet_url(url) or self._vet_feature()
         if reason:
             return FetchResult(url=url, ok=False, blocked_reason=reason, error=reason)
         if self._cache is not None and not refresh and url in self._cache:
