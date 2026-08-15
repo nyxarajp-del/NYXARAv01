@@ -288,8 +288,15 @@ class Tutor:
         }
 
     # ---- study --------------------------------------------------------------- #
-    def study(self, pairs: Iterable[Pair], *, progress: Any = None) -> StudyReport:
-        """Teach every pair. The answer is grounded; the question is bound to it."""
+    def study(self, pairs: Iterable[Pair], *, progress: Any = None,
+              checkpoint: Any = None, checkpoint_every: int = 0) -> StudyReport:
+        """Teach every pair. The answer is grounded; the question is bound to it.
+
+        ``checkpoint`` is called with the count so far every ``checkpoint_every`` pairs. A long
+        corpus is hours of work and the state only becomes durable when someone writes it down —
+        measured the hard way: a 30-minute run was cut off by its own time budget and lost
+        everything, because saving happened once, at an end it never reached.
+        """
         rep = StudyReport()
         before = self._snapshot()
         rep.facts_before = before["facts"]
@@ -326,6 +333,12 @@ class Tutor:
                     try:
                         progress(rep.studied)
                     except Exception:  # noqa: BLE001
+                        pass
+                if (checkpoint is not None and checkpoint_every > 0
+                        and rep.studied % checkpoint_every == 0):
+                    try:
+                        checkpoint(rep.studied)
+                    except Exception:  # noqa: BLE001 — a failed save costs durability, not the run
                         pass
         finally:
             if field_organ is not None and restore is not None:
@@ -427,6 +440,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--exam", type=int, default=200, help="held-out questions to ask")
     parser.add_argument("--crystallise-every", type=int, default=250)
     parser.add_argument("--save", default="", help="write the trained brain's state here")
+    parser.add_argument("--checkpoint-every", type=int, default=2000,
+                        help="re-save the state every N pairs, so a long run cannot lose it all")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     from nyxara.njp.brain import NJPBrain
@@ -447,7 +462,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(json.dumps(before.to_dict(), indent=1))
 
     print("\n— studying —")
-    report = tutor.study(study_set, progress=lambda n: print(f"  {n} pairs…", flush=True))
+    started = time.perf_counter()
+
+    def _progress(n: int) -> None:
+        rate = (time.perf_counter() - started) / n * 1000.0
+        print(f"  {n}/{len(study_set)} pairs  ({rate:.0f} ms/pair)", flush=True)
+
+    def _checkpoint(n: int) -> None:
+        if not args.save:
+            return
+        Path(args.save).write_text(json.dumps(brain.to_dict()), encoding="utf-8")
+        print(f"  checkpoint at {n} → {args.save}", flush=True)
+
+    report = tutor.study(study_set, progress=_progress, checkpoint=_checkpoint,
+                         checkpoint_every=args.checkpoint_every)
     print(json.dumps(report.to_dict(), indent=1))
 
     print("\n— exam AFTER studying (same held-out questions) —")
