@@ -118,6 +118,13 @@ class CycleReport:
     experiment: str = ""
     experiment_gain: float = 0.0
     beliefs_touched: int = 0
+    # The world-level prediction: what she expected the situation to lead to, and what the world
+    # charged her in bits for being wrong about it. Separate from `error`, which grades her
+    # against her own firing — this grades her against reality.
+    world_predicted: str = ""
+    world_bits: float = 0.0
+    world_excess: float = 0.0
+    surprised: bool = False
     ms: float = 0.0
 
     @property
@@ -138,6 +145,10 @@ class CycleReport:
                 "experiment": self.experiment,
                 "experiment_gain": round(self.experiment_gain, 5),
                 "beliefs_touched": self.beliefs_touched,
+                "world_predicted": self.world_predicted,
+                "world_bits": round(self.world_bits, 4),
+                "world_excess": round(self.world_excess, 4),
+                "surprised": self.surprised,
                 "learned": self.learned, "ms": round(self.ms, 3)}
 
 
@@ -243,6 +254,7 @@ class RecursiveCognitiveField:
         self.restructures = 0
         self.restructures_kept = 0
         self.experiments_designed = 0
+        self.surprises = 0
         self.errors_diagnosed: Dict[str, int] = {}
         self.trials: List[Trial] = []
         self.accepted_trials = 0
@@ -263,6 +275,7 @@ class RecursiveCognitiveField:
             rep.perceived = len(triples)
 
             rep.concepts_fed = self._form_concepts(triples, rep)
+            self._predict_world(triples, rep)
             rep.arrows = self._sync_world(rep)
             rep.hypotheses = self._raise_hypotheses(rep)
             self._simulate(thought, rep)
@@ -319,6 +332,42 @@ class RecursiveCognitiveField:
             report = self.concepts.crystallise()
             rep.crystallised = report.changed
         return fed
+
+    # ---- the predictive brain ------------------------------------------------ #
+    def _predict_world(self, triples: Sequence[Any], rep: CycleReport) -> None:
+        """Expect what comes next, look, and price the difference in bits.
+
+        This is the step that separates a fact store from something that thinks. Every other
+        signal in this loop measures her against *herself* — the manifold's anticipation of her
+        own firing, graded by her own firing. This one measures her against the **world**: she
+        commits to what the situation leads to, the next turn shows what it actually led to, and
+        the gap is real information she did not have.
+
+        Surprise is routed by ``excess``, not by raw bits. A model that honestly reported "I have
+        no idea" and was then wrong has learned something and done nothing wrong; one that said
+        "certainly X" and got Y has a defect worth restructuring for. Grading both the same is
+        how a system is taught that vagueness is safe.
+        """
+        model = getattr(self.brain, "predictive", None)
+        if model is None or not triples:
+            return
+        try:
+            from nyxara.njp.predictive import WorldState
+            facts = [f"{getattr(t, 'subject', '')} {getattr(t, 'predicate', '')} "
+                     f"{getattr(t, 'object', '')}".strip() for t in triples[:4]]
+            state = WorldState.of(facts)
+            if state.empty:
+                return
+            intent = getattr(self.brain, "_last_intent_kind", "") or ""
+            prediction, surprise = model.predict_and_observe(state, intent)
+            rep.world_bits = surprise.bits
+            rep.world_excess = surprise.excess
+            rep.world_predicted = prediction.top
+            if surprise.surprising:
+                rep.surprised = True
+                self.surprises += 1
+        except Exception:  # noqa: BLE001 — a failed expectation costs a signal, never the turn
+            pass
 
     # ---- world model -------------------------------------------------------- #
     def _sync_world(self, rep: CycleReport) -> int:
@@ -789,6 +838,7 @@ class RecursiveCognitiveField:
             "restructures": self.restructures,
             "restructures_kept": self.restructures_kept,
             "experiments_designed": self.experiments_designed,
+            "surprises": self.surprises,
             "errors": dict(self.errors_diagnosed),
             "samples": len(self._samples), "holdout": len(self._holdout),
             # The last score computed, not a fresh one: see `benchmark`. 0.0 means loop 2 has not

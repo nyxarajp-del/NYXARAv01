@@ -193,6 +193,15 @@ from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
+from nyxara.njp.predictive import (
+    Assumption,
+    Explanation,
+    PredictiveWorldModel,
+    Surprise,
+    ThoughtState,
+    WorldState,
+)
+from nyxara.njp.predictive import Prediction as StatePrediction
 from nyxara.njp.pulse import PulseEngine, PulseReport
 from nyxara.njp.reasoner import NJPReasoner
 from nyxara.njp.soulsync import Anticipation, LatentWant, Preference, Reading, SoulSync
@@ -234,6 +243,8 @@ __all__ = [
     "ExperimentDesigner", "Experiment", "UniverseHypothesis",
     "BeliefLedger", "Belief", "Support", "Revision", "Reliability", "EvidenceKind",
     "MetaReasoner", "ProblemClassifier", "ProblemKind", "Classification", "Critique", "Solution",
+    "PredictiveWorldModel", "WorldState", "StatePrediction", "Surprise",
+    "ThoughtState", "Assumption", "Explanation",
     "RecursiveCognitiveField", "CycleReport", "Diagnosis", "ErrorClass",
     "Bottleneck", "Modification", "Trial",
     # truth is not relevance, and reasoning is not always what a turn calls for

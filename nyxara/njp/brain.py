@@ -224,6 +224,10 @@ class NJPBrain:
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
         self.metareason = self._build_metareason(c)
+        # The predictive brain: what follows what in the WORLD, as opposed to which of her own
+        # cells fire next. Without it she is a fact store that grows; with it she is something
+        # that expects, is wrong, and learns from the difference.
+        self.predictive = self._build_predictive(c)
         # Truth is not relevance, and reasoning is not always what a turn calls for.
         self._speech, self._policy, self.gate = self._build_relevance(c)
         # Last, because it registers repairs against organs built above it and reads them on
@@ -786,6 +790,36 @@ class NJPBrain:
                     RelevanceGate(threshold=self._cfg("relevance_threshold", 0.22)))
         except Exception:  # noqa: BLE001 — without it she is credulous, not broken
             return None, None, None
+
+    def _build_predictive(self, c: Any) -> Any:
+        """The world-state sequence model. Stage A of the curriculum, and the floor under it."""
+        if not self._gate("predictive", True):
+            return None
+        try:
+            from nyxara.njp.predictive import PredictiveWorldModel
+            return PredictiveWorldModel(
+                max_order=self._cfg("predictive_order", 3),
+                min_evidence=self._cfg("predictive_min_evidence", 2))
+        except Exception:  # noqa: BLE001 — without it she remembers but never expects
+            return None
+
+    def deliberate(self, question: str = "", *, action: str = "") -> Any:
+        """Think about the current situation as an inspectable object, not a string.
+
+        The Master's sequence, walked over the predictive model: what do I know, what am I
+        assuming, what could explain this, which explanation predicts best, what would prove me
+        wrong, conclusion. Returns the :class:`~nyxara.njp.predictive.ThoughtState` itself so the
+        reasoning can be read while it is happening rather than inferred from what came out.
+        """
+        try:
+            from nyxara.njp.predictive import ThoughtState
+            state = ThoughtState(context=str(question or ""))
+            if self.predictive is None:
+                return state
+            return state.deliberate(self.predictive, action=action,
+                                    beliefs=self.beliefs, concepts=self.genesis)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _build_field(self, c: Any) -> Any:
         """The Recursive Cognitive Field — both loops, over the organs built above."""
@@ -1746,7 +1780,8 @@ class NJPBrain:
                             ("loop", self.loop),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("metareason", self.metareason), ("field", self.field)):
+                            ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("field", self.field)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -1778,7 +1813,8 @@ class NJPBrain:
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("metareason", self.metareason), ("field", self.field)):
+                            ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("field", self.field)):
             if organ is None:
                 continue
             try:
@@ -1829,7 +1865,8 @@ class NJPBrain:
             # clustering cannot resurrect concepts the current rules would never form.
             for key, organ in (("concepts", self.genesis), ("universe", self.universe),
                                ("designer", self.designer), ("beliefs", self.beliefs),
-                               ("metareason", self.metareason), ("field", self.field)):
+                               ("metareason", self.metareason), ("predictive", self.predictive),
+                               ("field", self.field)):
                 if d.get(key) and organ is not None:
                     organ.load_dict(d[key])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain
