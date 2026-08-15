@@ -1563,6 +1563,11 @@ class SelfImprovementConfig(BaseModel):
     # concurrently. They write disjoint caches, so the result is identical to the sequential
     # order — only faster. Set False for strictly deterministic single-threaded execution.
     parallel_cycle: bool = True
+    # Wall-clock budget for one whole observation fan-out. Every step in it is subprocess- and
+    # I/O-bound, and an unbounded `fut.result()` meant one wedged linter or benchmark hung the
+    # cycle forever — with no way back, in the autonomic loop as much as in a test run. A step
+    # that overruns is recorded as having observed nothing rather than being waited on.
+    observe_timeout_s: float = Field(default=180.0, gt=0.0)
     # --- enactment (self-modification) — Master JP's standing authorisation: ON, full auto --- #
     # Gains auto-apply each cycle. This does NOT weaken safety: every edit still clears the
     # reversible verify-or-rollback gauntlet (syntax compile → corrigibility/honesty battery →

@@ -804,9 +804,30 @@ class RecursiveSelfImprovement:
         self._plan_effort()
         try:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=len(steps)) as pool:
-                for fut in [pool.submit(s) for s in steps]:
-                    fut.result()
+            from concurrent.futures import TimeoutError as _FutureTimeout
+            # Bounded, because every one of these steps is subprocess- and I/O-bound and a
+            # subprocess that never returns made `fut.result()` wait forever. Measured: the whole
+            # of tests/growth died in this call, and the failure is not a test artefact — the
+            # autonomic loop runs the same cycle, so a wedged linter or benchmark would hang a
+            # live self-improvement pass with no way back. `with ThreadPoolExecutor(...)` is not
+            # used because its __exit__ joins the workers, which would re-introduce the same
+            # unbounded wait after every per-future timeout had already expired.
+            budget = float(getattr(cfg, "observe_timeout_s", 180.0) or 180.0)
+            pool = ThreadPoolExecutor(max_workers=len(steps))
+            try:
+                futures = [pool.submit(s) for s in steps]
+                deadline = time.monotonic() + budget
+                for fut in futures:
+                    try:
+                        fut.result(timeout=max(0.0, deadline - time.monotonic()))
+                    except _FutureTimeout:
+                        # Recorded rather than swallowed: a step that timed out produced no
+                        # observation, and a cycle that silently observed less than it thinks it
+                        # did is exactly the kind of quiet zero this repo keeps having to hunt.
+                        self._observe_timeouts = getattr(self, "_observe_timeouts", 0) + 1
+                        break
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         except Exception:  # noqa: BLE001 — never let parallelism break the cycle; run in order
             for step in steps:
                 step()
