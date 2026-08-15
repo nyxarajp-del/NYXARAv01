@@ -39,7 +39,8 @@ import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from dataclasses import field as dc_field
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.ledger import Ledger
@@ -129,6 +130,11 @@ class NJPThought:
     # represent. `trial` is set only on the turns loop 2 comes round.
     field: Any = None
     trial: Any = None
+    # What the Master was *doing* with this turn, and what each recalled memory scored against
+    # it. Carried so a reply that reached for something irrelevant is visible from outside rather
+    # than having to be inferred from the reply itself.
+    act: Any = None
+    relevance: List[Any] = dc_field(default_factory=list)
 
     @property
     def confidence(self) -> float:
@@ -218,6 +224,17 @@ class NJPBrain:
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
         self.metareason = self._build_metareason(c)
+        # The predictive brain: what follows what in the WORLD, as opposed to which of her own
+        # cells fire next. Without it she is a fact store that grows; with it she is something
+        # that expects, is wrong, and learns from the difference.
+        self.predictive = self._build_predictive(c)
+        # Stage G: she plans over what she has actually learned, acts, and is graded by the
+        # world. Built after `predictive` because it plans by searching that model — an agent
+        # with no world model does not plan, it flails.
+        self.agent = self._build_agent(c)
+        self.curriculum = self._build_curriculum(c)
+        # Truth is not relevance, and reasoning is not always what a turn calls for.
+        self._speech, self._policy, self.gate = self._build_relevance(c)
         # Last, because it registers repairs against organs built above it and reads them on
         # every turn. Without it the organs are all present and none of them hear from each other.
         self.loop = self._build_loop(c)
@@ -761,6 +778,97 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_relevance(self, c: Any) -> Tuple[Any, Any, Any]:
+        """The speech-act reader, the cognitive policy and the relevance gate.
+
+        Built together because they are one mechanism: the reader says what kind of turn it is,
+        the policy says which cognition that kind permits, and the gate enforces it over memory.
+        Switching the group off restores the previous behaviour exactly — every turn gets the
+        full apparatus and recall attaches whatever was nearest — which is worth being able to
+        do, and worth naming as the thing that produced a pendulum law in answer to "how are you".
+        """
+        if not self._gate("relevance", True):
+            return None, None, None
+        try:
+            from nyxara.njp.relevance import CognitivePolicy, RelevanceGate, SpeechActReader
+            return (SpeechActReader(), CognitivePolicy(),
+                    RelevanceGate(threshold=self._cfg("relevance_threshold", 0.22)))
+        except Exception:  # noqa: BLE001 — without it she is credulous, not broken
+            return None, None, None
+
+    def _build_predictive(self, c: Any) -> Any:
+        """The world-state sequence model. Stage A of the curriculum, and the floor under it."""
+        if not self._gate("predictive", True):
+            return None
+        try:
+            from nyxara.njp.predictive import PredictiveWorldModel
+            return PredictiveWorldModel(
+                max_order=self._cfg("predictive_order", 3),
+                min_evidence=self._cfg("predictive_min_evidence", 2))
+        except Exception:  # noqa: BLE001 — without it she remembers but never expects
+            return None
+
+    def deliberate(self, question: str = "", *, action: str = "") -> Any:
+        """Think about the current situation as an inspectable object, not a string.
+
+        The Master's sequence, walked over the predictive model: what do I know, what am I
+        assuming, what could explain this, which explanation predicts best, what would prove me
+        wrong, conclusion. Returns the :class:`~nyxara.njp.predictive.ThoughtState` itself so the
+        reasoning can be read while it is happening rather than inferred from what came out.
+        """
+        try:
+            from nyxara.njp.predictive import ThoughtState
+            state = ThoughtState(context=str(question or ""))
+            if self.predictive is None:
+                return state
+            return state.deliberate(self.predictive, action=action,
+                                    beliefs=self.beliefs, concepts=self.genesis)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_agent(self, c: Any) -> Any:
+        """Stage G — the loop that closes: goal → plan → action → outcome → better model."""
+        if not self._gate("agency", True) or self.predictive is None:
+            return None
+        try:
+            from nyxara.njp.agency import Agent
+            return Agent(self.predictive, max_depth=self._cfg("plan_depth", 4))
+        except Exception:  # noqa: BLE001 — without it she intends but never acts
+            return None
+
+    def _build_curriculum(self, c: Any) -> Any:
+        """The nine stages, and the refusal to report one as reached before it is."""
+        if not self._gate("curriculum", True):
+            return None
+        try:
+            from nyxara.njp.curriculum import Curriculum
+            return Curriculum()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def pursue(self, goal: Any, *, actuator: Any = None, steps: int = 4) -> Any:
+        """Plan toward ``goal`` over the learned world model and act, re-planning each step.
+
+        Without an ``actuator`` this returns the plan as a **proposal** and takes no action —
+        which is the honest default, because deciding whether a proposed action may run is the
+        kernel's gate to make, never this brain's.
+        """
+        try:
+            if self.agent is None:
+                return []
+            return self.agent.pursue(goal, actuator=actuator, steps=steps)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def report_card(self) -> Dict[str, Any]:
+        """Which of the nine stages she has actually reached, measured, not claimed."""
+        try:
+            if self.curriculum is None:
+                return {}
+            return self.curriculum.assess(self).to_dict()
+        except Exception:  # noqa: BLE001
+            return {}
+
     def _build_field(self, c: Any) -> Any:
         """The Recursive Cognitive Field — both loops, over the organs built above."""
         if not self._gate("field", True):
@@ -962,6 +1070,12 @@ class NJPBrain:
             # 2-4. perceive and ground
             out.percept = self.perceive(out.stimulus, remember=remember, intent=out.intent)
             out.answer = self._compose(out)
+            # "I'm certain that I understand: <your words back>" is not a reply, it is a machine
+            # narrating its own comprehension. Understanding belongs in the internal state, which
+            # is where `out.act` already carries it; a turn that produced only an echo is a turn
+            # with no answer, and saying so is more honest than saying it back.
+            if self._is_echo(out):
+                out.answer = ""
             self._set_epistemic(out)
             # What she committed to is registered by :mod:`nyxara.njp.integrate`, not here.
             #
@@ -1276,6 +1390,23 @@ class NJPBrain:
         try:
             grounding = thought.percept.grounding if thought.percept else None
 
+            # 0. WHAT KIND OF TURN IS THIS, before any machinery is pointed at it.
+            #
+            # The failure this closes, from the Master's own transcript: he asked "How are you
+            # NYXARA?", perception correctly called it chat, and recall→reason ran anyway because
+            # that is what came next — returning a verified pendulum-period law with confidence
+            # raised to 1.00. Every stage worked. What was missing was anything that asked
+            # whether a true fact had the slightest thing to do with the question.
+            #
+            # A social or reflexive act is answered from the relationship and her own state, and
+            # `CognitivePolicy` forbids the world-knowledge pathways outright — so there is no
+            # route by which a physics law can reach a greeting, however well-established it is.
+            act = self._act(thought)
+            thought.act = act
+            if act is not None and self._policy is not None:
+                if self._policy.forbids_world_knowledge(act):
+                    return self._answer_socially(thought, act)
+
             # 1. She was asked something and the structure knows the answer.
             #
             # The bare claim is returned, with no hedge attached. The epistemic state travels
@@ -1307,16 +1438,163 @@ class NJPBrain:
                 bits.append(f"this contradicts what I had ({prior.object}); "
                             f"I have revised it to {now.object}")
 
-            rec = thought.percept.recall if thought.percept else None
-            best = getattr(rec, "best", None) if rec is not None else None
-            if best is not None and getattr(best, "text", ""):
-                bits.append(str(best.text))
+            # 4. Recall, but only what is actually *about* this turn.
+            #
+            # This line used to be `bits.append(best.text)` unconditionally — the single place
+            # where a true, well-established, entirely unrelated memory got attached to a reply
+            # because it happened to be the nearest thing in the store. Truth is not relevance,
+            # and the gate is where the difference is enforced: below threshold the memory is not
+            # down-weighted, it is not seen.
+            self._recall_through_gate(thought, act, bits)
             if thought.reading is not None and thought.reading.has_latent:
                 wants = "; ".join(w.want for w in thought.reading.latent[:2])
                 bits.append(f"you usually also want: {wants}")
             return " — ".join(bits)[:1000]
         except Exception:  # noqa: BLE001
             return ""
+
+    @staticmethod
+    def _is_echo(thought: NJPThought) -> bool:
+        """Did this turn hand the *question* back instead of answering it?
+
+        Scoped to turns that asked something, and that is not a detail. An acknowledgement of a
+        statement — "noted: Sara is a person" — is structurally identical to an echo and is not
+        one: it reports what she recorded, which is how a misparse becomes visible on the turn it
+        happens rather than three turns later. Blanking it (the first version of this did) meant
+        nothing was remembered on any statement turn, so nothing was ever promoted out of
+        episodic memory, and two integration tests that had been green went red. The failure this
+        check exists for is narrower than it first looks: *asked something, got the question
+        back*.
+        """
+        try:
+            from nyxara.njp.relevance import is_meta_commentary
+            grounding = getattr(thought.percept, "grounding", None)
+            if getattr(grounding, "triples", None):
+                return False        # she recorded something; saying so is not an echo
+            return is_meta_commentary(thought.answer, thought.stimulus)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _act(self, thought: NJPThought) -> Any:
+        """What the Master was *doing* with this turn. Prior to what it is about."""
+        if self._speech is None:
+            return None
+        try:
+            return self._speech.read(thought.stimulus, intent=thought.intent)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _answer_socially(self, thought: NJPThought, act: Any) -> str:
+        """Answer a social or reflexive turn from the relationship and her own state.
+
+        Short, and deliberately so. A greeting wants a greeting back; it does not want a report,
+        a fact, or — worst of the three — a statement that she has understood the greeting.
+        Where the reading is genuinely ambiguous she asks which was meant rather than asserting
+        a comprehension she does not have, which is the calibrated form of the same honesty the
+        rest of this brain applies to facts.
+        """
+        try:
+            from nyxara.njp.relevance import SpeechAct
+            kind = getattr(act, "kind", "")
+            if getattr(act, "ambiguous", False) and kind not in (
+                    SpeechAct.GREETING, SpeechAct.THANKS, SpeechAct.FAREWELL):
+                return "Tum mera current state pooch rahe ho, ya kuch karne ko keh rahe ho?"
+            if kind == SpeechAct.GREETING:
+                return "Hii Master 👋"
+            if kind == SpeechAct.FAREWELL:
+                return "Theek hai Master — main yahin hoon."
+            if kind == SpeechAct.THANKS:
+                return "Koi baat nahi, Master."
+            if kind == SpeechAct.SOCIAL_CHECKIN:
+                return self._self_state(mood=True)
+            if kind == SpeechAct.STATE_QUERY:
+                return self._self_state(mood=False)
+            return self._self_state(mood=False)
+        except Exception:  # noqa: BLE001
+            return "Hii Master 👋"
+
+    def _self_state(self, *, mood: bool) -> str:
+        """Her actual state, read off her own organs. Never a fact about the world.
+
+        Every number in here is one this brain already maintains, so "how are you" is answered by
+        introspection rather than by retrieval — which is the distinction the transcript's failure
+        turned on. If the organs are absent she says the honest small thing instead of reaching
+        for something impressive.
+        """
+        bits: List[str] = []
+        try:
+            cells = int(getattr(self.fabric, "n_cells", 0) or 0)
+            synapses = int(getattr(self.fabric, "n_synapses", 0) or 0)
+            if cells:
+                bits.append(f"{cells} cells / {synapses} synapses")
+            if self.genesis is not None:
+                stats = self.genesis.stats()
+                if stats.get("concepts"):
+                    bits.append(f"{stats['concepts']} concepts at {stats['compression']}× "
+                                f"compression")
+            if self.beliefs is not None:
+                known = len(self.beliefs.known())
+                unknown = len(self.beliefs.unknown())
+                if known or unknown:
+                    bits.append(f"{known} beliefs held, {unknown} open")
+            if self.goals is not None:
+                try:
+                    active = getattr(self.goals, "active", None)
+                    top = active() if callable(active) else None
+                    if top:
+                        bits.append(f"working on: {getattr(top[0], 'text', top[0])}")
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        if not bits:
+            return ("Main theek hoon Master — abhi shuruaat hi hai, mere paas batane layak "
+                    "kuch bana nahi hai." if mood else
+                    "Abhi kuch khaas nahi kar rahi — sun rahi hoon.")
+        head = "Main theek hoon Master. " if mood else "Abhi: "
+        return head + "; ".join(bits[:3]) + f" — {self.turns} turns."
+
+    def _recall_through_gate(self, thought: NJPThought, act: Any,
+                            bits: List[str]) -> None:
+        """Attach a recalled memory only if it is about this turn.
+
+        With no gate installed this falls back to the old unconditional behaviour rather than
+        silently dropping recall — a missing organ should cost her the improvement, not the
+        faculty.
+        """
+        try:
+            rec = thought.percept.recall if thought.percept else None
+            if rec is None:
+                return
+            candidates = list(getattr(rec, "traces", None) or [])
+            best = getattr(rec, "best", None)
+            if not candidates and best is not None:
+                candidates = [best]
+            if not candidates:
+                return
+            if self.gate is None:
+                text = str(getattr(best, "text", "") or "")
+                if text:
+                    bits.append(text)
+                return
+            admitted = self.gate.filter(
+                candidates, query=thought.stimulus, act=act, world=self.world,
+                goals=self._goal_texts(), thread=self.replay[-4:])
+            thought.relevance = list(self.gate.last)
+            if admitted:
+                bits.append(admitted[0].memory)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _goal_texts(self) -> List[str]:
+        try:
+            if self.goals is None:
+                return []
+            active = getattr(self.goals, "active", None)
+            rows = active() if callable(active) else []
+            return [str(getattr(g, "text", g)) for g in list(rows)[:8]]
+        except Exception:  # noqa: BLE001
+            return []
 
     @staticmethod
     def _set_epistemic(thought: NJPThought) -> None:
@@ -1344,12 +1622,29 @@ class NJPBrain:
                 thought.epistemic_confidence = 1.0
                 return
             # No grounded answer: known only if the gauntlet established what she did say.
+            #
+            # Confidence is passed through `revise_confidence`, which is monotonic: it may only
+            # exceed what it started at when independent evidence, real relevance and consistency
+            # all say so. The transcript's `0.80 → 1.00` came from none of those — it came from
+            # a conclusion having been reached, and "I thought about it harder" is not evidence
+            # about the world. Depth may lower confidence and may never raise it.
+            from nyxara.njp.relevance import revise_confidence
+            relevance = 1.0
+            scores = list(getattr(thought, "relevance", None) or [])
+            if scores:
+                relevance = max((s.total for s in scores), default=0.0)
+            judgement = thought.judgement
+            supports = int(len(getattr(judgement, "supports", None) or [])) if judgement else 0
+            confidence = revise_confidence(
+                thought.confidence, independent_evidence=supports,
+                relevance=relevance,
+                consistent=not bool(getattr(judgement, "refutations", None)))
             if thought.answer and thought.verified:
                 thought.epistemic = Epistemic.KNOWN
-                thought.epistemic_confidence = thought.confidence
+                thought.epistemic_confidence = confidence
             elif thought.answer:
                 thought.epistemic = Epistemic.BELIEVED
-                thought.epistemic_confidence = thought.confidence
+                thought.epistemic_confidence = confidence
             else:
                 thought.epistemic = Epistemic.UNKNOWN
                 thought.epistemic_confidence = 0.0
@@ -1533,7 +1828,9 @@ class NJPBrain:
                             ("loop", self.loop),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("metareason", self.metareason), ("field", self.field)):
+                            ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("agency", self.agent), ("curriculum", self.curriculum),
+                            ("field", self.field)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -1565,7 +1862,9 @@ class NJPBrain:
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
-                            ("metareason", self.metareason), ("field", self.field)):
+                            ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("agency", self.agent),
+                            ("field", self.field)):
             if organ is None:
                 continue
             try:
@@ -1616,7 +1915,8 @@ class NJPBrain:
             # clustering cannot resurrect concepts the current rules would never form.
             for key, organ in (("concepts", self.genesis), ("universe", self.universe),
                                ("designer", self.designer), ("beliefs", self.beliefs),
-                               ("metareason", self.metareason), ("field", self.field)):
+                               ("metareason", self.metareason), ("predictive", self.predictive),
+                               ("agency", self.agent), ("field", self.field)):
                 if d.get(key) and organ is not None:
                     organ.load_dict(d[key])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

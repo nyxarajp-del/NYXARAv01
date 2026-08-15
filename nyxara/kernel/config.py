@@ -1563,6 +1563,11 @@ class SelfImprovementConfig(BaseModel):
     # concurrently. They write disjoint caches, so the result is identical to the sequential
     # order — only faster. Set False for strictly deterministic single-threaded execution.
     parallel_cycle: bool = True
+    # Wall-clock budget for one whole observation fan-out. Every step in it is subprocess- and
+    # I/O-bound, and an unbounded `fut.result()` meant one wedged linter or benchmark hung the
+    # cycle forever — with no way back, in the autonomic loop as much as in a test run. A step
+    # that overruns is recorded as having observed nothing rather than being waited on.
+    observe_timeout_s: float = Field(default=180.0, gt=0.0)
     # --- enactment (self-modification) — Master JP's standing authorisation: ON, full auto --- #
     # Gains auto-apply each cycle. This does NOT weaken safety: every edit still clears the
     # reversible verify-or-rollback gauntlet (syntax compile → corrigibility/honesty battery →
@@ -2380,6 +2385,18 @@ class NJPConfig(BaseModel):
     beliefs_enabled: bool = True        # the belief ledger (njp/beliefs.py)
     metareason_enabled: bool = True     # reasoning-strategy selection (njp/metareason.py)
     field_enabled: bool = True          # both loops (njp/field.py)
+    predictive_enabled: bool = True     # Stage A: the world-state sequence model
+    agency_enabled: bool = True         # Stage G: goal -> plan -> action -> outcome
+    curriculum_enabled: bool = True     # the nine-rung ladder and its gating
+
+    # How far back the world-state model looks. Order 3 first, backing off to 2, 1 and the
+    # unconditional distribution — with sparse lived experience a long context almost never
+    # repeats, and a model that refuses to answer without one never answers.
+    predictive_order: int = Field(default=3, ge=1, le=8)
+    predictive_min_evidence: int = Field(default=2, ge=1, le=64)
+    # How many actions deep a plan may search. A learned model compounds its own error, so past
+    # a few steps the product of the estimates stops meaning anything.
+    plan_depth: int = Field(default=4, ge=1, le=12)
 
     # How alike two observations must be to be the same kind. The floor is not 0: at zero
     # everything resembles everything and every concept formed asserts nothing. A restructure may
@@ -2398,6 +2415,18 @@ class NJPConfig(BaseModel):
     # unless it strictly wins on a HELD-OUT benchmark. Slower than loop 1 by design: it
     # re-crystallises everything and benchmarks the result.
     meta_cycle_every_turns: int = Field(default=25, ge=1, le=1000)
+
+    # ---- truth is not relevance (njp/relevance.py) ---- #
+    # Speech-act routing + the cognitive relevance gate. OFF restores the previous behaviour
+    # exactly: every turn gets the full recall→reason apparatus and whatever memory was nearest
+    # is attached to the reply — which is how "How are you NYXARA?" was answered with a verified
+    # pendulum-period law. Worth being able to switch, worth naming what switching it off costs.
+    relevance_enabled: bool = True
+    # R(memory | context) a recalled memory must clear before the reasoner may see it at all.
+    # Below this it is not down-weighted, it is not seen: a candidate set is something an
+    # optimiser eventually picks from, especially one that scores candidates by how *verified*
+    # they are. Raising this makes her terser and more literal; lowering it makes her associative.
+    relevance_threshold: float = Field(default=0.22, ge=0.0, le=1.0)
 
 
 class HyperbolicManifoldConfig(BaseModel):

@@ -42,6 +42,18 @@ Every outcome it scores against is independent of the prediction it scores — p
 or the Master's own sentence — because a mind that grades its guesses against its own later
 guesses is not learning, it is agreeing with itself.
 
+**Truth is not relevance, and reasoning is not always what a turn calls for.**
+:mod:`nyxara.njp.relevance` exists because of a reproduced failure: asked *"How are you
+NYXARA?"*, she returned a verified pendulum-period law and raised her confidence to 1.00 for
+having reached a conclusion. Every stage worked — nothing ever asked whether a true thing had
+anything to do with the question. Now a recalled memory must clear
+:class:`~nyxara.njp.relevance.RelevanceGate` before the reasoner sees it at all;
+:class:`~nyxara.njp.relevance.CognitivePolicy` decides which cognition a *speech act* even
+permits, so a greeting cannot reach physics; and
+:func:`~nyxara.njp.relevance.revise_confidence` refuses to let confidence rise because she
+thought harder — depth may lower it, only independent evidence may raise it. "I understand:
+<your words back>" is recognised and refused: understanding belongs in the internal state.
+
 **She restructures what she can represent, not only what she believes.** :mod:`nyxara.njp.field`
 is the Recursive Cognitive Field, and it runs two loops. The fast one is the cognitive cycle::
 
@@ -163,12 +175,36 @@ from nyxara.njp.universe import (
     Rollout,
     StateDelta,
 )
+from nyxara.njp.relevance import (
+    Act,
+    CognitivePolicy,
+    Pathway,
+    RelevanceGate,
+    RelevanceScore,
+    SpeechAct,
+    SpeechActReader,
+    is_meta_commentary,
+    is_verified,
+    revise_confidence,
+)
 from nyxara.njp.universe import Hypothesis as UniverseHypothesis
 from nyxara.njp.evolve import EvolutionStep, ModuleCost, Profiler, SelfEvolver
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
+from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
+from nyxara.njp.agency import Plan as ActionPlan
+from nyxara.njp.curriculum import STAGES, Curriculum, Report, Stage, StageResult
+from nyxara.njp.predictive import (
+    Assumption,
+    Explanation,
+    PredictiveWorldModel,
+    Surprise,
+    ThoughtState,
+    WorldState,
+)
+from nyxara.njp.predictive import Prediction as StatePrediction
 from nyxara.njp.pulse import PulseEngine, PulseReport
 from nyxara.njp.reasoner import NJPReasoner
 from nyxara.njp.soulsync import Anticipation, LatentWant, Preference, Reading, SoulSync
@@ -210,6 +246,14 @@ __all__ = [
     "ExperimentDesigner", "Experiment", "UniverseHypothesis",
     "BeliefLedger", "Belief", "Support", "Revision", "Reliability", "EvidenceKind",
     "MetaReasoner", "ProblemClassifier", "ProblemKind", "Classification", "Critique", "Solution",
+    "Agent", "ActionPlan", "Step", "Outcome", "ActionValue",
+    "Curriculum", "Stage", "StageResult", "Report", "STAGES",
+    "PredictiveWorldModel", "WorldState", "StatePrediction", "Surprise",
+    "ThoughtState", "Assumption", "Explanation",
     "RecursiveCognitiveField", "CycleReport", "Diagnosis", "ErrorClass",
     "Bottleneck", "Modification", "Trial",
+    # truth is not relevance, and reasoning is not always what a turn calls for
+    "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
+    "RelevanceGate", "RelevanceScore",
+    "revise_confidence", "is_verified", "is_meta_commentary",
 ]

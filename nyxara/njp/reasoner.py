@@ -66,6 +66,28 @@ class NJPReasoner:
         self.proposed_tools = 0
         self.vetoed = 0
 
+    def __getattr__(self, name: str) -> Any:
+        """Fall through to the reasoner this one wraps.
+
+        A decorator that hides what it decorates is not a decorator, it is a wall. The kernel
+        hands the *inner* reasoner its causal world model and knowledge graph and then stores the
+        wrapper as ``core.reasoner``, so every caller that reads ``core.reasoner.causal_model``
+        — the orchestrator's own report among them — got ``None`` the moment this seat was
+        installed. The learned causal graph was still being built and simply could not be
+        reached through the front door.
+
+        Only called for attributes this class does not define, so nothing here can shadow the
+        wrapper's own behaviour. The dunder guard prevents the recursion that would otherwise
+        happen during unpickling, when ``base`` does not exist yet.
+        """
+        if name.startswith("__") or name == "base":
+            raise AttributeError(name)
+        try:
+            base = object.__getattribute__(self, "base")
+        except AttributeError:
+            raise AttributeError(name) from None
+        return getattr(base, name)
+
     def __call__(self, stimulus: str, focus: Any = None, *args: Any, **kwargs: Any) -> Any:
         candidate = self.base(stimulus, focus, *args, **kwargs)
         try:

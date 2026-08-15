@@ -132,3 +132,7 @@ include = ["nyxara*"]
 # Ship the curated real-world held-out validation corpus (eval/datasets.py loads it via
 # importlib.resources) so external validation works from an installed wheel, not only the repo.
 "nyxara.eval" = ["data/*.jsonl"]
+# The AI question/answer corpus NJP studies from (njp/study.py loads it by path).
+# Gzipped because it is 35,693 pairs: 16MB raw, 4.8MB compressed, and the loader
+# decompresses transparently.
+"nyxara.njp" = ["data/*.jsonl.gz"]
