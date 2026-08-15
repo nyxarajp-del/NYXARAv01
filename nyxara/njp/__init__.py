@@ -193,6 +193,9 @@ from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.integrate import LearningLoop, LoopReport
 from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
+from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
+from nyxara.njp.agency import Plan as ActionPlan
+from nyxara.njp.curriculum import STAGES, Curriculum, Report, Stage, StageResult
 from nyxara.njp.predictive import (
     Assumption,
     Explanation,
@@ -243,6 +246,8 @@ __all__ = [
     "ExperimentDesigner", "Experiment", "UniverseHypothesis",
     "BeliefLedger", "Belief", "Support", "Revision", "Reliability", "EvidenceKind",
     "MetaReasoner", "ProblemClassifier", "ProblemKind", "Classification", "Critique", "Solution",
+    "Agent", "ActionPlan", "Step", "Outcome", "ActionValue",
+    "Curriculum", "Stage", "StageResult", "Report", "STAGES",
     "PredictiveWorldModel", "WorldState", "StatePrediction", "Surprise",
     "ThoughtState", "Assumption", "Explanation",
     "RecursiveCognitiveField", "CycleReport", "Diagnosis", "ErrorClass",

@@ -312,6 +312,32 @@ class PredictiveWorldModel:
         return {outcome: (bucket.get(outcome, 0) + self.smoothing) / denominator
                 for outcome in alphabet}
 
+    def successors(self, context: Any = None, action: str = "") -> Dict[str, float]:
+        """Outcomes actually **observed** after this context, with their empirical shares.
+
+        Deliberately not :meth:`predict`. That method smooths, so every outcome in the alphabet
+        carries a little probability mass — which is right for surprise (nothing she has seen is
+        impossible) and wrong for anything that has to *walk* the transitions. A planner given
+        the smoothed distribution will happily route through an edge that exists only because of
+        the smoothing: measured, it produced a one-step plan claiming ``open`` leads straight to
+        ``outside`` on 0.077 of invented mass, when what she had actually observed was ``open``
+        then ``walk``. Imagination is allowed to consider the unobserved; a plan is not.
+        """
+        history = self._history if context is None else self._as_history(context)
+        action = _norm(action)
+        for order in range(self.max_order, -1, -1):
+            ctx = self._context(history, order)
+            bucket = self._counts.get((order, ctx, action))
+            if not bucket and action:
+                bucket = self._counts.get((order, ctx, ""))
+            if not bucket:
+                continue
+            total = sum(bucket.values())
+            if total < self.min_evidence and order > 0:
+                continue
+            return {outcome: count / total for outcome, count in bucket.items() if count > 0}
+        return {}
+
     @staticmethod
     def _as_history(context: Any) -> List[str]:
         if isinstance(context, WorldState):

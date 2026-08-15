@@ -2385,6 +2385,18 @@ class NJPConfig(BaseModel):
     beliefs_enabled: bool = True        # the belief ledger (njp/beliefs.py)
     metareason_enabled: bool = True     # reasoning-strategy selection (njp/metareason.py)
     field_enabled: bool = True          # both loops (njp/field.py)
+    predictive_enabled: bool = True     # Stage A: the world-state sequence model
+    agency_enabled: bool = True         # Stage G: goal -> plan -> action -> outcome
+    curriculum_enabled: bool = True     # the nine-rung ladder and its gating
+
+    # How far back the world-state model looks. Order 3 first, backing off to 2, 1 and the
+    # unconditional distribution — with sparse lived experience a long context almost never
+    # repeats, and a model that refuses to answer without one never answers.
+    predictive_order: int = Field(default=3, ge=1, le=8)
+    predictive_min_evidence: int = Field(default=2, ge=1, le=64)
+    # How many actions deep a plan may search. A learned model compounds its own error, so past
+    # a few steps the product of the estimates stops meaning anything.
+    plan_depth: int = Field(default=4, ge=1, le=12)
 
     # How alike two observations must be to be the same kind. The floor is not 0: at zero
     # everything resembles everything and every concept formed asserts nothing. A restructure may

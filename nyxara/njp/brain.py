@@ -228,6 +228,11 @@ class NJPBrain:
         # cells fire next. Without it she is a fact store that grows; with it she is something
         # that expects, is wrong, and learns from the difference.
         self.predictive = self._build_predictive(c)
+        # Stage G: she plans over what she has actually learned, acts, and is graded by the
+        # world. Built after `predictive` because it plans by searching that model — an agent
+        # with no world model does not plan, it flails.
+        self.agent = self._build_agent(c)
+        self.curriculum = self._build_curriculum(c)
         # Truth is not relevance, and reasoning is not always what a turn calls for.
         self._speech, self._policy, self.gate = self._build_relevance(c)
         # Last, because it registers repairs against organs built above it and reads them on
@@ -820,6 +825,49 @@ class NJPBrain:
                                     beliefs=self.beliefs, concepts=self.genesis)
         except Exception:  # noqa: BLE001
             return None
+
+    def _build_agent(self, c: Any) -> Any:
+        """Stage G — the loop that closes: goal → plan → action → outcome → better model."""
+        if not self._gate("agency", True) or self.predictive is None:
+            return None
+        try:
+            from nyxara.njp.agency import Agent
+            return Agent(self.predictive, max_depth=self._cfg("plan_depth", 4))
+        except Exception:  # noqa: BLE001 — without it she intends but never acts
+            return None
+
+    def _build_curriculum(self, c: Any) -> Any:
+        """The nine stages, and the refusal to report one as reached before it is."""
+        if not self._gate("curriculum", True):
+            return None
+        try:
+            from nyxara.njp.curriculum import Curriculum
+            return Curriculum()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def pursue(self, goal: Any, *, actuator: Any = None, steps: int = 4) -> Any:
+        """Plan toward ``goal`` over the learned world model and act, re-planning each step.
+
+        Without an ``actuator`` this returns the plan as a **proposal** and takes no action —
+        which is the honest default, because deciding whether a proposed action may run is the
+        kernel's gate to make, never this brain's.
+        """
+        try:
+            if self.agent is None:
+                return []
+            return self.agent.pursue(goal, actuator=actuator, steps=steps)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def report_card(self) -> Dict[str, Any]:
+        """Which of the nine stages she has actually reached, measured, not claimed."""
+        try:
+            if self.curriculum is None:
+                return {}
+            return self.curriculum.assess(self).to_dict()
+        except Exception:  # noqa: BLE001
+            return {}
 
     def _build_field(self, c: Any) -> Any:
         """The Recursive Cognitive Field — both loops, over the organs built above."""
@@ -1781,6 +1829,7 @@ class NJPBrain:
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("agency", self.agent), ("curriculum", self.curriculum),
                             ("field", self.field)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -1814,6 +1863,7 @@ class NJPBrain:
                             ("concepts", self.genesis), ("universe", self.universe),
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
+                            ("agency", self.agent),
                             ("field", self.field)):
             if organ is None:
                 continue
@@ -1866,7 +1916,7 @@ class NJPBrain:
             for key, organ in (("concepts", self.genesis), ("universe", self.universe),
                                ("designer", self.designer), ("beliefs", self.beliefs),
                                ("metareason", self.metareason), ("predictive", self.predictive),
-                               ("field", self.field)):
+                               ("agency", self.agent), ("field", self.field)):
                 if d.get(key) and organ is not None:
                     organ.load_dict(d[key])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain
