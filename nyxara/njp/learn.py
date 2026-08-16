@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["TrainStep", "Readout", "gradcheck", "available"]
 
@@ -96,15 +96,36 @@ class Readout:
     Softmax + cross-entropy would force the outputs to compete for a fixed budget of probability
     and quietly teach it that only one cell may fire — which is false of this substrate.
 
-    Cells are mapped to a fixed-width slot by hashing, so the head has a stable input width while
-    the fabric underneath keeps growing new cells. Collisions are real and are reported by
-    :meth:`stats`; the alternative — resizing the network every time a cell is born — throws away
-    everything learned so far on every act of neurogenesis.
+    Cells are mapped to a slot by hashing, so the head has a stable input width while the fabric
+    underneath keeps growing new cells. Collisions are real and are reported by :meth:`stats`.
+
+    **The width grows rather than staying fixed**, and the reason is a measurement. Held at 512
+    while the fabric grew to 4,700 cells, the head reported **4,188 collisions** — 89% of cells
+    sharing a slot with roughly eight others. A representation in which nine different cells are
+    literally the same input cannot distinguish them however long it trains, which is what a loss
+    falling 75 → 66 with an accuracy of 0.0 was saying.
+
+    The original defence of the fixed width was that resizing on every birth would throw away
+    everything learned. That is true and it is not the only option: widening in steps and
+    **copying the existing weights into the larger matrices** preserves every slot that already
+    existed, so what was learned stays exactly where it was addressed. Only the new capacity is
+    fresh. The Adam moments are carried across the same way, because resetting them would make
+    the step after a growth behave as though training had just started.
     """
 
     def __init__(self, *, width: int = 512, hidden: int = 128, lr: float = 0.01,
-                 seed: int = 42, weight_decay: float = 0.0) -> None:
+                 seed: int = 42, weight_decay: float = 0.0,
+                 max_width: int = 16384, load_factor: float = 0.75) -> None:
         self.width = max(8, int(width))
+        #: A hard ceiling, so growth cannot become the memory leak the fixed width was avoiding.
+        #: Past it she collides again and says so, which is the honest end state for a finite
+        #: machine rather than an allocation that eventually fails.
+        self.max_width = max(self.width, int(max_width))
+        #: Grow once the slots in use pass this share of the width. Below 1.0 on purpose: hashing
+        #: collides well before a table is full, and waiting for "full" means most of the damage
+        #: is already done.
+        self.load_factor = min(0.95, max(0.1, float(load_factor)))
+        self.growths = 0
         self.hidden = max(4, int(hidden))
         self.lr = float(lr)
         self.weight_decay = float(weight_decay)
@@ -115,6 +136,11 @@ class Readout:
         self.last: Optional[TrainStep] = None
         self._collisions = 0
         self._slots: Dict[int, int] = {}
+        # The occupied slots, as a set. This used to be re-derived with `got in
+        # self._slots.values()` on every newly seen cell — a linear scan inside the hot path,
+        # which is O(n^2) over the life of the fabric and was doing roughly 11 million
+        # comparisons by the time 4,700 cells had been mapped.
+        self._used: Set[int] = set()
 
         self._params: List[Any] = []
         self._m: List[Any] = []
@@ -147,15 +173,110 @@ class Readout:
 
     # ---- encoding --------------------------------------------------------- #
     def slot(self, cell_id: int) -> int:
-        """Fixed slot for a cell. Stable across calls, so what was learned stays addressable."""
-        got = self._slots.get(int(cell_id))
+        """Stable slot for a cell, so what was learned about it stays addressable.
+
+        Stable across growth too: widening rehashes every known cell and moves its weights with
+        it, so a slot changing is not a slot forgetting.
+        """
+        cell = int(cell_id)
+        got = self._slots.get(cell)
         if got is not None:
             return got
-        got = int(cell_id) % self.width
-        if got in self._slots.values():
-            self._collisions += 1
-        self._slots[int(cell_id)] = got
+        if len(self._slots) + 1 > self.width * self.load_factor:
+            self._grow()
+            got = self._slots.get(cell)
+            if got is not None:
+                return got
+        got = self._assign(cell, self.width, self._used)
+        self._slots[cell] = got
         return got
+
+    def _assign(self, cell: int, width: int, used: Set[int]) -> int:
+        """A free slot for this cell, probing forward from its hash.
+
+        Plain ``cell % width`` collides at the birthday rate long before the table is full: 1,049
+        cells in 2,048 slots produced 237 shared slots, which is exactly what random hashing
+        predicts and is still 237 pairs of cells the head cannot tell apart. Probing costs one
+        dictionary lookup per step and gives a distinct slot to every cell until the table is
+        genuinely full — at which point the collision is real, unavoidable and counted.
+        """
+        start = cell % width
+        for step in range(width):
+            candidate = (start + step) % width
+            if candidate not in used:
+                used.add(candidate)
+                return candidate
+        # Genuinely full. Share a slot and say so.
+        self._collisions += 1
+        return start
+
+    def _grow(self) -> bool:
+        """Double the width, carrying every learned weight into the larger head.
+
+        The rows and columns that existed keep their values; only the new capacity is initialised.
+        A cell's slot may change — the hash is over a different modulus — so every known cell is
+        rehashed and its learned row moved with it. That is the difference between widening and
+        starting again.
+        """
+        engine = _engine()
+        if engine is None or not self._built or self.width >= self.max_width:
+            return False
+        try:
+            old_width = self.width
+            new_width = min(self.max_width, old_width * 2)
+            if new_width <= old_width:
+                return False
+            rng = np.random.default_rng(self.seed + self.growths + 1)
+
+            def _wider_in(tensor: Any) -> Any:
+                limit = math.sqrt(6.0 / (new_width + self.hidden))
+                data = rng.uniform(-limit, limit, size=(new_width, self.hidden))
+                return engine.Tensor(data, requires_grad=True)
+
+            def _wider_out(tensor: Any) -> Any:
+                limit = math.sqrt(6.0 / (self.hidden + new_width))
+                data = rng.uniform(-limit, limit, size=(self.hidden, new_width))
+                return engine.Tensor(data, requires_grad=True)
+
+            w1, w2 = _wider_in(self.W1), _wider_out(self.W2)
+            b2 = engine.Tensor(np.zeros((1, new_width)), requires_grad=True)
+            m1 = np.zeros_like(w1.data)
+            m2 = np.zeros_like(w2.data)
+            mb2 = np.zeros_like(b2.data)
+            v1, v2, vb2 = (np.zeros_like(w1.data), np.zeros_like(w2.data),
+                           np.zeros_like(b2.data))
+            old_m1, old_mb1, old_m2, old_mb2 = self._m
+            old_v1, old_vb1, old_v2, old_vb2 = self._v
+
+            # Rehash and carry. A cell whose slot moves takes its input row, its output column,
+            # its bias and its optimiser moments with it.
+            moved: Dict[int, int] = {}
+            used: Set[int] = set()
+            collisions = 0
+            for cell, old_slot in self._slots.items():
+                new_slot = self._assign(int(cell), new_width, used)
+                w1.data[new_slot] = self.W1.data[old_slot]
+                w2.data[:, new_slot] = self.W2.data[:, old_slot]
+                b2.data[0, new_slot] = self.b2.data[0, old_slot]
+                m1[new_slot] = old_m1[old_slot]
+                v1[new_slot] = old_v1[old_slot]
+                m2[:, new_slot] = old_m2[:, old_slot]
+                v2[:, new_slot] = old_v2[:, old_slot]
+                mb2[0, new_slot] = old_mb2[0, old_slot]
+                vb2[0, new_slot] = old_vb2[0, old_slot]
+                moved[cell] = new_slot
+
+            self.W1, self.W2, self.b2 = w1, w2, b2
+            self._params = [self.W1, self.b1, self.W2, self.b2]
+            self._m = [m1, old_mb1, m2, mb2]
+            self._v = [v1, old_vb1, v2, vb2]
+            self._slots = moved
+            self._used = used
+            self.width = new_width
+            self.growths += 1
+            return True
+        except Exception:  # noqa: BLE001 — a failed growth leaves the head exactly as it was
+            return False
 
     def encode(self, cells: Iterable[int]) -> Any:
         """A set of firing cells as a dense membership row."""
@@ -303,6 +424,9 @@ class Readout:
                 "steps": self.steps, "samples_seen": self.samples_seen,
                 "parameters": int(sum(p.data.size for p in self._params)) if self._built else 0,
                 "cells_mapped": len(self._slots), "slot_collisions": self._collisions,
+                "collision_rate": (round(self._collisions / len(self._slots), 4)
+                                   if self._slots else 0.0),
+                "growths": self.growths, "max_width": self.max_width,
                 "last": self.last.to_dict() if self.last else None}
 
     def to_dict(self) -> Dict[str, Any]:
