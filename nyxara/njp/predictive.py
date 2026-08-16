@@ -52,9 +52,10 @@ guesses is that model's world, not hers.
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass, field as dc_field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
     "WorldState",
@@ -428,6 +429,26 @@ class PredictiveWorldModel:
 # --------------------------------------------------------------------------- #
 # Thought as an object
 # --------------------------------------------------------------------------- #
+# How much a predicted outcome is discounted for landing on something she holds contested. Not
+# zero — a contested claim is unsettled, not refuted, and treating "I cannot settle this" as "this
+# is false" would be the same overclaiming in the opposite direction.
+_CONTESTED_DISCOUNT = 0.6
+
+
+# Words that carry no subject and would otherwise match everything against everything. A length
+# cutoff was the cheaper option and the wrong one: it would take "the" and "was" out along with
+# "ice" and "sun", and the short words are exactly the ones a world-state signature is made of.
+_NOISE = frozenset({"the", "and", "was", "has", "had", "for", "its", "his", "her", "not",
+                    "but", "are", "were", "that", "this", "with", "from", "have", "been",
+                    "claim", "thing"})
+
+
+def _tokens(text: str) -> Set[str]:
+    """Comparable words in a claim or an outcome signature."""
+    return {w for w in re.split(r"[^a-z0-9]+", str(text or "").lower())
+            if len(w) > 2 and w not in _NOISE}
+
+
 @dataclass
 class Assumption:
     """Something she is taking for granted, and whether it has been checked."""
@@ -482,6 +503,10 @@ class ThoughtState:
     confidence: float = 0.0
     steps: List[str] = dc_field(default_factory=list)
     ms: float = 0.0
+    # The prediction the assumption step already paid for, kept so the explanation step does not
+    # ask the model the identical question a second time. Private: it is working state for one
+    # deliberation, not part of what a deliberation reports.
+    _prediction: Any = None
 
     @property
     def decided(self) -> bool:
@@ -556,10 +581,13 @@ class ThoughtState:
             checked=True, holds=prediction.evidence >= model.min_evidence))
         self.predicted_outcomes = dict(prediction.distribution)
         self.uncertainty = prediction.entropy_bits
+        self._prediction = prediction
 
     def _what_could_explain(self, model: PredictiveWorldModel, action: str) -> None:
         self.steps.append("what-could-explain")
-        prediction = model.predict(action=action)
+        # Reuse the prediction the previous step already paid for. Asking the model the identical
+        # question twice cost a second backoff walk and could never return anything different.
+        prediction = self._prediction or model.predict(action=action)
         for outcome, probability in sorted(prediction.distribution.items(),
                                            key=lambda kv: -kv[1])[:4]:
             self.hypotheses.append(Explanation(
@@ -567,7 +595,38 @@ class ThoughtState:
                 predicts=outcome, probability=probability))
 
     def _which_predicts_best(self) -> None:
+        """Weigh each explanation against what she actually holds, not just against the prior.
+
+        This step existed as a label and did nothing, so the "which predicts best" in the trace
+        named a comparison that never happened: :meth:`_conclude` took the argmax of the model's
+        raw distribution, and everything gathered by :meth:`_what_do_i_know` — the beliefs, the
+        contested claims — sat there unused. A prior is what she expected *before* looking at her
+        own evidence, and calling the winner of one the best-predicting explanation is precisely
+        the step being skipped.
+
+        An explanation whose outcome is named in something she holds contested is discounted: a
+        prediction that lands on a claim she cannot settle is worth less than one that does not,
+        however likely the sequence model finds it. Corroboration is deliberately *not* rewarded
+        in the same way — evidence agreeing with a prediction is what the model already counted
+        when it built the distribution, and paying for it twice is how a system talks itself into
+        confidence.
+
+        Renormalised afterwards so the margin test in :meth:`_conclude` still compares a
+        distribution rather than a bag of scaled numbers.
+        """
         self.steps.append("which-predicts-best")
+        if not self.hypotheses:
+            return
+        contested = {w for claim in self.contradictions for w in _tokens(claim)}
+        if contested:
+            for hypothesis in self.hypotheses:
+                if _tokens(hypothesis.predicts) & contested:
+                    hypothesis.probability *= _CONTESTED_DISCOUNT
+        total = sum(h.probability for h in self.hypotheses)
+        if total > 0.0:
+            for hypothesis in self.hypotheses:
+                hypothesis.probability /= total
+        self.hypotheses.sort(key=lambda h: h.probability, reverse=True)
 
     def _what_would_prove_me_wrong(self) -> None:
         """Every hypothesis gets a falsifier — the observation that would kill it.

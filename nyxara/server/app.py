@@ -1471,6 +1471,17 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         """Her own open questions, priced by expected value of information."""
         return _organ("curiosity", "CURIOSITY_ENABLED")
 
+    @app.get("/v1/njp/shadow", dependencies=auth)
+    def njp_shadow() -> dict:
+        """What she does not know — gaps priced by information gain, and her weak faculties."""
+        brain = _brain()
+        if brain is None:
+            return _off("NJP_ENABLED")
+        try:
+            return brain.shadow()
+        except Exception:  # noqa: BLE001
+            return {"error": "shadow failed"}
+
     @app.get("/v1/njp/attention", dependencies=auth)
     def njp_attention() -> dict:
         """What has been winning her attention, and what has been losing."""

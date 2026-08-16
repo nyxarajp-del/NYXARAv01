@@ -69,7 +69,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["LoopReport", "LearningLoop"]
 
@@ -109,6 +109,15 @@ class LoopReport:
     # error → repair
     diagnoses: Dict[str, int] = field(default_factory=dict)
     repaired: int = 0
+    # what an independently-established outcome was allowed to change. Every one of these was
+    # structurally pinned at zero before the return edge existed, however well the organ behind
+    # it worked when called by hand.
+    strategies_graded: int = 0
+    beliefs_settled: int = 0
+    beliefs_retracted: int = 0
+    questions_closed: int = 0
+    experiments_run: int = 0
+    bits_gained: float = 0.0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -148,6 +157,12 @@ class LoopReport:
                 "deferred": {"opened": self.deferred_opened, "resolved": self.deferred_resolved,
                              "open": self.deferred_open, "corrections": self.corrections},
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
+                "graded": {"strategies": self.strategies_graded,
+                           "beliefs_settled": self.beliefs_settled,
+                           "beliefs_retracted": self.beliefs_retracted,
+                           "questions_closed": self.questions_closed,
+                           "experiments_run": self.experiments_run,
+                           "bits_gained": round(self.bits_gained, 4)},
                 "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
                           "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
@@ -172,6 +187,11 @@ class _Deferred:
     predicate: str = ""
     asked_at: int = 0
     answered: str = ""            # what she said at the time ("" when she abstained)
+    # How she reached it, kept so the credit can find its way back to the strategy that produced
+    # the answer once reality says whether it was right. A grade that cannot be attributed is a
+    # grade nothing learns from.
+    solution: Any = None
+    question: str = ""            # the turn as the Master asked it
 
 
 class LearningLoop:
@@ -201,7 +221,15 @@ class LearningLoop:
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
+            "strategies_graded": 0, "beliefs_settled": 0,
+            "beliefs_retracted": 0, "questions_closed": 0,
+            "experiments_run": 0,
         }
+
+        # Experiments already settled against the record. Kept here rather than read off the
+        # designer, whose `run` is a count and whose `resolved` names hypotheses rather than
+        # experiments — so neither can answer "have I settled this one already".
+        self._experiments_run: Set[str] = set()
 
         # Turn-to-turn carry. The readout learns "what fired then → what fires now", which needs
         # exactly one turn of history and no more.
@@ -357,6 +385,7 @@ class LearningLoop:
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
+            self._close_curiosity(thought, rep)
             self._track_goals(thought, rep)
             self._observe_capabilities(thought, rep)
             self._train_readout(fired, rep)
@@ -523,12 +552,88 @@ class LearningLoop:
                               expected_triples=True, triples=[])
             self._deferred[key] = _Deferred(
                 key=key, subject=subject, predicate=predicate,
-                asked_at=int(getattr(self.brain, "turns", 0)), answered=said)
+                asked_at=int(getattr(self.brain, "turns", 0)), answered=said,
+                solution=getattr(thought, "solution", None),
+                question=str(getattr(thought, "stimulus", "")))
+            self._stake_a_belief(thought, said, subject, predicate)
             rep.deferred_opened = 1
             if len(self._deferred) > self.defer_capacity:
                 for stale in list(self._deferred)[:len(self._deferred) - self.defer_capacity]:
                     self._deferred.pop(stale, None)
         except Exception:  # noqa: BLE001
+            pass
+
+    def _close_curiosity(self, thought: Any, rep: LoopReport) -> None:
+        """A fact arrived; any question it answers stops being open.
+
+        Deliberately not tied to the deferral path. A deferral only exists where *she* was asked
+        something and could not answer, while curiosity's questions are ones she raised herself —
+        "what is Amit's employer?" is answered by the Master mentioning it in passing, not by him
+        replying to her. Matching on subject and predicate is what makes that work: both sides
+        already carry the pair, and the question was generated from exactly the relation the
+        incoming triple now supplies.
+
+        Without this, ``Curiosity.resolve`` had no caller, ``resolved`` never moved off zero, and
+        the goal-completion branch in :meth:`_goals_from_curiosity` was unreachable — so a
+        question she raised could only ever age out, never be answered.
+        """
+        try:
+            curiosity = getattr(self.brain, "curiosity", None)
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            if curiosity is None or grounding is None:
+                return
+            triples = list(getattr(grounding, "triples", None) or [])
+            if not triples:
+                return
+            open_questions = list(curiosity.open_questions())
+            if not open_questions:
+                return
+            for triple in triples:
+                subject = str(getattr(triple, "subject", "") or "").strip().lower()
+                predicate = str(getattr(triple, "predicate", "") or "").strip().lower()
+                if not subject:
+                    continue
+                for question in open_questions:
+                    if getattr(question, "resolved", False):
+                        continue
+                    if str(getattr(question, "subject", "") or "").strip().lower() != subject:
+                        continue
+                    wanted = str(getattr(question, "predicate", "") or "").strip().lower()
+                    # A question naming no particular relation is answered by anything about its
+                    # subject; one that names a relation waits for that relation specifically.
+                    if wanted and wanted != predicate:
+                        continue
+                    if curiosity.resolve(question, str(getattr(triple, "object", "") or "")):
+                        rep.questions_closed += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _stake_a_belief(self, thought: Any, said: str, subject: str, predicate: str) -> None:
+        """Record what she just asserted as a belief that can later be found wrong.
+
+        The ledger only ever held what the *Master* said — ``field._record_beliefs`` writes his
+        testimony and nothing writes hers — so the one class of claim that could be graded against
+        an independent later fact was the one class never entered. Settling had nothing to settle,
+        which is why ``retract``, ``settle`` and the whole calibration path behind them sat unused
+        while working perfectly.
+
+        Every belief goes in with the falsifier that would kill it, stated in advance and in the
+        world's terms rather than hers. A claim recorded without one cannot take part in
+        prediction-against-reality at all; it can only accumulate.
+        """
+        try:
+            beliefs = getattr(self.brain, "beliefs", None)
+            if beliefs is None or not said or said == "<unknown>":
+                return
+            solution = getattr(thought, "solution", None)
+            beliefs.hold(
+                said,
+                confidence=float(getattr(solution, "confidence", 0.0) or 0.0) or 0.5,
+                domain=predicate or "general",
+                produced_by=str(getattr(solution, "strategy", "") or "grounding"),
+                falsifier=f"{subject} {predicate} is stated to be something other than {said}",
+                why="asserted in answer to a question")
+        except Exception:  # noqa: BLE001 — an unrecorded belief loses the grade, never the turn
             pass
 
     def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport) -> None:
@@ -561,9 +666,54 @@ class LearningLoop:
                         if getattr(diagnosis, "repaired", False):
                             rep.repaired += 1
                         self._tell_self_model(diagnosis)
+                self._grade_by_reality(pending, bool(outcome.correct), triple, rep)
                 rep.scored += 1
         except Exception:  # noqa: BLE001
             pass
+
+    def _grade_by_reality(self, pending: _Deferred, correct: bool,
+                          triple: Any, rep: LoopReport) -> None:
+        """Send one independently-established outcome to everything that staked a claim on it.
+
+        This is the return edge the rest of NJP was missing. Every organ below could already be
+        told it was right or wrong and none of them ever was, so each was left grading itself:
+        strategy credit came from the critic that had just approved the answer, and the belief
+        ledger recorded what it had been told without ever finding out whether it held.
+
+        What makes the signal worth propagating is *where it comes from*. It is the Master's own
+        later statement, grounded into a triple on a turn after the one being graded — so the
+        thing doing the grading is independent of the thing being graded. A loop closed against
+        her own later opinion of the same question would move every counter here and teach
+        nothing, which is the failure this is built to avoid rather than the one it risks.
+        """
+        # Strategy credit. `outcome` explicitly overrides the provisional credit the critic
+        # awarded, which is the whole reason it exists and the reason its absence mattered.
+        try:
+            metareason = getattr(self.brain, "metareason", None)
+            if metareason is not None and pending.solution is not None:
+                metareason.outcome(pending.solution, correct=correct)
+                rep.strategies_graded += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Belief settlement, and with it the calibration stack. Nothing called `settle` or
+        # `retract`, so `_outcomes` stayed empty, `reliability()` always reported zero samples,
+        # and `temper()` was a guaranteed no-op — an entire calibration path written, tested and
+        # inert. A belief is retracted rather than deleted: driven to zero and kept, so the
+        # tombstone survives and "this has failed before" stays answerable.
+        try:
+            beliefs = getattr(self.brain, "beliefs", None)
+            if beliefs is not None and pending.answered:
+                settled = beliefs.settle(pending.answered, true=correct,
+                                         why=f"the Master stated {triple.object}")
+                if settled is not None:
+                    rep.beliefs_settled += 1
+                elif not correct:
+                    if beliefs.retract(pending.answered, why="contradicted by observation"):
+                        rep.beliefs_retracted += 1
+        except Exception:  # noqa: BLE001
+            pass
+
 
     # ---- goals ------------------------------------------------------------- #
     def _track_goals(self, thought: Any, rep: LoopReport) -> None:
@@ -833,6 +983,9 @@ class LearningLoop:
             except Exception:  # noqa: BLE001
                 pass
 
+        if turn % self.discover_every == 0:
+            self._run_experiments(rep)
+
         if turn % self.wonder_every == 0:
             try:
                 curiosity = getattr(self.brain, "curiosity", None)
@@ -840,6 +993,78 @@ class LearningLoop:
                     rep.wondered = len(curiosity.wonder())
             except Exception:  # noqa: BLE001
                 pass
+
+    @staticmethod
+    def _as_recorded(world: Any, effect: str) -> str:
+        """The name the record actually files this effect under, where it differs from the law's.
+
+        ``world`` carries two namings for one thing and they were never reconciled. A *stated*
+        law names its effect with the noun the Master used — "water causes growth" — while an
+        *observed* occurrence is filed under the canonical event predicate — "the plant grew"
+        becomes ``grows``. So a hypothesis raised from the law asked the record about ``growth``,
+        which the record has never heard of, and every experiment stayed unresolvable no matter
+        how much evidence accumulated.
+
+        Matched on a shared stem, and only when **exactly one** recorded event matches. An
+        ambiguous stem returns the original name, which leaves the experiment open — the right
+        outcome, because settling a hypothesis against the wrong event is worse than not settling
+        it at all.
+        """
+        try:
+            counts = getattr(world, "_counts", None) or {}
+            if effect in counts:
+                return effect
+            stem = str(effect or "")[:4].lower()
+            if len(stem) < 4:
+                return effect
+            matches = [name for name in counts if str(name)[:4].lower() == stem]
+            return matches[0] if len(matches) == 1 else effect
+        except Exception:  # noqa: BLE001
+            return effect
+
+    def _run_experiments(self, rep: LoopReport) -> None:
+        """Settle a designed experiment against the record, and let the losing hypothesis die.
+
+        :class:`~nyxara.njp.universe.ExperimentDesigner` designed an experiment on every single
+        turn — measured at 8 designed, 0 run — and ``observe_result`` had no caller anywhere, so
+        ``bits_gained`` was permanently 0.0 and no hypothesis was ever eliminated. Curiosity that
+        computes the informative experiment and never performs it is not curiosity; it is a
+        report about curiosity.
+
+        The outcome comes from :meth:`~nyxara.njp.world.WorldView.counterfactual`, which counts,
+        over her own event record, how often the effect happened *without* the cause. That matters
+        more than the wiring: the alternative — asking the fitted universe what removing the cause
+        would do — grades a hypothesis with the model the hypothesis is about, and every
+        probability would move while nothing was learned. ``counterfactual`` returns
+        ``still_happens=None`` when the record is too thin or too even to call, and an unresolved
+        experiment is left open rather than settled on a guess.
+        """
+        designer = getattr(self.brain, "designer", None)
+        world = getattr(self.brain, "world", None)
+        if designer is None or world is None:
+            return
+        try:
+            for name in list(getattr(designer, "hypotheses", None) or {}):
+                if "→" not in name or name.startswith("not("):
+                    continue
+                cause, _, effect = name.partition("→")
+                cause, effect = cause.strip(), effect.strip()
+                experiment = f"remove:{cause}"
+                if not cause or not effect or experiment in self._experiments_run:
+                    continue
+                verdict = world.counterfactual(cause, self._as_recorded(world, effect))
+                if not verdict.answerable:
+                    continue
+                # "still happens without it" refutes the arrow; "never happens without it"
+                # supports it. These are the two labels `_raise_hypotheses` predicted with.
+                before = designer.prior_entropy()
+                designer.observe_result(
+                    experiment, "present" if verdict.still_happens else "absent")
+                self._experiments_run.add(experiment)
+                rep.experiments_run += 1
+                rep.bits_gained += max(0.0, before - designer.prior_entropy())
+        except Exception:  # noqa: BLE001 — an unresolved experiment stays open, never fatal
+            pass
 
     # ---- bookkeeping --------------------------------------------------------- #
     def _roll_up(self, rep: LoopReport) -> None:
@@ -853,6 +1078,11 @@ class LearningLoop:
             self.totals["deferred_resolved"] += rep.deferred_resolved
             self.totals["corrections"] += rep.corrections
             self.totals["repaired"] += rep.repaired
+            self.totals["strategies_graded"] += rep.strategies_graded
+            self.totals["beliefs_settled"] += rep.beliefs_settled
+            self.totals["beliefs_retracted"] += rep.beliefs_retracted
+            self.totals["questions_closed"] += rep.questions_closed
+            self.totals["experiments_run"] += rep.experiments_run
             self.totals["capabilities"] += rep.capabilities
             self.totals["train_steps"] += int(rep.trained)
             self.totals["consolidations"] += int(rep.consolidated)

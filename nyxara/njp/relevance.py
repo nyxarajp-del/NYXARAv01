@@ -180,6 +180,16 @@ _CAN_YOU = re.compile(
     re.IGNORECASE)
 _WHY = re.compile(r"\bwhy\b|\bkyun\b|\bkyon\b|\bkyu\b|क्यों|\bwajah\b|\breason\s+for\b",
                   re.IGNORECASE)
+# An intervention, which is a different question from a correlation and needs a different organ.
+# "why do plants grow" asks for a mechanism she may already hold; "what if I halve the water"
+# asks her to *change* something and report what follows, which only the do-operator answers.
+# Scored above `_WHY` because the construction is the more specific of the two: every phrase here
+# names an intervention outright, where "why" merely asks after a cause.
+_WHATIF = re.compile(
+    r"\bwhat\s+if\b|\bwhat\s+happens\s+if\b|\bwhat\s+would\s+happen\b|\bsuppose\b"
+    r"|\bif\s+(?:i|we|you)\s+(?:halve|double|remove|increase|reduce|cut|raise|lower|stop)\b"
+    r"|\bagar\b|\bmaan\s+lo\b|अगर|\bkya\s+ho\s+(?:agar|to)\b",
+    re.IGNORECASE)
 _WHAT_IS = re.compile(r"\bwhat\s+is\b|\bwhat's\b|\bkya\s+ha[ie]\b|\bkya\s+hota\b|क्या\s+है"
                       r"|\bdefine\b|\bmatlab\b|\bmeaning\b", re.IGNORECASE)
 _TASK = re.compile(
@@ -237,6 +247,9 @@ class SpeechActReader:
         if _WHY.search(raw):
             scores[SpeechAct.CAUSAL_QUERY] += 0.8
             cues.append("why")
+        if _WHATIF.search(raw):
+            scores[SpeechAct.CAUSAL_QUERY] += 0.85
+            cues.append("what-if")
         if _WHAT_IS.search(raw):
             scores[SpeechAct.KNOWLEDGE_QUERY] += 0.6
             cues.append("what-is")

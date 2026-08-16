@@ -44,6 +44,7 @@ and the turn continues on the fabric alone.
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import unicodedata
@@ -227,8 +228,9 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+(?P<v>went|came)\s+to\s+(?P<o>.+)$", ""),
     (r"^(?P<s>.+?)\s+(?P<v>bought|sold|sent|received|made|opened|closed|broke|started|stopped)"
      r"\s+(?P<o>.+)$", ""),
-    (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened)"
-     r"\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened"
+     r"|grew|rose|died|burned|burnt|boiled|melted|froze|evaporated|condensed"
+     r"|expanded|contracted)\s*$", ""),
 
     # --- Processes: the general statements a world model is actually built out of ------------ #
     #
@@ -321,6 +323,14 @@ _EVENT_VERBS: Dict[str, str] = {
     "marta": "dies", "marti": "dies", "मरता": "dies", "मरती": "dies", "dies": "dies",
     "rises": "rises", "evaporates": "evaporates", "condenses": "condenses",
     "expands": "expands", "contracts": "contracts",
+    # English past tense, folded onto the same predicates as the present. The Master reports what
+    # happened in the past tense — "the plant grew" — and without these the sentence extracted
+    # nothing at all, so `world` recorded no occurrence, `_counts` stayed empty, and
+    # `world.counterfactual` could never clear `min_support`. An experiment settled from the
+    # record is unreachable while the record cannot be written to.
+    "grew": "grows", "rose": "rises", "died": "dies", "burned": "burns", "burnt": "burns",
+    "boiled": "boils", "melted": "melts", "froze": "freezes", "evaporated": "evaporates",
+    "condensed": "condenses", "expanded": "expands", "contracted": "contracts",
 }
 
 # "X because Y" — the one construction that states a cause outright rather than leaving it to be
@@ -330,6 +340,65 @@ _EVENT_VERBS: Dict[str, str] = {
 _BECAUSE = re.compile(
     r"^(?P<effect>.+?)\s+(?:because(?:\s+of)?|since|kyunki|kyonki|isliye\s+ki)\s+(?P<cause>.+)$",
     re.IGNORECASE)
+
+# --------------------------------------------------------------------------- #
+# Measurement — the one kind of sentence a causal coefficient can be fitted from
+# --------------------------------------------------------------------------- #
+# Every pattern in :data:`_SEED_PATTERNS` reads at most one relation out of a sentence and stops.
+# That is right for a fact and wrong for a measurement: "the plant got 10 litres of water and
+# grew 20 cm" states *two* variables of *one* entity at *one* moment, and it is the pairing that
+# carries the information — two numbers observed together are what a coefficient is fitted to,
+# while the same two numbers read separately are two unrelated readings.
+#
+# This was measured, not assumed. After four such sentences,
+# :meth:`nyxara.njp.universe.InternalUniverse.usable_relations` was empty,
+# ``concepts._by_subject[...].numbers`` was ``{}``, and ``what_if('water', 0.5)`` answered at
+# confidence 0.0 with "no usable arrow leaves the intervened variables" — a simulator that owned
+# a causal skeleton it could never fit a single coefficient to, because nothing upstream had ever
+# handed it a number.
+_MEASURE = re.compile(
+    r"(?P<q>-?\d+(?:\.\d+)?)\s*"
+    r"(?P<u>litres?|liters?|ml|cm|mm|km|kg|degrees?|celsius|hours?|hrs?|days?|"
+    r"[lmg])?\b\s*"
+    r"(?:of\s+(?P<n>[a-z]+))?",
+    re.IGNORECASE)
+
+# A sentence only reports a measurement if it says who was measured. Requiring the subject is
+# what keeps this off "water boils at 100" — a standing law, already read by the threshold
+# pattern below, and not an observation of any particular thing.
+_MEASURE_SUBJECT = re.compile(
+    r"^(?P<s>.+?)\s+(?:got|gets|has|had|received|used|took|drank|grew|grows|"
+    r"reached|measured|weighs|weighed|lasted)\b", re.IGNORECASE)
+
+_WORD = re.compile(r"[a-z]+")
+
+# The verb governing a bare quantity names the variable it measures: "grew 20 cm" is a statement
+# about growth, not merely about a length. An empty value means the verb names no variable of its
+# own ("got 10 litres of water" is about water, and the noun says so) — distinct from a verb that
+# is absent from this table entirely, which contributes nothing.
+_MEASURE_VERBS: Dict[str, str] = {
+    "grew": "growth", "grows": "growth", "grow": "growth",
+    "badha": "growth", "badhi": "growth", "badhe": "growth",
+    "weighs": "mass", "weighed": "mass",
+    "lasted": "duration", "reached": "",
+    "got": "", "gets": "", "has": "", "had": "", "received": "", "used": "",
+    "took": "", "drank": "", "measured": "",
+}
+
+# The unit's own dimension, used only when neither a noun nor a governing verb named the
+# variable. It is the weakest of the three because a unit is not a variable: two different
+# quantities of one entity can share one, and naming them both after it collapses exactly the
+# distinction a causal fit needs.
+_UNIT_DIMENSION: Dict[str, str] = {
+    "litre": "volume", "litres": "volume", "liter": "volume", "liters": "volume",
+    "l": "volume", "ml": "volume",
+    "cm": "length", "mm": "length", "m": "length", "km": "length",
+    "kg": "mass", "g": "mass",
+    "degree": "temperature", "degrees": "temperature", "celsius": "temperature",
+    "hour": "duration", "hours": "duration", "hr": "duration", "hrs": "duration",
+    "day": "duration", "days": "duration",
+}
+
 
 # Wh-words that can open a turn. English only: this is the head-initial case, and every other
 # language here puts its wh-word somewhere else entirely.
@@ -423,6 +492,61 @@ def _norm_relation(raw: str) -> str:
     return re.sub(r"_+", "_", "".join(out)).strip("_")
 
 
+def _quantity_name(low: str, at: int) -> str:
+    """The variable named by the nearest governing verb before ``at``, or empty.
+
+    Nearest rather than first: "the plant got 10 litres of water and grew 20 cm" has two verbs,
+    and the one that governs a quantity is the one it follows.
+    """
+    found = ""
+    for word in _WORD.finditer(low[:at]):
+        named = _MEASURE_VERBS.get(word.group())
+        if named is not None:
+            found = named
+    return found
+
+
+def _measurements(text: str) -> List[Tuple[str, float]]:
+    """Every ``(variable, value)`` a sentence reports, in the order it reports them.
+
+    The variable is named by the noun the quantity is *of* where the sentence says so, by the
+    verb that governs it where it does not, and by the unit's dimension only as a last resort.
+    A quantity none of the three can name is dropped rather than stored under the unit: an
+    unnamed number is not an observation of anything, and the simulator would fit it as though
+    it were.
+    """
+    out: List[Tuple[str, float]] = []
+    low = str(text or "").lower()
+    if not low:
+        return out
+    for match in _MEASURE.finditer(low):
+        try:
+            value = float(match.group("q"))
+        except (TypeError, ValueError):        # noqa: PERF203 — a malformed number is skipped
+            continue
+        if not math.isfinite(value):
+            continue
+        unit = (match.group("u") or "").strip()
+        name = (match.group("n") or "").strip()
+        if not name:
+            name = _quantity_name(low, match.start())
+        if not name:
+            name = _UNIT_DIMENSION.get(unit, "")
+        if name:
+            out.append((name, value))
+    return out
+
+
+def _as_object(value: float) -> str:
+    """A measured value as the object of a triple.
+
+    Integral values lose the trailing ``.0`` because the object is read back with ``float()``
+    by :meth:`nyxara.njp.concepts.ConceptGenesis.observe_triples` and shown to the Master as
+    written — "10 litres" should not come back as "10.0".
+    """
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
 def _clean(text: str) -> str:
     """Trim punctuation and a leading article, keeping the entity itself intact."""
     out = _STRIP.sub("", str(text or "")).strip()
@@ -472,6 +596,10 @@ class Grounder:
         self.patterns_learned = 0
         self.patterns_pruned = 0
         self.llm_calls = 0
+        # How often each word has reached no entity. A running tally rather than a per-turn
+        # snapshot, because "he keeps saying this and I still have nothing for it" is a gap and
+        # "he mentioned it once" is not, and the snapshot could not tell them apart.
+        self._ungrounded_seen: Dict[str, int] = {}
 
     # ---- the one call ----------------------------------------------------- #
     def ground(self, text: str, *, intent: Any = None, deep: bool = False) -> GroundingResult:
@@ -496,7 +624,7 @@ class Grounder:
                     self.answered += 1
                 else:
                     self.unknown += 1
-                out.ungrounded = self._ungrounded(out.concepts)
+                out.ungrounded = self._ungrounded(out.concepts, tally=True)
                 return out
 
             triples = self._extract(out.text)
@@ -517,7 +645,7 @@ class Grounder:
             if out.triples:
                 self.grounded_turns += 1
             self._observe_concepts(out)
-            out.ungrounded = self._ungrounded(out.concepts)
+            out.ungrounded = self._ungrounded(out.concepts, tally=not out.triples)
             return out
         except Exception:  # noqa: BLE001 — a failed grounding never breaks a turn
             return out
@@ -551,6 +679,14 @@ class Grounder:
         causal = _BECAUSE.match(low)
         if causal is not None:
             return self._extract_causal(causal, text)
+
+        # A measurement is handled before the pattern loop for the same reason "because" is: the
+        # loop stops at the first match, and a sentence reporting two quantities of one entity
+        # would keep one number and discard the other — which destroys the pairing rather than
+        # merely losing half of it.
+        measured = self._extract_measurements(text)
+        if measured:
+            return measured
 
         for pattern in list(self.patterns):
             try:
@@ -586,6 +722,34 @@ class Grounder:
                 source="pattern" if not pattern.learned else "learned-pattern", text=text))
             break
         self._prune_patterns()
+        return out
+
+    def _extract_measurements(self, text: str) -> List[GroundedTriple]:
+        """A measurement sentence, as one triple per quantity it reports.
+
+        This is the one extractor that deliberately returns *every* reading rather than the
+        first. Two variables observed together are what a causal coefficient is fitted to, so
+        keeping only the leading quantity would leave the simulator with numbers it could never
+        pair — the state it was actually measured in.
+
+        Returns nothing at all where the sentence names no subject or no nameable quantity,
+        which is what keeps a standing law ("water boils at 100") on the threshold pattern that
+        already reads it rather than being mistaken for an observation of some particular thing.
+        """
+        out: List[GroundedTriple] = []
+        pairs = _measurements(text)
+        if not pairs:
+            return out
+        head = _MEASURE_SUBJECT.match(_clean(text))
+        if head is None:
+            return out
+        subject = self.resolve(head.group("s"))
+        if not subject:
+            return out
+        for name, value in pairs:
+            out.append(GroundedTriple(
+                subject=subject, predicate=self._predicate(name), object=_as_object(value),
+                confidence=0.9, source="measurement", text=text))
         return out
 
     def _extract_causal(self, match: Any, text: str) -> List[GroundedTriple]:
@@ -913,7 +1077,28 @@ class Grounder:
             pass
         return sorted(out)
 
-    def _ungrounded(self, concepts: Sequence[str]) -> List[str]:
+    def persistent_unknowns(self, *, min_times: int = 2, limit: int = 8) -> List[Tuple[str, int]]:
+        """Words that have reached no entity more than once, commonest first.
+
+        The per-turn ``ungrounded`` list is a snapshot and is overwritten every turn, so a word
+        the Master has used five times and a word he mentioned once in passing were
+        indistinguishable — and the only consumer rendered either as the same sentence. A tally
+        is what makes the difference legible, and it is the same discipline curiosity already
+        applies to failures: once is noise, repeatedly is a gap.
+        """
+        try:
+            # A word she uses as a *relation* is not a thing she is missing. "lives" and "works"
+            # never appear as entities because they are not entities, and asking "what is lives?"
+            # is the kind of question that makes a gap list unreadable — the signal is the noun
+            # she has no node for, not the verb she has been parsing correctly all along.
+            rows = [(word, n) for word, n in self._ungrounded_seen.items()
+                    if n >= int(min_times)]
+            rows.sort(key=lambda kv: (-kv[1], kv[0]))
+            return rows[: max(0, int(limit))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _ungrounded(self, concepts: Sequence[str], *, tally: bool = False) -> List[str]:
         """Concepts that reach no entity — the words that are still just words to her."""
         out: List[str] = []
         try:
@@ -924,6 +1109,18 @@ class Grounder:
             for concept in concepts:
                 if concept.lower() not in known:
                     out.append(concept)
+                    # Only a sentence that grounded *nothing* contributes to the tally. A
+                    # sentence that produced a triple has explained its own words: "Ravi lives in
+                    # Pune" leaves "lives" unmatched as an entity because it is the relation, not
+                    # a thing she is missing, and "what is lives?" is exactly the question that
+                    # makes a gap list unreadable.
+                    if tally:
+                        word = concept.lower()
+                        self._ungrounded_seen[word] = self._ungrounded_seen.get(word, 0) + 1
+            # A word that has since been grounded stops being a gap, so its tally goes rather
+            # than lingering as a question she has already answered.
+            for seen in [w for w in self._ungrounded_seen if w in known]:
+                self._ungrounded_seen.pop(seen, None)
         except Exception:  # noqa: BLE001
             pass
         return out[:16]

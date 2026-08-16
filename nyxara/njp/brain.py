@@ -36,6 +36,7 @@ Master is sovereign.
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,36 @@ from nyxara.njp.soulsync import Reading, SoulSync
 from nyxara.njp.truth import Judgement, TruthGauntlet, Verdict
 
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
+
+# What a counterfactual question asks her to *do* to a variable, and by how much.
+#
+# Only interventions whose magnitude the sentence actually states are listed. "reduce the water"
+# is deliberately absent: a factor she chose herself would come back through the do-operator
+# carrying the same confidence as one the Master gave, and nothing downstream could tell the two
+# apart afterwards. An intervention she cannot size is one she declines to simulate.
+_INTERVENTION_FACTOR: Dict[str, float] = {
+    "halve": 0.5, "halving": 0.5, "half": 0.5, "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
+    "double": 2.0, "doubling": 2.0, "dugna": 2.0, "duguna": 2.0,
+    "remove": 0.0, "removing": 0.0, "stop": 0.0, "stopping": 0.0, "band": 0.0, "bina": 0.0,
+}
+
+_INTERVENTION = re.compile(
+    r"\b(?P<op>halve|halving|half|double|doubling|remove|removing|stop|stopping|"
+    r"aadha|adha|aadhi|dugna|duguna|band|bina)\b"
+    r"(?:\s+(?:the|le|kar|of|its))*\s+(?P<var>[a-z][a-z_]*)\b",
+    re.IGNORECASE)
+
+# The same question stated as an absolute rather than a factor — "what if the water were 3".
+_INTERVENTION_ABSOLUTE = re.compile(
+    r"\b(?:the\s+)?(?P<var>[a-z][a-z_]*)\s+(?:were|was|is|becomes?|ho)\s+"
+    r"(?P<val>-?\d+(?:\.\d+)?)\b",
+    re.IGNORECASE)
+
+# Hinglish puts the object before the verb — "paani aadha kar doon" — so the factor word follows
+# the variable rather than preceding it. Same intervention, mirrored word order.
+_INTERVENTION_TRAILING = re.compile(
+    r"\b(?P<var>[a-z][a-z_]*)\s+(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|double)\b",
+    re.IGNORECASE)
 
 
 def _cell_id(token: str) -> int:
@@ -135,6 +166,17 @@ class NJPThought:
     # than having to be inferred from the reply itself.
     act: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
+    # The meta-reasoner's own record of how this answer was reached, kept so that when reality
+    # grades the answer later the credit can reach the strategy that actually produced it.
+    # Without it :meth:`~nyxara.njp.metareason.MetaReasoner.outcome` has nothing to be called
+    # with, which is why strategy credit came only from the critic — a mind grading its own
+    # reasoning by its own opinion of that reasoning.
+    solution: Any = None
+    # A question of her own she put to the Master this turn, because she had nothing to answer
+    # with. Carried as structure rather than folded into `answer`: "I do not know" and "I do not
+    # know, and here is what would help" are the same epistemic state, and a caller that wants
+    # only the honest non-answer must still be able to get it.
+    asked: Any = None
 
     @property
     def confidence(self) -> float:
@@ -860,6 +902,136 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def _ask_back(self, thought: NJPThought) -> None:
+        """Put her own best question to the Master, on a turn where she had nothing to answer.
+
+        :meth:`~nyxara.njp.curiosity.Curiosity.ask` had no caller anywhere, so ``asked`` never
+        incremented, so ``stale`` was permanently ``False``, so ``stale_questions`` was always
+        empty and the escalation path behind it could not be reached. A queue of questions nobody
+        ever puts is not curiosity — it is a list.
+
+        Only on a turn that produced no answer, and only where the speech act permits reaching
+        for world knowledge at all: a greeting must not come back with "what is a tachyon?", which
+        is the same failure :mod:`nyxara.njp.relevance` was written for, pointed outward. The
+        question is recorded on the thought and never folded into ``answer`` — a caller asking
+        whether she could answer must still get the honest empty string.
+
+        ``top`` already excludes stale questions, so asking the same thing a fourth time is
+        impossible by construction; what has gone stale is reported by :meth:`shadow` instead,
+        which is the escalation this makes reachable.
+        """
+        try:
+            if self.curiosity is None or thought.answer:
+                return
+            act = getattr(thought, "act", None)
+            if act is not None and self._policy is not None:
+                if self._policy.forbids_world_knowledge(act):
+                    return
+            # Look before marking. `ask` increments `asked` on whatever is top, and a question
+            # curiosity priced as "go and find this out yourself" is not one she has put to him —
+            # counting it would drive a gap she never voiced to stale and silence it.
+            candidate = self.curiosity.top()
+            if candidate is None or getattr(candidate, "action", "") != "ask":
+                return
+            thought.asked = self.curiosity.ask()
+        except Exception:  # noqa: BLE001 — a turn that cannot ask still answers honestly
+            return
+
+    def budget(self) -> Dict[str, Any]:
+        """What this turn is allowed to spend, chosen by what has actually been paying.
+
+        The homeostasis loop was almost entirely built and had no middle. ``_build_meta``
+        registers three arms — ``settle_steps``, ``recall_k``, ``reason_depth`` — over real
+        settings, with the comment that each "changes what a turn costs, so a win here is a
+        measured win rather than a preference". :meth:`~nyxara.njp.selfmodel.MetaLearner.choose`
+        picks between them, :meth:`resolve` already rewards one of them. Nothing ever *read a
+        choice back*, so every turn spent the same fixed config constant and the bandit learned
+        about a knob that was never turned.
+
+        Choosing is what registers the pending arm that :meth:`resolve` later grades, so this is
+        also what makes the existing reward meaningful rather than a credit assigned to whichever
+        arm happened to be chosen last.
+
+        Falls back to the configured constants for any arm that has not been registered, which is
+        the honest default: an untuned knob is the one she shipped with, not a guess.
+        """
+        out: Dict[str, Any] = {
+            "settle_steps": int(self._cfg("max_settle_steps", 24)),
+            "recall_k": int(self._cfg("recall_k", 5)),
+            "reason_depth": str(self._cfg("reason_max_rung", "proof")),
+            "learned": False,
+        }
+        if self.meta is None:
+            return out
+        try:
+            for arm in ("settle_steps", "recall_k", "reason_depth"):
+                chosen = self.meta.choose(arm)
+                if chosen is None:
+                    continue
+                out[arm] = chosen.value
+                out["learned"] = True
+        except Exception:  # noqa: BLE001 — an unchosen knob keeps the value she was built with
+            return out
+        return out
+
+    def shadow(self) -> Dict[str, Any]:
+        """What she does not know, as one structure instead of five nobody joined.
+
+        Ignorance was tracked in five places and read in none of them usefully. The grounder
+        computed the words that reached no entity and the only consumer rendered them as a
+        sentence on turns where she had nothing else to say. The belief ledger's ``audit`` — which
+        names, per belief, whether confidence exceeds evidence and whether a falsifier was ever
+        stated — was called once, by its own ``stats``, which kept the count and dropped the rows.
+        ``ThoughtState``'s assumptions were never written at runtime at all. Each store was
+        honest; none of them was answerable.
+
+        Two axes, kept apart because they call for different repairs. **Gaps** are propositions
+        she lacks and curiosity already prices them by expected information gain against what
+        they cost, so this reads that pricing rather than inventing a second one. **Faculties** is
+        the other kind of not-knowing — which of her own organs is untrustworthy — and it stays
+        separate because it is about her, not about the world, and merging the two would put
+        "I am bad at recall" in a queue of things to go and look up.
+
+        Read-only. Nothing here decides anything; it reports what the organs already hold, which
+        is the whole point — an aggregator that also acted would become a sixth store.
+        """
+        out: Dict[str, Any] = {"gaps": [], "by_gap": {}, "stale": [],
+                               "faculties": {}, "open": 0}
+        try:
+            if self.curiosity is not None:
+                questions = list(self.curiosity.open_questions())
+                # Most valuable first: curiosity has already priced each one by what answering it
+                # buys against what it costs, and re-ranking here would be a second opinion with
+                # no new information behind it.
+                questions.sort(key=lambda q: float(getattr(q, "value", 0.0)), reverse=True)
+                out["open"] = len(questions)
+                out["gaps"] = [q.to_dict() for q in questions[:12]]
+                for question in questions:
+                    kind = str(getattr(question, "gap", "") or "")
+                    out["by_gap"][kind] = out["by_gap"].get(kind, 0) + 1
+                # Asked three times and still open. `top` refuses to surface these, so without a
+                # reader they simply went quiet — which reads as "no longer curious" when what
+                # actually happened is "asked repeatedly and never answered". That is the one
+                # state in the queue that wants a different response rather than more patience.
+                out["stale"] = [q.to_dict() for q in self.curiosity.stale_questions()[:6]]
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.self_model is not None:
+                weakest = self.self_model.weakest()
+                out["faculties"] = {
+                    # `certainty` had no reader anywhere, and it is the one calibrated
+                    # "how much do I know about how good I am" number in the package.
+                    "measured": {name: {"level": round(c.level, 4),
+                                        "certainty": round(c.certainty, 4),
+                                        "weak": c.weak}
+                                 for name, c in self.self_model.capabilities.items()},
+                    "weakest": weakest.name if weakest is not None else "",
+                }
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     def report_card(self) -> Dict[str, Any]:
         """Which of the nine stages she has actually reached, measured, not claimed."""
         try:
@@ -904,23 +1076,106 @@ class NJPBrain:
             return None
 
     def _strategy_simulate(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Answer by intervening on the world model rather than recalling what went with what.
+
+        The rendering states the intervention, the consequences it entails, and the confidence the
+        do-operator itself earned — which is a real number, off the arrow's fit and how far past
+        the observed range the question reached, not a decoration. A counterfactual shown without
+        it is indistinguishable from an observation, and the two are not the same kind of claim.
+
+        A counterfactual that entails no consequence is not an answer and returns nothing, so the
+        turn goes to whatever can answer it instead of to a restatement of the question's own
+        premise.
+        """
         try:
             variable = str(ctx.get("variable") or "").strip().lower()
             if not variable or self.universe is None:
                 return None
-            out = self.universe.what_if(variable, ctx.get("value", 0.0))
+            value = float(ctx.get("value", 0.0))
+            out = self.universe.what_if(variable, value)
             if not out.answerable:
                 return None
-            return "; ".join(f"{d.variable}={d.after:.3f}" for d in out.changed()[:3])
+            effects = [d for d in out.changed() if d.variable != variable]
+            if not effects:
+                return None
+            was = out.factual.get(variable)
+            done = (f"{variable} {float(was):g} → {value:g}" if was is not None
+                    else f"{variable} = {value:g}")
+            entails = "; ".join(f"{d.variable} {d.before:g} → {d.after:g}" for d in effects[:3])
+            return f"{done} predicts {entails} (confidence {out.confidence:.2f})"
         except Exception:  # noqa: BLE001
             return None
+
+    def _resolve_variable(self, name: str) -> str:
+        """A bare noun from a question, as the universe's own variable name.
+
+        The universe names a variable ``entity.attribute``, because that is what lets it tell two
+        attributes of one thing from two unrelated readings. A question says "the water", never
+        "plant.water", so the two have to be reconciled somewhere. Here, and against the variables
+        she has actually observed — guessing an entity would invent a subject the Master never
+        mentioned and simulate confidently over it.
+        """
+        want = str(name or "").strip().lower()
+        if not want:
+            return ""
+        try:
+            for variable in list(getattr(self.universe, "state", None) or {}):
+                if variable == want or variable.rsplit(".", 1)[-1] == want:
+                    return variable
+        except Exception:  # noqa: BLE001 — an unresolvable name simply is not simulated
+            return ""
+        return ""
+
+    def _counterfactual_context(self, question: str) -> Dict[str, Any]:
+        """The intervention a question asks for, as a variable and the value to set it to.
+
+        Empty where the question names no intervention, names a variable she has never observed,
+        or names an intervention whose size it does not state — each of which is a reason to
+        decline rather than to simulate something adjacent. This is the dict that makes
+        :meth:`_strategy_simulate` reachable at all; without a ``variable`` key it returns ``None``
+        on every call, which is why the do-operator went unused while working perfectly.
+
+        A factor resolves against what was actually observed, so "halve the water" means half of
+        what this plant has been getting rather than half of an arbitrary unit.
+        """
+        out: Dict[str, Any] = {}
+        if self.universe is None:
+            return out
+        try:
+            text = str(question or "")
+            absolute = _INTERVENTION_ABSOLUTE.search(text)
+            if absolute is not None:
+                variable = self._resolve_variable(absolute.group("var"))
+                if variable:
+                    return {"variable": variable, "value": float(absolute.group("val"))}
+
+            match = _INTERVENTION.search(text) or _INTERVENTION_TRAILING.search(text)
+            if match is None:
+                return out
+            variable = self._resolve_variable(match.group("var"))
+            factor = _INTERVENTION_FACTOR.get(match.group("op").lower())
+            if not variable or factor is None:
+                return out
+            current = getattr(self.universe, "state", None) or {}
+            observed = current.get(variable)
+            if observed is None:
+                return out
+            return {"variable": variable, "value": float(observed) * factor}
+        except Exception:  # noqa: BLE001 — an unparsed intervention is simply not simulated
+            return {}
 
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
             if self.reasoner is None:
                 return None
             conclusion = self.reasoner.reason(problem)
-            return getattr(conclusion, "claim", None) or getattr(conclusion, "answer", None)
+            # Honour the ladder's own refusal to commit. This path used to read the answer
+            # regardless of `decided`, so a conclusion the direct fallback would have thrown away
+            # for being too close to call entered the meta-reasoner as a strategy result — one
+            # margin rule enforced in one caller and ignored in the other, on the same object.
+            if conclusion is None or not conclusion.decided:
+                return None
+            return conclusion.answer or None
         except Exception:  # noqa: BLE001
             return None
 
@@ -1016,13 +1271,19 @@ class NJPBrain:
                 # Ask what usually follows this BEFORE settling — the pre-cognitive read.
                 out.anticipated = self.fabric.anticipate(out.cells)
 
+                # What this turn may spend, chosen by what has been paying rather than by a
+                # constant. Read once so the settle and the recall are budgeted together — two
+                # separate draws would let her deliberate deeply on a narrow recall and call the
+                # combination a win.
+                spend = self.budget()
+
                 self.fabric.stimulate(out.cells)
-                out.settled = self.fabric.settle()
+                out.settled = self.fabric.settle(max_steps=int(spend["settle_steps"]))
 
                 if self.memory is not None:
                     try:
                         out.recall = self.memory.recall(out.stimulus,
-                                                        k=self._cfg("recall_k", 5))
+                                                        k=int(spend["recall_k"]))
                     except Exception:  # noqa: BLE001
                         out.recall = None
                 return out
@@ -1104,6 +1365,14 @@ class NJPBrain:
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
                 self._deliberate(out)
+                # The epistemic pass above ran against an empty answer, so a deliberated one
+                # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
+                # rather than move: the first pass also feeds the echo check, which has to
+                # happen before deliberation, not after it.
+                if out.answer:
+                    self._set_epistemic(out)
+                else:
+                    self._ask_back(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -1297,7 +1566,13 @@ class NJPBrain:
                     "subject": (str(getattr(triples[0], "subject", "")) if triples else ""),
                     "about_self": bool(getattr(thought.intent, "about_self", False)),
                 }
+                # The intervention the question asks for, where it asks for one. Without these
+                # two keys `_strategy_simulate` returns None on every call, so the do-operator
+                # was registered, chosen, run and unable to do anything — the gap that made a
+                # working causal engine unreachable from a causal question.
+                context.update(self._counterfactual_context(thought.stimulus))
                 solution = self.metareason.solve(thought.stimulus, context=context)
+                thought.solution = solution
                 if solution.assertable and solution.answer:
                     thought.answer = str(solution.answer)
                     return
@@ -1307,9 +1582,15 @@ class NJPBrain:
             if self.reasoner is None:
                 return
             novelty = float(getattr(thought.percept, "novelty", 0.5) or 0.5)
+            # The depth arm caps how far down the ladder this turn may go. `depth_for` still
+            # chooses within that cap from the turn's own uncertainty and stakes — the budget
+            # says what she may afford, not what this question needs, and conflating the two
+            # would make an easy question expensive just because she has been doing well.
+            ceiling = str(self.budget().get("reason_depth") or "")
             conclusion = self.reasoner.reason(
                 thought.stimulus, uncertainty=novelty,
-                stakes=self._cfg("reason_stakes", 0.5), task="question")
+                stakes=self._cfg("reason_stakes", 0.5), task="question",
+                max_rung=ceiling or None)
             if conclusion is not None and conclusion.decided and conclusion.answer:
                 thought.answer = conclusion.answer
         except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
@@ -1692,7 +1973,13 @@ class NJPBrain:
                     self.self_model.observe("grounding", 1.0) if getattr(
                         getattr(thought, "percept", None), "grounding", None) else None
                 if self.meta is not None:
-                    self.meta.reward("settle_steps", float(correct))
+                    # Every arm that was spent this turn is graded, not just the one. Rewarding
+                    # `settle_steps` alone meant the other two knobs accumulated choices and
+                    # never a single outcome, so their means stayed at the prior for ever and
+                    # `best()` could never name a winner. A knob that is turned and never scored
+                    # is not being learned about, it is being varied.
+                    for arm in ("settle_steps", "recall_k", "reason_depth"):
+                        self.meta.reward(arm, float(correct))
         except Exception:  # noqa: BLE001
             pass
 
