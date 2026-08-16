@@ -1334,6 +1334,12 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     def _brain() -> Any:
         return getattr(core, "njp", None)
 
+    # Organs readable over the wire, by URL segment. Read-only: this route never acts.
+    _NJP_ORGANS = ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger",
+                   "learner", "calculate")
+    # Where the URL segment does not match the attribute on the brain.
+    _ORGAN_ATTR = {"calculate": "calculator"}
+
     def _off(flag: str = "ENABLED") -> dict:
         return {"available": False,
                 "reason": f"NJP V.01 is disabled (NYXARA_NJP__{flag}=false)."}
@@ -1532,9 +1538,13 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
         brain = _brain()
         if brain is None:
             return _off()
-        if organ not in ("fabric", "truth", "soulsync", "evolver", "pulse", "ledger"):
+        # `learner` and `calculate` are the attribute names on the brain, not the display names:
+        # the Core is `brain.learner` because `brain.core` is already the kernel back-reference,
+        # and the calculator is `brain.calculator`. The allowlist is keyed by the URL segment and
+        # `_ORGAN_ATTR` maps it to whatever the attribute is actually called.
+        if organ not in _NJP_ORGANS:
             return {"available": False, "reason": f"no NJP organ named {organ!r}."}
-        part = getattr(brain, organ, None)
+        part = getattr(brain, _ORGAN_ATTR.get(organ, organ), None)
         if part is None:
             return _off(f"{organ.upper()}_ENABLED")
         return part.stats()

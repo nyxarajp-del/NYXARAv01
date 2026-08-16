@@ -58,9 +58,14 @@ __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 # carrying the same confidence as one the Master gave, and nothing downstream could tell the two
 # apart afterwards. An intervention she cannot size is one she declines to simulate.
 _INTERVENTION_FACTOR: Dict[str, float] = {
-    "halve": 0.5, "halving": 0.5, "half": 0.5, "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
-    "double": 2.0, "doubling": 2.0, "dugna": 2.0, "duguna": 2.0,
-    "remove": 0.0, "removing": 0.0, "stop": 0.0, "stopping": 0.0, "band": 0.0, "bina": 0.0,
+    # Past participles are here because "what if the water IS HALVED" is the commonest English
+    # phrasing of the question and matched none of the infinitive/gerund forms — the passive is
+    # how a counterfactual about a thing rather than an actor is normally put.
+    "halve": 0.5, "halving": 0.5, "halved": 0.5, "half": 0.5,
+    "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
+    "double": 2.0, "doubling": 2.0, "doubled": 2.0, "dugna": 2.0, "duguna": 2.0,
+    "remove": 0.0, "removing": 0.0, "removed": 0.0, "stop": 0.0, "stopping": 0.0,
+    "stopped": 0.0, "band": 0.0, "bina": 0.0,
 }
 
 _INTERVENTION = re.compile(
@@ -77,8 +82,17 @@ _INTERVENTION_ABSOLUTE = re.compile(
 
 # Hinglish puts the object before the verb — "paani aadha kar doon" — so the factor word follows
 # the variable rather than preceding it. Same intervention, mirrored word order.
+#
+# The English passive belongs in this pattern rather than the leading one for exactly the same
+# reason: "the water is halved" also puts the variable first. It is the commonest way to ask a
+# counterfactual about a *thing* rather than about someone acting on it, and matching only
+# "halve the water" meant the natural phrasing of the question fell through to no intervention
+# at all — the parse then supplied no `variable` key, `_strategy_simulate` returned None before
+# reaching the do-operator, and the turn answered nothing while the engine sat ready.
 _INTERVENTION_TRAILING = re.compile(
-    r"\b(?P<var>[a-z][a-z_]*)\s+(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|double)\b",
+    r"\b(?:the\s+)?(?P<var>[a-z][a-z_]*)\s+(?:(?:is|was|were|be|gets?|got)\s+)?"
+    r"(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|halved|double|doubled|"
+    r"removed|stopped)\b",
     re.IGNORECASE)
 
 
@@ -161,6 +175,15 @@ class NJPThought:
     # represent. `trial` is set only on the turns loop 2 comes round.
     field: Any = None
     trial: Any = None
+    # What the Cognitive Learning Core did with this turn: schemas induced over the kinds the
+    # field formed, scored against held-out facts, and the ones that failed dropped. A
+    # `CoreReport`; absent when the organ is off.
+    learning: Any = None
+    # How an answer was *derived*, when it was derived rather than looked up — the composition or
+    # the schema transfer, with its steps. Carried separately from `answer` because the two are
+    # different epistemic objects: a derived answer is defeasible however confident it reads, and
+    # a caller that cannot tell it from a stated fact will eventually state it as one.
+    derivation: Any = None
     # What the Master was *doing* with this turn, and what each recalled memory scored against
     # it. Carried so a reply that reached for something irrelevant is visible from outside rather
     # than having to be inferred from the reply itself.
@@ -246,6 +269,9 @@ class NJPBrain:
         self.discoverer = self._build_discoverer(c)
         self.reasoner = self._build_reasoner(c)
         self.self_model = self._build_self_model(c)
+        # Before `metareason`, which registers a strategy bound to it: a calculator built after
+        # the strategy table would be registered as absent and never chosen.
+        self.calculator = self._build_calculator(c)
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
@@ -265,6 +291,15 @@ class NJPBrain:
         self.universe = self._build_universe(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
+        # The Cognitive Learning Core, before `metareason` because that registers a strategy
+        # bound to it. Everything the Core reads — the grounder, the world, the concept layer,
+        # the universe, curiosity — is already built by this line; it needs nothing from `field`,
+        # which is why it does not have to wait for the end of this method.
+        #
+        # Named `learner`, not `core`: `self.core` is already the kernel back-reference set at
+        # the top of this method, and shadowing it would sever the brain from the orchestrator
+        # that holds it.
+        self.learner = self._build_learner(c)
         self.metareason = self._build_metareason(c)
         # The predictive brain: what follows what in the WORLD, as opposed to which of her own
         # cells fire next. Without it she is a fact store that grows; with it she is something
@@ -788,6 +823,44 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_learner(self, c: Any) -> Any:
+        """The Cognitive Learning Core: the loop that makes the other organs add up to learning.
+
+        Given the concept layer and the fact store rather than a copy of either. A Core holding
+        its own knowledge would be a second brain to keep in step, which is exactly the
+        arrangement this package exists to not have.
+        """
+        if not self._gate("learner", True):
+            return None
+        try:
+            from nyxara.njp.core import CognitiveLearningCore
+            return CognitiveLearningCore(
+                self, concepts=self.genesis, grounder=self.grounder,
+                universe=self.universe, world=self.world, curiosity=self.curiosity,
+                max_depth=self._cfg("learner_max_depth", 4),
+                min_members=self._cfg("learner_min_members", 2),
+                holdout_share=self._cfg("learner_holdout_share", 0.3),
+                represent_every=self._cfg("learner_represent_every", 4),
+                test_every=self._cfg("learner_test_every", 6))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_calculator(self, c: Any) -> Any:
+        """Arithmetic. Absent before this: no module in ``nyxara/njp/`` could evaluate anything.
+
+        :mod:`nyxara.njp.prove` is the package's only sympy consumer and it *verifies* claims — an
+        arithmetic question reached it and came back INEXPRESSIBLE. So "2+2 kitna hai" descended
+        the whole ladder and returned the empty string, which is an honest answer to a question
+        she genuinely could not answer, and an absurd one to that question.
+        """
+        if not self._gate("calculate", True):
+            return None
+        try:
+            from nyxara.njp.calculate import Calculator
+            return Calculator(prefer_exact=self._cfg("calculate_prefer_exact", True))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_metareason(self, c: Any) -> Any:
         """Meta-reasoning: which way of thinking this problem calls for, learned from outcomes.
 
@@ -808,6 +881,30 @@ class NJPBrain:
             if self.universe is not None:
                 meta.register("simulate", (ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
                               self._strategy_simulate, prior=0.5)
+            if self.learner is not None:
+                # The derivation strategy: compose stated facts into one that was never stated,
+                # or transfer a held-out-confirmed schema onto a subject that never showed the
+                # property. Registered for FACTUAL and CAUSAL because those are the kinds whose
+                # questions the fact store answers by lookup — and a lookup is precisely what
+                # has already failed by the time any strategy here runs.
+                # EMPIRICAL is in the list as a fallback rather than as the intended route: the
+                # `derivable` context key should have pulled a derivable question into FACTUAL
+                # before this table is consulted. It is here for the case where it did not —
+                # working an answer out of facts already held is cheaper than designing an
+                # experiment to go and get it, so it should at least be *reachable* wherever
+                # `experiment` is.
+                meta.register("derive",
+                              (ProblemKind.FACTUAL, ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
+                              self._strategy_derive, prior=0.65)
+            if self.calculator is not None:
+                # Registered for EMPIRICAL as well as SYMBOLIC, and that is not belt-and-braces.
+                # `grounded is False` adds 0.5 to EMPIRICAL on every unanswered question, so a
+                # sum she has never been told the answer to can still classify empirical even
+                # with the arithmetic flag set. Being a candidate under both readings means the
+                # retry loop reaches it either way; being *preferred* under neither is the
+                # chooser's business, which is what the priors are for.
+                meta.register("calculate", (ProblemKind.SYMBOLIC, ProblemKind.EMPIRICAL),
+                              self._strategy_calculate, prior=0.75)
             if self.grounder is not None:
                 meta.register("recall", (ProblemKind.FACTUAL,), self._strategy_recall, prior=0.7)
             if self.self_model is not None or self.beliefs is not None:
@@ -1179,6 +1276,48 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _strategy_derive(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Answer by composing facts, or by transferring from a kind. Never by looking up.
+
+        The answer carries its route in ``kind``, and only ``direct`` is a fact — which this
+        never returns, because a direct hit means the grounder already answered and this strategy
+        was never reached. So everything from here is defeasible by construction, and the caveat
+        travels with it rather than being attached to the sentence: a composed or transferred
+        answer that reads like a stated one is the failure this whole layer is supposed to avoid.
+        """
+        try:
+            if self.learner is None:
+                return None
+            # The classifier already ran this walk to decide what kind of problem this is; doing
+            # it again here would be the same graph search twice per turn for one answer.
+            cached = ctx.get("derived")
+            if cached:
+                return str(cached)
+            derived = self.learner.answer(problem)
+            if not derived.ok:
+                return None
+            return derived.answer or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_calculate(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Work out the value. The one strategy here whose answer is not a belief.
+
+        Everything else in this table returns something that could be wrong and travels with a
+        confidence — a recalled fact, a simulated consequence, a rung of the ladder. An evaluated
+        expression is not of that kind: ``2+2`` is 4 in every world she could be in, so it is
+        stated flatly and the gauntlet downstream has nothing to weigh it against. That is why
+        the calculator refuses anything it cannot close rather than approximating: an organ
+        whose output is exempt from doubt has to earn the exemption on every call.
+        """
+        try:
+            if self.calculator is None:
+                return None
+            evaluation = self.calculator.evaluate(problem)
+            return evaluation.text if evaluation.ok else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _strategy_introspect(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
             if self.beliefs is None:
@@ -1427,6 +1566,15 @@ class NJPBrain:
                 if self.field.due_for_meta():
                     out.trial = self.field.meta_cycle()
 
+            # 12. THE CORE — induce schemas over the kinds the field just formed, score the
+            # standing ones against facts they were never built from, and drop the ones that
+            # fail. Last on purpose: REPRESENT reads `concepts`, which step 11 has only just
+            # updated with this turn's triples, so a Core running any earlier would be
+            # generalising over the previous turn's kinds. This is the step at which having the
+            # organs becomes learning from them.
+            if self.learner is not None:
+                out.learning = self.learner.cycle(out)
+
             out.ms = (time.perf_counter() - t0) * 1000.0
             if self.ledger is not None:
                 self.ledger.observe_latency(out.ms)
@@ -1571,6 +1719,24 @@ class NJPBrain:
                 # was registered, chosen, run and unable to do anything — the gap that made a
                 # working causal engine unreachable from a causal question.
                 context.update(self._counterfactual_context(thought.stimulus))
+                # Whether there is a closed sum in here at all. A parse result rather than a
+                # keyword, for the same reason the intervention above is: the classifier can
+                # count digits and operators but cannot tell "2+2" from "100 degree at 3pm", and
+                # it was routing the first of those to the empirical strategies.
+                if self.calculator is not None:
+                    from nyxara.njp.calculate import expression_in
+                    context["arithmetic"] = expression_in(thought.stimulus) or ""
+                # Whether this follows from facts she already holds. Derived here rather than
+                # inside the strategy so the *classifier* can see it — a lookup miss otherwise
+                # reads as "go and find out" and never reaches the reasoning that would settle
+                # it without leaving. Carried in the context so `_strategy_derive` reuses this
+                # derivation instead of recomputing the same walk.
+                if self.learner is not None:
+                    derived = self.learner.answer(thought.stimulus)
+                    if derived.ok:
+                        context["derivable"] = True
+                        context["derived"] = derived.answer
+                        thought.derivation = derived
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
                 if solution.assertable and solution.answer:
@@ -2117,7 +2283,8 @@ class NJPBrain:
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
-                            ("field", self.field)):
+                            ("calculate", self.calculator),
+                            ("field", self.field), ("learner", self.learner)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -2151,7 +2318,7 @@ class NJPBrain:
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
-                            ("field", self.field)):
+                            ("field", self.field), ("learner", self.learner)):
             if organ is None:
                 continue
             try:
@@ -2203,7 +2370,8 @@ class NJPBrain:
             for key, organ in (("concepts", self.genesis), ("universe", self.universe),
                                ("designer", self.designer), ("beliefs", self.beliefs),
                                ("metareason", self.metareason), ("predictive", self.predictive),
-                               ("agency", self.agent), ("field", self.field)):
+                               ("agency", self.agent), ("field", self.field),
+                               ("learner", self.learner)):
                 if d.get(key) and organ is not None:
                     organ.load_dict(d[key])
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born brain

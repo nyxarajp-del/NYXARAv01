@@ -37,6 +37,9 @@ from nyxara.eval.generalization import (GeneralizationReport, GeneralizationResu
                                         run_structure_transfer)
 from nyxara.eval.harness import (EvalCase, EvalOutcome, EvalReport, EvalResult,
                                  EvalSuite, default_core_factory)
+from nyxara.eval.intelligence import (STAGE_NAMES, IntelligenceReport,
+                                      run_intelligence_benchmark)
+from nyxara.eval.intelligence import StageResult as IntelligenceStageResult
 from nyxara.eval.suites import build_default_suite
 
 __all__ = [
@@ -92,6 +95,14 @@ __all__ = [
     "run_structure_transfer",
     "run_law_induction",
     "run_generalization_benchmark",
+    # is she LEARNING, or is a counter going up? (eval/intelligence.py)
+    # Six stages on generated vocabulary, each scored only on items never taught, each with a
+    # fresh brain. Memorisation is the control: below 0.5 the rest of the curve is measuring a
+    # broken pipe rather than an absent faculty, and the report says so.
+    "run_intelligence_benchmark",
+    "IntelligenceReport",
+    "IntelligenceStageResult",
+    "STAGE_NAMES",
     # does a FACULTY beat its own absence? (eval/ablation.py)
     # Every other battery here measures the whole mind. This one measures one part against not
     # having it, on the held-out fold, with a paired test — the only evidence that can honestly

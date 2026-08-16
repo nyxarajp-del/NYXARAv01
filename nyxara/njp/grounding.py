@@ -186,6 +186,40 @@ class GroundingResult:
                 "learned_pattern": self.learned_pattern, "ms": round(self.ms, 3)}
 
 
+# The Hinglish process verbs, named once because two different tables need exactly the same set.
+#
+# "X se Y <verb> hai" is how a causal claim is stated; "X se kya <verb> hai" is how it is asked
+# for back. Those regexes live ~200 lines apart, in `_SEED_PATTERNS` and `_QUESTION_PATTERNS`,
+# and when the verb lists were written out separately in each the two drifted immediately — a
+# verb she could be *told* in was not one she could be *asked* in, which is the read/write
+# asymmetry `_CAUSE_OF` exists to close at the level of direction. Closing it for direction and
+# leaving it open for vocabulary would have been the same bug wearing a different hat.
+#
+# Transitive and intransitive forms both belong here: "pyaas bujhti hai" (the thirst is quenched)
+# and "paani pyaas bujhata hai" (water quenches thirst) are one claim about one arrow.
+#
+# Written as stems + an inflection group rather than as a flat list of surface forms. Hindi
+# agrees the participle with its subject — ``-ta`` masculine singular, ``-ti`` feminine,
+# ``-te`` masculine plural — so every verb here has three spellings and a hand-written list
+# reliably ships two of them. "dhoop se kapde sukhTE hai" missing while "sukhta" was present is
+# not a vocabulary gap, it is a plural the author did not think of; enumerating the inflection
+# once makes that class of gap unrepresentable.
+_PROCESS_STEMS = (
+    r"ban|ho|aa|mil|nikal|badh|ghat|"                   # become, be, come, be got, rise, fall
+    r"ubal|pighal|jal|mar|gir|ug|jam|"                  # boil, melt, burn, die, fall, grow, freeze
+    r"bujh|bujha|sukh|phail|toot|khul|ruk|chal"         # quench, dry, spread, break, open, stop, run
+)
+_PROCESS_VERBS = (
+    r"(?:" + _PROCESS_STEMS + r")(?:ta|ti|te)"
+    # Devanagari carries the same three endings on the same stems; spelled out because the
+    # matra-bearing stems do not decompose as cleanly as their romanisations.
+    r"|बनता|बनती|बनते|होता|होती|होते|आता|आती|आते|मिलता|मिलती|मिलते|"
+    r"निकलता|निकलती|बढ़ता|बढ़ती|घटता|घटती|"
+    r"उबलता|पिघलता|जलता|जलती|मरता|मरती|गिरता|उगता|जमता|जमती|"
+    r"बुझता|बुझती|सूखता|सूखते|फैलता|टूटता|खुलता|रुकता|चलता"
+)
+
+
 # --------------------------------------------------------------------------- #
 # Seed patterns — the bootstrap parser, not the ceiling
 # --------------------------------------------------------------------------- #
@@ -204,6 +238,19 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
     (r"^(?P<s>.+?)\s+(?:causes?|leads?\s+to)\s+(?P<o>.+)$", "causes"),
+    # Monotone influence — the signed half of causation, and the shape most real knowledge about
+    # quantities actually has. "water increases growth" is not the same claim as "water causes
+    # growth": it says which *way* the arrow points, which is exactly what a counterfactual needs
+    # and what a bare `causes` edge cannot supply. Without these two relations the commonest
+    # sentence anyone writes about a quantity extracted nothing at all.
+    (r"^(?P<s>.+?)\s+(?:increases?|raises?|boosts?|improves?|badhata|badhati|badhata|"
+     r"बढ़ाता|बढ़ाती)\s+(?P<o>.+)$", "increases"),
+    (r"^(?P<s>.+?)\s+(?:decreases?|reduces?|lowers?|slows?|ghatata|ghatati|kam\s+karta|"
+     r"घटाता|घटाती)\s+(?P<o>.+)$", "decreases"),
+    # "zyada paani se zyada growth" / "more water more growth" — the comparative form of the
+    # same claim, which is how it is usually said out loud.
+    (r"^(?:more|zyada|ज़्यादा|अधिक)\s+(?P<s>.+?)\s+(?:se\s+|=\s*|,\s*|→\s*)?"
+     r"(?:more|zyada|ज़्यादा|अधिक)\s+(?P<o>.+)$", "increases"),
     # Verb-final statements — the mirror of the question gap, and the reason closing that gap
     # alone was not enough. Every pattern above assumes the English order "X <relation> is Y";
     # Hinglish and Hindi put the copula last, "X ka <relation> Y **hai**". So the Master could
@@ -253,13 +300,7 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
      r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
     # "X se Y banta/hota/nikalta hai" — the ablative "se" is Hinglish's plainest causal marker.
     (r"^(?P<s>.+?)\s+(?:se|से)\s+(?P<o>.+?)\s+"
-     r"(?:banta|banti|bante|hota|hoti|hote|aata|aati|aate|milta|milti|milte|"
-     r"nikalta|nikalti|badhta|badhti|badhte|"
-     # The process verbs belong here too. "garmi se pani ubalta hai" is a causal claim about
-     # heat, not a bare report that water boils — reading it as the latter throws away the one
-     # word in the sentence that says *why*.
-     r"ubalta|ubalti|pighalta|pighalti|jalta|jalti|marta|marti|girta|girti|ugta|ugti|"
-     r"बनता|बनती|होता|होती|आता|आती|मिलता|मिलती|निकलता|बढ़ता|बढ़ती|उबलता|पिघलता)"
+     r"(?:" + _PROCESS_VERBS + r")"
      r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
     # "bina X (ke) Y marta hai" — a requirement stated through its own violation. The groups are
     # deliberately reversed: the sentence leads with what is missing, but the *subject* of the
@@ -366,9 +407,57 @@ _MEASURE = re.compile(
 # A sentence only reports a measurement if it says who was measured. Requiring the subject is
 # what keeps this off "water boils at 100" — a standing law, already read by the threshold
 # pattern below, and not an observation of any particular thing.
+#
+# The Hinglish half is not a nicety. The English verb list alone meant that in the Master's own
+# language *no sentence could ever report a measurement*: "paudhe ko 2 litre paani mila" names a
+# subject, a quantity, a unit and a substance, and matched nothing. Downstream that is the whole
+# numeric pipeline — `concepts[...].numbers` stays `{}`, `field._sync_world` never calls
+# `universe.observe`, `universe.state` stays empty, and every counterfactual over a variable she
+# was told about in Hinglish answers "no usable arrow leaves the intervened variables". The
+# comment above this block records that exact failure being fixed once for English; it was left
+# reproducible verbatim for the language the Master actually writes in.
 _MEASURE_SUBJECT = re.compile(
     r"^(?P<s>.+?)\s+(?:got|gets|has|had|received|used|took|drank|grew|grows|"
-    r"reached|measured|weighs|weighed|lasted)\b", re.IGNORECASE)
+    r"reached|measured|weighs|weighed|lasted"
+    # Hinglish. `mila/mili/mile` (was given), `liya/li` (took), `piya` (drank),
+    # `badha/badhi/badhe` (grew), `pahuncha` (reached), `hai/tha/thi` (is/was — the plain copula,
+    # which is how a quantity is most often simply stated).
+    r")\b", re.IGNORECASE)
+
+# The same sentence in Hinglish word order, which is the reason this is a second pattern rather
+# than more alternatives in the first.
+#
+# English puts the verb between the subject and the quantity — "the plant GREW 20 cm" — so
+# "everything before the verb" is the subject. Hindi is verb-final: "paudhe ko 2 litre paani
+# MILA" puts it last, and the same rule then swallows the quantity into the subject. Measured
+# with the verbs merely added to the list above: subject `"paudhe ko 2 litre paani"`, which is
+# not an entity, will never match the same plant twice, and quietly makes every Hinglish
+# measurement its own single-observation variable that no coefficient can ever be fitted to.
+#
+# So the subject is taken as what precedes the first digit, with the agent/dative postposition
+# trimmed, and the verb is required at the end where Hinglish actually puts it.
+#
+# A threshold is not a measurement, and in Hinglish the two are one word apart. "pani 100 degree
+# PAR ubalta hai" is a standing law about water; "paani 3 litre hai" is an observation of some
+# particular water. Both are verb-final, both end in a copula, and both carry a number — so the
+# SOV pattern below matches the law too, and would file "the temperature at which water boils"
+# as "the temperature water was measured at". The threshold pattern in `_SEED_PATTERNS` already
+# reads these correctly and keeps the number; `_extract_measurements` runs first, so it has to
+# stand aside rather than win.
+#
+# The discriminator is the locative: a threshold states a value the process happens *at*, and
+# says so with `par`/`pe`/`पर` or English "at". A measurement never does.
+_THRESHOLD = re.compile(
+    r"-?\d+(?:\.\d+)?\s*(?:degrees?|°\s*c|celsius|डिग्री)?\s*(?:par|pe|pr|पर)\s+\S"
+    r"|\b(?:boils|melts|freezes|evaporates|condenses)\s+at\s+-?\d",
+    re.IGNORECASE)
+
+_MEASURE_SUBJECT_SOV = re.compile(
+    r"^(?P<s>[^\d]+?)\s*(?:ko|ne|ka|ki|ke|को|ने|का|की|के)?\s*(?=-?\d)"
+    r".*\b(?:mila|mili|mile|liya|li|liye|piya|pi|badha|badhi|badhe|"
+    r"pahuncha|pahunchi|tola|napa|hai|hain|tha|thi|the|"
+    r"मिला|मिली|मिले|लिया|पिया|बढ़ा|बढ़ी|पहुँचा|है|हैं|था|थी)\s*$",
+    re.IGNORECASE)
 
 _WORD = re.compile(r"[a-z]+")
 
@@ -383,6 +472,11 @@ _MEASURE_VERBS: Dict[str, str] = {
     "lasted": "duration", "reached": "",
     "got": "", "gets": "", "has": "", "had": "", "received": "", "used": "",
     "took": "", "drank": "", "measured": "",
+    # Hinglish. Empty value means "the verb names no variable of its own" — the noun or the unit
+    # in the sentence does — which is the right reading for every receiving/possessing verb here.
+    "mila": "", "mili": "", "mile": "", "liya": "", "li": "", "liye": "",
+    "piya": "", "pi": "", "hai": "", "hain": "", "tha": "", "thi": "", "the": "",
+    "pahuncha": "", "pahunchi": "", "tola": "mass", "napa": "",
 }
 
 # The unit's own dimension, used only when neither a noun nor a governing verb named the
@@ -416,6 +510,16 @@ _ASK_ANYWHERE = re.compile(
     r"|\btell\s+me\b|\bdo\s+you\s+know\b)",
     re.IGNORECASE)
 
+# A reserved marker for "ask this relation backwards", not a predicate anything ever stores.
+#
+# "What causes heat?" and "what does fire cause?" are the same edge read from opposite ends, and
+# an edge is only stored once — under its subject. Rather than duplicate every causal fact in
+# reverse (which would double the store and make contradiction detection lie), the question table
+# tags the inverse direction with this marker and `answer` scans by object instead. The `<-`
+# prefix cannot collide with a real predicate because `_norm_relation` strips punctuation, so no
+# sentence can ever normalise to this string.
+_CAUSE_OF = "<-causes"
+
 # Question forms -> the predicate they are asking about. Same reasoning: a floor, not a ceiling.
 #
 # Ordering is load-bearing. A form that names BOTH a subject and a property ("Ravi ka naam kya
@@ -433,8 +537,41 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhere\s+does\s+(?P<s>.+?)\s+work", "works_at"),
     (r"\bwhere\s+is\s+(?P<s>.+?)\??$", "located_in"),
     (r"\bwho\s+is\s+(?P<s>.+?)\??$", "is_a"),
+
+    # --- Causal questions, English. Ahead of the generic "what is X" on purpose ------------- #
+    #
+    # This block closes a measured read/write asymmetry, and the asymmetry is the whole point.
+    # The statement side has FIVE ways to write ``causes`` — the English rule at line 206, the
+    # two Hinglish process rules below it, and `_extract_causal` for "X because Y". The question
+    # side had NONE: no pattern in this table produced the predicate ``causes`` at all. So
+    # "aag se garmi hoti hai" stored the key ``("aag", "causes")`` correctly, and every way of
+    # asking for it back — "aag se kya hota hai", "what does fire cause" — fell through
+    # `_read_question` with an empty predicate, took the `_ask_graph` branch, and came back
+    # UNKNOWN. `_lookup` was never called; the fact was reachable only by iterating `facts`
+    # directly. A relation she can be told and can never be asked is not a relation she has.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:cause|causes|lead\s+to|leads\s+to|produce|produces)\b",
+     "causes"),
+    (r"\bwhat\s+(?:happens|results?)\s+(?:from|because\s+of|due\s+to|with)\s+(?P<s>.+?)\??$",
+     "causes"),
+    (r"\bwhat\s+is\s+(?:the\s+)?(?:effect|result|consequence)\s+of\s+(?P<s>.+?)\??$", "causes"),
+    # The inverse direction — asked about the EFFECT, wanting the cause. `_CAUSE_OF` is a
+    # reserved marker, not a stored predicate: nothing ever writes an edge called that. `answer`
+    # reads it as "scan `causes` edges by object instead of by subject" (see `_lookup_inverse`).
+    (r"\bwhy\s+does\s+(?P<s>.+?)\s+(?:happen|occur)\b", _CAUSE_OF),
+    (r"\bwhat\s+causes\s+(?P<s>.+?)\??$", _CAUSE_OF),
+    (r"\bwhat\s+is\s+(?:the\s+)?(?:cause|reason)\s+(?:of|for)\s+(?P<s>.+?)\??$", _CAUSE_OF),
+
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:do|own|like|know)", ""),
+    # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
+    # one pattern covers every relation the fold table knows a verb for rather than needing a
+    # line each. "need" was the absence that showed: `animal needs water` stored fine, and
+    # `what does an animal need` matched nothing, because the verb list here was four words long
+    # and had been extended once, for the relations that happened to exist at the time.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?P<p>do|own|like|know|need|needs|require|requires|"
+     r"produce|produces|increase|increases|decrease|decreases)\b", ""),
+    # "sparrow ko kya chahiye" — the same question, verb-final.
+    (r"^(?P<s>.+?)\s+(?:ko|को)\s+(?:kya|क्या)\s+"
+     r"(?P<p>chahiye|chaahiye|zaroorat|चाहिए|ज़रूरत)\b", ""),
 
     # --- Hinglish / Devanagari, wh-in-situ ---
     # "mera naam kya hai" / "मेरा नाम क्या है" — the Master's own property.
@@ -443,6 +580,13 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # "mera naam batao" / "मेरा नाम बताओ" — imperative ask, same fact.
     (r"^(?:mera|meri|mere|मेरा|मेरी|मेरे)\s+(?P<p>\S+)\s+"
      r"(?:batao|bataao|bata|bataiye|btao|batana|बताओ|बताइए|बता)", ""),
+    # "aag ka karan kya hai" — the cause OF a thing, which is the stored edge read backwards.
+    # Ahead of the generic "X ka <property> kya hai" directly below, which would otherwise match
+    # first and read `karan` as an ordinary property name. Measured with the two in the other
+    # order: "aag ka karan kya hai" answered `garmi` — what fire causes, offered as what causes
+    # fire. A wrong answer in the confident register is worse than the silence it replaced.
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?:karan|kaaran|wajah|vajah|कारण|वजह)\s+"
+     r"(?:kya|क्या)\s*(?:hai|hain|है|हैं)?\s*$", _CAUSE_OF),
     # "Ravi ka naam kya hai" — someone else's property, subject and property both named.
     (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?P<p>\S+)\s+"
      r"(?:kya|क्या)\s*(?:hai|hain|h|है|हैं)?\s*$", ""),
@@ -456,6 +600,30 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:rehta|rehti|rahta|rahti|रहता|रहती)",
      "located_in"),
     (r"^(?P<s>.+?)\s+(?:kahan|kahaan|कहाँ|कहां)\s+(?:hai|है)", "located_in"),
+    # --- Causal questions, Hinglish / Devanagari ---------------------------------------------- #
+    #
+    # The mirror of the process patterns that WRITE these edges. "aag se garmi hoti hai" is
+    # stored by the ablative-`se` rule; "aag se kya hota hai" is the same sentence with the
+    # object replaced by the wh-word, and it has to reach the same key. The verb list is kept
+    # deliberately in step with that rule's — a process verb she can be told in is one she must
+    # be answerable in.
+    #
+    # Ahead of the generic `kya` catch-all below, which anchors the copula straight after the
+    # wh-word and therefore cannot match these at all ("kya HOTA hai", not "kya hai").
+    (r"^(?P<s>.+?)\s+(?:se|से)\s+(?:kya|क्या)\s+"
+     r"(?:" + _PROCESS_VERBS + r")"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
+    # "aag kya karti hai" — the same question with the cause as an agent rather than an ablative.
+    (r"^(?P<s>.+?)\s+(?:kya|क्या)\s+(?:karta|karti|karte|करता|करती)"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", "causes"),
+    # The inverse: named the effect, wants the cause. "garmi kyun hoti hai" / "garmi kaise hoti
+    # hai" / "garmi ka karan kya hai".
+    (r"^(?P<s>.+?)\s+(?:kyun|kyon|kaise|क्यों|कैसे)\s+"
+     r"(?:" + _PROCESS_VERBS + r")"
+     r"\s*(?:hai|hain|है|हैं)?\s*$", _CAUSE_OF),
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?:karan|kaaran|wajah|vajah|कारण|वजह)\s+"
+     r"(?:kya|क्या)\s*(?:hai|hain|है|हैं)?\s*$", _CAUSE_OF),
+
     # "Ravi kaun hai" / "Ravi kya hai" — the generic ask, deliberately last of the Hinglish set.
     (r"^(?P<s>.+?)\s+(?:kaun|कौन)\s*(?:hai|hain|है|हैं)?\s*$", "is_a"),
     (r"^(?P<s>.+?)\s+(?:kya|क्या)\s*(?:hai|hain|है|हैं)?\s*$", "is_a"),
@@ -740,11 +908,26 @@ class Grounder:
         pairs = _measurements(text)
         if not pairs:
             return out
-        head = _MEASURE_SUBJECT.match(_clean(text))
+        cleaned = _clean(text)
+        # A standing law states the value its process turns on; it is not a reading taken of
+        # anything. `_SEED_PATTERNS` has a threshold rule that keeps both the subject and the
+        # number, and this extractor runs before the pattern loop — so the only way that rule
+        # can be reached is for this one to decline.
+        if _THRESHOLD.search(cleaned):
+            return out
+        # SVO first, then the verb-final reading. Order matters only for a sentence both could
+        # claim, and there the English one is right: it anchors on a verb it has actually
+        # identified, whereas the SOV pattern anchors on "ends in a copula", which "the plant has
+        # 3 litres" also does.
+        head = _MEASURE_SUBJECT.match(cleaned) or _MEASURE_SUBJECT_SOV.match(cleaned)
         if head is None:
             return out
         subject = self.resolve(head.group("s"))
-        if not subject:
+        # A subject carrying a digit is an over-capture, not an entity — the signature of the
+        # word-order bug this pair of patterns exists to avoid. Refusing here means a sentence
+        # neither reading parsed cleanly contributes nothing, rather than contributing a variable
+        # named after its own measurement that nothing will ever match again.
+        if not subject or any(c.isdigit() for c in subject):
             return out
         for name, value in pairs:
             out.append(GroundedTriple(
@@ -972,18 +1155,27 @@ class Grounder:
             if not predicate:
                 return self._ask_graph(question, out)
 
-            found = self._lookup(subject, predicate)
+            # An inverse question reads the same edges from the far end; everything downstream —
+            # corroboration, the tri-state, the `why` line — is identical, because it is the same
+            # evidence. Only the direction of the scan and which end becomes the answer differ.
+            inverse = predicate == _CAUSE_OF
+            found = (self._lookup_inverse(subject, "causes") if inverse
+                     else self._lookup(subject, predicate))
             if not found:
                 # The graph may know it even when the local mirror does not (it survives restarts).
                 return self._ask_graph(question, out)
 
             best = max(found, key=lambda t: t.confidence)
             out.triples = found
-            out.text = best.object
+            out.text = best.subject if inverse else best.object
             out.confidence = best.confidence
             # Corroboration is what separates believing from knowing: one source that could be
-            # wrong is a belief however confident it sounds.
-            corroborated = len({t.source for t in found if t.object == best.object}) > 1
+            # wrong is a belief however confident it sounds. Agreement is counted on whichever end
+            # is being *answered with* — on an inverse question two records naming the same cause
+            # corroborate each other even where the effects they name differ in wording.
+            agreed = out.text
+            corroborated = len({t.source for t in found
+                                if (t.subject if inverse else t.object) == agreed}) > 1
             # A contested claim is never KNOWN, however confident the surviving side is: something
             # in her own record disagrees with it, and stating that as fact is exactly the move
             # this tri-state exists to prevent.
@@ -1001,6 +1193,26 @@ class Grounder:
     def _lookup(self, subject: str, predicate: str) -> List[GroundedTriple]:
         """Live facts only. A superseded belief stays on record but is never answered with."""
         return [t for t in self.facts.get((subject.lower(), predicate), []) if not t.superseded]
+
+    def _lookup_inverse(self, obj: str, predicate: str) -> List[GroundedTriple]:
+        """The same edges read backwards: everything that ``predicate``\\ s *into* ``obj``.
+
+        A linear scan, deliberately. The forward index exists because the overwhelming majority of
+        questions name a subject; building and maintaining a second index for the minority that
+        name an object would double the write cost of every fact to save a walk over a store that
+        is bounded by what one conversation could state. If that ever stops being true the fix is
+        an index, not a cache — a stale reverse index would answer with facts already superseded.
+        """
+        low = str(obj or "").strip().lower()
+        if not low:
+            return []
+        out: List[GroundedTriple] = []
+        for (_subject, stored), triples in self.facts.items():
+            if stored != predicate:
+                continue
+            out.extend(t for t in triples
+                       if not t.superseded and t.object.strip().lower() == low)
+        return out
 
     def history(self, subject: str, predicate: str) -> List[GroundedTriple]:
         """Everything ever believed about this pair, superseded entries included, oldest first."""
@@ -1240,6 +1452,22 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "job": "works_at", "work": "works_at", "works": "works_at", "employer": "works_at",
     "owns": "owns", "own": "owns", "has": "owns",
     "kind": "is_a", "type": "is_a",
+    # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
+    # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —
+    # so without this fold the fact is written under a key no question ever forms. Same class of
+    # asymmetry as a relation with no question form at all, one layer further down and harder to
+    # see, because here both halves work and simply disagree about the name.
+    "needs": "requires", "need": "requires", "requires": "requires", "require": "requires",
+    "chahiye": "requires", "zaroorat": "requires", "चाहिए": "requires", "ज़रूरत": "requires",
+    # Only the FORWARD-facing words fold to `causes`. "effect of X" and "X ka asar" both ask what
+    # X leads to, which is the edge as stored. The words for the other direction — "cause",
+    # "karan", "wajah" — are deliberately absent: folding them here would send "aag ka karan kya
+    # hai" (what causes fire) to a forward lookup on `(aag, causes)` and answer with what fire
+    # causes, which is not merely unhelpful but backwards. Those forms are read by the
+    # `_CAUSE_OF` question patterns instead, which is the only place the direction is visible.
+    "effect": "causes", "effects": "causes", "result": "causes", "asar": "causes",
+    "increase": "increases", "raises": "increases", "badhata": "increases",
+    "decrease": "decreases", "reduces": "decreases", "ghatata": "decreases",
     # The same relations as the Master actually writes them. A fold table that only speaks one
     # language means a fact stored in English is unreachable from the question asked in Hinglish
     # — which is precisely the gap this list exists to close, applied inconsistently.

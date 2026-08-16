@@ -26,6 +26,27 @@ import argparse
 import sys
 
 
+def _run_intelligence(args: argparse.Namespace) -> int:
+    """The six-stage learning curve.
+
+    Exits non-zero only when the **control** stage fails. The other five are measurements, not
+    assertions: a low transfer score is a fact about where she currently is, and turning it into
+    a build failure would make the honest thing to do about a weak faculty be to stop measuring
+    it. Memorisation is different — below half it means the harness is broken, and a broken
+    harness reporting five more numbers is worse than reporting none.
+    """
+    from nyxara.eval.intelligence import run_intelligence_benchmark
+    report = run_intelligence_benchmark(seed=args.seed, width=args.width,
+                                        only=tuple(args.stage or ()))
+    print(report.render())
+    if args.save:
+        import json
+        from pathlib import Path
+        Path(args.save).write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        print(f"\nsaved to {args.save}")
+    return 0 if report.sound else 1
+
+
 def _run_safety(args: argparse.Namespace) -> int:
     from nyxara.eval.suites import build_default_suite
     report = build_default_suite().run(category=args.category)
@@ -295,8 +316,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--category", default=None, help="run only one category")
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")
+    parser.add_argument("--intelligence", action="store_true",
+                        help="run the six-stage learning curve (eval/intelligence.py): "
+                             "memorization -> generalization -> recombination -> causal "
+                             "prediction -> self-correction -> transfer. Every stage is scored "
+                             "on items the brain was never taught, on generated vocabulary, "
+                             "with a fresh brain per stage")
+    parser.add_argument("--width", type=int, default=6,
+                        help="intelligence: items per stage. Resolution, not difficulty")
+    parser.add_argument("--stage", action="append", default=None,
+                        help="intelligence: run only this stage (repeatable)")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
+    if args.intelligence:
+        return _run_intelligence(args)
     if args.general:
         from nyxara.eval.general_novel import run_general
         report = run_general()
