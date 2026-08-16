@@ -746,7 +746,12 @@ _ASK_ANYWHERE = re.compile(
     r"(?:\b(?:kya|kaun|kahan|kahaan|kab|kyun|kyon|kaise|kitna|kitne|kaunsa|kaunsi)\b"
     r"|[क][्]?[य][ा]|कौन|कहाँ|कहां|कब|क्यों|कैसे|कितना"
     r"|\b(?:batao|bataao|bata|bataiye|btao|batana)\b|बताओ|बताइए|बता"
-    r"|\btell\s+me\b|\bdo\s+you\s+know\b)",
+    r"|\btell\s+me\b|\bdo\s+you\s+know\b"
+    # Imperative asks that name no wh-word. This list already holds "batao" and "tell me" for
+    # exactly this reason — a request for a fact is a question by function whatever its mood —
+    # and these three were simply missing, so "explain overfitting" was read as a statement and
+    # sent to the extractor to learn a relation from.
+    r"|^\s*(?:explain|define|describe)\b)",
     re.IGNORECASE)
 
 # A reserved marker for "ask this relation backwards", not a predicate anything ever stores.

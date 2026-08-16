@@ -241,3 +241,24 @@ def test_a_real_question_is_still_a_question():
     brain = NJPBrain()
     for text in ("what is my name", "mera naam kya hai", "tell me my name", "When does rain fall?"):
         assert brain.think(text).percept.grounding.is_question, text
+
+
+# --------------------------------------------------------------------------- #
+# Imperative asks
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("ask", ["Explain overfitting", "Define overfitting",
+                                 "Describe overfitting"])
+def test_an_imperative_ask_is_a_question(ask):
+    """`_ASK_ANYWHERE` already held "batao" and "tell me" for exactly this reason."""
+    brain = NJPBrain()
+    brain.think("Overfitting occurs when a model is trained too much on the training data.")
+    thought = brain.think(ask)
+    assert thought.percept.grounding.is_question, ask
+    assert "trained too much" in thought.answer
+
+
+def test_the_word_explain_inside_a_statement_is_not_an_ask():
+    """Anchored at the head — a request begins with the imperative, a statement does not."""
+    brain = NJPBrain()
+    thought = brain.think("A good teacher will explain the topic twice.")
+    assert not thought.percept.grounding.is_question

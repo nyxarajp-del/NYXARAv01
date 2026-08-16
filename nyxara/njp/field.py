@@ -730,9 +730,27 @@ class RecursiveCognitiveField:
         if self.designer is not None:
             stats = self.designer.stats()
             if stats["hypotheses"] and not stats["run"]:
+                # Why it cannot resolve them matters, and the two cases are not the same problem.
+                # An experiment asks "would the effect still happen without the cause", and that
+                # is settled by counting occurrences where it did. A brain taught from text has
+                # been told laws and has observed nothing, so there is no record to count and the
+                # experiment is unsettleable rather than neglected — testimony can state a
+                # relation and cannot supply a counterexample to it.
+                observed = 0
+                try:
+                    # Reached through the universe, which already holds the causal record; the
+                    # field has no world reference of its own and does not need one for this.
+                    world = getattr(self.universe, "world", None)
+                    observed = len(getattr(world, "_counts", None) or {})
+                except Exception:  # noqa: BLE001
+                    observed = 0
+                why = ("experiments are designed but never resolved"
+                       if observed else
+                       "experiments cannot be settled: nothing has been observed, only stated — "
+                       "a law supplies no counterexample to itself")
                 found.append(Bottleneck(
-                    organ="designer", metric="run", value=0.0, severity=0.7,
-                    why="experiments are designed but never resolved"))
+                    organ="designer", metric="run", value=0.0,
+                    severity=0.7 if observed else 0.4, why=why))
         if self.meta is not None:
             rate = self.meta.stats().get("assertable_rate")
             if rate is not None and rate < 0.6:
