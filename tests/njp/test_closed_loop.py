@@ -394,6 +394,70 @@ def test_the_ladder_strategy_honours_the_ladder_s_own_refusal_to_commit():
     assert brain._strategy_ladder("why did the flood happen", {}) is None
 
 
+# --------------------------------------------------------------------------- #
+# The shadow model — ignorance as structure rather than as a sentence
+# --------------------------------------------------------------------------- #
+def _puzzled_brain() -> NJPBrain:
+    brain = NJPBrain()
+    for line in ("Ravi lives in Pune", "Ravi works at Infosys",
+                 "Sara lives in Delhi", "Sara works at TCS", "Amit lives in Mumbai",
+                 "what is a tachyon", "tell me about the tachyon", "what does a tachyon do"):
+        brain.think(line)
+    brain.curiosity.wonder()
+    return brain
+
+
+def test_a_word_she_keeps_meeting_and_cannot_place_becomes_a_gap():
+    # The grounder computed this every turn since it was written; the only consumer rendered it
+    # as a sentence on turns where she had nothing else to say, so on every turn she *did*
+    # answer it was built and dropped.
+    brain = _puzzled_brain()
+    gaps = brain.shadow()["by_gap"]
+    assert gaps.get("ungrounded_word", 0) >= 1, brain.shadow()
+
+
+def test_the_relation_in_a_sentence_that_grounded_is_not_a_gap():
+    # "Ravi lives in Pune" leaves "lives" unmatched as an entity because it is the relation, not
+    # a thing she is missing. Counting it would fill the list with "what is lives?".
+    brain = _puzzled_brain()
+    words = {w for w, _n in brain.grounder.persistent_unknowns(min_times=1, limit=32)}
+    assert "tachyon" in words, words
+    assert "lives" not in words and "works" not in words, words
+
+
+def test_a_belief_held_past_its_evidence_becomes_something_to_investigate():
+    # `audit` is the richest ignorance structure in the package and it was 100% write-only — its
+    # sole caller was its own stats(), which threw the rows away and kept the count.
+    brain = _puzzled_brain()
+    shadow = brain.shadow()
+    assert shadow["by_gap"].get("overconfident", 0) >= 1, shadow["by_gap"]
+
+    flagged = [g for g in shadow["gaps"] if g["gap"] == "overconfident"]
+    # It has to be worth acting on. A belief resting entirely on testimony is uncertain to the
+    # full height of its confidence, not to the difference of two numbers that happen to agree.
+    assert any(g["value"] > 0.0 for g in flagged), flagged
+
+
+def test_ignorance_about_the_world_and_about_herself_stay_separate():
+    # Different repairs. "I have no node for tachyon" is something to go and find out; "I am bad
+    # at recall" is not, and putting it in a queue of things to look up would be a category error.
+    brain = _puzzled_brain()
+    shadow = brain.shadow()
+    assert "gaps" in shadow and "faculties" in shadow, shadow.keys()
+    assert all(g["gap"] != "weak_faculty" for g in shadow["gaps"]), shadow["gaps"]
+    # `certainty` — how much she knows about how good she is — had no reader anywhere.
+    for record in shadow["faculties"]["measured"].values():
+        assert "certainty" in record, record
+
+
+def test_the_shadow_is_ranked_by_what_answering_it_would_buy():
+    # Curiosity has already priced every question by expected information gain against cost.
+    # Re-ranking here would be a second opinion with no new information behind it.
+    brain = _puzzled_brain()
+    values = [g["value"] for g in brain.shadow()["gaps"]]
+    assert values == sorted(values, reverse=True), values
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.

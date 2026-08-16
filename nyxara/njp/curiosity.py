@@ -45,6 +45,12 @@ class Gap:
     MISSING_RELATION = "missing_relation"   # peers have it, this one does not
     REPEATED_FAILURE = "repeated_failure"   # wrong the same way, repeatedly
     THIN_COVERAGE = "thin_coverage"     # too little data to predict here at all
+    # Ignorance the rest of the brain was already computing and throwing away. Each of these was
+    # measured every turn by an organ that had no consumer: the word that reached no entity, the
+    # belief held past its evidence, the instruction too vague to act on. They were rendered as
+    # strings or counted and dropped, so nothing could ever act on them.
+    UNGROUNDED_WORD = "ungrounded_word"     # a word she has no entity for at all
+    OVERCONFIDENT = "overconfident"     # believed harder than the evidence earns
 
 
 @dataclass
@@ -127,7 +133,8 @@ class Curiosity:
         try:
             self.passes += 1
             for question in (self._from_unknowns() + self._from_missing_relations()
-                             + self._from_failures() + self._from_thin_coverage()):
+                             + self._from_failures() + self._from_thin_coverage()
+                             + self._from_ungrounded() + self._from_audit()):
                 if self._raise(question) is question:
                     raised.append(question)
             self._appraise()
@@ -220,6 +227,76 @@ class Curiosity:
                     text=f"why does my {kind.replace('_', ' ')} keep failing?",
                     gap=Gap.REPEATED_FAILURE, subject=kind, predicate="failure_cause",
                     uncertainty=min(1.0, count / 10.0), stakes=0.7, cost=_COST_GATHER))
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def _from_ungrounded(self) -> List[Question]:
+        """Words the Master keeps using that still reach no entity.
+
+        The grounder has computed this on every single turn since it was written and the only
+        consumer rendered it as a sentence on turns where she had nothing else to say — so on
+        every turn she *did* answer, the list was built and dropped. A word he has used repeatedly
+        and that she still has nothing for is the cheapest possible gap to name, and she was
+        naming it to nobody.
+
+        Requires more than one sighting, on the same principle as ``_from_failures``: once is how
+        conversation works, repeatedly is a hole.
+        """
+        out: List[Question] = []
+        try:
+            grounder = getattr(self.brain, "grounder", None)
+            if grounder is None or not hasattr(grounder, "persistent_unknowns"):
+                return out
+            for word, times in grounder.persistent_unknowns(min_times=2, limit=4):
+                out.append(Question(
+                    text=f"what is {word}?", gap=Gap.UNGROUNDED_WORD, subject=word,
+                    predicate="is_a",
+                    # More sightings, more certain it matters — and it stays a question about a
+                    # word rather than about the world, so the stakes are modest.
+                    uncertainty=min(1.0, 0.4 + 0.15 * times), stakes=0.35, cost=_COST_ASK))
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def _from_audit(self) -> List[Question]:
+        """Beliefs she is holding harder than her evidence earns.
+
+        :meth:`~nyxara.njp.beliefs.BeliefLedger.audit` is the richest ignorance structure in the
+        package — it names, per belief, whether confidence exceeds evidence, whether any hard
+        evidence exists, and whether a falsifier was ever stated — and it was one hundred percent
+        write-only: its sole caller was its own ``stats()``, which threw the rows away and kept
+        the count.
+
+        This is a different kind of not-knowing from the others. The rest are things she has never
+        met; this is something she believes and should not, which is worse, because it will be
+        acted on. Cheap to investigate rather than expensive to ask, because the repair is to go
+        and find evidence, not to make the Master vouch for it.
+        """
+        out: List[Question] = []
+        try:
+            beliefs = getattr(self.brain, "beliefs", None)
+            if beliefs is None:
+                return out
+            for row in (beliefs.audit() or [])[:4]:
+                claim = str(row.get("claim", ""))[:80]
+                problems = list(row.get("problems", []) or [])
+                if not claim or not problems:
+                    continue
+                confidence = float(row.get("confidence", 0.5))
+                # How much of this belief is at risk. Where confidence has simply outrun the
+                # evidence, the excess is what is unearned. Where there is no *hard* evidence at
+                # all, the whole of it is — soft support never establishes anything, which is the
+                # ledger's own rule, so a belief resting entirely on being told is uncertain to
+                # the full height of its confidence rather than to the difference of two numbers
+                # that happen to agree.
+                unearned = max(0.0, confidence - float(row.get("earned", 0.0)))
+                if "no hard evidence" in problems:
+                    unearned = max(unearned, confidence)
+                out.append(Question(
+                    text=f"what would settle whether {claim} is true? ({problems[0]})",
+                    gap=Gap.OVERCONFIDENT, subject=claim, predicate="evidence",
+                    uncertainty=min(1.0, unearned), stakes=0.6, cost=_COST_GATHER))
         except Exception:  # noqa: BLE001
             pass
         return out

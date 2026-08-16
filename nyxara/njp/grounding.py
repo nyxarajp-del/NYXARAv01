@@ -596,6 +596,10 @@ class Grounder:
         self.patterns_learned = 0
         self.patterns_pruned = 0
         self.llm_calls = 0
+        # How often each word has reached no entity. A running tally rather than a per-turn
+        # snapshot, because "he keeps saying this and I still have nothing for it" is a gap and
+        # "he mentioned it once" is not, and the snapshot could not tell them apart.
+        self._ungrounded_seen: Dict[str, int] = {}
 
     # ---- the one call ----------------------------------------------------- #
     def ground(self, text: str, *, intent: Any = None, deep: bool = False) -> GroundingResult:
@@ -620,7 +624,7 @@ class Grounder:
                     self.answered += 1
                 else:
                     self.unknown += 1
-                out.ungrounded = self._ungrounded(out.concepts)
+                out.ungrounded = self._ungrounded(out.concepts, tally=True)
                 return out
 
             triples = self._extract(out.text)
@@ -641,7 +645,7 @@ class Grounder:
             if out.triples:
                 self.grounded_turns += 1
             self._observe_concepts(out)
-            out.ungrounded = self._ungrounded(out.concepts)
+            out.ungrounded = self._ungrounded(out.concepts, tally=not out.triples)
             return out
         except Exception:  # noqa: BLE001 — a failed grounding never breaks a turn
             return out
@@ -1073,7 +1077,28 @@ class Grounder:
             pass
         return sorted(out)
 
-    def _ungrounded(self, concepts: Sequence[str]) -> List[str]:
+    def persistent_unknowns(self, *, min_times: int = 2, limit: int = 8) -> List[Tuple[str, int]]:
+        """Words that have reached no entity more than once, commonest first.
+
+        The per-turn ``ungrounded`` list is a snapshot and is overwritten every turn, so a word
+        the Master has used five times and a word he mentioned once in passing were
+        indistinguishable — and the only consumer rendered either as the same sentence. A tally
+        is what makes the difference legible, and it is the same discipline curiosity already
+        applies to failures: once is noise, repeatedly is a gap.
+        """
+        try:
+            # A word she uses as a *relation* is not a thing she is missing. "lives" and "works"
+            # never appear as entities because they are not entities, and asking "what is lives?"
+            # is the kind of question that makes a gap list unreadable — the signal is the noun
+            # she has no node for, not the verb she has been parsing correctly all along.
+            rows = [(word, n) for word, n in self._ungrounded_seen.items()
+                    if n >= int(min_times)]
+            rows.sort(key=lambda kv: (-kv[1], kv[0]))
+            return rows[: max(0, int(limit))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _ungrounded(self, concepts: Sequence[str], *, tally: bool = False) -> List[str]:
         """Concepts that reach no entity — the words that are still just words to her."""
         out: List[str] = []
         try:
@@ -1084,6 +1109,18 @@ class Grounder:
             for concept in concepts:
                 if concept.lower() not in known:
                     out.append(concept)
+                    # Only a sentence that grounded *nothing* contributes to the tally. A
+                    # sentence that produced a triple has explained its own words: "Ravi lives in
+                    # Pune" leaves "lives" unmatched as an entity because it is the relation, not
+                    # a thing she is missing, and "what is lives?" is exactly the question that
+                    # makes a gap list unreadable.
+                    if tally:
+                        word = concept.lower()
+                        self._ungrounded_seen[word] = self._ungrounded_seen.get(word, 0) + 1
+            # A word that has since been grounded stops being a gap, so its tally goes rather
+            # than lingering as a question she has already answered.
+            for seen in [w for w in self._ungrounded_seen if w in known]:
+                self._ungrounded_seen.pop(seen, None)
         except Exception:  # noqa: BLE001
             pass
         return out[:16]

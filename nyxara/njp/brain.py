@@ -897,6 +897,58 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def shadow(self) -> Dict[str, Any]:
+        """What she does not know, as one structure instead of five nobody joined.
+
+        Ignorance was tracked in five places and read in none of them usefully. The grounder
+        computed the words that reached no entity and the only consumer rendered them as a
+        sentence on turns where she had nothing else to say. The belief ledger's ``audit`` — which
+        names, per belief, whether confidence exceeds evidence and whether a falsifier was ever
+        stated — was called once, by its own ``stats``, which kept the count and dropped the rows.
+        ``ThoughtState``'s assumptions were never written at runtime at all. Each store was
+        honest; none of them was answerable.
+
+        Two axes, kept apart because they call for different repairs. **Gaps** are propositions
+        she lacks and curiosity already prices them by expected information gain against what
+        they cost, so this reads that pricing rather than inventing a second one. **Faculties** is
+        the other kind of not-knowing — which of her own organs is untrustworthy — and it stays
+        separate because it is about her, not about the world, and merging the two would put
+        "I am bad at recall" in a queue of things to go and look up.
+
+        Read-only. Nothing here decides anything; it reports what the organs already hold, which
+        is the whole point — an aggregator that also acted would become a sixth store.
+        """
+        out: Dict[str, Any] = {"gaps": [], "by_gap": {}, "faculties": {}, "open": 0}
+        try:
+            if self.curiosity is not None:
+                questions = list(self.curiosity.open_questions())
+                # Most valuable first: curiosity has already priced each one by what answering it
+                # buys against what it costs, and re-ranking here would be a second opinion with
+                # no new information behind it.
+                questions.sort(key=lambda q: float(getattr(q, "value", 0.0)), reverse=True)
+                out["open"] = len(questions)
+                out["gaps"] = [q.to_dict() for q in questions[:12]]
+                for question in questions:
+                    kind = str(getattr(question, "gap", "") or "")
+                    out["by_gap"][kind] = out["by_gap"].get(kind, 0) + 1
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.self_model is not None:
+                weakest = self.self_model.weakest()
+                out["faculties"] = {
+                    # `certainty` had no reader anywhere, and it is the one calibrated
+                    # "how much do I know about how good I am" number in the package.
+                    "measured": {name: {"level": round(c.level, 4),
+                                        "certainty": round(c.certainty, 4),
+                                        "weak": c.weak}
+                                 for name, c in self.self_model.capabilities.items()},
+                    "weakest": weakest.name if weakest is not None else "",
+                }
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     def report_card(self) -> Dict[str, Any]:
         """Which of the nine stages she has actually reached, measured, not claimed."""
         try:
