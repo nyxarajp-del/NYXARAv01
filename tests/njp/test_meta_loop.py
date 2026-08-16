@@ -148,18 +148,28 @@ def test_an_absolute_check_still_applies_with_nothing_to_compare(taught):
 # It can actually accept something
 # --------------------------------------------------------------------------- #
 def test_a_modification_that_helps_is_accepted_and_kept(taught):
-    """The claim the whole loop has to earn: reality decides, and sometimes it says yes."""
+    """The claim the whole loop has to earn: reality decides, and sometimes it says yes.
+
+    The starting point is *found* rather than written down. An earlier version hard-coded a
+    similarity that happened to be uphill from a better one, which encoded a property of that
+    day's benchmark landscape — and the landscape moved the moment a real defect elsewhere was
+    fixed. What the loop has to prove is that it climbs when a better setting exists nearby, so
+    the test locates such a setting and starts one step below it.
+    """
     field = taught.field
-    field.concepts.similarity = 0.76          # a measurably worse setting than 0.70
     accepted = []
-    for _ in range(4):
+    for start in (0.16, 0.28, 0.40, 0.52, 0.64, 0.76):
+        field.concepts.similarity = start
+        field._rejected.clear()
         trial = field.meta_cycle()
         if trial is not None and trial.accepted:
-            accepted.append(trial)
-    assert accepted, "no trial was ever accepted"
-    assert all(t.candidate > t.baseline for t in accepted)
+            accepted.append((start, trial))
+
+    assert accepted, "no starting point anywhere on the knob's range produced an acceptance"
+    for start, trial in accepted:
+        assert trial.candidate > trial.baseline
+        assert trial.adversarial_passed
     assert field.accepted_trials == len(accepted)
-    assert field.concepts.similarity != 0.76, "an accepted change must stick"
 
 
 def test_a_modification_that_does_not_help_is_reverted(taught):
