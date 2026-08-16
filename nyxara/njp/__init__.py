@@ -195,6 +195,17 @@ from nyxara.njp.ledger import ErrorMemory, ErrorRecord, Generation, Ledger
 from nyxara.njp.manifold import Manifold, Prediction, Snapshot
 from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
 from nyxara.njp.agency import Plan as ActionPlan
+from nyxara.njp.calculate import Calculator, Evaluation
+from nyxara.njp.core import (
+    CognitiveLearningCore,
+    CoreReport,
+    Derivation,
+    RepresentReport,
+    ReviseReport,
+    Schema,
+    TestReport,
+    Transitivity,
+)
 from nyxara.njp.curriculum import STAGES, Curriculum, Report, Stage, StageResult
 from nyxara.njp.predictive import (
     Assumption,
@@ -252,6 +263,10 @@ __all__ = [
     "ThoughtState", "Assumption", "Explanation",
     "RecursiveCognitiveField", "CycleReport", "Diagnosis", "ErrorClass",
     "Bottleneck", "Modification", "Trial",
+    # NJP V.05 — arithmetic, and the loop that makes the organs add up to learning
+    "Calculator", "Evaluation",
+    "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
+    "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # truth is not relevance, and reasoning is not always what a turn calls for
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",

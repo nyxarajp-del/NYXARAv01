@@ -2388,6 +2388,20 @@ class NJPConfig(BaseModel):
     predictive_enabled: bool = True     # Stage A: the world-state sequence model
     agency_enabled: bool = True         # Stage G: goal -> plan -> action -> outcome
     curriculum_enabled: bool = True     # the nine-rung ladder and its gating
+    calculate_enabled: bool = True      # arithmetic evaluation (njp/calculate.py)
+    learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
+
+    # How much of the fact store the Core never induces a schema from, so that scoring one is a
+    # genuine generalisation check rather than a re-read of its own evidence. Split by a stable
+    # hash of the triple, so the same fact is in the same fold across restarts.
+    learner_holdout_share: float = Field(default=0.3, ge=0.05, le=0.8)
+    # How many relations a composed answer may chain. Each hop multiplies confidence by the
+    # predicate's learned transitivity, so this is a ceiling on cost, not on plausibility —
+    # a chain long enough to matter has usually priced itself out first.
+    learner_max_depth: int = Field(default=4, ge=2, le=8)
+    # Subjects a role needs before a schema may be induced over it. Two is the floor at which
+    # "these things have something in common" stops being a restatement of one observation.
+    learner_min_members: int = Field(default=2, ge=2, le=16)
 
     # How far back the world-state model looks. Order 3 first, backing off to 2, 1 and the
     # unconditional distribution — with sparse lived experience a long context almost never

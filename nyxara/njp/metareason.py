@@ -259,6 +259,21 @@ class ProblemClassifier:
             # question about the world rather than about her memory of it.
             scores[ProblemKind.EMPIRICAL] += 0.5
 
+        if ctx.get("derivable"):
+            # The Core can already work this out from facts she holds — supplied by the caller as
+            # a completed derivation, not as a guess that one might exist.
+            #
+            # This corrects a structural bias, not a wording one. `grounded is False` adds 0.5 to
+            # EMPIRICAL, so *every* lookup miss reads as "she does not know and could find out"
+            # — and derivation is the third option that framing has no room for: she may neither
+            # know it nor need to go and get it, because it follows from what she was already
+            # told. Measured: "what does sparrow need", with `sparrow is_a bird`, `bird is_a
+            # animal` and `animal requires water` all held, classified empirical 0.75 and was
+            # answered with a proposed *experiment*, while the three-step inheritance sat
+            # underived. Boosting FACTUAL past EMPIRICAL sends it to the strategy that reasons
+            # from the store rather than the one that plans a trip outside it.
+            scores[ProblemKind.FACTUAL] += 0.6
+
         if ctx.get("variable"):
             # An intervention she can actually carry out: the question named a variable she has
             # observed and a change she can size. That is a fact about what this question *is*,

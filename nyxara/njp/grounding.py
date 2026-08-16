@@ -238,6 +238,19 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+knows?\s+(?P<o>.+)$", "knows"),
     (r"^(?P<s>.+?)\s+is\s+(?:part\s+of|inside)\s+(?P<o>.+)$", "part_of"),
     (r"^(?P<s>.+?)\s+(?:causes?|leads?\s+to)\s+(?P<o>.+)$", "causes"),
+    # Monotone influence — the signed half of causation, and the shape most real knowledge about
+    # quantities actually has. "water increases growth" is not the same claim as "water causes
+    # growth": it says which *way* the arrow points, which is exactly what a counterfactual needs
+    # and what a bare `causes` edge cannot supply. Without these two relations the commonest
+    # sentence anyone writes about a quantity extracted nothing at all.
+    (r"^(?P<s>.+?)\s+(?:increases?|raises?|boosts?|improves?|badhata|badhati|badhata|"
+     r"बढ़ाता|बढ़ाती)\s+(?P<o>.+)$", "increases"),
+    (r"^(?P<s>.+?)\s+(?:decreases?|reduces?|lowers?|slows?|ghatata|ghatati|kam\s+karta|"
+     r"घटाता|घटाती)\s+(?P<o>.+)$", "decreases"),
+    # "zyada paani se zyada growth" / "more water more growth" — the comparative form of the
+    # same claim, which is how it is usually said out loud.
+    (r"^(?:more|zyada|ज़्यादा|अधिक)\s+(?P<s>.+?)\s+(?:se\s+|=\s*|,\s*|→\s*)?"
+     r"(?:more|zyada|ज़्यादा|अधिक)\s+(?P<o>.+)$", "increases"),
     # Verb-final statements — the mirror of the question gap, and the reason closing that gap
     # alone was not enough. Every pattern above assumes the English order "X <relation> is Y";
     # Hinglish and Hindi put the copula last, "X ka <relation> Y **hai**". So the Master could
@@ -549,7 +562,16 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhat\s+is\s+(?:the\s+)?(?:cause|reason)\s+(?:of|for)\s+(?P<s>.+?)\??$", _CAUSE_OF),
 
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
-    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:do|own|like|know)", ""),
+    # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
+    # one pattern covers every relation the fold table knows a verb for rather than needing a
+    # line each. "need" was the absence that showed: `animal needs water` stored fine, and
+    # `what does an animal need` matched nothing, because the verb list here was four words long
+    # and had been extended once, for the relations that happened to exist at the time.
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?P<p>do|own|like|know|need|needs|require|requires|"
+     r"produce|produces|increase|increases|decrease|decreases)\b", ""),
+    # "sparrow ko kya chahiye" — the same question, verb-final.
+    (r"^(?P<s>.+?)\s+(?:ko|को)\s+(?:kya|क्या)\s+"
+     r"(?P<p>chahiye|chaahiye|zaroorat|चाहिए|ज़रूरत)\b", ""),
 
     # --- Hinglish / Devanagari, wh-in-situ ---
     # "mera naam kya hai" / "मेरा नाम क्या है" — the Master's own property.
@@ -558,6 +580,13 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # "mera naam batao" / "मेरा नाम बताओ" — imperative ask, same fact.
     (r"^(?:mera|meri|mere|मेरा|मेरी|मेरे)\s+(?P<p>\S+)\s+"
      r"(?:batao|bataao|bata|bataiye|btao|batana|बताओ|बताइए|बता)", ""),
+    # "aag ka karan kya hai" — the cause OF a thing, which is the stored edge read backwards.
+    # Ahead of the generic "X ka <property> kya hai" directly below, which would otherwise match
+    # first and read `karan` as an ordinary property name. Measured with the two in the other
+    # order: "aag ka karan kya hai" answered `garmi` — what fire causes, offered as what causes
+    # fire. A wrong answer in the confident register is worse than the silence it replaced.
+    (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?:karan|kaaran|wajah|vajah|कारण|वजह)\s+"
+     r"(?:kya|क्या)\s*(?:hai|hain|है|हैं)?\s*$", _CAUSE_OF),
     # "Ravi ka naam kya hai" — someone else's property, subject and property both named.
     (r"^(?P<s>.+?)\s+(?:ka|ki|ke|का|की|के)\s+(?P<p>\S+)\s+"
      r"(?:kya|क्या)\s*(?:hai|hain|h|है|हैं)?\s*$", ""),
@@ -1423,6 +1452,22 @@ _PREDICATE_ALIASES: Dict[str, str] = {
     "job": "works_at", "work": "works_at", "works": "works_at", "employer": "works_at",
     "owns": "owns", "own": "owns", "has": "owns",
     "kind": "is_a", "type": "is_a",
+    # The relations a seed pattern renames on the way in. "animal needs water" is *stored* as
+    # `requires` by the pattern that reads it, and "what does an animal need" asks for `needs` —
+    # so without this fold the fact is written under a key no question ever forms. Same class of
+    # asymmetry as a relation with no question form at all, one layer further down and harder to
+    # see, because here both halves work and simply disagree about the name.
+    "needs": "requires", "need": "requires", "requires": "requires", "require": "requires",
+    "chahiye": "requires", "zaroorat": "requires", "चाहिए": "requires", "ज़रूरत": "requires",
+    # Only the FORWARD-facing words fold to `causes`. "effect of X" and "X ka asar" both ask what
+    # X leads to, which is the edge as stored. The words for the other direction — "cause",
+    # "karan", "wajah" — are deliberately absent: folding them here would send "aag ka karan kya
+    # hai" (what causes fire) to a forward lookup on `(aag, causes)` and answer with what fire
+    # causes, which is not merely unhelpful but backwards. Those forms are read by the
+    # `_CAUSE_OF` question patterns instead, which is the only place the direction is visible.
+    "effect": "causes", "effects": "causes", "result": "causes", "asar": "causes",
+    "increase": "increases", "raises": "increases", "badhata": "increases",
+    "decrease": "decreases", "reduces": "decreases", "ghatata": "decreases",
     # The same relations as the Master actually writes them. A fold table that only speaks one
     # language means a fact stored in English is unreachable from the question asked in Hinglish
     # — which is precisely the gap this list exists to close, applied inconsistently.
