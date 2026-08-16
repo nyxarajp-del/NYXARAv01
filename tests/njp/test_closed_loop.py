@@ -20,12 +20,14 @@ from nyxara.njp.grounding import _measurements
 # The session every test here teaches from: one entity, two variables, an exact 2× relation and
 # no noise. Exactness is deliberate — a fitted slope of 2.0 is a claim that can be checked to
 # 1e-6, where "roughly correlated" would pass on a coincidence.
+# Ordered so the last reading is the round one: an intervention is resolved against what was
+# most recently observed, so the tail of this tuple is what "halve the water" halves.
 _TAUGHT = (
-    "the plant got 10 litres of water and grew 20 cm",
-    "the plant got 5 litres of water and grew 10 cm",
     "the plant got 2 litres of water and grew 4 cm",
+    "the plant got 5 litres of water and grew 10 cm",
     "the plant got 8 litres of water and grew 16 cm",
     "the plant got 3 litres of water and grew 6 cm",
+    "the plant got 10 litres of water and grew 20 cm",
 )
 
 
@@ -95,3 +97,111 @@ def test_a_counterfactual_far_outside_the_observed_range_loses_confidence():
     near = brain.universe.what_if("plant.water", 4.0)
     far = brain.universe.what_if("plant.water", 500.0)
     assert far.confidence < near.confidence, (near.confidence, far.confidence)
+
+
+# --------------------------------------------------------------------------- #
+# Routing — the question has to reach the organ that can answer it
+# --------------------------------------------------------------------------- #
+def test_a_counterfactual_reads_as_a_causal_query_not_a_lookup():
+    # `CAUSAL_QUERY` is the only act whose pathways include SIMULATE, and nothing used to produce
+    # it for "what if": the `why` cue does not match the phrase and the `what is` cue requires a
+    # copula. So the one act that could reach the do-operator was unreachable by construction.
+    from nyxara.njp.relevance import SpeechAct, SpeechActReader
+
+    reader = SpeechActReader()
+    for question in ("what if I halve the water", "what happens if I remove the water",
+                     "agar main paani aadha kar doon"):
+        assert reader.read(question).kind == SpeechAct.CAUSAL_QUERY, question
+
+
+def test_an_intervention_resolves_to_the_variable_the_universe_actually_named():
+    # The universe names variables `entity.attribute`; a question says "the water". Reconciling
+    # them against observed variables rather than by guessing an entity is what stops her
+    # simulating confidently over a subject the Master never mentioned.
+    brain = _taught_brain()
+    assert brain._counterfactual_context("what if I halve the water") == {
+        "variable": "plant.water", "value": 5.0,          # half of the 10 last observed
+    }
+    assert brain._counterfactual_context("what if I halve the sunlight") == {}
+
+
+def test_an_intervention_whose_size_is_not_stated_is_declined():
+    # "reduce the water" names no magnitude. A factor she invented would come back through the
+    # do-operator carrying the same confidence as one the Master gave, and nothing downstream
+    # could tell them apart afterwards.
+    brain = _taught_brain()
+    assert brain._counterfactual_context("what if I reduce the water") == {}
+
+
+def test_what_if_halving_the_water_gets_a_real_number():
+    # The whole slice, end to end. Measured before it: the empty string, from the
+    # `if is_question: return ""` in _compose, with a working do-operator two calls away.
+    brain = _taught_brain()
+    answer = brain.think("what if I halve the water").answer
+    assert answer, "a counterfactual over an observed variable answered with nothing"
+    assert "plant.growth" in answer, answer
+    assert "10" in answer, answer                         # 20 → 10, the halved growth
+    assert "confidence" in answer.lower(), answer
+
+
+def test_a_counterfactual_that_changes_nothing_is_not_an_answer():
+    # Setting a variable to the value it already holds entails no consequence, and reporting the
+    # premise back as though it were a prediction is the counterfactual form of an echo.
+    brain = _taught_brain()
+    assert brain.think("what if the water were 10").answer == ""
+
+
+def test_the_answer_states_the_confidence_the_do_operator_earned():
+    # Not that a number is present, but that it *moves the right way*: a question inside the
+    # observed range must come back more confident than one reaching well past it. This is the
+    # assertion a template with a hard-coded confidence would fail.
+    brain = _taught_brain()
+    inside = brain.think("what if the water were 4").answer          # within the 2..10 observed
+    outside = brain.think("what if the water were 90").answer        # far beyond it
+    assert inside and outside, (inside, outside)
+
+    def _confidence(text: str) -> float:
+        return float(text.rsplit("confidence", 1)[1].strip(" )"))
+
+    assert _confidence(inside) > _confidence(outside), (inside, outside)
+
+
+def test_a_counterfactual_over_a_variable_never_observed_is_declined():
+    # The honest failure. She has never measured sunlight, so there is no arrow to push on, and
+    # inventing one is the single worst thing a simulator can do.
+    brain = _taught_brain()
+    assert brain.think("what if I halve the sunlight").answer == ""
+
+
+def test_a_strategy_that_produces_nothing_yields_to_one_that_can():
+    # `causal` (explanation) and `simulate` (intervention) are both eligible for a causal problem,
+    # and `causal` has the higher prior. It produces nothing on an intervention — explanation is
+    # not intervention — and abstaining there meant the organ that owns the question was never
+    # asked. The retry is what makes the registry's second-best reachable.
+    brain = _taught_brain()
+    context = dict(brain._counterfactual_context("what if I halve the water"),
+                   grounded=False, subject="", about_self=False)
+    solution = brain.metareason.solve("what if I halve the water", context=context)
+    assert solution.answered, solution.to_dict()
+    assert solution.strategy == "simulate", solution.to_dict()
+    assert "causal" in solution.attempts, solution.attempts
+
+
+def test_an_ordinary_empirical_question_is_not_dragged_into_the_causal_path():
+    # The regression guard for the classifier change. The causal boost is scored off the parsed
+    # intervention, not off another keyword, so a question that names no intervention she can
+    # perform is classified exactly as it was before.
+    from nyxara.njp.metareason import ProblemKind, ProblemClassifier
+
+    classifier = ProblemClassifier()
+    plain = classifier.classify("what is the boiling point of mercury", context={"grounded": False})
+    assert plain.kind == ProblemKind.EMPIRICAL, plain.to_dict()
+
+
+def test_a_greeting_still_cannot_reach_physics():
+    # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
+    # greeting must not acquire a route to the world model just because one now exists.
+    brain = _taught_brain()
+    answer = brain.think("hello NYXARA").answer
+    assert "plant" not in answer.lower(), answer
+    assert "confidence" not in answer.lower(), answer

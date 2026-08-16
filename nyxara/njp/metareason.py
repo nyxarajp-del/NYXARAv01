@@ -172,6 +172,10 @@ class Solution:
     answer: Any = None
     kind: str = ""
     strategy: str = ""
+    # Every strategy tried, in order, ending with the one that answered. More than one name here
+    # means the first choice could not bind to this problem — worth seeing, because that is the
+    # bandit's prior being wrong about which organ owns this kind of question.
+    attempts: List[str] = field(default_factory=list)
     alternative: str = ""
     alternative_answer: Any = None
     agreed: Optional[bool] = None
@@ -193,6 +197,7 @@ class Solution:
         return {"problem": self.problem[:160],
                 "answer": str(self.answer)[:200] if self.answer is not None else None,
                 "kind": self.kind, "strategy": self.strategy,
+                "attempts": self.attempts[:4],
                 "alternative": self.alternative,
                 "alternative_answer": (str(self.alternative_answer)[:120]
                                        if self.alternative_answer is not None else None),
@@ -239,6 +244,16 @@ class ProblemClassifier:
             # question about the world rather than about her memory of it.
             scores[ProblemKind.EMPIRICAL] += 0.5
 
+        if ctx.get("variable"):
+            # An intervention she can actually carry out: the question named a variable she has
+            # observed and a change she can size. That is a fact about what this question *is*,
+            # not an inference from its wording, so it outweighs the word cues — "what if I halve
+            # the water" scores as introspective the moment it says "I", and it is not a question
+            # about her. Scored from the context rather than from another keyword deliberately:
+            # the words that make a counterfactual are the same ones that make an ordinary
+            # conditional, and only the parse can tell them apart.
+            scores[ProblemKind.CAUSAL] += 0.6
+
         if words & _SELF_WORDS:
             scores[ProblemKind.INTROSPECTIVE] += 0.4
         if ctx.get("about_self"):
@@ -269,8 +284,13 @@ class MetaReasoner:
     """Picks the reasoning strategy, runs it, criticises it, and says how much to trust it."""
 
     def __init__(self, *, meta_learner: Any = None, beliefs: Any = None,
-                 world: Any = None, classifier: Optional[ProblemClassifier] = None) -> None:
+                 world: Any = None, classifier: Optional[ProblemClassifier] = None,
+                 max_attempts: int = 3) -> None:
         self.classifier = classifier or ProblemClassifier()
+        # How many eligible strategies may be tried before the turn is left unanswered. Bounded
+        # rather than exhaustive: the point is to reach the organ that can bind to this question,
+        # not to run every organ she owns on a question none of them fit.
+        self.max_attempts = max(1, int(max_attempts))
         self.meta_learner = meta_learner        # optional njp.selfmodel.MetaLearner
         self.beliefs = beliefs                  # optional njp.beliefs.BeliefLedger
         self.world = world                      # optional njp.world.WorldView
@@ -332,11 +352,32 @@ class MetaReasoner:
 
             out.strategy = strategy.name
             out.answer = self._run(strategy, out.problem, ctx)
+
+            # A strategy that produced *nothing* has not answered the question, and abstaining
+            # here meant the one organ that could answer it was never asked. Measured: "what if I
+            # halve the water" over an observed variable classifies CAUSAL, chooses `causal` on
+            # its higher prior, gets nothing back — explanation is not intervention — and returns
+            # unanswered while `simulate` sits registered, eligible, and able to answer exactly
+            # this. The retry spends one more strategy on a turn that had already failed, which is
+            # precisely when it is worth spending, and each empty attempt is scored as the failure
+            # it was so the bandit stops leading with it.
+            tried = [strategy.name]
+            while not out.answered and len(tried) < self.max_attempts:
+                nxt = self.choose(out.kind, exclude=tried)
+                if nxt is None or nxt.solve is None:
+                    break
+                self._miss(strategy)
+                tried.append(nxt.name)
+                strategy, out.strategy = nxt, nxt.name
+                out.answer = self._run(nxt, out.problem, ctx)
+
             if not out.answered:
                 self.abstained += 1
-                out.critique.defects.append(f"{strategy.name} produced nothing")
+                self._miss(strategy)
+                out.critique.defects.append(f"{' then '.join(tried)} produced nothing")
                 out.confidence = 0.0
                 return out
+            out.attempts = list(tried)
 
             out.critique = self._criticise(out, ctx)
 
@@ -454,6 +495,16 @@ class MetaReasoner:
             except Exception:  # noqa: BLE001
                 pass
         return max(0.0, min(0.97, base))
+
+    @staticmethod
+    def _miss(strategy: Strategy) -> None:
+        """Score a strategy that returned nothing as the failure it was.
+
+        Without this an organ that cannot bind to a kind of problem keeps its prior for ever: it
+        is chosen, produces nothing, and is never charged for it — so it is chosen again next
+        time, ahead of the organ that would have answered.
+        """
+        strategy.trials += 1
 
     def _reward(self, solution: Solution, strategy: Strategy) -> None:
         """Credit the strategy by what actually came of it, not by whether it returned something.

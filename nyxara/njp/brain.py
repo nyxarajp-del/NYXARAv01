@@ -36,6 +36,7 @@ Master is sovereign.
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,36 @@ from nyxara.njp.soulsync import Reading, SoulSync
 from nyxara.njp.truth import Judgement, TruthGauntlet, Verdict
 
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
+
+# What a counterfactual question asks her to *do* to a variable, and by how much.
+#
+# Only interventions whose magnitude the sentence actually states are listed. "reduce the water"
+# is deliberately absent: a factor she chose herself would come back through the do-operator
+# carrying the same confidence as one the Master gave, and nothing downstream could tell the two
+# apart afterwards. An intervention she cannot size is one she declines to simulate.
+_INTERVENTION_FACTOR: Dict[str, float] = {
+    "halve": 0.5, "halving": 0.5, "half": 0.5, "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
+    "double": 2.0, "doubling": 2.0, "dugna": 2.0, "duguna": 2.0,
+    "remove": 0.0, "removing": 0.0, "stop": 0.0, "stopping": 0.0, "band": 0.0, "bina": 0.0,
+}
+
+_INTERVENTION = re.compile(
+    r"\b(?P<op>halve|halving|half|double|doubling|remove|removing|stop|stopping|"
+    r"aadha|adha|aadhi|dugna|duguna|band|bina)\b"
+    r"(?:\s+(?:the|le|kar|of|its))*\s+(?P<var>[a-z][a-z_]*)\b",
+    re.IGNORECASE)
+
+# The same question stated as an absolute rather than a factor — "what if the water were 3".
+_INTERVENTION_ABSOLUTE = re.compile(
+    r"\b(?:the\s+)?(?P<var>[a-z][a-z_]*)\s+(?:were|was|is|becomes?|ho)\s+"
+    r"(?P<val>-?\d+(?:\.\d+)?)\b",
+    re.IGNORECASE)
+
+# Hinglish puts the object before the verb — "paani aadha kar doon" — so the factor word follows
+# the variable rather than preceding it. Same intervention, mirrored word order.
+_INTERVENTION_TRAILING = re.compile(
+    r"\b(?P<var>[a-z][a-z_]*)\s+(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|double)\b",
+    re.IGNORECASE)
 
 
 def _cell_id(token: str) -> int:
@@ -904,16 +935,93 @@ class NJPBrain:
             return None
 
     def _strategy_simulate(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Answer by intervening on the world model rather than recalling what went with what.
+
+        The rendering states the intervention, the consequences it entails, and the confidence the
+        do-operator itself earned — which is a real number, off the arrow's fit and how far past
+        the observed range the question reached, not a decoration. A counterfactual shown without
+        it is indistinguishable from an observation, and the two are not the same kind of claim.
+
+        A counterfactual that entails no consequence is not an answer and returns nothing, so the
+        turn goes to whatever can answer it instead of to a restatement of the question's own
+        premise.
+        """
         try:
             variable = str(ctx.get("variable") or "").strip().lower()
             if not variable or self.universe is None:
                 return None
-            out = self.universe.what_if(variable, ctx.get("value", 0.0))
+            value = float(ctx.get("value", 0.0))
+            out = self.universe.what_if(variable, value)
             if not out.answerable:
                 return None
-            return "; ".join(f"{d.variable}={d.after:.3f}" for d in out.changed()[:3])
+            effects = [d for d in out.changed() if d.variable != variable]
+            if not effects:
+                return None
+            was = out.factual.get(variable)
+            done = (f"{variable} {float(was):g} → {value:g}" if was is not None
+                    else f"{variable} = {value:g}")
+            entails = "; ".join(f"{d.variable} {d.before:g} → {d.after:g}" for d in effects[:3])
+            return f"{done} predicts {entails} (confidence {out.confidence:.2f})"
         except Exception:  # noqa: BLE001
             return None
+
+    def _resolve_variable(self, name: str) -> str:
+        """A bare noun from a question, as the universe's own variable name.
+
+        The universe names a variable ``entity.attribute``, because that is what lets it tell two
+        attributes of one thing from two unrelated readings. A question says "the water", never
+        "plant.water", so the two have to be reconciled somewhere. Here, and against the variables
+        she has actually observed — guessing an entity would invent a subject the Master never
+        mentioned and simulate confidently over it.
+        """
+        want = str(name or "").strip().lower()
+        if not want:
+            return ""
+        try:
+            for variable in list(getattr(self.universe, "state", None) or {}):
+                if variable == want or variable.rsplit(".", 1)[-1] == want:
+                    return variable
+        except Exception:  # noqa: BLE001 — an unresolvable name simply is not simulated
+            return ""
+        return ""
+
+    def _counterfactual_context(self, question: str) -> Dict[str, Any]:
+        """The intervention a question asks for, as a variable and the value to set it to.
+
+        Empty where the question names no intervention, names a variable she has never observed,
+        or names an intervention whose size it does not state — each of which is a reason to
+        decline rather than to simulate something adjacent. This is the dict that makes
+        :meth:`_strategy_simulate` reachable at all; without a ``variable`` key it returns ``None``
+        on every call, which is why the do-operator went unused while working perfectly.
+
+        A factor resolves against what was actually observed, so "halve the water" means half of
+        what this plant has been getting rather than half of an arbitrary unit.
+        """
+        out: Dict[str, Any] = {}
+        if self.universe is None:
+            return out
+        try:
+            text = str(question or "")
+            absolute = _INTERVENTION_ABSOLUTE.search(text)
+            if absolute is not None:
+                variable = self._resolve_variable(absolute.group("var"))
+                if variable:
+                    return {"variable": variable, "value": float(absolute.group("val"))}
+
+            match = _INTERVENTION.search(text) or _INTERVENTION_TRAILING.search(text)
+            if match is None:
+                return out
+            variable = self._resolve_variable(match.group("var"))
+            factor = _INTERVENTION_FACTOR.get(match.group("op").lower())
+            if not variable or factor is None:
+                return out
+            current = getattr(self.universe, "state", None) or {}
+            observed = current.get(variable)
+            if observed is None:
+                return out
+            return {"variable": variable, "value": float(observed) * factor}
+        except Exception:  # noqa: BLE001 — an unparsed intervention is simply not simulated
+            return {}
 
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
         try:
@@ -1104,6 +1212,12 @@ class NJPBrain:
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
                 self._deliberate(out)
+                # The epistemic pass above ran against an empty answer, so a deliberated one
+                # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
+                # rather than move: the first pass also feeds the echo check, which has to
+                # happen before deliberation, not after it.
+                if out.answer:
+                    self._set_epistemic(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -1297,6 +1411,11 @@ class NJPBrain:
                     "subject": (str(getattr(triples[0], "subject", "")) if triples else ""),
                     "about_self": bool(getattr(thought.intent, "about_self", False)),
                 }
+                # The intervention the question asks for, where it asks for one. Without these
+                # two keys `_strategy_simulate` returns None on every call, so the do-operator
+                # was registered, chosen, run and unable to do anything — the gap that made a
+                # working causal engine unreachable from a causal question.
+                context.update(self._counterfactual_context(thought.stimulus))
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 if solution.assertable and solution.answer:
                     thought.answer = str(solution.answer)
