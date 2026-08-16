@@ -36,6 +36,7 @@ what comes back*; it does not re-derive any of it.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -149,6 +150,11 @@ class Conclusion:
     decided: bool = False              # False ⇒ genuinely torn, and says so
     hypotheses: List[Hypothesis] = field(default_factory=list)
     margin: float = 0.0                # how clear the winner was of the runner-up
+    # How torn she actually is, in bits over the live rivals. The margin says how far ahead the
+    # winner is; this says how much of the field it had to beat. One strong reading against six
+    # weak ones and one strong reading against one nearly-as-strong can share a margin and are
+    # not the same epistemic state, and only this number tells them apart.
+    uncertainty_bits: float = 0.0
     why: List[str] = field(default_factory=list)
     ms: float = 0.0
 
@@ -159,7 +165,8 @@ class Conclusion:
     def to_dict(self) -> Dict[str, Any]:
         return {"answer": self.answer[:300], "rung": self.rung, "depth": self.depth,
                 "confidence": round(self.confidence, 4), "decided": self.decided,
-                "margin": round(self.margin, 4), "why": self.why[:6],
+                "margin": round(self.margin, 4),
+                "uncertainty_bits": round(self.uncertainty_bits, 4), "why": self.why[:6],
                 "hypotheses": [h.to_dict() for h in self.hypotheses[:6]],
                 "ms": round(self.ms, 3)}
 
@@ -341,8 +348,78 @@ class Reasoner:
                 continue
             self.propose(state, Hypothesis(claim=claim, support=float(score),
                                            source="memory", evidence=["recalled"]))
+        self._propose_causal(state)
         if len(state.live) > 1:
             out.why.append(f"weighed {len(state.live)} competing readings")
+
+    @staticmethod
+    def _recorded_events(world: Any, problem: str) -> List[str]:
+        """The events the record knows that this question is asking about.
+
+        The record files an occurrence under its canonical predicate — "the flood happened" is
+        stored as ``happened`` — while a question says "why did the flood happen". Asking
+        ``world.why`` with the raw word finds nothing, which is why the causal record has never
+        once contributed a hypothesis. Matched on a shared stem, longest first so the most
+        specific reading is tried before a shorter one that merely contains it.
+        """
+        out: List[str] = []
+        try:
+            known = list(getattr(world, "_counts", None) or {})
+            if not known:
+                return out
+            words = [w.strip("?.,!'\"") for w in str(problem or "").lower().split()]
+            for word in sorted(words, key=len, reverse=True):
+                if len(word) < 4:
+                    continue
+                for name in known:
+                    if name in out:
+                        continue
+                    if str(name)[:4].lower() == word[:4]:
+                        out.append(str(name))
+        except Exception:  # noqa: BLE001
+            return out
+        return out[:3]
+
+    def _propose_causal(self, state: ProblemState) -> None:
+        """Rivals from the causal record, so recall is not the only voice in the room.
+
+        Every hypothesis here used to come from one place — whatever memory recalled — so a
+        "debate" was three recollections of the same conversation. The world model holds
+        genuinely different candidates for *why* something happened, each with its own observed
+        lift, and offering them makes the field an actual field.
+
+        Support is the link's own measured strength, not a flat prior, so a cause seen twice
+        cannot out-argue one seen fifty times merely by being mentioned. A correlate is proposed
+        at a discount and says in its evidence that it is one — recorded as a candidate she has
+        no right to promote, which is exactly the distinction ``world.why`` already draws and
+        nothing downstream was reading.
+        """
+        brain = self.brain
+        world = getattr(brain, "world", None) if brain is not None else None
+        if world is None:
+            return
+        try:
+            for token in self._recorded_events(world, state.problem):
+                explanation = world.why(token)
+                if not getattr(explanation, "explained", False):
+                    continue
+                for link in list(getattr(explanation, "causes", []) or [])[:2]:
+                    claim = f"{link.cause} caused {link.effect}"
+                    if state.was_rejected(claim):
+                        continue
+                    self.propose(state, Hypothesis(
+                        claim=claim, support=float(link.strength), source="world",
+                        evidence=[f"seen together {link.together} time(s)"]))
+                for link in list(getattr(explanation, "correlates", []) or [])[:1]:
+                    claim = f"{link.cause} preceded {link.effect}"
+                    if state.was_rejected(claim):
+                        continue
+                    self.propose(state, Hypothesis(
+                        claim=claim, support=float(link.strength) * 0.5, source="world",
+                        evidence=["a correlate, not established as a cause"]))
+                break                    # one effect per pass; the rest are other questions
+        except Exception:  # noqa: BLE001 — no causal record just means fewer rivals
+            pass
 
     def _verify(self, state: ProblemState, out: Conclusion) -> None:
         """Check each hypothesis against what she already believes. Contradiction costs it."""
@@ -363,6 +440,29 @@ class Reasoner:
                         break
             if hypothesis.contradicted:
                 out.why.append("a reading contradicted what she already believes")
+
+    @staticmethod
+    def _entropy(ranked: Sequence[Hypothesis]) -> float:
+        """How torn she is across the whole field, in bits.
+
+        The margin already says how far the winner is clear of the runner-up, and it cannot tell
+        one strong reading against six weak ones from one strong reading against one nearly as
+        strong. Those are different epistemic states and a mind that reports them identically is
+        hiding the more interesting half.
+
+        Scores are normalised into a distribution rather than treated as probabilities, because
+        ``support - against`` is not one. That makes this a measure of *spread over live rivals*,
+        which is what it is used for, and not a claim about likelihood — the honest reading of a
+        number a hypothesis pool can actually produce.
+        """
+        try:
+            weights = [h.score for h in ranked if h.score > 0.0]
+            total = sum(weights)
+            if len(weights) < 2 or total <= 0.0:
+                return 0.0
+            return -sum((w / total) * math.log2(w / total) for w in weights)
+        except Exception:  # noqa: BLE001
+            return 0.0
 
     @staticmethod
     def _conflicts(claim: str, fact: Any) -> bool:
@@ -431,6 +531,7 @@ class Reasoner:
             # `answer` to publish something she has no reason at all to believe, which is the
             # exact failure the whole ladder exists to prevent.
             out.answer = best.claim if best.score > 0.0 else ""
+            out.uncertainty_bits = self._entropy(ranked)
             if not out.decided and len(ranked) > 1 and best.score > 0.0:
                 out.why.append(
                     f"two readings are too close to call ({best.score:.2f} vs {runner_up:.2f})")

@@ -1034,7 +1034,13 @@ class NJPBrain:
             if self.reasoner is None:
                 return None
             conclusion = self.reasoner.reason(problem)
-            return getattr(conclusion, "claim", None) or getattr(conclusion, "answer", None)
+            # Honour the ladder's own refusal to commit. This path used to read the answer
+            # regardless of `decided`, so a conclusion the direct fallback would have thrown away
+            # for being too close to call entered the meta-reasoner as a strategy result — one
+            # margin rule enforced in one caller and ignored in the other, on the same object.
+            if conclusion is None or not conclusion.decided:
+                return None
+            return conclusion.answer or None
         except Exception:  # noqa: BLE001
             return None
 

@@ -331,6 +331,69 @@ def test_an_experiment_is_not_settled_on_a_record_too_thin_to_call():
     assert brain.designer.stats()["run"] == 0, brain.designer.stats()
 
 
+# --------------------------------------------------------------------------- #
+# The field has to be a field — rivals from more than one voice
+# --------------------------------------------------------------------------- #
+def _flooded_brain() -> NJPBrain:
+    """Two candidate causes for one effect, each seen about as often as the other."""
+    brain = NJPBrain()
+    for line in ["the rain fell", "the flood happened"] * 4 + \
+                ["the river rose", "the flood happened"] * 3:
+        brain.think(line)
+    return brain
+
+
+def test_the_causal_record_contributes_rivals_not_just_memory():
+    # Every hypothesis used to come from one place — whatever memory recalled — so a "debate"
+    # was three recollections of one conversation. The record holds genuinely different
+    # candidates for why something happened, and none of them ever reached the pool.
+    brain = _flooded_brain()
+    conclusion = brain.reasoner.reason("why did the flood happen", uncertainty=0.8, stakes=0.8)
+    sources = {h.source for h in conclusion.hypotheses}
+    assert "world" in sources, [(h.source, h.claim) for h in conclusion.hypotheses]
+
+
+def test_two_candidate_causes_leave_her_undecided_rather_than_picking_one():
+    # The winner-is-not-truth discipline, at the point it actually bites. Rain and river are
+    # equally supported; returning the first would be inventing a decision she has not made.
+    brain = _flooded_brain()
+    conclusion = brain.reasoner.reason("why did the flood happen", uncertainty=0.8, stakes=0.8)
+    assert not conclusion.decided, conclusion.to_dict()
+    assert conclusion.margin < 0.15, conclusion.to_dict()
+
+
+def test_uncertainty_is_reported_in_bits_over_the_whole_field():
+    # The margin cannot tell one strong reading against six weak ones from one strong reading
+    # against one nearly as strong. Those are different states and this is the number that
+    # separates them.
+    brain = _flooded_brain()
+    torn = brain.reasoner.reason("why did the flood happen", uncertainty=0.8, stakes=0.8)
+    assert torn.uncertainty_bits > 1.0, torn.to_dict()
+
+    # A pool with nothing live in it is not uncertain, it is empty — and reports 0.0, not a
+    # number that would read as confidence.
+    empty = brain.reasoner.reason("why did the quasar collapse", uncertainty=0.8, stakes=0.8)
+    assert empty.uncertainty_bits == 0.0, empty.to_dict()
+
+
+def test_a_correlate_is_offered_as_a_correlate_and_not_as_a_cause():
+    # `world.why` already separates causes from correlates and nothing downstream read the
+    # distinction. A correlate enters the pool at a discount and says what it is.
+    brain = _flooded_brain()
+    conclusion = brain.reasoner.reason("why did the flood happen", uncertainty=0.8, stakes=0.8)
+    correlates = [h for h in conclusion.hypotheses if "preceded" in h.claim]
+    for hypothesis in correlates:
+        assert any("correlate" in e for e in hypothesis.evidence), hypothesis.to_dict()
+
+
+def test_the_ladder_strategy_honours_the_ladder_s_own_refusal_to_commit():
+    # One margin rule, one object, two callers — and only one of them enforced it. An undecided
+    # conclusion could enter the meta-reasoner as a strategy result while the direct fallback
+    # would have thrown the same conclusion away.
+    brain = _flooded_brain()
+    assert brain._strategy_ladder("why did the flood happen", {}) is None
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.
