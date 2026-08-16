@@ -198,6 +198,72 @@ def test_an_ordinary_empirical_question_is_not_dragged_into_the_causal_path():
     assert plain.kind == ProblemKind.EMPIRICAL, plain.to_dict()
 
 
+# --------------------------------------------------------------------------- #
+# The return edge — an outcome has to reach what staked a claim on it
+# --------------------------------------------------------------------------- #
+def _graded_brain(names=("Ravi", "Sita", "Amit", "Neha")) -> NJPBrain:
+    """Ask before teaching, so the answer is deliberated and a later fact can grade it.
+
+    The order is the whole point: she answers on one turn and the Master states the fact on a
+    later one, so what does the grading is independent of what is being graded.
+    """
+    brain = NJPBrain()
+    for name in names:
+        brain.think(f"where does {name} live")
+        brain.think(f"{name} lives in Delhi")
+    return brain
+
+
+def test_a_strategy_is_graded_by_reality_and_not_only_by_its_own_critic():
+    # MetaReasoner.outcome exists to override the critic's provisional credit — its docstring
+    # says so — and nothing had ever called it, so strategy selection was trained entirely on
+    # the opinion of the critic that had just approved the answer.
+    brain = _graded_brain()
+    assert brain.loop.totals["strategies_graded"] > 0, brain.loop.totals
+
+
+def test_an_answer_she_asserts_is_staked_as_a_belief_that_can_be_found_wrong():
+    # The ledger only ever held the Master's testimony, so the one class of claim that could be
+    # checked against an independent later fact was the class never entered.
+    brain = NJPBrain()
+    brain.think("Ravi lives in Pune")
+    brain.think("where does Ravi live")
+    held = [b for b in brain.beliefs.known() if "pune" in b.claim.lower()]
+    assert held, [b.claim for b in brain.beliefs.known()]
+    assert held[0].falsifier, held[0].to_dict()
+
+
+def test_reliability_becomes_measurable_so_temper_stops_being_a_no_op():
+    # The sharpest cascade in the audit: settle/retract were never called, so `_outcomes` stayed
+    # empty, `reliability()` always reported zero samples, and `temper()` returned its input
+    # unchanged for ever. An entire calibration path, written and tested and inert.
+    brain = NJPBrain()
+    for name in ("Ravi", "Sita", "Amit", "Neha", "Vikram", "Priya", "Arjun"):
+        brain.think(f"{name} lives in Pune")
+        brain.think(f"where does {name} live")
+        brain.think(f"{name} lives in Delhi")       # the Master says otherwise
+
+    reliability = brain.beliefs.reliability("located_in")
+    assert reliability.samples >= 5, reliability.to_dict()
+    assert brain.beliefs.temper(0.9, "located_in") < 0.9, reliability.to_dict()
+
+
+def test_a_belief_is_retracted_rather_than_deleted():
+    # Quarantine, not deletion. Driving a belief to zero and keeping it is what lets "this has
+    # failed before" stay answerable; dropping the record makes the same mistake available again.
+    brain = NJPBrain()
+    brain.beliefs.hold("the sky is green", confidence=0.8, domain="colour",
+                       falsifier="the sky is observed to be another colour")
+    assert brain.beliefs.retract("the sky is green", why="contradicted by observation")
+    assert brain.beliefs.stats()["retracted"] == 1
+
+    # The tombstone: still answerable, still carrying its history, at zero confidence.
+    tombstone = brain.beliefs.why("the sky is green")
+    assert tombstone, "a retracted belief was deleted rather than quarantined"
+    assert tombstone["confidence"] == 0.0, tombstone
+    assert tombstone["history"], tombstone
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.

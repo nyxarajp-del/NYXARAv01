@@ -109,6 +109,13 @@ class LoopReport:
     # error → repair
     diagnoses: Dict[str, int] = field(default_factory=dict)
     repaired: int = 0
+    # what an independently-established outcome was allowed to change. Every one of these was
+    # structurally pinned at zero before the return edge existed, however well the organ behind
+    # it worked when called by hand.
+    strategies_graded: int = 0
+    beliefs_settled: int = 0
+    beliefs_retracted: int = 0
+    questions_closed: int = 0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -148,6 +155,10 @@ class LoopReport:
                 "deferred": {"opened": self.deferred_opened, "resolved": self.deferred_resolved,
                              "open": self.deferred_open, "corrections": self.corrections},
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
+                "graded": {"strategies": self.strategies_graded,
+                           "beliefs_settled": self.beliefs_settled,
+                           "beliefs_retracted": self.beliefs_retracted,
+                           "questions_closed": self.questions_closed},
                 "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
                           "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
@@ -172,6 +183,11 @@ class _Deferred:
     predicate: str = ""
     asked_at: int = 0
     answered: str = ""            # what she said at the time ("" when she abstained)
+    # How she reached it, kept so the credit can find its way back to the strategy that produced
+    # the answer once reality says whether it was right. A grade that cannot be attributed is a
+    # grade nothing learns from.
+    solution: Any = None
+    question: str = ""            # the turn as the Master asked it
 
 
 class LearningLoop:
@@ -201,6 +217,8 @@ class LearningLoop:
             "repaired": 0, "capabilities": 0, "train_steps": 0,
             "consolidations": 0, "discoveries": 0, "wonders": 0,
             "goals_added": 0, "goals_completed": 0,
+            "strategies_graded": 0, "beliefs_settled": 0,
+            "beliefs_retracted": 0, "questions_closed": 0,
         }
 
         # Turn-to-turn carry. The readout learns "what fired then → what fires now", which needs
@@ -523,12 +541,43 @@ class LearningLoop:
                               expected_triples=True, triples=[])
             self._deferred[key] = _Deferred(
                 key=key, subject=subject, predicate=predicate,
-                asked_at=int(getattr(self.brain, "turns", 0)), answered=said)
+                asked_at=int(getattr(self.brain, "turns", 0)), answered=said,
+                solution=getattr(thought, "solution", None),
+                question=str(getattr(thought, "stimulus", "")))
+            self._stake_a_belief(thought, said, subject, predicate)
             rep.deferred_opened = 1
             if len(self._deferred) > self.defer_capacity:
                 for stale in list(self._deferred)[:len(self._deferred) - self.defer_capacity]:
                     self._deferred.pop(stale, None)
         except Exception:  # noqa: BLE001
+            pass
+
+    def _stake_a_belief(self, thought: Any, said: str, subject: str, predicate: str) -> None:
+        """Record what she just asserted as a belief that can later be found wrong.
+
+        The ledger only ever held what the *Master* said — ``field._record_beliefs`` writes his
+        testimony and nothing writes hers — so the one class of claim that could be graded against
+        an independent later fact was the one class never entered. Settling had nothing to settle,
+        which is why ``retract``, ``settle`` and the whole calibration path behind them sat unused
+        while working perfectly.
+
+        Every belief goes in with the falsifier that would kill it, stated in advance and in the
+        world's terms rather than hers. A claim recorded without one cannot take part in
+        prediction-against-reality at all; it can only accumulate.
+        """
+        try:
+            beliefs = getattr(self.brain, "beliefs", None)
+            if beliefs is None or not said or said == "<unknown>":
+                return
+            solution = getattr(thought, "solution", None)
+            beliefs.hold(
+                said,
+                confidence=float(getattr(solution, "confidence", 0.0) or 0.0) or 0.5,
+                domain=predicate or "general",
+                produced_by=str(getattr(solution, "strategy", "") or "grounding"),
+                falsifier=f"{subject} {predicate} is stated to be something other than {said}",
+                why="asserted in answer to a question")
+        except Exception:  # noqa: BLE001 — an unrecorded belief loses the grade, never the turn
             pass
 
     def _resolve_deferred(self, grounding: Any, predictor: Any, rep: LoopReport) -> None:
@@ -561,7 +610,65 @@ class LearningLoop:
                         if getattr(diagnosis, "repaired", False):
                             rep.repaired += 1
                         self._tell_self_model(diagnosis)
+                self._grade_by_reality(pending, bool(outcome.correct), triple, rep)
                 rep.scored += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _grade_by_reality(self, pending: _Deferred, correct: bool,
+                          triple: Any, rep: LoopReport) -> None:
+        """Send one independently-established outcome to everything that staked a claim on it.
+
+        This is the return edge the rest of NJP was missing. Every organ below could already be
+        told it was right or wrong and none of them ever was, so each was left grading itself:
+        strategy credit came from the critic that had just approved the answer, and the belief
+        ledger recorded what it had been told without ever finding out whether it held.
+
+        What makes the signal worth propagating is *where it comes from*. It is the Master's own
+        later statement, grounded into a triple on a turn after the one being graded — so the
+        thing doing the grading is independent of the thing being graded. A loop closed against
+        her own later opinion of the same question would move every counter here and teach
+        nothing, which is the failure this is built to avoid rather than the one it risks.
+        """
+        # Strategy credit. `outcome` explicitly overrides the provisional credit the critic
+        # awarded, which is the whole reason it exists and the reason its absence mattered.
+        try:
+            metareason = getattr(self.brain, "metareason", None)
+            if metareason is not None and pending.solution is not None:
+                metareason.outcome(pending.solution, correct=correct)
+                rep.strategies_graded += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Belief settlement, and with it the calibration stack. Nothing called `settle` or
+        # `retract`, so `_outcomes` stayed empty, `reliability()` always reported zero samples,
+        # and `temper()` was a guaranteed no-op — an entire calibration path written, tested and
+        # inert. A belief is retracted rather than deleted: driven to zero and kept, so the
+        # tombstone survives and "this has failed before" stays answerable.
+        try:
+            beliefs = getattr(self.brain, "beliefs", None)
+            if beliefs is not None and pending.answered:
+                settled = beliefs.settle(pending.answered, true=correct,
+                                         why=f"the Master stated {triple.object}")
+                if settled is not None:
+                    rep.beliefs_settled += 1
+                elif not correct:
+                    if beliefs.retract(pending.answered, why="contradicted by observation"):
+                        rep.beliefs_retracted += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+        # The question is answered, so it stops being an open one. Without this `resolved` never
+        # moved and the goal-completion branch in `_goals_from_curiosity` was unreachable.
+        try:
+            curiosity = getattr(self.brain, "curiosity", None)
+            if curiosity is not None:
+                for question in list(curiosity.open_questions()):
+                    if pending.subject and pending.subject.lower() in str(
+                            getattr(question, "about", "") or getattr(question, "text", "")).lower():
+                        if curiosity.resolve(question, str(triple.object)):
+                            rep.questions_closed += 1
+                        break
         except Exception:  # noqa: BLE001
             pass
 
@@ -853,6 +960,10 @@ class LearningLoop:
             self.totals["deferred_resolved"] += rep.deferred_resolved
             self.totals["corrections"] += rep.corrections
             self.totals["repaired"] += rep.repaired
+            self.totals["strategies_graded"] += rep.strategies_graded
+            self.totals["beliefs_settled"] += rep.beliefs_settled
+            self.totals["beliefs_retracted"] += rep.beliefs_retracted
+            self.totals["questions_closed"] += rep.questions_closed
             self.totals["capabilities"] += rep.capabilities
             self.totals["train_steps"] += int(rep.trained)
             self.totals["consolidations"] += int(rep.consolidated)

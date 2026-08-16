@@ -166,6 +166,12 @@ class NJPThought:
     # than having to be inferred from the reply itself.
     act: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
+    # The meta-reasoner's own record of how this answer was reached, kept so that when reality
+    # grades the answer later the credit can reach the strategy that actually produced it.
+    # Without it :meth:`~nyxara.njp.metareason.MetaReasoner.outcome` has nothing to be called
+    # with, which is why strategy credit came only from the critic — a mind grading its own
+    # reasoning by its own opinion of that reasoning.
+    solution: Any = None
 
     @property
     def confidence(self) -> float:
@@ -1417,6 +1423,7 @@ class NJPBrain:
                 # working causal engine unreachable from a causal question.
                 context.update(self._counterfactual_context(thought.stimulus))
                 solution = self.metareason.solve(thought.stimulus, context=context)
+                thought.solution = solution
                 if solution.assertable and solution.answer:
                     thought.answer = str(solution.answer)
                     return
