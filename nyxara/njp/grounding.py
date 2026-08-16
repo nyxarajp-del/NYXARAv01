@@ -198,6 +198,29 @@ class Pattern:
 
 
 @dataclass
+class RecalledFact:
+    """One fact retrieved *about the thing the question named*, with why it was offered.
+
+    Not "the nearest memory". The distinction is the entire safety property of this path, and it
+    is enforced structurally rather than by a threshold alone: a fact is only ever a candidate if
+    its **subject** is substantially named in the question. A verified pendulum law cannot surface
+    in a conversation about someone's day, because "day" does not name the pendulum.
+    """
+
+    triple: Optional[GroundedTriple] = None
+    score: float = 0.0            # subject match × predicate affinity × the fact's own confidence
+    subject_score: float = 0.0    # how squarely the question named this entity
+    affinity: float = 0.0         # how well this relation answers the question that was asked
+    hops: int = 0                 # 0 = stated of the subject itself, 1 = reached through an edge
+    via: str = ""                 # the edge followed to get here, empty when direct
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"triple": self.triple.to_dict() if self.triple else None,
+                "score": round(self.score, 4), "subject_score": round(self.subject_score, 4),
+                "affinity": round(self.affinity, 4), "hops": self.hops, "via": self.via}
+
+
+@dataclass
 class GroundingResult:
     """What one turn grounded to. Empty is a normal, honest outcome."""
 
@@ -719,6 +742,65 @@ _CAUSE_OF = "<-causes"
 # Ordering is load-bearing. A form that names BOTH a subject and a property ("Ravi ka naam kya
 # hai") must be tried before the generic one that names only a subject ("Ravi kya hai"), or the
 # generic reading swallows it and asks `is_a` about a person whose *name* was wanted.
+# --------------------------------------------------------------------------- #
+# Retrieval — the question names an entity, the store holds a different relation about it
+# --------------------------------------------------------------------------- #
+# `_lookup` is a single dict lookup on ``(subject, predicate)``, and that exactness is the second
+# measured bottleneck after extraction itself. "What is X?" always reads as ``is_a``, while the
+# sentence that taught her about X may well have stored ``means``, ``part_of``, ``involves`` or
+# ``occurs_when``. The fact was present, about the right entity, and unreachable — so the turn
+# came back UNKNOWN with 521 facts sitting in the store.
+#
+# What this is NOT. It is not "offer the nearest memory": that is the failure `RelevanceGate`
+# exists to prevent, and `_compose` refuses it outright for good reason. The discipline here is
+# structural — a fact is a candidate only if the question **names its subject** — so relatedness
+# never substitutes for aboutness.
+
+# Which relations answer which question. The key is the predicate the question asked for; the
+# value is what else would genuinely answer it, and how much of the confidence survives being
+# answered from a neighbour rather than the relation actually requested.
+#
+# Nothing here is a synonym table — `_PREDICATE_ALIASES` already folds spellings of one relation.
+# These are *different* relations that happen to answer the same question, which is why each
+# carries a discount rather than being merged.
+_PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
+    "is_a": {"is_a": 1.0, "means": 0.95, "part_of": 0.8, "occurs_when": 0.8,
+             "involves": 0.7, "purpose": 0.65, "known_for": 0.6, "has_kind": 0.5,
+             "consists_of": 0.5, "also_known_as": 0.5},
+    "means": {"means": 1.0, "is_a": 0.95, "occurs_when": 0.8, "part_of": 0.7,
+              "involves": 0.7, "purpose": 0.65},
+    "has_kind": {"has_kind": 1.0, "consists_of": 0.85, "has_part": 0.7, "is_a": 0.5},
+    "consists_of": {"consists_of": 1.0, "has_part": 0.9, "has_kind": 0.7},
+    "causes": {"causes": 1.0, "produces": 0.9, "increases": 0.7, "decreases": 0.7,
+               "occurs_when": 0.6},
+    "located_in": {"located_in": 1.0, "part_of": 0.6},
+    "purpose": {"purpose": 1.0, "involves": 0.7, "means": 0.6, "is_a": 0.5},
+    # "What causes X?" asked about the effect and wants the cause. A forward `causes` edge *from*
+    # X answers the opposite question, and answering with it is not a weaker answer — it is a
+    # wrong one, pointing the arrow backwards. Scored at zero rather than merely discounted, so
+    # no combination of a high subject match and a confident fact can float it into an answer.
+    #
+    # Measured: with `aag causes garmi` stored and nothing known to cause `aag`, "aag ka karan kya
+    # hai?" came back "garmi" — she named the thing fire produces when asked what produces fire.
+    _CAUSE_OF: {"causes": 0.0, "produces": 0.0, "increases": 0.0, "decreases": 0.0,
+                "occurs_when": 0.6, "is_a": 0.3},
+}
+
+# Everything a relation not named above is worth when it is the only thing known about a named
+# entity. Low on purpose: answering "what is X" with an unrelated property of X is better than
+# UNKNOWN only when the fact is genuinely about X, and it should never outrank a real match.
+_AFFINITY_FLOOR = 0.35
+
+# The words a question is *made of* rather than *about*. Interrogatives and copulas name no
+# entity, so leaving them in would let "what" match a subject containing the word "what".
+_QUESTION_WORDS = frozenset({
+    "what", "which", "who", "whom", "whose", "where", "when", "why", "how", "is", "are", "was",
+    "were", "do", "does", "did", "the", "a", "an", "of", "in", "on", "at", "for", "to", "and",
+    "or", "me", "tell", "about", "there", "their", "it", "its", "this", "that", "these", "those",
+    "can", "could", "would", "should", "kya", "kaun", "kahan", "kab", "kyun", "kaise", "hai",
+    "hain", "ka", "ki", "ke", "ko", "se", "mein", "batao", "क्या", "कौन", "कहाँ", "है", "हैं",
+})
+
 _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     # --- English ---
     (r"\bwhat\s+is\s+(?:my|mera|meri)\s+(?P<p>\w+)", ""),
@@ -754,6 +836,21 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhy\s+does\s+(?P<s>.+?)\s+(?:happen|occur)\b", _CAUSE_OF),
     (r"\bwhat\s+causes\s+(?P<s>.+?)\??$", _CAUSE_OF),
     (r"\bwhat\s+is\s+(?:the\s+)?(?:cause|reason)\s+(?:of|for)\s+(?P<s>.+?)\??$", _CAUSE_OF),
+
+    # The relations `_SEED_PATTERNS` learned to *write* in the expository register, now readable
+    # back. Writing a relation she can never be asked for is the same read/write asymmetry the
+    # causal block above this one was added to close; adding extraction without these would have
+    # reproduced it exactly, one register later.
+    (r"\bwhat\s+are\s+(?:the\s+)?(?:\w+\s+){0,2}?"
+     r"(?:categories|types|kinds|forms|classes)\s+of\s+(?P<s>.+?)\??$", "has_kind"),
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:components|parts|stages|steps|phases)\s+of\s+"
+     r"(?P<s>.+?)\??$", "has_part"),
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:consist\s+of|comprise)\??$", "consists_of"),
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+(?:mean|refer\s+to|stand\s+for)\??$", "means"),
+    (r"\bwhat\s+does\s+(?P<s>.+?)\s+involve\??$", "involves"),
+    (r"\bwhen\s+does\s+(?P<s>.+?)\s+(?:occur|happen)\??$", "occurs_when"),
+    (r"\bwhat\s+is\s+(?P<s>.+?)\s+(?:used\s+for|for)\??$", "purpose"),
+    (r"\bwhat\s+is\s+(?P<s>.+?)\s+known\s+for\??$", "known_for"),
 
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
     # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
@@ -1054,6 +1151,12 @@ class Grounder:
         self.patterns_learned = 0
         self.patterns_pruned = 0
         self.llm_calls = 0
+        # Retrieval, counted separately from `answered` so "she found the entity but not the
+        # relation" is visible as its own outcome rather than hidden inside either success or
+        # failure. A high `recalls` with a low `recalled` says the questions name things she has
+        # never been told about; the reverse says her relations and her questions disagree.
+        self.recalls = 0
+        self.recalled = 0
         # How often each word has reached no entity. A running tally rather than a per-turn
         # snapshot, because "he keeps saying this and I still have nothing for it" is a gap and
         # "he mentioned it once" is not, and the snapshot could not tell them apart.
@@ -1572,6 +1675,15 @@ class Grounder:
                      else self._lookup(subject, predicate))
             if not found:
                 # The graph may know it even when the local mirror does not (it survives restarts).
+                #
+                # Retrieval is deliberately NOT tried here. Answering from a neighbouring relation
+                # is the weakest thing she can do that still counts as an answer, and returning it
+                # from this method would hand it to `_compose` as a grounded answer — which stops
+                # `brain._deliberate` from ever running, because that is gated on the answer still
+                # being empty. Measured: `sparrow needs water`, inherited through `sparrow is_a
+                # bird`, was replaced by the flat fact `sparrow is_a bird`. A retrieved fact
+                # pre-empting a derived one is a strictly worse answer arriving strictly earlier.
+                # `Grounder.recall` is public and the brain calls it after deliberation instead.
                 return self._ask_graph(question, out)
 
             best = max(found, key=lambda t: t.confidence)
@@ -1622,6 +1734,184 @@ class Grounder:
             out.extend(t for t in triples
                        if not t.superseded and t.object.strip().lower() == low)
         return out
+
+    def answer_by_recall(self, question: str, out: Optional[Answer] = None) -> Answer:
+        """Answer from a different relation about the entity that was asked about.
+
+        **Never ``KNOWN``.** Corroboration is what licenses stating something as fact, and having
+        retrieved a thing is not corroboration of it — the retrieval says the fact is *about* what
+        was asked, which is a claim about relevance, not about truth. Conflating the two is how a
+        store starts asserting whatever it happened to find.
+
+        The confidence carried out is the retrieval score, which is the fact's own confidence
+        already multiplied by how squarely the question named its subject and by how well the
+        relation answers what was asked. It is therefore always at or below what the fact itself
+        was worth: this path can lower confidence and can never raise it.
+        """
+        out = out if out is not None else Answer()
+        try:
+            got = self.recall(question, limit=1)
+            if not got or got[0].triple is None:
+                return out
+            best = got[0]
+            triple = best.triple
+            # Below this the fact is about the right entity but answers a different question, and
+            # a wrong answer confidently placed is worse than the honest UNKNOWN it replaces.
+            if best.score < self.min_confidence:
+                return out
+            out.triples = [triple]
+            out.text = triple.object or triple.subject
+            out.confidence = round(best.score, 4)
+            out.state = Epistemic.BELIEVED
+            where = f" via {best.via}" if best.hops else ""
+            out.why = (f"recalled{where}: {triple.subject} —{triple.predicate}→ {triple.object}"
+                       f" (asked for a different relation)")
+            # A conditional fact answered without its condition is a false answer. Say the
+            # condition out loud rather than dropping it — this is the whole reason the field
+            # exists on the triple.
+            if triple.condition:
+                out.why += f"; holds when {triple.condition}"
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    # ---- retrieval -------------------------------------------------------- #
+    def recall(self, question: str, *, limit: int = 5,
+               subject_floor: float = 0.6) -> List[RecalledFact]:
+        """Facts about the entity this question names, ranked by how well they answer it.
+
+        The pipeline, and every step is a method or a table in this file::
+
+            question → content tokens → candidate subjects → related entities (aliases)
+                     → facts on those subjects → predicate affinity → ranked
+
+        **The floor is the safety property.** ``subject_floor`` is a fraction of the *subject's*
+        own words that the question must contain, not a fraction of the question's — so a
+        two-word entity named in full scores 1.0 inside a twenty-word question, while a long
+        stored subject sharing one incidental word with the question scores far below the floor
+        and is never a candidate. This is what makes the result *about* what was asked rather
+        than merely near it, and it is why the pendulum-law failure cannot recur through this
+        path: no phrasing of "how are you" names the pendulum.
+
+        Returns an empty list rather than a weak best guess when nothing clears the floor.
+        Empty is the honest and common outcome, and the caller keeps its UNKNOWN.
+        """
+        out: List[RecalledFact] = []
+        try:
+            tokens = self._question_tokens(question)
+            if not tokens:
+                return out
+            wanted = self._read_question(_clean(question).lower())[1]
+            affinities = _PREDICATE_AFFINITY.get(wanted, {})
+
+            for subject, subject_score in self._candidate_subjects(tokens, subject_floor):
+                for triple in self._facts_of(subject):
+                    affinity = self._affinity(affinities, triple.predicate, subject)
+                    out.append(RecalledFact(
+                        triple=triple, subject_score=subject_score, affinity=affinity,
+                        score=subject_score * affinity * triple.confidence))
+                # One hop, and only through an edge that means "the same thing, named
+                # differently" or "the kind this belongs to". Following an arbitrary relation
+                # would walk to a genuinely different entity and answer about that instead,
+                # which is the drift this whole module is built to refuse.
+                for alias in self._neighbours(subject):
+                    for triple in self._facts_of(alias):
+                        affinity = self._affinity(affinities, triple.predicate, alias)
+                        out.append(RecalledFact(
+                            triple=triple, subject_score=subject_score, affinity=affinity,
+                            hops=1, via=subject,
+                            # A hop costs. A fact stated of the alias is evidence about this
+                            # entity, but weaker evidence than one stated of it directly, and
+                            # collapsing the two would make a chain indistinguishable from a
+                            # statement.
+                            score=subject_score * affinity * triple.confidence * 0.7))
+            out.sort(key=lambda r: r.score, reverse=True)
+            # De-duplicate on the claim itself: the same fact reached directly and through an
+            # alias is one fact, and reporting it twice would look like corroboration.
+            seen: Set[Tuple[str, str, str]] = set()
+            unique: List[RecalledFact] = []
+            for got in out:
+                key = got.triple.as_tuple() if got.triple else ("", "", "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(got)
+            self.recalls += 1
+            if unique:
+                self.recalled += 1
+            return unique[:max(1, int(limit))]
+        except Exception:  # noqa: BLE001 — retrieval never breaks a turn
+            return out
+
+    def _affinity(self, affinities: Dict[str, float], predicate: str, subject: str) -> float:
+        """How well this relation answers the question that was asked.
+
+        Two regimes, and the second is the one worth explaining. When the question's own
+        predicate was read, :data:`_PREDICATE_AFFINITY` says what else would answer it.
+
+        When it was *not* read — an unusual phrasing, "tell me about X" — there is no evidence
+        about which relation is wanted, and the honest prior is a uniform one over the relations
+        this subject actually has. So a subject known by a single relation answers at full weight
+        (there is nothing to be ambiguous between), while one known by five answers at a fifth
+        (any of them could have been meant, and four would be the wrong answer). That is the
+        ambiguity the score should carry, and a fixed floor could only ever be wrong in one
+        direction or the other.
+        """
+        if affinities:
+            return affinities.get(predicate, _AFFINITY_FLOOR)
+        low = str(subject or "").lower()
+        relations = {p for (s, p) in self.facts if s == low}
+        return 1.0 / max(1, len(relations))
+
+    @staticmethod
+    def _question_tokens(question: str) -> Set[str]:
+        """The content words of a question — what it is *about*, not what it is made of."""
+        words = "".join(c if c.isalnum() else " " for c in str(question or "").lower()).split()
+        return {w for w in words if w not in _QUESTION_WORDS and len(w) > 2}
+
+    def _candidate_subjects(self, tokens: Set[str],
+                            floor: float) -> List[Tuple[str, float]]:
+        """Every stored subject the question actually names, best first.
+
+        Scored by how much of the *subject* the question contains. Normalising by the subject
+        rather than by the question is the whole point: "what is a Wittig reaction" is a short
+        question that names its entity completely, and a measure normalised by the question would
+        punish it for the words it spends asking.
+        """
+        scores: Dict[str, float] = {}
+        for subject, _predicate in self.facts:
+            if subject in scores:
+                continue
+            parts = {w for w in subject.replace("_", " ").split() if len(w) > 2}
+            if not parts:
+                continue
+            shared = parts & tokens
+            if not shared:
+                continue
+            score = len(shared) / len(parts)
+            if score >= floor:
+                scores[subject] = score
+        return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:4]
+
+    def _facts_of(self, subject: str) -> List[GroundedTriple]:
+        """Every live fact stated of one subject, across all its relations."""
+        out: List[GroundedTriple] = []
+        low = str(subject or "").lower()
+        for (stored, _predicate), triples in self.facts.items():
+            if stored != low:
+                continue
+            out.extend(t for t in triples if not t.superseded)
+        return out
+
+    def _neighbours(self, subject: str) -> List[str]:
+        """Entities that are the same thing under another name, or the kind it belongs to."""
+        out: List[str] = []
+        for predicate in ("also_known_as", "is_a", "part_of"):
+            for triple in self._lookup(subject, predicate):
+                name = triple.object.strip().lower()
+                if name and name != str(subject or "").lower() and name not in out:
+                    out.append(name)
+        return out[:3]
 
     def history(self, subject: str, predicate: str) -> List[GroundedTriple]:
         """Everything ever believed about this pair, superseded entries included, oldest first."""
@@ -1770,18 +2060,42 @@ class Grounder:
         relation from them.
         """
         try:
-            if intent is not None and getattr(intent, "kind", "") == "question":
-                return True
             low = str(text or "").strip().lower()
             if not low:
                 return False
             if low.endswith("?"):
                 return True
+            # A fronted conditional is a statement, whatever word it starts with. Checked before
+            # the head test because "when" and "if" head both a question and a conditional, and
+            # what separates them is the comma and the main clause after it: "When *does* rain
+            # fall" inverts its auxiliary, "When a model memorises noise, it generalises poorly"
+            # closes a whole clause first. `_split_condition` already recognises exactly this
+            # construction for extraction, so it is asked rather than a second rule invented.
+            if low.endswith(".") and _split_condition(text)[1]:
+                return False
             head = low.split()[0]
             if head in _WH_HEAD:
                 return True
             # Wh-in-situ (Hinglish/Devanagari) and imperative asks, anywhere in the turn.
-            return bool(_ASK_ANYWHERE.search(low))
+            if _ASK_ANYWHERE.search(low):
+                return True
+            # The intent reader is consulted last, and it is not allowed to overrule a sentence
+            # its author punctuated as a statement.
+            #
+            # The failure this closes, measured end to end: "Overfitting occurs when a model is
+            # trained too much." was read as a question, because the intent reader's stated reason
+            # was "it contains a question word" — the *subordinating* "when", which joins a clause
+            # here rather than asking anything. `ground` then took the answering branch and the
+            # sentence was never extracted at all. Every conditional statement was affected, which
+            # is precisely the class of sentence whose condition this module had just learned to
+            # keep: "if X, then Y", "X occurs when C", "when C, E".
+            #
+            # A trailing full stop is weak evidence on its own, and decisive here: all three
+            # positive surface tests have already declined, so the only thing that made this a
+            # question was a conjunction inside a clause the author closed with a period.
+            if intent is not None and getattr(intent, "kind", "") == "question":
+                return not low.endswith(".")
+            return False
         except Exception:  # noqa: BLE001
             return False
 
@@ -1808,6 +2122,8 @@ class Grounder:
             "patterns": len(self.patterns), "patterns_learned": self.patterns_learned,
             "patterns_live": len(learned), "patterns_pruned": self.patterns_pruned,
             "llm_calls": self.llm_calls,
+            "recalls": self.recalls, "recalled": self.recalled,
+            "recall_rate": round(self.recalled / self.recalls, 4) if self.recalls else None,
             "graph_attached": self.graph is not None,
             "ladder_attached": self.ladder is not None,
         }

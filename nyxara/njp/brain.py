@@ -163,6 +163,10 @@ class NJPThought:
     cycle_id: str = ""
     ms: float = 0.0
     focus: Any = None                          # what won the turn's attention, and what lost
+    # Set when the answer came from a relation the question did not ask for. Carries the trace
+    # of which fact was offered and why, so a retrieved answer is never indistinguishable from
+    # one the store held under exactly the relation that was requested.
+    recalled: str = ""
     # What she is entitled to say about `answer`: known / believed / unknown. Carried beside the
     # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
     epistemic: str = "unknown"
@@ -999,6 +1003,36 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def _recall(self, thought: NJPThought) -> None:
+        """Answer from a relation the question did not ask for, about the entity it did name.
+
+        The gate this passes through is the same one a remembered episode passes through, and for
+        the same reason: a fact being *about* what was asked is a claim about relevance, and
+        relevance is exactly what :class:`~nyxara.njp.relevance.RelevanceGate` is for. A retrieved
+        fact that cannot clear it is not offered, however confidently it was stored.
+
+        Never ``KNOWN``. Having found something is not corroboration of it.
+        """
+        try:
+            if self.grounder is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            if not getattr(grounding, "is_question", False):
+                return
+            # A social or reflexive turn has no business reaching the fact store at all, and the
+            # policy that says so has already run for `_compose`. Asking it again here keeps the
+            # rule in one place rather than trusting that nothing has changed in between.
+            if thought.act is not None and self._policy is not None:
+                if self._policy.forbids_world_knowledge(thought.act):
+                    return
+            answer = self.grounder.answer_by_recall(thought.stimulus)
+            if not answer.answered:
+                return
+            thought.answer = str(answer.text)[:1000]
+            thought.recalled = answer.why
+        except Exception:  # noqa: BLE001 — a failed recall leaves the turn as it was
+            return
+
     def _ask_back(self, thought: NJPThought) -> None:
         """Put her own best question to the Master, on a turn where she had nothing to answer.
 
@@ -1504,6 +1538,21 @@ class NJPBrain:
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
                 self._deliberate(out)
+                # 4c. RECALL — the last thing tried, and last on purpose.
+                #
+                # She may hold the entity the question named under a relation it did not ask for:
+                # asked "what is deep learning" with `deep learning --part_of--> machine learning`
+                # in the store, `_lookup` misses on the predicate and the fact is unreachable
+                # though it is exactly what was wanted. That was the second measured bottleneck
+                # after extraction — 521 facts held, and questions about them answered UNKNOWN.
+                #
+                # After deliberation, never before it. A retrieved fact is the weakest answer that
+                # still counts as one, and running it earlier stops the reasoner from ever being
+                # reached: `sparrow needs water`, derived through `sparrow is_a bird`, was
+                # measured being replaced by the flat `sparrow is_a bird` the moment retrieval
+                # answered first. Strictly worse, strictly sooner.
+                if not out.answer:
+                    self._recall(out)
                 # The epistemic pass above ran against an empty answer, so a deliberated one
                 # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
                 # rather than move: the first pass also feeds the echo check, which has to
