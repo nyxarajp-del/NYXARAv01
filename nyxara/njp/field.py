@@ -258,6 +258,15 @@ class RecursiveCognitiveField:
         self.errors_diagnosed: Dict[str, int] = {}
         self.trials: List[Trial] = []
         self.accepted_trials = 0
+        # Trials refused because the organ they targeted has no measure. A number worth reporting
+        # rather than hiding: it names the organs whose improvement she currently cannot verify.
+        self.unmeasurable = 0
+        # Bottlenecks found and left alone because nothing here can act on them. Reported so a
+        # real limit is visible rather than silently skipped.
+        self.blocked: List[Bottleneck] = []
+        # Modifications made and reverted, by (organ, knob, before, after). Bounded because the
+        # knob ranges are bounded, so this cannot grow without limit.
+        self._rejected: Set[Tuple[str, str, float, float]] = set()
         self.last: Optional[CycleReport] = None
         # Samples the benchmark is computed on. The held-out half is *never* used by any
         # restructure decision, which is the only thing that makes a benchmark win mean anything.
@@ -637,14 +646,32 @@ class RecursiveCognitiveField:
             if self._protected(modification):
                 trial.why = "refused: names a protected knob"
                 return trial
+            # An organ the benchmark cannot see may not be modified. Without this the loop can
+            # run forever at zero: it correctly identifies a bottleneck, correctly proposes a
+            # bounded change, and then scores it with a metric that is blind to the organ it
+            # touched — so the gain is 0.0 by construction, the change is reverted as useless,
+            # and the same trial repeats. Measured: 52 trials, 0 accepted, `baseline` and
+            # `candidate` equal to five decimal places every time.
+            #
+            # Refusing is better than guessing. It converts an invisible non-result into a stated
+            # gap — "this organ has no measure" is a finding, and one `stats` now reports.
+            if modification.organ not in self._measured_organs():
+                self.unmeasurable += 1
+                trial.why = (f"refused: {modification.organ} is not covered by the benchmark, "
+                             f"so any result would be unmeasurable")
+                return trial
 
             trial.baseline = self.benchmark()
+            # Captured before the change, so the battery can tell "this made compression worse"
+            # from "compression was already poor when this started".
+            before_compression = (self.concepts.compression()
+                                  if self.concepts is not None else None)
             applied = self._apply(modification)
             if not applied:
                 trial.why = "modification could not be applied"
                 return trial
             trial.candidate = self.benchmark()
-            trial.adversarial_passed = self._adversarial()
+            trial.adversarial_passed = self._adversarial(compression_before=before_compression)
 
             # Strictly better, and still safe. Ties revert: an equal score is not evidence for a
             # change, and accepting ties is how a system drifts a long way on no evidence at all.
@@ -655,6 +682,9 @@ class RecursiveCognitiveField:
                 self.accepted_trials += 1
             else:
                 self._revert(modification)
+                # Remembered so it is not proposed again from the same state. Without this the
+                # loop spends every cycle re-running its first failed experiment.
+                self._rejected.add(self._signature(modification))
                 trial.why = ("adversarial battery failed" if not trial.adversarial_passed
                              else f"no gain ({trial.baseline:.4f} → {trial.candidate:.4f})")
             return trial
@@ -684,13 +714,19 @@ class RecursiveCognitiveField:
                     why="concepts barely compress the observations they claim to explain"))
         if self.universe is not None:
             stats = self.universe.stats()
-            usable, total = stats["usable_relations"], max(1, stats["relations"])
-            share = usable / total
+            # Arrows that can answer *anything*, which is not the same as arrows that can predict
+            # a number. A stated law propagates a direction and no magnitude, and counting only
+            # the fitted ones pinned this metric at exactly 0.0 on any text-taught brain — every
+            # arrow it had was stated. The loop then spent 52 trials turning a depth knob on an
+            # organ it had correctly identified and could not have helped.
+            answerable = (stats["usable_relations"] + stats.get("directional_relations", 0))
+            total = max(1, stats["relations"])
+            share = answerable / total
             if share < 0.5:
                 found.append(Bottleneck(
-                    organ="universe", metric="usable_share", value=share,
+                    organ="universe", metric="answerable_share", value=share,
                     severity=min(1.0, 1.0 - share),
-                    why="most learned arrows do not explain enough to propagate through"))
+                    why="most learned arrows can neither predict a value nor state a direction"))
         if self.designer is not None:
             stats = self.designer.stats()
             if stats["hypotheses"] and not stats["run"]:
@@ -706,7 +742,29 @@ class RecursiveCognitiveField:
                     why="most answers do not survive their own critic"))
         if not found:
             return None
-        return max(found, key=lambda b: b.severity)
+        found.sort(key=lambda b: b.severity, reverse=True)
+        # An organ she can neither measure nor modify is a *finding*, not a task. Ranking purely
+        # by severity let the worst unactionable bottleneck mask every actionable one — measured:
+        # `designer` at severity 0.7 ("experiments are designed but never resolved") sat at the
+        # top and the loop reported "no legal modification for designer" forever, never once
+        # looking at the organs it could have improved.
+        #
+        # The blocked ones are kept and reported rather than discarded. "This is what is limiting
+        # her and nothing here can act on it" is the most useful thing this method can say, and
+        # dropping it silently is how a known gap becomes an invisible one.
+        self.blocked = [b for b in found if not self._actionable(b)]
+        actionable = [b for b in found if self._actionable(b)]
+        return actionable[0] if actionable else None
+
+    def _actionable(self, bottleneck: Bottleneck) -> bool:
+        """Can this bottleneck be both changed and scored? Both, or it is not a task."""
+        try:
+            if bottleneck.organ not in self._measured_organs():
+                return False
+            modification = self.propose(bottleneck)
+            return modification is not None and not self._protected(modification)
+        except Exception:  # noqa: BLE001
+            return False
 
     def propose(self, bottleneck: Bottleneck) -> Optional[Modification]:
         """Invent a bounded, reversible change aimed at *this* bottleneck.
@@ -717,24 +775,69 @@ class RecursiveCognitiveField:
         """
         if bottleneck.organ == "concepts" and self.concepts is not None:
             before = float(self.concepts.similarity)
-            after = round(min(0.8, max(0.1, before + (0.06 if before < 0.45 else -0.06))), 4)
-            if abs(after - before) < 1e-9:
-                return None
-            return Modification(organ="concepts", knob="similarity", before=before, after=after,
-                                rationale="move the clustering threshold toward better compression")
+            # Both directions, preferred one first. A single hard-coded direction meant that once
+            # it failed there was nothing else to try, and the loop re-proposed the identical
+            # change every cycle forever — measured: six trials, all `similarity 0.34 → 0.40`,
+            # all reverted. `reason.py` keeps rejected hypotheses for exactly this reason; the
+            # slow loop had no equivalent and repeated its one dead end indefinitely.
+            step = 0.06 if before < 0.45 else -0.06
+            for delta in (step, -step):
+                after = round(min(0.8, max(0.1, before + delta)), 4)
+                if abs(after - before) < 1e-9:
+                    continue
+                candidate = Modification(
+                    organ="concepts", knob="similarity", before=before, after=after,
+                    rationale="move the clustering threshold toward better compression")
+                if not self._already_tried(candidate):
+                    return candidate
+            return None
         if bottleneck.organ == "universe" and self.universe is not None:
             before = float(self.universe.max_depth)
-            after = float(min(10, max(1, int(before) + 1)))
-            if abs(after - before) < 1e-9:
-                return None
-            return Modification(organ="universe", knob="max_depth", before=before, after=after,
-                                rationale="propagate further so more arrows are exercised")
+            for after in (float(min(10, int(before) + 1)), float(max(1, int(before) - 1))):
+                if abs(after - before) < 1e-9:
+                    continue
+                candidate = Modification(
+                    organ="universe", knob="max_depth", before=before, after=after,
+                    rationale="propagate further so more arrows are exercised")
+                if not self._already_tried(candidate):
+                    return candidate
+            return None
         if bottleneck.organ == "meta" and self.meta is not None:
             return Modification(organ="field", knob="crystallise_every",
                                 before=float(self.crystallise_every),
                                 after=float(max(1, self.crystallise_every - 1)),
                                 rationale="refresh concepts more often so answers rest on newer structure")
         return None
+
+    @staticmethod
+    def _signature(modification: Modification) -> Tuple[str, str, float, float]:
+        return (modification.organ, modification.knob,
+                round(modification.before, 6), round(modification.after, 6))
+
+    def _already_tried(self, modification: Modification) -> bool:
+        """Has this exact change already been made and reverted?
+
+        Exact rather than approximate, and from the same starting value: a knob at 0.34 moving to
+        0.40 is a different experiment from the same knob at 0.46 moving to 0.40, because
+        everything else about her has changed in between. What must not repeat is the identical
+        experiment from the identical state.
+        """
+        return self._signature(modification) in self._rejected
+
+    def _measured_organs(self) -> Set[str]:
+        """The organs :meth:`benchmark` actually scores, and therefore the only legal targets.
+
+        Derived from what is attached rather than hard-coded, so switching an organ off removes
+        it from both sides at once and the invariant cannot drift out of step with the score.
+        `field` counts as measured because its own knobs act on the concept layer, which is
+        scored.
+        """
+        out: Set[str] = set()
+        if self.concepts is not None:
+            out.update({"concepts", "field"})
+        if self.universe is not None:
+            out.add("universe")
+        return out
 
     def _protected(self, modification: Modification) -> bool:
         target = f"{modification.organ}.{modification.knob}".lower()
@@ -781,27 +884,71 @@ class RecursiveCognitiveField:
         method that silently rebuilds the concept hierarchy is a performance bug waiting for the
         concept count to grow, and reporting should never have side effects in the first place.
         """
-        if self.concepts is None or not self._holdout:
-            return 0.0
         try:
-            self.concepts.crystallise()
-            covered = 0
-            total = 0
-            for subject, features in self._holdout[-200:]:
-                total += 1
-                if self.concepts.explain(subject, features).covered:
-                    covered += 1
-            coverage = covered / total if total else 0.0
-            # Compression and coverage together, because either alone is gameable: one enormous
-            # concept covers everything and compresses nothing; a concept per observation
-            # compresses nothing and covers everything.
-            ratio = self.concepts.compression()
-            self._last_benchmark = round(0.5 * coverage + 0.5 * min(1.0, (ratio - 1.0) / 2.0), 6)
+            parts: List[Tuple[float, float]] = []          # (score, weight)
+            parts.extend(self._score_concepts())
+            parts.extend(self._score_universe())
+            if not parts:
+                return 0.0
+            total_weight = sum(w for _s, w in parts)
+            self._last_benchmark = round(
+                sum(s * w for s, w in parts) / total_weight, 6) if total_weight else 0.0
             return self._last_benchmark
         except Exception:  # noqa: BLE001
             return 0.0
 
-    def _adversarial(self) -> bool:
+    def _score_concepts(self) -> List[Tuple[float, float]]:
+        """Coverage of held-out subjects, and the compression that has to pay for it."""
+        if self.concepts is None or not self._holdout:
+            return []
+        self.concepts.crystallise()
+        covered = total = 0
+        for subject, features in self._holdout[-200:]:
+            total += 1
+            if self.concepts.explain(subject, features).covered:
+                covered += 1
+        coverage = covered / total if total else 0.0
+        # Compression and coverage together, because either alone is gameable: one enormous
+        # concept covers everything and compresses nothing; a concept per observation
+        # compresses nothing and covers everything.
+        ratio = self.concepts.compression()
+        return [(coverage, 1.0), (min(1.0, (ratio - 1.0) / 2.0), 1.0)]
+
+    def _score_universe(self) -> List[Tuple[float, float]]:
+        """How much of the causal model can actually answer a counterfactual.
+
+        The benchmark used to read the concept layer and nothing else, while `propose` handed out
+        knobs for `universe`, `designer` and `meta`. A knob on an organ the score cannot see moves
+        it by exactly zero, which is what 52 trials at `baseline == candidate` to five decimal
+        places were reporting: not "this change did not help" but "this change was unmeasurable".
+
+        Reach rather than count, because reach is what `max_depth` — the one knob this organ has —
+        actually changes. A model whose arrows all answer but never chain is worth less than one
+        whose arrows compose, and only the second is a world model.
+        """
+        if self.universe is None:
+            return []
+        stats = self.universe.stats()
+        total = stats.get("relations") or 0
+        if not total:
+            return []
+        answerable = stats.get("usable_relations", 0) + stats.get("directional_relations", 0)
+        share = min(1.0, answerable / max(1, total))
+
+        # What one intervention actually reaches, averaged over a few causes. Capped at a handful
+        # of probes: this runs inside a benchmark that already re-crystallises the concept layer.
+        reached: List[float] = []
+        for relation in list(self.universe.relations.values())[:8]:
+            try:
+                result = self.universe.without(relation.cause)
+                downstream = {d.variable for d in result.deltas if d.variable != relation.cause}
+                reached.append(min(1.0, len(downstream) / 3.0))
+            except Exception:  # noqa: BLE001
+                continue
+        reach = (sum(reached) / len(reached)) if reached else 0.0
+        return [(share, 1.0), (reach, 1.0)]
+
+    def _adversarial(self, *, compression_before: Optional[float] = None) -> bool:
         """The battery a modification must survive whatever the benchmark says.
 
         Deliberately about *invariants*, not performance: a configuration that scores brilliantly
@@ -822,8 +969,20 @@ class RecursiveCognitiveField:
             observations = max(1, len(self.concepts.observations))
             if len(concepts) == 1 and concepts[0].support >= observations:
                 return False
-            # 3. Compression must not have fallen below break-even.
-            if self.concepts.compression() < 1.0:
+            # 3. Compression must not have been *driven* below break-even.
+            #
+            # Absolute where there is nothing to compare against, and a non-regression check where
+            # there is — the distinction matters and blocked the loop entirely without it. On a
+            # corpus whose concept set already fails to pay for itself, an absolute rule refuses
+            # every modification including the ones that improve matters: measured, a change that
+            # took the benchmark from 0.5036 to 0.5464 was rejected because compression was 0.70
+            # both before and after. The battery exists to catch a modification that games the
+            # metric, not to trap her in whatever state she happens to be in.
+            now = self.concepts.compression()
+            if compression_before is None:
+                if now < 1.0:
+                    return False
+            elif now < 1.0 and now < compression_before - 1e-9:
                 return False
             # 4. An unseen observation with nothing in common must NOT be confidently covered.
             probe = self.concepts.explain("__adversarial_probe__", ["__nonsense_feature__"])
@@ -849,6 +1008,9 @@ class RecursiveCognitiveField:
             "benchmark": self._last_benchmark,
             "meta_trials": len(self.trials),
             "meta_accepted": self.accepted_trials,
+            "meta_unmeasurable": self.unmeasurable,
+            "measured_organs": sorted(self._measured_organs()),
+            "blocked_bottlenecks": [b.to_dict() for b in self.blocked[:4]],
             "meta_gain": round(sum(t.gain for t in accepted), 5),
             "last_trial": self.trials[-1].to_dict() if self.trials else None,
             "last_cycle": self.last.to_dict() if self.last else None,
