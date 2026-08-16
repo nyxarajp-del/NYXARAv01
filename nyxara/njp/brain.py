@@ -897,6 +897,43 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def budget(self) -> Dict[str, Any]:
+        """What this turn is allowed to spend, chosen by what has actually been paying.
+
+        The homeostasis loop was almost entirely built and had no middle. ``_build_meta``
+        registers three arms — ``settle_steps``, ``recall_k``, ``reason_depth`` — over real
+        settings, with the comment that each "changes what a turn costs, so a win here is a
+        measured win rather than a preference". :meth:`~nyxara.njp.selfmodel.MetaLearner.choose`
+        picks between them, :meth:`resolve` already rewards one of them. Nothing ever *read a
+        choice back*, so every turn spent the same fixed config constant and the bandit learned
+        about a knob that was never turned.
+
+        Choosing is what registers the pending arm that :meth:`resolve` later grades, so this is
+        also what makes the existing reward meaningful rather than a credit assigned to whichever
+        arm happened to be chosen last.
+
+        Falls back to the configured constants for any arm that has not been registered, which is
+        the honest default: an untuned knob is the one she shipped with, not a guess.
+        """
+        out: Dict[str, Any] = {
+            "settle_steps": int(self._cfg("max_settle_steps", 24)),
+            "recall_k": int(self._cfg("recall_k", 5)),
+            "reason_depth": str(self._cfg("reason_max_rung", "proof")),
+            "learned": False,
+        }
+        if self.meta is None:
+            return out
+        try:
+            for arm in ("settle_steps", "recall_k", "reason_depth"):
+                chosen = self.meta.choose(arm)
+                if chosen is None:
+                    continue
+                out[arm] = chosen.value
+                out["learned"] = True
+        except Exception:  # noqa: BLE001 — an unchosen knob keeps the value she was built with
+            return out
+        return out
+
     def shadow(self) -> Dict[str, Any]:
         """What she does not know, as one structure instead of five nobody joined.
 
@@ -1188,13 +1225,19 @@ class NJPBrain:
                 # Ask what usually follows this BEFORE settling — the pre-cognitive read.
                 out.anticipated = self.fabric.anticipate(out.cells)
 
+                # What this turn may spend, chosen by what has been paying rather than by a
+                # constant. Read once so the settle and the recall are budgeted together — two
+                # separate draws would let her deliberate deeply on a narrow recall and call the
+                # combination a win.
+                spend = self.budget()
+
                 self.fabric.stimulate(out.cells)
-                out.settled = self.fabric.settle()
+                out.settled = self.fabric.settle(max_steps=int(spend["settle_steps"]))
 
                 if self.memory is not None:
                     try:
                         out.recall = self.memory.recall(out.stimulus,
-                                                        k=self._cfg("recall_k", 5))
+                                                        k=int(spend["recall_k"]))
                     except Exception:  # noqa: BLE001
                         out.recall = None
                 return out
@@ -1491,9 +1534,15 @@ class NJPBrain:
             if self.reasoner is None:
                 return
             novelty = float(getattr(thought.percept, "novelty", 0.5) or 0.5)
+            # The depth arm caps how far down the ladder this turn may go. `depth_for` still
+            # chooses within that cap from the turn's own uncertainty and stakes — the budget
+            # says what she may afford, not what this question needs, and conflating the two
+            # would make an easy question expensive just because she has been doing well.
+            ceiling = str(self.budget().get("reason_depth") or "")
             conclusion = self.reasoner.reason(
                 thought.stimulus, uncertainty=novelty,
-                stakes=self._cfg("reason_stakes", 0.5), task="question")
+                stakes=self._cfg("reason_stakes", 0.5), task="question",
+                max_rung=ceiling or None)
             if conclusion is not None and conclusion.decided and conclusion.answer:
                 thought.answer = conclusion.answer
         except Exception:  # noqa: BLE001 — a failed deliberation leaves the turn unanswered
@@ -1876,7 +1925,13 @@ class NJPBrain:
                     self.self_model.observe("grounding", 1.0) if getattr(
                         getattr(thought, "percept", None), "grounding", None) else None
                 if self.meta is not None:
-                    self.meta.reward("settle_steps", float(correct))
+                    # Every arm that was spent this turn is graded, not just the one. Rewarding
+                    # `settle_steps` alone meant the other two knobs accumulated choices and
+                    # never a single outcome, so their means stayed at the prior for ever and
+                    # `best()` could never name a winner. A knob that is turned and never scored
+                    # is not being learned about, it is being varied.
+                    for arm in ("settle_steps", "recall_k", "reason_depth"):
+                        self.meta.reward(arm, float(correct))
         except Exception:  # noqa: BLE001
             pass
 

@@ -197,7 +197,7 @@ class Reasoner:
 
     # ---- the routing decision ---------------------------------------------- #
     def depth_for(self, *, uncertainty: float, stakes: float = 0.5,
-                  task: str = "question") -> str:
+                  task: str = "question", max_rung: Optional[str] = None) -> str:
         """How deep this question warrants going, before any work is done.
 
         Three inputs, and they are not interchangeable. High uncertainty on a trivial question is
@@ -226,7 +226,13 @@ class Reasoner:
                 target = Rung.VERIFICATION
             else:
                 target = Rung.PROOF
-            return target if Rung.cost(target) <= Rung.cost(self.max_rung) else self.max_rung
+            # A per-call ceiling is a *budget*, not a preference: it caps what this turn may
+            # afford without changing what the question is judged to need, so an easy question
+            # still costs one rung under a generous budget.
+            ceiling = max_rung if max_rung in Rung.ALL else self.max_rung
+            if Rung.cost(ceiling) > Rung.cost(self.max_rung):
+                ceiling = self.max_rung
+            return target if Rung.cost(target) <= Rung.cost(ceiling) else ceiling
         except Exception:  # noqa: BLE001
             return Rung.ASSOCIATION
 
@@ -249,7 +255,7 @@ class Reasoner:
     # ---- the pass ----------------------------------------------------------- #
     def reason(self, problem: str, *, candidates: Optional[Sequence[Hypothesis]] = None,
                uncertainty: float = 0.5, stakes: float = 0.5,
-               task: str = "question") -> Conclusion:
+               task: str = "question", max_rung: Optional[str] = None) -> Conclusion:
         """Work the problem, descending only as far as it needs.
 
         The loop stops the moment an answer is good enough, which is what makes the ladder worth
@@ -262,7 +268,8 @@ class Reasoner:
             state.turns += 1
             self.passes += 1
 
-            target = self.depth_for(uncertainty=uncertainty, stakes=stakes, task=task)
+            target = self.depth_for(uncertainty=uncertainty, stakes=stakes, task=task,
+                                    max_rung=max_rung)
             for hypothesis in (candidates or []):
                 self.propose(state, hypothesis)
 

@@ -458,6 +458,67 @@ def test_the_shadow_is_ranked_by_what_answering_it_would_buy():
     assert values == sorted(values, reverse=True), values
 
 
+# --------------------------------------------------------------------------- #
+# Homeostasis — a knob that is turned has to be scored
+# --------------------------------------------------------------------------- #
+def _graded_turns(n: int = 30) -> NJPBrain:
+    brain = NJPBrain()
+    for i in range(n):
+        thought = brain.think(f"Ravi{i} lives in Pune")
+        brain.resolve(thought, correct=1.0 if i % 3 else 0.0)
+    return brain
+
+
+def test_every_knob_that_is_spent_is_also_graded():
+    # `_build_meta` registers three arms over real settings and says each "changes what a turn
+    # costs". Only `settle_steps` was ever rewarded, so the other two accumulated choices and
+    # never a single outcome — their means sat at the prior for ever and `best()` could never
+    # name a winner. A knob that is turned and never scored is being varied, not learned about.
+    brain = _graded_turns()
+    for arm in ("settle_steps", "recall_k", "reason_depth"):
+        assert brain.meta.best(arm) is not None, (arm, brain.meta.stats())
+        trials = sum(s.trials for s in brain.meta.strategies[arm].values())
+        assert trials > 0, (arm, trials)
+
+
+def test_a_turn_spends_what_was_chosen_rather_than_a_constant():
+    # The loop had no middle: choose() existed, reward() existed, and nothing read a choice back,
+    # so every turn spent the same fixed config value and the bandit learned about a knob that
+    # was never turned.
+    brain = _graded_turns()
+    spend = brain.budget()
+    assert spend["learned"] is True, spend
+    assert spend["settle_steps"] in (8, 24, 64), spend
+    assert spend["recall_k"] in (3, 8), spend
+    assert spend["reason_depth"] in ("association", "verification"), spend
+
+
+def test_an_unregistered_knob_keeps_the_value_she_was_built_with():
+    # The honest default. An untuned knob is the one she shipped with, not a guess.
+    class _NoMeta:
+        meta_enabled = False
+
+    brain = NJPBrain(_NoMeta())
+    assert brain.meta is None
+    spend = brain.budget()
+    assert spend["learned"] is False, spend
+    assert spend["settle_steps"] == 24 and spend["recall_k"] == 5, spend
+
+
+def test_the_depth_budget_caps_without_changing_what_the_question_needs():
+    # A budget says what she may afford, not what this question requires. Conflating the two
+    # would make an easy question expensive merely because she has been doing well.
+    brain = NJPBrain()
+    easy = brain.reasoner.depth_for(uncertainty=0.05, stakes=0.05, max_rung="verification")
+    hard = brain.reasoner.depth_for(uncertainty=1.0, stakes=1.0, max_rung="verification")
+    assert easy == "intuition", easy            # a generous budget does not inflate it
+    assert hard == "verification", hard         # a tight budget does cap it
+
+    from nyxara.njp.reason import Rung
+    unbounded = brain.reasoner.depth_for(uncertainty=1.0, stakes=1.0)
+    assert Rung.cost(unbounded) > Rung.cost(hard), (unbounded, hard)
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.
