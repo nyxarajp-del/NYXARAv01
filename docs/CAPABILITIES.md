@@ -868,7 +868,8 @@ sympy) — it returns a verdict only where a claim is formally expressible and r
 ### Reachable over the wire
 
 `/v1/njp/status`, `/fabric`, `/ledger`, `/think`, `/recall`, `/anticipate`, `/expand`, `/evolve`,
-`/pulse`, and `/{organ}` — so growth and self-rewriting are observable from outside the process,
+`/pulse`, `/learner`, `/calculate`, and `/{organ}` — so growth and self-rewriting are observable
+from outside the process,
 not merely asserted in a docstring. On the console: `/njp`, and `/njp think` prints the synapse
 count before and after the turn, which is the claim this whole package has to earn.
 

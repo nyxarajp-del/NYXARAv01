@@ -329,3 +329,24 @@ def test_a_corrupt_record_leaves_a_working_core():
     core = _fitted(_CHAIN)
     core.load_dict({"schemas": [{"nonsense": True}], "transitivity": "not a list"})
     assert core.stats()["turns"] >= 0
+
+
+# --------------------------------------------------------------------------- #
+# Reachable over the wire
+# --------------------------------------------------------------------------- #
+
+def test_the_core_is_readable_over_http():
+    """An organ observable only from inside the process is a docstring, not a capability."""
+    pytest.importorskip("fastapi", reason="the API server needs the [server] extra")
+    from fastapi.testclient import TestClient
+
+    from nyxara.server.app import create_app
+
+    client = TestClient(create_app())
+    body = client.get("/v1/njp/learner").json()
+    assert "schemas" in body and "transitivity" in body
+
+    calculator = client.get("/v1/njp/calculate").json()
+    assert "evaluated" in calculator
+
+    assert client.get("/v1/njp/nonsense").json()["available"] is False
