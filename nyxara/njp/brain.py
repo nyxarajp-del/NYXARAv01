@@ -1030,6 +1030,15 @@ class NJPBrain:
                 return
             thought.answer = str(answer.text)[:1000]
             thought.recalled = answer.why
+            # Being retrieved and used IS the evidence consolidation is looking for, and until
+            # now it never reached it: grounding answers from a fact store keyed by
+            # (subject, predicate) while `levels` is keyed by the turn a memory arrived on, so a
+            # fact used a hundred times looked exactly like one nobody had read. The canonical
+            # claim is the join.
+            if self.levels is not None and answer.triples:
+                triple = answer.triples[0]
+                self.levels.touch_claim(
+                    f"{triple.subject}|{triple.predicate}|{triple.object}".lower())
         except Exception:  # noqa: BLE001 — a failed recall leaves the turn as it was
             return
 
@@ -1824,7 +1833,7 @@ class NJPBrain:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
-                    source=f"turn-{self.turns}")
+                    source=f"turn-{self.turns}", claim=self._claim_of(thought))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
@@ -1832,6 +1841,31 @@ class NJPBrain:
                                      cue=thought.stimulus)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _claim_of(thought: NJPThought) -> str:
+        """What this turn *asserted*, canonically — the thing recurrence should be counted over.
+
+        :mod:`nyxara.njp.levels` falls back to a bag of the memory's words, which cannot see that
+        "Deep learning is a subset of machine learning" and "ML contains deep learning" are one
+        claim. It has the triple by this point in the turn, and the triple is the claim: two
+        sentences say the same thing exactly when they assert the same relation between the same
+        two entities.
+
+        Empty for a turn that grounded nothing, which leaves the fallback in place rather than
+        inventing an identity for text nobody parsed.
+        """
+        try:
+            grounding = getattr(thought.percept, "grounding", None)
+            triples = list(getattr(grounding, "triples", None) or [])
+            if not triples:
+                return ""
+            # A turn stating several relations is identified by all of them, sorted so the order
+            # they were extracted in cannot make one turn look unlike another that said the same.
+            return " ; ".join(sorted(
+                f"{t.subject}|{t.predicate}|{t.object}".lower() for t in triples[:4]))[:200]
+        except Exception:  # noqa: BLE001
+            return ""
 
     @staticmethod
     def _level_for(thought: NJPThought) -> str:
