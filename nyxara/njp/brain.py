@@ -58,9 +58,14 @@ __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 # carrying the same confidence as one the Master gave, and nothing downstream could tell the two
 # apart afterwards. An intervention she cannot size is one she declines to simulate.
 _INTERVENTION_FACTOR: Dict[str, float] = {
-    "halve": 0.5, "halving": 0.5, "half": 0.5, "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
-    "double": 2.0, "doubling": 2.0, "dugna": 2.0, "duguna": 2.0,
-    "remove": 0.0, "removing": 0.0, "stop": 0.0, "stopping": 0.0, "band": 0.0, "bina": 0.0,
+    # Past participles are here because "what if the water IS HALVED" is the commonest English
+    # phrasing of the question and matched none of the infinitive/gerund forms — the passive is
+    # how a counterfactual about a thing rather than an actor is normally put.
+    "halve": 0.5, "halving": 0.5, "halved": 0.5, "half": 0.5,
+    "aadha": 0.5, "adha": 0.5, "aadhi": 0.5,
+    "double": 2.0, "doubling": 2.0, "doubled": 2.0, "dugna": 2.0, "duguna": 2.0,
+    "remove": 0.0, "removing": 0.0, "removed": 0.0, "stop": 0.0, "stopping": 0.0,
+    "stopped": 0.0, "band": 0.0, "bina": 0.0,
 }
 
 _INTERVENTION = re.compile(
@@ -77,8 +82,17 @@ _INTERVENTION_ABSOLUTE = re.compile(
 
 # Hinglish puts the object before the verb — "paani aadha kar doon" — so the factor word follows
 # the variable rather than preceding it. Same intervention, mirrored word order.
+#
+# The English passive belongs in this pattern rather than the leading one for exactly the same
+# reason: "the water is halved" also puts the variable first. It is the commonest way to ask a
+# counterfactual about a *thing* rather than about someone acting on it, and matching only
+# "halve the water" meant the natural phrasing of the question fell through to no intervention
+# at all — the parse then supplied no `variable` key, `_strategy_simulate` returned None before
+# reaching the do-operator, and the turn answered nothing while the engine sat ready.
 _INTERVENTION_TRAILING = re.compile(
-    r"\b(?P<var>[a-z][a-z_]*)\s+(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|double)\b",
+    r"\b(?:the\s+)?(?P<var>[a-z][a-z_]*)\s+(?:(?:is|was|were|be|gets?|got)\s+)?"
+    r"(?P<op>aadha|adha|aadhi|dugna|duguna|band|half|halved|double|doubled|"
+    r"removed|stopped)\b",
     re.IGNORECASE)
 
 
@@ -246,6 +260,9 @@ class NJPBrain:
         self.discoverer = self._build_discoverer(c)
         self.reasoner = self._build_reasoner(c)
         self.self_model = self._build_self_model(c)
+        # Before `metareason`, which registers a strategy bound to it: a calculator built after
+        # the strategy table would be registered as absent and never chosen.
+        self.calculator = self._build_calculator(c)
         self.meta = self._build_meta(c)
         self.goals = self._build_goals(c)
         self.curiosity = self._build_curiosity(c)
@@ -788,6 +805,22 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_calculator(self, c: Any) -> Any:
+        """Arithmetic. Absent before this: no module in ``nyxara/njp/`` could evaluate anything.
+
+        :mod:`nyxara.njp.prove` is the package's only sympy consumer and it *verifies* claims — an
+        arithmetic question reached it and came back INEXPRESSIBLE. So "2+2 kitna hai" descended
+        the whole ladder and returned the empty string, which is an honest answer to a question
+        she genuinely could not answer, and an absurd one to that question.
+        """
+        if not self._gate("calculate", True):
+            return None
+        try:
+            from nyxara.njp.calculate import Calculator
+            return Calculator(prefer_exact=self._cfg("calculate_prefer_exact", True))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_metareason(self, c: Any) -> Any:
         """Meta-reasoning: which way of thinking this problem calls for, learned from outcomes.
 
@@ -808,6 +841,15 @@ class NJPBrain:
             if self.universe is not None:
                 meta.register("simulate", (ProblemKind.CAUSAL, ProblemKind.EMPIRICAL),
                               self._strategy_simulate, prior=0.5)
+            if self.calculator is not None:
+                # Registered for EMPIRICAL as well as SYMBOLIC, and that is not belt-and-braces.
+                # `grounded is False` adds 0.5 to EMPIRICAL on every unanswered question, so a
+                # sum she has never been told the answer to can still classify empirical even
+                # with the arithmetic flag set. Being a candidate under both readings means the
+                # retry loop reaches it either way; being *preferred* under neither is the
+                # chooser's business, which is what the priors are for.
+                meta.register("calculate", (ProblemKind.SYMBOLIC, ProblemKind.EMPIRICAL),
+                              self._strategy_calculate, prior=0.75)
             if self.grounder is not None:
                 meta.register("recall", (ProblemKind.FACTUAL,), self._strategy_recall, prior=0.7)
             if self.self_model is not None or self.beliefs is not None:
@@ -1176,6 +1218,24 @@ class NJPBrain:
             if conclusion is None or not conclusion.decided:
                 return None
             return conclusion.answer or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _strategy_calculate(self, problem: str, ctx: Dict[str, Any]) -> Any:
+        """Work out the value. The one strategy here whose answer is not a belief.
+
+        Everything else in this table returns something that could be wrong and travels with a
+        confidence — a recalled fact, a simulated consequence, a rung of the ladder. An evaluated
+        expression is not of that kind: ``2+2`` is 4 in every world she could be in, so it is
+        stated flatly and the gauntlet downstream has nothing to weigh it against. That is why
+        the calculator refuses anything it cannot close rather than approximating: an organ
+        whose output is exempt from doubt has to earn the exemption on every call.
+        """
+        try:
+            if self.calculator is None:
+                return None
+            evaluation = self.calculator.evaluate(problem)
+            return evaluation.text if evaluation.ok else None
         except Exception:  # noqa: BLE001
             return None
 
@@ -1571,6 +1631,13 @@ class NJPBrain:
                 # was registered, chosen, run and unable to do anything — the gap that made a
                 # working causal engine unreachable from a causal question.
                 context.update(self._counterfactual_context(thought.stimulus))
+                # Whether there is a closed sum in here at all. A parse result rather than a
+                # keyword, for the same reason the intervention above is: the classifier can
+                # count digits and operators but cannot tell "2+2" from "100 degree at 3pm", and
+                # it was routing the first of those to the empirical strategies.
+                if self.calculator is not None:
+                    from nyxara.njp.calculate import expression_in
+                    context["arithmetic"] = expression_in(thought.stimulus) or ""
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
                 if solution.assertable and solution.answer:
@@ -2117,6 +2184,7 @@ class NJPBrain:
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
+                            ("calculate", self.calculator),
                             ("field", self.field)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed

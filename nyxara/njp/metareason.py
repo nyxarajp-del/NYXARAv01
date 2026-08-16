@@ -230,6 +230,21 @@ class ProblemClassifier:
         if any(w in words for w in ("prove", "proof", "derive", "solve", "calculate", "hisaab")):
             scores[ProblemKind.SYMBOLIC] += 0.4
 
+        if ctx.get("arithmetic"):
+            # A closed expression that actually parsed, supplied by the caller. Character-counting
+            # cannot separate "2+2" from "100 degree at 3pm"; a parse can, and this flag is only
+            # ever set by one that succeeded.
+            #
+            # Weighted like `contradicts` rather than like `variable`, because it is that kind of
+            # evidence: an expression that parsed closed is not a *hint* that the question is
+            # symbolic, it is the question being symbolic. It has to outrank EMPIRICAL outright,
+            # since `grounded is False` alone puts that at 0.5 and any "kitna"/"how much" phrasing
+            # adds 0.25 more — and the empirical critic demands a falsifier, which "4" can never
+            # have. Measured before this: "5 ka square kitna hai" classified EMPIRICAL 0.75 over
+            # SYMBOLIC 0.60, the calculator was still reached, computed 25, and the critic threw
+            # it away as "empirical claim with no stated test". The answer was right and unsaid.
+            scores[ProblemKind.SYMBOLIC] += 0.95
+
         causal_hits = len(words & _CAUSAL_WORDS)
         if causal_hits:
             scores[ProblemKind.CAUSAL] += min(0.9, 0.45 * causal_hits)
