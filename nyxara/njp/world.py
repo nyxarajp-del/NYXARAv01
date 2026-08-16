@@ -413,11 +413,26 @@ class WorldView:
         """Why did this happen? Causes that earned the word; correlates named as correlates."""
         out = Explanation(effect=effect)
         try:
-            for cause in self._pairs:
-                got = self.link(cause, effect)
-                if got.together <= 0:
-                    continue
-                (out.causes if self._is_causal(got) else out.correlates).append(got)
+            # Both intakes, exactly as `links` already reads them. This used to walk `_pairs`
+            # alone and skip anything with `together <= 0`, which is every law she was ever
+            # *told*: testimony lives in `_stated` and has no co-occurrence count at all. So on a
+            # brain taught from text — where every causal link is stated and none is observed —
+            # `why` could not name a single cause, and `reason._propose_causal`, which is its one
+            # caller, therefore never contributed a rival hypothesis to any debate.
+            #
+            # Measured: two stated laws into `garmi`, `links()` returning both, and
+            # `why("garmi").explained` False.
+            seen: Set[str] = set()
+            for source in (self._pairs, self._stated):
+                for cause in source:
+                    if cause in seen:
+                        continue
+                    seen.add(cause)
+                    got = self.link(cause, effect)
+                    # Nothing at all connects these two — neither seen together nor stated.
+                    if got.together <= 0 and got.stated <= 0:
+                        continue
+                    (out.causes if self._is_causal(got) else out.correlates).append(got)
             out.causes.sort(key=lambda c: c.lift, reverse=True)
             out.correlates.sort(key=lambda c: c.together, reverse=True)
             if out.causes:
