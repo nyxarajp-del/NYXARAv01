@@ -594,6 +594,28 @@ _SUPERLATIVE = re.compile(
     r"longest|deepest|highest|strongest|weakest|oldest|newest|rarest|best|worst|"
     r"most\s+\w+|least\s+\w+)\s+(?P<o>.+)$", re.IGNORECASE)
 
+# Where a noun phrase stops being a noun phrase. Everything after the first of these belongs to a
+# modifier — a prepositional phrase, a relative clause, a participle — and the head of the phrase
+# is the last noun before it.
+#
+# This exists because of a measurement, not a wish for tidier data. After 1,200 corpus pairs the
+# store held 1,226 facts across 831 subjects, and **12 objects out of 1,226 were also subjects**.
+# The graph was a star: every subject pointed at a phrase that nothing else ever pointed at or
+# spoke about. `is_a` was worst — 3 of 443. So `core` could compose nothing (a chain needs the
+# object of one edge to be the subject of the next), `concepts` could find no invariant (members
+# need a shared property), and both organs looked broken while being starved. `learner` after
+# 1,320 turns: 9 schemas, and `answers_given` exactly 0.
+_KIND_HEAD_BREAK = re.compile(
+    r"\b(?:of|in|on|for|with|that|which|who|whose|to|from|by|where|when|"
+    r"used|known|called|designed|based|made|found|created|developed|"
+    r"consisting|containing|responsible|capable|able|depends?)\b", re.IGNORECASE)
+
+# Words that are never the head of a kind: articles and the grammar around them.
+_KIND_HEAD_SKIP = frozenset({
+    "the", "a", "an", "of", "in", "on", "for", "with", "that", "which", "to", "and", "or",
+    "is", "are", "was", "were", "from", "by", "as", "its", "their", "this", "these", "those",
+})
+
 # Splitting a list into its items. Oxford comma and bare "and"/"or" both appear, and an item may
 # itself contain "or" ("narrow or weak AI") — so the separator is a comma *or* a conjunction that
 # is not inside an item, approximated by requiring the conjunction to be the last separator.
@@ -1020,6 +1042,31 @@ def _as_object(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
+def _kind_head(phrase: str) -> str:
+    """The bare kind inside a kind phrase — ``largest animal on Earth`` → ``animal``.
+
+    Approximate on purpose, and cheap: the head of an English noun phrase is the last noun before
+    its first modifier. No part-of-speech tagger is involved, so the guards are crude and do real
+    work — a trailing participle or adverb is dropped (``application designed to…`` heads at
+    ``application``, not ``designed``), and a phrase that reduces to nothing yields nothing rather
+    than a preposition.
+
+    What this is *for*: a shared kind. ``blue whale is_a largest animal on Earth`` and
+    ``African elephant is_a largest land animal`` name one kind between them and no two of these
+    phrases are ever equal, so nothing downstream can tell that both are animals. Measured on the
+    bundled corpus, 443 ``is_a`` objects reduce to 133 heads, 59 of which have two or more members
+    — which is the first point at which a kind exists to generalise over at all.
+    """
+    segment = _KIND_HEAD_BREAK.split(str(phrase or ""), 1)[0]
+    words = [w for w in re.findall(r"[^\W\d_]+(?:['-][^\W\d_]+)*", segment, re.UNICODE)
+             if w.lower() not in _KIND_HEAD_SKIP]
+    # Participles and adverbs are modifiers that survived the split because nothing preceded them.
+    while words and (words[-1].lower().endswith(("ing", "ed", "ly"))):
+        words.pop()
+    head = words[-1].lower() if words else ""
+    return head if len(head) > 2 else ""
+
+
 def _clauses(text: str) -> List[str]:
     """A sentence's independently-assertable clauses, in order.
 
@@ -1298,7 +1345,40 @@ class Grounder:
                 # them separable rather than letting a hedge look like a bad parse.
                 triple.confidence = round(triple.confidence * factor, 6)
             out.extend(found)
+        out.extend(self._kind_edges(out, text))
         self._prune_patterns()
+        return out
+
+    def _kind_edges(self, triples: List[GroundedTriple], text: str) -> List[GroundedTriple]:
+        """The bare kind alongside the full kind phrase, so two members can meet.
+
+        Added rather than substituted. ``blue whale is_a largest animal on Earth`` is the more
+        informative claim and is kept; ``blue whale is_a animal`` is the one that connects, and
+        without it the first is a fact about a phrase nothing else will ever mention.
+
+        Only for ``is_a``. ``part_of`` already names an entity as its object, and a "head" of a
+        ``means`` definition is not a kind — it is the first noun of a paraphrase, and asserting
+        membership from it would invent a taxonomy out of sentence shape.
+        """
+        out: List[GroundedTriple] = []
+        seen = {(t.subject.lower(), t.object.lower()) for t in triples}
+        for triple in triples:
+            if triple.predicate != "is_a" or len(triple.object.split()) < 2:
+                continue
+            head = _kind_head(triple.object)
+            if not head or head == triple.subject.lower():
+                continue
+            if (triple.subject.lower(), head) in seen:
+                continue
+            seen.add((triple.subject.lower(), head))
+            out.append(GroundedTriple(
+                subject=triple.subject, predicate="is_a", object=head,
+                # Below the phrase it was derived from: this is a parse of a parse, and the guards
+                # that produce it are heuristics about English rather than a relation anyone said.
+                confidence=round(triple.confidence * 0.8, 6),
+                source="kind-head", text=text,
+                condition=triple.condition, temporal=triple.temporal,
+                modality=triple.modality))
         return out
 
     def _extract_clause(self, clause: str, text: str) -> List[GroundedTriple]:
@@ -2265,7 +2345,17 @@ _PREDICATE_ALIASES: Dict[str, str] = {
 }
 
 # Relations that can hold only one value at a time. A second value contradicts rather than adds.
+# Relations that can hold exactly one value at a time, so a second value is a contradiction
+# rather than an addition.
+#
+# `is_a` is deliberately **not** here, and used to be. A thing belongs to many kinds at once —
+# sparrow is_a bird, sparrow is_a animal — and that is not a conflict, it is what a taxonomy *is*.
+# With it listed, every second kind retracted the first, so the hierarchy destroyed itself as fast
+# as it was built. Measured: `blue whale is_a animal` arrived as a contradiction of
+# `blue whale is_a animal on Earth` and was superseded on the turn it was learned, which left
+# `core._inherit` walking a graph whose every kind edge but one was marked dead. `learner`
+# reported 9 schemas and `answers_given` 0 across 1,320 turns.
 _FUNCTIONAL = frozenset({
     "has_name", "located_in", "born_in", "age", "birthday",
-    "works_at", "is_a", "capital_of", "married_to",
+    "works_at", "capital_of", "married_to",
 })
