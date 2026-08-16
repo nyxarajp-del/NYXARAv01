@@ -146,6 +146,13 @@ from nyxara.njp.beliefs import (
     Revision,
     Support,
 )
+from nyxara.njp.adversary import (
+    Attack,
+    AttackKind,
+    AttackReport,
+    SelfAttacker,
+    Stance,
+)
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
 from nyxara.njp.cell import Cell
 from nyxara.njp.concepts import Concept, ConceptGenesis, Coverage, GenesisReport, Observation
@@ -267,6 +274,8 @@ __all__ = [
     "Calculator", "Evaluation",
     "CognitiveLearningCore", "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
+    # she goes after her own conclusions
+    "SelfAttacker", "Attack", "AttackReport", "Stance", "AttackKind",
     # truth is not relevance, and reasoning is not always what a turn calls for
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",

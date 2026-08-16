@@ -295,6 +295,10 @@ class NJPBrain:
         self.universe = self._build_universe(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
+        # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
+        # and `beliefs`, because every one of its four attacks is settled against one of them —
+        # an adversary with nothing to check against is a generator of rhetorical questions.
+        self.adversary = self._build_adversary(c)
         # The Cognitive Learning Core, before `metareason` because that registers a strategy
         # bound to it. Everything the Core reads — the grounder, the world, the concept layer,
         # the universe, curiosity — is already built by this line; it needs nothing from `field`,
@@ -977,6 +981,25 @@ class NJPBrain:
             from nyxara.njp.agency import Agent
             return Agent(self.predictive, max_depth=self._cfg("plan_depth", 4))
         except Exception:  # noqa: BLE001 — without it she intends but never acts
+            return None
+
+    def _build_adversary(self, c: Any) -> Any:
+        """The subsystem that goes after her own conclusions.
+
+        Given the world record and the simulator rather than copies: an attack is only worth
+        anything if it is checked against the same evidence the belief was built from, and a
+        second private store would let a claim survive an attack on data that no longer matches
+        what she actually knows.
+        """
+        if not self._gate("adversary", True):
+            return None
+        try:
+            from nyxara.njp.adversary import SelfAttacker
+            return SelfAttacker(
+                world=self.world, universe=self.universe, beliefs=self.beliefs,
+                min_support=self._cfg("adversary_min_support", 3),
+                coincidence_lift=self._cfg("adversary_coincidence_lift", 0.1))
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_curriculum(self, c: Any) -> Any:
@@ -2367,7 +2390,8 @@ class NJPBrain:
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
-                            ("field", self.field), ("learner", self.learner)):
+                            ("field", self.field), ("learner", self.learner),
+                            ("adversary", self.adversary)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -2401,7 +2425,8 @@ class NJPBrain:
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
-                            ("field", self.field), ("learner", self.learner)):
+                            ("field", self.field), ("learner", self.learner),
+                            ("adversary", self.adversary)):
             if organ is None:
                 continue
             try:
