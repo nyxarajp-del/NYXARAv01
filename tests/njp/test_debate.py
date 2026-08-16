@@ -151,8 +151,23 @@ def test_a_clearly_better_cause_wins():
 # --------------------------------------------------------------------------- #
 # The ladder still refuses to spend depth it does not need
 # --------------------------------------------------------------------------- #
-def test_a_question_the_structure_answers_stops_at_association(told):
-    """Running a debate over a fact she simply holds is the other failure mode."""
-    conclusion = told.reasoner.reason("garmi ka karan kya hai?")
+def test_a_question_the_structure_answers_stops_at_association():
+    """Running a debate over a fact she simply holds is the other failure mode.
+
+    Deliberately *not* the two-equal-causes fixture. That one is ambiguous, and grounding now
+    declines to pick between a dead heat rather than returning whichever came out of the dict
+    first — so it descends, which is right. An unambiguous fact is what this rung is for.
+    """
+    brain = NJPBrain()
+    brain.think("aag se garmi hoti hai")
+    conclusion = brain.reasoner.reason("garmi ka karan kya hai?")
     assert conclusion.decided
     assert conclusion.rung == "association"
+
+
+def test_a_dead_heat_descends_instead_of_picking_one(told):
+    """Grounding answered first and had no way to say "two", so the debate never ran."""
+    conclusion = told.reasoner.reason("garmi ka karan kya hai?")
+    assert not conclusion.decided
+    assert conclusion.rung == "deliberation"
+    assert any("too close to call" in w for w in conclusion.why)

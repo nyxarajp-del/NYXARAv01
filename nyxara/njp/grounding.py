@@ -1799,6 +1799,20 @@ class Grounder:
                 return self._ask_graph(question, out)
 
             best = max(found, key=lambda t: t.confidence)
+            # A tie is a tie at this layer too. Two stated causes of one effect are both held at
+            # 0.9, and `max` picks whichever the dict happened to yield first — so "garmi ka karan
+            # kya hai?" asserted `aag` over `dhoop` for no reason at all. The debate in
+            # `nyxara.njp.reason` exists precisely to report that as undecided, and it never ran
+            # because this answered first: the ladder only descends when the rung above comes back
+            # empty.
+            #
+            # Declining is what lets deliberation happen. It is not a refusal to answer — it is a
+            # refusal to answer *arbitrarily*, at the one layer that had no way to say "two".
+            rival = self._tied_rival(found, best, inverse)
+            if rival:
+                out.why = (f"two readings are equally supported: "
+                           f"{best.subject if inverse else best.object} and {rival}")
+                return out
             out.triples = found
             out.text = best.subject if inverse else best.object
             out.confidence = best.confidence
@@ -1822,6 +1836,40 @@ class Grounder:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    @staticmethod
+    def _tied_rival(found: List[GroundedTriple], best: GroundedTriple,
+                    inverse: bool, *, epsilon: float = 1e-6) -> str:
+        """A different answer held just as strongly as the best one, or empty.
+
+        Compared on the end being *answered with*, so an inverse question ties on causes and a
+        forward one ties on objects. Exact rather than approximate: a claim genuinely better
+        supported by any margin is still the answer, and only a dead heat is a dead heat.
+
+        Support counts as well as confidence, and it has to. Repetition does not raise a stored
+        triple's confidence — being told "aag se garmi" twice writes two triples at 0.9 rather
+        than one at 0.95 — so on confidence alone a claim told twice ties with a rival told once,
+        which is plainly wrong. Being told something twice is evidence; the tie is only real when
+        the rival matches on both.
+        """
+        answer = (best.subject if inverse else best.object).strip().lower()
+
+        def _end(triple: GroundedTriple) -> str:
+            return (triple.subject if inverse else triple.object).strip().lower()
+
+        standing: Dict[str, Tuple[float, int, str]] = {}
+        for triple in found:
+            key = _end(triple)
+            conf, count, surface = standing.get(key, (0.0, 0, ""))
+            standing[key] = (max(conf, triple.confidence), count + 1,
+                             surface or (triple.subject if inverse else triple.object))
+        mine = standing.get(answer, (best.confidence, 1, ""))
+        for key, (conf, count, surface) in standing.items():
+            if key == answer:
+                continue
+            if conf >= mine[0] - epsilon and count >= mine[1]:
+                return surface
+        return ""
 
     def _lookup(self, subject: str, predicate: str) -> List[GroundedTriple]:
         """Live facts only. A superseded belief stays on record but is never answered with."""
