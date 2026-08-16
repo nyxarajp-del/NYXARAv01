@@ -264,6 +264,73 @@ def test_a_belief_is_retracted_rather_than_deleted():
     assert tombstone["history"], tombstone
 
 
+# --------------------------------------------------------------------------- #
+# Curiosity, and the experiment she designed but never ran
+# --------------------------------------------------------------------------- #
+def test_a_question_she_raised_is_closed_by_a_fact_that_answers_it():
+    # `Curiosity.resolve` had no caller, so `resolved` never left zero and a question she raised
+    # could only age out. Closed off any grounded fact, not off the deferral path: a deferral
+    # exists where *she* was asked something, while these are questions she asked herself, and
+    # the Master mentioning the answer in passing is what answers them.
+    brain = NJPBrain()
+    for line in ("Ravi lives in Pune", "Ravi works at Infosys",
+                 "Sara lives in Delhi", "Sara works at TCS",
+                 "Amit lives in Mumbai", "Neha lives in Chennai", "Neha works at Wipro"):
+        brain.think(line)
+
+    raised = brain.curiosity.wonder()
+    assert raised, "no gap found where one entity lacks a property its peers have"
+    assert any(q.subject == "amit" for q in raised), [q.text for q in raised]
+
+    brain.think("Amit works at Zoho")
+    assert brain.curiosity.stats()["resolved"] >= 1, brain.curiosity.stats()
+    assert brain.loop.totals["questions_closed"] >= 1, brain.loop.totals
+
+
+def test_a_past_tense_report_reaches_the_record():
+    # The record is written from event predicates, and the past-tense forms the Master actually
+    # uses extracted nothing at all — so "the plant grew" left no trace, `_counts` stayed empty,
+    # and anything that reads the record could never clear its support floor.
+    brain = NJPBrain()
+    brain.think("the plant grew")
+    assert brain.world._counts.get("grows"), brain.world._counts
+
+
+def test_an_experiment_that_is_designed_is_eventually_run():
+    # Measured before this: 8 experiments designed over 8 turns, 0 run, bits_gained pinned at
+    # 0.0, because `observe_result` had no caller anywhere in the package. Curiosity that
+    # computes the informative experiment and never performs it is a report about curiosity.
+    brain = NJPBrain()
+    for line in ["water causes growth"] + ["the plant grew", "the sun rose"] * 7:
+        brain.think(line)
+
+    stats = brain.designer.stats()
+    assert stats["run"] > 0, stats
+    assert stats["bits_gained"] > 0.0, stats
+    assert brain.loop.totals["experiments_run"] > 0, brain.loop.totals
+
+
+def test_the_record_outranks_the_testimony_that_raised_the_hypothesis():
+    # She was *told* water causes growth, then watched growth happen seven times with no water
+    # event preceding any of them. The observation settles it against the testimony, and the
+    # losing hypothesis goes to exactly zero rather than being nudged down.
+    brain = NJPBrain()
+    for line in ["water causes growth"] + ["the plant grew", "the sun rose"] * 7:
+        brain.think(line)
+
+    probabilities = {n: h.probability for n, h in brain.designer.hypotheses.items()}
+    assert probabilities.get("water→growth") == 0.0, probabilities
+
+
+def test_an_experiment_is_not_settled_on_a_record_too_thin_to_call():
+    # The honest non-answer. One sighting cannot decide what an effect depends on, and settling
+    # a hypothesis against the wrong evidence is worse than leaving it open.
+    brain = NJPBrain()
+    for line in ("water causes growth", "the plant grew"):
+        brain.think(line)
+    assert brain.designer.stats()["run"] == 0, brain.designer.stats()
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.

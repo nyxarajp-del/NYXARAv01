@@ -69,7 +69,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["LoopReport", "LearningLoop"]
 
@@ -116,6 +116,8 @@ class LoopReport:
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
+    experiments_run: int = 0
+    bits_gained: float = 0.0
     # goals
     goals_added: int = 0
     goals_blocked: int = 0
@@ -158,7 +160,9 @@ class LoopReport:
                 "graded": {"strategies": self.strategies_graded,
                            "beliefs_settled": self.beliefs_settled,
                            "beliefs_retracted": self.beliefs_retracted,
-                           "questions_closed": self.questions_closed},
+                           "questions_closed": self.questions_closed,
+                           "experiments_run": self.experiments_run,
+                           "bits_gained": round(self.bits_gained, 4)},
                 "goals": {"added": self.goals_added, "blocked": self.goals_blocked,
                           "completed": self.goals_completed, "open": self.goals_open},
                 "capabilities": self.capabilities,
@@ -219,7 +223,13 @@ class LearningLoop:
             "goals_added": 0, "goals_completed": 0,
             "strategies_graded": 0, "beliefs_settled": 0,
             "beliefs_retracted": 0, "questions_closed": 0,
+            "experiments_run": 0,
         }
+
+        # Experiments already settled against the record. Kept here rather than read off the
+        # designer, whose `run` is a count and whose `resolved` names hypotheses rather than
+        # experiments — so neither can answer "have I settled this one already".
+        self._experiments_run: Set[str] = set()
 
         # Turn-to-turn carry. The readout learns "what fired then → what fires now", which needs
         # exactly one turn of history and no more.
@@ -375,6 +385,7 @@ class LearningLoop:
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
+            self._close_curiosity(thought, rep)
             self._track_goals(thought, rep)
             self._observe_capabilities(thought, rep)
             self._train_readout(fired, rep)
@@ -552,6 +563,51 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             pass
 
+    def _close_curiosity(self, thought: Any, rep: LoopReport) -> None:
+        """A fact arrived; any question it answers stops being open.
+
+        Deliberately not tied to the deferral path. A deferral only exists where *she* was asked
+        something and could not answer, while curiosity's questions are ones she raised herself —
+        "what is Amit's employer?" is answered by the Master mentioning it in passing, not by him
+        replying to her. Matching on subject and predicate is what makes that work: both sides
+        already carry the pair, and the question was generated from exactly the relation the
+        incoming triple now supplies.
+
+        Without this, ``Curiosity.resolve`` had no caller, ``resolved`` never moved off zero, and
+        the goal-completion branch in :meth:`_goals_from_curiosity` was unreachable — so a
+        question she raised could only ever age out, never be answered.
+        """
+        try:
+            curiosity = getattr(self.brain, "curiosity", None)
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            if curiosity is None or grounding is None:
+                return
+            triples = list(getattr(grounding, "triples", None) or [])
+            if not triples:
+                return
+            open_questions = list(curiosity.open_questions())
+            if not open_questions:
+                return
+            for triple in triples:
+                subject = str(getattr(triple, "subject", "") or "").strip().lower()
+                predicate = str(getattr(triple, "predicate", "") or "").strip().lower()
+                if not subject:
+                    continue
+                for question in open_questions:
+                    if getattr(question, "resolved", False):
+                        continue
+                    if str(getattr(question, "subject", "") or "").strip().lower() != subject:
+                        continue
+                    wanted = str(getattr(question, "predicate", "") or "").strip().lower()
+                    # A question naming no particular relation is answered by anything about its
+                    # subject; one that names a relation waits for that relation specifically.
+                    if wanted and wanted != predicate:
+                        continue
+                    if curiosity.resolve(question, str(getattr(triple, "object", "") or "")):
+                        rep.questions_closed += 1
+        except Exception:  # noqa: BLE001
+            pass
+
     def _stake_a_belief(self, thought: Any, said: str, subject: str, predicate: str) -> None:
         """Record what she just asserted as a belief that can later be found wrong.
 
@@ -658,19 +714,6 @@ class LearningLoop:
         except Exception:  # noqa: BLE001
             pass
 
-        # The question is answered, so it stops being an open one. Without this `resolved` never
-        # moved and the goal-completion branch in `_goals_from_curiosity` was unreachable.
-        try:
-            curiosity = getattr(self.brain, "curiosity", None)
-            if curiosity is not None:
-                for question in list(curiosity.open_questions()):
-                    if pending.subject and pending.subject.lower() in str(
-                            getattr(question, "about", "") or getattr(question, "text", "")).lower():
-                        if curiosity.resolve(question, str(triple.object)):
-                            rep.questions_closed += 1
-                        break
-        except Exception:  # noqa: BLE001
-            pass
 
     # ---- goals ------------------------------------------------------------- #
     def _track_goals(self, thought: Any, rep: LoopReport) -> None:
@@ -940,6 +983,9 @@ class LearningLoop:
             except Exception:  # noqa: BLE001
                 pass
 
+        if turn % self.discover_every == 0:
+            self._run_experiments(rep)
+
         if turn % self.wonder_every == 0:
             try:
                 curiosity = getattr(self.brain, "curiosity", None)
@@ -947,6 +993,78 @@ class LearningLoop:
                     rep.wondered = len(curiosity.wonder())
             except Exception:  # noqa: BLE001
                 pass
+
+    @staticmethod
+    def _as_recorded(world: Any, effect: str) -> str:
+        """The name the record actually files this effect under, where it differs from the law's.
+
+        ``world`` carries two namings for one thing and they were never reconciled. A *stated*
+        law names its effect with the noun the Master used — "water causes growth" — while an
+        *observed* occurrence is filed under the canonical event predicate — "the plant grew"
+        becomes ``grows``. So a hypothesis raised from the law asked the record about ``growth``,
+        which the record has never heard of, and every experiment stayed unresolvable no matter
+        how much evidence accumulated.
+
+        Matched on a shared stem, and only when **exactly one** recorded event matches. An
+        ambiguous stem returns the original name, which leaves the experiment open — the right
+        outcome, because settling a hypothesis against the wrong event is worse than not settling
+        it at all.
+        """
+        try:
+            counts = getattr(world, "_counts", None) or {}
+            if effect in counts:
+                return effect
+            stem = str(effect or "")[:4].lower()
+            if len(stem) < 4:
+                return effect
+            matches = [name for name in counts if str(name)[:4].lower() == stem]
+            return matches[0] if len(matches) == 1 else effect
+        except Exception:  # noqa: BLE001
+            return effect
+
+    def _run_experiments(self, rep: LoopReport) -> None:
+        """Settle a designed experiment against the record, and let the losing hypothesis die.
+
+        :class:`~nyxara.njp.universe.ExperimentDesigner` designed an experiment on every single
+        turn — measured at 8 designed, 0 run — and ``observe_result`` had no caller anywhere, so
+        ``bits_gained`` was permanently 0.0 and no hypothesis was ever eliminated. Curiosity that
+        computes the informative experiment and never performs it is not curiosity; it is a
+        report about curiosity.
+
+        The outcome comes from :meth:`~nyxara.njp.world.WorldView.counterfactual`, which counts,
+        over her own event record, how often the effect happened *without* the cause. That matters
+        more than the wiring: the alternative — asking the fitted universe what removing the cause
+        would do — grades a hypothesis with the model the hypothesis is about, and every
+        probability would move while nothing was learned. ``counterfactual`` returns
+        ``still_happens=None`` when the record is too thin or too even to call, and an unresolved
+        experiment is left open rather than settled on a guess.
+        """
+        designer = getattr(self.brain, "designer", None)
+        world = getattr(self.brain, "world", None)
+        if designer is None or world is None:
+            return
+        try:
+            for name in list(getattr(designer, "hypotheses", None) or {}):
+                if "→" not in name or name.startswith("not("):
+                    continue
+                cause, _, effect = name.partition("→")
+                cause, effect = cause.strip(), effect.strip()
+                experiment = f"remove:{cause}"
+                if not cause or not effect or experiment in self._experiments_run:
+                    continue
+                verdict = world.counterfactual(cause, self._as_recorded(world, effect))
+                if not verdict.answerable:
+                    continue
+                # "still happens without it" refutes the arrow; "never happens without it"
+                # supports it. These are the two labels `_raise_hypotheses` predicted with.
+                before = designer.prior_entropy()
+                designer.observe_result(
+                    experiment, "present" if verdict.still_happens else "absent")
+                self._experiments_run.add(experiment)
+                rep.experiments_run += 1
+                rep.bits_gained += max(0.0, before - designer.prior_entropy())
+        except Exception:  # noqa: BLE001 — an unresolved experiment stays open, never fatal
+            pass
 
     # ---- bookkeeping --------------------------------------------------------- #
     def _roll_up(self, rep: LoopReport) -> None:
@@ -964,6 +1082,7 @@ class LearningLoop:
             self.totals["beliefs_settled"] += rep.beliefs_settled
             self.totals["beliefs_retracted"] += rep.beliefs_retracted
             self.totals["questions_closed"] += rep.questions_closed
+            self.totals["experiments_run"] += rep.experiments_run
             self.totals["capabilities"] += rep.capabilities
             self.totals["train_steps"] += int(rep.trained)
             self.totals["consolidations"] += int(rep.consolidated)

@@ -228,8 +228,9 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?P<s>.+?)\s+(?P<v>went|came)\s+to\s+(?P<o>.+)$", ""),
     (r"^(?P<s>.+?)\s+(?P<v>bought|sold|sent|received|made|opened|closed|broke|started|stopped)"
      r"\s+(?P<o>.+)$", ""),
-    (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened)"
-     r"\s*$", ""),
+    (r"^(?P<s>.+?)\s+(?P<v>fell|broke|crashed|failed|started|stopped|opened|closed|happened"
+     r"|grew|rose|died|burned|burnt|boiled|melted|froze|evaporated|condensed"
+     r"|expanded|contracted)\s*$", ""),
 
     # --- Processes: the general statements a world model is actually built out of ------------ #
     #
@@ -322,6 +323,14 @@ _EVENT_VERBS: Dict[str, str] = {
     "marta": "dies", "marti": "dies", "मरता": "dies", "मरती": "dies", "dies": "dies",
     "rises": "rises", "evaporates": "evaporates", "condenses": "condenses",
     "expands": "expands", "contracts": "contracts",
+    # English past tense, folded onto the same predicates as the present. The Master reports what
+    # happened in the past tense — "the plant grew" — and without these the sentence extracted
+    # nothing at all, so `world` recorded no occurrence, `_counts` stayed empty, and
+    # `world.counterfactual` could never clear `min_support`. An experiment settled from the
+    # record is unreachable while the record cannot be written to.
+    "grew": "grows", "rose": "rises", "died": "dies", "burned": "burns", "burnt": "burns",
+    "boiled": "boils", "melted": "melts", "froze": "freezes", "evaporated": "evaporates",
+    "condensed": "condenses", "expanded": "expands", "contracted": "contracts",
 }
 
 # "X because Y" — the one construction that states a cause outright rather than leaving it to be
