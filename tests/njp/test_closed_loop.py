@@ -519,6 +519,135 @@ def test_the_depth_budget_caps_without_changing_what_the_question_needs():
     assert Rung.cost(unbounded) > Rung.cost(hard), (unbounded, hard)
 
 
+# --------------------------------------------------------------------------- #
+# The two stubs — a step that named a comparison, and a question nobody put
+# --------------------------------------------------------------------------- #
+def _rainy_model():
+    from nyxara.njp.predictive import PredictiveWorldModel, WorldState
+
+    model = PredictiveWorldModel()
+    for _ in range(6):
+        model.observe(WorldState.of(["rain"]))
+        model.observe(WorldState.of(["flood"]))
+        model.observe(WorldState.of(["rain"]))
+        model.observe(WorldState.of(["drain"]))
+    return model
+
+
+class _Contested:
+    """A ledger holding exactly one contested claim, about floods."""
+
+    @staticmethod
+    def known():
+        return []
+
+    @staticmethod
+    def unknown():
+        return [{"kind": "contested", "subject": "the flood claim"}]
+
+
+def test_an_explanation_landing_on_a_contested_claim_is_discounted():
+    # The step existed as a label and did nothing, so "which predicts best" in the trace named a
+    # comparison that never happened: _conclude took the argmax of the model's raw prior and
+    # everything _what_do_i_know gathered sat unused.
+    from nyxara.njp.predictive import ThoughtState
+
+    model = _rainy_model()
+    plain = ThoughtState(context="what next").deliberate(model)
+    contested = ThoughtState(context="what next").deliberate(model, beliefs=_Contested())
+
+    def _p(state, outcome):
+        return next(h.probability for h in state.hypotheses if h.predicts == outcome)
+
+    assert _p(contested, "flood") < _p(plain, "flood"), (plain.to_dict(), contested.to_dict())
+    # Discounted, not eliminated: contested means unsettled, not refuted, and treating the two
+    # the same would be overclaiming in the other direction.
+    assert _p(contested, "flood") > 0.0, contested.to_dict()
+
+
+def test_the_reweighted_explanations_are_still_a_distribution():
+    # _conclude's margin test compares two probabilities. Handing it a bag of scaled numbers
+    # would silently change what the margin means.
+    from nyxara.njp.predictive import ThoughtState
+
+    state = ThoughtState(context="what next").deliberate(_rainy_model(), beliefs=_Contested())
+    assert abs(sum(h.probability for h in state.hypotheses) - 1.0) < 1e-9, state.to_dict()
+    ranked = [h.probability for h in state.hypotheses]
+    assert ranked == sorted(ranked, reverse=True), ranked
+
+
+def test_an_unrelated_contested_claim_changes_nothing():
+    # The guard against the discount becoming a general confidence-lowering device: only an
+    # explanation that actually lands on the contested claim may lose standing.
+    from nyxara.njp.predictive import ThoughtState
+
+    class _Elsewhere:
+        @staticmethod
+        def known():
+            return []
+
+        @staticmethod
+        def unknown():
+            return [{"kind": "contested", "subject": "the exchange rate"}]
+
+    model = _rainy_model()
+    plain = ThoughtState(context="what next").deliberate(model)
+    other = ThoughtState(context="what next").deliberate(model, beliefs=_Elsewhere())
+    assert [round(h.probability, 9) for h in plain.hypotheses] == \
+           [round(h.probability, 9) for h in other.hypotheses]
+
+
+def test_a_question_she_cannot_answer_is_put_to_the_master():
+    # `Curiosity.ask` had no caller, so `asked` never incremented, so `stale` was permanently
+    # False and the escalation behind it was unreachable. A queue of questions nobody ever puts
+    # is not curiosity, it is a list.
+    brain = _puzzled_brain()
+    thought = brain.think("what does a muon weigh")
+    assert thought.asked is not None, brain.shadow()
+    assert thought.asked.asked == 1, thought.asked.to_dict()
+
+
+def test_the_same_question_is_not_put_a_fourth_time():
+    # Three attempts, then it goes quiet and she moves on to the next gap — `top` already
+    # excluded stale questions, and nothing had ever been able to make one stale.
+    brain = _puzzled_brain()
+    first = brain.think("what does a muon weigh").asked
+    for _ in range(2):
+        brain.think("what does a muon weigh")
+    assert first.stale, first.to_dict()
+
+    later = brain.think("what does a muon weigh").asked
+    assert later is None or later.key() != first.key(), later.to_dict()
+
+
+def test_what_went_stale_is_reported_rather_than_going_quiet():
+    # The escalation this makes reachable. "Asked repeatedly and never answered" reads as "no
+    # longer curious" when nothing surfaces it, and it is the one state that wants a different
+    # response rather than more patience.
+    brain = _puzzled_brain()
+    for _ in range(3):
+        brain.think("what does a muon weigh")
+    stale = brain.shadow()["stale"]
+    assert stale, brain.shadow()
+    assert all(q["asked"] >= 3 for q in stale), stale
+
+
+def test_a_greeting_is_not_answered_with_a_question_of_her_own():
+    # The relevance discipline, pointed outward. A greeting must not come back with
+    # "what is a tachyon?" any more than it may come back with a pendulum law.
+    brain = _puzzled_brain()
+    assert brain.think("hello NYXARA").asked is None
+
+
+def test_something_she_should_investigate_herself_is_not_counted_as_asked():
+    # `ask` marks whatever is top. A gap curiosity priced as "go and find this out" is not one
+    # she has put to him, and counting it would drive a question she never voiced to stale.
+    brain = _puzzled_brain()
+    for question in brain.curiosity.open_questions():
+        if question.action != "ask":
+            assert question.asked == 0, question.to_dict()
+
+
 def test_a_greeting_still_cannot_reach_physics():
     # The failure `relevance.py` was written for, re-checked after making a new pathway live: a
     # greeting must not acquire a route to the world model just because one now exists.

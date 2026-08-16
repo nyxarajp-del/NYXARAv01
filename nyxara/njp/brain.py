@@ -172,6 +172,11 @@ class NJPThought:
     # with, which is why strategy credit came only from the critic — a mind grading its own
     # reasoning by its own opinion of that reasoning.
     solution: Any = None
+    # A question of her own she put to the Master this turn, because she had nothing to answer
+    # with. Carried as structure rather than folded into `answer`: "I do not know" and "I do not
+    # know, and here is what would help" are the same epistemic state, and a caller that wants
+    # only the honest non-answer must still be able to get it.
+    asked: Any = None
 
     @property
     def confidence(self) -> float:
@@ -897,6 +902,41 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def _ask_back(self, thought: NJPThought) -> None:
+        """Put her own best question to the Master, on a turn where she had nothing to answer.
+
+        :meth:`~nyxara.njp.curiosity.Curiosity.ask` had no caller anywhere, so ``asked`` never
+        incremented, so ``stale`` was permanently ``False``, so ``stale_questions`` was always
+        empty and the escalation path behind it could not be reached. A queue of questions nobody
+        ever puts is not curiosity — it is a list.
+
+        Only on a turn that produced no answer, and only where the speech act permits reaching
+        for world knowledge at all: a greeting must not come back with "what is a tachyon?", which
+        is the same failure :mod:`nyxara.njp.relevance` was written for, pointed outward. The
+        question is recorded on the thought and never folded into ``answer`` — a caller asking
+        whether she could answer must still get the honest empty string.
+
+        ``top`` already excludes stale questions, so asking the same thing a fourth time is
+        impossible by construction; what has gone stale is reported by :meth:`shadow` instead,
+        which is the escalation this makes reachable.
+        """
+        try:
+            if self.curiosity is None or thought.answer:
+                return
+            act = getattr(thought, "act", None)
+            if act is not None and self._policy is not None:
+                if self._policy.forbids_world_knowledge(act):
+                    return
+            # Look before marking. `ask` increments `asked` on whatever is top, and a question
+            # curiosity priced as "go and find this out yourself" is not one she has put to him —
+            # counting it would drive a gap she never voiced to stale and silence it.
+            candidate = self.curiosity.top()
+            if candidate is None or getattr(candidate, "action", "") != "ask":
+                return
+            thought.asked = self.curiosity.ask()
+        except Exception:  # noqa: BLE001 — a turn that cannot ask still answers honestly
+            return
+
     def budget(self) -> Dict[str, Any]:
         """What this turn is allowed to spend, chosen by what has actually been paying.
 
@@ -955,7 +995,8 @@ class NJPBrain:
         Read-only. Nothing here decides anything; it reports what the organs already hold, which
         is the whole point — an aggregator that also acted would become a sixth store.
         """
-        out: Dict[str, Any] = {"gaps": [], "by_gap": {}, "faculties": {}, "open": 0}
+        out: Dict[str, Any] = {"gaps": [], "by_gap": {}, "stale": [],
+                               "faculties": {}, "open": 0}
         try:
             if self.curiosity is not None:
                 questions = list(self.curiosity.open_questions())
@@ -968,6 +1009,11 @@ class NJPBrain:
                 for question in questions:
                     kind = str(getattr(question, "gap", "") or "")
                     out["by_gap"][kind] = out["by_gap"].get(kind, 0) + 1
+                # Asked three times and still open. `top` refuses to surface these, so without a
+                # reader they simply went quiet — which reads as "no longer curious" when what
+                # actually happened is "asked repeatedly and never answered". That is the one
+                # state in the queue that wants a different response rather than more patience.
+                out["stale"] = [q.to_dict() for q in self.curiosity.stale_questions()[:6]]
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -1325,6 +1371,8 @@ class NJPBrain:
                 # happen before deliberation, not after it.
                 if out.answer:
                     self._set_epistemic(out)
+                else:
+                    self._ask_back(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
