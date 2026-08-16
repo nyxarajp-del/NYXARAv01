@@ -808,6 +808,30 @@ class RecursiveCognitiveField:
                     rationale="move the clustering threshold toward better compression")
                 if not self._already_tried(candidate):
                     return candidate
+            # `similarity` is not the only thing that decides what a kind is, and it was the only
+            # thing offered. With both its directions exhausted the organ was reported as blocked
+            # while two knobs that genuinely move the benchmark had never been tried once — how
+            # much of a cluster must share a feature before the kind may claim it, and how many
+            # members a kind needs at all.
+            share = float(getattr(self.concepts, "invariant_share", 0.0) or 0.0)
+            for delta in (0.1, -0.1):
+                after = round(min(1.0, max(0.2, share + delta)), 4)
+                if abs(after - share) < 1e-9:
+                    continue
+                candidate = Modification(
+                    organ="concepts", knob="invariant_share", before=share, after=after,
+                    rationale="change how much of a kind must share a feature before it is claimed")
+                if not self._already_tried(candidate):
+                    return candidate
+            members = float(getattr(self.concepts, "min_members", 0) or 0)
+            for after in (members + 1.0, members - 1.0):
+                if after < 2.0:
+                    continue
+                candidate = Modification(
+                    organ="concepts", knob="min_members", before=members, after=after,
+                    rationale="change how many members a kind needs before it is a kind")
+                if not self._already_tried(candidate):
+                    return candidate
             return None
         if bottleneck.organ == "universe" and self.universe is not None:
             before = float(self.universe.max_depth)

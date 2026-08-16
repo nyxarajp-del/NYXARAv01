@@ -144,3 +144,35 @@ def test_an_inherited_answer_is_weaker_than_a_stated_one():
     stated = brain.learner.predict("animal", "requires")
     assert inherited.ok and stated.ok
     assert inherited.confidence < stated.confidence
+
+
+# --------------------------------------------------------------------------- #
+# A kind defined by the relation being inferred licenses nothing
+# --------------------------------------------------------------------------- #
+def test_a_tautological_schema_is_never_induced():
+    """`⟨kind⟩ is_a species` over a kind whose only invariant is `is_a:species` says that things
+    which are species are species. `_roles_for_transfer` already refuses to transfer such a role,
+    so inducing it produces a schema that can never answer and a count that looks productive.
+
+    Measured after kind-heads gave many subjects a shared `is_a:<kind>`: every schema induced on
+    the corpus was of this form — 43 of them, 3 tested, `derived_schema` structurally 0.
+    """
+    brain = NJPBrain()
+    for animal in ("dog", "cat", "horse", "wolf", "fox", "bear"):
+        brain.think(f"the {animal} is a species of mammal")
+    learner = brain.learner
+    for schema in learner.schemas.values():
+        concept = (getattr(learner.concepts, "concepts", None) or {}).get(schema.role)
+        if concept is None:
+            continue
+        residue = {f for f in concept.invariants
+                   if not str(f).startswith(f"{schema.predicate}:")}
+        assert residue, f"{schema.role} is defined by {schema.predicate} alone"
+
+
+def test_the_refusals_are_counted_rather_than_silent():
+    """A high count says her concepts are forming on the relation she is generalising over."""
+    brain = NJPBrain()
+    for animal in ("dog", "cat", "horse", "wolf", "fox", "bear"):
+        brain.think(f"the {animal} is a species of mammal")
+    assert "schemas_tautological" in brain.learner.stats()

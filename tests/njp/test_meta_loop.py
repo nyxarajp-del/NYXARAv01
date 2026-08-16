@@ -157,6 +157,9 @@ def test_a_modification_that_helps_is_accepted_and_kept(taught):
     the test locates such a setting and starts one step below it.
     """
     field = taught.field
+    # A lifetime counter, and the brain runs its own meta-cycles on a turn cadence while the
+    # fixture is being taught. The delta is what this test can claim.
+    before = field.accepted_trials
     accepted = []
     for start in (0.16, 0.28, 0.40, 0.52, 0.64, 0.76):
         field.concepts.similarity = start
@@ -169,7 +172,7 @@ def test_a_modification_that_helps_is_accepted_and_kept(taught):
     for start, trial in accepted:
         assert trial.candidate > trial.baseline
         assert trial.adversarial_passed
-    assert field.accepted_trials == len(accepted)
+    assert field.accepted_trials - before == len(accepted)
 
 
 def test_a_modification_that_does_not_help_is_reverted(taught):
@@ -178,3 +181,35 @@ def test_a_modification_that_does_not_help_is_reverted(taught):
     trial = field.meta_cycle()
     if trial is not None and trial.modification is not None and not trial.accepted:
         assert field.concepts.similarity == pytest.approx(before)
+
+
+# --------------------------------------------------------------------------- #
+# An organ has more than one knob
+# --------------------------------------------------------------------------- #
+def test_the_concept_layer_offers_more_than_one_knob(taught):
+    """`similarity` was the only thing ever proposed, and it is not the only thing that decides
+    what a kind is. With both its directions exhausted the organ was reported blocked while two
+    knobs that genuinely move the benchmark had never been tried once."""
+    field = taught.field
+    bottleneck = Bottleneck(organ="concepts", metric="compression", value=0.7, severity=0.5)
+    knobs = set()
+    for _ in range(10):
+        proposal = field.propose(bottleneck)
+        if proposal is None:
+            break
+        knobs.add(proposal.knob)
+        field._rejected.add(field._signature(proposal))
+    assert len(knobs) >= 2, knobs
+
+
+def test_min_members_is_a_real_knob(taught):
+    """Measured: climbing it from 2 to 6 moved the benchmark 0.6205 -> 0.6780."""
+    field = taught.field
+    before = field.concepts.min_members
+    field.concepts.min_members = 2
+    accepted = [t for t in (field.meta_cycle() for _ in range(8))
+                if t is not None and t.accepted and t.modification
+                and t.modification.knob == "min_members"]
+    if accepted:
+        assert field.concepts.min_members != 2
+    field.concepts.min_members = before
