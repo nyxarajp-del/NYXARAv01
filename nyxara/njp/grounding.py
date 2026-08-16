@@ -78,7 +78,25 @@ class Epistemic:
 
 @dataclass
 class GroundedTriple:
-    """One extracted relation, with everything needed to judge and revise it."""
+    """One extracted relation, with everything needed to judge and revise it.
+
+    **Why a triple is not the whole claim.** ``water --freezes--> 0`` is what a flat extractor
+    keeps out of *"if the temperature falls below 0°C, water freezes"*, and what it throws away is
+    the half that makes the sentence usable: the relation does not hold, it holds **under a
+    condition**. Three fields carry the part the arrow cannot:
+
+    * :attr:`condition` — the circumstance the relation is asserted under. A triple with a
+      condition is a *conditional* claim, and answering with it while dropping the condition is
+      how a true statement becomes a false one.
+    * :attr:`temporal` — when it held, where the surface said so. Distinct from ``at``, which is
+      when *she was told*; a claim about 1950 recorded today has both, and they are not the same
+      fact about it.
+    * :attr:`modality` — whether the surface asserted, hedged, or generalised. "may cause" and
+      "causes" are different claims and were previously indistinguishable once extracted.
+
+    All three default empty, so a plain assertion is exactly the triple it always was, and every
+    existing consumer that reads subject/predicate/object is untouched.
+    """
 
     subject: str = ""
     predicate: str = ""
@@ -92,14 +110,34 @@ class GroundedTriple:
     # the history is what lets her say which.
     superseded: bool = False
     contested: bool = False       # took part in a contradiction, either side
+    # The cognitive half — see the class docstring. Empty means "the surface said nothing about
+    # this", which is kept apart from a stated absence in exactly the way `Epistemic.UNKNOWN` is
+    # kept apart from a low confidence.
+    condition: str = ""
+    temporal: str = ""
+    modality: str = ""            # "" | "possible" | "typical" | "necessary"
 
     def as_tuple(self) -> Tuple[str, str, str]:
         return (self.subject, self.predicate, self.object)
 
+    @property
+    def conditional(self) -> bool:
+        """Does this claim hold only under a stated circumstance?"""
+        return bool(self.condition)
+
     def to_dict(self) -> Dict[str, Any]:
-        return {"subject": self.subject, "predicate": self.predicate, "object": self.object,
-                "confidence": round(self.confidence, 4), "source": self.source,
-                "superseded": self.superseded, "contested": self.contested}
+        out = {"subject": self.subject, "predicate": self.predicate, "object": self.object,
+               "confidence": round(self.confidence, 4), "source": self.source,
+               "superseded": self.superseded, "contested": self.contested}
+        # Only present when the surface actually carried them. An unconditional claim should not
+        # serialise three empty strings that every reader then has to learn to ignore.
+        if self.condition:
+            out["condition"] = self.condition
+        if self.temporal:
+            out["temporal"] = self.temporal
+        if self.modality:
+            out["modality"] = self.modality
+        return out
 
 
 @dataclass
@@ -231,6 +269,41 @@ _SEED_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"^(?:my|mera|meri)\s+(?P<p>\w+)\s+(?:is|hai)\s+(?P<o>.+)$", ""),
     (r"^(?P<s>.+?)\s+lives?\s+in\s+(?P<o>.+)$", "located_in"),
     (r"^(?P<s>.+?)\s+(?:rehta|rehti)\s+(?:hai\s+)?(?P<o>.+?)\s*(?:me|mein)$", "located_in"),
+    # --- Definitional forms ------------------------------------------------------------------ #
+    #
+    # Measured: these four constructions account for the largest single block of the 139/200
+    # corpus answers that extracted nothing. They are how expository prose states a relation, and
+    # the seed list was written for conversation, where they almost never appear. That is the
+    # whole gap — not a hard parsing problem, a register the parser had never met.
+    #
+    # Ordered before `is_a` because "X is a subset of Y" is a *containment* claim, and the generic
+    # rule below would read it as "X is a (subset of Y)" — an is_a edge to a phrase no other
+    # sentence will ever produce again, which is worse than not extracting it.
+    (r"^(?P<s>.+?)\s+is\s+(?:a\s+|an\s+)?(?:subset|subfield|branch|subclass|type|kind|form)"
+     r"\s+of\s+(?P<o>.+)$", "part_of"),
+    (r"^(?P<s>.+?)\s+(?:refers?\s+to|is\s+defined\s+as|is\s+known\s+as|stands?\s+for|"
+     r"means?|denotes?)\s+(?P<o>.+)$", "means"),
+    (r"^(?P<s>.+?)\s+is\s+the\s+(?:process|ability|practice|study|field|technique|method|art)"
+     r"\s+of\s+(?P<o>.+)$", "means"),
+    (r"^(?P<s>.+?)\s+(?:involves?|entails?)\s+(?P<o>.+)$", "involves"),
+    (r"^(?P<s>.+?)\s+(?:focus(?:es)?\s+on|aims?\s+to|is\s+used\s+(?:to|for))\s+(?P<o>.+)$",
+     "purpose"),
+    (r"^(?P<s>.+?)\s+is\s+known\s+for\s+(?P<o>.+)$", "known_for"),
+    # The definite copula. Measured on the bundled corpus: `X is the Y` is the single commonest
+    # unextracted construction there, because every copula rule in this list demanded the
+    # *indefinite* article. "The blue whale is the largest animal on Earth" is as plain a fact as
+    # a sentence gets, and it grounded to nothing.
+    #
+    # Placed after the superlative extractor reads it (that one splits the ranking out first) and
+    # after every specific `is the process/ability of` reading above, so this only ever catches
+    # what nothing more precise claimed.
+    (r"^(?P<s>.+?)\s+is\s+(?:considered\s+)?(?:to\s+be\s+)?(?:the|one\s+of\s+the)\s+(?P<o>.+)$",
+     "is_a"),
+    # "X occurs when C" — a definition *by* its condition. Kept whole as a relation rather than
+    # split, because "overfitting" on its own is not a claim: the whole content of the sentence is
+    # the circumstance. The condition is ALSO recorded on the triple, so a later reader can ask
+    # for the circumstance without re-parsing the object.
+    (r"^(?P<s>.+?)\s+(?:occurs?|happens?|arises?)\s+when\s+(?P<o>.+)$", "occurs_when"),
     (r"^(?P<s>.+?)\s+is\s+(?:a|an)\s+(?P<o>.+)$", "is_a"),
     (r"^(?P<s>.+?)\s+works?\s+(?:at|for)\s+(?P<o>.+)$", "works_at"),
     (r"^(?P<s>.+?)\s+(?:owns|has)\s+(?:a\s+|an\s+)?(?P<o>.+)$", "owns"),
@@ -381,6 +454,127 @@ _EVENT_VERBS: Dict[str, str] = {
 _BECAUSE = re.compile(
     r"^(?P<effect>.+?)\s+(?:because(?:\s+of)?|since|kyunki|kyonki|isliye\s+ki)\s+(?P<cause>.+)$",
     re.IGNORECASE)
+
+# --------------------------------------------------------------------------- #
+# Conditions, time and uncertainty — the half a triple cannot hold
+# --------------------------------------------------------------------------- #
+# Measured before these existed: of 200 corpus answers, 139 extracted nothing. The failures were
+# not exotic sentences — they were four constructions, each of which states a relation plainly and
+# none of which any seed pattern could see:
+#
+#   "X refers to Y"                         definitional
+#   "The N types of X are A, B and C"       enumerative
+#   "X involves P, while Y involves Q"      contrastive — two claims in one sentence
+#   "X occurs when C"                       conditional
+#
+# The first two are vocabulary and are fixed in `_SEED_PATTERNS`. The last two are *structure*:
+# one sentence carrying more than one claim, and a claim that holds only under a circumstance.
+# A pattern list cannot fix those however long it grows, because the extractor stops at the first
+# match and has nowhere to put a condition once it has one.
+
+# A sentence's clauses, where each states its own claim. Split only on the connectives that
+# genuinely coordinate two *independent* claims — "while"/"whereas" contrast them, ";" and "but"
+# separate them. Deliberately NOT split on bare "and": "bread and butter" is one object, and
+# splitting there would shred more claims than it recovers.
+_CLAUSE_SPLIT = re.compile(
+    r"\s*(?:;|,\s*(?:while|whereas|but)\s+|\s+whereas\s+)\s*", re.IGNORECASE)
+
+# Sentence boundaries, for the multi-sentence answers a corpus supplies and a conversation rarely
+# does. Guarded against the abbreviation that would otherwise split mid-claim.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Zऀ-ॿ])")
+
+# The circumstance a claim is asserted under. Ordered most-specific first: "X occurs when C" is
+# read by a seed pattern that keeps the whole thing as a relation, so it must not be caught here
+# and reduced to a bare "X".
+_CONDITIONS: Tuple[Any, ...] = (
+    # "If C, then E" / "If C, E" — the canonical form, and the Master's "agar C to E".
+    re.compile(r"^if\s+(?P<cond>.+?)\s*,\s*(?:then\s+)?(?P<main>.+)$", re.IGNORECASE),
+    re.compile(r"^if\s+(?P<cond>.+?)\s+then\s+(?P<main>.+)$", re.IGNORECASE),
+    re.compile(r"^(?:agar|अगर)\s+(?P<cond>.+?)\s+(?:to|toh|तो)\s+(?P<main>.+)$", re.IGNORECASE),
+    # "When C, E" — same claim, and the comma is what makes it unambiguous.
+    re.compile(r"^when\s+(?P<cond>.+?)\s*,\s*(?P<main>.+)$", re.IGNORECASE),
+    # "E if C" — the trailing form. Last, because a leading "if" is never this.
+    re.compile(r"^(?P<main>.+?)\s+if\s+(?P<cond>.+)$", re.IGNORECASE),
+)
+
+# What the surface said about how sure it is. This is *uncertainty as stated*, not her own
+# confidence in the extraction — the two are multiplied at the end, never conflated. A hedged
+# claim extracted perfectly is still a hedged claim.
+#
+# The factor is applied to the pattern's own confidence, so "X may cause Y" cannot be asserted
+# with the weight of "X causes Y" however cleanly it parsed.
+_MODALITY: Tuple[Tuple[Any, str, float], ...] = (
+    (re.compile(r"\b(?:may|might|could|possibly|perhaps|sometimes|can\s+sometimes|"
+                r"shayad|शायद|ho\s+sakta)\b", re.IGNORECASE), "possible", 0.6),
+    (re.compile(r"\b(?:usually|typically|generally|often|commonly|normally|mostly|tend\s+to|"
+                r"aam\s+taur\s+par|आमतौर)\b", re.IGNORECASE), "typical", 0.85),
+    (re.compile(r"\b(?:always|never|must|invariably|necessarily|hamesha|हमेशा)\b",
+                re.IGNORECASE), "necessary", 1.0),
+)
+
+# When it held, where the surface said so. Kept as the phrase rather than parsed into a timestamp:
+# "during training" and "in 1950" are both answers to *when*, and only one of them is a date. A
+# parser that insisted on a date would discard the commoner of the two.
+_TEMPORAL = re.compile(
+    r"\b(?:in|during|after|before|since|by|until|till)\s+"
+    r"(?P<t>(?:the\s+)?(?:\d{4}|\d{1,2}(?:st|nd|rd|th)?\s+\w+|"
+    r"training|inference|runtime|execution|testing|deployment|preprocessing)"
+    r"(?:\s+(?:phase|time|stage|period))?)\b",
+    re.IGNORECASE)
+
+# An enumeration states several claims of one kind about one subject, and the count is part of
+# what makes it checkable — "the three types of X" that yields two is a parse that went wrong.
+_ENUMERATION = re.compile(
+    r"^(?:the\s+)?(?:\w+\s+){0,3}?"
+    r"(?P<kind>categories|types|kinds|forms|classes|stages|components|parts|steps|"
+    r"phases|layers|branches|subfields|examples|applications|advantages|benefits|"
+    r"disadvantages|limitations|challenges)\s+of\s+"
+    r"(?P<s>.+?)\s+(?:are|include|includes)\s+(?P<list>.+)$",
+    re.IGNORECASE)
+
+# "X consists of A, B and C" — the same shape stated from the subject rather than the kind.
+_COMPOSITION = re.compile(
+    r"^(?P<s>.+?)\s+(?:consists?\s+of|is\s+composed\s+of|is\s+made\s+up\s+of|comprises?)\s+"
+    r"(?P<list>.+)$", re.IGNORECASE)
+
+# The kind-noun a list is a list *of*, folded onto one predicate so "types" and "kinds" of the
+# same subject accumulate into one relation instead of two that never meet.
+_KIND_PREDICATE: Dict[str, str] = {
+    "categories": "has_kind", "types": "has_kind", "kinds": "has_kind",
+    "forms": "has_kind", "classes": "has_kind", "branches": "has_kind",
+    "subfields": "has_kind", "examples": "has_example", "applications": "has_application",
+    "stages": "has_stage", "steps": "has_step", "phases": "has_stage",
+    "components": "has_part", "parts": "has_part", "layers": "has_part",
+    "advantages": "has_advantage", "benefits": "has_advantage",
+    "disadvantages": "has_limitation", "limitations": "has_limitation",
+    "challenges": "has_limitation",
+}
+
+# An appositive alias — "the bumblebee bat, also known as the Kitti's hog-nosed bat, is …". Two
+# names for one entity, stated in passing inside a sentence that is really about something else.
+# Worth extracting for a reason beyond the alias itself: an entity with two surfaces is reachable
+# from both, so a later question phrased the other way finds what she already knows instead of
+# creating a second, unconnected node for the same animal.
+_APPOSITIVE = re.compile(
+    r"^(?P<s>.+?)\s*,\s*(?:also\s+)?(?:known\s+as|called|referred\s+to\s+as)\s+"
+    r"(?P<alias>.+?)\s*,\s*(?P<rest>.+)$", re.IGNORECASE)
+
+# "X is the largest Y" — a superlative, and two claims rather than one. It says what X *is*
+# (a Y) and where it *ranks* among them, and a store that keeps only the whole phrase can answer
+# neither question: "largest animal on Earth" is a string no other sentence will ever produce,
+# so the fact connects to nothing. Splitting it gives one edge that joins X to a kind other
+# entities also belong to, and one that records the ranking.
+_SUPERLATIVE = re.compile(
+    r"^(?P<s>.+?)\s+(?:is|was)\s+(?:considered\s+)?(?:to\s+be\s+)?"
+    r"(?:the\s+|one\s+of\s+the\s+)"
+    r"(?P<sup>largest|biggest|smallest|fastest|slowest|tallest|shortest|heaviest|lightest|"
+    r"longest|deepest|highest|strongest|weakest|oldest|newest|rarest|best|worst|"
+    r"most\s+\w+|least\s+\w+)\s+(?P<o>.+)$", re.IGNORECASE)
+
+# Splitting a list into its items. Oxford comma and bare "and"/"or" both appear, and an item may
+# itself contain "or" ("narrow or weak AI") — so the separator is a comma *or* a conjunction that
+# is not inside an item, approximated by requiring the conjunction to be the last separator.
+_LIST_SPLIT = re.compile(r"\s*,\s*(?:and\s+|or\s+)?|\s+and\s+", re.IGNORECASE)
 
 # --------------------------------------------------------------------------- #
 # Measurement — the one kind of sentence a causal coefficient can be fitted from
@@ -715,6 +909,102 @@ def _as_object(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
+def _clauses(text: str) -> List[str]:
+    """A sentence's independently-assertable clauses, in order.
+
+    One sentence routinely carries more than one claim — *"Supervised learning involves labelled
+    examples, while unsupervised learning involves unlabelled data"* is two facts about two
+    subjects — and the extractor stops at the first pattern that matches. Before this, the second
+    half of every such sentence was unreachable no matter how many patterns existed.
+
+    Conservative on purpose. Splitting on bare ``and`` would shred "bread and butter" and every
+    enumeration in the corpus, so only connectives that genuinely coordinate two *independent*
+    claims are cut. A text with nothing to split returns itself, and the caller's behaviour on a
+    single-clause sentence is then byte-for-byte what it was.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    out: List[str] = []
+    for sentence in _SENTENCE_SPLIT.split(raw):
+        for clause in _CLAUSE_SPLIT.split(sentence):
+            clause = clause.strip()
+            # Two words cannot state a relation, and admitting them here would hand the pattern
+            # loop fragments that match its loosest rules on nothing at all.
+            if len(clause.split()) >= 3:
+                out.append(clause)
+    return out or [raw]
+
+
+def _split_condition(clause: str) -> Tuple[str, str]:
+    """``(main, condition)`` — the claim, and the circumstance it is asserted under.
+
+    Returns the clause unchanged with an empty condition where the surface states none, so an
+    unconditional sentence takes exactly the path it always took.
+
+    The condition is *not* thrown away once split, which is the entire point. "If the temperature
+    falls below 0°C, water freezes" carries a real relation — ``water --freezes-->`` — and a real
+    restriction on it, and a store that keeps the first without the second holds a claim that is
+    plainly false: water does not, in general, freeze.
+    """
+    text = str(clause or "").strip()
+    if not text:
+        return "", ""
+    for rx in _CONDITIONS:
+        match = rx.match(text)
+        if match is None:
+            continue
+        main = (match.group("main") or "").strip(" ,")
+        cond = (match.group("cond") or "").strip(" ,")
+        # A split that leaves nothing to assert is not a split. "If so, then yes" parses and means
+        # nothing; returning it would replace a whole clause with a fragment.
+        if len(main.split()) >= 2 and len(cond.split()) >= 2:
+            return main, cond
+    return text, ""
+
+
+def _modality_of(text: str) -> Tuple[str, float]:
+    """What the surface claimed about its own certainty, and what that costs the confidence.
+
+    Strongest reading wins, and "strongest" means *most restrictive*: a sentence carrying both
+    "usually" and "may" is a hedged claim, because the hedge is the weaker commitment and a
+    speaker who makes both has made the weaker one.
+    """
+    found, factor = "", 1.0
+    for rx, name, scale in _MODALITY:
+        if rx.search(str(text or "")):
+            if scale < factor or not found:
+                found, factor = name, min(factor, scale)
+    return found, factor
+
+
+def _temporal_of(text: str) -> str:
+    """The time the claim is pinned to, where the surface pins it. Empty is the normal case."""
+    match = _TEMPORAL.search(str(text or ""))
+    return (match.group("t") or "").strip() if match is not None else ""
+
+
+def _list_items(raw: str) -> List[str]:
+    """The items of an enumeration, cleaned, de-duplicated, order preserved.
+
+    Items shorter than a word or longer than a clause are dropped: the first is punctuation the
+    splitter tripped on, and the second is a sentence that ran past the list and would enter the
+    store as an "entity" nothing ever matches again.
+    """
+    out: List[str] = []
+    seen: Set[str] = set()
+    for part in _LIST_SPLIT.split(str(raw or "")):
+        item = _clean(part)
+        if not item or len(item.split()) > 8:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
 def _clean(text: str) -> str:
     """Trim punctuation and a leading article, keeping the entity itself intact."""
     out = _STRIP.sub("", str(text or "")).strip()
@@ -829,12 +1119,19 @@ class Grounder:
         return got
 
     def _extract(self, text: str) -> List[GroundedTriple]:
-        """Deterministic extraction. First pattern that matches wins.
+        """Deterministic extraction: every claim the sentence states, not merely the first.
 
         Matched against the cleaned text **as written**, not a lowercased copy: the patterns are
         already case-insensitive, and matching on a lowered string meant every captured object was
         stored lowercased, so "Jay" came back as "jay" and she could not say the Master's name the
         way he wrote it.
+
+        **Why this is a loop over clauses now.** The pattern loop stops at the first match, which
+        is right — a sentence states one relation and the most specific reading of it should win.
+        It was applied to the whole *text*, which is not the same thing: a sentence coordinating
+        two claims had its second half discarded by a rule that exists to disambiguate one. So the
+        first-match discipline is kept exactly, and moved inside a clause. On a single-clause
+        sentence the two are identical, which is what keeps every prior behaviour intact.
         """
         out: List[GroundedTriple] = []
         low = _clean(text)
@@ -855,6 +1152,56 @@ class Grounder:
         measured = self._extract_measurements(text)
         if measured:
             return measured
+
+        for clause in _clauses(text):
+            main, condition = _split_condition(clause)
+            modality, factor = _modality_of(clause)
+            temporal = _temporal_of(clause)
+            found = self._extract_clause(main, text)
+            for triple in found:
+                triple.condition = condition
+                triple.modality = modality
+                triple.temporal = temporal
+                # Stated uncertainty lowers what she may claim, and it does so *after* the
+                # extractor has scored its own reliability. The two are different questions —
+                # "did I read this right" and "how strongly was it said" — and multiplying keeps
+                # them separable rather than letting a hedge look like a bad parse.
+                triple.confidence = round(triple.confidence * factor, 6)
+            out.extend(found)
+        self._prune_patterns()
+        return out
+
+    def _extract_clause(self, clause: str, text: str) -> List[GroundedTriple]:
+        """Every triple one clause states. First matching pattern wins, as it always has."""
+        out: List[GroundedTriple] = []
+        low = _clean(clause)
+        if not low:
+            return out
+
+        # An appositive names the same entity twice. Recorded, then removed, so the sentence it
+        # was embedded in is read as the sentence it actually is — before this, the interruption
+        # sat between the subject and its verb and defeated every pattern anchored on that verb.
+        alias = _APPOSITIVE.match(low)
+        if alias is not None:
+            subject = self.resolve(alias.group("s") or "")
+            other = _clean(alias.group("alias") or "")
+            if subject and other:
+                out.append(GroundedTriple(
+                    subject=subject, predicate="also_known_as", object=other,
+                    confidence=0.85, source="appositive", text=text))
+                low = _clean(f"{alias.group('s')} {alias.group('rest')}")
+
+        # An enumeration states several claims at once and must not be reduced to its first item.
+        # Handled before the pattern loop for the same reason a measurement is: the loop is built
+        # to pick one reading, and here every item IS the reading.
+        listed = self._extract_enumeration(low, text)
+        if listed:
+            return out + listed
+
+        # A superlative is two claims — the kind and the rank — and both are wanted.
+        ranked = self._extract_superlative(low, text)
+        if ranked:
+            return out + ranked
 
         for pattern in list(self.patterns):
             try:
@@ -889,7 +1236,69 @@ class Grounder:
                 confidence=0.9 if not pattern.learned else 0.6 + 0.3 * pattern.precision,
                 source="pattern" if not pattern.learned else "learned-pattern", text=text))
             break
-        self._prune_patterns()
+        return out
+
+    def _extract_superlative(self, clause: str, text: str) -> List[GroundedTriple]:
+        """``X is the largest Y`` → what X is, and where it ranks.
+
+        Kept as two triples rather than one because they answer different questions and only one
+        of them connects. ``blue whale --is_a--> animal on Earth`` shares a shape with
+        ``African elephant --is_a--> land animal``, which is what lets a kind be induced over
+        them; ``blue whale --largest--> animal on Earth`` never would, because the predicate is
+        different for every superlative and nothing would ever group.
+        """
+        out: List[GroundedTriple] = []
+        match = _SUPERLATIVE.match(clause)
+        if match is None:
+            return out
+        subject = self.resolve(match.group("s") or "")
+        kind = _clean(match.group("o") or "")
+        rank = _clean(match.group("sup") or "").lower()
+        if not subject or not kind:
+            return out
+        out.append(GroundedTriple(
+            subject=subject, predicate="is_a", object=kind,
+            confidence=0.85, source="superlative", text=text))
+        out.append(GroundedTriple(
+            subject=subject, predicate=self._predicate(f"is_{rank}"), object=kind,
+            confidence=0.85, source="superlative", text=text))
+        return out
+
+    def _extract_enumeration(self, clause: str, text: str) -> List[GroundedTriple]:
+        """``the three types of X are A, B and C`` → one triple per item.
+
+        This is the construction that matters most for connecting what she knows, and the reason
+        is a measured one: after 1,200 corpus pairs the store held 521 facts across 468 subjects —
+        roughly one fact each, so almost nothing shared a subject and the schema inducer had
+        nothing to generalise over. An enumeration is the opposite shape. It attaches several
+        objects to one subject under one predicate in a single sentence, which is exactly the
+        evidence :mod:`nyxara.njp.core` needs to induce a role and :mod:`nyxara.njp.concepts`
+        needs to find an invariant.
+
+        Two items is the floor. A "list" of one is a plain relation and the pattern loop reads it
+        better, keeping the object whole rather than as a degenerate list.
+        """
+        out: List[GroundedTriple] = []
+        match = _ENUMERATION.match(clause)
+        predicate = ""
+        if match is not None:
+            predicate = _KIND_PREDICATE.get((match.group("kind") or "").lower(), "has_kind")
+        else:
+            match = _COMPOSITION.match(clause)
+            if match is None:
+                return out
+            predicate = "consists_of"
+        subject = self.resolve(match.group("s") or "")
+        items = _list_items(match.group("list") or "")
+        if not subject or len(items) < 2:
+            return out
+        for item in items:
+            out.append(GroundedTriple(
+                subject=subject, predicate=self._predicate(predicate), object=item,
+                # Below a single-relation parse on purpose. A list is read by a looser rule than a
+                # named relation and its items are segmented by punctuation, so it earns slightly
+                # less than a sentence whose whole shape had to match.
+                confidence=0.8, source="enumeration", text=text))
         return out
 
     def _extract_measurements(self, text: str) -> List[GroundedTriple]:
