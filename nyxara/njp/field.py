@@ -532,7 +532,10 @@ class RecursiveCognitiveField:
             elif diagnosis.kind == ErrorClass.STRUCTURAL and self.universe is not None:
                 cause, _, effect = diagnosis.subject.partition("→")
                 if cause and effect:
-                    self.universe.declare(cause, effect)
+                    # Signed, so the arrow can carry a direction before it can carry a
+                    # coefficient. A structural miss says the arrow was missing, and the
+                    # monotone reading is the one that makes it answerable at all.
+                    self.universe.declare(cause, effect, sign=1)
             # NUMERIC needs no action here: `universe.observe` refits every arrow on every
             # observation already, and adding a second refit would double-count the sample.
         except Exception:  # noqa: BLE001

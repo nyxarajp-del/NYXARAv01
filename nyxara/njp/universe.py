@@ -65,6 +65,10 @@ __all__ = [
 
 _MIN_FIT = 3          # samples before a relation is allowed to claim anything
 _MIN_R2 = 0.25        # below this the fit explains too little to propagate through
+# What a direction-only answer is worth. Capped well under what any fit earns: she was *told* the
+# arrow exists, which is real knowledge and is not a measurement, and a number that reads like one
+# would let testimony borrow the credibility of data.
+_DIRECTIONAL_CONFIDENCE = 0.35
 
 
 def _norm(name: Any) -> str:
@@ -102,6 +106,10 @@ class Relation:
     lo: float = math.inf      # observed range of the cause, for honesty about extrapolation
     hi: float = -math.inf
     stated: bool = False      # the skeleton said this arrow may exist, before any data arrived
+    # Which way the stated law runs: +1 "more cause, more effect", -1 the reverse, 0 unstated.
+    # Only meaningful for an arrow that has never been fitted — once there are numbers, the
+    # slope's own sign is the answer and this is not consulted.
+    sign: int = 0
 
     def observe(self, x: float, y: float) -> None:
         self.n += 1
@@ -147,7 +155,23 @@ class Relation:
 
     @property
     def usable(self) -> bool:
+        """Fitted well enough to predict a *number*."""
         return self.n >= _MIN_FIT and self.r2 >= _MIN_R2
+
+    @property
+    def directional(self) -> bool:
+        """Told about, never measured — so it carries a direction and no magnitude.
+
+        This is the state 40 of 40 arrows were in after 1,200 corpus pairs: every one of them
+        stated, none of them fitted, `usable_relations` empty, and every counterfactual answered
+        "no usable arrow leaves the intervened variables". A causal skeleton the simulator could
+        not use for anything.
+
+        A text corpus states laws and almost never states quantities, so waiting for numbers is
+        waiting forever. "Fire causes heat" cannot say *how much* heat and does say that removing
+        the fire removes the heat, and that is a real answer to a real counterfactual.
+        """
+        return self.stated and not self.usable and self.sign != 0
 
     def predict(self, x: float) -> float:
         return self.slope * x + self.intercept
@@ -191,6 +215,11 @@ class StateDelta:
     after: Optional[float] = None
     confidence: float = 0.0
     via: List[str] = field(default_factory=list)      # the arrows the change travelled
+    # Set when the answer came from a stated law rather than a fitted one. `after` is then None
+    # on purpose: the direction is known and the magnitude genuinely is not, and putting a number
+    # there would be inventing one.
+    direction: int = 0                                # +1 up, -1 down, 0 unknown
+    qualitative: bool = False
 
     @property
     def change(self) -> Optional[float]:
@@ -199,9 +228,13 @@ class StateDelta:
         return self.after - self.before
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"variable": self.variable, "before": self.before, "after": self.after,
-                "change": None if self.change is None else round(self.change, 5),
-                "confidence": round(self.confidence, 4), "via": self.via[:6]}
+        out = {"variable": self.variable, "before": self.before, "after": self.after,
+               "change": None if self.change is None else round(self.change, 5),
+               "confidence": round(self.confidence, 4), "via": self.via[:6]}
+        if self.qualitative:
+            out["direction"] = self.direction
+            out["qualitative"] = True
+        return out
 
 
 @dataclass
@@ -306,7 +339,7 @@ class InternalUniverse:
         self.state.update(clean)
         return fitted
 
-    def declare(self, cause: str, effect: str) -> Relation:
+    def declare(self, cause: str, effect: str, *, sign: int = 0) -> Relation:
         """Assert that an arrow may exist, before any numbers for it have been seen.
 
         This is how a stated law reaches the simulator. "paudhe ko pani chahiye" gives no
@@ -320,6 +353,10 @@ class InternalUniverse:
             rel = Relation(cause=cause, effect=effect, stated=True)
             self.relations[key] = rel
         rel.stated = True
+        # A later, more specific statement may say which way an arrow runs; an earlier one that
+        # said nothing must not overwrite it back to unknown.
+        if sign:
+            rel.sign = 1 if sign > 0 else -1
         return rel
 
     def sync_from_world(self) -> int:
@@ -330,7 +367,11 @@ class InternalUniverse:
         try:
             for link in self.world.links(causal_only=True)[:self.capacity]:
                 before = len(self.relations)
-                self.declare(link.cause, link.effect)
+                # "X causes Y" is monotone-positive in ordinary use: it is what licenses "no
+                # fire, no heat", which is the counterfactual anyone actually asks. A skeleton
+                # link carries no sign of its own, so this is the reading applied — and a caller
+                # that knows better (grounding saw `decreases`) passes its own.
+                self.declare(link.cause, link.effect, sign=1)
                 added += int(len(self.relations) > before)
         except Exception:  # noqa: BLE001 — no skeleton just means fewer permitted arrows
             return added
@@ -382,6 +423,13 @@ class InternalUniverse:
 
     def _children(self, variable: str) -> List[Relation]:
         return [r for (c, e), r in self.relations.items() if c == variable and r.usable]
+
+    def _directional_children(self, variable: str) -> List[Relation]:
+        return [r for (c, e), r in self.relations.items() if c == variable and r.directional]
+
+    def directional_relations(self) -> List[Relation]:
+        """Arrows she was told about and has never measured. Direction only, no magnitude."""
+        return [r for r in self.relations.values() if r.directional]
 
     def intervene(self, interventions: Dict[str, Any],
                   base: Optional[Dict[str, Any]] = None) -> CounterfactualResult:
@@ -450,14 +498,70 @@ class InternalUniverse:
                 result.deltas.append(StateDelta(
                     variable=name, before=factual.get(name), after=predicted.get(name),
                     confidence=confidences.get(name, 0.0), via=via.get(name, [])))
+
+            # The qualitative pass, over arrows she was told about and has never measured.
+            #
+            # Run second and only where the numeric pass reached nothing, so a fitted answer is
+            # never displaced by a direction. A stated law cannot say how much and does say which
+            # way, and refusing to answer at all — which is what happened for every counterfactual
+            # over 1,200 corpus pairs — throws away the only causal knowledge a text corpus
+            # actually supplies.
+            self._propagate_direction(fixed, factual, settled, result)
+
             downstream = [d.confidence for d in result.deltas if d.variable not in fixed]
             result.confidence = (sum(downstream) / len(downstream)) if downstream else 0.0
             if not downstream:
-                result.reason = "no usable arrow leaves the intervened variables"
+                result.reason = "no arrow of any kind leaves the intervened variables"
+            elif all(d.qualitative for d in result.deltas if d.variable not in fixed):
+                result.reason = "direction only — no arrow on this path has ever been measured"
             return result
         except Exception:  # noqa: BLE001 — a failed simulation answers nothing, never raises
             result.reason = "simulation failed"
             return result
+
+    def _propagate_direction(self, fixed: Dict[str, float], factual: Dict[str, float],
+                             settled: Set[str], result: CounterfactualResult) -> None:
+        """Walk the stated skeleton, carrying a sign where there is no coefficient to carry.
+
+        The sign of the intervention matters and is read from the factual state: setting a
+        variable *below* where it was pushes a positively-signed effect down, not up. With no
+        factual value to compare against, the intervention's own direction is unknown and the
+        effect is reported as touched with direction 0 rather than guessed at.
+
+        Confidence is deliberately capped well below what a fit earns. This is structural
+        knowledge — she was told the arrow exists — and it should never read like a measurement.
+        """
+        try:
+            direction: Dict[str, int] = {}
+            for name, value in fixed.items():
+                before = factual.get(name)
+                if before is None:
+                    direction[name] = 0
+                else:
+                    direction[name] = 1 if value > before else (-1 if value < before else 0)
+
+            frontier = list(fixed)
+            seen: Set[str] = set(fixed)
+            for _ in range(self.max_depth):
+                nxt: List[str] = []
+                for parent in frontier:
+                    for rel in self._directional_children(parent):
+                        if rel.effect in fixed or rel.effect in settled or rel.effect in seen:
+                            continue        # severed, or the numeric pass already explained it
+                        seen.add(rel.effect)
+                        moved = direction.get(parent, 0) * rel.sign
+                        direction[rel.effect] = moved
+                        result.deltas.append(StateDelta(
+                            variable=rel.effect, before=factual.get(rel.effect), after=None,
+                            confidence=_DIRECTIONAL_CONFIDENCE,
+                            via=[f"{parent}→{rel.effect} (stated)"],
+                            direction=moved, qualitative=True))
+                        nxt.append(rel.effect)
+                frontier = nxt
+                if not frontier:
+                    break
+        except Exception:  # noqa: BLE001 — a failed qualitative pass leaves the numeric answer
+            return
 
     def what_if(self, variable: str, value: Any,
                 base: Optional[Dict[str, Any]] = None) -> CounterfactualResult:
@@ -581,6 +685,10 @@ class InternalUniverse:
             "variables": len(self.state),
             "relations": len(self.relations),
             "usable_relations": len(usable),
+            # Told about and never measured. Kept apart from `usable_relations` because they
+            # answer different questions — how much, versus which way — and a single number
+            # covering both would hide that every arrow she has is of the second kind.
+            "directional_relations": len(self.directional_relations()),
             "stated_arrows": sum(1 for r in self.relations.values() if r.stated),
             "observations": self.observations,
             "rollouts": len(self.rollouts),
