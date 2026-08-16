@@ -789,6 +789,9 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
 # Everything a relation not named above is worth when it is the only thing known about a named
 # entity. Low on purpose: answering "what is X" with an unrelated property of X is better than
 # UNKNOWN only when the fact is genuinely about X, and it should never outrank a real match.
+#: Default only — the live value is :attr:`Grounder.affinity_floor`, so it can be measured rather
+#: than asserted. It was asserted first, at 0.35, and the measurement said so: with it, retrieval
+#: answered 45 of 120 held-out questions and got 4 right, where before it answered 3 and got 2.
 _AFFINITY_FLOOR = 0.35
 
 # The words a question is *made of* rather than *about*. Interrogatives and copulas name no
@@ -1124,7 +1127,8 @@ class Grounder:
     def __init__(self, *, graph: Any = None, ladder: Any = None, llm: Any = None,
                  min_confidence: float = 0.35, known_floor: float = 0.75,
                  learn_patterns: bool = True, max_learned: int = 512,
-                 pattern_floor: float = 0.34, pattern_min_trials: int = 6) -> None:
+                 pattern_floor: float = 0.34, pattern_min_trials: int = 6,
+                 affinity_floor: float = _AFFINITY_FLOOR) -> None:
         self.graph = graph
         self.ladder = ladder
         self._llm = llm
@@ -1135,6 +1139,10 @@ class Grounder:
         self.max_learned = max(0, int(max_learned))
         self.pattern_floor = float(pattern_floor)
         self.pattern_min_trials = max(2, int(pattern_min_trials))
+        # What a relation nobody listed as answering this question is worth. The single most
+        # consequential number in retrieval: it decides whether an unrelated property of the right
+        # entity may be offered as an answer at all.
+        self.affinity_floor = max(0.0, min(1.0, float(affinity_floor)))
 
         self.patterns: List[Pattern] = [
             Pattern(regex=rx, predicate=pred, learned=False) for rx, pred in _SEED_PATTERNS
@@ -1858,7 +1866,7 @@ class Grounder:
         direction or the other.
         """
         if affinities:
-            return affinities.get(predicate, _AFFINITY_FLOOR)
+            return affinities.get(predicate, self.affinity_floor)
         low = str(subject or "").lower()
         relations = {p for (s, p) in self.facts if s == low}
         return 1.0 / max(1, len(relations))
@@ -2145,7 +2153,15 @@ class Grounder:
                     subject=str(row.get("subject", "")), predicate=str(row.get("predicate", "")),
                     object=str(row.get("object", "")),
                     confidence=float(row.get("confidence", 0.0)),
-                    source=str(row.get("source", "")), text=str(row.get("text", "")))
+                    source=str(row.get("source", "")), text=str(row.get("text", "")),
+                    # Restored, not dropped. A conditional claim reloaded without its condition
+                    # is not a slightly poorer memory of it — it is a different and usually false
+                    # claim, which is the entire reason the field exists. The same holds for a
+                    # hedge: "X may cause Y" coming back as "X causes Y" across a restart would
+                    # let her state on Tuesday what she carefully qualified on Monday.
+                    condition=str(row.get("condition", "")),
+                    temporal=str(row.get("temporal", "")),
+                    modality=str(row.get("modality", "")))
                 if triple.subject and triple.predicate:
                     self.facts.setdefault(
                         (triple.subject.lower(), triple.predicate), []).append(triple)

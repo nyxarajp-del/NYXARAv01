@@ -167,6 +167,19 @@ def test_extraction_connects_rather_than_merely_covering(grounder):
     assert len(is_a_subjects) >= 3
 
 
+def test_the_cognitive_fields_survive_a_restart(grounder):
+    """A conditional claim reloaded without its condition is a different, false claim."""
+    grounder.ground("If the temperature falls below 0 degrees, water freezes.")
+    grounder.ground("Smoking may cause cancer")
+
+    revived = Grounder()
+    revived.load_dict(grounder.to_dict())
+
+    restored = [t for triples in revived.facts.values() for t in triples]
+    assert any(t.condition for t in restored), "the condition must come back"
+    assert any(t.modality == "possible" for t in restored), "so must the hedge"
+
+
 def test_a_single_clause_sentence_behaves_exactly_as_before(grounder):
     """The first-match rule moved inside a clause; on one clause it must be unchanged."""
     result = grounder.ground("my name is Jay")
