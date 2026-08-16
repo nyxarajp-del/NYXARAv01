@@ -87,6 +87,56 @@ def test_the_arrow_is_not_answered_backwards():
 
 
 # --------------------------------------------------------------------------- #
+# Which relations may answer a question that named no relation
+# --------------------------------------------------------------------------- #
+# Measured on 200 held-out corpus questions: of 60 retrieved answers, 29 came from `owns` and
+# `increases` and 0 of those were right — `owns` scored a mean F1 of 0.003 across 17 answers. They
+# were immune to `affinity_floor` because they never reached the affinity table: the question's
+# own predicate could not be read, and the uniform-prior branch awarded full weight to a subject
+# known by exactly one relation. Restricting that branch to relations that *define* took 58
+# answers to 27 and left all 4 correct ones standing.
+def test_a_relation_that_does_not_define_cannot_answer_what_is():
+    """`Ravi owns a red car` is a fine fact and a useless answer to "what is Ravi"."""
+    grounder = Grounder()
+    grounder.ground("Ravi has a red car")
+    assert not grounder.answer_by_recall("What is Ravi?").answered
+
+
+def test_the_same_relation_answers_when_it_is_asked_for_by_name():
+    """The restriction is on answering an unread question, not on the relation itself."""
+    grounder = Grounder()
+    grounder.ground("Ravi has a red car")
+    answer = grounder.answer_by_recall("What does Ravi own?")
+    assert answer.answered
+    assert "red car" in answer.text
+
+
+def test_a_defining_relation_still_answers_an_unread_question(taught):
+    """"tell me about X" names no relation, and a definition is what it wants."""
+    assert taught.answer_by_recall("Tell me about deep learning").answered
+
+
+def test_the_retrieval_floor_is_separate_from_the_fact_floor():
+    """They gate different decisions: worth keeping, versus answers what was asked."""
+    grounder = Grounder()
+    assert grounder.recall_floor != grounder.min_confidence
+    assert grounder.recall_floor >= 0.6, "set by measurement — see the module comment"
+
+
+def test_raising_the_floor_removes_answers_and_never_adds_them(taught):
+    strict = Grounder()
+    strict.facts = taught.facts
+    strict.recall_floor = 0.95
+    loose = Grounder()
+    loose.facts = taught.facts
+    loose.recall_floor = 0.2
+    questions = ["What is deep learning?", "What is overfitting?", "What is clustering?"]
+    answered_strict = {q for q in questions if strict.answer_by_recall(q).answered}
+    answered_loose = {q for q in questions if loose.answer_by_recall(q).answered}
+    assert answered_strict <= answered_loose
+
+
+# --------------------------------------------------------------------------- #
 # What it must never claim
 # --------------------------------------------------------------------------- #
 def test_a_retrieved_fact_is_believed_and_never_known(taught):

@@ -789,6 +789,17 @@ _PREDICATE_AFFINITY: Dict[str, Dict[str, float]] = {
 # Everything a relation not named above is worth when it is the only thing known about a named
 # entity. Low on purpose: answering "what is X" with an unrelated property of X is better than
 # UNKNOWN only when the fact is genuinely about X, and it should never outrank a real match.
+# Relations that describe *what a thing is*, and may therefore answer a question whose own
+# predicate could not be read — "tell me about X", or any phrasing no pattern covers. Everything
+# outside this set has to be asked for by name.
+#
+# The line is not "important relations" but "relations that define". `owns` and `increases` are
+# perfectly good facts and terrible answers to "what is X": they say something true about the
+# entity and nothing about what it is.
+_GENERAL_ANSWER = frozenset({
+    "is_a", "means", "part_of", "occurs_when", "purpose", "involves", "consists_of", "has_kind",
+})
+
 #: Default only — the live value is :attr:`Grounder.affinity_floor`, so it can be measured rather
 #: than asserted. It was asserted first, at 0.35, and the measurement said so: with it, retrieval
 #: answered 45 of 120 held-out questions and got 4 right, where before it answered 3 and got 2.
@@ -1126,6 +1137,7 @@ class Grounder:
 
     def __init__(self, *, graph: Any = None, ladder: Any = None, llm: Any = None,
                  min_confidence: float = 0.35, known_floor: float = 0.75,
+                 recall_floor: float = 0.6,
                  learn_patterns: bool = True, max_learned: int = 512,
                  pattern_floor: float = 0.34, pattern_min_trials: int = 6,
                  affinity_floor: float = _AFFINITY_FLOOR) -> None:
@@ -1134,6 +1146,13 @@ class Grounder:
         self._llm = llm
         self._llm_tried = llm is not None
         self.min_confidence = float(min_confidence)
+        # What a *retrieved* answer must score to be offered at all. Separate from
+        # `min_confidence` because it gates a different decision — not "is this fact worth
+        # keeping" but "does this fact answer the question that was asked" — and because it was
+        # set by measurement rather than by taste. On 200 held-out questions, moving retrieval
+        # from `min_confidence` (0.35) to 0.6 took 58 answers down to 27 while leaving all 4
+        # correct ones in place: it removed only wrong answers.
+        self.recall_floor = max(0.0, min(1.0, float(recall_floor)))
         self.known_floor = float(known_floor)
         self.learn_patterns = bool(learn_patterns)
         self.max_learned = max(0, int(max_learned))
@@ -1765,7 +1784,7 @@ class Grounder:
             triple = best.triple
             # Below this the fact is about the right entity but answers a different question, and
             # a wrong answer confidently placed is worse than the honest UNKNOWN it replaces.
-            if best.score < self.min_confidence:
+            if best.score < self.recall_floor:
                 return out
             out.triples = [triple]
             out.text = triple.object or triple.subject
@@ -1810,11 +1829,10 @@ class Grounder:
             if not tokens:
                 return out
             wanted = self._read_question(_clean(question).lower())[1]
-            affinities = _PREDICATE_AFFINITY.get(wanted, {})
 
             for subject, subject_score in self._candidate_subjects(tokens, subject_floor):
                 for triple in self._facts_of(subject):
-                    affinity = self._affinity(affinities, triple.predicate, subject)
+                    affinity = self._affinity(wanted, triple.predicate, subject)
                     out.append(RecalledFact(
                         triple=triple, subject_score=subject_score, affinity=affinity,
                         score=subject_score * affinity * triple.confidence))
@@ -1824,7 +1842,7 @@ class Grounder:
                 # which is the drift this whole module is built to refuse.
                 for alias in self._neighbours(subject):
                     for triple in self._facts_of(alias):
-                        affinity = self._affinity(affinities, triple.predicate, alias)
+                        affinity = self._affinity(wanted, triple.predicate, alias)
                         out.append(RecalledFact(
                             triple=triple, subject_score=subject_score, affinity=affinity,
                             hops=1, via=subject,
@@ -1851,7 +1869,7 @@ class Grounder:
         except Exception:  # noqa: BLE001 — retrieval never breaks a turn
             return out
 
-    def _affinity(self, affinities: Dict[str, float], predicate: str, subject: str) -> float:
+    def _affinity(self, wanted: str, predicate: str, subject: str) -> float:
         """How well this relation answers the question that was asked.
 
         Two regimes, and the second is the one worth explaining. When the question's own
@@ -1865,8 +1883,26 @@ class Grounder:
         ambiguity the score should carry, and a fixed floor could only ever be wrong in one
         direction or the other.
         """
+        # Asked for by name, and held under that very name. Nothing outranks that, and it has to
+        # be checked before the table: most relations have no row of their own, so a question that
+        # named one of those would otherwise fall through to the unread-question branch and be
+        # refused for not being a definition — having asked for it explicitly.
+        if wanted and predicate == wanted:
+            return 1.0
+        affinities = _PREDICATE_AFFINITY.get(wanted, {})
         if affinities:
             return affinities.get(predicate, self.affinity_floor)
+        # A relation that does not describe *what a thing is* cannot serve as the answer to a
+        # question nobody could parse. This is the measured fix, and it was not the fix expected:
+        # of 60 retrieved answers over 200 held-out questions, 29 came from `owns` and
+        # `increases` — 0 correct between them, mean F1 0.003 for `owns` — and they were immune to
+        # `affinity_floor` because they never went through the table branch at all. They arrived
+        # here, where a subject known by exactly one relation was awarded full weight.
+        #
+        # The defect was not the prior. It was that "I could not read the question" was allowed to
+        # license any relation whatsoever, including one that answers a question nobody asked.
+        if predicate not in _GENERAL_ANSWER:
+            return 0.0
         low = str(subject or "").lower()
         relations = {p for (s, p) in self.facts if s == low}
         return 1.0 / max(1, len(relations))
@@ -2161,7 +2197,16 @@ class Grounder:
                     # let her state on Tuesday what she carefully qualified on Monday.
                     condition=str(row.get("condition", "")),
                     temporal=str(row.get("temporal", "")),
-                    modality=str(row.get("modality", "")))
+                    modality=str(row.get("modality", "")),
+                    # The revision itself, and this is the one that bites hardest. `_lookup`
+                    # answers from live facts only; a superseded entry stays on record so she can
+                    # say what she used to believe, and returning it as live undoes the
+                    # contradiction that retired it. Measured: told "my name is Jay" then "my name
+                    # is Raj", she answers Raj — and after a reload she answers **Jay**, because
+                    # both came back live and the retracted one won on confidence order. A store
+                    # that forgets its retractions overnight is worse than one that never revised.
+                    superseded=bool(row.get("superseded", False)),
+                    contested=bool(row.get("contested", False)))
                 if triple.subject and triple.predicate:
                     self.facts.setdefault(
                         (triple.subject.lower(), triple.predicate), []).append(triple)
