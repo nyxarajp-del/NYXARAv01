@@ -200,6 +200,14 @@ class Fabric:
         self.compilations = 0
         self._synced = True
         self._touched: Any = None
+        # Weight-only edits waiting to be patched into the compiled arrays.
+        #
+        # Potentiation and depression change a synapse's *value* and not the graph's *shape*, and
+        # both used to mark the whole compiled form dirty — so a handful of weight tweaks forced a
+        # full O(synapses) rebuild every single turn. Measured at 543k synapses: `_compile` was
+        # 223 ms a call, once per turn, 17% of the entire turn and the largest single cost in the
+        # profile. Structural edits still rebuild; these are patched in place.
+        self._weight_edits: List[Tuple[int, int, float]] = []
         self.base_threshold = float(threshold)
         self.refractory = max(0, int(refractory))
         self.max_settle_steps = max(1, int(max_settle_steps))
@@ -360,7 +368,45 @@ class Fabric:
         self._dirty = False
         self._synced = True
         self._touched = None
+        self._weight_edits.clear()
         self.compilations += 1
+
+    def _note_weight(self, pre: int, post: int, weight: float) -> None:
+        """Record a weight change for patching rather than invalidating the whole compilation.
+
+        Bounded: past a share of the wiring, patching one edge at a time stops being cheaper than
+        rebuilding, so it falls back to a full compile rather than degrading quietly.
+        """
+        if self._dirty:
+            return
+        if len(self._weight_edits) > 4096:
+            self._dirty = True
+            self._weight_edits.clear()
+            return
+        self._weight_edits.append((pre, post, float(weight)))
+
+    def _apply_weight_edits(self) -> None:
+        """Patch changed weights into the compiled arrays, without touching the structure.
+
+        Costs one scan of the presynaptic cell's own row per edit — mean degree, tens — against
+        the O(cells + synapses) list-building a rebuild costs.
+        """
+        try:
+            edits, self._weight_edits = self._weight_edits, []
+            indptr, indices, weights = self._indptr, self._indices, self._weights
+            for pre, post, value in edits:
+                i = self._index.get(pre)
+                j = self._index.get(post)
+                if i is None or j is None:
+                    self._dirty = True          # structure moved underneath; rebuild instead
+                    return
+                lo, hi = int(indptr[i]), int(indptr[i + 1])
+                for k in range(lo, hi):
+                    if int(indices[k]) == j:
+                        weights[k] = value
+                        break
+        except Exception:  # noqa: BLE001 — a failed patch falls back to a full rebuild
+            self._dirty = True
 
     def _writeback(self) -> None:
         """Push the vectorised state back onto the Cell objects the rest of the package reads.
@@ -419,6 +465,10 @@ class Fabric:
         try:
             if self._dirty or self._order is None:
                 self._compile()
+            elif self._weight_edits:
+                self._apply_weight_edits()
+                if self._dirty:
+                    self._compile()
             if not self._order:
                 return ()
 
@@ -724,7 +774,7 @@ class Fabric:
             targets = self.out.setdefault(j, {})
             if i in targets:
                 targets[i] = _clip(targets[i] + self.hebbian_rate * outcome)
-                self._dirty = True
+                self._note_weight(j, i, targets[i])
                 rep.potentiated += 1
             elif budget > 0 and outcome > 0.0:
                 # SYNAPTOGENESIS. A causal pair the fabric had no wire for now has one.
@@ -741,7 +791,7 @@ class Fabric:
                     for post, w in list(self.out.get(j, {}).items()):
                         if post not in nxt:
                             self.out[j][post] = _clip(w - self.depress_rate * abs(outcome))
-                            self._dirty = True
+                            self._note_weight(j, post, self.out[j][post])
                             rep.depressed += 1
         except Exception:  # noqa: BLE001
             pass
