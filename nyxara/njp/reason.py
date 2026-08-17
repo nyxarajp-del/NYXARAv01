@@ -359,6 +359,37 @@ class Reasoner:
         if len(state.live) > 1:
             out.why.append(f"weighed {len(state.live)} competing readings")
 
+    def _effects_asked_about(self, world: Any, problem: str) -> List[str]:
+        """What the question is asking to have explained, best reading first.
+
+        The grounder's own question parser is asked first, and that is the fix. The stem match
+        below reads ``world._counts`` — *observed occurrences* — and everything she learns from
+        text is a **stated law**, which creates a causal link and no occurrence at all. So on any
+        text-taught brain ``_counts`` is empty, no token is ever found, and this whole method
+        returned nothing: the causal record has never once contributed a rival hypothesis, and
+        the "debate" was whatever memory happened to recall.
+
+        Measured on three stated laws: ``_counts`` = {}, causal links = 2, tokens found = 0.
+        The grounder reads "pyaas ka karan kya hai?" as ``("pyaas", "<-causes")`` — the effect,
+        named exactly, with no stem matching required.
+        """
+        out: List[str] = []
+        try:
+            grounder = getattr(self.brain, "grounder", None) if self.brain is not None else None
+            reader = getattr(grounder, "_read_question", None)
+            if reader is not None:
+                from nyxara.njp.grounding import _clean
+                subject, _predicate = reader(_clean(problem).lower())
+                subject = str(subject or "").strip().lower()
+                if subject:
+                    out.append(subject)
+        except Exception:  # noqa: BLE001 — the stem fallback still applies
+            pass
+        for name in self._recorded_events(world, problem):
+            if name not in out:
+                out.append(name)
+        return out[:3]
+
     @staticmethod
     def _recorded_events(world: Any, problem: str) -> List[str]:
         """The events the record knows that this question is asking about.
@@ -406,7 +437,7 @@ class Reasoner:
         if world is None:
             return
         try:
-            for token in self._recorded_events(world, state.problem):
+            for token in self._effects_asked_about(world, state.problem):
                 explanation = world.why(token)
                 if not getattr(explanation, "explained", False):
                     continue
@@ -414,9 +445,16 @@ class Reasoner:
                     claim = f"{link.cause} caused {link.effect}"
                     if state.was_rejected(claim):
                         continue
+                    # Named for what it actually rests on. A stated law has no co-occurrence
+                    # count, and reporting "seen together 0 time(s)" as its evidence describes
+                    # the opposite of the case for it.
+                    if link.together > 0:
+                        because = f"seen together {link.together} time(s)"
+                    else:
+                        because = f"stated as a law {link.stated} time(s), never yet observed"
                     self.propose(state, Hypothesis(
                         claim=claim, support=float(link.strength), source="world",
-                        evidence=[f"seen together {link.together} time(s)"]))
+                        evidence=[because]))
                 for link in list(getattr(explanation, "correlates", []) or [])[:1]:
                     claim = f"{link.cause} preceded {link.effect}"
                     if state.was_rejected(claim):
@@ -506,6 +544,13 @@ class Reasoner:
         """Add a candidate, unless she has already rejected it or already holds it."""
         try:
             if not hypothesis.claim.strip() or state.was_rejected(hypothesis.claim):
+                return None
+            # A candidate nothing supports is not a candidate. Proposing it cannot help — it can
+            # never out-score anything, and `_settle` refuses to answer with a zero — while it
+            # does pad the field enough for `len(state.live) > 1` to report "weighed 2 competing
+            # readings". Measured: 235 of 237 passes ended undecided, and the two readings being
+            # weighed were her own past acknowledgements recalled at similarity 0.0.
+            if hypothesis.support <= 0.0 and not hypothesis.proved:
                 return None
             for existing in state.hypotheses:
                 if existing.claim.strip().lower() == hypothesis.claim.strip().lower():

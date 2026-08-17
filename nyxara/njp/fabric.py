@@ -153,6 +153,7 @@ class Fabric:
                  neurogenesis_error: float = 0.55, neurogenesis_window: int = 8,
                  neurogenesis_batch: int = 8, neurogenesis_fanout: int = 6,
                  soft_cell_ceiling: int = 250_000, soft_synapse_ceiling: int = 4_000_000,
+                 soft_latency_ms: float = 250.0, latency_floor_synapses: int = 8192,
                  manifold_dim: int = 10000, manifold: Optional[Manifold] = None,
                  dt: float = 0.001, tau_m: float = 0.02, tau_ref: float = 0.002,
                  candidate_cap: int = 4096,
@@ -219,6 +220,8 @@ class Fabric:
         # degrades the resolution of what is least used and keeps going.
         self.soft_cell_ceiling = max(64, int(soft_cell_ceiling))
         self.soft_synapse_ceiling = max(256, int(soft_synapse_ceiling))
+        self.soft_latency_ms = max(1.0, float(soft_latency_ms))
+        self.latency_floor_synapses = max(256, int(latency_floor_synapses))
 
         self.cells: Dict[int, Cell] = {}
         self.out: Dict[int, Dict[int, float]] = {}   # pre  -> {post: weight}
@@ -238,6 +241,11 @@ class Fabric:
         self._last: Optional[SettleResult] = None
         self._prev_snapshot: Optional[Snapshot] = None
         self._errors: List[float] = []               # recent prediction errors — neurogenesis reads
+        # What one expansion actually costs, in wall-clock milliseconds. The count ceilings above
+        # bound *memory*; this bounds *time*, and time is what makes a fabric unusable first.
+        self._expand_ms: List[float] = []
+        self.consolidations = 0
+        self.consolidated_on_latency = 0
 
     # ---- shape ----------------------------------------------------------- #
     def __len__(self) -> int:
@@ -655,11 +663,25 @@ class Fabric:
 
             if self.n_cells > self.soft_cell_ceiling or self.n_synapses > self.soft_synapse_ceiling:
                 self.consolidate()
+            elif self._too_slow():
+                # The count ceilings are a memory bound and they are the wrong bound to hit first.
+                # This class's own `_step` docstring works it out: 72.9 ms per turn at 24k
+                # synapses extrapolates to roughly 12 SECONDS per turn at `soft_synapse_ceiling`.
+                # So a fabric left to grow into its declared capacity becomes unusable long before
+                # it becomes large, and `consolidate` — written precisely to keep learning going
+                # under pressure — never runs. Measured over 1,200 corpus pairs: 136,085 synapses,
+                # 3.4% of the ceiling, zero consolidations, and 748 ms per pair and climbing.
+                #
+                # Compressing on elapsed cost makes the honest claim in this module's header
+                # ("what bounds it is the machine") into something the code can actually reach.
+                self.consolidate()
+                self.consolidated_on_latency += 1
 
             self.expansions += 1
             rep.cells_after = self.n_cells
             rep.synapses_after = self.n_synapses
             rep.ms = (time.perf_counter() - t0) * 1000.0
+            self._record_cost(rep.ms)
             return rep
         except Exception:  # noqa: BLE001 — a failed expansion changes nothing, never crashes
             rep.cells_after = self.n_cells
@@ -790,6 +812,38 @@ class Fabric:
             pass
 
     # ---- compression, so growth can continue ------------------------------ #
+    def _record_cost(self, ms: float) -> None:
+        """Remember what this expansion cost, over a short window."""
+        try:
+            self._expand_ms.append(max(0.0, float(ms)))
+            if len(self._expand_ms) > 32:
+                del self._expand_ms[:-32]
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _mean_expand_ms(self) -> Optional[float]:
+        """Mean cost of a recent expansion, or ``None`` before there is a window to average."""
+        if len(self._expand_ms) < 8:
+            return None
+        return sum(self._expand_ms) / len(self._expand_ms)
+
+    def _too_slow(self) -> bool:
+        """Has growth started costing more per turn than the machine should spend on it?
+
+        Two guards, and both matter. A window is required so one slow turn — a garbage collection,
+        a cold cache — cannot trigger compression of structure that is doing its job. And a floor
+        on size is required so a genuinely small fabric on a loaded machine compresses nothing:
+        below ``latency_floor_synapses`` the cost is the interpreter, not the structure, and
+        dropping synapses would not make it faster. It would only make her smaller.
+        """
+        try:
+            if self.n_synapses < self.latency_floor_synapses:
+                return False
+            mean = self._mean_expand_ms()
+            return mean is not None and mean > self.soft_latency_ms
+        except Exception:  # noqa: BLE001
+            return False
+
     def consolidate(self, *, fraction: float = 0.05) -> Dict[str, Any]:
         """Make room by **compressing the least-used structure**, never by blind eviction.
 
@@ -799,6 +853,12 @@ class Fabric:
         resolution of what is barely used degrades first, and that is reported rather than hidden.
         """
         out = {"synapses_before": self.n_synapses, "cells_before": self.n_cells, "dropped": 0}
+        self.consolidations += 1
+        # The window is cleared because it describes a fabric that no longer exists. Leaving it
+        # would keep `_too_slow` true on the pre-compression costs and compress again next turn,
+        # and the turn after — a fabric that shrank itself away while its own measurements said
+        # it was still slow.
+        self._expand_ms.clear()
         try:
             weights: List[Tuple[float, int, int]] = []
             for pre, targets in self.out.items():
@@ -840,6 +900,13 @@ class Fabric:
                         "decay": round(self.decay, 6), "elapsed_s": round(self.now, 6)},
             "compilations": self.compilations,
             "candidate_cap": self.candidate_cap,
+            # What growth currently costs, and the bound it is measured against. Reported so
+            # "she is getting slower" is a number rather than something the Master notices.
+            "mean_expand_ms": (round(self._mean_expand_ms(), 3)
+                               if self._mean_expand_ms() is not None else None),
+            "soft_latency_ms": self.soft_latency_ms,
+            "consolidations": self.consolidations,
+            "consolidated_on_latency": self.consolidated_on_latency,
             # Stated rather than implied: growth is not unconditional, and a fabric that has
             # stopped growing should be visibly stopped rather than quietly flat.
             "growing": self.expansions > 0 and self.grown_total > 0,

@@ -70,6 +70,18 @@ _INVARIANT_SHARE = 0.6      # a feature is invariant if this fraction of members
 _COVER = 0.45               # an observation is covered by a concept at or above this
 
 
+#: Marks an observation created for the *object* of a relation, so a superordinate has somewhere
+#: to accumulate evidence. It records that something points at this node — not a property of it.
+#: Every kind she has ever met carries it, so it discriminates nothing and must never be clustered
+#: on. See :meth:`ConceptGenesis._similarity` for what happened when it was.
+_ROLE_PREFIX = "is_target_of:"
+
+
+def _content_features(features: Set[str]) -> Set[str]:
+    """The features that actually say something about the thing."""
+    return {f for f in features if not f.startswith(_ROLE_PREFIX)}
+
+
 def _norm(text: Any) -> str:
     return " ".join(str(text or "").strip().lower().split())
 
@@ -328,13 +340,27 @@ class ConceptGenesis:
 
     # ---- similarity ------------------------------------------------------- #
     def _similarity(self, a: Observation, b: Observation) -> float:
-        """Jaccard on the symbols, cosine on the numbers, blended by how much of each exists."""
+        """Jaccard on the symbols, cosine on the numbers, blended by how much of each exists.
+
+        Role markers are excluded, and that exclusion is load-bearing. ``observe_triples`` records
+        the *object* of every relation as an observation carrying one feature —
+        ``is_target_of:is_a`` — so that a superordinate has somewhere to accumulate evidence. But
+        a role marker is not a property of the thing: it says something points at it, which is
+        true of every kind she has ever met. Two such observations have identical feature sets and
+        therefore Jaccard 1.0, so they all collapse into one concept.
+
+        Measured: the largest concept after 1,200 corpus pairs was named ``is_target_of:is_a`` and
+        had **230 members** — "things that something is a kind of", true of everything and
+        informative about nothing. It dominated the concept set and dragged compression under
+        break-even, which then vetoed every self-improvement trial.
+        """
+        af, bf = _content_features(a.features), _content_features(b.features)
         sym = 0.0
         sym_weight = 0.0
-        if a.features or b.features:
-            union = a.features | b.features
+        if af or bf:
+            union = af | bf
             if union:
-                sym = len(a.features & b.features) / len(union)
+                sym = len(af & bf) / len(union)
                 sym_weight = 1.0
 
         num = 0.0
@@ -369,7 +395,10 @@ class ConceptGenesis:
             return set()
         counts: Dict[str, int] = {}
         for obs in members:
-            for feat in obs.features:
+            # Content only. A concept whose *claim* is a role marker asserts that something points
+            # at its members — true of every kind she has ever met, and the adversarial battery's
+            # own rule that "no concept may assert nothing" in spirit if not in letter.
+            for feat in _content_features(obs.features):
                 counts[feat] = counts.get(feat, 0) + 1
         need = max(2, math.ceil(self.invariant_share * len(members)))
         return {f for f, n in counts.items() if n >= need}
@@ -493,7 +522,12 @@ class ConceptGenesis:
 
         by_feature: Dict[str, List[Observation]] = {}
         for obs in self.observations:
-            for feat in obs.features:
+            # Content only, for the same reason the similarity cut excludes them: a role marker is
+            # shared by every object of every relation, so bucketing on one produces a "kind"
+            # holding a third of the store. Measured after the similarity fix alone, the largest
+            # concept was still `is_target_of:known_for` with 122 members — the frequent-itemset
+            # path had been reading raw features and rebuilding the same degenerate group.
+            for feat in _content_features(obs.features):
                 by_feature.setdefault(feat, []).append(obs)
         frequent = [members for members in by_feature.values()
                     if len(members) >= max(self.min_members, 3)]
@@ -506,27 +540,52 @@ class ConceptGenesis:
     def _cluster(self, threshold: float) -> List[List[Observation]]:
         """Single-pass agglomeration against running cluster centroids, at one cut height.
 
-        Cheap on purpose (``O(n·k)``): this runs inside a conversational turn, and a clustering
-        that costs a second is one that gets called every twentieth turn and therefore never
-        clusters what she is currently talking about.
+        Cheap on purpose, and it had stopped being cheap. Scoring every observation against every
+        live centroid is ``O(n·k)`` and both grow, which profiled at **12.8 million**
+        ``_similarity`` calls over 100 turns — 58% of the whole turn, and rising with the store.
+
+        The comparison is skipped rather than approximated. Jaccard over disjoint feature sets is
+        exactly zero, so a centroid sharing no content feature with the observation can never win
+        and never needed scoring; an inverted index over the features finds the ones that can.
+        The clustering produced is identical, which matters — a faster clustering that grouped
+        differently would silently change what she believes a kind is.
         """
         clusters: List[List[Observation]] = []
         summaries: List[Observation] = []          # a synthetic centroid per cluster
+        # feature -> indices of centroids carrying it, so only reachable centroids are scored.
+        index: Dict[str, Set[int]] = {}
+
+        def _reindex(idx: int, summary: Observation) -> None:
+            for feature in _content_features(summary.features):
+                index.setdefault(feature, set()).add(idx)
+
         for obs in self.observations:
+            features = _content_features(obs.features)
+            candidates: Set[int] = set()
+            for feature in features:
+                candidates |= index.get(feature, set())
+            # A numeric observation can be similar without sharing a symbol, so those still see
+            # every centroid. There are few of them and the fast path is for the symbolic bulk.
+            if obs.numbers:
+                candidates = set(range(len(summaries)))
+
             best = -1
             best_score = 0.0
-            for idx, summary in enumerate(summaries):
-                score = self._similarity(obs, summary)
+            for idx in candidates:
+                score = self._similarity(obs, summaries[idx])
                 if score > best_score:
                     best, best_score = idx, score
             if best >= 0 and best_score >= threshold:
                 clusters[best].append(obs)
                 summaries[best] = self._summarise(clusters[best])
+                _reindex(best, summaries[best])
             else:
                 clusters.append([obs])
-                summaries.append(Observation(subject=obs.subject,
-                                             features=set(obs.features),
-                                             numbers=dict(obs.numbers)))
+                summary = Observation(subject=obs.subject,
+                                      features=set(obs.features),
+                                      numbers=dict(obs.numbers))
+                summaries.append(summary)
+                _reindex(len(summaries) - 1, summary)
         return clusters
 
     def _assign_members(self) -> None:
@@ -703,17 +762,25 @@ class ConceptGenesis:
         member lacks, so inventing one enormous concept that swallows everything makes the number
         *worse*, not better. That is what stops this from being a metric she can game.
         """
-        raw = sum(len(o.features) for o in self.observations)
+        # Content only, throughout. A node recorded solely because a relation points at it has
+        # nothing to compress: it costs one symbol raw and one symbol modelled, so every such
+        # node drags the ratio toward exactly 1.0 regardless of how well the real concepts are
+        # doing. With 445 observations of which most were relation targets, that dilution was
+        # most of the number.
+        raw = sum(len(_content_features(o.features)) for o in self.observations)
         if raw <= 0:
             return 1.0
         model = sum(len(c.invariants) for c in self.concepts.values())
         for obs in self.observations:
+            features = _content_features(obs.features)
+            if not features:
+                continue                                       # nothing to describe either way
             concept = self.concepts.get(obs.concept)
             if concept is None:
-                model += len(obs.features)
+                model += len(features)
                 continue
-            model += len(obs.features - concept.invariants)    # not predicted
-            model += len(concept.invariants - obs.features)    # wrongly promised
+            model += len(features - concept.invariants)        # not predicted
+            model += len(concept.invariants - features)        # wrongly promised
         return raw / model if model > 0 else 1.0
 
     # ---- restructuring ------------------------------------------------------ #

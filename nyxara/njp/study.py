@@ -45,10 +45,32 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
-__all__ = ["Pair", "Corpus", "StudyReport", "ExamReport", "Tutor", "DEFAULT_CORPUS"]
+__all__ = ["Pair", "Corpus", "StudyReport", "ExamReport", "Tutor", "SeedReport",
+           "seed_kinds", "DEFAULT_CORPUS", "DEFAULT_KINDS"]
 
 #: The bundled corpus: 35,693 deduplicated question/answer pairs on artificial intelligence.
 DEFAULT_CORPUS = Path(__file__).with_name("data") / "ai_qa.jsonl.gz"
+
+#: Kind-level facts, which no corpus of instances ever states.
+#:
+#: Measured on the bundled corpus twice over: of 92 distinct kinds she extracts, **not one** has a
+#: single property stated about it, and across every kind with two or more members there is **not
+#: one** (predicate, object) pair two members agree on. So a corpus of instances can teach her
+#: that a blue whale is an animal and can never teach her that animals need food — and without the
+#: second, `core._inherit` has nothing to inherit and `answers_given` is structurally zero however
+#: correct the machinery is.
+#:
+#: Shipped for the same reason `eval/data/holdout_realworld.jsonl` is: some evidence has to come
+#: from outside the generator. Every line is a plain, checkable claim about a *kind*, it enters as
+#: **testimony** with a confidence below a direct observation, and it carries ``source="seed"`` so
+#: nothing can mistake it for something she worked out. Checked against the held-out set: the
+#: closest any seed fact comes to answering a held-out question is F1 0.364, under the 0.4 mark.
+DEFAULT_KINDS = Path(__file__).with_name("data") / "kinds.jsonl"
+
+#: Below what a parsed statement earns. A claim about a whole kind is defeasible by construction —
+#: most birds fly, and a penguin is still a bird — so anything inheriting from one should start
+#: from a number that already says the claim admits exceptions.
+_SEED_CONFIDENCE = 0.8
 
 # Function words carry no topic, so they are excluded from scoring. Grading on them would let a
 # reply score well by containing "the" and "of" — which is how a bag-of-words metric flatters a
@@ -264,7 +286,7 @@ class Tutor:
     pairs and gains nothing, since the concepts barely move between adjacent examples.
     """
 
-    def __init__(self, brain: Any, *, crystallise_every: int = 250,
+    def __init__(self, brain: Any, *, seed: bool = True, crystallise_every: int = 250,
                  consolidate_every: int = 1000, max_chars: int = 400,
                  f1_threshold: float = 0.4) -> None:
         self.brain = brain
@@ -273,6 +295,16 @@ class Tutor:
         self.max_chars = max(80, int(max_chars))
         self.f1_threshold = float(f1_threshold)
         self.studied = 0
+        # Seeded once, before the first pair, and on by default.
+        #
+        # A corpus of instances cannot teach the properties of kinds — measured, not assumed: of
+        # 92 kinds extracted from the bundled corpus, none has a property stated about it, and no
+        # two members of any kind agree on one. Teaching from such a corpus with no kind layer
+        # leaves `core._inherit` with nothing to inherit, which is exactly the state it was in.
+        #
+        # Off by `seed=False` for a caller that wants to measure the corpus alone.
+        self.seed = bool(seed)
+        self.seeded: Optional[SeedReport] = None
 
     # ---- reading the organs ------------------------------------------------- #
     def _snapshot(self) -> Dict[str, Any]:
@@ -298,6 +330,10 @@ class Tutor:
         everything, because saving happened once, at an end it never reached.
         """
         rep = StudyReport()
+        # Before the snapshot, so the kind layer is part of what she starts from rather than
+        # showing up as growth the corpus produced.
+        if self.seed and self.seeded is None:
+            self.seeded = seed_kinds(self.brain)
         before = self._snapshot()
         rep.facts_before = before["facts"]
         rep.concepts_before = before["concepts"]
@@ -494,3 +530,84 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# --------------------------------------------------------------------------- #
+# The half a corpus of instances cannot teach
+# --------------------------------------------------------------------------- #
+@dataclass
+class SeedReport:
+    """What seeding the kind-level facts actually put in the store."""
+
+    read: int = 0
+    asserted: int = 0
+    skipped: int = 0
+    kinds: int = 0
+    ms: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"read": self.read, "asserted": self.asserted, "skipped": self.skipped,
+                "kinds": self.kinds, "ms": round(self.ms, 3)}
+
+
+def seed_kinds(brain: Any, path: Any = DEFAULT_KINDS) -> SeedReport:
+    """Teach the properties of kinds, which a corpus of instances never states.
+
+    Asserted straight into the fact store rather than pushed through ``think``. These are not
+    turns — nobody said them to her, and running them as conversation would put 137 fabricated
+    exchanges into her episodic memory and her fabric's growth record, which would make the
+    session log a lie about what happened.
+
+    Marked ``source="seed"`` throughout, so provenance separates it from anything she extracted,
+    and held below the confidence a parsed statement earns: a claim about a whole kind is
+    defeasible by construction — most birds fly, and a penguin is still a bird — and the store
+    should say so before anything inherits from it.
+
+    Fed to the concept layer as well as the fact store, because a kind with properties is exactly
+    the material :mod:`nyxara.njp.concepts` needs and has never had.
+    """
+    report = SeedReport()
+    t0 = time.perf_counter()
+    try:
+        from nyxara.njp.grounding import GroundedTriple
+
+        grounder = getattr(brain, "grounder", None)
+        if grounder is None:
+            return report
+        rows: List[Dict[str, Any]] = []
+        with open(str(path), "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    report.skipped += 1
+
+        triples: List[Any] = []
+        for row in rows:
+            report.read += 1
+            subject = str(row.get("subject", "")).strip()
+            predicate = str(row.get("predicate", "")).strip()
+            obj = str(row.get("object", "")).strip()
+            if not subject or not predicate or not obj:
+                report.skipped += 1
+                continue
+            triple = GroundedTriple(
+                subject=subject, predicate=grounder._predicate(predicate), object=obj,
+                confidence=_SEED_CONFIDENCE, source="seed",
+                text=f"{subject} {predicate} {obj}")
+            grounder._assert(triple)
+            triples.append(triple)
+            report.asserted += 1
+
+        report.kinds = len({t.subject.lower() for t in triples})
+        genesis = getattr(brain, "genesis", None)
+        if genesis is not None and triples:
+            genesis.observe_triples(triples)
+        return report
+    except Exception:  # noqa: BLE001 — a failed seed leaves the store exactly as it was
+        return report
+    finally:
+        report.ms = (time.perf_counter() - t0) * 1000.0

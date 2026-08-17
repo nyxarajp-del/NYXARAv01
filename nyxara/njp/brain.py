@@ -163,6 +163,10 @@ class NJPThought:
     cycle_id: str = ""
     ms: float = 0.0
     focus: Any = None                          # what won the turn's attention, and what lost
+    # Set when the answer came from a relation the question did not ask for. Carries the trace
+    # of which fact was offered and why, so a retrieved answer is never indistinguishable from
+    # one the store held under exactly the relation that was requested.
+    recalled: str = ""
     # What she is entitled to say about `answer`: known / believed / unknown. Carried beside the
     # claim rather than baked into it, so the voice can hedge without the hedge becoming content.
     epistemic: str = "unknown"
@@ -291,6 +295,10 @@ class NJPBrain:
         self.universe = self._build_universe(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
+        # The subsystem that attacks what the ones above it conclude. After `world`, `universe`
+        # and `beliefs`, because every one of its four attacks is settled against one of them —
+        # an adversary with nothing to check against is a generator of rhetorical questions.
+        self.adversary = self._build_adversary(c)
         # The Cognitive Learning Core, before `metareason` because that registers a strategy
         # bound to it. Everything the Core reads — the grounder, the world, the concept layer,
         # the universe, curiosity — is already built by this line; it needs nothing from `field`,
@@ -975,6 +983,25 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — without it she intends but never acts
             return None
 
+    def _build_adversary(self, c: Any) -> Any:
+        """The subsystem that goes after her own conclusions.
+
+        Given the world record and the simulator rather than copies: an attack is only worth
+        anything if it is checked against the same evidence the belief was built from, and a
+        second private store would let a claim survive an attack on data that no longer matches
+        what she actually knows.
+        """
+        if not self._gate("adversary", True):
+            return None
+        try:
+            from nyxara.njp.adversary import SelfAttacker
+            return SelfAttacker(
+                world=self.world, universe=self.universe, beliefs=self.beliefs,
+                min_support=self._cfg("adversary_min_support", 3),
+                coincidence_lift=self._cfg("adversary_coincidence_lift", 0.1))
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_curriculum(self, c: Any) -> Any:
         """The nine stages, and the refusal to report one as reached before it is."""
         if not self._gate("curriculum", True):
@@ -998,6 +1025,45 @@ class NJPBrain:
             return self.agent.pursue(goal, actuator=actuator, steps=steps)
         except Exception:  # noqa: BLE001
             return []
+
+    def _recall(self, thought: NJPThought) -> None:
+        """Answer from a relation the question did not ask for, about the entity it did name.
+
+        The gate this passes through is the same one a remembered episode passes through, and for
+        the same reason: a fact being *about* what was asked is a claim about relevance, and
+        relevance is exactly what :class:`~nyxara.njp.relevance.RelevanceGate` is for. A retrieved
+        fact that cannot clear it is not offered, however confidently it was stored.
+
+        Never ``KNOWN``. Having found something is not corroboration of it.
+        """
+        try:
+            if self.grounder is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            if not getattr(grounding, "is_question", False):
+                return
+            # A social or reflexive turn has no business reaching the fact store at all, and the
+            # policy that says so has already run for `_compose`. Asking it again here keeps the
+            # rule in one place rather than trusting that nothing has changed in between.
+            if thought.act is not None and self._policy is not None:
+                if self._policy.forbids_world_knowledge(thought.act):
+                    return
+            answer = self.grounder.answer_by_recall(thought.stimulus)
+            if not answer.answered:
+                return
+            thought.answer = str(answer.text)[:1000]
+            thought.recalled = answer.why
+            # Being retrieved and used IS the evidence consolidation is looking for, and until
+            # now it never reached it: grounding answers from a fact store keyed by
+            # (subject, predicate) while `levels` is keyed by the turn a memory arrived on, so a
+            # fact used a hundred times looked exactly like one nobody had read. The canonical
+            # claim is the join.
+            if self.levels is not None and answer.triples:
+                triple = answer.triples[0]
+                self.levels.touch_claim(
+                    f"{triple.subject}|{triple.predicate}|{triple.object}".lower())
+        except Exception:  # noqa: BLE001 — a failed recall leaves the turn as it was
+            return
 
     def _ask_back(self, thought: NJPThought) -> None:
         """Put her own best question to the Master, on a turn where she had nothing to answer.
@@ -1504,6 +1570,21 @@ class NJPBrain:
             # reasoner also meant she could never notice a question she had failed to answer.
             if not out.answer:
                 self._deliberate(out)
+                # 4c. RECALL — the last thing tried, and last on purpose.
+                #
+                # She may hold the entity the question named under a relation it did not ask for:
+                # asked "what is deep learning" with `deep learning --part_of--> machine learning`
+                # in the store, `_lookup` misses on the predicate and the fact is unreachable
+                # though it is exactly what was wanted. That was the second measured bottleneck
+                # after extraction — 521 facts held, and questions about them answered UNKNOWN.
+                #
+                # After deliberation, never before it. A retrieved fact is the weakest answer that
+                # still counts as one, and running it earlier stops the reasoner from ever being
+                # reached: `sparrow needs water`, derived through `sparrow is_a bird`, was
+                # measured being replaced by the flat `sparrow is_a bird` the moment retrieval
+                # answered first. Strictly worse, strictly sooner.
+                if not out.answer:
+                    self._recall(out)
                 # The epistemic pass above ran against an empty answer, so a deliberated one
                 # would keep `unknown` at confidence 0.0 however well it was derived. Re-run
                 # rather than move: the first pass also feeds the echo check, which has to
@@ -1775,7 +1856,7 @@ class NJPBrain:
                 self.levels.remember(
                     f"turn-{self.turns}", thought.answer,
                     level=self._level_for(thought), cue=thought.stimulus,
-                    source=f"turn-{self.turns}")
+                    source=f"turn-{self.turns}", claim=self._claim_of(thought))
                 return
             if self.memory is not None:
                 self.memory.remember(f"turn-{self.turns}", thought.answer,
@@ -1783,6 +1864,31 @@ class NJPBrain:
                                      cue=thought.stimulus)
         except Exception:  # noqa: BLE001
             pass
+
+    @staticmethod
+    def _claim_of(thought: NJPThought) -> str:
+        """What this turn *asserted*, canonically — the thing recurrence should be counted over.
+
+        :mod:`nyxara.njp.levels` falls back to a bag of the memory's words, which cannot see that
+        "Deep learning is a subset of machine learning" and "ML contains deep learning" are one
+        claim. It has the triple by this point in the turn, and the triple is the claim: two
+        sentences say the same thing exactly when they assert the same relation between the same
+        two entities.
+
+        Empty for a turn that grounded nothing, which leaves the fallback in place rather than
+        inventing an identity for text nobody parsed.
+        """
+        try:
+            grounding = getattr(thought.percept, "grounding", None)
+            triples = list(getattr(grounding, "triples", None) or [])
+            if not triples:
+                return ""
+            # A turn stating several relations is identified by all of them, sorted so the order
+            # they were extracted in cannot make one turn look unlike another that said the same.
+            return " ; ".join(sorted(
+                f"{t.subject}|{t.predicate}|{t.object}".lower() for t in triples[:4]))[:200]
+        except Exception:  # noqa: BLE001
+            return ""
 
     @staticmethod
     def _level_for(thought: NJPThought) -> str:
@@ -2284,7 +2390,8 @@ class NJPBrain:
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
-                            ("field", self.field), ("learner", self.learner)):
+                            ("field", self.field), ("learner", self.learner),
+                            ("adversary", self.adversary)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -2318,7 +2425,8 @@ class NJPBrain:
                             ("designer", self.designer), ("beliefs", self.beliefs),
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
-                            ("field", self.field), ("learner", self.learner)):
+                            ("field", self.field), ("learner", self.learner),
+                            ("adversary", self.adversary)):
             if organ is None:
                 continue
             try:

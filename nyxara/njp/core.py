@@ -363,6 +363,10 @@ class CognitiveLearningCore:
         self.answers_given = 0
         self.questions_raised = 0
         self.schemas_formed = 0
+        # Schemas refused because the kind was defined by the relation they would predict. Counted
+        # rather than dropped silently: a high number says her concepts are being formed on the
+        # same relation she is trying to generalise, which is a finding about the intake.
+        self.schemas_tautological = 0
         self.schemas_dropped = 0
         self.last: Dict[str, Any] = {}
 
@@ -460,6 +464,19 @@ class CognitiveLearningCore:
                 # Which concept, if any, actually claims these subjects together.
                 for role, members in self._roles_over(subjects).items():
                     if len(members) < self.min_members:
+                        continue
+                    if self._tautological(role, predicate):
+                        # The kind is defined by the very relation this schema would predict, so
+                        # the schema says "things that are species are species". `generalize`
+                        # already refuses to transfer such a role — `_roles_for_transfer` drops a
+                        # concept whose invariants are empty once the target relation is removed —
+                        # so inducing it produces a schema that can never answer anything and a
+                        # count that looks like productivity.
+                        #
+                        # Measured after kind-heads gave many subjects a shared `is_a:<kind>`:
+                        # every schema induced on the corpus was of this form. 43 schemas, 3 of
+                        # them tested, and `derived_schema` structurally 0.
+                        self.schemas_tautological += 1
                         continue
                     report.proposed += 1
                     key = (role, predicate, obj)
@@ -993,6 +1010,23 @@ class CognitiveLearningCore:
         except Exception:  # noqa: BLE001
             return ""
 
+    def _tautological(self, role: str, predicate: str) -> bool:
+        """Is this kind defined by nothing but the relation the schema would infer?
+
+        The same test `_roles_for_transfer` applies at answer time, applied at induction time so
+        the schema is never created rather than created and then left unusable.
+        """
+        try:
+            concept = (getattr(self.concepts, "concepts", None) or {}).get(role)
+            if concept is None:
+                return False
+            prefix = f"{predicate}:"
+            residue = {f for f in (getattr(concept, "invariants", None) or set())
+                       if not str(f).startswith(prefix)}
+            return not residue
+        except Exception:  # noqa: BLE001
+            return False
+
     def _roles_for_transfer(self, subject: str, predicate: str) -> Set[str]:
         """The kinds this subject qualifies for **ignoring the relation being inferred**.
 
@@ -1192,6 +1226,7 @@ class CognitiveLearningCore:
             "schemas": len(self.schemas),
             "schemas_confirmed": confirmed,
             "schemas_formed": self.schemas_formed,
+            "schemas_tautological": self.schemas_tautological,
             "schemas_dropped": self.schemas_dropped,
             "schemas_tested": len(tested),
             "mean_precision": None if precision is None else round(precision, 3),
