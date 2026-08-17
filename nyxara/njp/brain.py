@@ -2307,6 +2307,15 @@ class NJPBrain:
                 if self.self_model is not None and float(correct) >= 0.5:
                     self.self_model.observe("grounding", 1.0) if getattr(
                         getattr(thought, "percept", None), "grounding", None) else None
+                # Grade the *route* the answer came by, not just "reasoning". A stored fact read
+                # back and a two-hop composition fail at different rates, and a single posterior
+                # lets the reliable one subsidise the shaky one — which is backwards, because the
+                # composed answer is exactly where the caller most needs the warning. The label
+                # is already on the derivation; this only records the outcome against it.
+                derivation = getattr(thought, "derivation", None)
+                if self.self_model is not None and derivation is not None:
+                    from nyxara.njp.selfmodel import mode_of
+                    self.self_model.observe(mode_of(derivation), float(correct))
                 if self.meta is not None:
                     # Every arm that was spent this turn is graded, not just the one. Rewarding
                     # `settle_steps` alone meant the other two knobs accumulated choices and
