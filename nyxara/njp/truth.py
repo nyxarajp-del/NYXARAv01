@@ -33,6 +33,19 @@ because three sources that fail the same way are one source:
    exactly how consensus becomes bias.
 3. Otherwise ``SUPPORTED`` (real evidence, not enough) or ``CONJECTURE`` (none).
 4. Nothing expressible produced ⇒ ``ABSTAINED``.
+5. **Simulation is never corroboration.** A reading marked ``simulated`` is recorded, is reported,
+   and may hold a claim at ``CONJECTURE`` — which is precisely what a hypothesis is — but it can
+   never count toward ``min_sources``, can never be hard, and can never promote anything::
+
+       REAL DATA  → belief
+       SIMULATION → hypothesis → test request → real evidence → belief
+
+   This is a structural rule rather than a weight, because a weight can be accumulated. Without
+   it the loop closes: she simulates a result, stores it as evidence, and the stored evidence
+   corroborates the next simulation — after which more compute buys more certainty and no more
+   truth, and nothing downstream can tell the two apart. It matters most for the organs that
+   *generate* their own material — the pulse's dream pass, and any self-play or imagined
+   experiment — which is exactly where a system teaches itself its own hallucinations.
 
 **What is honestly claimed.** This makes NJP *refuse to assert* what she cannot corroborate: an
 unverified claim leaves here labelled ``CONJECTURE`` and the brain says so instead of stating it.
@@ -70,12 +83,27 @@ class Evidence:
     supports: bool = False
     refutes: bool = False
     hard: bool = False             # can this source be *wrong in a checkable way*?
+    # Did this reading come from something she *imagined* rather than met? A simulated result is
+    # a hypothesis and never corroboration, however confident the simulator was — the failure it
+    # guards against is a system that dreams a result, stores it as evidence, and then cites its
+    # own dream back to itself. Once that loop closes, more compute makes her more certain and no
+    # more right, and nothing downstream can tell the difference.
+    #
+    # This sits strictly below `hard=False` rather than beside it: soft evidence is weak testimony
+    # about the world, simulated evidence is not about the world at all.
+    simulated: bool = False
     weight: float = 0.0            # 0..1 — how much this reading is worth
     detail: str = ""
 
+    @property
+    def corroborating(self) -> bool:
+        """Does this reading count toward establishing the claim? Simulation never does."""
+        return bool(self.supports and not self.simulated)
+
     def to_dict(self) -> Dict[str, Any]:
         return {"source": self.source, "supports": self.supports, "refutes": self.refutes,
-                "hard": self.hard, "weight": round(self.weight, 4), "detail": self.detail[:300]}
+                "hard": self.hard, "simulated": self.simulated,
+                "weight": round(self.weight, 4), "detail": self.detail[:300]}
 
 
 @dataclass
@@ -88,6 +116,9 @@ class Judgement:
     evidence: List[Evidence] = field(default_factory=list)
     hard_supports: int = 0
     supports: int = 0
+    #: Readings that supported the claim but came from simulation. Counted and reported, never
+    #: allowed to promote — a claim held up only by these stays a conjecture.
+    simulated_supports: int = 0
     t: float = field(default_factory=time.time)
     ms: float = 0.0
 
@@ -103,7 +134,8 @@ class Judgement:
     def to_dict(self) -> Dict[str, Any]:
         return {"claim": self.claim[:400], "verdict": self.verdict,
                 "confidence": round(self.confidence, 4), "supports": self.supports,
-                "hard_supports": self.hard_supports, "ms": round(self.ms, 3),
+                "hard_supports": self.hard_supports,
+                "simulated_supports": self.simulated_supports, "ms": round(self.ms, 3),
                 "evidence": [e.to_dict() for e in self.evidence]}
 
 
@@ -347,9 +379,20 @@ class TruthGauntlet:
                 out.ms = (time.perf_counter() - t0) * 1000.0
                 return out
 
-            supports = [e for e in out.evidence if e.supports]
+            # Simulated readings are excluded here rather than down-weighted, and that is the
+            # whole rule: REAL DATA -> belief; SIMULATION -> hypothesis -> test -> real evidence
+            # -> belief. A simulated support cannot be counted, cannot be hard, and cannot be the
+            # one that tips a claim over `min_sources`. Otherwise a dream becomes a source, the
+            # source corroborates the next dream, and more compute buys more certainty without
+            # buying any more truth.
+            #
+            # It is still *recorded*: it stays in `out.evidence` and can still hold the claim at
+            # CONJECTURE, which is exactly what a hypothesis is. What it may never do is promote.
+            supports = [e for e in out.evidence if e.corroborating]
+            simulated = [e for e in out.evidence if e.supports and e.simulated]
             out.supports = len(supports)
             out.hard_supports = sum(1 for e in supports if e.hard)
+            out.simulated_supports = len(simulated)
 
             enough = out.supports >= self.min_sources
             hard_ok = (out.hard_supports >= 1) if self.require_hard else True

@@ -5,9 +5,11 @@ from __future__ import annotations
 from nyxara.njp.ledger import Ledger
 from nyxara.njp.truth import (
     ConsistencySource,
+    Evidence,
     LedgerSource,
     ObservationSource,
     PredictiveSource,
+    Source,
     TruthGauntlet,
     Verdict,
 )
@@ -94,3 +96,58 @@ def test_a_broken_source_is_a_silent_source():
 
     g = TruthGauntlet(sources=[Boom(), _predictive(True)], min_sources=1)
     assert g.judge("still works").verdict == Verdict.ESTABLISHED
+
+
+# --------------------------------------------------------------------------- #
+# Simulation is never corroboration
+# --------------------------------------------------------------------------- #
+class _Real(Source):
+    name = "real"
+    hard = True
+
+    def check(self, claim, *, context=None):
+        return Evidence(source=self.name, supports=True, hard=True, weight=0.9)
+
+
+class _Dream(Source):
+    name = "dream"
+    hard = False
+
+    def check(self, claim, *, context=None):
+        return Evidence(source=self.name, supports=True, simulated=True, weight=1.0)
+
+
+def test_simulation_alone_never_gets_past_conjecture():
+    """The loop this closes: dream a result, store it as evidence, cite it back to yourself.
+
+    Once that closes, more compute buys more certainty and no more truth, and nothing downstream
+    can tell the difference. A weight could be accumulated; exclusion cannot, which is why this is
+    structural rather than a discount.
+    """
+    judged = TruthGauntlet(sources=[_Dream(), _Dream()]).judge("x causes y")
+    assert judged.verdict == Verdict.CONJECTURE
+    assert judged.supports == 0
+    assert judged.simulated_supports == 2
+    assert not judged.assertable
+
+
+def test_a_simulated_support_cannot_tip_a_claim_over_the_threshold():
+    """The dangerous case is not simulation alone — it is simulation as the deciding vote."""
+    judged = TruthGauntlet(sources=[_Real(), _Dream()]).judge("x causes y")
+    assert judged.verdict == Verdict.SUPPORTED, "a dream completed a quorum it must not"
+    assert judged.supports == 1 and judged.simulated_supports == 1
+
+
+def test_real_evidence_still_establishes():
+    """The rule must not have made establishment unreachable."""
+    judged = TruthGauntlet(sources=[_Real(), _Real()]).judge("x causes y")
+    assert judged.verdict == Verdict.ESTABLISHED
+    assert judged.simulated_supports == 0
+
+
+def test_a_simulated_reading_is_still_recorded_and_reported():
+    """A hypothesis is worth keeping. What it may never do is promote."""
+    judged = TruthGauntlet(sources=[_Dream()]).judge("x causes y")
+    assert [e for e in judged.evidence if e.simulated]
+    assert judged.to_dict()["simulated_supports"] == 1
+    assert any(e["simulated"] for e in judged.to_dict()["evidence"])
