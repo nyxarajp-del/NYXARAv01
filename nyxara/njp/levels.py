@@ -151,6 +151,14 @@ def _claim_of(text: str) -> str:
     ever promoted, because no two answers shared a whole word-set. The fix is not to lower the bar
     for promotion; it is to let a caller that *knows* the claim say so — see the ``claim`` argument
     to :meth:`HierarchicalMemory.remember`. This stays as the fallback for text nobody parsed.
+
+    **It is blind to direction, and that is the hazard worth naming.** The words are sorted, so
+    ``aag causes garmi`` and ``garmi causes aag`` are one claim to this function — as are
+    ``Master has name Jay`` and ``Jay has name Master``. A pair of opposites therefore looks like
+    a recurrence and earns a promotion. That is where the baseline's promotion count came from:
+    17 promotions on the bundled corpus under this rule, 8 under the triple identity, and the
+    difference is not a lower bar but the removal of promotions that direction-reversed pairs had
+    been earning. Anything that knows the relation should pass ``claim`` rather than rely on this.
     """
     return " ".join(sorted({t for t in str(text or "").lower().split() if len(t) > 2}))[:200]
 

@@ -84,6 +84,14 @@ _WONDER_EVERY = 16
 # on a *turn* count like the others, since a wall-clock cadence is exactly what left the slow
 # organs at zero across a 113-turn session.
 _ATTACK_EVERY = 20
+# The capability ladder, and the growth ledger. Both were reachable only from a wall clock or a
+# reporting method nobody calls in a turn — `ledger.record` from `pulse` alone, and
+# `curriculum.assess` from `report_card` alone — which is precisely the failure this module was
+# written to fix, in two organs it missed. Measured over 1,200 corpus pairs: `curriculum
+# .assessments` 0 and `ledger.generations` 0, so "which stage has she reached" and "is she more
+# than she was" both had no answer at all.
+_ASSESS_EVERY = 24
+_LEDGER_EVERY = 32
 
 # Width of the numeric state handed to the dynamics model. Small on purpose: this is a coarse
 # summary of which regions of the fabric were active, not a reconstruction of it, and a kNN model
@@ -147,6 +155,11 @@ class LoopReport:
     attacked: int = 0
     attacks_refuted: int = 0
     attack_verdict: str = ""
+    # Where she stands on the ladder, and which generation this turn closed. Both are measurements
+    # rather than work, and both were unreachable from a turn.
+    stage: str = ""
+    stages_mastered: int = 0
+    generation: int = 0
     ms: float = 0.0
 
     @property
@@ -159,7 +172,8 @@ class LoopReport:
         """
         return bool(self.events or self.transitions or self.scored or self.deferred_resolved
                     or self.capabilities or self.trained or self.consolidated
-                    or self.discovered or self.wondered or self.attacked)
+                    or self.discovered or self.wondered or self.attacked
+                    or self.generation)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"turn": self.turn, "events": self.events, "transitions": self.transitions,
@@ -187,6 +201,8 @@ class LoopReport:
                 "wondered": self.wondered, "learned": self.learned,
                 "attacked": self.attacked, "attacks_refuted": self.attacks_refuted,
                 "attack_verdict": self.attack_verdict,
+                "stage": self.stage, "stages_mastered": self.stages_mastered,
+                "generation": self.generation,
                 "ms": round(self.ms, 3)}
 
 
@@ -218,12 +234,15 @@ class LearningLoop:
     def __init__(self, brain: Any, *, consolidate_every: int = _CONSOLIDATE_EVERY,
                  discover_every: int = _DISCOVER_EVERY, wonder_every: int = _WONDER_EVERY,
                  attack_every: int = _ATTACK_EVERY,
+                 assess_every: int = _ASSESS_EVERY, ledger_every: int = _LEDGER_EVERY,
                  train: bool = True, defer_capacity: int = 256) -> None:
         self.brain = brain
         self.consolidate_every = max(1, int(consolidate_every))
         self.discover_every = max(1, int(discover_every))
         self.wonder_every = max(1, int(wonder_every))
         self.attack_every = max(1, int(attack_every))
+        self.assess_every = max(1, int(assess_every))
+        self.ledger_every = max(1, int(ledger_every))
         self.train_enabled = bool(train)
         self.defer_capacity = max(8, int(defer_capacity))
 
@@ -1006,6 +1025,31 @@ class LearningLoop:
                 curiosity = getattr(self.brain, "curiosity", None)
                 if curiosity is not None:
                     rep.wondered = len(curiosity.wonder())
+            except Exception:  # noqa: BLE001
+                pass
+
+        if turn % self.assess_every == 0:
+            try:
+                curriculum = getattr(self.brain, "curriculum", None)
+                if curriculum is not None:
+                    got = curriculum.assess(self.brain)
+                    rep.stage = str(getattr(got, "current", "") or "")
+                    rep.stages_mastered = len(getattr(got, "mastered", None) or ())
+            except Exception:  # noqa: BLE001
+                pass
+
+        if turn % self.ledger_every == 0:
+            try:
+                ledger = getattr(self.brain, "ledger", None)
+                fabric = getattr(self.brain, "fabric", None)
+                if ledger is not None and fabric is not None:
+                    evolver = getattr(self.brain, "evolver", None)
+                    gen = ledger.record(
+                        fabric_stats=fabric.stats(),
+                        edits_kept=int(getattr(evolver, "kept", 0) or 0),
+                        edits_rolled_back=int(getattr(evolver, "rolled_back", 0) or 0),
+                        note="turn")
+                    rep.generation = int(getattr(gen, "n", 0) or 0)
             except Exception:  # noqa: BLE001
                 pass
 

@@ -220,3 +220,30 @@ def test_min_members_is_a_real_knob(taught):
     if accepted:
         assert field.concepts.min_members != 2
     field.concepts.min_members = before
+
+
+# --------------------------------------------------------------------------- #
+# Two measurements that were never taken
+# --------------------------------------------------------------------------- #
+def test_the_capability_ladder_is_actually_assessed():
+    """`curriculum.assess` was reachable only from `report_card`, which no turn calls.
+
+    Measured over 1,200 corpus pairs: `curriculum.assessments` 0. "Which stage has she reached"
+    had no answer, from the one module written to answer it.
+    """
+    brain = NJPBrain()
+    for i in range(26):
+        brain.think("aag se garmi hoti hai" if i % 2 else "dhoop se garmi hoti hai")
+    assert brain.stats()["curriculum"]["assessments"] >= 1
+
+
+def test_a_generation_is_closed_on_a_turn_count():
+    """`ledger.record` was reachable only from the pulse's wall clock — the exact failure the
+    learning loop exists to fix, in an organ it had missed. `ledger.generations` was 0, so "is
+    she more than she was" had no rows to answer from."""
+    brain = NJPBrain()
+    for i in range(34):
+        brain.think("aag se garmi hoti hai" if i % 2 else "dhoop se garmi hoti hai")
+    stats = brain.stats()["ledger"]
+    assert stats["generations"] >= 1
+    assert stats["latest"]["note"] == "turn"

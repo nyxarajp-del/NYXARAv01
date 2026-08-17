@@ -216,3 +216,33 @@ def test_a_turn_records_its_relations_as_the_claim():
     brain.think("Deep learning is a subset of machine learning.")
     claims = [e.claim for e in brain.levels.entries.values() if e.claim]
     assert any("part_of" in c for c in claims), claims
+
+
+# --------------------------------------------------------------------------- #
+# A claim has a direction, and the fallback cannot see it
+# --------------------------------------------------------------------------- #
+def test_the_surface_fallback_is_blind_to_direction():
+    """Named rather than fixed: the words are sorted, so opposites collapse into one claim.
+
+    This is where the baseline's promotion count came from — 17 on the bundled corpus against 8
+    under the triple identity, the difference being promotions that direction-reversed pairs had
+    been earning from each other.
+    """
+    from nyxara.njp.levels import _claim_of
+    assert _claim_of("noted: aag causes garmi") == _claim_of("noted: garmi causes aag")
+
+
+def test_a_triple_claim_keeps_its_direction():
+    """Which is why anything that knows the relation passes `claim` instead."""
+    memory = HierarchicalMemory()
+    memory.remember("t1", "noted: aag causes garmi", claim="aag|causes|garmi")
+    memory.remember("t2", "noted: garmi causes aag", claim="garmi|causes|aag")
+    memory.consolidate()
+    assert not memory.levels[Level.SEMANTIC], "opposites are not evidence for each other"
+
+
+def test_the_brain_passes_a_directed_claim():
+    brain = NJPBrain()
+    brain.think("aag se garmi hoti hai")
+    claims = [e.claim for e in brain.levels.entries.values() if e.claim]
+    assert any("|causes|" in c for c in claims), claims
