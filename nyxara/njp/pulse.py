@@ -129,7 +129,23 @@ class PulseEngine:
 
     # ---- feeding ---------------------------------------------------------- #
     def submit(self, result: Any, *, outcome: float = 1.0) -> None:
-        """Hand one lived turn to the beat. Called by the brain at the end of every think."""
+        """Hand one *out-of-turn* experience to the beat.
+
+        This said "Called by the brain at the end of every think", and it is not — it has no
+        callers at all, and it must not gain that one. :meth:`NJPBrain._expand` grows the fabric
+        synchronously inside the turn precisely so that "after every conversation" means the
+        synapse count differs when the turn returns, and its own comment records that routing
+        turns through here as well would double-count every one of them.
+
+        So the queue is for experience that arrives *outside* a turn, and nothing in the repo
+        currently produces any. That is worth stating plainly rather than leaving a docstring
+        that reads as though the path were live: until something does,
+        :attr:`PulseReport.expanded`, ``grown`` and ``born`` are structurally zero, and a reader
+        chasing why the pulse never grows anything should stop here rather than in the fabric.
+
+        The pulse's other cadences — consolidate, wonder, discover, dream, evolve — do not read
+        this queue and are unaffected.
+        """
         try:
             if len(self.queue) == self.queue.maxlen:
                 self.dropped += 1

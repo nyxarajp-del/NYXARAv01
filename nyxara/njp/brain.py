@@ -781,6 +781,15 @@ class NJPBrain:
                 consolidate_every=self._cfg("consolidate_every_turns", 8),
                 discover_every=self._cfg("discover_every_turns", 12),
                 wonder_every=self._cfg("wonder_every_turns", 16),
+                # These three took the constructor's defaults and had no way to reach config,
+                # so three of the six turn cadences were fixed at whatever `integrate.py` said.
+                # `attack_every` is the one that mattered: a 1,352-pair study run built 1,750
+                # beliefs and, at one attack per twenty turns with `limit=1`, challenged roughly
+                # 67 of them. The adversary was not missing — it was rationed, and there was no
+                # knob to un-ration it.
+                attack_every=self._cfg("attack_every_turns", 20),
+                assess_every=self._cfg("assess_every_turns", 24),
+                ledger_every=self._cfg("ledger_every_turns", 32),
                 train=self._cfg("train_readout", True))
         except Exception:  # noqa: BLE001 — without it the organs never close the loop
             return None
@@ -1018,6 +1027,25 @@ class NJPBrain:
         Without an ``actuator`` this returns the plan as a **proposal** and takes no action —
         which is the honest default, because deciding whether a proposed action may run is the
         kernel's gate to make, never this brain's.
+
+        **This has no production callers, and adding one would change nothing.** It is tempting
+        to read that as missing wiring — the curriculum's Stage G scores `agency.success_rate`
+        and is therefore unreachable, which looks like a call site nobody wrote. It is not.
+        Measured on a brain taught three causal facts: ``known_actions`` 0, and
+        ``pursue("garmi")`` returns ``[]``.
+
+        The reason is circular and structural. :meth:`Agent.plan` searches over the actions
+        :class:`~nyxara.njp.predictive.PredictiveWorldModel` knows, and the only thing that ever
+        teaches it one is :meth:`Agent.act` (``agency.py``), which runs only after a plan is
+        found. No plan without actions, no actions without a plan. Nothing else in NJP names an
+        action: there is no actuator, no action vocabulary, no affordance list — she models what
+        follows what, and never what she could *do*.
+
+        So Stage G is not blocked by a missing caller and will not be unblocked by one. Calling
+        this from the turn loop would add a scheduled no-op and move a counter off zero without
+        anything having happened, which is the kind of wiring this package has already been
+        burned by. The gap is an action vocabulary, and that is a design question rather than a
+        line of plumbing.
         """
         try:
             if self.agent is None:
