@@ -253,3 +253,23 @@ def test_planning_now_runs_instead_of_refusing():
     stats = brain.agent.stats()
     assert stats["planned"] > 0, "plan() was never even attempted"
     assert stats["plans_found"] > 0, "the search ran and found no route to a state she was in"
+
+
+def test_a_named_goal_cannot_be_grounded_in_this_state_encoding():
+    """Pins why `pursue` takes a state and not a word, so the next attempt starts from the reason.
+
+    `_encode_state` is a 16-bucket histogram over fired cells, chosen coarse on purpose so it
+    stays stable under neurogenesis. The cost is that it cannot carry identity: unrelated words
+    collide onto the same vector. Grounding a named goal by nearest-neighbour against recorded
+    states therefore finds a real state for *any* input, including a word she has never heard,
+    and would hand the planner a confident wrong target.
+    """
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.integrate import LearningLoop
+
+    brain = NJPBrain()
+    encodings = {word: tuple(LearningLoop._encode_state(brain.encode(word)))
+                 for word in ("garmi", "banana", "zzzqqqxyz")}
+    assert len(set(encodings.values())) < len(encodings), (
+        "the state encoding now distinguishes these words — goal grounding may be possible, "
+        "and this test should be replaced by one that grounds a named goal")

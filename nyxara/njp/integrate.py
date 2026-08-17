@@ -502,6 +502,24 @@ class LearningLoop:
         is what a kNN dynamics model can actually use. It is stable under neurogenesis — new cells
         land in existing buckets rather than changing the width — which matters because the state
         encoding must not change shape every time the fabric grows.
+
+        **What this costs, and it is the thing blocking goal grounding.** Sixteen buckets cannot
+        carry identity. Measured::
+
+            garmi      -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+            banana     -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+            zzzqqqxyz  -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+
+        Three unrelated words, one state. So a goal named in words — ``pursue("garmi")`` — cannot
+        be located in this space by nearest-neighbour: matching a word's encoding against recorded
+        states finds a real state for *any* input, including a word she has never heard, and hands
+        the planner a confident wrong target. That was tried here and reverted rather than shipped.
+
+        Goal grounding therefore needs one of two things, and neither is a small change: a state
+        encoding wide enough to distinguish concepts (which trades away the neurogenesis stability
+        this width was chosen for), or goals expressed as *predicates over* states rather than as
+        states — "a state in which garmi fired" instead of "this state". The second is the better
+        shape and is why `pursue` still takes only a state today.
         """
         vec = [0.0] * _STATE_WIDTH
         try:
