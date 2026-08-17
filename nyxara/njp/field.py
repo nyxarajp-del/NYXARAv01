@@ -50,6 +50,7 @@ No LLM anywhere in this file.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -73,6 +74,17 @@ class ErrorClass:
     STRUCTURAL = "structural"     # right concepts, missing arrow → declare it
     CONCEPTUAL = "conceptual"     # her concepts cannot express this → restructure
     UNKNOWN = "unknown"           # not enough information to say
+
+
+def _fold(key: str, *, share: float) -> bool:
+    """Is this subject in the held-out fold? Stable across restarts and machines.
+
+    The same rule `njp.core._fold` uses, and for the same stated reason: a split that reshuffles
+    on every process start means yesterday's held-out evidence is today's training evidence, and
+    a score measured against it stops meaning anything.
+    """
+    digest = hashlib.blake2b(str(key or "").encode("utf-8"), digest_size=4).hexdigest()
+    return (int(digest, 16) % 1000) < int(max(0.0, min(1.0, share)) * 1000)
 
 
 @dataclass
@@ -323,6 +335,17 @@ class RecursiveCognitiveField:
         # and never touched by a restructure decision. Hashing the subject rather than using a
         # counter keeps the same subject on the same side of the split across restarts, so the
         # held-out set does not quietly leak in as the session grows.
+        #
+        # `_fold` and not the builtin `hash()`. That is the whole point of the paragraph above and
+        # `hash()` cannot deliver it: Python randomises string hashing per process, so the split
+        # reshuffled on every start — the one property this was written to guarantee was the one
+        # it did not have.
+        #
+        # The cost was not theoretical. `benchmark()` scores coverage over `_holdout`, so its
+        # value moved with `PYTHONHASHSEED`: measured, seed 0 gave 0.637121 and seed 5 gave
+        # **1.000**, and at the ceiling no modification can be strictly better, so `meta_cycle`
+        # accepted nothing and `test_a_modification_that_helps_is_accepted_and_kept` failed. It
+        # had been failing about one run in five and reading as flake for exactly this reason.
         for triple in triples:
             subject = str(getattr(triple, "subject", "") or "").strip().lower()
             if not subject:
@@ -331,9 +354,8 @@ class RecursiveCognitiveField:
             if obs is None:
                 continue
             row = (subject, sorted(obs.features))
-            target = (self._holdout
-                      if (abs(hash(subject)) % 1000) / 1000.0 < self.holdout_share
-                      else self._samples)
+            target = self._holdout if _fold(subject, share=self.holdout_share) \
+                else self._samples
             target.append(row)
             del target[:-400]
         if fed and self.cycles % self.crystallise_every == 0:
