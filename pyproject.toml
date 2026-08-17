@@ -135,4 +135,6 @@ include = ["nyxara*"]
 # The AI question/answer corpus NJP studies from (njp/study.py loads it by path).
 # Gzipped because it is 35,693 pairs: 16MB raw, 4.8MB compressed, and the loader
 # decompresses transparently.
-"nyxara.njp" = ["data/*.jsonl.gz"]
+# Also the kind-property seed: a corpus of instances states no properties of kinds, so this is
+# the layer inheritance composes through (njp/study.py loads it by path).
+"nyxara.njp" = ["data/*.jsonl.gz", "data/*.jsonl"]

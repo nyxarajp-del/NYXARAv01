@@ -161,12 +161,19 @@ def test_a_modification_that_helps_is_accepted_and_kept(taught):
     # fixture is being taught. The delta is what this test can claim.
     before = field.accepted_trials
     accepted = []
+    # Several starts, and several cycles from each. An earlier version took one cycle per start
+    # and asserted on whatever came back, which on this landscape meant hanging the whole test on
+    # a single 0.0018 gain — a real acceptance, and far too fine a margin to assert. The claim is
+    # that the loop climbs when there is anywhere to climb, not that it climbs from a named point.
     for start in (0.16, 0.28, 0.40, 0.52, 0.64, 0.76):
         field.concepts.similarity = start
         field._rejected.clear()
-        trial = field.meta_cycle()
-        if trial is not None and trial.accepted:
-            accepted.append((start, trial))
+        for _ in range(4):
+            trial = field.meta_cycle()
+            if trial is None or trial.modification is None:
+                break
+            if trial.accepted:
+                accepted.append((start, trial))
 
     assert accepted, "no starting point anywhere on the knob's range produced an acceptance"
     for start, trial in accepted:

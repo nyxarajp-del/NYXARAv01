@@ -1,0 +1,137 @@
+{"subject": "animal", "predicate": "requires", "object": "food"}
+{"subject": "animal", "predicate": "requires", "object": "water"}
+{"subject": "animal", "predicate": "requires", "object": "oxygen"}
+{"subject": "animal", "predicate": "is_a", "object": "organism"}
+{"subject": "animal", "predicate": "can", "object": "move"}
+{"subject": "animal", "predicate": "has_part", "object": "cells"}
+{"subject": "plant", "predicate": "requires", "object": "water"}
+{"subject": "plant", "predicate": "requires", "object": "sunlight"}
+{"subject": "plant", "predicate": "is_a", "object": "organism"}
+{"subject": "plant", "predicate": "has_part", "object": "cells"}
+{"subject": "plant", "predicate": "produces", "object": "oxygen"}
+{"subject": "fungus", "predicate": "is_a", "object": "organism"}
+{"subject": "fungus", "predicate": "has_part", "object": "cells"}
+{"subject": "bacterium", "predicate": "is_a", "object": "organism"}
+{"subject": "bacterium", "predicate": "has_part", "object": "cells"}
+{"subject": "organism", "predicate": "requires", "object": "energy"}
+{"subject": "organism", "predicate": "can", "object": "reproduce"}
+{"subject": "organism", "predicate": "is_a", "object": "living thing"}
+{"subject": "living thing", "predicate": "can", "object": "die"}
+{"subject": "mammal", "predicate": "is_a", "object": "animal"}
+{"subject": "mammal", "predicate": "is_warm_blooded", "object": "yes"}
+{"subject": "mammal", "predicate": "has_part", "object": "lungs"}
+{"subject": "mammal", "predicate": "feeds_young_with", "object": "milk"}
+{"subject": "bird", "predicate": "is_a", "object": "animal"}
+{"subject": "bird", "predicate": "has_part", "object": "feathers"}
+{"subject": "bird", "predicate": "has_part", "object": "wings"}
+{"subject": "bird", "predicate": "has_part", "object": "beak"}
+{"subject": "bird", "predicate": "lays", "object": "eggs"}
+{"subject": "bird", "predicate": "is_warm_blooded", "object": "yes"}
+{"subject": "fish", "predicate": "is_a", "object": "animal"}
+{"subject": "fish", "predicate": "has_part", "object": "gills"}
+{"subject": "fish", "predicate": "lives_in", "object": "water"}
+{"subject": "fish", "predicate": "has_part", "object": "fins"}
+{"subject": "reptile", "predicate": "is_a", "object": "animal"}
+{"subject": "reptile", "predicate": "lays", "object": "eggs"}
+{"subject": "reptile", "predicate": "has_part", "object": "scales"}
+{"subject": "amphibian", "predicate": "is_a", "object": "animal"}
+{"subject": "amphibian", "predicate": "lays", "object": "eggs"}
+{"subject": "insect", "predicate": "is_a", "object": "animal"}
+{"subject": "insect", "predicate": "has_part", "object": "six legs"}
+{"subject": "insect", "predicate": "has_part", "object": "exoskeleton"}
+{"subject": "whale", "predicate": "is_a", "object": "mammal"}
+{"subject": "whale", "predicate": "lives_in", "object": "ocean"}
+{"subject": "species", "predicate": "is_a", "object": "group of organisms"}
+{"subject": "tree", "predicate": "is_a", "object": "plant"}
+{"subject": "tree", "predicate": "has_part", "object": "roots"}
+{"subject": "tree", "predicate": "has_part", "object": "leaves"}
+{"subject": "flower", "predicate": "is_a", "object": "plant"}
+{"subject": "predator", "predicate": "is_a", "object": "animal"}
+{"subject": "predator", "predicate": "eats", "object": "other animals"}
+{"subject": "herbivore", "predicate": "is_a", "object": "animal"}
+{"subject": "herbivore", "predicate": "eats", "object": "plants"}
+{"subject": "carnivore", "predicate": "is_a", "object": "animal"}
+{"subject": "carnivore", "predicate": "eats", "object": "meat"}
+{"subject": "metal", "predicate": "conducts", "object": "electricity"}
+{"subject": "metal", "predicate": "conducts", "object": "heat"}
+{"subject": "metal", "predicate": "is_a", "object": "material"}
+{"subject": "metal", "predicate": "is_a", "object": "element or alloy"}
+{"subject": "gas", "predicate": "is_a", "object": "state of matter"}
+{"subject": "gas", "predicate": "has_property", "object": "no fixed shape"}
+{"subject": "liquid", "predicate": "is_a", "object": "state of matter"}
+{"subject": "liquid", "predicate": "has_property", "object": "no fixed shape"}
+{"subject": "solid", "predicate": "is_a", "object": "state of matter"}
+{"subject": "solid", "predicate": "has_property", "object": "fixed shape"}
+{"subject": "acid", "predicate": "is_a", "object": "chemical compound"}
+{"subject": "acid", "predicate": "has_property", "object": "pH below 7"}
+{"subject": "base", "predicate": "is_a", "object": "chemical compound"}
+{"subject": "base", "predicate": "has_property", "object": "pH above 7"}
+{"subject": "molecule", "predicate": "has_part", "object": "atoms"}
+{"subject": "atom", "predicate": "has_part", "object": "protons"}
+{"subject": "atom", "predicate": "has_part", "object": "electrons"}
+{"subject": "element", "predicate": "has_part", "object": "atoms"}
+{"subject": "compound", "predicate": "has_part", "object": "elements"}
+{"subject": "mineral", "predicate": "is_a", "object": "solid"}
+{"subject": "reaction", "predicate": "is_a", "object": "chemical process"}
+{"subject": "reaction", "predicate": "transforms", "object": "reactants into products"}
+{"subject": "machine", "predicate": "is_a", "object": "device"}
+{"subject": "machine", "predicate": "requires", "object": "energy"}
+{"subject": "device", "predicate": "is_a", "object": "artefact"}
+{"subject": "artefact", "predicate": "is_a", "object": "made object"}
+{"subject": "tool", "predicate": "is_a", "object": "artefact"}
+{"subject": "tool", "predicate": "is_used_for", "object": "a task"}
+{"subject": "vehicle", "predicate": "is_a", "object": "machine"}
+{"subject": "vehicle", "predicate": "is_used_for", "object": "transport"}
+{"subject": "computer", "predicate": "is_a", "object": "machine"}
+{"subject": "computer", "predicate": "processes", "object": "data"}
+{"subject": "engine", "predicate": "is_a", "object": "machine"}
+{"subject": "engine", "predicate": "converts", "object": "fuel into motion"}
+{"subject": "instrument", "predicate": "is_a", "object": "tool"}
+{"subject": "instrument", "predicate": "is_used_for", "object": "measurement"}
+{"subject": "algorithm", "predicate": "is_a", "object": "procedure"}
+{"subject": "algorithm", "predicate": "is_used_for", "object": "solving a problem"}
+{"subject": "technique", "predicate": "is_a", "object": "method"}
+{"subject": "method", "predicate": "is_used_for", "object": "achieving a result"}
+{"subject": "model", "predicate": "is_a", "object": "representation"}
+{"subject": "model", "predicate": "is_used_for", "object": "prediction"}
+{"subject": "network", "predicate": "has_part", "object": "nodes"}
+{"subject": "network", "predicate": "has_part", "object": "connections"}
+{"subject": "application", "predicate": "is_a", "object": "software"}
+{"subject": "software", "predicate": "runs_on", "object": "a computer"}
+{"subject": "dataset", "predicate": "is_a", "object": "collection of data"}
+{"subject": "process", "predicate": "has_part", "object": "steps"}
+{"subject": "system", "predicate": "has_part", "object": "components"}
+{"subject": "language", "predicate": "is_used_for", "object": "communication"}
+{"subject": "function", "predicate": "is_a", "object": "mapping"}
+{"subject": "function", "predicate": "takes", "object": "inputs"}
+{"subject": "person", "predicate": "is_a", "object": "human"}
+{"subject": "human", "predicate": "is_a", "object": "mammal"}
+{"subject": "scientist", "predicate": "is_a", "object": "person"}
+{"subject": "scientist", "predicate": "studies", "object": "nature"}
+{"subject": "author", "predicate": "is_a", "object": "person"}
+{"subject": "author", "predicate": "writes", "object": "books"}
+{"subject": "actor", "predicate": "is_a", "object": "person"}
+{"subject": "actor", "predicate": "performs_in", "object": "films or plays"}
+{"subject": "founder", "predicate": "is_a", "object": "person"}
+{"subject": "founder", "predicate": "starts", "object": "an organisation"}
+{"subject": "director", "predicate": "is_a", "object": "person"}
+{"subject": "company", "predicate": "is_a", "object": "organisation"}
+{"subject": "organisation", "predicate": "has_part", "object": "people"}
+{"subject": "city", "predicate": "is_a", "object": "settlement"}
+{"subject": "country", "predicate": "has_part", "object": "territory"}
+{"subject": "country", "predicate": "is_a", "object": "state"}
+{"subject": "language", "predicate": "is_a", "object": "system of communication"}
+{"subject": "planet", "predicate": "orbits", "object": "a star"}
+{"subject": "planet", "predicate": "is_a", "object": "celestial body"}
+{"subject": "star", "predicate": "is_a", "object": "celestial body"}
+{"subject": "star", "predicate": "emits", "object": "light"}
+{"subject": "ocean", "predicate": "is_a", "object": "body of water"}
+{"subject": "ocean", "predicate": "contains", "object": "salt water"}
+{"subject": "river", "predicate": "is_a", "object": "body of water"}
+{"subject": "mountain", "predicate": "is_a", "object": "landform"}
+{"subject": "force", "predicate": "causes", "object": "acceleration"}
+{"subject": "energy", "predicate": "can", "object": "be transferred"}
+{"subject": "wave", "predicate": "transfers", "object": "energy"}
+{"subject": "light", "predicate": "is_a", "object": "wave"}
+{"subject": "sound", "predicate": "is_a", "object": "wave"}
+{"subject": "sound", "predicate": "requires", "object": "a medium"}
