@@ -468,8 +468,29 @@ class LearningLoop:
                 return
             intent = getattr(thought, "intent", None)
             action = str(getattr(intent, "kind", "") or "turn")
-            world.observe_transition(self._prev_state, action, self._encode_state(fired))
+            state = self._encode_state(fired)
+            world.observe_transition(self._prev_state, action, state)
             rep.transitions = 1
+
+            # The same labelled transition, to the model the *planner* actually searches over.
+            #
+            # `Agent.plan` enumerates `Agent.actions()`, which reads the actions
+            # `PredictiveWorldModel` has seen — and nothing ever gave it one. `field` feeds that
+            # model every turn with no action label, and the only call that supplies one is
+            # `Agent.act`, which runs after a plan is found. No plan without actions, no actions
+            # without a plan: `known_actions` sat at 0 for the life of every process, `pursue`
+            # returned [] whatever it was asked, and the curriculum's agency rung was unreachable
+            # by construction.
+            #
+            # The label is not invented for this. It is the same one `world` has always been
+            # given — the kind of turn, which is the intervention she actually made on her own
+            # state — so `Agent.actions()` stays what its docstring promises: a set drawn from
+            # what has been observed, never a list someone wrote down. Planning for an action she
+            # has never seen the consequences of would still be fiction; this only stops her from
+            # being unable to plan for the ones she has.
+            predictive = getattr(self.brain, "predictive", None)
+            if predictive is not None and action:
+                predictive.observe(self._prev_state, action, next_state=state)
         except Exception:  # noqa: BLE001
             pass
 
