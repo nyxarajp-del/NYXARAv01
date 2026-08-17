@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["TrainStep", "Readout", "gradcheck", "available"]
@@ -252,7 +252,14 @@ class Readout:
             # its bias and its optimiser moments with it.
             moved: Dict[int, int] = {}
             used: Set[int] = set()
-            collisions = 0
+            # Reset before the rehash, not after, so `_assign` counts collisions in the *new*
+            # table. This counter used to survive a growth untouched — a dead `collisions = 0`
+            # local was written here and thrown away — so a head that had just doubled its width
+            # specifically to stop colliding went on reporting the smaller table's collision
+            # count, and `stats()["collision_rate"]` described a table that no longer existed.
+            # The one number that says whether growth worked was the one number growth did not
+            # update.
+            self._collisions = 0
             for cell, old_slot in self._slots.items():
                 new_slot = self._assign(int(cell), new_width, used)
                 w1.data[new_slot] = self.W1.data[old_slot]
@@ -433,21 +440,65 @@ class Readout:
         if not self._built:
             return {}
         return {"width": self.width, "hidden": self.hidden, "steps": self.steps,
+                "growths": self.growths, "samples_seen": self.samples_seen,
+                "collisions": self._collisions,
                 "params": [p.data.tolist() for p in self._params],
                 "slots": {str(k): v for k, v in self._slots.items()}}
 
     def load_dict(self, d: Dict[str, Any]) -> None:
+        """Restore a saved head, **geometry first**.
+
+        The width has to be rebuilt before the weights are read, and skipping that step did not
+        fail loudly — it failed by degrees, which is worse:
+
+        * ``width`` was written by :meth:`to_dict` and never read back, so a head that had grown
+          to 8192 was restored into the 512 it was constructed with;
+        * every saved parameter then failed the ``arr.shape == p.data.shape`` guard and was
+          **silently skipped**, discarding the entire trained head while reporting nothing;
+        * ``_slots`` was restored anyway, leaving 4,567 cells mapped into a 512-wide table — a
+          state that cannot arise from training, since the load factor caps that at 384;
+        * :meth:`encode` then wrote past the end of a width-sized row, the fail-soft wrapper
+          swallowed it, and the readout never took another gradient step for the rest of the
+          process's life. ``steps`` froze at the restored value, which is exactly what a resumed
+          run looked like: symbolic organs learning, gradient head permanently dead.
+
+        So: adopt the saved geometry, rebuild at that shape, then load. A saved state whose
+        parameters still do not match after that is rejected as a whole rather than half-applied,
+        because a head with two of its four tensors restored is not a partially trained head — it
+        is a broken one.
+        """
         try:
             if not self._built or not d:
                 return
+            width = int(d.get("width", 0) or 0)
+            hidden = int(d.get("hidden", 0) or 0)
+            if width >= 8 and hidden >= 4 and (width != self.width or hidden != self.hidden):
+                self.width = width
+                self.hidden = hidden
+                self.max_width = max(self.max_width, width)
+                self._build()                     # re-allocate at the saved shape
+
             params = d.get("params") or []
-            if len(params) == len(self._params):
-                for p, saved in zip(self._params, params):
-                    arr = np.array(saved, dtype=float)
-                    if arr.shape == p.data.shape:
-                        p.data = arr
-            self._slots = {int(k): int(v) for k, v in (d.get("slots") or {}).items()}
+            if len(params) != len(self._params):
+                return
+            restored = [np.array(saved, dtype=float) for saved in params]
+            if any(a.shape != p.data.shape for a, p in zip(restored, self._params)):
+                return                            # all or nothing
+            for p, arr in zip(self._params, restored):
+                p.data = arr
+            # Adam's moments belong to the shape that was just replaced, so they are reset rather
+            # than carried: stale first/second moments against fresh weights take the first steps
+            # after a resume in the wrong direction.
+            self._m = [np.zeros_like(p.data) for p in self._params]
+            self._v = [np.zeros_like(p.data) for p in self._params]
+
+            self._slots = {int(k): int(v) for k, v in (d.get("slots") or {}).items()
+                           if 0 <= int(v) < self.width}
+            self._used = set(self._slots.values())
             self.steps = int(d.get("steps", 0))
+            self.growths = int(d.get("growths", 0) or 0)
+            self.samples_seen = int(d.get("samples_seen", 0) or 0)
+            self._collisions = int(d.get("collisions", 0) or 0)
         except Exception:  # noqa: BLE001
             pass
 

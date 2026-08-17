@@ -94,6 +94,11 @@ def _content(text: Any) -> Set[str]:
     return out
 
 
+def _round_or_none(value: Optional[float], digits: int) -> Optional[float]:
+    """Round, but keep None as None — an absent organ must not report a number."""
+    return None if value is None else round(value, digits)
+
+
 def _f1(gold: Set[str], said: Set[str]) -> float:
     """Content-word F1. Symmetric, so neither a terse nor a rambling reply is rewarded for it."""
     if not gold or not said:
@@ -247,14 +252,33 @@ class StudyReport:
     readout_loss_before: Optional[float] = None
     readout_loss_after: Optional[float] = None
     readout_steps: int = 0
+    readout_width_before: int = 0
     readout_width: int = 0
+
+    @staticmethod
+    def _per_slot(loss: Optional[float], width: int) -> Optional[float]:
+        """Loss per slot — the only form of this number that survives the readout growing.
+
+        ``Readout._loss`` is binary cross-entropy **summed over slots** and divided by the batch
+        size, so it scales with ``width``. The readout doubles its width and rehashes whenever the
+        cells it has mapped pass a load factor, which on a corpus happens repeatedly: measured over
+        500 pairs the width went 512 → 8192 and the raw loss went 33.50 → 197.66, which reads as
+        training having made it six times worse. Per slot those same two numbers are 0.0654 →
+        0.0241 — it improved by a factor of nearly three. Dividing by width is what makes the two
+        ends of a pass comparable at all.
+        """
+        if loss is None or width <= 0:
+            return None
+        return loss / width
 
     @property
     def readout_learned(self) -> Optional[float]:
-        """Loss drop over the pass, or None when there is no readout to report."""
-        if self.readout_loss_before is None or self.readout_loss_after is None:
+        """Per-slot loss drop over the pass. Positive means it got better."""
+        before = self._per_slot(self.readout_loss_before, self.readout_width_before)
+        after = self._per_slot(self.readout_loss_after, self.readout_width)
+        if before is None or after is None:
             return None
-        return self.readout_loss_before - self.readout_loss_after
+        return before - after
 
     @property
     def facts_learned(self) -> int:
@@ -277,10 +301,18 @@ class StudyReport:
                 "cells": [self.cells_before, self.cells_after],
                 "synapses": [self.synapses_before, self.synapses_after],
                 "consolidations": self.consolidations,
-                "readout": {"loss": [self.readout_loss_before, self.readout_loss_after],
-                            "learned": (round(self.readout_learned, 6)
-                                        if self.readout_learned is not None else None),
-                            "steps": self.readout_steps, "width": self.readout_width},
+                "readout": {
+                    # Raw first, because it is what the organ reports; per-slot second, because
+                    # it is the one that means anything once the width has changed under it.
+                    "loss": [self.readout_loss_before, self.readout_loss_after],
+                    "loss_per_slot": [
+                        _round_or_none(self._per_slot(self.readout_loss_before,
+                                                      self.readout_width_before), 6),
+                        _round_or_none(self._per_slot(self.readout_loss_after,
+                                                      self.readout_width), 6)],
+                    "learned_per_slot": _round_or_none(self.readout_learned, 6),
+                    "steps": self.readout_steps,
+                    "width": [self.readout_width_before, self.readout_width]},
                 "grew": self.grew, "ms": round(self.ms, 1),
                 "ms_per_pair": round(self.ms / self.studied, 2) if self.studied else None}
 
@@ -408,6 +440,7 @@ class Tutor:
         rep.cells_before = before["cells"]
         rep.synapses_before = before["synapses"]
         rep.readout_loss_before = before["readout_loss"]
+        rep.readout_width_before = before["readout_width"]
         steps_before = before["readout_steps"]
 
         # Crystallisation is throttled for the whole pass and restored afterwards, so a tutored

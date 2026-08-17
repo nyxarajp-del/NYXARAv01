@@ -245,7 +245,35 @@ def test_the_study_report_shows_what_the_gradient_learner_did():
     assert "readout" in d
     if brain.readout is not None:                 # absent without numpy, and that is reported
         assert d["readout"]["steps"] > 0
-        assert d["readout"]["width"] > 0
+        assert d["readout"]["width"][1] > 0
+
+
+def test_readout_loss_is_reported_per_slot_so_a_width_change_cannot_fake_a_trend():
+    """The raw loss is summed over slots, so it scales with a width the readout doubles itself.
+
+    Measured over 500 corpus pairs: width 512 → 8192, raw loss 33.50 → 197.66. Read raw, training
+    made it six times worse; read per slot, 0.0654 → 0.0241, it improved threefold. Comparing the
+    two ends of a pass at different widths is not a comparison.
+    """
+    from nyxara.njp.study import StudyReport
+
+    rep = StudyReport(readout_loss_before=33.502175, readout_width_before=512,
+                      readout_loss_after=197.657845, readout_width=8192)
+    assert rep.readout_loss_after > rep.readout_loss_before      # raw says it got worse
+    assert rep.readout_learned > 0, "per-slot must see the improvement the raw number hides"
+    per_slot = rep.to_dict()["readout"]["loss_per_slot"]
+    assert per_slot[0] == pytest.approx(0.0654, abs=1e-3)
+    assert per_slot[1] == pytest.approx(0.0241, abs=1e-3)
+
+
+def test_an_absent_readout_reports_nothing_rather_than_zero():
+    """No readout and a readout trained to zero loss must not look the same."""
+    from nyxara.njp.study import StudyReport
+
+    d = StudyReport().to_dict()["readout"]
+    assert d["loss"] == [None, None]
+    assert d["loss_per_slot"] == [None, None]
+    assert d["learned_per_slot"] is None
 
 
 # --------------------------------------------------------------------------- #
