@@ -32,6 +32,20 @@ readout — not a generative model. It will answer questions whose facts it extr
 the rest, and the measured numbers will say so. Nothing here will make her fluent; it makes her
 *grounded in a domain*, which is a smaller and checkable claim.
 
+**And about the denominator.** The bundled corpus is an instruction-following dataset, not the
+"AI question/answer" set this file used to claim (see :data:`DEFAULT_CORPUS`): about 36% of it
+asks her to *write* something and another 38% to compute or transform something. Neither has an
+answer a fact store can hold. So a coverage number over the whole corpus is mostly measuring
+items that are unreachable by construction, and it will stay low no matter how good extraction
+becomes. Two figures are worth more than one here: extraction quality (:meth:`Grounder.stats`
+reports ``unparsed`` and ``extraction_rate``) and answering quality on the factual subset.
+
+Scoring has the mirror-image problem. Gold answers average 25.3 content words of prose while a
+fact store answers in three or four, so symmetric F1 fails a *correct* short answer about two
+times in three. :func:`_f1` and :func:`_hit` are therefore both reported: F1 asks whether the
+reply was right **and** complete, ``_hit`` asks only whether it was right. Neither is the score
+on its own, and the gap between them is itself the reading.
+
 Pure standard library. No LLM anywhere in the path.
 """
 
@@ -52,7 +66,24 @@ __all__ = ["Pair", "Corpus", "StudyReport", "ExamReport", "Tutor", "SeedReport",
            "seed_kinds", "save_state", "load_state", "main",
            "DEFAULT_CORPUS", "DEFAULT_KINDS"]
 
-#: The bundled corpus: 35,693 deduplicated question/answer pairs on artificial intelligence.
+#: The bundled corpus: 35,693 deduplicated instruction/response pairs, general-domain.
+#:
+#: It was described here as "question/answer pairs on artificial intelligence", and measurement
+#: says it is neither. Classified over an 8,000-pair sample:
+#:
+#:   * **35.8% generative** — "Design a poster", "Summarize this book", "Recommend a poem".
+#:     There is no fact of the matter to store, so a fact store cannot answer these at all.
+#:   * **37.6% other** — "Find the volume of a cone with height 10cm", "Arrange these words
+#:     alphabetically". Computation and transformation, mostly not lookup either.
+#:   * **26.6% factual** — "What is X", "Name two advantages of Y". These are the answerable part.
+#:
+#: Head words are `generate 3461 · create 2679 · describe 2523 · write 1982`, and the sampled
+#: content spans cafés, Olympic swimmers and dinosaurs. It is an instruction-following dataset.
+#:
+#: This matters for how the exam is read, not just for accuracy of description: **roughly
+#: three-quarters of it is not answerable by lookup at any quality of extraction**, so a coverage
+#: figure over the whole corpus has a denominator that is mostly unreachable by construction.
+#: Report against the factual subset, or say which denominator is in use.
 DEFAULT_CORPUS = Path(__file__).with_name("data") / "ai_qa.jsonl.gz"
 
 #: Kind-level facts, which no corpus of instances ever states.
@@ -109,6 +140,30 @@ def _f1(gold: Set[str], said: Set[str]) -> float:
     precision = shared / len(said)
     recall = shared / len(gold)
     return 2 * precision * recall / (precision + recall)
+
+
+def _hit(gold: Set[str], said: Set[str]) -> float:
+    """How much of what she *said* is in the gold answer. Precision only, no length penalty.
+
+    :func:`_f1` is symmetric, and against this corpus that quietly makes it a test of verbosity.
+    Gold answers here average **25.3 content words** of prose. A fact store answers in three or
+    four. Measured over 200 held-out pairs, a reply consisting of four correct content words
+    drawn from the gold answer scores mean F1 **0.369** and clears the 0.4 bar only **36%** of
+    the time — and even quoting the gold answer's own first sentence verbatim clears it only 70%.
+    So a *perfectly correct* short answer fails the symmetric metric roughly two times in three,
+    and `accuracy_overall` is capped near 0.36 however good the extraction gets.
+
+    This is the other half of the picture, not a replacement: it asks whether what she said was
+    *right*, where F1 asks whether it was right **and** complete. A reply that pads itself with
+    noise loses here exactly as it does there, because noise words are not in the gold set. What
+    it does not do is punish her for being brief when brevity is correct.
+
+    Both are reported. Neither is the score on its own: F1 alone calls a correct short answer
+    wrong, and this alone calls "water" a complete answer to a question about the water cycle.
+    """
+    if not gold or not said:
+        return 0.0
+    return len(gold & said) / len(said)
 
 
 # --------------------------------------------------------------------------- #
@@ -326,6 +381,12 @@ class ExamReport:
     correct: int = 0
     abstained: int = 0
     total_f1: float = 0.0
+    # The brevity-aware half. `correct` is F1 ≥ threshold and stays the headline; `on_topic` is
+    # the same answers judged by whether what she said was *right* rather than also complete.
+    # Reported together because the gap between them is itself the reading: a wide gap means she
+    # is answering correctly and tersely, a narrow one means she is genuinely missing.
+    on_topic: int = 0
+    total_hit: float = 0.0
     best: List[Tuple[str, float]] = field(default_factory=list)
     threshold: float = 0.4
     ms: float = 0.0
@@ -354,6 +415,15 @@ class ExamReport:
     def mean_f1(self) -> float:
         return (self.total_f1 / self.answered) if self.answered else 0.0
 
+    @property
+    def on_topic_rate(self) -> float:
+        """Of the ones she answered, how many were *right* — brevity not penalised."""
+        return (self.on_topic / self.answered) if self.answered else 0.0
+
+    @property
+    def mean_hit(self) -> float:
+        return (self.total_hit / self.answered) if self.answered else 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         return {"asked": self.asked, "answered": self.answered, "correct": self.correct,
                 "abstained": self.abstained,
@@ -361,6 +431,11 @@ class ExamReport:
                 "precision_when_answered": round(self.precision, 4),
                 "accuracy_overall": round(self.accuracy, 4),
                 "mean_f1_when_answered": round(self.mean_f1, 4),
+                # Brevity-aware. A correct three-word answer to a twenty-five-word gold answer
+                # scores near 1.0 here and near 0.3 on F1; the pair is what tells a terse right
+                # answer from a wrong one, which neither number does alone.
+                "on_topic_when_answered": round(self.on_topic_rate, 4),
+                "mean_hit_when_answered": round(self.mean_hit, 4),
                 "threshold": self.threshold, "ms": round(self.ms, 1),
                 "best": [[q[:70], round(s, 3)] for q, s in self.best[:5]]}
 
@@ -557,8 +632,13 @@ class Tutor:
                 rep.abstained += 1
                 continue
             rep.answered += 1
-            score = _f1(_content(pair.answer), _content(said))
+            gold, spoken = _content(pair.answer), _content(said)
+            score = _f1(gold, spoken)
             rep.total_f1 += score
+            hit = _hit(gold, spoken)
+            rep.total_hit += hit
+            if hit >= self.f1_threshold:
+                rep.on_topic += 1
             scored.append((pair.question, score))
             if score >= self.f1_threshold:
                 rep.correct += 1

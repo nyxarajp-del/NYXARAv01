@@ -286,3 +286,27 @@ def test_a_quoted_question_is_never_asserted_into_the_fact_store():
     before = len(grounder.facts)
     grounder.ground('"What is the Bernoulli equation?"')
     assert len(grounder.facts) == before, "a held-out question wrote itself into the fact store"
+
+
+def test_a_statement_that_extracts_nothing_is_counted():
+    """54% of corpus answers yield no triple, and nothing counted it.
+
+    `unknown` counts a *question* she could not answer, and `turns - grounded_turns` is polluted
+    because a question increments `turns` and never reaches the extractor at all. So a silent
+    majority failure in extraction looked exactly like a working extractor from `stats()`.
+    """
+    grounder = Grounder()
+    grounder.ground("A neural network is a system of connected nodes.")
+    assert grounder.stats()["unparsed"] == 0
+
+    grounder.ground("Whoa rolling with the constant flow, this rap game dont own me")
+    assert grounder.stats()["unparsed"] == 1
+    assert 0.0 < grounder.stats()["extraction_rate"] < 1.0
+
+
+def test_the_unparsed_count_survives_a_round_trip():
+    grounder = Grounder()
+    grounder.ground("Whoa rolling with the constant flow, this rap game dont own me")
+    revived = Grounder()
+    revived.load_dict(grounder.to_dict())
+    assert revived.stats()["unparsed"] == grounder.stats()["unparsed"]

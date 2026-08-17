@@ -1226,6 +1226,8 @@ class Grounder:
         self.grounded_turns = 0
         self.answered = 0
         self.unknown = 0
+        #: Statements that reached the extractor and produced no triple at all.
+        self.unparsed = 0
         self.contradictions_found = 0
         self.patterns_learned = 0
         self.patterns_pruned = 0
@@ -1284,6 +1286,17 @@ class Grounder:
 
             if out.triples:
                 self.grounded_turns += 1
+            else:
+                # A statement that reached the extractor and yielded nothing. Counted separately
+                # from `unknown` (which is a *question* she could not answer) and from
+                # `turns - grounded_turns` (which is polluted, because a question increments
+                # `turns` and never reaches extraction at all).
+                #
+                # Nothing counted this before, and it is the single largest number in the corpus
+                # pipeline: 54% of answers extract no triple. A silent majority failure looks
+                # exactly like a working extractor from `stats()`, which is why the fact store
+                # grew slowly for a long time with nothing to point at.
+                self.unparsed += 1
             self._observe_concepts(out)
             out.ungrounded = self._ungrounded(out.concepts, tally=not out.triples)
             return out
@@ -2318,6 +2331,9 @@ class Grounder:
             "facts": sum(len(v) for v in self.facts.values()),
             "subjects": len({s for s, _p in self.facts}),
             "answered": self.answered, "unknown": self.unknown,
+            "unparsed": self.unparsed,
+            "extraction_rate": (round(self.grounded_turns / (self.grounded_turns + self.unparsed), 4)
+                                if (self.grounded_turns + self.unparsed) else None),
             "contradictions_found": self.contradictions_found,
             "patterns": len(self.patterns), "patterns_learned": self.patterns_learned,
             "patterns_live": len(learned), "patterns_pruned": self.patterns_pruned,
@@ -2335,6 +2351,7 @@ class Grounder:
             "patterns": [p.to_dict() for p in self.patterns if p.learned],
             "counters": {"turns": self.turns, "grounded": self.grounded_turns,
                          "answered": self.answered, "unknown": self.unknown,
+                         "unparsed": self.unparsed,
                          "learned": self.patterns_learned, "pruned": self.patterns_pruned},
         }
 
@@ -2378,6 +2395,7 @@ class Grounder:
             self.grounded_turns = int(counters.get("grounded", 0))
             self.answered = int(counters.get("answered", 0))
             self.unknown = int(counters.get("unknown", 0))
+            self.unparsed = int(counters.get("unparsed", 0))
             self.patterns_learned = int(counters.get("learned", 0))
             self.patterns_pruned = int(counters.get("pruned", 0))
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born grounder

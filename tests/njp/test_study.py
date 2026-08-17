@@ -34,10 +34,35 @@ PAIRS = [
 # The corpus that ships
 # --------------------------------------------------------------------------- #
 def test_the_bundled_corpus_is_present_and_well_formed():
-    assert DEFAULT_CORPUS.exists(), "the bundled AI question/answer corpus is missing"
+    assert DEFAULT_CORPUS.exists(), "the bundled instruction/response corpus is missing"
     pairs = Corpus.load(DEFAULT_CORPUS, limit=200)
     assert len(pairs) == 200
     assert all(p.question and p.answer for p in pairs)
+
+
+def test_most_of_the_corpus_is_not_answerable_by_a_fact_store():
+    """The denominator, pinned — because a coverage figure is meaningless without it.
+
+    This file described the corpus as "question/answer pairs on artificial intelligence". It is
+    an instruction-following dataset: measured over 8,000 pairs, 35.8% ask her to *write*
+    something ("Design a poster", "Recommend a poem") and 37.6% to compute or transform something
+    ("Find the volume of a cone"). Neither has an answer a fact store can hold, so roughly
+    three-quarters of any coverage denominator is unreachable at any quality of extraction.
+
+    Asserting a band rather than an exact share: the point is that the generative majority is
+    real and large, not that it is precisely 35.8%.
+    """
+    import re
+
+    generative = re.compile(
+        r"^(write|generate|create|compose|draft|make up|come up with|invent|design|imagine|"
+        r"rewrite|paraphrase|translate|summariz|summaris|edit|convert|output|construct|produce|"
+        r"suggest|recommend|brainstorm|make a)", re.I)
+    pairs = Corpus.load(DEFAULT_CORPUS, limit=3000, seed=0)
+    share = sum(1 for p in pairs if generative.match(p.question.strip())) / len(pairs)
+    assert 0.25 < share < 0.50, (
+        f"generative share is {share:.3f} — the corpus changed, and every coverage number "
+        f"in this file's docstring is stated against the old composition")
 
 
 def test_the_corpus_has_no_duplicate_questions():
@@ -317,3 +342,45 @@ def test_every_name_the_entry_point_needs_is_bound_before_the_guard():
         defined = max(source.rfind(f"\ndef {name}("), source.rfind(f"\nclass {name}"))
         assert defined != -1, f"{name} is not defined at module level"
         assert defined < guard, f"{name} is defined below the __main__ guard — `-m` will NameError"
+
+
+# --------------------------------------------------------------------------- #
+# Scoring a fact store against prose
+# --------------------------------------------------------------------------- #
+def test_a_correct_short_answer_is_not_scored_as_wrong():
+    """Symmetric F1 against 25-word prose is a test of verbosity, not of correctness.
+
+    Gold answers in this corpus average 25.3 content words. A fact store answers in three or
+    four. Measured over 200 held-out pairs, a reply of four correct content words drawn from the
+    gold answer scores mean F1 0.369 and clears the 0.4 bar only 36% of the time — so a
+    *perfectly correct* short answer fails roughly two times in three, and `accuracy_overall` is
+    capped near 0.36 however good extraction becomes.
+    """
+    from nyxara.njp.study import _hit
+
+    gold = _content("The blue whale is the largest mammal, reaching up to 33 metres in length "
+                    "and weighing as much as 173 tonnes when fully grown at sea")
+    terse = _content("blue whale")
+    assert _f1(gold, terse) < 0.4, "premise gone: F1 no longer punishes the short answer"
+    assert _hit(gold, terse) == pytest.approx(1.0), "every word she said was in the gold answer"
+
+
+def test_the_brevity_aware_score_still_punishes_padding_and_being_wrong():
+    """It must not become a metric that anything can win."""
+    from nyxara.njp.study import _hit
+
+    gold = _content("Overfitting is when a model memorises training data and fails on new data")
+    assert _hit(gold, _content("overfitting memorises training data")) > 0.9
+    # Noise words are not in the gold set, so padding costs precision here exactly as in F1.
+    # The padding has to be *distinct* words to cost anything, because `_content` returns a set
+    # and a word repeated ten times is one word — which is true of `_f1` on this corpus too.
+    noise = "banana trombone gravel pelican lantern marzipan quarry thimble walrus cobalt"
+    assert _hit(gold, _content("overfitting " + noise)) < 0.2
+    assert _hit(gold, _content("the resplendent quetzal is a bird")) == 0.0
+
+
+def test_both_scores_are_reported_so_neither_can_be_read_alone():
+    report = Tutor(NJPBrain()).exam(PAIRS)
+    d = report.to_dict()
+    assert "mean_f1_when_answered" in d, "the symmetric score must survive"
+    assert "on_topic_when_answered" in d and "mean_hit_when_answered" in d
