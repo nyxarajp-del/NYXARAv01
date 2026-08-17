@@ -167,6 +167,88 @@ def test_precision_and_coverage_are_reported_separately():
 
 
 # --------------------------------------------------------------------------- #
+# Sampling a subset, and persisting a run
+# --------------------------------------------------------------------------- #
+def test_a_limited_load_samples_the_corpus_rather_than_taking_its_head():
+    """The first N rows of a topic-grouped corpus are a different corpus, not a smaller one."""
+    head = Corpus.load(DEFAULT_CORPUS, limit=300, sample=False)
+    drawn = Corpus.load(DEFAULT_CORPUS, limit=300, seed=0)
+    assert len(head) == len(drawn) == 300
+    assert {p.question for p in head} != {p.question for p in drawn}
+    # The sample must reach past the head of the file, which is the whole point.
+    full_head = {p.question for p in Corpus.load(DEFAULT_CORPUS, limit=300, sample=False)}
+    assert any(p.question not in full_head for p in drawn)
+
+
+def test_the_sample_is_reproducible_across_calls():
+    """A subsample that reshuffles makes two runs incomparable."""
+    a = Corpus.load(DEFAULT_CORPUS, limit=200, seed=7)
+    b = Corpus.load(DEFAULT_CORPUS, limit=200, seed=7)
+    assert [p.question for p in a] == [p.question for p in b]
+    assert [p.question for p in a] != [p.question for p in Corpus.load(
+        DEFAULT_CORPUS, limit=200, seed=8)]
+
+
+def test_sampling_does_not_disturb_the_held_out_split():
+    """The fold is a hash of the question, so it must not depend on how the pair was drawn."""
+    for pair in Corpus.load(DEFAULT_CORPUS, limit=300, seed=3):
+        assert pair.held_out == Pair(question=pair.question, answer=pair.answer).held_out
+
+
+def test_a_saved_state_round_trips_into_a_fresh_brain(tmp_path):
+    from nyxara.njp.study import load_state, save_state
+
+    taught = NJPBrain()
+    for pair in PAIRS:
+        taught.think(pair.answer)
+    path = save_state(taught, tmp_path / "state.json")
+
+    revived = NJPBrain()
+    assert load_state(revived, path) is True
+    assert revived.fabric.n_synapses == taught.fabric.n_synapses
+    assert (revived.stats()["grounding"]["facts"] == taught.stats()["grounding"]["facts"])
+
+
+def test_load_state_reports_a_missing_file_rather_than_pretending(tmp_path):
+    from nyxara.njp.study import load_state
+
+    assert load_state(NJPBrain(), tmp_path / "never-written.json") is False
+
+
+def test_a_checkpoint_never_destroys_the_last_good_one(tmp_path):
+    """The moment a checkpoint is for is the moment it is most likely to be half-written."""
+    from nyxara.njp.study import save_state
+
+    target = tmp_path / "state.json"
+    brain = NJPBrain()
+    brain.think("a neural network learns weights")
+    save_state(brain, target)
+    good = target.read_text(encoding="utf-8")
+
+    class Exploding:
+        def to_dict(self):
+            raise RuntimeError("died mid-write")
+
+    with pytest.raises(RuntimeError):
+        save_state(Exploding(), target)
+
+    assert target.read_text(encoding="utf-8") == good, "a failed write clobbered the good state"
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "state.json"]
+    assert not leftovers, f"temp files left behind: {leftovers}"
+
+
+def test_the_study_report_shows_what_the_gradient_learner_did():
+    """The only gradient learner in NJP trains once per pair and was invisible to this report."""
+    brain = NJPBrain()
+    report = Tutor(brain, seed=False).study(PAIRS)
+    d = report.to_dict()
+    assert "readout" in d
+    if brain.readout is not None:                 # absent without numpy, and that is reported
+        assert d["readout"]["steps"] > 0
+        assert d["readout"]["width"] > 0
+
+
+# --------------------------------------------------------------------------- #
 # The entry point, invoked the way a user invokes it
 # --------------------------------------------------------------------------- #
 def test_the_cli_runs_as_a_module_and_not_only_as_an_import():

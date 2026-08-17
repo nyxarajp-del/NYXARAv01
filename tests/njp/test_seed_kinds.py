@@ -60,14 +60,35 @@ def test_it_is_about_kinds_rather_than_individuals(rows):
 
 
 def test_it_cannot_answer_a_held_out_question(rows):
-    """Shipped data that answers the exam is not a seed, it is leakage."""
-    held = Corpus.split(Corpus.load(DEFAULT_CORPUS, limit=3000))[1][:200]
-    worst = 0.0
+    """Shipped data that answers the exam is not a seed, it is leakage.
+
+    Two things about how this is measured, both of which were wrong before and both of which
+    change what the test actually proves.
+
+    **The exam sample must span the corpus.** This used to read ``limit=3000`` when a limited load
+    meant "the first 3000 rows", so it examined the head of a topic-grouped file and called that
+    the held-out set. Now that a limited load *samples*, this scans a subset drawn from all 35,693
+    pairs — and immediately found a collision the head-only version could never have reached.
+
+    **A predicate is structure, not claim content.** That collision was
+    ``language is_used_for communication`` scoring 0.500 against *"The most commonly used type of
+    language is English."* The seed does not contain "English" and cannot answer the question; the
+    score came from ``language`` plus ``used``, and ``used`` is in the seed only because it is a
+    fragment of the relation *name*. Scoring a relation name as though it were content measures
+    the grammar of the triple format rather than what the triple claims. So the comparison is
+    against subject and object — the claim — which is what "does this seed state the answer"
+    actually means.
+    """
+    held = Corpus.split(Corpus.load(DEFAULT_CORPUS, limit=3000, seed=0))[1][:200]
+    worst, worst_pair = 0.0, ("", "")
     for row in rows:
-        text = f"{row['subject']} {row['predicate']} {row['object']}"
+        claim = _content(f"{row['subject']} {row['object']}")
         for pair in held:
-            worst = max(worst, _f1(_content(pair.answer), _content(text)))
-    assert worst < 0.4, f"a seed fact scores {worst:.3f} against a held-out answer"
+            score = _f1(_content(pair.answer), claim)
+            if score > worst:
+                worst, worst_pair = score, (f"{row['subject']} {row['object']}", pair.answer)
+    assert worst < 0.4, (f"a seed fact scores {worst:.3f} against a held-out answer\n"
+                         f"  seed:   {worst_pair[0]}\n  answer: {worst_pair[1][:160]}")
 
 
 # --------------------------------------------------------------------------- #

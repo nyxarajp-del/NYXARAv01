@@ -24,6 +24,7 @@ nyxara-improve = "nyxara.growth.improve_main:main"
 nyxara-genesis = "nyxara.growth.genesis_main:main"
 nyxara-self-optimize = "nyxara.growth.self_optimize_main:main"
 nyxara-prove = "nyxara.growth.prove_main:main"
+nyxara-study = "nyxara.njp.study:main"
 
 [project.optional-dependencies]
 # Her PRIMARY brain: Gemma-4-E2B-it served ON-DEVICE by Google's LiteRT-LM runtime (import name
