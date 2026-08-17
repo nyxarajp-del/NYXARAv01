@@ -214,3 +214,58 @@ def test_a_knowledge_question_is_still_answered_from_structure():
     brain = _taught_brain()
     answer = brain.think("gravity kya hai").answer
     assert "force" in answer.lower(), answer
+
+
+# --------------------------------------------------------------------------- #
+# The gate can only judge what actually reaches it
+# --------------------------------------------------------------------------- #
+def test_recalled_memories_actually_reach_the_relevance_gate():
+    """The gate scored nothing, ever, because the recall was read off fields that never existed.
+
+    ``NJPBrain._recall_through_gate`` read ``rec.traces`` and ``rec.best``. ``memory.Recall``
+    carries ``hit``, ``score``, ``decided``, ``associated`` and ``considered`` — neither of the
+    two it was asked for. Both reads were ``getattr(..., None)``, so nothing raised: the
+    candidate list was simply always empty and the method returned before ``gate.filter`` on
+    every turn of every kind. The holographic memory that ``study.py`` writes to twice per corpus
+    pair contributed to an answer exactly never.
+
+    Asserting on ``gate.stats()["scored"]`` rather than on an answer is deliberate — whether a
+    given memory is *admitted* is the gate's judgement and may legitimately be "no". What was
+    broken is that it never got to judge.
+    """
+    brain = _taught_brain()
+    assert brain.gate is not None, "no gate installed; this test cannot say anything"
+    before = brain.gate.stats()["scored"]
+    brain.think("the apple fell from the tree")
+    assert brain.gate.stats()["scored"] > before, (
+        "recall never reached the gate — _recall_through_gate returned before filtering")
+
+
+def test_a_question_she_cannot_ground_is_answered_with_silence_not_the_nearest_memory():
+    """Measured, not assumed: recall-as-answer buys coverage by spending honesty.
+
+    Routing unanswered questions through recall-and-the-gate was tried. In-sample it looked
+    excellent — 200 taught questions went from 8 answered to 75, and from 4 correct to 59. On
+    held-out questions the same change produced three answers where there had been three
+    abstentions, and **none** of the three was right:
+
+        "Give me an example of irony?"       → a memory about the word "charge"
+        "Which tree has aromatic blossoms?"  → a memory about the Resplendent Quetzal
+
+    Nothing separated those from the good ones. The worst held-out answer scored 0.394 at the
+    gate, above the 0.388 median of the *correct* in-sample ones, and `Recall.decided` was True
+    in every case in both populations. So there is no threshold to tune here: relevance is not
+    correctness.
+    """
+    brain = _taught_brain()
+    assert not brain.think("Give me an example of irony?").answer
+    assert not brain.think("Which tree is famous for its aromatic blossoms?").answer
+
+
+def test_the_recall_dataclass_has_the_fields_the_brain_reads():
+    """Structural guard, so a rename cannot silently disconnect the memory again."""
+    from nyxara.njp.memory import Recall
+
+    rec = Recall()
+    for field in ("hit", "score", "decided", "associated", "considered"):
+        assert hasattr(rec, field), f"Recall lost {field}, which brain._recall_through_gate reads"

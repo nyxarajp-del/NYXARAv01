@@ -1976,6 +1976,29 @@ class NJPBrain:
 
             # 2. She was asked something and genuinely does not know. Say that — do not fall
             # through to recall and offer a loosely-related memory as though it were an answer.
+            #
+            # This was tried the other way and the numbers said no. Letting a question answer from
+            # recall-through-the-gate took in-sample coverage from 4.0% to 37.5% (200 taught
+            # questions, 8 → 75 answered, 4 → 59 scoring F1 ≥ 0.4) — and on held-out questions it
+            # turned 0 honest abstentions into 3 confident wrong ones while gaining not a single
+            # correct answer:
+            #
+            #     "Give me an example of irony?"        → a memory about the word "charge"
+            #     "Which tree has aromatic blossoms?"   → a memory about the Resplendent Quetzal
+            #
+            # Neither a stricter gate threshold nor `Recall.decided` separates those from the good
+            # ones: the worst held-out answer scored 0.394, above the median 0.388 of the correct
+            # in-sample ones, and `decided` was True for every case in both populations. Relevance
+            # is not correctness, and a score that cannot tell them apart cannot be the licence to
+            # speak.
+            #
+            # The in-sample gain was mostly an artifact besides — it is the store returning the
+            # answer whose *text* sits nearest the question, which is the echo `memory.py`
+            # deliberately avoids by not encoding cues, and it does not transfer.
+            #
+            # So the guard stays. Recall still reaches the gate on statement turns (see
+            # `_recall_through_gate`, which really was dead), and a question NJP cannot ground is
+            # still answered with silence rather than with the nearest thing in the store.
             if getattr(grounding, "is_question", False):
                 return ""
 
@@ -2119,12 +2142,24 @@ class NJPBrain:
             rec = thought.percept.recall if thought.percept else None
             if rec is None:
                 return
-            candidates = list(getattr(rec, "traces", None) or [])
-            best = getattr(rec, "best", None)
-            if not candidates and best is not None:
-                candidates = [best]
+            # `Recall` carries `hit` (the nearest trace) and `associated` ([(key, weight)]).
+            #
+            # This used to read `rec.traces` and `rec.best`, and `Recall` has never had either
+            # field — so both `getattr`s returned None, `candidates` was always empty, and the
+            # method returned here on every turn of every kind. The holographic memory reached an
+            # answer exactly never, while `study.py` wrote to it twice per corpus pair. Because
+            # both reads were `getattr` with a default, nothing raised and nothing logged; the
+            # only symptom was recall silently contributing nothing.
+            candidates = [rec.hit] if rec.hit is not None else []
+            store = getattr(self.memory, "recall_key", None)
+            if store is not None:
+                for key, _weight in (rec.associated or [])[:4]:
+                    trace = store(key)
+                    if trace is not None and trace is not rec.hit:
+                        candidates.append(trace)
             if not candidates:
                 return
+            best = candidates[0]
             if self.gate is None:
                 text = str(getattr(best, "text", "") or "")
                 if text:
