@@ -2253,6 +2253,16 @@ class Grounder:
             low = str(text or "").strip().lower()
             if not low:
                 return False
+            # A quoted question is still a question. The mark test is `endswith`, so a wrapping
+            # quote hid it — `"What is the Archimedes principle?"` ends in `"` and was read as a
+            # statement, sent to the extractor, and *asserted*. That is how held-out questions
+            # were entering the fact store: measured over 260 held-out items, 4 were unrecognised
+            # and every one of them was a quoted question. The corpus quotes questions often
+            # enough to matter, and a leak from the exam into the store is the one bug that makes
+            # every other number here untrustworthy.
+            low = low.strip("\"'“”‘’«»").strip()
+            if not low:
+                return False
             if low.endswith("?"):
                 return True
             # A fronted conditional is a statement, whatever word it starts with. Checked before

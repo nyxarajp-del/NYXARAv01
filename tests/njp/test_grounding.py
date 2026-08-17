@@ -259,3 +259,30 @@ def test_grounding_does_not_stop_the_fabric_growing():
     before = brain.fabric.n_synapses
     brain.think("my name is Jay")
     assert brain.fabric.n_synapses > before
+
+
+# --------------------------------------------------------------------------- #
+# A quoted question is still a question
+# --------------------------------------------------------------------------- #
+def test_a_quoted_question_is_not_mistaken_for_a_statement():
+    """The mark test is `endswith`, so a wrapping quote hid it — and the cost was a leak.
+
+    `"What is the Archimedes principle?"` ends in `"`, so it was read as a statement, sent to the
+    extractor and *asserted* into the fact store. Measured over 260 held-out corpus items, 4 were
+    unrecognised as questions and every one was a quoted question — which is the exam writing
+    into the store it is supposed to be testing.
+    """
+    grounder = Grounder()
+    for quoted in ('"What is the Archimedes principle?"',
+                   "'Who is known for her agility?'",
+                   "“Is it ethical to edit genes?”"):
+        assert grounder._is_question(quoted.lower()), quoted
+    assert not grounder._is_question("a neural network is a system of connected nodes.")
+
+
+def test_a_quoted_question_is_never_asserted_into_the_fact_store():
+    """The leak itself, not just the classification."""
+    grounder = Grounder()
+    before = len(grounder.facts)
+    grounder.ground('"What is the Bernoulli equation?"')
+    assert len(grounder.facts) == before, "a held-out question wrote itself into the fact store"
