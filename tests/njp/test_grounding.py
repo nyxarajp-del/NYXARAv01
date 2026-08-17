@@ -310,3 +310,43 @@ def test_the_unparsed_count_survives_a_round_trip():
     revived = Grounder()
     revived.load_dict(grounder.to_dict())
     assert revived.stats()["unparsed"] == grounder.stats()["unparsed"]
+
+
+# --------------------------------------------------------------------------- #
+# A list with no kind-noun to key on
+# --------------------------------------------------------------------------- #
+def test_a_bare_list_is_extracted_even_without_a_kind_noun():
+    """`_ENUMERATION` needs "the N types/parts of X are ..."; most corpus lists have no such noun.
+
+    Measured over 595 corpus answers that extracted nothing, this shape accounts for 30 of them —
+    5%, and it was the only candidate pattern of three tried worth more than a rounding error
+    ("X is an example of Y" reached 0.2%). Enumerations matter out of proportion to their count
+    because they attach several objects to *one* subject, which is the evidence `njp.core` needs
+    to induce a role and `njp.concepts` needs to find an invariant.
+    """
+    grounder = Grounder()
+    triples = grounder.ground("Three materials used to build bridges are steel, concrete, "
+                              "and timber.").triples
+    objects = {t.object.lower() for t in triples}
+    assert {"steel", "concrete", "timber"} <= objects
+    assert len({t.subject for t in triples}) == 1, "a list must hang off one subject"
+
+
+def test_a_list_of_adjectives_is_not_an_enumeration():
+    """Splitting a description produces claims that are each false on their own.
+
+    "The most effective business reports are concise, well-structured and relevant" is one claim
+    about a kind, not three members of it.
+    """
+    grounder = Grounder()
+    got = grounder.ground("The most effective business reports are concise, well-structured, "
+                          "and relevant.").triples
+    assert not [t for t in got if t.source == "enumeration"]
+
+
+def test_a_list_whose_subject_names_nothing_is_refused():
+    """"Here are a few tips ..." parses perfectly and its subject is not an entity."""
+    grounder = Grounder()
+    got = grounder.ground("Here are a few tips that help you, stay organized and be "
+                          "productive.").triples
+    assert not [t for t in got if t.source == "enumeration"]

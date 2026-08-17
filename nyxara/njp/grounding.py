@@ -560,6 +560,43 @@ _COMPOSITION = re.compile(
     r"^(?P<s>.+?)\s+(?:consists?\s+of|is\s+composed\s+of|is\s+made\s+up\s+of|comprises?)\s+"
     r"(?P<list>.+)$", re.IGNORECASE)
 
+# "Three materials used to build bridges are steel, concrete and timber."
+#
+# The same list shape without a kind-noun to key on, which `_ENUMERATION` requires. Measured over
+# 595 corpus answers that extracted nothing, this catches 30 of them — 5%, and the only candidate
+# pattern out of three tried that was worth more than a rounding error ("X is an example of Y"
+# reached 0.2%). That is the honest size of what more patterns can buy here: 58% of extraction
+# failures have no copula at all, because they are stories, code, poems and instructions.
+_BARE_ENUMERATION = re.compile(
+    r"^(?P<s>[^,.;:]{3,70}?)\s+are\s+(?P<list>[^.;]{5,}?,[^.;]{3,}?\band\b[^.;]{2,})\.?$",
+    re.IGNORECASE)
+
+# Subjects that name nothing. "Here are a few tips for working from home" parses as a perfect
+# enumeration whose subject is "Here", and storing that attaches a list to a word that is not an
+# entity — which is how a fact store fills up with rows nothing can ever retrieve.
+_EMPTY_SUBJECTS = frozenset({
+    "here", "there", "these", "those", "this", "that", "it", "they", "some", "others",
+    "the following", "below", "above", "examples",
+})
+
+# An item list whose members are adjectives is a description, not an enumeration of things.
+# "The most effective business reports are concise, well-structured, and contain relevant data"
+# is one claim about a kind, not three members of it, and splitting it produces three facts that
+# are each false on their own.
+#
+# Suffix-based and therefore approximate — there is no part-of-speech tagger in this package.
+# The endings are the ones the corpus actually produced ("concise", "well-structured",
+# "relevant"), plus a small hand-list for the common adjectives that no suffix catches.
+_ADJECTIVAL_ITEM = re.compile(
+    r"^(?:very|highly|well|more|most|less|least)[- ]\w+$"
+    r"|^\w+(?:ive|ous|ful|able|ible|ent|ant|ary|ic|al|less|ish|ise|ize|ised|ized|ed|ing)$",
+    re.IGNORECASE)
+_ADJECTIVAL_WORDS = frozenset({
+    "concise", "clear", "brief", "short", "long", "large", "small", "simple", "complex",
+    "accurate", "precise", "fast", "slow", "cheap", "easy", "hard", "good", "bad", "safe",
+    "clean", "strong", "weak", "high", "low", "new", "old", "true", "false",
+})
+
 # The kind-noun a list is a list *of*, folded onto one predicate so "types" and "kinds" of the
 # same subject accumulate into one relation instead of two that never meet.
 _KIND_PREDICATE: Dict[str, str] = {
@@ -1513,12 +1550,27 @@ class Grounder:
             predicate = _KIND_PREDICATE.get((match.group("kind") or "").lower(), "has_kind")
         else:
             match = _COMPOSITION.match(clause)
-            if match is None:
-                return out
             predicate = "consists_of"
+            if match is None:
+                match = _BARE_ENUMERATION.match(clause)
+                if match is None:
+                    return out
+                # A list with no kind-noun says its members are *of* the subject and nothing more
+                # specific, so it lands on the same relation an "examples of X" list would.
+                predicate = "has_example"
         subject = self.resolve(match.group("s") or "")
         items = _list_items(match.group("list") or "")
         if not subject or len(items) < 2:
+            return out
+        if subject.strip().lower() in _EMPTY_SUBJECTS:
+            return out
+        # A list of adjectives describes the subject rather than enumerating it. Splitting
+        # "concise, well-structured and accurate" into three members produces three claims that
+        # are each false as stated.
+        adjectival = sum(1 for i in items
+                         if _ADJECTIVAL_ITEM.match(i.strip())
+                         or i.strip().lower() in _ADJECTIVAL_WORDS)
+        if adjectival * 2 >= len(items):
             return out
         for item in items:
             out.append(GroundedTriple(
