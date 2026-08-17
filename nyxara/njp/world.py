@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Event", "CausalLink", "Explanation", "Expectation", "Counterfactual", "WorldView"]
 

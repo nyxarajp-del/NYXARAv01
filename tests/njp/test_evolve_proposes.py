@@ -8,7 +8,6 @@ self-rewriting loop was dead code that reported "no safe edit found" forever.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

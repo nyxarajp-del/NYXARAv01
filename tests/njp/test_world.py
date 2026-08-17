@@ -6,7 +6,6 @@ follows, and what would have happened otherwise.
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.world import Event, WorldView

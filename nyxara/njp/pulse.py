@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 __all__ = ["PulseReport", "PulseEngine"]

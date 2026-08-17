@@ -809,9 +809,15 @@ class ConceptGenesis:
             # restructured nothing. What is wanted is the *smallest* change to the conditions
             # that actually closes this gap and does not cost compression elsewhere. That is a
             # bounded search, and it is short enough to run inside a turn.
-            # The band a repair may move the knobs within, around what the Master configured.
-            share_lo, share_hi = 0.6 * self._base_share, min(0.98, 1.6 * self._base_share)
-            sim_lo, sim_hi = 0.5 * self._base_similarity, 1.5 * self._base_similarity
+            # How far a repair may move each knob, around what the Master configured.
+            #
+            # One bound each, and only one, because each branch below moves its knob in a single
+            # direction: tightening raises `share` toward its ceiling, loosening lowers
+            # `similarity` toward its floor. The opposite bounds were computed and never read —
+            # a symmetric-looking declaration for an asymmetric search, which reads as though a
+            # direction were missing rather than deliberately absent.
+            share_hi = min(0.98, 1.6 * self._base_share)
+            sim_lo = 0.5 * self._base_similarity
 
             candidates: List[Tuple[float, float]] = []
             loosening = coverage.gap == "unknown"

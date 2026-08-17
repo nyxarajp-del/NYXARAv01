@@ -14,7 +14,6 @@ refutation were corroboration.
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.adversary import AttackKind, SelfAttacker, Stance
 from nyxara.njp.beliefs import BeliefLedger

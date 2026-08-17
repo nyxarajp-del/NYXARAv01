@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field as dc_field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["Stage", "StageResult", "Report", "Curriculum", "STAGES"]
 

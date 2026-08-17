@@ -39,7 +39,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = ["Rung", "Hypothesis", "ProblemState", "Conclusion", "Reasoner"]
 

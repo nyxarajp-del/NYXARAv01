@@ -7,7 +7,7 @@ plan rather than a confident one, and that the curriculum cannot be climbed out 
 
 from __future__ import annotations
 
-from nyxara.njp.agency import Agent, Plan
+from nyxara.njp.agency import Agent
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.curriculum import STAGES, Curriculum
 from nyxara.njp.predictive import PredictiveWorldModel, WorldState

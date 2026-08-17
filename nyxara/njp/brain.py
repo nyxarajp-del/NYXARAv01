@@ -41,13 +41,13 @@ import threading
 import time
 from dataclasses import dataclass, field
 from dataclasses import field as dc_field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.ledger import Ledger
 from nyxara.njp.manifold import Prediction
 from nyxara.njp.soulsync import Reading, SoulSync
-from nyxara.njp.truth import Judgement, TruthGauntlet, Verdict
+from nyxara.njp.truth import Judgement, TruthGauntlet
 
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 

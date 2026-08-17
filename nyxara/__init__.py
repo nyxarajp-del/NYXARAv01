@@ -56,8 +56,17 @@ from nyxara.growth.scientist import (
     Hypothesis,
     InvestigationReport,
     Scientist,
-    Verdict,
 )
+# Two different classes were both exported here as `Verdict`, and the later import silently won:
+# `nyxara.Verdict` resolved to `njp.truth.Verdict` (ABSTAINED / CONJECTURE / ESTABLISHED /
+# SUPPORTED / REFUTED) while the scientist's — a str subclass with INCONCLUSIVE — was reachable
+# from the package root not at all. Nothing outside imported either from here, so the collision
+# had cost nobody anything yet; it was still a name in the public surface meaning whichever of
+# two things import order happened to leave standing.
+#
+# `Verdict` keeps resolving to the gauntlet's, because that is what it already meant. The
+# scientist's is exported under its own name rather than dropped.
+from nyxara.growth.scientist import Verdict as ScientistVerdict
 from nyxara.growth.skill_memory import SkillMemory
 from nyxara.growth.vsa_reasoner import VSAReasoner, VSAResult, VSAVerdict
 from nyxara.growth.causal_code_engine import (
@@ -299,7 +308,7 @@ __all__ = [
     "Hypothesis",
     "Conclusion",
     "InvestigationReport",
-    "Verdict",
+    "ScientistVerdict",
     # active curiosity (ask her own WHY / WHAT-IF, self-design the experiment)
     "ActiveCuriosity",
     "CuriosityFinding",
