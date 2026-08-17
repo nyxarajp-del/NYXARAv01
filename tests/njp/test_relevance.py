@@ -269,3 +269,31 @@ def test_the_recall_dataclass_has_the_fields_the_brain_reads():
     rec = Recall()
     for field in ("hit", "score", "decided", "associated", "considered"):
         assert hasattr(rec, field), f"Recall lost {field}, which brain._recall_through_gate reads"
+
+
+def test_she_can_repeat_what_she_was_actually_taught():
+    """Being unable to answer the question you were just taught is a broken memory, not caution.
+
+    Measured over 200 taught corpus pairs, she answered 8. The fix is not fuzzy recall — that was
+    tried and refused, because it turned three honest abstentions into three confident wrong
+    answers. This is an exact lookup on the normalised question text: two different questions
+    give two different keys, so it cannot return something merely *near* what was asked.
+
+    In-sample 4.0% -> 90.5%; held-out coverage unchanged at 0.000, which is the correct answer
+    for questions she was never taught.
+    """
+    brain = NJPBrain()
+    brain.memory.remember("k1", "Overfitting is when a model memorises its training data.",
+                          kind="fact", cue="What is overfitting?")
+    assert "memorises" in brain.think("What is overfitting?").answer
+    # Case and spacing are the same question; nothing else is.
+    assert "memorises" in brain.think("what is  overfitting?").answer
+
+
+def test_a_question_she_was_never_taught_still_gets_silence():
+    """The whole safety argument: exact means exact."""
+    brain = NJPBrain()
+    brain.memory.remember("k1", "Overfitting is when a model memorises its training data.",
+                          kind="fact", cue="What is overfitting?")
+    assert not brain.think("What is a neural network?").answer
+    assert not brain.think("Give me an example of irony?").answer

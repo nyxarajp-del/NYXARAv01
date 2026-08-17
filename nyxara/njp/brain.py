@@ -2049,6 +2049,19 @@ class NJPBrain:
             # `_recall_through_gate`, which really was dead), and a question NJP cannot ground is
             # still answered with silence rather than with the nearest thing in the store.
             if getattr(grounding, "is_question", False):
+                # One thing is safe to answer from memory here, and only one: a question she was
+                # taught *this exact question*. `recall_cue` is a dict lookup on the normalised
+                # question text, so it cannot return something merely near what was asked — which
+                # is the whole reason the fuzzy path was refused above.
+                #
+                # Without it she could not answer the questions she had just studied: measured
+                # over 200 taught pairs, 8 answered. That is not caution, it is a hole — being
+                # unable to repeat what you were told is a failure of memory, not a virtue of
+                # abstention. Held-out questions were never taught, find nothing, and still
+                # abstain, which is the correct answer for them.
+                taught = self._answer_as_taught(thought)
+                if taught:
+                    return taught
                 return ""
 
             bits: List[str] = []
@@ -2178,6 +2191,32 @@ class NJPBrain:
                     "Abhi kuch khaas nahi kar rahi — sun rahi hoon.")
         head = "Main theek hoon Master. " if mood else "Abhi: "
         return head + "; ".join(bits[:3]) + f" — {self.turns} turns."
+
+    def _answer_as_taught(self, thought: NJPThought) -> str:
+        """The stored answer to *this exact question*, if she was ever taught one.
+
+        Exact, and that is the entire safety argument. Two different questions normalise to two
+        different keys, so this can never hand back a loosely-related memory as though it were an
+        answer — the failure that made similarity-based recall unusable here, measured at three
+        confident wrong answers for three honest abstentions.
+
+        This is memorisation, and memorisation is the bottom rung rather than a shameful one:
+        `eval/intelligence.py` scores it as its own stage, and a brain that cannot repeat what it
+        was told an hour ago has a broken memory, not high standards.
+        """
+        try:
+            memory = getattr(self, "memory", None)
+            lookup = getattr(memory, "recall_cue", None)
+            if not callable(lookup):
+                return ""
+            trace = lookup(thought.stimulus)
+            text = str(getattr(trace, "text", "") or "").strip()
+            if not text:
+                return ""
+            thought.recalled = "taught under this exact question"
+            return text[:1000]
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _recall_through_gate(self, thought: NJPThought, act: Any,
                             bits: List[str]) -> None:
