@@ -267,3 +267,35 @@ def test_the_pulse_queue_has_no_feeder_and_says_so():
 
     assert "out-of-turn" in (PulseEngine.submit.__doc__ or "")
     assert "must not gain that one" in (PulseEngine.submit.__doc__ or "")
+
+
+def test_the_always_on_daemon_beats_njps_pulse():
+    """`brain.tick()` was reachable only from an HTTP poke, and this file never mentioned njp.
+
+    The cost was not the pulse. It was everything downstream: `evolve.beat()` runs only from the
+    pulse, `forge.MetamorphicCompiler` only from `evolve.accelerate()`, and
+    `autopoiesis.AutopoieticRewriter` only from the forge — three organs, written and tested,
+    behind a door nothing opened on its own.
+    """
+    from nyxara.kernel.autonomic import AutonomicLoop
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    core = NyxaraCore()
+    assert core.njp is not None, "no njp brain; this test cannot say anything"
+    before = core.njp.pulse.beats
+    loop = AutonomicLoop(core=core)
+    loop.run_for(3)
+    assert loop.njp_pulses == 3
+    assert core.njp.pulse.beats > before, "the daemon ran and the pulse never beat"
+
+
+def test_the_pulse_hook_survives_a_core_without_njp():
+    """Fail-soft like every other hook in that loop: a pulse is a capability, never fatal."""
+    from nyxara.kernel.autonomic import AutonomicLoop
+
+    class Bare:
+        oversight = None
+
+    loop = AutonomicLoop(core=Bare())
+    loop._maybe_njp_pulse()
+    assert loop.njp_pulses == 0
