@@ -528,10 +528,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 # --------------------------------------------------------------------------- #
 # The half a corpus of instances cannot teach
 # --------------------------------------------------------------------------- #
@@ -611,3 +607,25 @@ def seed_kinds(brain: Any, path: Any = DEFAULT_KINDS) -> SeedReport:
         return report
     finally:
         report.ms = (time.perf_counter() - t0) * 1000.0
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+# --------------------------------------------------------------------------- #
+#
+# This guard belongs at the *end* of the module, below every name `main` reaches.
+#
+# It used to sit directly under `main` (above `SeedReport`/`seed_kinds`), and under
+# `python -m nyxara.njp.study` that is not a style question — it is a crash. `-m` executes the
+# module body top to bottom, so the guard fired while the body was still running and `main()` was
+# called before `seed_kinds` had been bound:
+#
+#     File "nyxara/njp/study.py", line 336, in study
+#         self.seeded = seed_kinds(self.brain)
+#     NameError: name 'seed_kinds' is not defined
+#
+# Importing the module as a library ran the whole body first, so `seed_kinds` existed and every
+# test passed. That is exactly why the suite never caught it, and why the regression test for this
+# invokes the CLI through `subprocess` rather than by importing `main`.
+if __name__ == "__main__":
+    raise SystemExit(main())

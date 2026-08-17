@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import gzip
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
+from nyxara.njp import study
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.study import DEFAULT_CORPUS, Corpus, Pair, Tutor, _content, _f1
 
@@ -160,3 +164,46 @@ def test_precision_and_coverage_are_reported_separately():
     report = Tutor(NJPBrain()).exam(PAIRS)
     d = report.to_dict()
     assert "coverage" in d and "precision_when_answered" in d and "accuracy_overall" in d
+
+
+# --------------------------------------------------------------------------- #
+# The entry point, invoked the way a user invokes it
+# --------------------------------------------------------------------------- #
+def test_the_cli_runs_as_a_module_and_not_only_as_an_import():
+    """``python -m nyxara.njp.study`` must complete. Importing ``main`` does not prove that.
+
+    The regression: ``seed_kinds`` was defined *below* ``if __name__ == "__main__"``, so under
+    ``-m`` the guard fired while the module body was still executing and ``Tutor.study`` raised
+    ``NameError: name 'seed_kinds' is not defined`` on its first step. Importing the module as a
+    library ran the whole body first, which is why every existing test passed and the only
+    training command in the repo had never completed a run.
+
+    So this test must spawn the interpreter. Calling ``main([...])`` in-process would import the
+    module and reproduce nothing.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", "nyxara.njp.study", "--limit", "40", "--exam", "4"],
+        capture_output=True, text=True, timeout=600,
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    assert proc.returncode == 0, f"CLI exited {proc.returncode}\nstderr:\n{proc.stderr[-2000:]}"
+    assert "NameError" not in proc.stderr, proc.stderr[-2000:]
+    assert "Traceback" not in proc.stderr, proc.stderr[-2000:]
+    # It must have got past seeding and through both exams, not merely exited cleanly.
+    assert "studying" in proc.stdout
+    assert "exam AFTER studying" in proc.stdout
+
+
+def test_every_name_the_entry_point_needs_is_bound_before_the_guard():
+    """The structural form of the same bug, checked without spawning anything.
+
+    ``main`` is only reachable from the guard, so any module-level name it can reach at runtime
+    must be defined above that guard. This catches a re-introduction the moment someone appends a
+    new helper to the end of the file and wires it into ``Tutor``.
+    """
+    source = Path(study.__file__).read_text(encoding="utf-8")
+    guard = source.index('if __name__ == "__main__":')
+    for name in ("seed_kinds", "SeedReport", "Tutor", "Corpus", "main"):
+        defined = max(source.rfind(f"\ndef {name}("), source.rfind(f"\nclass {name}"))
+        assert defined != -1, f"{name} is not defined at module level"
+        assert defined < guard, f"{name} is defined below the __main__ guard — `-m` will NameError"
