@@ -188,6 +188,9 @@ class NJPThought:
     # different epistemic objects: a derived answer is defeasible however confident it reads, and
     # a caller that cannot tell it from a stated fact will eventually state it as one.
     derivation: Any = None
+    #: The genome's record of this turn's reasoning, kept so the outcome can be graded against
+    #: the *shape* that produced it once reality says whether it was right.
+    trace: Any = None
     # What the Master was *doing* with this turn, and what each recalled memory scored against
     # it. Carried so a reply that reached for something irrelevant is visible from outside rather
     # than having to be inferred from the reply itself.
@@ -273,6 +276,7 @@ class NJPBrain:
         self.discoverer = self._build_discoverer(c)
         self.reasoner = self._build_reasoner(c)
         self.self_model = self._build_self_model(c)
+        self.genome = self._build_genome(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -483,6 +487,16 @@ class NJPBrain:
                             enough=self._cfg("reason_enough", 0.75),
                             max_rung=self._cfg("reason_max_rung", "proof"))
         except Exception:  # noqa: BLE001 — she answers associatively, at one depth, as before
+            return None
+
+    def _build_genome(self, c: Any) -> Any:
+        """The record of how she reasons, so a shape she keeps re-deriving can be seen."""
+        if not self._gate("genome", True):
+            return None
+        try:
+            from nyxara.njp.genome import ReasoningGenome
+            return ReasoningGenome()
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_self_model(self, c: Any) -> Any:
@@ -1846,6 +1860,13 @@ class NJPBrain:
                         context["derivable"] = True
                         context["derived"] = derived.answer
                         thought.derivation = derived
+                        # Keep the *shape* of the reasoning, not just its answer. Until now the
+                        # derivation survived one turn and was dropped, so two identical chains
+                        # through different subjects were never seen together and nothing could
+                        # notice she was re-deriving the same form over and over.
+                        if self.genome is not None:
+                            thought.trace = self.genome.record(
+                                derived, question=thought.stimulus)
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
                 if solution.assertable and solution.answer:
@@ -2316,6 +2337,9 @@ class NJPBrain:
                 if self.self_model is not None and derivation is not None:
                     from nyxara.njp.selfmodel import mode_of
                     self.self_model.observe(mode_of(derivation), float(correct))
+                if self.genome is not None:
+                    self.genome.grade(getattr(thought, "trace", None),
+                                      correct=float(correct) >= 0.5)
                 if self.meta is not None:
                     # Every arm that was spent this turn is graded, not just the one. Rewarding
                     # `settle_steps` alone meant the other two knobs accumulated choices and
@@ -2453,7 +2477,8 @@ class NJPBrain:
                             ("pulse", self.pulse), ("grounding", self.grounder),
                             ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("self_model", self.self_model), ("genome", self.genome),
+                            ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
                             ("attention", self.attention), ("readout", self.readout),
                             ("loop", self.loop),
@@ -2490,7 +2515,8 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("self_model", self.self_model), ("genome", self.genome),
+                            ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
@@ -2534,6 +2560,8 @@ class NJPBrain:
                 self.discoverer.load_dict(d["discover"])
             if d.get("self_model") and self.self_model is not None:
                 self.self_model.load_dict(d["self_model"])
+            if d.get("genome") and self.genome is not None:
+                self.genome.load_dict(d["genome"])
             if d.get("meta") and self.meta is not None:
                 self.meta.load_dict(d["meta"])
             if d.get("goals") and self.goals is not None:
