@@ -262,3 +262,29 @@ def test_the_word_explain_inside_a_statement_is_not_an_ask():
     brain = NJPBrain()
     thought = brain.think("A good teacher will explain the topic twice.")
     assert not thought.percept.grounding.is_question
+
+
+# --------------------------------------------------------------------------- #
+# Named is not the same as being what the question is about
+# --------------------------------------------------------------------------- #
+def test_a_common_noun_fully_named_is_not_thereby_the_topic():
+    """Seeding 137 kind facts took exam answers 25 -> 44 with correct stuck at 6: all 19 extra
+    were wrong, because a one-word kind like `group` or `reaction` is fully named by any question
+    containing the word."""
+    grounder = Grounder()
+    grounder.ground("A group is a collection of things")
+    assert not grounder.answer_by_recall(
+        "What is a protecting group in nucleoside synthesis?").answered
+
+
+def test_a_short_question_naming_its_entity_completely_still_answers():
+    """The other half. Normalising only by the question punishes this for asking."""
+    grounder = Grounder()
+    grounder.ground("Deep learning is a subset of machine learning that uses neural networks.")
+    assert grounder.answer_by_recall("What is deep learning?").answered
+
+
+def test_a_kind_answers_a_question_that_is_about_the_kind():
+    grounder = Grounder()
+    grounder.ground("An animal needs food")
+    assert grounder.answer("What does an animal need?").answered

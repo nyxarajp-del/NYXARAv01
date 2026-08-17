@@ -2065,8 +2065,21 @@ class Grounder:
             shared = parts & tokens
             if not shared:
                 continue
-            score = len(shared) / len(parts)
-            if score >= floor:
+            named = len(shared) / len(parts)
+            # Being *named* is not the same as being what the question is *about*, and a
+            # one-word subject makes the difference stark: "group" is fully named by "what is a
+            # protecting group in nucleoside synthesis?" and is plainly not its topic. So the
+            # share of the question the subject accounts for is a second factor.
+            #
+            # Both are needed and neither alone is right. Normalising only by the subject lets a
+            # common noun match any question containing it — measured when 137 kind facts were
+            # seeded: exam answers went 25 to 44 and correct answers stayed at 6, so all 19 extra
+            # were wrong. Normalising only by the question punishes "what is deep learning?" for
+            # the words it spends asking, which is what the subject-normalised form was chosen to
+            # avoid in the first place.
+            topical = len(shared) / max(1, len(tokens))
+            score = named * (topical ** 0.5)
+            if named >= floor and score >= floor * 0.5:
                 scores[subject] = score
         return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:4]
 
