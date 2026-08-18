@@ -295,21 +295,56 @@ class LedgerSource(Source):
             return None
 
 
+#: Provenance that means *she made this up rather than met it*. A reading from one of these can
+#: be recorded and reported and can hold a claim at CONJECTURE; it can never corroborate. Matched
+#: on the leading segment of a source tag, so ``"dream:turn-9"`` and ``"simulation"`` both land.
+SIMULATED_ORIGINS = frozenset({
+    "simulation", "simulated", "dream", "imagined", "imagination",
+    "rollout", "counterfactual", "hypothetical", "selfplay", "synthetic",
+})
+
+
+def _origin(tag: Any) -> str:
+    """The provenance of one observation, normalised to its leading segment."""
+    text = str(tag or "").strip().lower()
+    return text.split(":", 1)[0].split("/", 1)[0]
+
+
 class ObservationSource(Source):
-    """Independent recorded observations bearing on the claim."""
+    """Independent recorded observations bearing on the claim.
+
+    **Independence is counted by origin, not by row**, and that is the whole of this class. The
+    count used to be over matching strings, which made a bulk-loaded corpus into a corroboration
+    machine: a quarter-million ConceptNet rows in the fact store are not a quarter-million
+    witnesses, they are one source read a quarter of a million times. `EvidenceKind.CONSENSUS`
+    already states the rule — *"agreement between sources that share an origin is one source
+    counted many times, which is exactly how a confident error propagates"* — and this is that
+    rule applied where the rows actually arrive.
+
+    Observations may be plain strings (origin unknown, counted as one anonymous source) or
+    ``(text, origin)`` pairs. An origin in :data:`SIMULATED_ORIGINS` marks the whole reading
+    ``simulated``, which :meth:`TruthGauntlet.judge` then refuses to count toward ``min_sources``.
+    """
 
     name = "observation"
     hard = False
 
-    def __init__(self, observations: Optional[Sequence[str]] = None, *,
+    def __init__(self, observations: Optional[Sequence[Any]] = None, *,
                  min_overlap: float = 0.34) -> None:
-        self.observations: List[str] = list(observations or [])
+        self.observations: List[Any] = list(observations or [])
         self.min_overlap = float(min_overlap)
 
     @staticmethod
     def _tok(text: str) -> set:
         return {w for w in "".join(c if c.isalnum() else " "
                                    for c in str(text or "").lower()).split() if len(w) > 2}
+
+    @staticmethod
+    def _split(item: Any) -> tuple:
+        """One observation as ``(text, origin)``. A bare string has no stated origin."""
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            return str(item[0] or ""), _origin(item[1])
+        return str(item or ""), ""
 
     def check(self, claim: str, *, context: Any = None) -> Optional[Evidence]:
         try:
@@ -319,19 +354,36 @@ class ObservationSource(Source):
             want = self._tok(claim)
             if not want or not pool:
                 return None
-            best, hits = 0.0, 0
-            for obs in pool:
-                have = self._tok(obs)
+            best = 0.0
+            origins: set = set()
+            simulated_origins: set = set()
+            hits = 0
+            for item in pool:
+                text, origin = self._split(item)
+                have = self._tok(text)
                 if not have:
                     continue
                 score = len(want & have) / float(len(want | have))
-                if score >= self.min_overlap:
-                    hits += 1
-                    best = max(best, score)
+                if score < self.min_overlap:
+                    continue
+                hits += 1
+                best = max(best, score)
+                if origin in SIMULATED_ORIGINS:
+                    simulated_origins.add(origin)
+                else:
+                    origins.add(origin)
             if not hits:
                 return None
+            # Real origins decide the weight; a reading with none of them is simulated through
+            # and through, and says so rather than arriving as a weaker fact.
+            simulated = not origins and bool(simulated_origins)
+            independent = len(origins) or len(simulated_origins)
+            detail = (f"{hits} matching observation(s) from {independent} independent "
+                      f"source(s), best overlap {best:.2f}")
+            if simulated_origins:
+                detail += f"; simulated: {', '.join(sorted(simulated_origins))}"
             return Evidence(source=self.name, supports=True, weight=min(1.0, best),
-                            detail=f"{hits} corroborating observation(s), best overlap {best:.2f}")
+                            simulated=simulated, detail=detail)
         except Exception:  # noqa: BLE001
             return None
 

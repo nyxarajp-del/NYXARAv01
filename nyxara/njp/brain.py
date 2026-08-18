@@ -251,7 +251,11 @@ class NJPBrain:
         # What the gauntlet reads off this brain when it judges a claim. Refreshed per turn by
         # `_prepare_evidence`; both are empty between turns, which is why an ungrounded claim
         # gets no support rather than stale support from a previous one.
-        self.observations: List[str] = []
+        # `(text, source)` pairs, not bare strings. The source is what makes an observation
+        # *independent*: `truth.ObservationSource` counts origins rather than rows, so a corpus
+        # cannot corroborate itself once per row, and an origin she imagined cannot corroborate
+        # at all.
+        self.observations: List[Any] = []
         self.holdout: List[Any] = []
         # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
         # which this one does — so three threads call think() on this same object at once. A
@@ -1844,8 +1848,10 @@ class NJPBrain:
                     # "independent recorded observation" is; the rendered triple is her own
                     # paraphrase of it, and it also overlaps a short answer far worse — "Jay"
                     # against "Master has_name Jay" scores 0.33 and misses the floor by a hair.
-                    self.observations.append(str(triple.text or "").strip() or
-                                             f"{triple.subject} {triple.predicate} {triple.object}")
+                    self.observations.append(
+                        (str(triple.text or "").strip()
+                         or f"{triple.subject} {triple.predicate} {triple.object}",
+                         str(getattr(triple, "source", "") or "")))
 
             # The held-out half: other assertions of whatever this turn is actually about.
             for triple in mine:

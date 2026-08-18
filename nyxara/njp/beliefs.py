@@ -72,15 +72,30 @@ class EvidenceKind:
     TESTIMONY = "testimony"         # the Master said so
     INFERENCE = "inference"         # it follows from other beliefs
     CONSENSUS = "consensus"         # several sources agree — the weakest, and deliberately so
+    SIMULATED = "simulated"         # she imagined it. Never a reason *for* anything
 
     # A hard reason can establish a belief on its own; a soft one can only ever corroborate.
     # Consensus is soft *because* it is popular: agreement between sources that share an origin
     # is one source counted many times, which is exactly how a confident error propagates.
     HARD = frozenset({PROOF, OBSERVATION, PREDICTION})
+
+    # Simulation is not the bottom of the ordering, it is outside it. Every other kind is a
+    # reading of the world at some remove; a simulated one is a reading of her own model, so
+    # counting it — at any weight — closes the loop where she imagines a result, stores it, and
+    # the stored result corroborates the next imagining. More compute then buys more certainty
+    # and no more truth. `weight_of` returns 0.0 for it and `supporting` refuses it outright,
+    # which is a structural rule rather than a small number, because a small number accumulates.
+    NEVER_SUPPORTS = frozenset({SIMULATED})
     WEIGHTS: Dict[str, float] = {
         PROOF: 1.0, OBSERVATION: 0.85, PREDICTION: 0.8,
         TESTIMONY: 0.6, INFERENCE: 0.45, CONSENSUS: 0.25,
+        SIMULATED: 0.0,
     }
+
+    @classmethod
+    def supporting(cls, kind: str) -> bool:
+        """May a reason of this kind count *for* a belief at all?"""
+        return str(kind) not in cls.NEVER_SUPPORTS
 
 
 @dataclass
@@ -159,10 +174,15 @@ class Belief:
         ten pieces of testimony are worth more than one and are still not a proof. The gap
         between this and :attr:`confidence` is what :meth:`BeliefLedger.audit` looks for.
         """
-        if not self.evidence:
+        # Simulated reasons are dropped here rather than weighted at zero. The zero would do the
+        # same arithmetic today and would stop doing it the moment someone decided a dream was
+        # worth 0.05 — and a small number accumulates, which is the whole failure. Filtering
+        # makes it a rule about *kind* instead of a fact about a table.
+        reasons = [e for e in self.evidence if EvidenceKind.supporting(e.kind)]
+        if not reasons:
             return 0.0
         total = 0.0
-        for i, support in enumerate(sorted(self.evidence, key=lambda e: -e.weight)):
+        for i, support in enumerate(sorted(reasons, key=lambda e: -e.weight)):
             total += support.weight * (0.6 ** i)
         earned = total / (1.0 + total) * 1.6
         ceiling = 0.97 if self.hard_support else self.SOFT_CEILING
