@@ -22,11 +22,23 @@ def test_soul_and_affect_are_wired():
 
 
 def test_owner_interaction_warms_affect():
+    """Serving the Master replenishes owner-connection — measured apart from the felt catch-up.
+
+    The first turn on a core does two things at once. It serves the Master, and it *bridges the
+    downtime*: `gap` is the time since her last recorded interaction, and anything over five
+    seconds ages her by it, depleting every drive by `decay_per_s * dt`. Across a suite that runs
+    for twenty minutes that gap is always large, so the first turn's depletion swamps one hello
+    and pressure comes out higher than it started — measured at 0.90 against 0.60.
+
+    That is the behaviour this repo wants: she should feel an absence. It just means the first
+    turn cannot be the measurement. So the gap is bridged first, and the claim is tested on the
+    turn after it, where serving is the only thing happening.
+    """
     nyx = NyxaraCore()
+    nyx.process("hello NYXARA", authority=Authority.OWNER)   # bridges the downtime
     before = nyx.affect.pressure("owner_connection")
-    nyx.process("hello NYXARA", authority=Authority.OWNER)
+    nyx.process("hello again NYXARA", authority=Authority.OWNER)
     after = nyx.affect.pressure("owner_connection")
-    # serving the Master replenishes owner-connection (pressure drops or stays satisfied)
     assert after <= before
 
 

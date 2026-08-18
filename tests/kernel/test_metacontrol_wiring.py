@@ -32,12 +32,22 @@ def test_core_builds_metacontrol_and_plans_before_reasoning():
 
 
 def test_outcome_recorded_every_turn():
+    """One turn, one sample — asserted as a delta, because a fresh core is not a blank one.
+
+    `MetacognitiveController` restores `metacontrol.json` on construction and saves it every
+    `persist_every` records (5 by default), and every test in a run shares one `NYXARA_HOME`. So
+    once any earlier test has taken enough turns, a newly-built core wakes up already calibrated
+    — measured at 15 samples after `test_autonomic.py`. That is the behaviour this repo wants in
+    production, where remembering how well-judged her own effort estimates were is the entire
+    point of persisting them, and it means the absolute count says nothing about wiring. The
+    increment does.
+    """
     nyx = NyxaraCore()
-    assert nyx.metacontrol.calibrator.samples == 0
+    start = nyx.metacontrol.calibrator.samples
     nyx.process(EASY)
-    assert nyx.metacontrol.calibrator.samples == 1
+    assert nyx.metacontrol.calibrator.samples == start + 1
     nyx.process("what is the capital of France?")
-    assert nyx.metacontrol.calibrator.samples == 2
+    assert nyx.metacontrol.calibrator.samples == start + 2
     # the consumed plan never leaks into the next turn
     assert nyx._last_compute_plan is None
 
