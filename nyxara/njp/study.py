@@ -718,6 +718,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="load --save if it exists, then keep training into it")
     parser.add_argument("--checkpoint-every", type=int, default=2000,
                         help="re-save the state every N pairs, so a long run cannot lose it all")
+    parser.add_argument("--ingest", default="",
+                        help="bulk-load a triple JSONL (e.g. ConceptNet) before studying")
+    parser.add_argument("--ingest-source", default="ingest",
+                        help="provenance tag written on every ingested fact")
+    parser.add_argument("--ingest-max", type=int, default=250_000,
+                        help="hard cap on facts taken from --ingest")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     from nyxara.njp.brain import NJPBrain
@@ -756,17 +762,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   max_chars=args.max_chars,
                   f1_threshold=args.f1_threshold)
 
-    print("\n— exam BEFORE studying (the control) —")
-    before = tutor.exam(exam_set, limit=args.exam)
-    print(json.dumps(before.to_dict(), indent=1))
-
-    print("\n— studying —")
-    started = time.perf_counter()
-
-    def _progress(n: int) -> None:
-        rate = (time.perf_counter() - started) / n * 1000.0
-        print(f"  {n}/{len(study_set)} pairs  ({rate:.0f} ms/pair)", flush=True)
-
     def _checkpoint(n: int) -> None:
         if not args.save:
             return
@@ -778,6 +773,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  CHECKPOINT FAILED at {n}: {exc}", flush=True)
             return
         print(f"  checkpoint at {n} → {args.save}", flush=True)
+
+    print("\n— exam BEFORE studying (the control) —")
+    before = tutor.exam(exam_set, limit=args.exam)
+    print(json.dumps(before.to_dict(), indent=1))
+
+    # Ingestion sits *between* two exams on purpose. Run before the control it would be part of
+    # the control, and the one thing worth knowing — whether a quarter-million external facts
+    # moved a held-out score by themselves — would be folded into the corpus result and
+    # unrecoverable. Three points make the attribution: fresh, after facts, after turns.
+    #
+    # Read `precision` rather than `accuracy` across them. Ingestion mechanically converts
+    # abstentions into answers, so coverage rises whatever it loaded; if `correct` does not rise
+    # with it, precision falls and the load added noise rather than knowledge.
+    if args.ingest:
+        from nyxara.njp.ingest import ingest_triples
+
+        print(f"\n— ingesting {args.ingest} —")
+        got = ingest_triples(brain, args.ingest, source=args.ingest_source,
+                             max_facts=args.ingest_max,
+                             checkpoint=_checkpoint, checkpoint_every=50_000)
+        print(json.dumps(got.to_dict(), indent=1))
+        if got.capped:
+            print(f"  CAPPED at {args.ingest_max} — the rest of the file was not read")
+        mid = tutor.exam(exam_set, limit=args.exam)
+        print(f"  after ingest: coverage {before.coverage:.3f} → {mid.coverage:.3f}   "
+              f"precision {before.precision:.3f} → {mid.precision:.3f}")
+
+    print("\n— studying —")
+    started = time.perf_counter()
+
+    def _progress(n: int) -> None:
+        rate = (time.perf_counter() - started) / n * 1000.0
+        print(f"  {n}/{len(study_set)} pairs  ({rate:.0f} ms/pair)", flush=True)
 
     report = tutor.study(study_set, progress=_progress, checkpoint=_checkpoint,
                          checkpoint_every=args.checkpoint_every)
