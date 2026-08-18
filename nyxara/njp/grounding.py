@@ -936,6 +936,24 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+(?:used\s+for|for)\??$", "purpose"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+known\s+for\??$", "known_for"),
 
+    # The two relations a commonsense corpus supplies most of, and the two that had no question
+    # form at all. Same read/write asymmetry as the causal block above, found the same way —
+    # by measuring instead of assuming: with `sparrow capable_of fly` in the store,
+    # `_read_question("what is sparrow capable of?")` returned `('sparrow capable of', 'is_a')`.
+    # The generic "what is X" below swallowed the whole tail as a subject, so the fact was
+    # stored, reachable by `_lookup`, reasoned over by the Core — and unaskable in English.
+    #
+    # They sit above that generic line for exactly that reason, and `has_property` deliberately
+    # does not claim "what is X like", which is a request for a comparison rather than for a
+    # property she holds.
+    (r"\bwhat\s+(?:can|could)\s+(?:an?\s+)?(?P<s>.+?)\s+do\b", "capable_of"),
+    (r"\bwhat\s+is\s+(?:an?\s+)?(?P<s>.+?)\s+capable\s+of\??$", "capable_of"),
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:properties|qualities|characteristics|features)\s+"
+     r"of\s+(?P<s>.+?)\??$", "has_property"),
+    # "sparrow kya kar sakta hai" — verb-final, the same question.
+    (r"^(?P<s>.+?)\s+(?:kya|क्या)\s+(?:kar\s+sakta|kar\s+sakti|कर\s+सकता|कर\s+सकती)\b",
+     "capable_of"),
+
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
     # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
     # one pattern covers every relation the fold table knows a verb for rather than needing a

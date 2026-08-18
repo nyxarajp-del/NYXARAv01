@@ -62,11 +62,34 @@ def test_the_standing_grant_still_frees_ordinary_autonomous_work():
     assert result.disposition is Disposition.ACT
 
 
-def test_the_waiver_is_recorded_in_the_gate_trace():
-    """A silently-waived gate is how this went unnoticed. Name the clause that was waived."""
+def test_the_gate_trace_is_never_silent_on_an_act():
+    """A silently-waived gate is how this went unnoticed, so the trace always says what happened.
+
+    It reads `result.gates`, not `result.meta` — `CycleResult` has never had a `meta` field, and
+    the assertion this replaces was reaching through `(result.meta or {})`, which is always `{}`
+    and made the whole check vacuous whichever way the gate went.
+    """
     core = _core()
     result = core.process("open the project notes", authority=Authority.AUTONOMOUS)
-    initiative = (result.meta or {}).get("gates", {}).get("initiative", "")
+    assert (result.gates or {}).get("initiative"), result.gates
+
+
+def test_a_waiver_names_the_clause_it_set_aside():
+    """The naming requirement, on a turn where a waiver is actually used.
+
+    An ordinary act does not exercise it: "open the project notes" clears governance outright, so
+    its basis is `cleared`, which `Governance.waivable` refuses — the same invariant the test
+    below states. Asserting a waiver on a cleared act asserted that `cleared` was waivable, which
+    contradicts it. So the case is built directly: a candidate under the confidence threshold,
+    which is one of the two clauses a standing grant may set aside.
+    """
+    core = _core()
+    shaky = Candidate(text="open the project notes", kind="act",
+                      capability=Capability.FS_READ, risk=RiskTier.LOW, reversible=True,
+                      confidence=0.05, belief=0.05, rationale="deliberately under the threshold")
+    gates: dict = {}
+    core._gate(shaky, Authority.AUTONOMOUS, gates)
+    initiative = gates.get("initiative", "")
     assert "sovereign-grant" in initiative and "(" in initiative, initiative
 
 
@@ -110,7 +133,7 @@ def test_a_broken_governor_does_not_block_the_turn():
     core = _core()
     core._initiative = lambda: (_ for _ in ()).throw(RuntimeError("governor is down"))
     result = core.process("open the project notes", authority=Authority.AUTONOMOUS)
-    assert "skipped" in (result.meta or {}).get("gates", {}).get("initiative", "")
+    assert "skipped" in (result.gates or {}).get("initiative", "")
 
 
 def test_a_conversational_reply_is_not_initiative_gated():

@@ -103,19 +103,23 @@ def test_every_emitted_predicate_is_one_the_package_can_use():
         "stored and never read")
 
 
-def test_the_two_weakest_relations_are_documented_rather_than_assumed():
-    """`capable_of` and `has_property` are kept for schema induction and are not question-reachable.
+def test_the_two_weakest_relations_are_now_askable_as_well_as_storable():
+    """`capable_of` and `has_property` are kept because schema induction needs them.
 
-    Measured, and the reason no affinity row was asserted on a guess: the gap is in the question
-    grammar, not in the affinity table. The fact is stored and `_lookup` finds it; what does not
-    exist is a pattern that reads an English question into that predicate.
+    They used to be storable and unaskable: measured, `_read_question("what is sparrow capable
+    of?")` returned `('sparrow capable of', 'is_a')`, because the generic "what is X" swallowed
+    the whole tail. The fact was in the store, `_lookup` found it, the Core reasoned over it, and
+    no English question reached it. That was a gap in the question grammar rather than in this
+    map — which is why no affinity row was ever asserted on a guess to paper over it — and it is
+    closed in `tests/njp/test_wiring_gaps.py`, where the four question forms are pinned.
     """
-    grounder = Grounder()
     from nyxara.njp.grounding import GroundedTriple
+
+    grounder = Grounder()
     grounder._assert(GroundedTriple(subject="sparrow", predicate="capable_of", object="fly",
                                     confidence=0.7, source="test"))
     assert [t.object for t in grounder._lookup("sparrow", "capable_of")] == ["fly"]
-    assert grounder._read_question("what is sparrow capable of?") == ("sparrow capable of", "is_a")
+    assert grounder._read_question("what is sparrow capable of?") == ("sparrow", "capable_of")
 
 
 def test_at_location_is_not_emitted_because_located_in_holds_one_value(dump):
