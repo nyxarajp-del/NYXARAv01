@@ -75,4 +75,13 @@ def test_cls_can_be_disabled_falls_back_to_single_learner(monkeypatch):
         assert isinstance(core.learner, Learner)
         assert not isinstance(core.learner, ComplementaryLearningSystem)
     finally:
+        # `undo()` first, and it is the whole fix. `monkeypatch` reverts its own env var when the
+        # test function returns — which is *after* this `finally`, so reloading here re-read
+        # `NYXARA_MEMORY__CLS_ENABLED=false` and cached it into the process-wide settings
+        # singleton. Every later test in the run then built a core with CLS off.
+        #
+        # It was invisible from here because this test passes either way. It surfaced two
+        # directories later, as `test_native_causal_wiring.py` reporting `last_trace_steps` of 0
+        # on a question that produces six steps in a clean process.
+        monkeypatch.undo()
         reload_settings()

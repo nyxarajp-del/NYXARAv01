@@ -62,9 +62,10 @@ result rather than breaking a turn.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Collection, Dict, List, Optional, Set, Tuple
 
 __all__ = [
     "Derivation", "Schema", "Transitivity",
@@ -107,6 +108,35 @@ _MIN_LINK_CONFIDENCE = 0.05
 def _norm(text: Any) -> str:
     """The one spelling rule for a name, so two paths to it reach the same key."""
     return str(text or "").strip().lower()
+
+
+#: How a question says "not that one". Everything after the marker, up to the end or a comma, is
+#: an answer she has already been given and is not being asked for again.
+#:
+#: This is a small grammar rather than a general one, and deliberately: the words below are the
+#: ones that exclude a *named value*. "instead of" is absent because it usually replaces the
+#: subject rather than the answer, and reading it as an exclusion would silently drop the wrong
+#: half of the question.
+_EXCLUSION = re.compile(
+    r"\b(?:besides|apart\s+from|other\s+than|except(?:\s+for)?|aside\s+from)\s+"
+    r"(?P<v>[^,?.;]+)", re.IGNORECASE)
+
+
+def _exclusions(question: str) -> Set[str]:
+    """Answers the question has ruled out, normalised the way a stored object is."""
+    try:
+        return {_norm(m.group("v")) for m in _EXCLUSION.finditer(str(question or ""))
+                if _norm(m.group("v"))}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _strip_exclusions(text: str) -> str:
+    """The question with its exclusion clause removed, so the subject parse is not polluted."""
+    try:
+        return _norm(_EXCLUSION.sub("", str(text or "")))
+    except Exception:  # noqa: BLE001
+        return _norm(text)
 
 
 def _fold(key: str, *, share: float) -> bool:
@@ -532,7 +562,8 @@ class CognitiveLearningCore:
     # ======================================================================= #
     # 2. PREDICT — direct, then composed, then generalised
     # ======================================================================= #
-    def predict(self, subject: str, predicate: str, *, allow_schema: bool = True) -> Derivation:
+    def predict(self, subject: str, predicate: str, *, allow_schema: bool = True,
+                exclude: Collection[str] = ()) -> Derivation:
         """What she expects ``subject``'s ``predicate`` to be, and how sure by what route.
 
         Ordered strictly by epistemic strength: a fact she was told beats a chain she inferred,
@@ -540,14 +571,27 @@ class CognitiveLearningCore:
         above it came back empty, so a derivation never overrides a fact — the failure mode this
         ordering exists to prevent is a confident generalisation burying the observation that
         contradicts it.
+
+        ``exclude`` names answers the question has already ruled out, and it is the one thing that
+        may push past a direct hit. Measured, with ``aag causes garmi`` and ``garmi causes pasina``
+        stored::
+
+            answer("what does aag cause besides garmi?")  ->  'garmi'   direct, 0.9
+            reach("aag", "causes")                        ->  'pasina'  composed
+
+        The ladder is right and the reading of the question was wrong: a stated fact *should* beat
+        a chain, but "besides garmi" says that fact is not what was asked for. Without the
+        exclusion the strongest rung answers with the very value the question excluded, and every
+        rung below it — the one that had the answer — never runs.
         """
         out = Derivation()
         try:
             subject, predicate = _norm(subject), self._predicate(predicate)
             if not subject or not predicate:
                 return out
+            barred = {_norm(x) for x in exclude if _norm(x)}
 
-            direct = self._direct(subject, predicate)
+            direct = self._direct(subject, predicate, exclude=barred)
             if direct.ok:
                 self.derived_direct += 1
                 return direct
@@ -580,12 +624,14 @@ class CognitiveLearningCore:
         except Exception:  # noqa: BLE001
             return out
 
-    def _direct(self, subject: str, predicate: str) -> Derivation:
-        """The fact itself, if she has it."""
+    def _direct(self, subject: str, predicate: str, *,
+                exclude: Collection[str] = ()) -> Derivation:
+        """The fact itself, if she has it and the question did not rule it out."""
         out = Derivation()
         try:
             triples = [t for t in self._facts().get((subject, predicate), [])
-                       if not getattr(t, "superseded", False)]
+                       if not getattr(t, "superseded", False)
+                       and _norm(str(getattr(t, "object", ""))) not in exclude]
             if not triples:
                 return out
             best = max(triples, key=lambda t: float(getattr(t, "confidence", 0.0) or 0.0))
@@ -1094,12 +1140,19 @@ class CognitiveLearningCore:
                 return out
             from nyxara.njp.grounding import _CAUSE_OF, _clean
             subject, predicate = reader(_clean(question).lower())
+            barred = _exclusions(question)
+            if barred:
+                # The question named answers it has already been given, so the parse has to lose
+                # them too — "what does aag cause besides garmi" parses its subject as
+                # "aag ... besides garmi" or leaves the tail attached, and predicting on that
+                # subject finds nothing at all.
+                subject = _strip_exclusions(subject)
             if predicate and subject:
                 if predicate == _CAUSE_OF:
                     # Asked from the effect end. Composition still applies, backwards.
                     derived = self._compose_inverse(_norm(subject))
                 else:
-                    derived = self.predict(subject, predicate)
+                    derived = self.predict(subject, predicate, exclude=barred)
                 if derived.ok:
                     self.answers_given += 1
                     return derived

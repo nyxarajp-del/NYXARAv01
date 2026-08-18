@@ -51,7 +51,6 @@ Pure standard library. No LLM anywhere in the path.
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import os
@@ -203,18 +202,16 @@ class Corpus:
 
     @staticmethod
     def _rows(path: Path) -> Iterator[Dict[str, Any]]:
-        opener = gzip.open if str(path).endswith(".gz") else open
-        with opener(path, "rt", encoding="utf-8") as fh:  # type: ignore[operator]
-            head = fh.read(1)
-            fh.seek(0)
-            if head == "[":                      # a plain JSON list
-                for row in json.load(fh):
-                    yield row
-                return
-            for line in fh:                      # JSON lines
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+        """Rows of the corpus file, with a corrupt line treated as fatal.
+
+        The format handling lives in :func:`nyxara.njp.ingest.stream_rows` so there is one
+        implementation of it rather than two. The error policy stays here because it genuinely
+        differs: a bad line in *this* corpus means the bundled file is wrong and the run should
+        stop, where a bad line in a harvested third-party dump means one row of a quarter-million
+        is wrong and the rest are fine.
+        """
+        from nyxara.njp.ingest import stream_rows
+        yield from stream_rows(path, on_error="raise")
 
     @classmethod
     def load(cls, path: Any = DEFAULT_CORPUS, *, limit: Optional[int] = None,
@@ -721,6 +718,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="load --save if it exists, then keep training into it")
     parser.add_argument("--checkpoint-every", type=int, default=2000,
                         help="re-save the state every N pairs, so a long run cannot lose it all")
+    parser.add_argument("--ingest", default="",
+                        help="bulk-load a triple JSONL (e.g. ConceptNet) before studying")
+    parser.add_argument("--ingest-source", default="ingest",
+                        help="provenance tag written on every ingested fact")
+    parser.add_argument("--ingest-max", type=int, default=250_000,
+                        help="hard cap on facts taken from --ingest")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     from nyxara.njp.brain import NJPBrain
@@ -759,17 +762,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   max_chars=args.max_chars,
                   f1_threshold=args.f1_threshold)
 
-    print("\n— exam BEFORE studying (the control) —")
-    before = tutor.exam(exam_set, limit=args.exam)
-    print(json.dumps(before.to_dict(), indent=1))
-
-    print("\n— studying —")
-    started = time.perf_counter()
-
-    def _progress(n: int) -> None:
-        rate = (time.perf_counter() - started) / n * 1000.0
-        print(f"  {n}/{len(study_set)} pairs  ({rate:.0f} ms/pair)", flush=True)
-
     def _checkpoint(n: int) -> None:
         if not args.save:
             return
@@ -781,6 +773,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  CHECKPOINT FAILED at {n}: {exc}", flush=True)
             return
         print(f"  checkpoint at {n} → {args.save}", flush=True)
+
+    print("\n— exam BEFORE studying (the control) —")
+    before = tutor.exam(exam_set, limit=args.exam)
+    print(json.dumps(before.to_dict(), indent=1))
+
+    # Ingestion sits *between* two exams on purpose. Run before the control it would be part of
+    # the control, and the one thing worth knowing — whether a quarter-million external facts
+    # moved a held-out score by themselves — would be folded into the corpus result and
+    # unrecoverable. Three points make the attribution: fresh, after facts, after turns.
+    #
+    # Read `precision` rather than `accuracy` across them. Ingestion mechanically converts
+    # abstentions into answers, so coverage rises whatever it loaded; if `correct` does not rise
+    # with it, precision falls and the load added noise rather than knowledge.
+    if args.ingest:
+        from nyxara.njp.ingest import ingest_triples
+
+        print(f"\n— ingesting {args.ingest} —")
+        got = ingest_triples(brain, args.ingest, source=args.ingest_source,
+                             max_facts=args.ingest_max,
+                             checkpoint=_checkpoint, checkpoint_every=50_000)
+        print(json.dumps(got.to_dict(), indent=1))
+        if got.capped:
+            print(f"  CAPPED at {args.ingest_max} — the rest of the file was not read")
+        mid = tutor.exam(exam_set, limit=args.exam)
+        print(f"  after ingest: coverage {before.coverage:.3f} → {mid.coverage:.3f}   "
+              f"precision {before.precision:.3f} → {mid.precision:.3f}")
+
+    print("\n— studying —")
+    started = time.perf_counter()
+
+    def _progress(n: int) -> None:
+        rate = (time.perf_counter() - started) / n * 1000.0
+        print(f"  {n}/{len(study_set)} pairs  ({rate:.0f} ms/pair)", flush=True)
 
     report = tutor.study(study_set, progress=_progress, checkpoint=_checkpoint,
                          checkpoint_every=args.checkpoint_every)
@@ -841,43 +866,22 @@ def seed_kinds(brain: Any, path: Any = DEFAULT_KINDS) -> SeedReport:
     report = SeedReport()
     t0 = time.perf_counter()
     try:
-        from nyxara.njp.grounding import GroundedTriple
+        from nyxara.njp.ingest import ingest_triples
 
-        grounder = getattr(brain, "grounder", None)
-        if grounder is None:
-            return report
-        rows: List[Dict[str, Any]] = []
-        with open(str(path), "r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except ValueError:
-                    report.skipped += 1
-
-        triples: List[Any] = []
-        for row in rows:
-            report.read += 1
-            subject = str(row.get("subject", "")).strip()
-            predicate = str(row.get("predicate", "")).strip()
-            obj = str(row.get("object", "")).strip()
-            if not subject or not predicate or not obj:
-                report.skipped += 1
-                continue
-            triple = GroundedTriple(
-                subject=subject, predicate=grounder._predicate(predicate), object=obj,
-                confidence=_SEED_CONFIDENCE, source="seed",
-                text=f"{subject} {predicate} {obj}")
-            grounder._assert(triple)
-            triples.append(triple)
-            report.asserted += 1
-
-        report.kinds = len({t.subject.lower() for t in triples})
-        genesis = getattr(brain, "genesis", None)
-        if genesis is not None and triples:
-            genesis.observe_triples(triples)
+        # The mechanism is `njp/ingest.py`, which generalised what this function did at 137 rows
+        # to a corpus that does not fit in memory. Delegating rather than keeping a second copy
+        # is the point: there is one bulk path into the fact store, so a fix to folding, dedup or
+        # batching reaches the seed file and the corpus at the same time.
+        #
+        # `to_world=False`: these are properties of kinds, not statements of mechanism. "bird
+        # is_a animal" is not a law about how the world moves and does not belong on the causal
+        # skeleton, and the seed file never routed to the world model before this either.
+        got = ingest_triples(brain, path, source="seed", min_confidence=0.0,
+                             to_world=False, default_confidence=_SEED_CONFIDENCE)
+        report.read = got.read
+        report.asserted = got.asserted
+        report.skipped = got.skipped + got.duplicate
+        report.kinds = got.subjects
         return report
     except Exception:  # noqa: BLE001 — a failed seed leaves the store exactly as it was
         return report

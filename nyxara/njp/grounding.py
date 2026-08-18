@@ -45,6 +45,7 @@ and the turn continues on the fabric alone.
 from __future__ import annotations
 
 import math
+import os
 import re
 import time
 import unicodedata
@@ -869,6 +870,11 @@ _GENERAL_ANSWER = frozenset({
 #: answered 45 of 120 held-out questions and got 4 right, where before it answered 3 and got 2.
 _AFFINITY_FLOOR = 0.35
 
+#: How many ungrounded words the gap tally may hold. It is read by `persistent_unknowns`, which
+#: returns at most eight, so the cap only has to be large enough that a genuinely recurring gap is
+#: never evicted by one-off noise — not large enough to hold every word she has ever missed.
+_UNGROUNDED_TALLY_CAP = 4096
+
 # The words a question is *made of* rather than *about*. Interrogatives and copulas name no
 # entity, so leaving them in would let "what" match a subject containing the word "what".
 _QUESTION_WORDS = frozenset({
@@ -929,6 +935,24 @@ _QUESTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bwhen\s+does\s+(?P<s>.+?)\s+(?:occur|happen)\??$", "occurs_when"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+(?:used\s+for|for)\??$", "purpose"),
     (r"\bwhat\s+is\s+(?P<s>.+?)\s+known\s+for\??$", "known_for"),
+
+    # The two relations a commonsense corpus supplies most of, and the two that had no question
+    # form at all. Same read/write asymmetry as the causal block above, found the same way —
+    # by measuring instead of assuming: with `sparrow capable_of fly` in the store,
+    # `_read_question("what is sparrow capable of?")` returned `('sparrow capable of', 'is_a')`.
+    # The generic "what is X" below swallowed the whole tail as a subject, so the fact was
+    # stored, reachable by `_lookup`, reasoned over by the Core — and unaskable in English.
+    #
+    # They sit above that generic line for exactly that reason, and `has_property` deliberately
+    # does not claim "what is X like", which is a request for a comparison rather than for a
+    # property she holds.
+    (r"\bwhat\s+(?:can|could)\s+(?:an?\s+)?(?P<s>.+?)\s+do\b", "capable_of"),
+    (r"\bwhat\s+is\s+(?:an?\s+)?(?P<s>.+?)\s+capable\s+of\??$", "capable_of"),
+    (r"\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:properties|qualities|characteristics|features)\s+"
+     r"of\s+(?P<s>.+?)\??$", "has_property"),
+    # "sparrow kya kar sakta hai" — verb-final, the same question.
+    (r"^(?P<s>.+?)\s+(?:kya|क्या)\s+(?:kar\s+sakta|kar\s+sakti|कर\s+सकता|कर\s+सकती)\b",
+     "capable_of"),
 
     (r"\bwhat\s+is\s+(?P<s>.+?)\??$", "is_a"),
     # The predicate is read out of the verb itself and folded by `_PREDICATE_ALIASES`, so this
@@ -1279,6 +1303,38 @@ class Grounder:
         # snapshot, because "he keeps saying this and I still have nothing for it" is a gap and
         # "he mentioned it once" is not, and the snapshot could not tell them apart.
         self._ungrounded_seen: Dict[str, int] = {}
+        # Read-side indexes over `self.facts`, maintained by `_index` on every assertion.
+        #
+        # They exist because six methods here answered by walking the whole store, which is
+        # correct and was cheap while the store held what one conversation could state. Measured
+        # on a real brain at 20,000 facts: one `ground()` call cost 31.7 ms, of which `_features`
+        # and `_ungrounded` were 97% — both full scans, one of them run twice per extracted
+        # triple. Per-sentence cost grew with everything she had ever been told, which put a
+        # ceiling on every organ above the store rather than on the store alone.
+        #
+        # Narrowing each scan to its index is **exact**, not approximate, and the reason is a
+        # property of this file: `self.facts` is only ever appended to — nothing deletes a key or
+        # a triple — so an index built on write can never be stale. Supersession is not deletion
+        # and is deliberately not indexed: the scans that care about it filter it from the triple
+        # list they pull, never from the key set, so the two concerns stay separate here too.
+        # `_lookup_inverse` asked for exactly this in its own docstring, on the condition that
+        # the store outgrow one conversation. It has.
+        # Corpora she was loaded from, one row each: {"source", "path", "digest", "count", "at"}.
+        #
+        # A bulk-loaded fact is **regenerable**: the file it came from is still on disk, hashed,
+        # and immutable, so writing a quarter-million of them into `njp.json` on every save is
+        # copying a file she already has. `Manifold.to_dict` set this precedent for a matrix that
+        # living rebuilds *approximately*; a corpus is rebuilt *exactly*, which is a stronger
+        # guarantee than the one that argument was first made on.
+        self.ingested: List[Dict[str, Any]] = []
+        # Sources named in a restored manifest whose file is gone or has changed. Surfaced by
+        # `stats()` rather than swallowed: a store that quietly shrank overnight and said nothing
+        # is the failure this whole design is trying not to introduce.
+        self.ingest_gaps: List[str] = []
+        self._known: Set[str] = set()                        # every subject and object, lowered
+        self._by_subject: Dict[str, Set[str]] = {}           # subject -> its predicates
+        self._by_object: Dict[str, Set[Tuple[str, str]]] = {}  # object -> the keys pointing at it
+        self._subject_tokens: Dict[str, Set[str]] = {}       # content word -> subjects using it
 
     # ---- the one call ----------------------------------------------------- #
     def ground(self, text: str, *, intent: Any = None, deep: bool = False) -> GroundingResult:
@@ -1776,10 +1832,57 @@ class Grounder:
         return _PREDICATE_ALIASES.get(out, out) or "related_to"
 
     # ---- assertion and contradiction -------------------------------------- #
+    def _index(self, triple: GroundedTriple) -> None:
+        """Record one triple in the read-side indexes. The only writer, besides `_reindex`.
+
+        `_by_object` is keyed by **both** the stripped and unstripped lowercase forms of the
+        object, because the readers disagree: `_lookup_inverse` compares on ``.strip().lower()``
+        and `_features` on ``.lower()``. Indexing both makes the index a superset of either
+        reader's matches, and both readers re-check their own condition on the triples they pull
+        — so the answers are identical to the scans they replace rather than merely close.
+
+        `_known` is deliberately **not** given the stripped form. It answers `_ungrounded`, which
+        compared on ``.lower()`` alone; adding a second spelling there would quietly shrink the
+        gap list, and a word she cannot actually reach must keep counting as a gap.
+        """
+        try:
+            subject = triple.subject.lower()
+            key = (subject, triple.predicate)
+            self._known.add(subject)
+            self._known.add(triple.object.lower())
+            self._by_subject.setdefault(subject, set()).add(triple.predicate)
+            for form in {triple.object.lower(), triple.object.strip().lower()}:
+                self._by_object.setdefault(form, set()).add(key)
+            for word in subject.replace("_", " ").split():
+                if len(word) > 2:
+                    self._subject_tokens.setdefault(word, set()).add(subject)
+        except Exception:  # noqa: BLE001 — an unindexed fact is still a stored fact
+            pass
+
+    def _reindex(self) -> None:
+        """Rebuild every index from `self.facts`. The correct response to a bulk load.
+
+        `load_dict` appends to `self.facts` directly rather than going through `_assert`, which
+        is right — a reload is not a fresh assertion and must not re-run contradiction handling
+        — but it means the indexes have to be rebuilt once at the end rather than maintained
+        per row.
+        """
+        self._known = set()
+        self._by_subject = {}
+        self._by_object = {}
+        self._subject_tokens = {}
+        try:
+            for triples in self.facts.values():
+                for triple in triples:
+                    self._index(triple)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _assert(self, triple: GroundedTriple) -> None:
         """Record the fact locally and, when one is attached, in the KnowledgeGraph."""
         key = (triple.subject.lower(), triple.predicate)
         self.facts.setdefault(key, []).append(triple)
+        self._index(triple)
         try:
             if self.graph is None:
                 return
@@ -1953,10 +2056,10 @@ class Grounder:
         if not low:
             return []
         out: List[GroundedTriple] = []
-        for (_subject, stored), triples in self.facts.items():
-            if stored != predicate:
+        for key in self._by_object.get(low, ()):
+            if key[1] != predicate:
                 continue
-            out.extend(t for t in triples
+            out.extend(t for t in self.facts.get(key, ())
                        if not t.superseded and t.object.strip().lower() == low)
         return out
 
@@ -2102,7 +2205,7 @@ class Grounder:
         if predicate not in _GENERAL_ANSWER:
             return 0.0
         low = str(subject or "").lower()
-        relations = {p for (s, p) in self.facts if s == low}
+        relations = self._by_subject.get(low, ())
         return 1.0 / max(1, len(relations))
 
     @staticmethod
@@ -2121,9 +2224,13 @@ class Grounder:
         punish it for the words it spends asking.
         """
         scores: Dict[str, float] = {}
-        for subject, _predicate in self.facts:
-            if subject in scores:
-                continue
+        # Only subjects that share a content word with the question can score: the loop below
+        # rejects everything else at `if not shared`. So the posting lists answer exactly the
+        # set the scan would have reached, and the scoring underneath is untouched.
+        candidates: Set[str] = set()
+        for token in tokens:
+            candidates |= self._subject_tokens.get(token, set())
+        for subject in candidates:
             parts = {w for w in subject.replace("_", " ").split() if len(w) > 2}
             if not parts:
                 continue
@@ -2146,16 +2253,19 @@ class Grounder:
             score = named * (topical ** 0.5)
             if named >= floor and score >= floor * 0.5:
                 scores[subject] = score
-        return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:4]
+        # Tie-broken by name rather than by arrival. The scan this replaced walked `self.facts`,
+        # so two subjects on an identical score were separated by whichever was stated first —
+        # an accident of insertion order, not a decision. Naming the tie-break makes the same
+        # question return the same four candidates on a reloaded store as on a live one, which
+        # the old form did not guarantee once `load_dict` reordered the keys.
+        return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
 
     def _facts_of(self, subject: str) -> List[GroundedTriple]:
         """Every live fact stated of one subject, across all its relations."""
         out: List[GroundedTriple] = []
         low = str(subject or "").lower()
-        for (stored, _predicate), triples in self.facts.items():
-            if stored != low:
-                continue
-            out.extend(t for t in triples if not t.superseded)
+        for predicate in self._by_subject.get(low, ()):
+            out.extend(t for t in self.facts.get((low, predicate), ()) if not t.superseded)
         return out
 
     def _neighbours(self, subject: str) -> List[str]:
@@ -2233,12 +2343,15 @@ class Grounder:
         out: Set[str] = set()
         low = entity.lower()
         try:
-            for (subject, predicate), triples in self.facts.items():
-                if subject == low:
-                    out.add(predicate)
-                for triple in triples:
+            out.update(self._by_subject.get(low, ()))
+            for key in self._by_object.get(low, ()):
+                # Re-checked rather than trusted: the index is keyed on both spellings of an
+                # object, so it can offer a key this comparison rejects. That is the trade that
+                # keeps one index serving two readers without either of them changing answer.
+                for triple in self.facts.get(key, ()):
                     if triple.object.lower() == low:
-                        out.add(f"{predicate}_of")
+                        out.add(f"{key[1]}_of")
+                        break
         except Exception:  # noqa: BLE001
             pass
         return sorted(out)
@@ -2268,10 +2381,7 @@ class Grounder:
         """Concepts that reach no entity — the words that are still just words to her."""
         out: List[str] = []
         try:
-            known = {s for s, _p in self.facts}
-            for (_s, _p), triples in self.facts.items():
-                for triple in triples:
-                    known.add(triple.object.lower())
+            known = self._known
             for concept in concepts:
                 if concept.lower() not in known:
                     out.append(concept)
@@ -2283,6 +2393,15 @@ class Grounder:
                     if tally:
                         word = concept.lower()
                         self._ungrounded_seen[word] = self._ungrounded_seen.get(word, 0) + 1
+                        # Bounded. This is a tally of words she could not reach, and on a corpus
+                        # rather than a conversation that is an unbounded set — it grew forever
+                        # and was serialised on every save. The rarest entries go first because
+                        # the question this answers is "what does he keep asking for that I still
+                        # do not have", and a word seen once has not established that it keeps.
+                        if len(self._ungrounded_seen) > _UNGROUNDED_TALLY_CAP:
+                            keep = sorted(self._ungrounded_seen.items(),
+                                          key=lambda kv: (-kv[1], kv[0]))[:_UNGROUNDED_TALLY_CAP]
+                            self._ungrounded_seen = dict(keep)
             # A word that has since been grounded stops being a gap, so its tally goes rather
             # than lingering as a question she has already answered.
             for seen in [w for w in self._ungrounded_seen if w in known]:
@@ -2394,18 +2513,88 @@ class Grounder:
             "recall_rate": round(self.recalled / self.recalls, 4) if self.recalls else None,
             "graph_attached": self.graph is not None,
             "ladder_attached": self.ladder is not None,
+            # Corpora she is standing on, and any she could not stand back up. A gap is reported
+            # rather than left to be inferred from a fact count that looks fine on its own — she
+            # should be able to say *"I was taught from a file I can no longer read"* instead of
+            # quietly knowing less than she did yesterday.
+            "ingested": [{k: row.get(k) for k in ("source", "count", "at")}
+                         for row in self.ingested],
+            "ingest_gaps": list(self.ingest_gaps),
         }
+
+    def note_ingest(self, *, source: str, path: str, digest: str, count: int) -> None:
+        """Record that a corpus was bulk-loaded, so its facts need not be written to the sidecar.
+
+        Re-noting the same ``source`` replaces the earlier row rather than appending: loading a
+        newer ConceptNet over an older one leaves one manifest entry, and the digest on it is the
+        file that is actually on disk.
+        """
+        try:
+            self.ingested = [row for row in self.ingested if row.get("source") != source]
+            self.ingested.append({"source": str(source), "path": str(path),
+                                  "digest": str(digest), "count": int(count),
+                                  "at": time.time()})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _regenerable(self, triple: GroundedTriple) -> bool:
+        """Would replaying the manifest put this exact fact back?
+
+        Three conditions, and the last two are what make this safe rather than merely small. A
+        bulk fact a conversation has since **superseded** or **contested** is no longer what the
+        file says — replaying the file would restore the retracted version and undo the revision
+        on the next boot, which is the same defect `load_dict` already documents for dropping the
+        ``superseded`` flag, one layer up. Those facts are written out in full.
+        """
+        if triple.superseded or triple.contested:
+            return False
+        return any(row.get("source") == triple.source for row in self.ingested)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "facts": [t.to_dict() | {"text": t.text[:120]}
-                      for triples in self.facts.values() for t in triples],
+                      for triples in self.facts.values() for t in triples
+                      if not self._regenerable(t)],
+            "ingested": list(self.ingested),
             "patterns": [p.to_dict() for p in self.patterns if p.learned],
             "counters": {"turns": self.turns, "grounded": self.grounded_turns,
                          "answered": self.answered, "unknown": self.unknown,
                          "unparsed": self.unparsed,
                          "learned": self.patterns_learned, "pruned": self.patterns_pruned},
         }
+
+    def _replay_ingested(self) -> None:
+        """Re-read every corpus in the manifest whose file still matches its digest.
+
+        Seconds of real work on a load that used to be a file read, and a dependency on files
+        outside ``~/.nyxara`` — both genuine costs, taken against a save cost that otherwise grows
+        without bound. The digest is checked rather than assumed: a corpus that was edited under
+        her is not the corpus she was taught, and restoring it silently would make the fact store
+        disagree with its own provenance.
+        """
+        from types import SimpleNamespace
+
+        from nyxara.njp.ingest import ingest_triples
+
+        self.ingest_gaps = []
+        for row in list(self.ingested):
+            source, path = str(row.get("source", "")), str(row.get("path", ""))
+            try:
+                if not path or not os.path.exists(path):
+                    self.ingest_gaps.append(f"{source}: file missing ({path})")
+                    continue
+                from nyxara.njp.ingest import _digest as digest_of
+                if row.get("digest") and digest_of(path) != row.get("digest"):
+                    self.ingest_gaps.append(f"{source}: file changed since it was learned ({path})")
+                    continue
+                # Facts only. The concept layer and the world model persist their own bounded
+                # state in their own sidecars, so fanning out again here would double-count what
+                # they already restored.
+                ingest_triples(SimpleNamespace(grounder=self), path, source=source,
+                               max_facts=int(row.get("count", 0)) or 250_000,
+                               to_world=False, record=False)
+            except Exception as exc:  # noqa: BLE001
+                self.ingest_gaps.append(f"{source}: {exc}")
 
     def load_dict(self, d: Dict[str, Any]) -> None:
         try:
@@ -2435,6 +2624,21 @@ class Grounder:
                 if triple.subject and triple.predicate:
                     self.facts.setdefault(
                         (triple.subject.lower(), triple.predicate), []).append(triple)
+            # The manifest is restored *before* the replay and *after* the written facts, and both
+            # halves of that order matter. Before, because `_replay_ingested` reads it. After,
+            # because a superseded bulk fact was written out in full and must already be in the
+            # store when its regenerable twin arrives — the replay's dedup is on
+            # (subject, predicate, object), so the retracted version stays retracted.
+            self.ingested = [dict(row) for row in (d.get("ingested") or [])
+                             if isinstance(row, dict)]
+            if self.ingested:
+                self._replay_ingested()
+            # Once, at the end. A reload appends straight into `self.facts` rather than going
+            # through `_assert` — deliberately, because restoring a fact is not asserting one and
+            # must not re-run contradiction handling — so nothing has maintained the indexes on
+            # the way in. A brain that woke up with empty indexes would answer as though it knew
+            # nothing, which is a worse failure than a slow reload.
+            self._reindex()
             for row in (d.get("patterns") or []):
                 regex = str(row.get("regex", ""))
                 if not regex or any(p.regex == regex for p in self.patterns):

@@ -8,6 +8,8 @@ the handoff meter.
 """
 
 from __future__ import annotations
+from pathlib import Path
+
 
 from nyxara.kernel.orchestrator import Candidate, NyxaraCore
 
@@ -84,6 +86,35 @@ def test_native_answers_count_as_her_own_mind_in_the_handoff_meter():
 
 
 def test_report_surfaces_native_reasoning():
+    """Her own chain of thought reaches the report — with the law store cleared first.
+
+    This is not tidying: a discovered-law store changes whether `_native_answer` produces a trace
+    at all, and the dependency is measured. In one process::
+
+        fresh core                          -> 6 trace steps
+        after one core.idle_maintenance()   -> 0
+        after deleting the two law files    -> 5
+
+    `idle_maintenance` runs law discovery and writes `data/law_discovery.json` and
+    `data/law_notebook.jsonl`; every core built afterwards loads them and then *defers* on this
+    question, so `last_native_trace` is never assigned and the report says she did no native
+    reasoning. Whether deferring to a discovered law is the right answer is a separate question —
+    answering from a law she derived is arguably better than re-deriving it — but reporting it as
+    **no trace** is wrong either way, and that is a finding about `nyxara/mind/nyxara_reasoner.py`
+    rather than about this test.
+
+    So the store is cleared to make this test measure the thing in its name. The dependency is
+    written down here rather than hidden, because it was invisible for as long as no test ran
+    `idle_maintenance` before this one.
+    """
+    from nyxara.kernel.config import get_settings
+
+    data_dir = Path(get_settings().paths.data_dir)
+    for name in ("law_discovery.json", "law_notebook.jsonl"):
+        target = data_dir / name
+        if target.exists():
+            target.unlink()
+
     nyx = _core()
     nyx.process("what is 12 * 12?")
     rep = nyx.report()

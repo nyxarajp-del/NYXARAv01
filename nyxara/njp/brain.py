@@ -321,6 +321,8 @@ class NJPBrain:
         # world. Built after `predictive` because it plans by searching that model — an agent
         # with no world model does not plan, it flails.
         self.agent = self._build_agent(c)
+        # Held, not driven: the index reads its curve, a caller steps it deliberately.
+        self.noesis = self._build_noesis(c)
         self.curriculum = self._build_curriculum(c)
         # Truth is not relevance, and reasoning is not always what a turn calls for.
         self._speech, self._policy, self.gate = self._build_relevance(c)
@@ -1025,6 +1027,28 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return None
 
+    def _build_noesis(self, c: Any) -> Any:
+        """The library of reasoning she has compressed into reusable primitives.
+
+        Attached because :mod:`nyxara.njp.index` needs it and could not read it: ``R`` — reasoning
+        that survived a held-out description-length win — was permanently absent from the vector
+        with the honest note *"no noesis engine attached"*, while the engine sat fully built one
+        package over. A term whose source exists and is simply not wired is the same class of gap
+        as an organ that reports zeros.
+
+        Nothing here drives it. It is constructed and held, so the index can read its curve and a
+        caller can step it; the WAKE/SLEEP/DREAM loop stays something run deliberately rather than
+        something every turn pays for.
+        """
+        if not self._gate("noesis", True):
+            return None
+        try:
+            from nyxara.growth.noesis import NoesisEngine
+            return NoesisEngine(seed=self._cfg("seed", 42),
+                                tasks_per_cycle=self._cfg("noesis_tasks_per_cycle", 12))
+        except Exception:  # noqa: BLE001 — a brain without a program library still thinks
+            return None
+
     def _build_curriculum(self, c: Any) -> Any:
         """The nine stages, and the refusal to report one as reached before it is."""
         if not self._gate("curriculum", True):
@@ -1092,6 +1116,7 @@ class NJPBrain:
                     return
             answer = self.grounder.answer_by_recall(thought.stimulus)
             if not answer.answered:
+                self._recall_knowledge(thought)
                 return
             thought.answer = str(answer.text)[:1000]
             thought.recalled = answer.why
@@ -1105,6 +1130,40 @@ class NJPBrain:
                 self.levels.touch_claim(
                     f"{triple.subject}|{triple.predicate}|{triple.object}".lower())
         except Exception:  # noqa: BLE001 — a failed recall leaves the turn as it was
+            return
+
+    def _recall_knowledge(self, thought: NJPThought) -> None:
+        """Last resort: passages the kernel's KnowledgeBase holds, when the fact store had nothing.
+
+        This exists because the handle was dangling. ``attach_kernel`` has always set
+        ``self.knowledge``, and across the whole of ``nyxara/njp/`` it was never read once — so
+        everything the kernel ingested, and everything :mod:`nyxara.growth.foraging` distilled
+        from the live web, went into a store her brain could not reach. She foraged the internet
+        and did not know she had.
+
+        Three things keep it from becoming a hole in the epistemics:
+
+        * **It runs only when the fact store came back empty.** A retrieved passage never
+          outranks a stated relation.
+        * **It is never ``KNOWN``, and it never enters the fact store.** A chunk of text that
+          mentions what was asked is evidence of *relevance*, not of truth — the same distinction
+          ``answer_by_recall`` already refuses to blur — and passing it to ``_assert`` would let
+          prose she has not parsed become a fact she would later state.
+        * **It says where it came from.** ``recalled`` names the source, so a reply built on a
+          document is distinguishable in the trace from one built on something she was told.
+        """
+        try:
+            if self.knowledge is None:
+                return
+            chunks = self.knowledge.retrieve(thought.stimulus, k=1) or []
+            if not chunks:
+                return
+            text = str(getattr(chunks[0], "text", "") or "").strip()
+            if not text:
+                return
+            thought.answer = text[:1000]
+            thought.recalled = f"knowledge base: {getattr(chunks[0], 'source', '?')}"
+        except Exception:  # noqa: BLE001 — a missing knowledge base is absent, not fatal
             return
 
     def _ask_back(self, thought: NJPThought) -> None:

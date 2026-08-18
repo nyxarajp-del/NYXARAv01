@@ -2391,6 +2391,27 @@ class NJPConfig(BaseModel):
     calculate_enabled: bool = True      # arithmetic evaluation (njp/calculate.py)
     learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
 
+    # --- bulk fact intake (njp/ingest.py) --- #
+    #
+    # Facts from a corpus rather than from a turn. Nothing here runs on its own: these are the
+    # defaults `--ingest` and any caller of `ingest_triples` start from.
+    #
+    # The cap is a memory budget, and the honest figure is the measured one rather than the store's
+    # own: 991 bytes per fact end to end, because the dedup set and the concept layer cost more
+    # than the triple does. 250,000 facts is therefore ~250 MB, which fits a free-tier box with
+    # room to think. A load that hits the cap says so rather than dropping its tail quietly.
+    ingest_max_facts: int = Field(default=250_000, ge=0, le=5_000_000)
+    # Stated laws one bulk load may add. Separate from the fact cap because `WorldView._stated` is
+    # an unbounded dict and a corpus of causal edges is a very different shape from a conversation.
+    ingest_max_laws: int = Field(default=20_000, ge=0, le=1_000_000)
+    # Triples handed to the concept layer at a time. `ConceptGenesis` has a real capacity with FIFO
+    # eviction and does per-observation similarity work, so one list of everything would evict most
+    # of what it had just been told and cost quadratically to do it.
+    ingest_batch: int = Field(default=5_000, ge=1, le=100_000)
+    # Floor on a corpus row's own confidence. 0.0 keeps everything the converter emitted, which is
+    # the right default when the converter already applied a corroboration threshold of its own.
+    ingest_min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
     # How much of the fact store the Core never induces a schema from, so that scoring one is a
     # genuine generalisation check rather than a re-read of its own evidence. Split by a stable
     # hash of the triple, so the same fact is in the same fold across restarts.

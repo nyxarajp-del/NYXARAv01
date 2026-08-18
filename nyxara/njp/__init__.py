@@ -203,6 +203,7 @@ from nyxara.njp.manifold import Manifold, Prediction, Snapshot
 from nyxara.njp.agency import ActionValue, Agent, Outcome, Step
 from nyxara.njp.agency import Plan as ActionPlan
 from nyxara.njp.calculate import Calculator, Evaluation
+from nyxara.njp.index import IntelligenceIndex, IntelligenceVector, Term
 from nyxara.njp.core import (
     CognitiveLearningCore,
     CoreReport,
@@ -276,6 +277,8 @@ __all__ = [
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
     # she goes after her own conclusions
     "SelfAttacker", "Attack", "AttackReport", "Stance", "AttackKind",
+    # the one number she is not allowed to compute about herself
+    "IntelligenceIndex", "IntelligenceVector", "Term",
     # truth is not relevance, and reasoning is not always what a turn calls for
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",

@@ -174,16 +174,32 @@ class IntelligenceReport:
 # Harness
 # --------------------------------------------------------------------------- #
 
-def _brain(**overrides: Any) -> Any:
-    """A fresh brain, or ``None`` if NJP will not construct in this environment."""
+#: Something done to a fresh brain before a stage teaches it — bulk-loading a corpus, restoring a
+#: saved state, seeding a knowledge base. Takes the brain, returns nothing.
+Preparer = Callable[[Any], None]
+
+
+def _brain(*, prepare: Optional[Preparer] = None, **overrides: Any) -> Any:
+    """A fresh brain, or ``None`` if NJP will not construct in this environment.
+
+    ``prepare`` is what makes this benchmark usable as a before/after instrument at all. Every
+    stage builds its own brain — deliberately, so that no stage can be carried by what another
+    one taught — and the consequence was that nothing done to a brain *outside* the benchmark
+    could ever be measured by it. Feeding a quarter-million ConceptNet facts and then running
+    this measured six fresh brains that had never seen them.
+
+    A failing preparer is fatal to the stage rather than silent. The alternative is a run that
+    reports a fresh-brain score under a heading that claims the corpus was loaded, which is worse
+    than no number: it reads as evidence that the corpus did not help.
+    """
     try:
         from nyxara.njp.brain import NJPBrain
-        if overrides:
-            config = type("_Cfg", (), overrides)
-            return NJPBrain(config)
-        return NJPBrain()
+        brain = NJPBrain(type("_Cfg", (), overrides)) if overrides else NJPBrain()
     except Exception:  # noqa: BLE001
         return None
+    if prepare is not None:
+        prepare(brain)
+    return brain
 
 
 def _teach(brain: Any, sentences: Sequence[str]) -> int:
@@ -228,12 +244,13 @@ def _hit(answer: str, expected: str) -> bool:
 # 1 · MEMORIZATION — the control
 # --------------------------------------------------------------------------- #
 
-def _stage_memorization(rng: random.Random, width: int) -> StageResult:
+def _stage_memorization(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """Told N facts, asked for each one back. If this fails, nothing below it is interpretable."""
     out = StageResult(stage="memorization")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -259,7 +276,8 @@ def _stage_memorization(rng: random.Random, width: int) -> StageResult:
 # 2 · GENERALIZATION — a rule induced from some members, tested on others
 # --------------------------------------------------------------------------- #
 
-def _stage_generalization(rng: random.Random, width: int) -> StageResult:
+def _stage_generalization(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """Every member of a kind shares a property; some are told, the rest are asked.
 
     The held-out members are told *only* that they belong to the kind. Nothing states their
@@ -269,7 +287,7 @@ def _stage_generalization(rng: random.Random, width: int) -> StageResult:
     out = StageResult(stage="generalization")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -308,7 +326,8 @@ def _stage_generalization(rng: random.Random, width: int) -> StageResult:
 # 3 · RECOMBINATION — a conclusion neither sentence contains
 # --------------------------------------------------------------------------- #
 
-def _stage_recombination(rng: random.Random, width: int) -> StageResult:
+def _stage_recombination(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """``A causes B`` and ``B causes C`` are stated; ``A ⇝ C`` never is.
 
     The two premises are taught in separate turns and never appear together in one sentence, so
@@ -318,7 +337,7 @@ def _stage_recombination(rng: random.Random, width: int) -> StageResult:
     out = StageResult(stage="recombination")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -361,7 +380,8 @@ def _stage_recombination(rng: random.Random, width: int) -> StageResult:
 # 4 · CAUSAL PREDICTION — a value at a point never observed
 # --------------------------------------------------------------------------- #
 
-def _stage_causal(rng: random.Random, width: int) -> StageResult:
+def _stage_causal(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """Paired measurements are given; a counterfactual is asked at an unobserved input.
 
     Scored on whether the do-operator produces a *number* with a stated confidence, not on how
@@ -373,7 +393,7 @@ def _stage_causal(rng: random.Random, width: int) -> StageResult:
     out = StageResult(stage="causal_prediction")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -408,7 +428,8 @@ def _stage_causal(rng: random.Random, width: int) -> StageResult:
 # 5 · SELF-CORRECTION — the newer fact wins, and the change is visible
 # --------------------------------------------------------------------------- #
 
-def _stage_self_correction(rng: random.Random, width: int) -> StageResult:
+def _stage_self_correction(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """A fact is stated, then contradicted. Does she answer with the correction?
 
     Two things are scored and both are required: she must answer with the *revised* value, and
@@ -419,7 +440,7 @@ def _stage_self_correction(rng: random.Random, width: int) -> StageResult:
     out = StageResult(stage="self_correction")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -453,7 +474,8 @@ def _stage_self_correction(rng: random.Random, width: int) -> StageResult:
 # 6 · TRANSFER — the same structure, no shared vocabulary
 # --------------------------------------------------------------------------- #
 
-def _stage_transfer(rng: random.Random, width: int) -> StageResult:
+def _stage_transfer(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
     """A hierarchy is taught in one domain; the same shape is completed in another.
 
     The hardest stage, and the one closest to what the word transfer is usually used to mean. She
@@ -471,7 +493,7 @@ def _stage_transfer(rng: random.Random, width: int) -> StageResult:
     out = StageResult(stage="transfer")
     started = time.perf_counter()
     try:
-        brain = _brain()
+        brain = _brain(prepare=prepare)
         if brain is None:
             out.note = "NJP unavailable"
             return out
@@ -513,7 +535,9 @@ def _stage_transfer(rng: random.Random, width: int) -> StageResult:
         out.ms = (time.perf_counter() - started) * 1000.0
 
 
-_STAGES: Tuple[Tuple[str, Callable[[random.Random, int], StageResult]], ...] = (
+_StageRunner = Callable[[random.Random, int, Optional[Preparer]], StageResult]
+
+_STAGES: Tuple[Tuple[str, _StageRunner], ...] = (
     ("memorization", _stage_memorization),
     ("generalization", _stage_generalization),
     ("recombination", _stage_recombination),
@@ -524,11 +548,31 @@ _STAGES: Tuple[Tuple[str, Callable[[random.Random, int], StageResult]], ...] = (
 
 
 def run_intelligence_benchmark(*, seed: int = 0, width: int = 6,
-                               only: Sequence[str] = ()) -> IntelligenceReport:
+                               only: Sequence[str] = (),
+                               prepare: Optional[Preparer] = None) -> IntelligenceReport:
     """Run the curve and report it. Deterministic for a seed.
 
     ``width`` scales how many items each stage asks. It is a knob on statistical resolution, not
     on difficulty — a stage does not get harder with more items, only better measured.
+
+    ``prepare`` runs against every stage's fresh brain before it is taught, which is what turns
+    this from a fixed reading into a before/after instrument::
+
+        base = run_intelligence_benchmark()
+        with_facts = run_intelligence_benchmark(
+            prepare=lambda brain: ingest_triples(brain, "conceptnet_en.jsonl.gz"))
+
+    **Read the vector, not the mean.** The mean can rise because one stage got easier to guess,
+    and the stage worth watching here is `generalization` — it is schema induction, it currently
+    scores 0.00, and it needs several subjects sharing both a concept and a relation, which a
+    conversation almost never supplies and a commonsense corpus supplies constantly. A run where
+    the mean moves and `generalization` does not has not shown what it appears to show.
+
+    And note what this instrument **cannot** do: every stage's vocabulary is RNG-generated
+    nonsense, disjoint by construction from anything a real corpus contains. So a corpus cannot
+    make her better at these questions by containing their answers. That is the point — it makes
+    the benchmark a **regression guard** on prepared state rather than a way to credit it. A gain
+    here would be structural or it would be an error.
     """
     report = IntelligenceReport(seed=int(seed), width=int(width))
     started = time.perf_counter()
@@ -541,7 +585,7 @@ def run_intelligence_benchmark(*, seed: int = 0, width: int = 6,
         # `--only transfer` would test a different transfer problem than a full run does.
         rng = random.Random(f"{seed}:{name}")
         try:
-            report.stages.append(runner(rng, max(2, int(width))))
+            report.stages.append(runner(rng, max(2, int(width)), prepare))
         except Exception as exc:  # noqa: BLE001
             report.stages.append(StageResult(stage=name, note=f"error: {exc}"))
     report.ms = (time.perf_counter() - started) * 1000.0
