@@ -205,7 +205,7 @@ def ingest_triples(brain: Any, path: Any, *,
                    default_confidence: float = _DEFAULT_CONFIDENCE,
                    allow: Optional[Collection[str]] = None,
                    batch: int = 5_000,
-                   to_world: bool = True,
+                   to_world: bool = False,
                    record: bool = True,
                    progress: Optional[Callable[[int], None]] = None,
                    checkpoint: Optional[Callable[[int], None]] = None,
@@ -221,6 +221,21 @@ def ingest_triples(brain: Any, path: Any, *,
 
     ``checkpoint`` is called with the count so far every ``checkpoint_every`` assertions, in the
     shape :meth:`nyxara.njp.study.Tutor.study` uses, so the same ``--save`` plumbing serves both.
+
+    ``to_world`` is **off by default, and that default was measured rather than chosen.** It was
+    on, and `nyxara.eval.intelligence` caught what that cost the first time it was pointed at a
+    prepared brain: loading 8,000 facts took ``causal_prediction`` from 1.00 to 0.00, and
+    ``to_world=False`` restored it exactly. The mechanism is not subtle once looked at —
+    :class:`~nyxara.njp.universe.InternalUniverse` holds 512 relations, those 8,000 facts stated
+    2,312 laws, and ``sync_from_world`` imported 512 of them and filled it to the brim. Her own
+    ``water → growth``, the one the question was about, never got in.
+
+    The architectural reading is the same one :func:`~nyxara.njp.study.seed_kinds` already makes
+    about kinds: a commonsense corpus is **testimony about the world in general**, not observation
+    of *her* situation. The causal skeleton is what she has seen happen and been told about the
+    case in front of her, and a crowd-sourced "eating causes fullness" displacing that is not
+    extra knowledge — it is the loss of the only relations an intervention could be run on. Pass
+    ``to_world=True`` deliberately, for a corpus that really is about her world.
     """
     report = IngestReport(source=source)
     started = time.perf_counter()

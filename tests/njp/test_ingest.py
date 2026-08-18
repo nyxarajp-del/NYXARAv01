@@ -174,7 +174,7 @@ def test_law_predicates_reach_the_world_model_and_ordinary_relations_do_not(brai
     """A ConceptNet edge is never an event: nothing happened at a time."""
     report = ingest_triples(brain, _write(tmp_path / "t.jsonl", [
         {"subject": "aag", "predicate": "causes", "object": "garmi"},
-        {"subject": "sparrow", "predicate": "is_a", "object": "bird"}]))
+        {"subject": "sparrow", "predicate": "is_a", "object": "bird"}]), to_world=True)
     assert report.laws == 1
     assert any(link.cause == "aag" and link.effect == "garmi"
                for link in brain.world.links(causal_only=False))
@@ -182,15 +182,24 @@ def test_law_predicates_reach_the_world_model_and_ordinary_relations_do_not(brai
 
 def test_the_law_cap_is_respected(brain, tmp_path):
     rows = [{"subject": f"c{i}", "predicate": "causes", "object": f"e{i}"} for i in range(20)]
-    report = ingest_triples(brain, _write(tmp_path / "t.jsonl", rows), max_laws=5, batch=3)
+    report = ingest_triples(brain, _write(tmp_path / "t.jsonl", rows),
+                            to_world=True, max_laws=5, batch=3)
     assert report.laws == 5
     assert report.asserted == 20
 
 
-def test_to_world_false_routes_nothing_to_the_world_model(brain, tmp_path):
+def test_a_bulk_load_does_not_touch_the_causal_skeleton_unless_asked(brain, tmp_path):
+    """The default, and it was measured rather than chosen.
+
+    `InternalUniverse` holds 512 relations. With this on, 8,000 ingested facts stated 2,312 laws,
+    `sync_from_world` imported 512 of them and filled it, and the benchmark's own `water → growth`
+    never got in — `causal_prediction` went 1.00 to 0.00 and `to_world=False` restored it.
+    A commonsense corpus is testimony about the world in general, not observation of hers.
+    """
     report = ingest_triples(brain, _write(tmp_path / "t.jsonl", [
-        {"subject": "aag", "predicate": "causes", "object": "garmi"}]), to_world=False)
+        {"subject": "aag", "predicate": "causes", "object": "garmi"}]))
     assert report.laws == 0
+    assert brain.world.links(causal_only=True) == []
 
 
 # --------------------------------------------------------------------------- #

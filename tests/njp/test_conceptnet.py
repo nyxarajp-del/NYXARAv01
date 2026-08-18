@@ -224,7 +224,11 @@ def test_the_output_is_exactly_what_ingest_reads(dump, tmp_path):
     report = ingest_triples(brain, out, source="conceptnet")
     assert report.asserted == len(_converted(dump))
     assert ("sparrow", "is_a") in brain.grounder.facts
-    assert report.laws == 1                      # only `fire causes heat` is law-shaped
+    # No laws by default, and that default was measured: a commonsense corpus filling the
+    # 512-relation universe cost `causal_prediction` its whole score. Asked for explicitly,
+    # only `fire causes heat` is law-shaped here.
+    assert report.laws == 0
+    assert ingest_triples(NJPBrain(), out, source="conceptnet", to_world=True).laws == 1
 
 
 def test_an_unmapped_relation_asked_for_by_name_is_refused(dump, tmp_path):
