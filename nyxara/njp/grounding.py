@@ -45,6 +45,7 @@ and the turn continues on the fabric alone.
 from __future__ import annotations
 
 import math
+import os
 import re
 import time
 import unicodedata
@@ -1300,6 +1301,18 @@ class Grounder:
         # list they pull, never from the key set, so the two concerns stay separate here too.
         # `_lookup_inverse` asked for exactly this in its own docstring, on the condition that
         # the store outgrow one conversation. It has.
+        # Corpora she was loaded from, one row each: {"source", "path", "digest", "count", "at"}.
+        #
+        # A bulk-loaded fact is **regenerable**: the file it came from is still on disk, hashed,
+        # and immutable, so writing a quarter-million of them into `njp.json` on every save is
+        # copying a file she already has. `Manifold.to_dict` set this precedent for a matrix that
+        # living rebuilds *approximately*; a corpus is rebuilt *exactly*, which is a stronger
+        # guarantee than the one that argument was first made on.
+        self.ingested: List[Dict[str, Any]] = []
+        # Sources named in a restored manifest whose file is gone or has changed. Surfaced by
+        # `stats()` rather than swallowed: a store that quietly shrank overnight and said nothing
+        # is the failure this whole design is trying not to introduce.
+        self.ingest_gaps: List[str] = []
         self._known: Set[str] = set()                        # every subject and object, lowered
         self._by_subject: Dict[str, Set[str]] = {}           # subject -> its predicates
         self._by_object: Dict[str, Set[Tuple[str, str]]] = {}  # object -> the keys pointing at it
@@ -2482,18 +2495,88 @@ class Grounder:
             "recall_rate": round(self.recalled / self.recalls, 4) if self.recalls else None,
             "graph_attached": self.graph is not None,
             "ladder_attached": self.ladder is not None,
+            # Corpora she is standing on, and any she could not stand back up. A gap is reported
+            # rather than left to be inferred from a fact count that looks fine on its own — she
+            # should be able to say *"I was taught from a file I can no longer read"* instead of
+            # quietly knowing less than she did yesterday.
+            "ingested": [{k: row.get(k) for k in ("source", "count", "at")}
+                         for row in self.ingested],
+            "ingest_gaps": list(self.ingest_gaps),
         }
+
+    def note_ingest(self, *, source: str, path: str, digest: str, count: int) -> None:
+        """Record that a corpus was bulk-loaded, so its facts need not be written to the sidecar.
+
+        Re-noting the same ``source`` replaces the earlier row rather than appending: loading a
+        newer ConceptNet over an older one leaves one manifest entry, and the digest on it is the
+        file that is actually on disk.
+        """
+        try:
+            self.ingested = [row for row in self.ingested if row.get("source") != source]
+            self.ingested.append({"source": str(source), "path": str(path),
+                                  "digest": str(digest), "count": int(count),
+                                  "at": time.time()})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _regenerable(self, triple: GroundedTriple) -> bool:
+        """Would replaying the manifest put this exact fact back?
+
+        Three conditions, and the last two are what make this safe rather than merely small. A
+        bulk fact a conversation has since **superseded** or **contested** is no longer what the
+        file says — replaying the file would restore the retracted version and undo the revision
+        on the next boot, which is the same defect `load_dict` already documents for dropping the
+        ``superseded`` flag, one layer up. Those facts are written out in full.
+        """
+        if triple.superseded or triple.contested:
+            return False
+        return any(row.get("source") == triple.source for row in self.ingested)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "facts": [t.to_dict() | {"text": t.text[:120]}
-                      for triples in self.facts.values() for t in triples],
+                      for triples in self.facts.values() for t in triples
+                      if not self._regenerable(t)],
+            "ingested": list(self.ingested),
             "patterns": [p.to_dict() for p in self.patterns if p.learned],
             "counters": {"turns": self.turns, "grounded": self.grounded_turns,
                          "answered": self.answered, "unknown": self.unknown,
                          "unparsed": self.unparsed,
                          "learned": self.patterns_learned, "pruned": self.patterns_pruned},
         }
+
+    def _replay_ingested(self) -> None:
+        """Re-read every corpus in the manifest whose file still matches its digest.
+
+        Seconds of real work on a load that used to be a file read, and a dependency on files
+        outside ``~/.nyxara`` — both genuine costs, taken against a save cost that otherwise grows
+        without bound. The digest is checked rather than assumed: a corpus that was edited under
+        her is not the corpus she was taught, and restoring it silently would make the fact store
+        disagree with its own provenance.
+        """
+        from types import SimpleNamespace
+
+        from nyxara.njp.ingest import ingest_triples
+
+        self.ingest_gaps = []
+        for row in list(self.ingested):
+            source, path = str(row.get("source", "")), str(row.get("path", ""))
+            try:
+                if not path or not os.path.exists(path):
+                    self.ingest_gaps.append(f"{source}: file missing ({path})")
+                    continue
+                from nyxara.njp.ingest import _digest as digest_of
+                if row.get("digest") and digest_of(path) != row.get("digest"):
+                    self.ingest_gaps.append(f"{source}: file changed since it was learned ({path})")
+                    continue
+                # Facts only. The concept layer and the world model persist their own bounded
+                # state in their own sidecars, so fanning out again here would double-count what
+                # they already restored.
+                ingest_triples(SimpleNamespace(grounder=self), path, source=source,
+                               max_facts=int(row.get("count", 0)) or 250_000,
+                               to_world=False, record=False)
+            except Exception as exc:  # noqa: BLE001
+                self.ingest_gaps.append(f"{source}: {exc}")
 
     def load_dict(self, d: Dict[str, Any]) -> None:
         try:
@@ -2523,6 +2606,15 @@ class Grounder:
                 if triple.subject and triple.predicate:
                     self.facts.setdefault(
                         (triple.subject.lower(), triple.predicate), []).append(triple)
+            # The manifest is restored *before* the replay and *after* the written facts, and both
+            # halves of that order matter. Before, because `_replay_ingested` reads it. After,
+            # because a superseded bulk fact was written out in full and must already be in the
+            # store when its regenerable twin arrives — the replay's dedup is on
+            # (subject, predicate, object), so the retracted version stays retracted.
+            self.ingested = [dict(row) for row in (d.get("ingested") or [])
+                             if isinstance(row, dict)]
+            if self.ingested:
+                self._replay_ingested()
             # Once, at the end. A reload appends straight into `self.facts` rather than going
             # through `_assert` — deliberately, because restoring a fact is not asserting one and
             # must not re-run contradiction handling — so nothing has maintained the indexes on

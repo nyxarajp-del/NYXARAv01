@@ -164,6 +164,27 @@ def _law_predicates() -> frozenset:
         return frozenset()
 
 
+def _already_stored(grounder: Any, key: Tuple[str, str, str]) -> bool:
+    """Is this exact triple already in the store, in any state?
+
+    Superseded and contested entries count. That is the whole point rather than an edge case:
+    when `Grounder.load_dict` replays a corpus, a bulk fact a conversation later retracted has
+    already been restored from the sidecar in its retracted form, and re-asserting it here would
+    put a live copy of the withdrawn claim back beside it — `_lookup` reads live facts only, so
+    she would answer tomorrow with what she was corrected about today. A store that forgets its
+    retractions overnight is the failure `load_dict` already argues against for the flag itself.
+
+    It also makes re-ingesting the same file idempotent, which is worth having on its own.
+    """
+    try:
+        for triple in grounder.facts.get((key[0], key[1]), ()):
+            if triple.object.strip().lower() == key[2]:
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def _digest(path: Any) -> str:
     """A stable sha256 of the file, so a later reload can tell it is the same corpus."""
     try:
@@ -185,6 +206,7 @@ def ingest_triples(brain: Any, path: Any, *,
                    allow: Optional[Collection[str]] = None,
                    batch: int = 5_000,
                    to_world: bool = True,
+                   record: bool = True,
                    progress: Optional[Callable[[int], None]] = None,
                    checkpoint: Optional[Callable[[int], None]] = None,
                    checkpoint_every: int = 0) -> IngestReport:
@@ -267,7 +289,7 @@ def ingest_triples(brain: Any, path: Any, *,
                 report.skipped += 1
                 continue
             key = (subject.lower(), folded, obj.lower())
-            if key in seen:
+            if key in seen or _already_stored(grounder, key):
                 report.duplicate += 1
                 continue
             if report.asserted >= max_facts:
@@ -300,6 +322,17 @@ def ingest_triples(brain: Any, path: Any, *,
 
         _flush()
         report.subjects = len(subjects)
+        if report.asserted and record:
+            # The manifest is what lets `Grounder.to_dict` leave these facts out of the sidecar:
+            # it names a file that is still on disk and hashed, so they can be replayed exactly
+            # rather than copied. Recorded only on a load that actually stored something, and
+            # skipped entirely when `record=False` — which is how the replay itself avoids
+            # re-noting the corpus it is in the middle of restoring.
+            try:
+                grounder.note_ingest(source=source, path=str(path),
+                                     digest=report.digest, count=report.asserted)
+            except AttributeError:
+                pass
         return report
     except Exception:  # noqa: BLE001 — a failed ingest reports what it managed, never raises
         return report
