@@ -468,8 +468,29 @@ class LearningLoop:
                 return
             intent = getattr(thought, "intent", None)
             action = str(getattr(intent, "kind", "") or "turn")
-            world.observe_transition(self._prev_state, action, self._encode_state(fired))
+            state = self._encode_state(fired)
+            world.observe_transition(self._prev_state, action, state)
             rep.transitions = 1
+
+            # The same labelled transition, to the model the *planner* actually searches over.
+            #
+            # `Agent.plan` enumerates `Agent.actions()`, which reads the actions
+            # `PredictiveWorldModel` has seen — and nothing ever gave it one. `field` feeds that
+            # model every turn with no action label, and the only call that supplies one is
+            # `Agent.act`, which runs after a plan is found. No plan without actions, no actions
+            # without a plan: `known_actions` sat at 0 for the life of every process, `pursue`
+            # returned [] whatever it was asked, and the curriculum's agency rung was unreachable
+            # by construction.
+            #
+            # The label is not invented for this. It is the same one `world` has always been
+            # given — the kind of turn, which is the intervention she actually made on her own
+            # state — so `Agent.actions()` stays what its docstring promises: a set drawn from
+            # what has been observed, never a list someone wrote down. Planning for an action she
+            # has never seen the consequences of would still be fiction; this only stops her from
+            # being unable to plan for the ones she has.
+            predictive = getattr(self.brain, "predictive", None)
+            if predictive is not None and action:
+                predictive.observe(self._prev_state, action, next_state=state)
         except Exception:  # noqa: BLE001
             pass
 
@@ -481,6 +502,24 @@ class LearningLoop:
         is what a kNN dynamics model can actually use. It is stable under neurogenesis — new cells
         land in existing buckets rather than changing the width — which matters because the state
         encoding must not change shape every time the fabric grows.
+
+        **What this costs, and it is the thing blocking goal grounding.** Sixteen buckets cannot
+        carry identity. Measured::
+
+            garmi      -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+            banana     -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+            zzzqqqxyz  -> [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0]
+
+        Three unrelated words, one state. So a goal named in words — ``pursue("garmi")`` — cannot
+        be located in this space by nearest-neighbour: matching a word's encoding against recorded
+        states finds a real state for *any* input, including a word she has never heard, and hands
+        the planner a confident wrong target. That was tried here and reverted rather than shipped.
+
+        Goal grounding therefore needs one of two things, and neither is a small change: a state
+        encoding wide enough to distinguish concepts (which trades away the neurogenesis stability
+        this width was chosen for), or goals expressed as *predicates over* states rather than as
+        states — "a state in which garmi fired" instead of "this state". The second is the better
+        shape and is why `pursue` still takes only a state today.
         """
         vec = [0.0] * _STATE_WIDTH
         try:

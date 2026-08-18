@@ -560,6 +560,43 @@ _COMPOSITION = re.compile(
     r"^(?P<s>.+?)\s+(?:consists?\s+of|is\s+composed\s+of|is\s+made\s+up\s+of|comprises?)\s+"
     r"(?P<list>.+)$", re.IGNORECASE)
 
+# "Three materials used to build bridges are steel, concrete and timber."
+#
+# The same list shape without a kind-noun to key on, which `_ENUMERATION` requires. Measured over
+# 595 corpus answers that extracted nothing, this catches 30 of them — 5%, and the only candidate
+# pattern out of three tried that was worth more than a rounding error ("X is an example of Y"
+# reached 0.2%). That is the honest size of what more patterns can buy here: 58% of extraction
+# failures have no copula at all, because they are stories, code, poems and instructions.
+_BARE_ENUMERATION = re.compile(
+    r"^(?P<s>[^,.;:]{3,70}?)\s+are\s+(?P<list>[^.;]{5,}?,[^.;]{3,}?\band\b[^.;]{2,})\.?$",
+    re.IGNORECASE)
+
+# Subjects that name nothing. "Here are a few tips for working from home" parses as a perfect
+# enumeration whose subject is "Here", and storing that attaches a list to a word that is not an
+# entity — which is how a fact store fills up with rows nothing can ever retrieve.
+_EMPTY_SUBJECTS = frozenset({
+    "here", "there", "these", "those", "this", "that", "it", "they", "some", "others",
+    "the following", "below", "above", "examples",
+})
+
+# An item list whose members are adjectives is a description, not an enumeration of things.
+# "The most effective business reports are concise, well-structured, and contain relevant data"
+# is one claim about a kind, not three members of it, and splitting it produces three facts that
+# are each false on their own.
+#
+# Suffix-based and therefore approximate — there is no part-of-speech tagger in this package.
+# The endings are the ones the corpus actually produced ("concise", "well-structured",
+# "relevant"), plus a small hand-list for the common adjectives that no suffix catches.
+_ADJECTIVAL_ITEM = re.compile(
+    r"^(?:very|highly|well|more|most|less|least)[- ]\w+$"
+    r"|^\w+(?:ive|ous|ful|able|ible|ent|ant|ary|ic|al|less|ish|ise|ize|ised|ized|ed|ing)$",
+    re.IGNORECASE)
+_ADJECTIVAL_WORDS = frozenset({
+    "concise", "clear", "brief", "short", "long", "large", "small", "simple", "complex",
+    "accurate", "precise", "fast", "slow", "cheap", "easy", "hard", "good", "bad", "safe",
+    "clean", "strong", "weak", "high", "low", "new", "old", "true", "false",
+})
+
 # The kind-noun a list is a list *of*, folded onto one predicate so "types" and "kinds" of the
 # same subject accumulate into one relation instead of two that never meet.
 _KIND_PREDICATE: Dict[str, str] = {
@@ -1226,6 +1263,8 @@ class Grounder:
         self.grounded_turns = 0
         self.answered = 0
         self.unknown = 0
+        #: Statements that reached the extractor and produced no triple at all.
+        self.unparsed = 0
         self.contradictions_found = 0
         self.patterns_learned = 0
         self.patterns_pruned = 0
@@ -1284,6 +1323,17 @@ class Grounder:
 
             if out.triples:
                 self.grounded_turns += 1
+            else:
+                # A statement that reached the extractor and yielded nothing. Counted separately
+                # from `unknown` (which is a *question* she could not answer) and from
+                # `turns - grounded_turns` (which is polluted, because a question increments
+                # `turns` and never reaches extraction at all).
+                #
+                # Nothing counted this before, and it is the single largest number in the corpus
+                # pipeline: 54% of answers extract no triple. A silent majority failure looks
+                # exactly like a working extractor from `stats()`, which is why the fact store
+                # grew slowly for a long time with nothing to point at.
+                self.unparsed += 1
             self._observe_concepts(out)
             out.ungrounded = self._ungrounded(out.concepts, tally=not out.triples)
             return out
@@ -1500,12 +1550,27 @@ class Grounder:
             predicate = _KIND_PREDICATE.get((match.group("kind") or "").lower(), "has_kind")
         else:
             match = _COMPOSITION.match(clause)
-            if match is None:
-                return out
             predicate = "consists_of"
+            if match is None:
+                match = _BARE_ENUMERATION.match(clause)
+                if match is None:
+                    return out
+                # A list with no kind-noun says its members are *of* the subject and nothing more
+                # specific, so it lands on the same relation an "examples of X" list would.
+                predicate = "has_example"
         subject = self.resolve(match.group("s") or "")
         items = _list_items(match.group("list") or "")
         if not subject or len(items) < 2:
+            return out
+        if subject.strip().lower() in _EMPTY_SUBJECTS:
+            return out
+        # A list of adjectives describes the subject rather than enumerating it. Splitting
+        # "concise, well-structured and accurate" into three members produces three claims that
+        # are each false as stated.
+        adjectival = sum(1 for i in items
+                         if _ADJECTIVAL_ITEM.match(i.strip())
+                         or i.strip().lower() in _ADJECTIVAL_WORDS)
+        if adjectival * 2 >= len(items):
             return out
         for item in items:
             out.append(GroundedTriple(
@@ -2253,6 +2318,16 @@ class Grounder:
             low = str(text or "").strip().lower()
             if not low:
                 return False
+            # A quoted question is still a question. The mark test is `endswith`, so a wrapping
+            # quote hid it — `"What is the Archimedes principle?"` ends in `"` and was read as a
+            # statement, sent to the extractor, and *asserted*. That is how held-out questions
+            # were entering the fact store: measured over 260 held-out items, 4 were unrecognised
+            # and every one of them was a quoted question. The corpus quotes questions often
+            # enough to matter, and a leak from the exam into the store is the one bug that makes
+            # every other number here untrustworthy.
+            low = low.strip("\"'“”‘’«»").strip()
+            if not low:
+                return False
             if low.endswith("?"):
                 return True
             # A fronted conditional is a statement, whatever word it starts with. Checked before
@@ -2308,6 +2383,9 @@ class Grounder:
             "facts": sum(len(v) for v in self.facts.values()),
             "subjects": len({s for s, _p in self.facts}),
             "answered": self.answered, "unknown": self.unknown,
+            "unparsed": self.unparsed,
+            "extraction_rate": (round(self.grounded_turns / (self.grounded_turns + self.unparsed), 4)
+                                if (self.grounded_turns + self.unparsed) else None),
             "contradictions_found": self.contradictions_found,
             "patterns": len(self.patterns), "patterns_learned": self.patterns_learned,
             "patterns_live": len(learned), "patterns_pruned": self.patterns_pruned,
@@ -2325,6 +2403,7 @@ class Grounder:
             "patterns": [p.to_dict() for p in self.patterns if p.learned],
             "counters": {"turns": self.turns, "grounded": self.grounded_turns,
                          "answered": self.answered, "unknown": self.unknown,
+                         "unparsed": self.unparsed,
                          "learned": self.patterns_learned, "pruned": self.patterns_pruned},
         }
 
@@ -2368,6 +2447,7 @@ class Grounder:
             self.grounded_turns = int(counters.get("grounded", 0))
             self.answered = int(counters.get("answered", 0))
             self.unknown = int(counters.get("unknown", 0))
+            self.unparsed = int(counters.get("unparsed", 0))
             self.patterns_learned = int(counters.get("learned", 0))
             self.patterns_pruned = int(counters.get("pruned", 0))
         except Exception:  # noqa: BLE001 — a corrupt sidecar leaves a freshly-born grounder

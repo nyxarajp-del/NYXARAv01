@@ -45,9 +45,9 @@ never edit the live tree.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.njp.truth import PredictiveSource, TruthGauntlet, Verdict
 

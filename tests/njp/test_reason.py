@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.brain import NJPBrain
-from nyxara.njp.reason import Conclusion, Hypothesis, ProblemState, Reasoner, Rung
+from nyxara.njp.reason import Conclusion, Hypothesis, Reasoner, Rung
 
 
 @pytest.fixture()

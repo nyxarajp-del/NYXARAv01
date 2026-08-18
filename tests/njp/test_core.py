@@ -350,3 +350,68 @@ def test_the_core_is_readable_over_http():
     assert "evaluated" in calculator
 
     assert client.get("/v1/njp/nonsense").json()["available"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Reaching the Core by speaking to her
+# --------------------------------------------------------------------------- #
+def _two_hop_brain():
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    for fact in ("aag se garmi hoti hai", "garmi se pasina hoti hai"):
+        brain.think(fact)
+    return brain
+
+
+def test_a_composed_answer_is_reachable_from_a_spoken_question():
+    """The organ worked and the brain could not get to it, in any phrasing.
+
+    `core.reach('aag','causes')` returned the chain from the day it was written, and
+    `brain.think(...)` returned "" for all thirteen phrasings of the same question — because the
+    Core read questions through exactly one door, the grounder's pattern table, and that table
+    was written for conversational wh-questions.
+    """
+    brain = _two_hop_brain()
+    assert "pasina" in brain.think("aag se kya kya hota hai").answer.lower()
+    assert "aag" in brain.think("why pasina").answer.lower()
+    assert "aag" in brain.think("what is the root cause of pasina").answer.lower()
+    assert "yes" in brain.think("does aag cause pasina").answer.lower()
+
+
+def test_a_confident_wrong_parse_no_longer_blocks_composition():
+    """Treating a *successful* parse as final was the worse half of the same bug.
+
+    "aag se pasina hoti hai kya" parses to subject "aag se pasina hoti hai" under `is_a`, and
+    "what is the root cause of pasina" to "root cause of pasina" — both confident, both
+    meaningless, and both used to block the second route by not failing. A wrong parse cost more
+    than no parse.
+    """
+    brain = _two_hop_brain()
+    subject, predicate = brain.grounder._read_question("aag se pasina hoti hai kya")
+    assert predicate, "premise gone: this phrasing no longer produces a confident wrong parse"
+    assert "yes" in brain.think("aag se pasina hoti hai kya").answer.lower()
+
+
+def test_a_stated_fact_still_beats_a_composed_conjecture():
+    """Composition must not displace a one-hop answer she was actually told.
+
+    `aag causes garmi` is stated and carries 0.9; `aag causes pasina` is two hops and capped at
+    0.70 by `_COMPOSED_CEILING`. Asked what aag causes, the stated fact is the honest answer, and
+    a change that made her prefer the longer chain would be trading knowledge for inference.
+    """
+    brain = _two_hop_brain()
+    assert "garmi" in brain.think("what does aag cause").answer.lower()
+    assert "garmi" in brain.think("what causes pasina").answer.lower()
+
+
+def test_entity_composition_never_answers_from_a_relation_it_did_not_read():
+    """The fallback assumes `causes` and only `causes`, so it cannot invent a relation."""
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    brain.think("Ravi Mumbai me rehta hai")
+    brain.think("Mumbai India me hai")
+    # Nothing causal was ever stated, so the entity route must find nothing to compose.
+    got = brain.learner._compose_by_entity("why Ravi")
+    assert not got.ok

@@ -259,3 +259,94 @@ def test_grounding_does_not_stop_the_fabric_growing():
     before = brain.fabric.n_synapses
     brain.think("my name is Jay")
     assert brain.fabric.n_synapses > before
+
+
+# --------------------------------------------------------------------------- #
+# A quoted question is still a question
+# --------------------------------------------------------------------------- #
+def test_a_quoted_question_is_not_mistaken_for_a_statement():
+    """The mark test is `endswith`, so a wrapping quote hid it — and the cost was a leak.
+
+    `"What is the Archimedes principle?"` ends in `"`, so it was read as a statement, sent to the
+    extractor and *asserted* into the fact store. Measured over 260 held-out corpus items, 4 were
+    unrecognised as questions and every one was a quoted question — which is the exam writing
+    into the store it is supposed to be testing.
+    """
+    grounder = Grounder()
+    for quoted in ('"What is the Archimedes principle?"',
+                   "'Who is known for her agility?'",
+                   "“Is it ethical to edit genes?”"):
+        assert grounder._is_question(quoted.lower()), quoted
+    assert not grounder._is_question("a neural network is a system of connected nodes.")
+
+
+def test_a_quoted_question_is_never_asserted_into_the_fact_store():
+    """The leak itself, not just the classification."""
+    grounder = Grounder()
+    before = len(grounder.facts)
+    grounder.ground('"What is the Bernoulli equation?"')
+    assert len(grounder.facts) == before, "a held-out question wrote itself into the fact store"
+
+
+def test_a_statement_that_extracts_nothing_is_counted():
+    """54% of corpus answers yield no triple, and nothing counted it.
+
+    `unknown` counts a *question* she could not answer, and `turns - grounded_turns` is polluted
+    because a question increments `turns` and never reaches the extractor at all. So a silent
+    majority failure in extraction looked exactly like a working extractor from `stats()`.
+    """
+    grounder = Grounder()
+    grounder.ground("A neural network is a system of connected nodes.")
+    assert grounder.stats()["unparsed"] == 0
+
+    grounder.ground("Whoa rolling with the constant flow, this rap game dont own me")
+    assert grounder.stats()["unparsed"] == 1
+    assert 0.0 < grounder.stats()["extraction_rate"] < 1.0
+
+
+def test_the_unparsed_count_survives_a_round_trip():
+    grounder = Grounder()
+    grounder.ground("Whoa rolling with the constant flow, this rap game dont own me")
+    revived = Grounder()
+    revived.load_dict(grounder.to_dict())
+    assert revived.stats()["unparsed"] == grounder.stats()["unparsed"]
+
+
+# --------------------------------------------------------------------------- #
+# A list with no kind-noun to key on
+# --------------------------------------------------------------------------- #
+def test_a_bare_list_is_extracted_even_without_a_kind_noun():
+    """`_ENUMERATION` needs "the N types/parts of X are ..."; most corpus lists have no such noun.
+
+    Measured over 595 corpus answers that extracted nothing, this shape accounts for 30 of them —
+    5%, and it was the only candidate pattern of three tried worth more than a rounding error
+    ("X is an example of Y" reached 0.2%). Enumerations matter out of proportion to their count
+    because they attach several objects to *one* subject, which is the evidence `njp.core` needs
+    to induce a role and `njp.concepts` needs to find an invariant.
+    """
+    grounder = Grounder()
+    triples = grounder.ground("Three materials used to build bridges are steel, concrete, "
+                              "and timber.").triples
+    objects = {t.object.lower() for t in triples}
+    assert {"steel", "concrete", "timber"} <= objects
+    assert len({t.subject for t in triples}) == 1, "a list must hang off one subject"
+
+
+def test_a_list_of_adjectives_is_not_an_enumeration():
+    """Splitting a description produces claims that are each false on their own.
+
+    "The most effective business reports are concise, well-structured and relevant" is one claim
+    about a kind, not three members of it.
+    """
+    grounder = Grounder()
+    got = grounder.ground("The most effective business reports are concise, well-structured, "
+                          "and relevant.").triples
+    assert not [t for t in got if t.source == "enumeration"]
+
+
+def test_a_list_whose_subject_names_nothing_is_refused():
+    """"Here are a few tips ..." parses perfectly and its subject is not an entity."""
+    grounder = Grounder()
+    got = grounder.ground("Here are a few tips that help you, stay organized and be "
+                          "productive.").triples
+    assert not [t for t in got if t.source == "enumeration"]

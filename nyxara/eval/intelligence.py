@@ -332,19 +332,23 @@ def _stage_recombination(rng: random.Random, width: int) -> StageResult:
             taught.append(f"{mid} se {tail} hoti hai")
         out.taught = _teach(brain, taught)
 
-        learner = getattr(brain, "learner", None)
+        # Scored through `think`, like every other stage, and that is a deliberate change.
+        #
+        # This used to call `brain.learner.reach(...)` and `.connects(...)` directly, so it
+        # measured the *organ* and reported 20/20 while the same question asked in words returned
+        # "" — `core.reach` and `.connects` had zero production callers, and this benchmark was
+        # the only thing in the repo touching them. A stage that passes on a path the Master
+        # cannot use is not evidence about the Master's experience of her.
         for head, mid, tail in zip(heads, mids, tails):
             out.total += 1
-            if learner is None:
-                out.detail.append("no learner organ")
-                continue
-            reached = learner.reach(head, "causes")
-            connected = learner.connects(head, tail, "causes")
-            if _hit(str(reached.answer or ""), tail) or connected.answer == "yes":
+            said = _ask(brain, f"{head} se kya kya hota hai")
+            if not _hit(said, tail):
+                said = _ask(brain, f"does {head} cause {tail}")
+            if _hit(said, tail) or said.strip().lower().startswith("yes"):
                 out.correct += 1
             else:
-                out.detail.append(f"miss: {head} ⇝ {tail} not derived")
-        out.note = f"{chains} two-step chains, endpoint never stated"
+                out.detail.append(f"miss: {head} ⇝ {tail} not derived through think()")
+        out.note = f"{chains} two-step chains through think(), endpoint never stated"
         return out
     except Exception as exc:  # noqa: BLE001
         out.note = f"error: {exc}"

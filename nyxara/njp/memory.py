@@ -100,6 +100,9 @@ class HoloMemory:
                                             seed=self.seed,
                                             recall_threshold=self.recall_threshold)
         self.traces: Dict[str, Trace] = {}
+        #: Exact cue -> key, so a question she was actually taught can be found again without
+        #: entering the similarity space (see `recall_cue`). Whitespace- and case-normalised.
+        self._by_cue: Dict[str, str] = {}
         self.spilled: List[Tuple[str, str]] = []   # evicted (key, text) — persist these elsewhere
         self.ticks = 0
         self._recent: List[str] = []               # keys written/recalled in the current moment
@@ -127,6 +130,9 @@ class HoloMemory:
             self.ticks += 1
             self.field.remember(key, text)
             trace = self.traces.get(key)
+            normalised_cue = " ".join(str(cue or "").split()).strip().lower()
+            if normalised_cue:
+                self._by_cue[normalised_cue] = key
             if trace is None:
                 trace = Trace(key=key, text=text, kind=kind, cue=str(cue or ""),
                               written_tick=self.ticks)
@@ -207,6 +213,33 @@ class HoloMemory:
     def recall_key(self, key: str) -> Optional[Trace]:
         """Exact lookup by key — no similarity involved."""
         return self.traces.get(str(key))
+
+    def recall_cue(self, cue: str) -> Optional[Trace]:
+        """The trace stored *under this exact question*, or None. Never a near match.
+
+        ``remember`` deliberately does not encode the cue into the vector space, and the reason
+        given there is right: a stored question matches itself almost perfectly and would echo
+        back as the answer to its own re-asking. That argument is about **similarity** search —
+        it says a cue must not compete in the neighbourhood, and it does not say a cue may never
+        be looked up.
+
+        This is the lookup, and it is exact. Two different questions cannot collide, so it cannot
+        return something merely *near* what was asked — which is precisely the failure that made
+        fuzzy recall unusable as an answer: measured, that path turned three honest abstentions
+        into three confident wrong answers and got none right. This one either was taught this
+        question or it was not.
+
+        Normalised on whitespace and case only, so "What is overfitting?" and "what is
+        overfitting?" are the same question and nothing else is.
+        """
+        try:
+            wanted = " ".join(str(cue or "").split()).strip().lower()
+            if not wanted:
+                return None
+            got = self._by_cue.get(wanted)
+            return self.traces.get(got) if got else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def candidates(self, cue: str, *, k: int = 5) -> List[Tuple[Trace, float]]:
         """The ``k`` closest traces to ``cue``, most similar first.

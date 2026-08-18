@@ -655,3 +655,48 @@ def test_a_greeting_still_cannot_reach_physics():
     answer = brain.think("hello NYXARA").answer
     assert "plant" not in answer.lower(), answer
     assert "confidence" not in answer.lower(), answer
+
+
+# --------------------------------------------------------------------------- #
+# Curiosity that performs the experiment it designed
+# --------------------------------------------------------------------------- #
+def test_a_designed_experiment_is_actually_run_and_pays_in_bits():
+    """End-to-end, because every part of this was reachable only in combination.
+
+    The designer computes the informative experiment on every turn; `_run_experiments` settles it
+    against the *event* record via `world.counterfactual`; `_as_recorded` bridges the two namings
+    world carries — a stated law names its effect with the Master's noun ("growth") while an
+    observed occurrence is filed under the canonical event predicate ("grows").
+
+    That bridge is why this test states the law in words whose stem matches the event's. It is not
+    test convenience — it is the actual precondition, and a run whose events share no stem with
+    its laws leaves every experiment open no matter how much evidence piles up. Pinning the
+    working case here means a regression in any one of the four parts shows up as a failure
+    rather than as a `bits_gained` that quietly stays at zero.
+    """
+    brain = NJPBrain()
+    brain.think("water causes growth")
+    for _ in range(6):
+        brain.think("the water arrived")
+        brain.think("the plant grew")
+    for _ in range(2):
+        brain.think("the plant grew")
+    for i in range(14):
+        brain.think(f"soch {i}")
+
+    designer = brain.designer.stats()
+    assert designer["designed"] > 0, "no experiment was ever designed"
+    assert designer["run"] > 0, "an experiment was designed and never performed"
+    assert designer["bits_gained"] > 0.0, "an experiment ran and resolved nothing"
+    assert brain.loop.totals["experiments_run"] > 0
+
+
+def test_an_experiment_the_record_cannot_settle_is_left_open():
+    """`still_happens=None` must leave the hypothesis alone rather than settle it on a guess."""
+    brain = NJPBrain()
+    brain.think("aag se garmi hoti hai")
+    for i in range(20):
+        brain.think(f"soch {i}")
+    # No events at all, so nothing is answerable and nothing may be claimed.
+    assert brain.designer.stats()["run"] == 0
+    assert brain.designer.stats()["bits_gained"] == 0.0

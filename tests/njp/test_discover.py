@@ -6,7 +6,6 @@ episodes it was never fitted to. Anything can find patterns in data it was fitte
 
 from __future__ import annotations
 
-import pytest
 
 from nyxara.njp.discover import Discoverer, Status
 

@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import gzip
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
+from nyxara.njp import study
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.study import DEFAULT_CORPUS, Corpus, Pair, Tutor, _content, _f1
 
@@ -30,10 +34,35 @@ PAIRS = [
 # The corpus that ships
 # --------------------------------------------------------------------------- #
 def test_the_bundled_corpus_is_present_and_well_formed():
-    assert DEFAULT_CORPUS.exists(), "the bundled AI question/answer corpus is missing"
+    assert DEFAULT_CORPUS.exists(), "the bundled instruction/response corpus is missing"
     pairs = Corpus.load(DEFAULT_CORPUS, limit=200)
     assert len(pairs) == 200
     assert all(p.question and p.answer for p in pairs)
+
+
+def test_most_of_the_corpus_is_not_answerable_by_a_fact_store():
+    """The denominator, pinned — because a coverage figure is meaningless without it.
+
+    This file described the corpus as "question/answer pairs on artificial intelligence". It is
+    an instruction-following dataset: measured over 8,000 pairs, 35.8% ask her to *write*
+    something ("Design a poster", "Recommend a poem") and 37.6% to compute or transform something
+    ("Find the volume of a cone"). Neither has an answer a fact store can hold, so roughly
+    three-quarters of any coverage denominator is unreachable at any quality of extraction.
+
+    Asserting a band rather than an exact share: the point is that the generative majority is
+    real and large, not that it is precisely 35.8%.
+    """
+    import re
+
+    generative = re.compile(
+        r"^(write|generate|create|compose|draft|make up|come up with|invent|design|imagine|"
+        r"rewrite|paraphrase|translate|summariz|summaris|edit|convert|output|construct|produce|"
+        r"suggest|recommend|brainstorm|make a)", re.I)
+    pairs = Corpus.load(DEFAULT_CORPUS, limit=3000, seed=0)
+    share = sum(1 for p in pairs if generative.match(p.question.strip())) / len(pairs)
+    assert 0.25 < share < 0.50, (
+        f"generative share is {share:.3f} — the corpus changed, and every coverage number "
+        f"in this file's docstring is stated against the old composition")
 
 
 def test_the_corpus_has_no_duplicate_questions():
@@ -160,3 +189,198 @@ def test_precision_and_coverage_are_reported_separately():
     report = Tutor(NJPBrain()).exam(PAIRS)
     d = report.to_dict()
     assert "coverage" in d and "precision_when_answered" in d and "accuracy_overall" in d
+
+
+# --------------------------------------------------------------------------- #
+# Sampling a subset, and persisting a run
+# --------------------------------------------------------------------------- #
+def test_a_limited_load_samples_the_corpus_rather_than_taking_its_head():
+    """The first N rows of a topic-grouped corpus are a different corpus, not a smaller one."""
+    head = Corpus.load(DEFAULT_CORPUS, limit=300, sample=False)
+    drawn = Corpus.load(DEFAULT_CORPUS, limit=300, seed=0)
+    assert len(head) == len(drawn) == 300
+    assert {p.question for p in head} != {p.question for p in drawn}
+    # The sample must reach past the head of the file, which is the whole point.
+    full_head = {p.question for p in Corpus.load(DEFAULT_CORPUS, limit=300, sample=False)}
+    assert any(p.question not in full_head for p in drawn)
+
+
+def test_the_sample_is_reproducible_across_calls():
+    """A subsample that reshuffles makes two runs incomparable."""
+    a = Corpus.load(DEFAULT_CORPUS, limit=200, seed=7)
+    b = Corpus.load(DEFAULT_CORPUS, limit=200, seed=7)
+    assert [p.question for p in a] == [p.question for p in b]
+    assert [p.question for p in a] != [p.question for p in Corpus.load(
+        DEFAULT_CORPUS, limit=200, seed=8)]
+
+
+def test_sampling_does_not_disturb_the_held_out_split():
+    """The fold is a hash of the question, so it must not depend on how the pair was drawn."""
+    for pair in Corpus.load(DEFAULT_CORPUS, limit=300, seed=3):
+        assert pair.held_out == Pair(question=pair.question, answer=pair.answer).held_out
+
+
+def test_a_saved_state_round_trips_into_a_fresh_brain(tmp_path):
+    from nyxara.njp.study import load_state, save_state
+
+    taught = NJPBrain()
+    for pair in PAIRS:
+        taught.think(pair.answer)
+    path = save_state(taught, tmp_path / "state.json")
+
+    revived = NJPBrain()
+    assert load_state(revived, path) is True
+    assert revived.fabric.n_synapses == taught.fabric.n_synapses
+    assert (revived.stats()["grounding"]["facts"] == taught.stats()["grounding"]["facts"])
+
+
+def test_load_state_reports_a_missing_file_rather_than_pretending(tmp_path):
+    from nyxara.njp.study import load_state
+
+    assert load_state(NJPBrain(), tmp_path / "never-written.json") is False
+
+
+def test_a_checkpoint_never_destroys_the_last_good_one(tmp_path):
+    """The moment a checkpoint is for is the moment it is most likely to be half-written."""
+    from nyxara.njp.study import save_state
+
+    target = tmp_path / "state.json"
+    brain = NJPBrain()
+    brain.think("a neural network learns weights")
+    save_state(brain, target)
+    good = target.read_text(encoding="utf-8")
+
+    class Exploding:
+        def to_dict(self):
+            raise RuntimeError("died mid-write")
+
+    with pytest.raises(RuntimeError):
+        save_state(Exploding(), target)
+
+    assert target.read_text(encoding="utf-8") == good, "a failed write clobbered the good state"
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "state.json"]
+    assert not leftovers, f"temp files left behind: {leftovers}"
+
+
+def test_the_study_report_shows_what_the_gradient_learner_did():
+    """The only gradient learner in NJP trains once per pair and was invisible to this report."""
+    brain = NJPBrain()
+    report = Tutor(brain, seed=False).study(PAIRS)
+    d = report.to_dict()
+    assert "readout" in d
+    if brain.readout is not None:                 # absent without numpy, and that is reported
+        assert d["readout"]["steps"] > 0
+        assert d["readout"]["width"][1] > 0
+
+
+def test_readout_loss_is_reported_per_slot_so_a_width_change_cannot_fake_a_trend():
+    """The raw loss is summed over slots, so it scales with a width the readout doubles itself.
+
+    Measured over 500 corpus pairs: width 512 → 8192, raw loss 33.50 → 197.66. Read raw, training
+    made it six times worse; read per slot, 0.0654 → 0.0241, it improved threefold. Comparing the
+    two ends of a pass at different widths is not a comparison.
+    """
+    from nyxara.njp.study import StudyReport
+
+    rep = StudyReport(readout_loss_before=33.502175, readout_width_before=512,
+                      readout_loss_after=197.657845, readout_width=8192)
+    assert rep.readout_loss_after > rep.readout_loss_before      # raw says it got worse
+    assert rep.readout_learned > 0, "per-slot must see the improvement the raw number hides"
+    per_slot = rep.to_dict()["readout"]["loss_per_slot"]
+    assert per_slot[0] == pytest.approx(0.0654, abs=1e-3)
+    assert per_slot[1] == pytest.approx(0.0241, abs=1e-3)
+
+
+def test_an_absent_readout_reports_nothing_rather_than_zero():
+    """No readout and a readout trained to zero loss must not look the same."""
+    from nyxara.njp.study import StudyReport
+
+    d = StudyReport().to_dict()["readout"]
+    assert d["loss"] == [None, None]
+    assert d["loss_per_slot"] == [None, None]
+    assert d["learned_per_slot"] is None
+
+
+# --------------------------------------------------------------------------- #
+# The entry point, invoked the way a user invokes it
+# --------------------------------------------------------------------------- #
+def test_the_cli_runs_as_a_module_and_not_only_as_an_import():
+    """``python -m nyxara.njp.study`` must complete. Importing ``main`` does not prove that.
+
+    The regression: ``seed_kinds`` was defined *below* ``if __name__ == "__main__"``, so under
+    ``-m`` the guard fired while the module body was still executing and ``Tutor.study`` raised
+    ``NameError: name 'seed_kinds' is not defined`` on its first step. Importing the module as a
+    library ran the whole body first, which is why every existing test passed and the only
+    training command in the repo had never completed a run.
+
+    So this test must spawn the interpreter. Calling ``main([...])`` in-process would import the
+    module and reproduce nothing.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", "nyxara.njp.study", "--limit", "40", "--exam", "4"],
+        capture_output=True, text=True, timeout=600,
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    assert proc.returncode == 0, f"CLI exited {proc.returncode}\nstderr:\n{proc.stderr[-2000:]}"
+    assert "NameError" not in proc.stderr, proc.stderr[-2000:]
+    assert "Traceback" not in proc.stderr, proc.stderr[-2000:]
+    # It must have got past seeding and through both exams, not merely exited cleanly.
+    assert "studying" in proc.stdout
+    assert "exam AFTER studying" in proc.stdout
+
+
+def test_every_name_the_entry_point_needs_is_bound_before_the_guard():
+    """The structural form of the same bug, checked without spawning anything.
+
+    ``main`` is only reachable from the guard, so any module-level name it can reach at runtime
+    must be defined above that guard. This catches a re-introduction the moment someone appends a
+    new helper to the end of the file and wires it into ``Tutor``.
+    """
+    source = Path(study.__file__).read_text(encoding="utf-8")
+    guard = source.index('if __name__ == "__main__":')
+    for name in ("seed_kinds", "SeedReport", "Tutor", "Corpus", "main"):
+        defined = max(source.rfind(f"\ndef {name}("), source.rfind(f"\nclass {name}"))
+        assert defined != -1, f"{name} is not defined at module level"
+        assert defined < guard, f"{name} is defined below the __main__ guard — `-m` will NameError"
+
+
+# --------------------------------------------------------------------------- #
+# Scoring a fact store against prose
+# --------------------------------------------------------------------------- #
+def test_a_correct_short_answer_is_not_scored_as_wrong():
+    """Symmetric F1 against 25-word prose is a test of verbosity, not of correctness.
+
+    Gold answers in this corpus average 25.3 content words. A fact store answers in three or
+    four. Measured over 200 held-out pairs, a reply of four correct content words drawn from the
+    gold answer scores mean F1 0.369 and clears the 0.4 bar only 36% of the time — so a
+    *perfectly correct* short answer fails roughly two times in three, and `accuracy_overall` is
+    capped near 0.36 however good extraction becomes.
+    """
+    from nyxara.njp.study import _hit
+
+    gold = _content("The blue whale is the largest mammal, reaching up to 33 metres in length "
+                    "and weighing as much as 173 tonnes when fully grown at sea")
+    terse = _content("blue whale")
+    assert _f1(gold, terse) < 0.4, "premise gone: F1 no longer punishes the short answer"
+    assert _hit(gold, terse) == pytest.approx(1.0), "every word she said was in the gold answer"
+
+
+def test_the_brevity_aware_score_still_punishes_padding_and_being_wrong():
+    """It must not become a metric that anything can win."""
+    from nyxara.njp.study import _hit
+
+    gold = _content("Overfitting is when a model memorises training data and fails on new data")
+    assert _hit(gold, _content("overfitting memorises training data")) > 0.9
+    # Noise words are not in the gold set, so padding costs precision here exactly as in F1.
+    # The padding has to be *distinct* words to cost anything, because `_content` returns a set
+    # and a word repeated ten times is one word — which is true of `_f1` on this corpus too.
+    noise = "banana trombone gravel pelican lantern marzipan quarry thimble walrus cobalt"
+    assert _hit(gold, _content("overfitting " + noise)) < 0.2
+    assert _hit(gold, _content("the resplendent quetzal is a bird")) == 0.0
+
+
+def test_both_scores_are_reported_so_neither_can_be_read_alone():
+    report = Tutor(NJPBrain()).exam(PAIRS)
+    d = report.to_dict()
+    assert "mean_f1_when_answered" in d, "the symmetric score must survive"
+    assert "on_topic_when_answered" in d and "mean_hit_when_answered" in d

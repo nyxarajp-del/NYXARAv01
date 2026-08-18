@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["Capability", "Strategy", "Allocation", "SelfModel", "MetaLearner"]
 
@@ -48,6 +48,37 @@ CAPABILITIES = (
     "tool_use",         # did the tool call do what she expected?
     "language",         # did the phrasing carry the content?
 )
+
+#: How deep a chain has to be before it is tracked apart from a short one. A two-hop composition
+#: and a five-hop one fail for different reasons and at different rates, and averaging them makes
+#: the number useless for deciding whether to believe *this* answer.
+_DEEP_CHAIN = 3
+
+
+def mode_of(derivation: Any) -> str:
+    """Which *kind* of reasoning produced this answer, as a capability name.
+
+    ``reasoning`` was one flat posterior, so "how reliable am I here" could only ever be answered
+    about reasoning-in-general — and the ways this brain reasons do not fail at the same rate.
+    A stored fact read back is nearly always right; a two-hop composition is a conjecture priced
+    at 0.70 before anything else discounts it; a schema transfer is defeasible by construction.
+    Folding all three into one number means a confident direct answer subsidises a shaky composed
+    one, and the composed one is exactly where a caller most needs the warning.
+
+    The label is not invented here. :class:`~nyxara.njp.core.Derivation` has carried ``kind`` from
+    the start — ``direct | composed | schema | simulated`` — and a composed answer carries its
+    chain in ``support``, so the hop count is already on the object. This only reads them.
+
+    Names are hierarchical (``reasoning:composed:deep``) so :meth:`SelfModel.trust` can fall back
+    to the parent while a new mode is still untested.
+    """
+    kind = str(getattr(derivation, "kind", "") or "").strip().lower()
+    if not kind:
+        return "reasoning"
+    if kind != "composed":
+        return f"reasoning:{kind}"
+    hops = len(list(getattr(derivation, "support", None) or ()))
+    return f"reasoning:composed:{'deep' if hops >= _DEEP_CHAIN else 'short'}"
 
 
 @dataclass
@@ -217,12 +248,35 @@ class SelfModel:
         """
         try:
             stated = max(0.0, min(1.0, float(stated)))
-            got = self.capabilities.get(str(capability))
-            if got is None or got.observations < _MIN_OBSERVATIONS:
+            got = self._measured(str(capability))
+            if got is None:
                 return stated
             return stated * max(0.0, min(1.0, got.level))
         except Exception:  # noqa: BLE001
             return stated
+
+    def _measured(self, capability: str) -> Optional[Capability]:
+        """The most specific record for this name that has enough evidence to be worth using.
+
+        Capability names are hierarchical — ``reasoning:composed:deep`` sits under
+        ``reasoning:composed`` under ``reasoning`` — and without this walk, splitting a faculty
+        would make the model *less* informative rather than more: every new mode starts at zero
+        observations, falls under :data:`_MIN_OBSERVATIONS`, and is therefore not discounted at
+        all. A brain that has just learned to compose would get a free pass on exactly the
+        answers that most deserve doubt.
+
+        So: use the specific record once it has earned the right to speak, and until then borrow
+        the parent's. Reliability inherits downwards until the child has its own evidence.
+        """
+        name = str(capability)
+        while name:
+            got = self.capabilities.get(name)
+            if got is not None and got.observations >= _MIN_OBSERVATIONS:
+                return got
+            if ":" not in name:
+                return None
+            name = name.rsplit(":", 1)[0]
+        return None
 
     def weakest(self) -> Optional[Capability]:
         """The faculty most worth improving. Untested ones do not qualify."""

@@ -152,6 +152,95 @@ def test_weights_survive_a_reload(head: Readout):
     assert fresh.loss_on(_batch()) == pytest.approx(head.loss_on(_batch()))
 
 
+def test_weights_survive_a_reload_into_a_head_of_the_default_width():
+    """The reload above restores into a head built at the *same* width, which is the easy case.
+
+    A real resume never is. The head doubles its own width as the fabric grows, so the state on
+    disk is 4096 or 8192 wide and the brain that loads it was constructed at 512. `to_dict` wrote
+    `width` and `load_dict` never read it, so every saved tensor failed the shape guard and was
+    **silently skipped** — the whole trained head discarded, with nothing raised and nothing
+    logged. The slot map was restored regardless, and the readout then never took another
+    gradient step for the life of the process: a resumed run learned facts and concepts while its
+    only gradient learner sat dead at a frozen step count.
+    """
+    grown = Readout(width=16, hidden=8, seed=3, max_width=64)
+    while grown.width <= 16:
+        grown._grow()
+    for _ in range(10):
+        grown.train_step(_batch())
+    assert grown.width > 16 and grown.growths > 0
+
+    fresh = Readout(width=16, hidden=8, seed=99)     # the default-width brain a resume builds
+    fresh.load_dict(grown.to_dict())
+
+    assert fresh.width == grown.width, "saved width was ignored, so the head was rebuilt wrong"
+    assert fresh.growths == grown.growths
+    for restored, saved in zip(fresh._params, grown._params):
+        assert np.allclose(restored.data, saved.data), "trained weights were silently discarded"
+
+
+def test_a_reloaded_head_keeps_training(head: Readout):
+    """The symptom that made the silent discard expensive: it stopped learning, permanently."""
+    for _ in range(5):
+        head.train_step(_batch())
+    fresh = Readout(width=16, hidden=8, seed=99)
+    fresh.load_dict(head.to_dict())
+    before = fresh.steps
+    for _ in range(5):
+        fresh.train_step(_batch())
+    assert fresh.steps > before, "a reloaded head took no further gradient steps"
+
+
+def test_a_mismatched_state_is_rejected_whole_rather_than_half_applied():
+    """Two of four tensors restored is not a partially trained head. It is a broken one."""
+    head = Readout(width=16, hidden=8, seed=3)
+    for _ in range(5):
+        head.train_step(_batch())
+    saved = head.to_dict()
+    saved["params"][2] = [[0.0]]                     # corrupt one tensor's shape
+
+    fresh = Readout(width=16, hidden=8, seed=99)
+    original = [p.data.copy() for p in fresh._params]
+    fresh.load_dict(saved)
+    for now, then in zip(fresh._params, original):
+        assert np.allclose(now.data, then), "a rejected state still wrote some of its tensors"
+
+
+def test_growing_recounts_collisions_in_the_table_that_now_exists():
+    """The one number that says whether growth worked was the one number growth did not update.
+
+    ``_grow`` rehashes every cell into a table twice the size — that is the whole point — but it
+    never reset ``_collisions``, so a head that had just doubled its width to stop colliding went
+    on reporting the smaller table's count, and ``collision_rate`` described a table that no
+    longer existed.
+    """
+    # Pinned at its starting width so it cannot grow away from the crowding: `slot` doubles the
+    # table on its own once the load factor is passed, which is exactly the behaviour under test.
+    head = Readout(width=16, hidden=8, seed=3, max_width=16)
+    for cell in range(200):
+        head.slot(cell)
+    crowded = head.stats()["slot_collisions"]
+    assert crowded > 0, "the table did not actually collide; test inconclusive"
+
+    head.max_width = 256                          # now let it grow, and recount
+    assert head._grow()
+    assert head.stats()["slot_collisions"] < crowded, "collisions survived a doubling untouched"
+    assert all(0 <= s < head.width for s in head._slots.values())
+
+
+def test_a_restored_slot_map_never_points_outside_the_table():
+    """An index past the end of the row is what turned this into silent, permanent breakage."""
+    head = Readout(width=16, hidden=8, seed=3)
+    for _ in range(5):
+        head.train_step(_batch())
+    saved = head.to_dict()
+    saved["slots"]["999999"] = 10_000               # a slot from a much wider head
+
+    fresh = Readout(width=16, hidden=8, seed=99)
+    fresh.load_dict(saved)
+    assert all(0 <= s < fresh.width for s in fresh._slots.values())
+
+
 # ---- wired: the dream actually trains ------------------------------------------- #
 def _lived() -> "NJPBrain":  # noqa: F821
     from nyxara.njp.brain import NJPBrain

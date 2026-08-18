@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from nyxara.njp.evolve import Profiler, SelfEvolver, is_protected
 from nyxara.njp.ledger import Ledger

@@ -208,3 +208,63 @@ def test_organs_that_are_off_are_absent():
     brain = NJPBrain(_Off())
     assert brain.self_model is None and brain.meta is None
     assert "self_model" not in brain.stats() and "meta" not in brain.stats()
+
+
+# --------------------------------------------------------------------------- #
+# Which reasoning she is weak in, not whether reasoning is weak
+# --------------------------------------------------------------------------- #
+def test_reasoning_is_tracked_by_the_route_the_answer_came_by():
+    """One flat `reasoning` posterior let a reliable route subsidise a shaky one.
+
+    A stored fact read back is nearly always right; a two-hop composition is a conjecture priced
+    at 0.70 before anything else discounts it; a schema transfer is defeasible by construction.
+    Averaged together, the number cannot answer the question a caller actually has — *should I
+    believe this answer* — and the composed answer is exactly where the warning is needed.
+    """
+    from nyxara.njp.core import Derivation
+    from nyxara.njp.selfmodel import mode_of
+
+    assert mode_of(Derivation(kind="direct")) == "reasoning:direct"
+    assert mode_of(Derivation(kind="schema")) == "reasoning:schema"
+    short = Derivation(kind="composed", support=[("a", "causes", "b"), ("b", "causes", "c")])
+    deep = Derivation(kind="composed", support=[("a", "causes", "b")] * 4)
+    assert mode_of(short) == "reasoning:composed:short"
+    assert mode_of(deep) == "reasoning:composed:deep"
+    # No derivation at all is still reasoning, not a new unnamed faculty.
+    assert mode_of(None) == "reasoning"
+
+
+def test_an_untested_mode_borrows_its_parents_reliability():
+    """Otherwise splitting a faculty makes the model *less* informative, not more.
+
+    Every new mode starts at zero observations, falls under `_MIN_OBSERVATIONS`, and is therefore
+    not discounted at all — so a brain that had just learned to compose would get a free pass on
+    exactly the answers that most deserve doubt.
+    """
+    model = SelfModel()
+    for _ in range(10):
+        model.observe("reasoning", 0.6)
+    borrowed = model.trust("reasoning:composed:short", 0.72)
+    assert borrowed < 0.72, "an untested mode was not discounted at all"
+    assert borrowed == pytest.approx(model.trust("reasoning", 0.72))
+
+
+def test_once_a_mode_has_its_own_evidence_it_stops_borrowing():
+    model = SelfModel()
+    for _ in range(10):
+        model.observe("reasoning", 0.9)
+    for _ in range(10):
+        model.observe("reasoning:composed:short", 0.2)
+
+    composed = model.trust("reasoning:composed:short", 0.72)
+    direct = model.trust("reasoning:direct", 0.72)
+    assert composed < direct, "the weak mode was not judged on its own record"
+    assert direct == pytest.approx(model.trust("reasoning", 0.72)), "direct still borrows"
+
+
+def test_trust_is_still_only_ever_downward():
+    """A mode that has done well must not be able to inflate a stated confidence."""
+    model = SelfModel()
+    for _ in range(20):
+        model.observe("reasoning:composed:short", 1.0)
+    assert model.trust("reasoning:composed:short", 0.5) <= 0.5

@@ -7,7 +7,7 @@ plan rather than a confident one, and that the curriculum cannot be climbed out 
 
 from __future__ import annotations
 
-from nyxara.njp.agency import Agent, Plan
+from nyxara.njp.agency import Agent
 from nyxara.njp.brain import NJPBrain
 from nyxara.njp.curriculum import STAGES, Curriculum
 from nyxara.njp.predictive import PredictiveWorldModel, WorldState
@@ -205,3 +205,71 @@ def test_the_brain_exposes_its_own_report_card():
     brain.think("aag se garmi milti hai")
     card = brain.report_card()
     assert card and "depth" in card and len(card["stages"]) == len(STAGES)
+
+
+# --------------------------------------------------------------------------- #
+# The circle that could not start
+# --------------------------------------------------------------------------- #
+def _lived_brain():
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    for line in ("aag se garmi hoti hai", "the glass broke", "what is aag", "paani thanda hai"):
+        brain.think(line)
+    for i in range(10):
+        brain.think(f"soch {i} hai")
+    return brain
+
+
+def test_the_planner_has_actions_to_search_over():
+    """`known_actions` sat at 0 for the life of every process, and the reason was circular.
+
+    `Agent.plan` enumerates `Agent.actions()`, which reads what `PredictiveWorldModel` has seen.
+    The only call that ever supplied an action label was `Agent.act` — which runs *after* a plan
+    is found. No plan without actions, no actions without a plan, so `pursue` returned [] whatever
+    it was asked and the curriculum's agency rung was unreachable by construction.
+
+    `world` had been given the label all along; the model the planner searches over had not.
+    """
+    brain = _lived_brain()
+    assert brain.agent.stats()["known_actions"] > 0, "the planner still has no alphabet"
+    assert brain.agent.actions(), "actions() is empty, so plan() refuses before it starts"
+
+
+def test_the_action_set_is_still_drawn_from_what_was_observed():
+    """The docstring's promise: not a configured list. An agent that can plan for actions it has
+    never seen the consequences of produces fiction, and nothing here writes one down."""
+    brain = _lived_brain()
+    seen = {action for (_order, _ctx, action) in brain.predictive._counts if action}
+    assert set(brain.agent.actions()) <= seen
+
+
+def test_planning_now_runs_instead_of_refusing():
+    """`plans_found` where the goal is a state she has actually been in."""
+    brain = _lived_brain()
+    history = list(brain.predictive._history)
+    assert history, "no state history; this test cannot say anything"
+    brain.pursue(history[-1])
+    stats = brain.agent.stats()
+    assert stats["planned"] > 0, "plan() was never even attempted"
+    assert stats["plans_found"] > 0, "the search ran and found no route to a state she was in"
+
+
+def test_a_named_goal_cannot_be_grounded_in_this_state_encoding():
+    """Pins why `pursue` takes a state and not a word, so the next attempt starts from the reason.
+
+    `_encode_state` is a 16-bucket histogram over fired cells, chosen coarse on purpose so it
+    stays stable under neurogenesis. The cost is that it cannot carry identity: unrelated words
+    collide onto the same vector. Grounding a named goal by nearest-neighbour against recorded
+    states therefore finds a real state for *any* input, including a word she has never heard,
+    and would hand the planner a confident wrong target.
+    """
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.integrate import LearningLoop
+
+    brain = NJPBrain()
+    encodings = {word: tuple(LearningLoop._encode_state(brain.encode(word)))
+                 for word in ("garmi", "banana", "zzzqqqxyz")}
+    assert len(set(encodings.values())) < len(encodings), (
+        "the state encoding now distinguishes these words — goal grounding may be possible, "
+        "and this test should be replaced by one that grounds a named goal")

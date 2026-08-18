@@ -64,7 +64,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 __all__ = [
     "Derivation", "Schema", "Transitivity",
@@ -1094,17 +1094,118 @@ class CognitiveLearningCore:
                 return out
             from nyxara.njp.grounding import _CAUSE_OF, _clean
             subject, predicate = reader(_clean(question).lower())
-            if not predicate or not subject:
-                return out
-            if predicate == _CAUSE_OF:
-                # Asked from the effect end. Composition still applies, backwards.
-                return self._compose_inverse(_norm(subject))
-            derived = self.predict(subject, predicate)
-            if derived.ok:
-                self.answers_given += 1
-            return derived
+            if predicate and subject:
+                if predicate == _CAUSE_OF:
+                    # Asked from the effect end. Composition still applies, backwards.
+                    derived = self._compose_inverse(_norm(subject))
+                else:
+                    derived = self.predict(subject, predicate)
+                if derived.ok:
+                    self.answers_given += 1
+                    return derived
+
+            # The parse named nothing, or named something that answered nothing. Both are
+            # failures of the same door, and until now both returned empty — so everything this
+            # module can do was reachable only through the grounder's pattern table.
+            #
+            # Treating a *successful* parse as final was the worse half. `"aag se pasina hoti hai
+            # kya"` parses to subject `"aag se pasina hoti hai"` under `is_a`, and
+            # `"what is the root cause of pasina"` to `"root cause of pasina"` — both confident,
+            # both meaningless, and both blocked the second route by not failing. A wrong parse
+            # cost more than no parse at all.
+            #
+            # So the parse is a proposal: if it produced an answer, that answer wins, because it
+            # read an actual relation. If it produced nothing, name the *entities* instead. That
+            # asks a weaker question — "which things here do I hold causal edges for" — and it is
+            # allowed to answer only by composition, never by lookup (the grounder owns lookup
+            # and has already declined) and never with a relation it did not read.
+            return self._compose_by_entity(question)
         except Exception:  # noqa: BLE001
             return out
+
+    def _compose_by_entity(self, question: str) -> Derivation:
+        """Compose from whichever entities the question names, when the parser named none.
+
+        The relation is not read here — it is *assumed* to be ``causes``, and only ``causes``.
+        That is the whole safety story of this method: it cannot invent a relation it did not
+        parse, so the worst it can do is answer a causal question that was not asked, and the
+        confidence cap on composed answers still applies on top.
+
+        Direction is decided by evidence rather than by grammar. An entity that has causes
+        upstream of it is read backwards ("why X"), one that has effects downstream is read
+        forwards ("what does X lead to"), and an entity with both prefers the backward reading —
+        because a question naming an effect is far more often asking for its cause than for what
+        it goes on to produce. Where two entities are both known and one reaches the other, that
+        connection wins over either single-entity reading: naming both ends is a more specific
+        question than naming one.
+
+        Only *composed* answers are returned. A one-hop edge is a stored fact and the grounder
+        owns that lookup; if it declined, repeating it here would be a second retrieval path with
+        different rules, which is the duplication this module exists to avoid.
+        """
+        out = Derivation()
+        try:
+            names = self._entities_in(question)
+            if not names:
+                return out
+
+            forward: Dict[str, List[Tuple[str, float]]] = {}
+            backward: Dict[str, List[Tuple[str, float]]] = {}
+            for s, p, o, conf in self._edges():
+                if p == "causes":
+                    forward.setdefault(s, []).append((o, conf))
+                    backward.setdefault(o, []).append((s, conf))
+
+            known = [n for n in names if n in forward or n in backward]
+            if not known:
+                return out
+
+            # Both ends named: "does aag cause pasina", "aag se pasina hoti hai kya".
+            for head in known:
+                for tail in known:
+                    if head == tail:
+                        continue
+                    linked = self.connects(head, tail, "causes")
+                    if linked.ok and len(linked.support) > 1:
+                        self.answers_given += 1
+                        return linked
+
+            for name in known:
+                if name in backward:
+                    got = self._compose_inverse(name)
+                    if got.ok:
+                        self.answers_given += 1
+                        return got
+            for name in known:
+                if name in forward:
+                    got = self.reach(name, "causes")
+                    if got.ok:
+                        self.answers_given += 1
+                        return got
+            return out
+        except Exception:  # noqa: BLE001
+            return out
+
+    def _entities_in(self, question: str) -> List[str]:
+        """The content words of a question, in order, normalised to fact-store keys.
+
+        Uses the package's own tokeniser (:mod:`nyxara.njp.tongue`), which is script-aware and
+        already carries the function-word lists for English, romanised Hinglish and Devanagari —
+        so "aag se kya kya hota hai" yields ``aag`` and not ``se``, ``kya`` or ``hota``. Writing a
+        word filter here instead would be a second, worse stop-list beside the real one.
+        """
+        try:
+            from nyxara.njp.tongue import concepts_in
+            seen: Set[str] = set()
+            out: List[str] = []
+            for token in concepts_in(str(question or "")):
+                name = _norm(token)
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append(name)
+            return out
+        except Exception:  # noqa: BLE001
+            return []
 
     def _compose_inverse(self, effect: str) -> Derivation:
         """What upstream of ``effect`` could account for it, more than one hop back."""

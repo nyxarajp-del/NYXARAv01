@@ -247,3 +247,40 @@ def test_a_generation_is_closed_on_a_turn_count():
     stats = brain.stats()["ledger"]
     assert stats["generations"] >= 1
     assert stats["latest"]["note"] == "turn"
+
+
+# --------------------------------------------------------------------------- #
+# The split has to be the same split tomorrow
+# --------------------------------------------------------------------------- #
+def test_the_held_out_split_does_not_move_with_the_hash_seed():
+    """`_form_concepts` used the builtin `hash()`, which Python randomises per process.
+
+    The comment above it claimed the opposite — that hashing the subject "keeps the same subject
+    on the same side of the split across restarts" — and that is the one property `hash()` cannot
+    provide. The cost was not theoretical: `benchmark()` scores coverage over `_holdout`, so its
+    value moved with PYTHONHASHSEED. Measured, seed 0 gave 0.637121 and seed 5 gave **1.000**, and
+    at the ceiling no modification can be strictly better, so `meta_cycle` accepted nothing and
+    `test_a_modification_that_helps_is_accepted_and_kept` failed about one run in five and read as
+    flake.
+
+    Checked against the rule directly rather than by spawning interpreters: `_fold` is a blake2b
+    digest, so the same subject lands on the same side on every machine and every restart.
+    """
+    from nyxara.njp.field import _fold
+
+    subjects = ["aag", "garmi", "pasina", "pyaas", "paani", "baadal", "baarish", "keechad"]
+    folds = {s: _fold(s, share=0.25) for s in subjects}
+    assert folds == {s: _fold(s, share=0.25) for s in subjects}
+    assert any(folds.values()) and not all(folds.values()), (
+        "the split put every subject on one side, so it is not splitting anything")
+    # The value is a property of the string, not of this process.
+    assert _fold("garmi", share=0.25) == _fold("garmi", share=0.25)
+
+
+def test_the_benchmark_is_a_property_of_what_she_learned(taught):
+    """A score that moves with the interpreter's hash seed cannot decide whether a change helped."""
+    first = taught.field.benchmark()
+    second = taught.field.benchmark()
+    assert first == pytest.approx(second)
+    assert 0.0 < first < 1.0, (
+        f"benchmark is {first} — at a boundary nothing can be shown to improve on")

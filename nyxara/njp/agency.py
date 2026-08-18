@@ -44,9 +44,9 @@ import heapq
 import math
 import time
 from dataclasses import dataclass, field as dc_field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from nyxara.njp.predictive import PredictiveWorldModel, WorldState
+from nyxara.njp.predictive import PredictiveWorldModel
 
 __all__ = ["Step", "Plan", "Outcome", "ActionValue", "Agent"]
 

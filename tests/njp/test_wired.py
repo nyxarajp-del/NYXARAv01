@@ -227,3 +227,75 @@ def test_an_organ_that_is_off_is_absent_not_zeroed():
     brain = NJPBrain(_Off())
     assert brain.grounder is None and brain.ladder is None
     assert "grounding" not in brain.stats()
+
+
+# --------------------------------------------------------------------------- #
+# Cadences that had no knob
+# --------------------------------------------------------------------------- #
+def test_every_turn_cadence_is_reachable_from_config():
+    """Three of the six took the constructor's defaults and could not be reached.
+
+    `attack_every` is the one that mattered: a 1,352-pair study run built 1,750 beliefs and, at
+    one attack per twenty turns with `limit=1`, challenged roughly 67 of them. The adversary was
+    not missing — it was rationed, and there was no knob to un-ration it.
+    """
+    from nyxara.njp.brain import NJPBrain
+
+    class Cfg:
+        njp = None
+        attack_every_turns = 3
+        assess_every_turns = 5
+        ledger_every_turns = 7
+
+    tuned = NJPBrain(Cfg())
+    assert (tuned.loop.attack_every, tuned.loop.assess_every, tuned.loop.ledger_every) == (3, 5, 7)
+    default = NJPBrain()
+    assert (default.loop.attack_every, default.loop.assess_every,
+            default.loop.ledger_every) == (20, 24, 32)
+
+
+def test_the_pulse_queue_has_no_feeder_and_says_so():
+    """`submit` claimed the brain called it every think. It has no callers, and must not.
+
+    `NJPBrain._expand` grows the fabric synchronously inside the turn so that "after every
+    conversation" means the synapse count differs when the turn returns; its own comment records
+    that routing turns through the pulse as well would double-count every one. So the queue is
+    for out-of-turn experience, nothing currently produces any, and the expand counters are
+    structurally zero rather than broken.
+    """
+    from nyxara.njp.pulse import PulseEngine
+
+    assert "out-of-turn" in (PulseEngine.submit.__doc__ or "")
+    assert "must not gain that one" in (PulseEngine.submit.__doc__ or "")
+
+
+def test_the_always_on_daemon_beats_njps_pulse():
+    """`brain.tick()` was reachable only from an HTTP poke, and this file never mentioned njp.
+
+    The cost was not the pulse. It was everything downstream: `evolve.beat()` runs only from the
+    pulse, `forge.MetamorphicCompiler` only from `evolve.accelerate()`, and
+    `autopoiesis.AutopoieticRewriter` only from the forge — three organs, written and tested,
+    behind a door nothing opened on its own.
+    """
+    from nyxara.kernel.autonomic import AutonomicLoop
+    from nyxara.kernel.orchestrator import NyxaraCore
+
+    core = NyxaraCore()
+    assert core.njp is not None, "no njp brain; this test cannot say anything"
+    before = core.njp.pulse.beats
+    loop = AutonomicLoop(core=core)
+    loop.run_for(3)
+    assert loop.njp_pulses == 3
+    assert core.njp.pulse.beats > before, "the daemon ran and the pulse never beat"
+
+
+def test_the_pulse_hook_survives_a_core_without_njp():
+    """Fail-soft like every other hook in that loop: a pulse is a capability, never fatal."""
+    from nyxara.kernel.autonomic import AutonomicLoop
+
+    class Bare:
+        oversight = None
+
+    loop = AutonomicLoop(core=Bare())
+    loop._maybe_njp_pulse()
+    assert loop.njp_pulses == 0

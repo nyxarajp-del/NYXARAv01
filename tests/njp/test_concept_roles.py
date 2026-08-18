@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from nyxara.njp.brain import NJPBrain
-from nyxara.njp.concepts import ConceptGenesis, Observation, _content_features
+from nyxara.njp.concepts import ConceptGenesis, _content_features
 from nyxara.njp.grounding import GroundedTriple
 
 

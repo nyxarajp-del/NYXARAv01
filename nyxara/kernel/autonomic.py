@@ -96,6 +96,7 @@ class AutonomicLoop:
     errors: int = 0                       # total swallowed exceptions across all stages
     stage_errors: dict = field(default_factory=dict)   # per-stage error tally
     unproductive_ticks: int = 0           # ticks that adopted/acted/ran/fell-back on NOTHING
+    njp_pulses: int = 0                   # beats delivered to NJP's own cadences
     consecutive_unproductive: int = 0     # current streak of unproductive ticks (self-heal trigger)
     _running: bool = field(default=False, init=False)
     _task: Any = field(default=None, init=False)
@@ -238,6 +239,35 @@ class AutonomicLoop:
                 # self-evolution is its own kind of pass, tracked separately.
                 self.self_evolution_reports.append(cert.to_dict())
         except Exception:  # noqa: BLE001 — self-evolution is a capability, never fatal
+            pass
+
+    def _maybe_njp_pulse(self) -> None:
+        """Beat NJP's pulse from the daemon that is already running, once per tick.
+
+        NJP keeps its own wall-clock cadences — expand every 1s, consolidate 60s, wonder 30s,
+        discover 45s, dream 600s, evolve 300s — and `PulseEngine._due` gates each of them, so
+        beating more often than the slowest is free. What it did not have was **anything calling
+        it**. `brain.tick()` was reachable only from `POST /v1/njp/pulse`, `/njp pulse` in the
+        REPL, or a direct `orchestrator.njp_tick()`, and this file — the always-on daemon whose
+        whole job is work between the Master's turns — contained no reference to njp at all.
+
+        The cost of that was not the pulse itself. It was everything downstream: `evolve.beat()`
+        runs only from the pulse, `forge.MetamorphicCompiler` only from `evolve.accelerate()`,
+        and `autopoiesis.AutopoieticRewriter` only from the forge. Three organs, fully written
+        and tested, sat behind a door nothing opened on its own.
+
+        Oversight-gated and fail-soft like every other hook here: `brain.tick` checks the gate
+        itself and a raise is swallowed, because a pulse is a capability and never a reason to
+        break the daemon's cycle.
+        """
+        tick = getattr(self.core, "njp_tick", None)
+        if not callable(tick):
+            return
+        try:
+            report = tick(oversight=getattr(self.core, "oversight", None))
+            if report:
+                self.njp_pulses += 1
+        except Exception:  # noqa: BLE001 — a pulse is a capability, never fatal
             pass
 
     def _maybe_grow_topology(self) -> None:
@@ -669,6 +699,7 @@ class AutonomicLoop:
         self._advance_mission()
         self._maybe_learn()
         self._maybe_grow()
+        self._maybe_njp_pulse()
         self._maybe_persist()
         return result
 

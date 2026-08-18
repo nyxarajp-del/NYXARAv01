@@ -41,13 +41,13 @@ import threading
 import time
 from dataclasses import dataclass, field
 from dataclasses import field as dc_field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nyxara.njp.fabric import Fabric, GrowthReport, SettleResult
 from nyxara.njp.ledger import Ledger
 from nyxara.njp.manifold import Prediction
 from nyxara.njp.soulsync import Reading, SoulSync
-from nyxara.njp.truth import Judgement, TruthGauntlet, Verdict
+from nyxara.njp.truth import Judgement, TruthGauntlet
 
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 
@@ -188,6 +188,9 @@ class NJPThought:
     # different epistemic objects: a derived answer is defeasible however confident it reads, and
     # a caller that cannot tell it from a stated fact will eventually state it as one.
     derivation: Any = None
+    #: The genome's record of this turn's reasoning, kept so the outcome can be graded against
+    #: the *shape* that produced it once reality says whether it was right.
+    trace: Any = None
     # What the Master was *doing* with this turn, and what each recalled memory scored against
     # it. Carried so a reply that reached for something irrelevant is visible from outside rather
     # than having to be inferred from the reply itself.
@@ -273,6 +276,7 @@ class NJPBrain:
         self.discoverer = self._build_discoverer(c)
         self.reasoner = self._build_reasoner(c)
         self.self_model = self._build_self_model(c)
+        self.genome = self._build_genome(c)
         # Before `metareason`, which registers a strategy bound to it: a calculator built after
         # the strategy table would be registered as absent and never chosen.
         self.calculator = self._build_calculator(c)
@@ -483,6 +487,16 @@ class NJPBrain:
                             enough=self._cfg("reason_enough", 0.75),
                             max_rung=self._cfg("reason_max_rung", "proof"))
         except Exception:  # noqa: BLE001 — she answers associatively, at one depth, as before
+            return None
+
+    def _build_genome(self, c: Any) -> Any:
+        """The record of how she reasons, so a shape she keeps re-deriving can be seen."""
+        if not self._gate("genome", True):
+            return None
+        try:
+            from nyxara.njp.genome import ReasoningGenome
+            return ReasoningGenome()
+        except Exception:  # noqa: BLE001
             return None
 
     def _build_self_model(self, c: Any) -> Any:
@@ -781,6 +795,15 @@ class NJPBrain:
                 consolidate_every=self._cfg("consolidate_every_turns", 8),
                 discover_every=self._cfg("discover_every_turns", 12),
                 wonder_every=self._cfg("wonder_every_turns", 16),
+                # These three took the constructor's defaults and had no way to reach config,
+                # so three of the six turn cadences were fixed at whatever `integrate.py` said.
+                # `attack_every` is the one that mattered: a 1,352-pair study run built 1,750
+                # beliefs and, at one attack per twenty turns with `limit=1`, challenged roughly
+                # 67 of them. The adversary was not missing — it was rationed, and there was no
+                # knob to un-ration it.
+                attack_every=self._cfg("attack_every_turns", 20),
+                assess_every=self._cfg("assess_every_turns", 24),
+                ledger_every=self._cfg("ledger_every_turns", 32),
                 train=self._cfg("train_readout", True))
         except Exception:  # noqa: BLE001 — without it the organs never close the loop
             return None
@@ -1018,6 +1041,25 @@ class NJPBrain:
         Without an ``actuator`` this returns the plan as a **proposal** and takes no action —
         which is the honest default, because deciding whether a proposed action may run is the
         kernel's gate to make, never this brain's.
+
+        **This has no production callers, and adding one would change nothing.** It is tempting
+        to read that as missing wiring — the curriculum's Stage G scores `agency.success_rate`
+        and is therefore unreachable, which looks like a call site nobody wrote. It is not.
+        Measured on a brain taught three causal facts: ``known_actions`` 0, and
+        ``pursue("garmi")`` returns ``[]``.
+
+        The reason is circular and structural. :meth:`Agent.plan` searches over the actions
+        :class:`~nyxara.njp.predictive.PredictiveWorldModel` knows, and the only thing that ever
+        teaches it one is :meth:`Agent.act` (``agency.py``), which runs only after a plan is
+        found. No plan without actions, no actions without a plan. Nothing else in NJP names an
+        action: there is no actuator, no action vocabulary, no affordance list — she models what
+        follows what, and never what she could *do*.
+
+        So Stage G is not blocked by a missing caller and will not be unblocked by one. Calling
+        this from the turn loop would add a scheduled no-op and move a counter off zero without
+        anything having happened, which is the kind of wiring this package has already been
+        burned by. The gap is an action vocabulary, and that is a design question rather than a
+        line of plumbing.
         """
         try:
             if self.agent is None:
@@ -1818,6 +1860,13 @@ class NJPBrain:
                         context["derivable"] = True
                         context["derived"] = derived.answer
                         thought.derivation = derived
+                        # Keep the *shape* of the reasoning, not just its answer. Until now the
+                        # derivation survived one turn and was dropped, so two identical chains
+                        # through different subjects were never seen together and nothing could
+                        # notice she was re-deriving the same form over and over.
+                        if self.genome is not None:
+                            thought.trace = self.genome.record(
+                                derived, question=thought.stimulus)
                 solution = self.metareason.solve(thought.stimulus, context=context)
                 thought.solution = solution
                 if solution.assertable and solution.answer:
@@ -1976,7 +2025,43 @@ class NJPBrain:
 
             # 2. She was asked something and genuinely does not know. Say that — do not fall
             # through to recall and offer a loosely-related memory as though it were an answer.
+            #
+            # This was tried the other way and the numbers said no. Letting a question answer from
+            # recall-through-the-gate took in-sample coverage from 4.0% to 37.5% (200 taught
+            # questions, 8 → 75 answered, 4 → 59 scoring F1 ≥ 0.4) — and on held-out questions it
+            # turned 0 honest abstentions into 3 confident wrong ones while gaining not a single
+            # correct answer:
+            #
+            #     "Give me an example of irony?"        → a memory about the word "charge"
+            #     "Which tree has aromatic blossoms?"   → a memory about the Resplendent Quetzal
+            #
+            # Neither a stricter gate threshold nor `Recall.decided` separates those from the good
+            # ones: the worst held-out answer scored 0.394, above the median 0.388 of the correct
+            # in-sample ones, and `decided` was True for every case in both populations. Relevance
+            # is not correctness, and a score that cannot tell them apart cannot be the licence to
+            # speak.
+            #
+            # The in-sample gain was mostly an artifact besides — it is the store returning the
+            # answer whose *text* sits nearest the question, which is the echo `memory.py`
+            # deliberately avoids by not encoding cues, and it does not transfer.
+            #
+            # So the guard stays. Recall still reaches the gate on statement turns (see
+            # `_recall_through_gate`, which really was dead), and a question NJP cannot ground is
+            # still answered with silence rather than with the nearest thing in the store.
             if getattr(grounding, "is_question", False):
+                # One thing is safe to answer from memory here, and only one: a question she was
+                # taught *this exact question*. `recall_cue` is a dict lookup on the normalised
+                # question text, so it cannot return something merely near what was asked — which
+                # is the whole reason the fuzzy path was refused above.
+                #
+                # Without it she could not answer the questions she had just studied: measured
+                # over 200 taught pairs, 8 answered. That is not caution, it is a hole — being
+                # unable to repeat what you were told is a failure of memory, not a virtue of
+                # abstention. Held-out questions were never taught, find nothing, and still
+                # abstain, which is the correct answer for them.
+                taught = self._answer_as_taught(thought)
+                if taught:
+                    return taught
                 return ""
 
             bits: List[str] = []
@@ -2107,6 +2192,32 @@ class NJPBrain:
         head = "Main theek hoon Master. " if mood else "Abhi: "
         return head + "; ".join(bits[:3]) + f" — {self.turns} turns."
 
+    def _answer_as_taught(self, thought: NJPThought) -> str:
+        """The stored answer to *this exact question*, if she was ever taught one.
+
+        Exact, and that is the entire safety argument. Two different questions normalise to two
+        different keys, so this can never hand back a loosely-related memory as though it were an
+        answer — the failure that made similarity-based recall unusable here, measured at three
+        confident wrong answers for three honest abstentions.
+
+        This is memorisation, and memorisation is the bottom rung rather than a shameful one:
+        `eval/intelligence.py` scores it as its own stage, and a brain that cannot repeat what it
+        was told an hour ago has a broken memory, not high standards.
+        """
+        try:
+            memory = getattr(self, "memory", None)
+            lookup = getattr(memory, "recall_cue", None)
+            if not callable(lookup):
+                return ""
+            trace = lookup(thought.stimulus)
+            text = str(getattr(trace, "text", "") or "").strip()
+            if not text:
+                return ""
+            thought.recalled = "taught under this exact question"
+            return text[:1000]
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _recall_through_gate(self, thought: NJPThought, act: Any,
                             bits: List[str]) -> None:
         """Attach a recalled memory only if it is about this turn.
@@ -2119,12 +2230,24 @@ class NJPBrain:
             rec = thought.percept.recall if thought.percept else None
             if rec is None:
                 return
-            candidates = list(getattr(rec, "traces", None) or [])
-            best = getattr(rec, "best", None)
-            if not candidates and best is not None:
-                candidates = [best]
+            # `Recall` carries `hit` (the nearest trace) and `associated` ([(key, weight)]).
+            #
+            # This used to read `rec.traces` and `rec.best`, and `Recall` has never had either
+            # field — so both `getattr`s returned None, `candidates` was always empty, and the
+            # method returned here on every turn of every kind. The holographic memory reached an
+            # answer exactly never, while `study.py` wrote to it twice per corpus pair. Because
+            # both reads were `getattr` with a default, nothing raised and nothing logged; the
+            # only symptom was recall silently contributing nothing.
+            candidates = [rec.hit] if rec.hit is not None else []
+            store = getattr(self.memory, "recall_key", None)
+            if store is not None:
+                for key, _weight in (rec.associated or [])[:4]:
+                    trace = store(key)
+                    if trace is not None and trace is not rec.hit:
+                        candidates.append(trace)
             if not candidates:
                 return
+            best = candidates[0]
             if self.gate is None:
                 text = str(getattr(best, "text", "") or "")
                 if text:
@@ -2244,6 +2367,18 @@ class NJPBrain:
                 if self.self_model is not None and float(correct) >= 0.5:
                     self.self_model.observe("grounding", 1.0) if getattr(
                         getattr(thought, "percept", None), "grounding", None) else None
+                # Grade the *route* the answer came by, not just "reasoning". A stored fact read
+                # back and a two-hop composition fail at different rates, and a single posterior
+                # lets the reliable one subsidise the shaky one — which is backwards, because the
+                # composed answer is exactly where the caller most needs the warning. The label
+                # is already on the derivation; this only records the outcome against it.
+                derivation = getattr(thought, "derivation", None)
+                if self.self_model is not None and derivation is not None:
+                    from nyxara.njp.selfmodel import mode_of
+                    self.self_model.observe(mode_of(derivation), float(correct))
+                if self.genome is not None:
+                    self.genome.grade(getattr(thought, "trace", None),
+                                      correct=float(correct) >= 0.5)
                 if self.meta is not None:
                     # Every arm that was spent this turn is graded, not just the one. Rewarding
                     # `settle_steps` alone meant the other two knobs accumulated choices and
@@ -2381,7 +2516,8 @@ class NJPBrain:
                             ("pulse", self.pulse), ("grounding", self.grounder),
                             ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("self_model", self.self_model), ("genome", self.genome),
+                            ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
                             ("attention", self.attention), ("readout", self.readout),
                             ("loop", self.loop),
@@ -2418,7 +2554,8 @@ class NJPBrain:
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
-                            ("self_model", self.self_model), ("meta", self.meta),
+                            ("self_model", self.self_model), ("genome", self.genome),
+                            ("meta", self.meta),
                             ("goals", self.goals), ("curiosity", self.curiosity),
                             ("attention", self.attention), ("readout", self.readout),
                             ("concepts", self.genesis), ("universe", self.universe),
@@ -2462,6 +2599,8 @@ class NJPBrain:
                 self.discoverer.load_dict(d["discover"])
             if d.get("self_model") and self.self_model is not None:
                 self.self_model.load_dict(d["self_model"])
+            if d.get("genome") and self.genome is not None:
+                self.genome.load_dict(d["genome"])
             if d.get("meta") and self.meta is not None:
                 self.meta.load_dict(d["meta"])
             if d.get("goals") and self.goals is not None:
