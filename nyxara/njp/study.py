@@ -51,7 +51,6 @@ Pure standard library. No LLM anywhere in the path.
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import os
@@ -203,18 +202,16 @@ class Corpus:
 
     @staticmethod
     def _rows(path: Path) -> Iterator[Dict[str, Any]]:
-        opener = gzip.open if str(path).endswith(".gz") else open
-        with opener(path, "rt", encoding="utf-8") as fh:  # type: ignore[operator]
-            head = fh.read(1)
-            fh.seek(0)
-            if head == "[":                      # a plain JSON list
-                for row in json.load(fh):
-                    yield row
-                return
-            for line in fh:                      # JSON lines
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+        """Rows of the corpus file, with a corrupt line treated as fatal.
+
+        The format handling lives in :func:`nyxara.njp.ingest.stream_rows` so there is one
+        implementation of it rather than two. The error policy stays here because it genuinely
+        differs: a bad line in *this* corpus means the bundled file is wrong and the run should
+        stop, where a bad line in a harvested third-party dump means one row of a quarter-million
+        is wrong and the rest are fine.
+        """
+        from nyxara.njp.ingest import stream_rows
+        yield from stream_rows(path, on_error="raise")
 
     @classmethod
     def load(cls, path: Any = DEFAULT_CORPUS, *, limit: Optional[int] = None,
@@ -841,43 +838,22 @@ def seed_kinds(brain: Any, path: Any = DEFAULT_KINDS) -> SeedReport:
     report = SeedReport()
     t0 = time.perf_counter()
     try:
-        from nyxara.njp.grounding import GroundedTriple
+        from nyxara.njp.ingest import ingest_triples
 
-        grounder = getattr(brain, "grounder", None)
-        if grounder is None:
-            return report
-        rows: List[Dict[str, Any]] = []
-        with open(str(path), "r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except ValueError:
-                    report.skipped += 1
-
-        triples: List[Any] = []
-        for row in rows:
-            report.read += 1
-            subject = str(row.get("subject", "")).strip()
-            predicate = str(row.get("predicate", "")).strip()
-            obj = str(row.get("object", "")).strip()
-            if not subject or not predicate or not obj:
-                report.skipped += 1
-                continue
-            triple = GroundedTriple(
-                subject=subject, predicate=grounder._predicate(predicate), object=obj,
-                confidence=_SEED_CONFIDENCE, source="seed",
-                text=f"{subject} {predicate} {obj}")
-            grounder._assert(triple)
-            triples.append(triple)
-            report.asserted += 1
-
-        report.kinds = len({t.subject.lower() for t in triples})
-        genesis = getattr(brain, "genesis", None)
-        if genesis is not None and triples:
-            genesis.observe_triples(triples)
+        # The mechanism is `njp/ingest.py`, which generalised what this function did at 137 rows
+        # to a corpus that does not fit in memory. Delegating rather than keeping a second copy
+        # is the point: there is one bulk path into the fact store, so a fix to folding, dedup or
+        # batching reaches the seed file and the corpus at the same time.
+        #
+        # `to_world=False`: these are properties of kinds, not statements of mechanism. "bird
+        # is_a animal" is not a law about how the world moves and does not belong on the causal
+        # skeleton, and the seed file never routed to the world model before this either.
+        got = ingest_triples(brain, path, source="seed", min_confidence=0.0,
+                             to_world=False, default_confidence=_SEED_CONFIDENCE)
+        report.read = got.read
+        report.asserted = got.asserted
+        report.skipped = got.skipped + got.duplicate
+        report.kinds = got.subjects
         return report
     except Exception:  # noqa: BLE001 — a failed seed leaves the store exactly as it was
         return report
