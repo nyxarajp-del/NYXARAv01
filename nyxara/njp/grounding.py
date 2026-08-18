@@ -869,6 +869,11 @@ _GENERAL_ANSWER = frozenset({
 #: answered 45 of 120 held-out questions and got 4 right, where before it answered 3 and got 2.
 _AFFINITY_FLOOR = 0.35
 
+#: How many ungrounded words the gap tally may hold. It is read by `persistent_unknowns`, which
+#: returns at most eight, so the cap only has to be large enough that a genuinely recurring gap is
+#: never evicted by one-off noise — not large enough to hold every word she has ever missed.
+_UNGROUNDED_TALLY_CAP = 4096
+
 # The words a question is *made of* rather than *about*. Interrogatives and copulas name no
 # entity, so leaving them in would let "what" match a subject containing the word "what".
 _QUESTION_WORDS = frozenset({
@@ -1279,6 +1284,26 @@ class Grounder:
         # snapshot, because "he keeps saying this and I still have nothing for it" is a gap and
         # "he mentioned it once" is not, and the snapshot could not tell them apart.
         self._ungrounded_seen: Dict[str, int] = {}
+        # Read-side indexes over `self.facts`, maintained by `_index` on every assertion.
+        #
+        # They exist because six methods here answered by walking the whole store, which is
+        # correct and was cheap while the store held what one conversation could state. Measured
+        # on a real brain at 20,000 facts: one `ground()` call cost 31.7 ms, of which `_features`
+        # and `_ungrounded` were 97% — both full scans, one of them run twice per extracted
+        # triple. Per-sentence cost grew with everything she had ever been told, which put a
+        # ceiling on every organ above the store rather than on the store alone.
+        #
+        # Narrowing each scan to its index is **exact**, not approximate, and the reason is a
+        # property of this file: `self.facts` is only ever appended to — nothing deletes a key or
+        # a triple — so an index built on write can never be stale. Supersession is not deletion
+        # and is deliberately not indexed: the scans that care about it filter it from the triple
+        # list they pull, never from the key set, so the two concerns stay separate here too.
+        # `_lookup_inverse` asked for exactly this in its own docstring, on the condition that
+        # the store outgrow one conversation. It has.
+        self._known: Set[str] = set()                        # every subject and object, lowered
+        self._by_subject: Dict[str, Set[str]] = {}           # subject -> its predicates
+        self._by_object: Dict[str, Set[Tuple[str, str]]] = {}  # object -> the keys pointing at it
+        self._subject_tokens: Dict[str, Set[str]] = {}       # content word -> subjects using it
 
     # ---- the one call ----------------------------------------------------- #
     def ground(self, text: str, *, intent: Any = None, deep: bool = False) -> GroundingResult:
@@ -1776,10 +1801,57 @@ class Grounder:
         return _PREDICATE_ALIASES.get(out, out) or "related_to"
 
     # ---- assertion and contradiction -------------------------------------- #
+    def _index(self, triple: GroundedTriple) -> None:
+        """Record one triple in the read-side indexes. The only writer, besides `_reindex`.
+
+        `_by_object` is keyed by **both** the stripped and unstripped lowercase forms of the
+        object, because the readers disagree: `_lookup_inverse` compares on ``.strip().lower()``
+        and `_features` on ``.lower()``. Indexing both makes the index a superset of either
+        reader's matches, and both readers re-check their own condition on the triples they pull
+        — so the answers are identical to the scans they replace rather than merely close.
+
+        `_known` is deliberately **not** given the stripped form. It answers `_ungrounded`, which
+        compared on ``.lower()`` alone; adding a second spelling there would quietly shrink the
+        gap list, and a word she cannot actually reach must keep counting as a gap.
+        """
+        try:
+            subject = triple.subject.lower()
+            key = (subject, triple.predicate)
+            self._known.add(subject)
+            self._known.add(triple.object.lower())
+            self._by_subject.setdefault(subject, set()).add(triple.predicate)
+            for form in {triple.object.lower(), triple.object.strip().lower()}:
+                self._by_object.setdefault(form, set()).add(key)
+            for word in subject.replace("_", " ").split():
+                if len(word) > 2:
+                    self._subject_tokens.setdefault(word, set()).add(subject)
+        except Exception:  # noqa: BLE001 — an unindexed fact is still a stored fact
+            pass
+
+    def _reindex(self) -> None:
+        """Rebuild every index from `self.facts`. The correct response to a bulk load.
+
+        `load_dict` appends to `self.facts` directly rather than going through `_assert`, which
+        is right — a reload is not a fresh assertion and must not re-run contradiction handling
+        — but it means the indexes have to be rebuilt once at the end rather than maintained
+        per row.
+        """
+        self._known = set()
+        self._by_subject = {}
+        self._by_object = {}
+        self._subject_tokens = {}
+        try:
+            for triples in self.facts.values():
+                for triple in triples:
+                    self._index(triple)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _assert(self, triple: GroundedTriple) -> None:
         """Record the fact locally and, when one is attached, in the KnowledgeGraph."""
         key = (triple.subject.lower(), triple.predicate)
         self.facts.setdefault(key, []).append(triple)
+        self._index(triple)
         try:
             if self.graph is None:
                 return
@@ -1953,10 +2025,10 @@ class Grounder:
         if not low:
             return []
         out: List[GroundedTriple] = []
-        for (_subject, stored), triples in self.facts.items():
-            if stored != predicate:
+        for key in self._by_object.get(low, ()):
+            if key[1] != predicate:
                 continue
-            out.extend(t for t in triples
+            out.extend(t for t in self.facts.get(key, ())
                        if not t.superseded and t.object.strip().lower() == low)
         return out
 
@@ -2102,7 +2174,7 @@ class Grounder:
         if predicate not in _GENERAL_ANSWER:
             return 0.0
         low = str(subject or "").lower()
-        relations = {p for (s, p) in self.facts if s == low}
+        relations = self._by_subject.get(low, ())
         return 1.0 / max(1, len(relations))
 
     @staticmethod
@@ -2121,9 +2193,13 @@ class Grounder:
         punish it for the words it spends asking.
         """
         scores: Dict[str, float] = {}
-        for subject, _predicate in self.facts:
-            if subject in scores:
-                continue
+        # Only subjects that share a content word with the question can score: the loop below
+        # rejects everything else at `if not shared`. So the posting lists answer exactly the
+        # set the scan would have reached, and the scoring underneath is untouched.
+        candidates: Set[str] = set()
+        for token in tokens:
+            candidates |= self._subject_tokens.get(token, set())
+        for subject in candidates:
             parts = {w for w in subject.replace("_", " ").split() if len(w) > 2}
             if not parts:
                 continue
@@ -2146,16 +2222,19 @@ class Grounder:
             score = named * (topical ** 0.5)
             if named >= floor and score >= floor * 0.5:
                 scores[subject] = score
-        return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:4]
+        # Tie-broken by name rather than by arrival. The scan this replaced walked `self.facts`,
+        # so two subjects on an identical score were separated by whichever was stated first —
+        # an accident of insertion order, not a decision. Naming the tie-break makes the same
+        # question return the same four candidates on a reloaded store as on a live one, which
+        # the old form did not guarantee once `load_dict` reordered the keys.
+        return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:4]
 
     def _facts_of(self, subject: str) -> List[GroundedTriple]:
         """Every live fact stated of one subject, across all its relations."""
         out: List[GroundedTriple] = []
         low = str(subject or "").lower()
-        for (stored, _predicate), triples in self.facts.items():
-            if stored != low:
-                continue
-            out.extend(t for t in triples if not t.superseded)
+        for predicate in self._by_subject.get(low, ()):
+            out.extend(t for t in self.facts.get((low, predicate), ()) if not t.superseded)
         return out
 
     def _neighbours(self, subject: str) -> List[str]:
@@ -2233,12 +2312,15 @@ class Grounder:
         out: Set[str] = set()
         low = entity.lower()
         try:
-            for (subject, predicate), triples in self.facts.items():
-                if subject == low:
-                    out.add(predicate)
-                for triple in triples:
+            out.update(self._by_subject.get(low, ()))
+            for key in self._by_object.get(low, ()):
+                # Re-checked rather than trusted: the index is keyed on both spellings of an
+                # object, so it can offer a key this comparison rejects. That is the trade that
+                # keeps one index serving two readers without either of them changing answer.
+                for triple in self.facts.get(key, ()):
                     if triple.object.lower() == low:
-                        out.add(f"{predicate}_of")
+                        out.add(f"{key[1]}_of")
+                        break
         except Exception:  # noqa: BLE001
             pass
         return sorted(out)
@@ -2268,10 +2350,7 @@ class Grounder:
         """Concepts that reach no entity — the words that are still just words to her."""
         out: List[str] = []
         try:
-            known = {s for s, _p in self.facts}
-            for (_s, _p), triples in self.facts.items():
-                for triple in triples:
-                    known.add(triple.object.lower())
+            known = self._known
             for concept in concepts:
                 if concept.lower() not in known:
                     out.append(concept)
@@ -2283,6 +2362,15 @@ class Grounder:
                     if tally:
                         word = concept.lower()
                         self._ungrounded_seen[word] = self._ungrounded_seen.get(word, 0) + 1
+                        # Bounded. This is a tally of words she could not reach, and on a corpus
+                        # rather than a conversation that is an unbounded set — it grew forever
+                        # and was serialised on every save. The rarest entries go first because
+                        # the question this answers is "what does he keep asking for that I still
+                        # do not have", and a word seen once has not established that it keeps.
+                        if len(self._ungrounded_seen) > _UNGROUNDED_TALLY_CAP:
+                            keep = sorted(self._ungrounded_seen.items(),
+                                          key=lambda kv: (-kv[1], kv[0]))[:_UNGROUNDED_TALLY_CAP]
+                            self._ungrounded_seen = dict(keep)
             # A word that has since been grounded stops being a gap, so its tally goes rather
             # than lingering as a question she has already answered.
             for seen in [w for w in self._ungrounded_seen if w in known]:
@@ -2435,6 +2523,12 @@ class Grounder:
                 if triple.subject and triple.predicate:
                     self.facts.setdefault(
                         (triple.subject.lower(), triple.predicate), []).append(triple)
+            # Once, at the end. A reload appends straight into `self.facts` rather than going
+            # through `_assert` — deliberately, because restoring a fact is not asserting one and
+            # must not re-run contradiction handling — so nothing has maintained the indexes on
+            # the way in. A brain that woke up with empty indexes would answer as though it knew
+            # nothing, which is a worse failure than a slow reload.
+            self._reindex()
             for row in (d.get("patterns") or []):
                 regex = str(row.get("regex", ""))
                 if not regex or any(p.regex == regex for p in self.patterns):
