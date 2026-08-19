@@ -1283,6 +1283,10 @@ class Grounder:
         # Local mirror of every assertion, so grounding works with no KnowledgeGraph attached and
         # so contradiction detection has a store even before the kernel wires one in.
         self.facts: Dict[Tuple[str, str], List[GroundedTriple]] = {}
+        #: Bumped on every write to `facts`. Lets a reader that derived an expensive view of the
+        #: store — `core._edges` materialises all of it — tell whether that view is still current
+        #: in O(1), instead of rebuilding it to find out.
+        self.revision: int = 0
         self.turns = 0
         self.grounded_turns = 0
         self.answered = 0
@@ -1882,6 +1886,11 @@ class Grounder:
         """Record the fact locally and, when one is attached, in the KnowledgeGraph."""
         key = (triple.subject.lower(), triple.predicate)
         self.facts.setdefault(key, []).append(triple)
+        # Bumped on every write, so a reader can tell whether a view it derived is still current
+        # without walking the store to find out. `len(self.facts)` cannot serve: it counts
+        # (subject, predicate) keys, so a second object under an existing key leaves it unchanged
+        # and a cache keyed on it would go stale silently. See `core._edges`.
+        self.revision += 1
         self._index(triple)
         try:
             if self.graph is None:
@@ -1908,6 +1917,7 @@ class Grounder:
         difference between revising a belief and overwriting one.
         """
         try:
+            self.revision += 1          # a supersede changes what `_edges` would return
             prior.contested = incoming.contested = True
             if incoming.confidence + _RECENCY_BONUS >= prior.confidence:
                 prior.superseded = True

@@ -415,3 +415,59 @@ def test_entity_composition_never_answers_from_a_relation_it_did_not_read():
     # Nothing causal was ever stated, so the entity route must find nothing to compose.
     got = brain.learner._compose_by_entity("why Ravi")
     assert not got.ok
+
+
+# --------------------------------------------------------------------------- #
+# At corpus scale
+# --------------------------------------------------------------------------- #
+
+def test_the_edge_view_is_rebuilt_when_the_store_changes():
+    """The cache exists for speed and must never cost correctness. A fact asserted after the
+    view was built has to appear in the next one."""
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.grounding import GroundedTriple
+
+    brain = NJPBrain()
+    core = brain.learner
+    brain.grounder._assert(GroundedTriple(subject="dog", predicate="is_a", object="animal",
+                                          confidence=0.9, source="master"))
+    before = len(core._edges())
+    core._edges()                                     # warm the cache
+    brain.grounder._assert(GroundedTriple(subject="cat", predicate="is_a", object="animal",
+                                          confidence=0.9, source="master"))
+    assert len(core._edges()) == before + 1
+
+
+def test_a_second_object_under_an_existing_key_invalidates_the_view():
+    """The reason the cache is keyed on `Grounder.revision` and not on the size of the store:
+    a second object under an existing (subject, predicate) leaves the key count unchanged, so a
+    length-keyed cache would go stale invisibly."""
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.grounding import GroundedTriple
+
+    brain = NJPBrain()
+    core = brain.learner
+    brain.grounder._assert(GroundedTriple(subject="dog", predicate="is_a", object="animal",
+                                          confidence=0.9, source="master"))
+    keys_before = len(brain.grounder.facts)
+    before = len(core._edges())
+    brain.grounder._assert(GroundedTriple(subject="dog", predicate="is_a", object="canine",
+                                          confidence=0.9, source="master"))
+    assert len(brain.grounder.facts) == keys_before      # the key count did not move
+    assert len(core._edges()) == before + 1              # the view did
+
+
+def test_an_unchanged_store_is_not_walked_twice():
+    """Measured on ConceptNet, one call is 161 ms and a turn makes 2.5 of them — 68% of the
+    wall-clock of a turn spent rebuilding a list that had not changed."""
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.grounding import GroundedTriple
+
+    brain = NJPBrain()
+    core = brain.learner
+    for i in range(200):
+        brain.grounder._assert(GroundedTriple(subject=f"e{i}", predicate="is_a", object="thing",
+                                              confidence=0.8, source="master"))
+    first = core._edges()
+    assert core._edges() is first                        # same object, not merely equal
+    assert core._edges(fit_only=True) is not first        # the other fold is its own entry
