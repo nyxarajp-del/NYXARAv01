@@ -981,5 +981,30 @@ Paired arms over held-out batteries, `mcnemar_exact` reused from `nyxara.eval.ab
 invalidity checks run *before* any success verdict can be reached, because both would otherwise
 produce the strongest possible claim from no evidence: a removal that did not remove makes arm C a
 second copy of arm B (`broken`), and a battery the teacher never touched makes all three arms
-identical (`inert`). `dependent` is reported as plainly as `distilled` — if the teacher comes out
-and she falls back to where she started, that is the finding.
+identical (`inert`).
+
+**It has been run, and the answer is `dependent`.** Against the live 9B over
+`eval/general_novel`'s 20 held-out tasks, 2707 s:
+
+| arm | score | |
+|---|---|---|
+| A — NJP alone | **3/20** | one genuine solve, two correct abstentions |
+| B — NJP + Qwythos | **10/20** | the teacher moved 11 tasks |
+| C — distilled, teacher removed | **3/20** | 0 gained, 0 lost against A; p = 1.0 |
+
+Nothing survived the removal. She acquired a dependency, not an ability, and the scaffold is still
+load-bearing. That is the honest reading and it is the one the instrument printed — `dependent` is
+reported exactly as plainly as `distilled` would have been.
+
+**Why, and it is not mysterious.** Every causal claim the teacher made went through
+`nyxara.njp.adversary`'s four attacks against an empty record and came back `UNDECIDED` — which is
+not a pass, so none of them entered. There was nothing established for a residual to train on, and
+`residuals_trained` is 0. A scaffold that has not yet transferred anything is what this measures,
+and it measured it.
+
+**A finding worth keeping from arm B.** The teacher is markedly better at the mathematics and
+markedly *worse* at knowing when to stay quiet: it answered "The capital of France is Paris" on a
+task where the correct behaviour is to abstain, and lost the abstention items NJP got right. B's
+10/20 is a stronger model paying for its own fluency.
+
+The full run, arm by arm, is in `docs/teacher-removal-run.json`.

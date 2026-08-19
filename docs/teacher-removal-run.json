@@ -1,0 +1,48 @@
+{
+  "battery": "general_novel",
+  "verdict": "dependent",
+  "arms": {
+    "A": {
+      "arm": "A",
+      "n": 20,
+      "passed": 3,
+      "score": 0.15,
+      "teacher_attached": null,
+      "latency_s": 0.173
+    },
+    "B": {
+      "arm": "B",
+      "n": 20,
+      "passed": 10,
+      "score": 0.5,
+      "teacher_attached": null,
+      "latency_s": 2706.128
+    },
+    "C": {
+      "arm": "C",
+      "n": 20,
+      "passed": 3,
+      "score": 0.15,
+      "teacher_attached": null,
+      "latency_s": 0.328
+    }
+  },
+  "c_vs_a": {
+    "gained": 0,
+    "lost": 0,
+    "delta": 0.0,
+    "p_value": 1.0
+  },
+  "c_vs_b": {
+    "kept": 2,
+    "lost": 9,
+    "delta": -0.35,
+    "p_value": 0.06543
+  },
+  "responses_differed": 16,
+  "removal_verified": true,
+  "removal_detail": "no cortex, no teacher reference, no grafted regions",
+  "min_discordant": 6,
+  "parity_slack": 0.05,
+  "summary": "A=0.150  B=0.500  C=0.150  -> dependent"
+}
