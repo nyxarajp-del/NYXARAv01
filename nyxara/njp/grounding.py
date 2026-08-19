@@ -53,8 +53,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
-    "Epistemic", "GroundedTriple", "Answer", "Pattern", "GroundingResult", "Grounder",
-    "SELF_ENTITY",
+    "Epistemic", "Provenance", "GroundedTriple", "Answer", "Pattern", "GroundingResult",
+    "Grounder", "SELF_ENTITY",
 ]
 
 # The Master, as one canonical entity. First-person surface forms all resolve here, so "my name"
@@ -75,6 +75,77 @@ class Epistemic:
     KNOWN = "known"          # in the graph and corroborated — statable as fact
     BELIEVED = "believed"    # present, but only with its confidence attached
     UNKNOWN = "unknown"      # genuinely absent — she says so and does not generate
+
+
+class Provenance:
+    """Where a claim CAME FROM — a different question from how strongly it is held.
+
+    :class:`Epistemic` answers *how sure am I*. Nothing answered *how did this get here*, and until
+    a language model was asked for content rather than for phrasing, nothing had to: every triple in
+    the store came from something the Master or a document actually said. A cortex that proposes
+    hypotheses breaks that assumption, and it breaks it silently — a confident guess and a witnessed
+    fact are the same shape once extracted.
+
+    Three sources, and the ordering between them is the whole point:
+
+    * :attr:`OBSERVED` — real contact with something outside her reasoning: the Master's words, a
+      tool result, a fetched page, a measurement. Only contact creates this; nothing is promoted
+      *into* it.
+    * :attr:`DERIVED` — produced by her own machinery from claims that were themselves observed or
+      derived: a composition, a fitted relation, a simulated outcome.
+    * :attr:`PROPOSED` — a hypothesis. Her cortex's, or her own. **Not evidence, and it does not
+      become evidence by being repeated, restated, or believed harder.**
+
+    **The one legal promotion is PROPOSED → DERIVED**, and only by being re-derived from support
+    that is itself observed or derived. ``PROPOSED → OBSERVED`` is absent from the table on purpose:
+    a hypothesis that turns out to be right was never an observation, and the moment those two are
+    interchangeable she can manufacture evidence for herself by thinking.
+
+    **Composition cannot launder a proposal.** :meth:`weakest` is what makes that structural rather
+    than a convention: a derivation is only as sourced as its least-sourced input, so a chain with
+    one cortex conjecture in it comes out ``PROPOSED``, however many observed facts sit beside it.
+    Without that rule, two hops are all it takes to turn a guess into a fact.
+    """
+
+    OBSERVED = "observed"
+    DERIVED = "derived"
+    PROPOSED = "proposed"
+
+    ALL = (OBSERVED, DERIVED, PROPOSED)
+
+    #: Weakest first. Used for ordering and for :meth:`weakest`; not a confidence.
+    _RANK = {PROPOSED: 0, DERIVED: 1, OBSERVED: 2}
+
+    #: Every promotion that is allowed. The absences are the rule, not an oversight.
+    _PROMOTIONS = frozenset({(PROPOSED, DERIVED)})
+
+    @staticmethod
+    def rank(provenance: str) -> int:
+        """How well-sourced this is, weakest first. An unknown label ranks as a proposal."""
+        return Provenance._RANK.get(str(provenance or "").lower(), 0)
+
+    @staticmethod
+    def weakest(*provenances: str) -> str:
+        """The least-sourced of several — what a claim resting on all of them may call itself."""
+        found = [p for p in provenances if p]
+        if not found:
+            return Provenance.PROPOSED
+        return min(found, key=Provenance.rank)
+
+    @staticmethod
+    def may_promote(frm: str, to: str) -> bool:
+        """Is this transition allowed? Staying put always is; everything else consults the table."""
+        frm, to = str(frm or "").lower(), str(to or "").lower()
+        return frm == to or (frm, to) in Provenance._PROMOTIONS
+
+    @staticmethod
+    def promote(frm: str, to: str) -> str:
+        """The resulting provenance. An illegal promotion is refused, returning ``frm`` unchanged.
+
+        Refusing rather than raising because this sits on the turn path: a caller that asks for the
+        impossible should get the honest answer and carry on, not take the turn down with it.
+        """
+        return to if Provenance.may_promote(frm, to) else frm
 
 
 @dataclass
@@ -117,6 +188,10 @@ class GroundedTriple:
     condition: str = ""
     temporal: str = ""
     modality: str = ""            # "" | "possible" | "typical" | "necessary"
+    # Where this came from — see :class:`Provenance`. Defaults to OBSERVED because every extractor
+    # that predates the cortex reads a surface the Master or a document actually produced; only a
+    # proposer sets anything else, and only by saying so.
+    provenance: str = Provenance.OBSERVED
 
     def as_tuple(self) -> Tuple[str, str, str]:
         return (self.subject, self.predicate, self.object)
@@ -129,7 +204,11 @@ class GroundedTriple:
     def to_dict(self) -> Dict[str, Any]:
         out = {"subject": self.subject, "predicate": self.predicate, "object": self.object,
                "confidence": round(self.confidence, 4), "source": self.source,
-               "superseded": self.superseded, "contested": self.contested}
+               "superseded": self.superseded, "contested": self.contested,
+               # Always present, unlike the cognitive fields below: a reader who cannot see the
+               # provenance will assume the safe case, and the safe case is the wrong one exactly
+               # when it matters.
+               "provenance": self.provenance}
         # Only present when the surface actually carried them. An unconditional claim should not
         # serialise three empty strings that every reader then has to learn to ignore.
         if self.condition:
@@ -150,10 +229,18 @@ class Answer:
     confidence: float = 0.0
     triples: List[GroundedTriple] = field(default_factory=list)
     why: str = ""
+    #: The weakest provenance among the triples this was built from — a claim is only as sourced as
+    #: its least-sourced support. See :class:`Provenance`.
+    provenance: str = Provenance.OBSERVED
 
     @property
     def known(self) -> bool:
         return self.state == Epistemic.KNOWN
+
+    @property
+    def proposed(self) -> bool:
+        """Is this a hypothesis rather than something she was told or derived?"""
+        return self.provenance == Provenance.PROPOSED
 
     @property
     def answered(self) -> bool:
@@ -163,6 +250,7 @@ class Answer:
     def to_dict(self) -> Dict[str, Any]:
         return {"text": self.text, "state": self.state,
                 "confidence": round(self.confidence, 4), "why": self.why,
+                "provenance": self.provenance,
                 "triples": [t.to_dict() for t in self.triples]}
 
 
@@ -1991,12 +2079,20 @@ class Grounder:
             agreed = out.text
             corroborated = len({t.source for t in found
                                 if (t.subject if inverse else t.object) == agreed}) > 1
+            out.provenance = Provenance.weakest(*(t.provenance for t in found))
             # A contested claim is never KNOWN, however confident the surviving side is: something
             # in her own record disagrees with it, and stating that as fact is exactly the move
             # this tri-state exists to prevent.
+            #
+            # Nor is a PROPOSED one, and that clause closes a real hole rather than restating the
+            # obvious. ``corroborated`` counts DISTINCT SOURCES, so two cortex proposals produced
+            # from two different prompts corroborate each other — a hypothesis could be promoted to
+            # statable fact simply by being asked for twice. Provenance is what stops it, because it
+            # does not move when confidence does.
             out.state = (Epistemic.KNOWN
                          if (best.confidence >= self.known_floor and corroborated
-                             and not best.contested)
+                             and not best.contested
+                             and out.provenance != Provenance.PROPOSED)
                          else Epistemic.BELIEVED)
             out.why = f"{best.subject} —{best.predicate}→ {best.object}"
             if best.contested:

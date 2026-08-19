@@ -58,7 +58,7 @@ applied to the documentation itself).
 | 36 | Creativity | `nyxara.mind.creative` | REAL |
 | 37 | Common Sense | `nyxara.knowledge.base` | REAL+WIRED |
 | 38 | Social Reasoning (Theory of Mind) | `nyxara.social.tom` | REAL+WIRED |
-| 39 | Language Understanding (PRIMARY brain now runs **on-device**: Gemma-4-E2B-it in LiteRT-LM format leads the `auto` ladder `litertlm→self→native` — every rung in-process, no cloud providers at all, in-process with no API key and no network — so an offline machine answers on a real instruct model instead of an n-gram, and it is classed among her OWN brains rather than as an external teacher) | `nyxara.mind.llm` + `nyxara.mind.litertlm_assets` | UPGRADED |
+| 39 | Language Understanding (her CORTEX now runs **on-device**: Qwythos-9B, Qwen3.5-based, as a Q4_K_M GGUF served by llama.cpp, leads the `auto` ladder `qwythos→self→native` — every rung in-process, no cloud providers at all, no API key and no network — and it is classed among her OWN brains rather than as an external teacher. Gemma-4-E2B in LiteRT-LM format is still here and still tested, now a second local rung behind `NYXARA_LLM__LITERTLM_ENABLED=true`) | `nyxara.mind.llm` + `nyxara.mind.gguf_assets` + `nyxara.mind.litertlm_assets` | UPGRADED |
 | 40 | Multimodal Intelligence | `nyxara.senses.binding` | REAL+WIRED |
 | 41 | Embodied Intelligence | `nyxara.sim.embodied` + `nyxara.senses.live` | REAL+WIRED |
 | 42 | Real-time Decision Making (System 1/2) | `nyxara.mind.dual_process` | REAL+WIRED |

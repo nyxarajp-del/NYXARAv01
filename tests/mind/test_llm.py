@@ -154,9 +154,10 @@ def test_provider_status():
     llm = _native_llm()
     status = llm.provider_status()
     assert status["native"] is True
-    assert set(status) == {"litertlm", "self", "native"}
-    # Under TEST every rung but her native floor is honestly unavailable — including the on-device
-    # primary, which the profile seals so the suite never loads 2.4 GB of weights.
+    assert set(status) == {"qwythos", "litertlm", "self", "native"}
+    # Under TEST every rung but her native floor is honestly unavailable — including both on-device
+    # brains, which the profile seals so the suite never loads 5.6 GB or 2.4 GB of weights.
+    assert status["qwythos"] is False
     assert status["litertlm"] is False
 
 

@@ -29,9 +29,11 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when it would actually serve (`self`, or the `auto` ladder
-    # once its serve gate is open). An explicit non-self provider like `airouter` is a clean no-op.
+    # once its serve gate is open). An explicit non-self provider is a clean no-op. This used to
+    # name `airouter`; the cloud rungs were removed from LLMProvider and the test kept naming one,
+    # so it died in the enum lookup before it could assert anything about the forge at all.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    s.llm.provider = LLMProvider.AIROUTER
+    s.llm.provider = LLMProvider.NATIVE
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
@@ -63,7 +65,28 @@ def test_records_distilgpt2_base_even_when_degraded(tmp_path: Path):
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
     assert spec["base_model"] == DISTILGPT2
     assert spec["kind"] == "lora"
-    assert spec["trust_remote_code"] is False   # DistilGPT-2 (GPT-2 arch) is native — no remote code
+    # The spec must record the CONFIGURED posture, whatever it is. This asserted a literal False,
+    # which was the shipped default until `foundry.trust_remote_code` was deliberately turned on
+    # (config.py: "ON by Master JP's explicit instruction"), and then failed on every run without
+    # telling anyone which of the two had moved. What is worth pinning is that the flag survives
+    # the trip into the manifest in BOTH directions — a spec that silently dropped it would hand a
+    # rebuilding machine a different security posture than the one that was configured.
+    assert spec["trust_remote_code"] is s.foundry.trust_remote_code
+
+
+def test_spec_records_the_configured_remote_code_posture(tmp_path: Path):
+    # Both directions, because only one of them is the dangerous one to get wrong: a manifest that
+    # recorded True when False was configured would hand a rebuilding machine permission to execute
+    # a model repo's own Python, unreviewed, that the Master never granted.
+    for posture in (False, True):
+        root = tmp_path / f"foundry-{posture}"
+        s = NyxaraSettings.for_profile(Profile.DEV)
+        s.llm.provider = LLMProvider.SELF
+        s.llm.self_model_dir = root
+        s.foundry.trust_remote_code = posture
+        ensure_primary_model(s, log=lambda _m: None)
+        spec = json.loads((root / "manifest.json").read_text())["versions"][0]["spec"]
+        assert spec["trust_remote_code"] is posture
 
 
 def test_tiny_placeholder_base_is_upgraded_to_distilgpt2(tmp_path: Path):

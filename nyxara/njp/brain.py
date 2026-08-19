@@ -36,6 +36,7 @@ Master is sovereign.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import threading
 import time
@@ -48,6 +49,8 @@ from nyxara.njp.ledger import Ledger
 from nyxara.njp.manifold import Prediction
 from nyxara.njp.soulsync import Reading, SoulSync
 from nyxara.njp.truth import Judgement, TruthGauntlet
+
+log = logging.getLogger("nyxara.njp.brain")
 
 __all__ = ["NJPPercept", "NJPThought", "NJPBrain"]
 
@@ -207,6 +210,21 @@ class NJPThought:
     # know, and here is what would help" are the same epistemic state, and a caller that wants
     # only the honest non-answer must still be able to get it.
     asked: Any = None
+    # NJP V.06 — the cortex consult. All three are ``None`` when the cortex is off or unreachable,
+    # which is deliberately different from "it was consulted and said nothing".
+    #: Which seats this turn permitted, in which order, and on what basis. A ``Routing``.
+    routing: Any = None
+    #: What her cortex proposed and what the gates did with it. A ``CortexReport``.
+    cortex: Any = None
+    #: What the two seats came to — including, when they came to nothing, the question that
+    #: would settle it. An ``Arbitration``.
+    arbitration: Any = None
+    #: The discriminating experiment compiled out of a disagreement. An ``Experiment``.
+    experiment: Any = None
+    #: Where this turn's answer came from — see :class:`~nyxara.njp.grounding.Provenance`. Carried
+    #: on the thought so a caller can tell a witnessed answer from a proposed one without having to
+    #: reach back into the grounding result.
+    provenance: str = "observed"
 
     @property
     def confidence(self) -> float:
@@ -233,6 +251,11 @@ class NJPThought:
                 "judgement": self.judgement.to_dict() if self.judgement else None,
                 "growth": self.growth.to_dict() if self.growth else None,
                 "loop": self.loop.to_dict() if self.loop is not None else None,
+                "provenance": self.provenance,
+                "routing": self.routing.to_dict() if self.routing is not None else None,
+                "cortex": self.cortex.to_dict() if self.cortex is not None else None,
+                "arbitration": self.arbitration.to_dict() if self.arbitration is not None else None,
+                "experiment": self.experiment.to_dict() if self.experiment is not None else None,
                 "field": self.field.to_dict() if self.field is not None else None,
                 "trial": self.trial.to_dict() if self.trial is not None else None,
                 "focus": self.focus.to_dict() if self.focus is not None else None}
@@ -313,6 +336,16 @@ class NJPBrain:
         # that holds it.
         self.learner = self._build_learner(c)
         self.metareason = self._build_metareason(c)
+        # ---- NJP V.06: the cortex, and the two organs that keep it honest ---- #
+        # Built here, after `metareason`, `self_model`, `adversary` and `curiosity`, because every
+        # one of them is a collaborator rather than a copy: the router asks the classifier what
+        # kind of problem this is, weighs the seats by the self-model's posteriors, and the cortex's
+        # laws are attacked before they are believed. A cortex wired to none of them would be a
+        # second opinion with nothing to check it — which is the arrangement that produced weights
+        # with no capability behind them.
+        self.cortex = self._build_cortex(c)
+        self.router = self._build_router(c)
+        self.epistemic = self._build_epistemic(c)
         # The predictive brain: what follows what in the WORLD, as opposed to which of her own
         # cells fire next. Without it she is a fact store that grows; with it she is something
         # that expects, is wrong, and learns from the difference.
@@ -891,6 +924,47 @@ class NJPBrain:
         try:
             from nyxara.njp.calculate import Calculator
             return Calculator(prefer_exact=self._cfg("calculate_prefer_exact", True))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_cortex(self, c: Any) -> Any:
+        """Her cortex, as a proposer. Absent weights make it honestly unavailable, not absent."""
+        if not self._gate("cortex", True):
+            return None
+        try:
+            from nyxara.njp.cortex import Cortex
+            return Cortex(provider=self._cfg("cortex_provider", "qwythos"),
+                          max_tokens=self._cfg("cortex_max_tokens", 768))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_router(self, c: Any) -> Any:
+        """The seat router. Given the classifier, the self-model and the bandit rather than its own
+        copies: a router that classified for itself would put a keyword list in competition with a
+        strategy selector that learns from outcomes, and the keyword list would win arguments it
+        should lose.
+
+        ``self.meta`` is the :class:`~nyxara.njp.selfmodel.MetaLearner` this brain already built —
+        the same one ``metareason`` uses. One learner, one record of what actually works; its arms
+        are namespaced (``strategy:<kind>`` there, ``seat:<kind>`` here) so they do not collide.
+        """
+        if not self._gate("router", True):
+            return None
+        try:
+            from nyxara.njp.router import Router
+            return Router(meta=self.metareason, self_model=self.self_model, learner=self.meta)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_epistemic(self, c: Any) -> Any:
+        """The compiler that turns an unresolved question into the observation that would settle
+        it. Given curiosity because that is what already retires a question once it is answered."""
+        if not self._gate("epistemic", True):
+            return None
+        try:
+            from nyxara.njp.epistemic import EpistemicCompiler
+            return EpistemicCompiler(universe=self.universe, curiosity=self.curiosity,
+                                     stakes=self._cfg("epistemic_stakes", 0.5))
         except Exception:  # noqa: BLE001
             return None
 
@@ -1695,6 +1769,10 @@ class NJPBrain:
                 else:
                     self._ask_back(out)
 
+            # 4.5 CONSULT THE CORTEX — the one step that makes a stronger model buy stronger
+            # reasoning rather than better sentences. It proposes; the gate below still decides.
+            self._consult_cortex(out)
+
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
                 self._prepare_evidence(out)
@@ -2331,6 +2409,79 @@ class NJPBrain:
         except Exception:  # noqa: BLE001
             return []
 
+    def _consult_cortex(self, out: NJPThought) -> None:
+        """Ask her cortex for rival explanations, and let the record judge them. Never raises.
+
+        This is step 4.5, and it sits exactly here for a reason: **after** NJP has reached its own
+        answer and **before** the Truth-Seeking Gauntlet judges it. After, so the cortex is weighed
+        against a conclusion rather than filling a vacuum — a proposal with nothing to be selected
+        against can only ever be accepted. Before, so nothing it says can skip the gate.
+
+        Three things it may do, and one it may never:
+
+        * a hypothesis that clashes with the **record** simply loses, and the turn is unchanged;
+        * a clash between two ungrounded accounts *lowers* confidence and opens a question;
+        * that question is compiled into the observation that would settle it, and filed with
+          curiosity, which already retires a question once it is answered.
+
+        What it may never do is raise confidence or change the answer. The cortex is a proposer.
+        ``relevance.revise_confidence`` already holds the rule this obeys — depth may lower
+        confidence, only independent evidence may raise it — and a 9B model is depth, not evidence.
+        """
+        if self.router is None:
+            return
+        try:
+            out.routing = self.router.route(out.stimulus, act=out.act)
+        except Exception:  # noqa: BLE001 — a failed route leaves the turn exactly as it was
+            return
+        if self.cortex is None:
+            return
+        if not (out.routing.cortex_permitted or out.routing.extraction_permitted):
+            return
+        try:
+            if not self.cortex.available():
+                return
+            from nyxara.njp.cortex import CortexReport
+            report = CortexReport()
+            hypotheses: List[Any] = []
+            if out.routing.cortex_permitted:
+                # A question: ask for rivals to select between.
+                hypotheses = self.cortex.hypotheses(out.stimulus, context=out.answer,
+                                                    report=report)
+            else:
+                # A statement: this is the World Model Generator's turn. Pulling relations and
+                # causal claims out of what the Master just said is grounding work, and it is the
+                # half of this module that a question never reaches. One cortex call either way —
+                # a 9B model is seconds per turn, and two would be spent on the same sentence.
+                self.cortex.world_model(out.stimulus, context=out.answer, report=report)
+            self.cortex.offer(report, grounder=self.grounder, world=self.world,
+                              attacker=self.adversary, beliefs=self.beliefs)
+            out.cortex = report
+            if not hypotheses or not out.answer:
+                return
+
+            from nyxara.njp.grounding import Answer
+            from nyxara.njp.router import Verdict
+            lead = max(hypotheses, key=lambda h: h.confidence)
+            njp_side = Answer(text=out.answer, state=out.epistemic,
+                              confidence=out.epistemic_confidence, provenance=out.provenance)
+            out.arbitration = self.router.arbitrate(out.stimulus, cortex=lead, njp=njp_side)
+
+            if out.arbitration.verdict != Verdict.DISAGREEMENT:
+                return
+            # Two accounts that cannot both be right are grounds for LESS certainty in whichever
+            # she was about to give, never more. The gauntlet still runs after this.
+            out.epistemic_confidence = min(out.epistemic_confidence, out.arbitration.confidence)
+            if self.epistemic is None:
+                return
+            experiment = self.epistemic.compile(out.arbitration.question, hypotheses)
+            if experiment is None:
+                return
+            out.experiment = experiment
+            self.epistemic.to_question(experiment)
+        except Exception as exc:  # noqa: BLE001 — the cortex is an organ, never a dependency
+            log.debug("cortex consult degraded: %s", exc)
+
     @staticmethod
     def _set_epistemic(thought: NJPThought) -> None:
         """Record which of the three states this turn's answer is in.
@@ -2347,6 +2498,10 @@ class NJPBrain:
             if answer is not None and answer.answered:
                 thought.epistemic = answer.state
                 thought.epistemic_confidence = float(answer.confidence)
+                # An answer built from proposals is a proposal. Carrying it here is what lets the
+                # router tell "the record says X" from "something guessed X", which is the whole
+                # difference between a contradiction and a disagreement.
+                thought.provenance = getattr(answer, "provenance", thought.provenance)
                 return
             # An acknowledgement is not a claim about the world. "noted: Master has name Jay"
             # reports what she just recorded, and she is not uncertain about her own record —
@@ -2586,7 +2741,9 @@ class NJPBrain:
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
                             ("field", self.field), ("learner", self.learner),
-                            ("adversary", self.adversary)):
+                            ("adversary", self.adversary),
+                            ("cortex", self.cortex), ("router", self.router),
+                            ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:
@@ -2622,7 +2779,9 @@ class NJPBrain:
                             ("metareason", self.metareason), ("predictive", self.predictive),
                             ("agency", self.agent),
                             ("field", self.field), ("learner", self.learner),
-                            ("adversary", self.adversary)):
+                            ("adversary", self.adversary),
+                            ("cortex", self.cortex), ("router", self.router),
+                            ("epistemic", self.epistemic)):
             if organ is None:
                 continue
             try:

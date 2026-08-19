@@ -2,14 +2,21 @@
 # Core
 pydantic>=2.6
 pydantic-settings>=2.1
-# HER PRIMARY BRAIN — Gemma-4-E2B-it in Google's LiteRT-LM on-device format, served in-process by
-# this runtime (import name `litert_lm`). It leads the auto ladder in mind/llm.py: no API key, no
-# endpoint, nothing leaves the machine, and no outage can take it. This line installs the RUNTIME;
-# the ~2.4 GB weights come separately and once —
-#     python scripts/fetch_litertlm_model.py
+# HER CORTEX — Qwythos-9B (Qwen3.5-based, post-trained for reasoning) as a Q4_K_M GGUF, served
+# in-process by llama.cpp (import name `llama_cpp`). It leads the auto ladder in mind/llm.py: no
+# API key, no endpoint, nothing leaves the machine, and no outage can take it. This line installs
+# the RUNTIME; the ~5.6 GB weights (plus a 0.9 GB vision projector) come separately and once —
+#     python scripts/fetch_qwythos_model.py
 # (or just boot her: growth/bootstrap.py fetches them unless
-# NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD=false). Import-guarded like every heavy dep: with neither the
-# runtime nor the weights, the rung reports itself unavailable and the ladder starts at the cloud.
+# NYXARA_LLM__QWYTHOS_AUTO_DOWNLOAD=false). Import-guarded like every heavy dep: with neither the
+# runtime nor the weights, the rung reports itself unavailable and the ladder starts one rung
+# lower. The prebuilt wheels are CPU builds; a CUDA/Metal build is a source install and changes
+# only speed, never availability.
+llama-cpp-python>=0.3.2
+# HER SECOND LOCAL RUNG — Gemma-4-E2B-it in Google's LiteRT-LM on-device format (import name
+# `litert_lm`). OFF by default since the cortex took rung 1, and worth turning back on
+# (NYXARA_LLM__LITERTLM_ENABLED=true) on a host that cannot hold 5.6 GB — without it the step below
+# the cortex is the n-gram floor. Weights: python scripts/fetch_litertlm_model.py (~2.4 GB).
 # NOTE this wheel's liblitert-lm.so declares a hard dependency on the Vulkan LOADER
 # (libvulkan.so.1) even for the CPU backend — while importing NO symbol from it. Nothing extra is
 # needed: mind/vulkan_shim.py generates a 344-byte stub carrying only that SONAME, which satisfies

@@ -162,6 +162,7 @@ def ensure_primary_model(
     """
     settings = settings or get_settings()
     say = log or (lambda _msg: None)
+    _ensure_qwythos(settings, say)
     _ensure_litertlm(settings, say)
     # Forge a primary brain when NYXARA's OWN model is the selected primary provider —
     # explicitly (`self`), or via the default `auto` ladder where `self` is the first rung.
@@ -193,7 +194,10 @@ def _ensure_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> No
     Present weights make this a no-op file check, which is the normal boot. When they are absent it
     is a ~2.4 GB fetch, so it is gated by ``llm.litertlm_auto_download`` and never runs under TEST —
     the asset module enforces both. Failure is not fatal: the ``auto`` ladder simply starts one rung
-    lower, at her cloud tools, and she keeps her voice either way.
+    lower and she keeps her voice either way.
+
+    OFF by default since the cortex took rung 1: with ``litertlm_enabled`` False this is a cheap
+    no-op, and a host that re-enables Gemma as a second local rung gets its weights here as before.
     """
     try:
         from nyxara.mind.litertlm_assets import ensure_litertlm_model, model_present
@@ -204,7 +208,7 @@ def _ensure_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> No
             return
         say("primary brain      : fetching her on-device model (~2.4 GB, one time)…")
         got = ensure_litertlm_model(settings)
-        say(f"primary brain      : {'ready at ' + str(got) if got else 'not fetched; using the cloud rungs for now'}")
+        say(f"primary brain      : {'ready at ' + str(got) if got else 'not fetched; using the rungs below it for now'}")
         if got:
             _warm_litertlm(settings, say)
     except Exception as exc:  # noqa: BLE001 — boot must survive a failed fetch
@@ -234,6 +238,61 @@ def _warm_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> None
             say("primary brain      : could not start the runtime; using the rungs below it")
     except Exception as exc:  # noqa: BLE001 — warming is an optimisation, never a boot failure
         say(f"primary brain      : warm-up skipped ({exc})")
+
+
+def _ensure_qwythos(settings: NyxaraSettings, say: Callable[[str], None]) -> None:
+    """Put her CORTEX on disk if it isn't already. Best-effort, never raises.
+
+    Present weights make this a no-op file check, which is the normal boot. When they are absent it
+    is a ~5.6 GB fetch (plus 0.9 GB for the vision projector), so it is gated by
+    ``llm.qwythos_auto_download`` and never runs under TEST — the asset module enforces both.
+    Failure is not fatal: the ``auto`` ladder simply starts one rung lower and she keeps her voice.
+    """
+    try:
+        from nyxara.mind.gguf_assets import ensure_gguf_model, model_present
+        if not bool(getattr(settings.llm, "qwythos_enabled", True)):
+            return
+        if model_present(settings):
+            _warm_qwythos(settings, say)
+            return
+        if not bool(getattr(settings.llm, "qwythos_auto_download", False)):
+            return
+        say("cortex             : fetching her reasoning weights (~5.6 GB, one time)…")
+        got = ensure_gguf_model(settings)
+        say(f"cortex             : {'ready at ' + str(got) if got else 'not fetched; using the rungs below it for now'}")
+        if got:
+            _warm_qwythos(settings, say)
+    except Exception as exc:  # noqa: BLE001 — boot must survive a failed fetch
+        say(f"cortex             : fetch skipped ({exc})")
+
+
+def _warm_qwythos(settings: NyxaraSettings, say: Callable[[str], None]) -> None:
+    """Load the cortex weights at boot rather than inside the Master's first message.
+
+    Reading 5.6 GB is tens of seconds of work. It is the same work either way; boot is simply the
+    honest place to do it, where he is already watching a progress line, rather than in whatever
+    turn happens to come first. Best-effort: a host that cannot load them falls down the ladder
+    exactly as it would have on the first turn, and says so.
+
+    It also reports whether she can SEE, because a missing projector is invisible otherwise — the
+    text rung works perfectly and the first image is where anyone would find out.
+    """
+    import time as _time
+    try:
+        from nyxara.mind.llm import GGUFProvider
+        provider = GGUFProvider(settings=settings)
+        if not provider.available():
+            return
+        say("cortex             : loading her weights (~5.6 GB, once per boot)…")
+        started = _time.monotonic()
+        if provider.warm():
+            say(f"cortex             : ready in {_time.monotonic() - started:.0f}s")
+            can_see, why = provider.vision_available()
+            say(f"cortex vision      : {'ready' if can_see else 'unavailable — ' + why}")
+        else:
+            say("cortex             : could not load the weights; using the rungs below it")
+    except Exception as exc:  # noqa: BLE001 — warming is an optimisation, never a boot failure
+        say(f"cortex             : warm-up skipped ({exc})")
 
 
 def _forge(settings: NyxaraSettings, *, base_model: Optional[str], generations: int,
