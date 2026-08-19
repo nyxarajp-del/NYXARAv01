@@ -3861,6 +3861,13 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.autonomous_enact = False
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
+            # Ouroboros edits her own source, and ``ouroboros_enabled`` is the only thing standing
+            # between a caller and that edit (growth/__main__.py checks it and nothing else does).
+            # It ships ON under the max-power posture, which is the Master's deliberate choice for a
+            # real run — and leaves a hermetic suite one function call away from rewriting the live
+            # tree it is testing. Sealed here for the same reason the three lines above are, and the
+            # same reason ``njp.evolve_enabled`` is.
+            self.self_improvement.ouroboros_enabled = False
             # The autonomic loop is ON by default in DEV/PROD (L-AGENCY), but a hermetic suite must
             # never sprout a background thread that reaches the network, trains, or writes state
             # underneath the test that is running. A test that wants the loop drives AutonomicLoop

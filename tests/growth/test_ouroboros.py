@@ -215,9 +215,25 @@ def test_speedup_is_one_when_nothing_was_timed():
 
 
 # -------------------- config -------------------- #
-def test_ouroboros_is_off_by_default():
-    """Every other growth layer here is additive; this one edits her own source, so the Master
-    turns it on deliberately."""
-    for profile in (Profile.DEV, Profile.PROD, Profile.TEST):
+def test_ouroboros_is_sealed_where_it_would_do_harm():
+    """Every other growth layer here is additive; this one edits her own source.
+
+    It used to assert False on every profile, which stopped being true when the max-power posture
+    turned it on — and then failed on every run without saying which of the two had moved. The
+    Master's deliberate choice for a real run stands. What must not be true is that a *hermetic
+    suite* is one call away from rewriting the tree it is testing: ``ouroboros_enabled`` is the
+    whole gate (``growth/__main__.py`` checks it and nothing else does), so TEST seals it exactly
+    as TEST already seals ``autonomous_enact``, ``allow_tuning``, ``allow_llm_edits`` and
+    ``njp.evolve_enabled``.
+    """
+    for profile in (Profile.DEV, Profile.PROD):
         settings = NyxaraSettings.for_profile(profile)
-        assert settings.self_improvement.ouroboros_enabled is False
+        assert settings.self_improvement.ouroboros_enabled is True
+
+    sealed = NyxaraSettings.for_profile(Profile.TEST)
+    assert sealed.self_improvement.ouroboros_enabled is False
+    # the neighbours it is sealed alongside — if any of these ever ship True under TEST, the suite
+    # can edit the source tree it is checking
+    assert sealed.self_improvement.autonomous_enact is False
+    assert sealed.self_improvement.allow_llm_edits is False
+    assert sealed.njp.evolve_enabled is False
