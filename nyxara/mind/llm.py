@@ -665,7 +665,8 @@ class GGUFProvider(LLMProviderBase):
             # reads and kept on `raw`, because njp/genome.py mines those traces for recurring
             # reasoning shapes — this is a rendering choice, never a discarding of the trace.
             from nyxara.njp.cortex import split_think
-            text, _reasoning, _truncated = split_think(raw)
+            text, _reasoning, _truncated = split_think(
+                raw, preopened=bool(self._cfg("gguf_reasoning_preopened", False)))
         usage_raw = resp.get("usage") or {}
         usage = Usage(prompt_tokens=int(usage_raw.get("prompt_tokens", 0) or 0),
                       completion_tokens=int(usage_raw.get("completion_tokens", 0) or 0))

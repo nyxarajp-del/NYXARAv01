@@ -453,6 +453,20 @@ class LLMConfig(BaseModel):
     # kept on the response, because njp/genome.py mines those traces for reasoning shapes — this
     # is a rendering choice, never a discarding of the trace.
     gguf_strip_think: bool = True
+    # Does this model's chat template OPEN the reasoning block itself, in the prompt?
+    #
+    # Measured against the real weights: yes. Generation begins already inside <think>, so the
+    # model emits only the closing tag — a completed reply reads `</think>answer` with no opener.
+    # That makes `</think>` the *answer delimiter*, and its absence means the answer has not
+    # started yet rather than that no reasoning happened.
+    #
+    # This has to be declared rather than inferred, because the same bytes mean opposite things
+    # under the two conventions. With no tags at all: under a pre-opened template the reply is
+    # ENTIRELY reasoning that the token budget cut short; under a normal template it is entirely
+    # answer. Guessing wrong in the first direction hands the Master a monologue and reports it as
+    # a finished answer — which is exactly what happened on the first live run, at 0 reasoning
+    # characters across every reply.
+    gguf_reasoning_preopened: bool = True
 
     # ---- litertlm — her PRIMARY brain, and the only strong one that never leaves the machine ---- #
     # Gemma-4-E2B-it converted to Google's LiteRT-LM on-device format: one ~2.4 GB INT4

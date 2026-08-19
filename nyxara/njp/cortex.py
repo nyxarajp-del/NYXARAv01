@@ -82,7 +82,7 @@ class TeacherReply:
                 "tokens": self.tokens}
 
 
-def split_think(raw: str) -> Tuple[str, str, bool]:
+def split_think(raw: str, *, preopened: bool = False) -> Tuple[str, str, bool]:
     """``(answer, reasoning, truncated)`` for one raw generation.
 
     The truncated case is the one worth being careful about. A reply cut off by the token budget
@@ -114,7 +114,21 @@ def split_think(raw: str) -> Tuple[str, str, bool]:
         body = body[:open_tail.start()]
         truncated = True
 
-    # Case 4: no tags at all — the whole reply is the answer, and `body` already holds it.
+    # Case 4: no tags at all. What that means depends entirely on the template, which is why
+    # `preopened` is a declared fact rather than something inferred from the text.
+    #
+    # Under a pre-opened template — this model's — generation started inside the reasoning block,
+    # so a reply carrying no closing tag never left it: the whole thing is reasoning and there is
+    # NO ANSWER YET. Reading it as an answer is the original bug in a new disguise, and a worse
+    # one, because there is no syntactic marker to notice. Measured on the first live shadow run:
+    # three replies, three monologues returned as answers, `reasoning_chars = 0` on all of them.
+    #
+    # Under an ordinary template the same bytes are simply an answer with no reasoning.
+    if preopened and not reasoning_parts and body.strip():
+        reasoning_parts.append(body)
+        body = ""
+        truncated = True
+
     reasoning = "\n".join(
         re.sub(r"</?think>", "", p, flags=re.IGNORECASE).strip() for p in reasoning_parts)
     return body.strip(), reasoning.strip(), truncated
@@ -239,7 +253,8 @@ class Cortex:
             raw = str(resp["choices"][0]["message"]["content"] or "")
             out.raw = raw
             if bool(self._cfg("gguf_strip_think", True)):
-                out.text, out.reasoning, out.truncated = split_think(raw)
+                out.text, out.reasoning, out.truncated = split_think(
+                    raw, preopened=bool(self._cfg("gguf_reasoning_preopened", False)))
             else:
                 out.text = raw
             usage = resp.get("usage") or {}

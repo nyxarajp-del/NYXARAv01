@@ -92,7 +92,39 @@ def test_an_unmatched_closing_tag_is_complete_not_truncated():
     assert truncated is False
 
 
+def test_untagged_output_means_opposite_things_under_the_two_template_conventions():
+    """The same bytes, two readings, and only a DECLARED fact can tell them apart.
+
+    Under a pre-opened template — this model's — generation starts inside the reasoning block, so
+    a reply carrying no closing tag never left it: the whole thing is reasoning and there is no
+    answer yet. Under an ordinary template the same bytes are an answer with no reasoning.
+
+    Measured on the first live shadow run, before this existed: three replies, three reasoning
+    monologues returned as finished answers, ``reasoning_chars = 0`` on every one. It is the
+    original think-tag bug in a disguise with no syntactic marker to notice."""
+    monologue = "The user asks for a two-sentence explanation of why salt changes boiling point."
+
+    answer, reasoning, truncated = split_think(monologue, preopened=True)
+    assert answer == ""
+    assert reasoning == monologue
+    assert truncated is True
+
+    answer, reasoning, truncated = split_think(monologue, preopened=False)
+    assert answer == monologue
+    assert reasoning == ""
+    assert truncated is False
+
+
+def test_a_completed_reply_splits_identically_under_either_convention():
+    """`preopened` must only change the reading of the AMBIGUOUS case. A closing tag is
+    unambiguous, and a flag that also moved those would be a flag that hides bugs."""
+    for pre in (False, True):
+        assert split_think("thinking</think>Four.", preopened=pre) == ("Four.", "thinking", False)
+        assert split_think("<think>t</think>Four.", preopened=pre) == ("Four.", "t", False)
+
+
 def test_text_without_reasoning_passes_through_unchanged():
+    # Default convention (no pre-opened block): untagged text is simply an answer.
     answer, reasoning, truncated = split_think("just an answer")
     assert (answer, reasoning, truncated) == ("just an answer", "", False)
 
