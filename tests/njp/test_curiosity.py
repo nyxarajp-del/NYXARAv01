@@ -169,3 +169,76 @@ def test_one_atypical_peer_does_not_silence_the_question():
     missing = [q for q in b.curiosity.open_questions() if q.gap == Gap.MISSING_RELATION]
     assert missing, "an atypical peer silenced every missing-relation question"
     assert any(q.predicate == "works_at" for q in missing)
+
+
+# --------------------------------------------------------------------------- #
+# At corpus scale
+# --------------------------------------------------------------------------- #
+
+def test_a_bulk_corpus_does_not_become_a_source_of_questions(tmp_path):
+    """"What is aardvark's purpose?" because most animals in ConceptNet have one is not
+    curiosity, it is a statistic about somebody else's dataset. Same argument `ingest_triples`
+    makes for keeping a commonsense corpus out of the world model."""
+    import json
+
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.ingest import ingest_triples
+
+    rows = []
+    for i in range(60):
+        rows.append({"subject": f"beast{i}", "predicate": "is_a", "object": "animal"})
+        if i:                                   # beast0 is the one missing the majority property
+            rows.append({"subject": f"beast{i}", "predicate": "purpose", "object": "eating"})
+    path = tmp_path / "cn.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    brain = NJPBrain()
+    ingest_triples(brain, path, source="conceptnet")
+    assert brain.curiosity._from_missing_relations() == []
+
+
+def test_one_thing_the_master_said_makes_a_bulk_entity_hers(tmp_path):
+    """The exclusion is about where a subject came from, not about a name on a list. An entity
+    the Master has actually said something about is an entity she may wonder about, even if the
+    rest of what she knows about it arrived in a corpus."""
+    import json
+
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.grounding import GroundedTriple
+    from nyxara.njp.ingest import ingest_triples
+
+    rows = []
+    for i in range(6):
+        rows.append({"subject": f"beast{i}", "predicate": "is_a", "object": "animal"})
+        rows.append({"subject": f"beast{i}", "predicate": "purpose", "object": "eating"})
+    rows.append({"subject": "beast9", "predicate": "is_a", "object": "animal"})
+    path = tmp_path / "cn.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    brain = NJPBrain()
+    ingest_triples(brain, path, source="conceptnet")
+    for name in [f"beast{i}" for i in range(6)] + ["beast9"]:
+        brain.grounder._assert(GroundedTriple(subject=name, predicate="has_property",
+                                              object="alive", confidence=0.9, source="master"))
+    asked = {(q.subject, q.predicate) for q in brain.curiosity._from_missing_relations()}
+    assert ("beast9", "purpose") in asked
+
+
+def test_the_peer_comparison_is_bounded_however_much_she_knows():
+    """It is quadratic in subjects. Measured on ConceptNet before the bound: 8,495 subjects took
+    12.2 seconds, and the full load's ~130,000 subjects extrapolate to about forty minutes — on
+    the slow path of an ordinary turn, so she does not get slower, she stops answering."""
+    import time
+
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.grounding import GroundedTriple
+
+    brain = NJPBrain()
+    for i in range(6000):
+        brain.grounder._assert(GroundedTriple(subject=f"e{i}", predicate="is_a", object="thing",
+                                              confidence=0.8, source="master"))
+        brain.grounder._assert(GroundedTriple(subject=f"e{i}", predicate="purpose", object="use",
+                                              confidence=0.8, source="master"))
+    started = time.perf_counter()
+    brain.curiosity._from_missing_relations()
+    assert time.perf_counter() - started < 2.0

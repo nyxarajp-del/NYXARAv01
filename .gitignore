@@ -9,3 +9,9 @@ venv/
 
 # Code NYXARA authored herself at runtime — a live artifact, never a committed one.
 nyxara/growth/_forged/
+
+# Prepared corpora and the dumps they came from. Reproducible from scripts/prepare_datasets.py
+# and scripts/prepare_conceptnet.py, large, and third-party — the recipe belongs in the repo,
+# the download does not.
+data/njp/
+conceptnet-assertions-*.csv.gz

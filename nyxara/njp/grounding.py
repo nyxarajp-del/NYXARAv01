@@ -1283,6 +1283,10 @@ class Grounder:
         # Local mirror of every assertion, so grounding works with no KnowledgeGraph attached and
         # so contradiction detection has a store even before the kernel wires one in.
         self.facts: Dict[Tuple[str, str], List[GroundedTriple]] = {}
+        #: Bumped on every write to `facts`. Lets a reader that derived an expensive view of the
+        #: store — `core._edges` materialises all of it — tell whether that view is still current
+        #: in O(1), instead of rebuilding it to find out.
+        self.revision: int = 0
         self.turns = 0
         self.grounded_turns = 0
         self.answered = 0
@@ -1882,6 +1886,11 @@ class Grounder:
         """Record the fact locally and, when one is attached, in the KnowledgeGraph."""
         key = (triple.subject.lower(), triple.predicate)
         self.facts.setdefault(key, []).append(triple)
+        # Bumped on every write, so a reader can tell whether a view it derived is still current
+        # without walking the store to find out. `len(self.facts)` cannot serve: it counts
+        # (subject, predicate) keys, so a second object under an existing key leaves it unchanged
+        # and a cache keyed on it would go stale silently. See `core._edges`.
+        self.revision += 1
         self._index(triple)
         try:
             if self.graph is None:
@@ -1908,6 +1917,7 @@ class Grounder:
         difference between revising a belief and overwriting one.
         """
         try:
+            self.revision += 1          # a supersede changes what `_edges` would return
             prior.contested = incoming.contested = True
             if incoming.confidence + _RECENCY_BONUS >= prior.confidence:
                 prior.superseded = True
@@ -1977,9 +1987,26 @@ class Grounder:
             # Declining is what lets deliberation happen. It is not a refusal to answer — it is a
             # refusal to answer *arbitrarily*, at the one layer that had no way to say "two".
             rival = self._tied_rival(found, best, inverse)
-            if rival:
+            if rival and predicate not in _MULTI_VALUED:
                 out.why = (f"two readings are equally supported: "
                            f"{best.subject if inverse else best.object} and {rival}")
+                return out
+            if rival:
+                # A tie on a multi-valued relation is not a dead heat, it is two true facts, and
+                # falling silent on it is a false refusal. Measured on ConceptNet: `piano is_a`
+                # holds "instrument of music" and "percussion instrument" both at 0.9, and
+                # `hammer purpose` holds "driving nails" and "pounding nails" both at 0.9 — so
+                # "what is a piano?" and "what is a hammer used for?" both came back empty from a
+                # store that knew the answer perfectly well. A piano *is* both of those things.
+                #
+                # The principle the refusal protects is kept: she still does not pick one
+                # arbitrarily. She says both. What changes is only that "I cannot choose" stops
+                # being rendered as "I do not know".
+                out.text = self._tied_answer(found, best, inverse)
+                out.triples = found
+                out.confidence = best.confidence
+                out.state = Epistemic.BELIEVED
+                out.why = f"{subject} —{predicate}→ {out.text}"
                 return out
             out.triples = found
             out.text = best.subject if inverse else best.object
@@ -2004,6 +2031,30 @@ class Grounder:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    @staticmethod
+    def _tied_answer(found: List[GroundedTriple], best: GroundedTriple,
+                     inverse: bool, *, limit: int = 3, epsilon: float = 1e-6) -> str:
+        """Every reading held as strongly as the best one, joined — the answer to a real tie.
+
+        Capped, because ConceptNet lists ten things a hammer is for and a reply that recites all
+        of them is a data dump rather than an answer. Ordered by how often each was stated, so the
+        most corroborated reading leads; ties within the cap are broken alphabetically so the same
+        store gives the same sentence twice.
+        """
+        def _end(triple: GroundedTriple) -> str:
+            return (triple.subject if inverse else triple.object).strip()
+
+        standing: Dict[str, Tuple[float, int, str]] = {}
+        for triple in found:
+            key = _end(triple).lower()
+            conf, count, surface = standing.get(key, (0.0, 0, ""))
+            standing[key] = (max(conf, triple.confidence), count + 1, surface or _end(triple))
+        top = max((conf for conf, _c, _s in standing.values()), default=0.0)
+        tied = [(count, surface) for conf, count, surface in standing.values()
+                if conf >= top - epsilon]
+        tied.sort(key=lambda kv: (-kv[0], kv[1].lower()))
+        return " and ".join(surface for _count, surface in tied[:max(1, limit)])
 
     @staticmethod
     def _tied_rival(found: List[GroundedTriple], best: GroundedTriple,
@@ -2522,18 +2573,26 @@ class Grounder:
             "ingest_gaps": list(self.ingest_gaps),
         }
 
-    def note_ingest(self, *, source: str, path: str, digest: str, count: int) -> None:
+    def note_ingest(self, *, source: str, path: str, digest: str, count: int,
+                    form: str = "triples") -> None:
         """Record that a corpus was bulk-loaded, so its facts need not be written to the sidecar.
 
         Re-noting the same ``source`` replaces the earlier row rather than appending: loading a
         newer ConceptNet over an older one leaves one manifest entry, and the digest on it is the
         file that is actually on disk.
+
+        ``form`` names which loader can read the file back. It defaults to ``"triples"`` because
+        that is what every manifest written before prose corpora existed contains, and a row
+        without it must keep replaying exactly as it always did. A ``"text"`` corpus replayed with
+        the triple reader would restore **nothing** — the reader looks for a ``subject`` key that
+        a statement file does not have — and the loss would be silent, because a replay that
+        stores zero facts and a corpus that had zero to store report identically.
         """
         try:
             self.ingested = [row for row in self.ingested if row.get("source") != source]
             self.ingested.append({"source": str(source), "path": str(path),
                                   "digest": str(digest), "count": int(count),
-                                  "at": time.time()})
+                                  "form": str(form or "triples"), "at": time.time()})
         except Exception:  # noqa: BLE001
             pass
 
@@ -2590,9 +2649,18 @@ class Grounder:
                 # Facts only. The concept layer and the world model persist their own bounded
                 # state in their own sidecars, so fanning out again here would double-count what
                 # they already restored.
-                ingest_triples(SimpleNamespace(grounder=self), path, source=source,
-                               max_facts=int(row.get("count", 0)) or 250_000,
-                               to_world=False, record=False)
+                #
+                # The reader is chosen by the row's own `form`, not guessed from the filename. A
+                # manifest written before prose corpora existed has no `form` and must keep
+                # replaying as triples, which is what the default says.
+                if str(row.get("form") or "triples") == "text":
+                    from nyxara.njp.ingest import ingest_text
+                    ingest_text(SimpleNamespace(grounder=self), path, source=source,
+                                max_facts=int(row.get("count", 0)) or 250_000, record=False)
+                else:
+                    ingest_triples(SimpleNamespace(grounder=self), path, source=source,
+                                   max_facts=int(row.get("count", 0)) or 250_000,
+                                   to_world=False, record=False)
             except Exception as exc:  # noqa: BLE001
                 self.ingest_gaps.append(f"{source}: {exc}")
 
@@ -2705,6 +2773,20 @@ _PREDICATE_ALIASES: Dict[str, str] = {
 # `blue whale is_a animal on Earth` and was superseded on the turn it was learned, which left
 # `core._inherit` walking a graph whose every kind edge but one was marked dead. `learner`
 # reported 9 schemas and `answers_given` 0 across 1,320 turns.
+#: Relations that genuinely hold **more than one value at once**, where a tie between two equally
+#: supported readings means both are true rather than that one of them is wrong.
+#:
+#: `causes` is deliberately absent. Its tie is the one `_tied_rival` was written for — "garmi ka
+#: karan aag ya dhoop" — and the refusal there is load-bearing beyond politeness: `brain._deliberate`
+#: only runs when this method comes back empty, so answering a causal tie here would stop the
+#: debate in `nyxara.njp.reason` from ever running. The ladder descends only when the rung above
+#: returns nothing.
+_MULTI_VALUED = frozenset({
+    "is_a", "purpose", "capable_of", "has_part", "part_of", "consists_of",
+    "has_property", "has_kind", "means", "occurs_when", "requires", "owns",
+    "also_known_as", "known_for", "involves",
+})
+
 _FUNCTIONAL = frozenset({
     "has_name", "located_in", "born_in", "age", "birthday",
     "works_at", "capital_of", "married_to",

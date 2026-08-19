@@ -51,7 +51,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Collection, Dict, Iterator, List, Optional, Set, Tuple
 
-__all__ = ["IngestReport", "stream_rows", "stream_triples", "ingest_triples"]
+__all__ = ["IngestReport", "TextReport", "stream_rows", "stream_triples", "stream_statements",
+           "ingest_triples", "ingest_text"]
 
 #: What a row without its own confidence is worth. Below `study._SEED_CONFIDENCE` (0.8) on
 #: purpose: the seed file is a small curated set the Master vetted, and a harvested corpus is not.
@@ -68,6 +69,10 @@ class IngestReport:
     asserted: int = 0
     skipped: int = 0
     duplicate: int = 0
+    # Rows refused because their subject belongs to the exam. Counted separately from `skipped`
+    # on purpose: a skip is a row that failed a filter, and this is a row deliberately withheld.
+    # Reading them as one number would hide a holdout that had silently stopped working.
+    held_out: int = 0
     capped: bool = False
     subjects: int = 0
     predicates: Dict[str, int] = field(default_factory=dict)
@@ -79,7 +84,7 @@ class IngestReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"read": self.read, "asserted": self.asserted, "skipped": self.skipped,
-                "duplicate": self.duplicate, "capped": self.capped,
+                "duplicate": self.duplicate, "held_out": self.held_out, "capped": self.capped,
                 "subjects": self.subjects,
                 "predicates": dict(sorted(self.predicates.items(),
                                           key=lambda kv: (-kv[1], kv[0]))[:16]),
@@ -204,6 +209,7 @@ def ingest_triples(brain: Any, path: Any, *,
                    min_confidence: float = 0.0,
                    default_confidence: float = _DEFAULT_CONFIDENCE,
                    allow: Optional[Collection[str]] = None,
+                   exclude: Optional[Callable[[str, str], bool]] = None,
                    batch: int = 5_000,
                    to_world: bool = False,
                    record: bool = True,
@@ -214,6 +220,15 @@ def ingest_triples(brain: Any, path: Any, *,
 
     ``allow`` is checked **after** folding, because the caller names relations the way this
     package names them and the file names them the way its source did.
+
+    ``exclude`` is asked about each ``(subject, folded predicate)`` and refuses the row when it
+    says yes. Asked **after** folding, for the same reason ``allow`` is: the caller names relations
+    the way this package names them. It is
+    how :mod:`nyxara.njp.train` keeps a tenth of every fact corpus out of the brain so it has
+    something to examine her on: a corpus she has entirely memorised cannot be measured, and
+    before this existed the only questions available were from conversational corpora that ask
+    nothing a fact store can look up. Refusals are counted as :attr:`IngestReport.held_out` rather
+    than as skips, so a holdout that stops working shows up as a number going to zero.
 
     ``max_facts`` is a hard stop that sets :attr:`IngestReport.capped` — a load that silently
     dropped its tail would report the same numbers as one that finished, and the difference
@@ -300,6 +315,9 @@ def ingest_triples(brain: Any, path: Any, *,
                 report.skipped += 1
                 continue
             folded = grounder._predicate(predicate)
+            if exclude is not None and exclude(subject, folded):
+                report.held_out += 1
+                continue
             if allowed is not None and folded not in allowed:
                 report.skipped += 1
                 continue
@@ -346,6 +364,239 @@ def ingest_triples(brain: Any, path: Any, *,
             try:
                 grounder.note_ingest(source=source, path=str(path),
                                      digest=report.digest, count=report.asserted)
+            except AttributeError:
+                pass
+        return report
+    except Exception:  # noqa: BLE001 — a failed ingest reports what it managed, never raises
+        return report
+    finally:
+        report.ms = (time.perf_counter() - started) * 1000.0
+
+
+# --------------------------------------------------------------------------- #
+# Prose, which is most of what the world writes down
+# --------------------------------------------------------------------------- #
+@dataclass
+class TextReport:
+    """What a bulk load of *statements* put in the store, and what the extractor made of them.
+
+    The two numbers that matter are :attr:`parsed` and :attr:`asserted`, and they are reported
+    separately because they fail separately. A corpus where ``parsed`` is low was filtered badly —
+    the sentences handed over were not statements her patterns read. A corpus where ``parsed`` is
+    high and ``asserted`` is low was filtered fine and is simply already known, which is a
+    different and much better problem.
+    """
+
+    read: int = 0
+    parsed: int = 0
+    unparsed: int = 0
+    asserted: int = 0
+    duplicate: int = 0
+    skipped: int = 0
+    held_out: int = 0
+    capped: bool = False
+    subjects: int = 0
+    predicates: Dict[str, int] = field(default_factory=dict)
+    concepts: int = 0
+    source: str = ""
+    digest: str = ""
+    ms: float = 0.0
+
+    @property
+    def extraction_rate(self) -> float:
+        """Share of statements that yielded at least one triple.
+
+        Named for :meth:`Grounder.stats`'s figure and deliberately **not** the same number. That
+        one is a statement about her conversational history and this module must not touch it (see
+        :func:`ingest_triples`); this one is a statement about a file, and it belongs to the file.
+        """
+        return round(self.parsed / self.read, 4) if self.read else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"read": self.read, "parsed": self.parsed, "unparsed": self.unparsed,
+                "extraction_rate": self.extraction_rate,
+                "asserted": self.asserted, "duplicate": self.duplicate,
+                "skipped": self.skipped, "held_out": self.held_out,
+                "capped": self.capped, "subjects": self.subjects,
+                "predicates": dict(sorted(self.predicates.items(),
+                                          key=lambda kv: (-kv[1], kv[0]))[:16]),
+                "concepts": self.concepts, "source": self.source, "digest": self.digest,
+                "ms": round(self.ms, 3)}
+
+
+def stream_statements(path: Any) -> Iterator[Tuple[str, str]]:
+    """Yield ``(statement, provenance)`` for every well-formed row of a text corpus.
+
+    ``provenance`` is the row's own ``source`` — a Wikipedia URL, an arXiv id, a book title — and
+    it is carried through to :attr:`GroundedTriple.source` rather than dropped, so a fact she
+    later has to defend can be traced to the sentence it came from and not merely to the load.
+    """
+    for row in stream_rows(path):
+        try:
+            statement = " ".join(str(row.get("text") or row.get("statement") or "").split())
+            if len(statement) < 8:
+                continue
+            yield statement, str(row.get("source") or "").strip()
+        except (TypeError, ValueError):
+            continue
+
+
+def ingest_text(brain: Any, path: Any, *,
+                source: str = "text",
+                max_facts: int = 250_000,
+                max_statements: int = 0,
+                min_confidence: float = 0.0,
+                allow: Optional[Collection[str]] = None,
+                exclude: Optional[Callable[[str, str], bool]] = None,
+                batch: int = 5_000,
+                record: bool = True,
+                progress: Optional[Callable[[int], None]] = None,
+                checkpoint: Optional[Callable[[int], None]] = None,
+                checkpoint_every: int = 0) -> TextReport:
+    """Run the grounder's extractor over a file of statements and store what it finds.
+
+    The sibling of :func:`ingest_triples`, for the four sources in
+    :data:`nyxara.njp.corpora.SOURCES` that arrive as prose rather than as edges. Every invariant
+    that function holds is held here for the same reasons, and two are worth restating because a
+    prose loader is where they are most tempting to break:
+
+    **It does not call** :meth:`~nyxara.njp.grounding.Grounder.ground`. That method is the
+    conversational entry point: it increments ``turns``, files the result under ``unparsed`` or
+    ``grounded_turns``, and runs concept observation per sentence. Routing a corpus through it
+    would make ``stats()["extraction_rate"]`` — a number that is supposed to describe how well she
+    reads *the Master* — into a description of a file somebody downloaded. :attr:`TextReport`
+    reports the file's own rate instead, and the two never mix.
+
+    **It does not run contradiction detection.** ``ground`` calls ``_contradicts`` and ``_revise``
+    on every extraction, which is right for a turn and wrong for a corpus: Wikipedia states a
+    person's birthplace in one article and their death place in another, and ``located_in`` is in
+    ``grounding._FUNCTIONAL``, so a bulk load through the revision path would spend the run
+    retracting facts against each other in file order and finish holding whichever one happened to
+    be last. Bulk facts are *testimony*, entered side by side, and the first conversational turn
+    about one of them is where the revision belongs.
+
+    ``exclude`` is asked about **each extracted triple**, not about the sentence. It has to be: a
+    statement's subject and relation are not known until the extractor has read it, and a
+    sentence-level filter would need this module to guess at them with a second, worse parser —
+    the thing :mod:`nyxara.njp.corpora` refuses to write. So the sentence is extracted and then
+    its triples are individually withheld.
+
+    ``max_statements`` bounds the read where ``max_facts`` bounds the write. Both exist because
+    they answer different questions: a corpus can be too large to *read* in the time available
+    even if it would assert very little, and a corpus can assert far more than intended from very
+    few rows. ``capped`` is set by either.
+    """
+    report = TextReport(source=source)
+    started = time.perf_counter()
+    try:
+        grounder = getattr(brain, "grounder", None)
+        if grounder is None:
+            return report
+        report.digest = _digest(path)
+
+        genesis = getattr(brain, "genesis", None)
+        allowed = {str(name) for name in allow} if allow else None
+        max_facts = max(0, int(max_facts))
+        max_statements = max(0, int(max_statements))
+        batch = max(1, int(batch))
+
+        seen: Set[Tuple[str, str, str]] = set()
+        subjects: Set[str] = set()
+        pending: List[Any] = []
+
+        def _flush() -> None:
+            """One batch to the concept layer, for the reason :func:`ingest_triples` gives.
+
+            The world model is not fed here at all, and there is no ``to_world`` switch to turn it
+            on. That function's own docstring records what feeding it cost — ``causal_prediction``
+            1.00 → 0.00, because 512 relations of capacity filled with crowd-sourced laws — and
+            the argument is *stronger* for prose: a sentence saying "smoking causes cancer" is
+            testimony about the world in general, and her causal skeleton is what she has seen
+            happen. A switch nobody should set is a switch that will be set.
+            """
+            if not pending:
+                return
+            if genesis is not None:
+                try:
+                    report.concepts += int(genesis.observe_triples(pending) or 0)
+                except Exception:  # noqa: BLE001 — the facts are stored either way
+                    pass
+            pending.clear()
+
+        for statement, provenance in stream_statements(path):
+            if max_statements and report.read >= max_statements:
+                report.capped = True
+                break
+            report.read += 1
+
+            try:
+                extracted = grounder._extract(statement)
+            except Exception:  # noqa: BLE001 — one unreadable sentence is not a failed load
+                extracted = []
+            if not extracted:
+                report.unparsed += 1
+                continue
+            report.parsed += 1
+
+            for triple in extracted:
+                if exclude is not None and exclude(triple.subject, triple.predicate):
+                    report.held_out += 1
+                    continue
+                if triple.confidence < min_confidence:
+                    report.skipped += 1
+                    continue
+                if allowed is not None and triple.predicate not in allowed:
+                    report.skipped += 1
+                    continue
+                key = (triple.subject.lower(), triple.predicate, triple.object.lower())
+                if key in seen or _already_stored(grounder, key):
+                    report.duplicate += 1
+                    continue
+                if report.asserted >= max_facts:
+                    report.capped = True
+                    break
+                seen.add(key)
+                # Provenance is prefixed rather than replaced. `_regenerable` matches the manifest
+                # on `source`, so a triple tagged only with its Wikipedia URL would never match the
+                # load that produced it and would be written to the sidecar in full — which is the
+                # whole cost this manifest exists to avoid.
+                triple.source = f"{source}:{provenance}"[:120] if provenance else source
+                grounder._assert(triple)
+                pending.append(triple)
+                subjects.add(triple.subject.lower())
+                report.asserted += 1
+                report.predicates[triple.predicate] = \
+                    report.predicates.get(triple.predicate, 0) + 1
+            if report.capped:
+                break
+
+            if len(pending) >= batch:
+                _flush()
+                if progress is not None:
+                    try:
+                        progress(report.asserted)
+                    except Exception:  # noqa: BLE001
+                        pass
+            if (checkpoint is not None and checkpoint_every > 0
+                    and report.read % checkpoint_every == 0):
+                try:
+                    checkpoint(report.asserted)
+                except Exception:  # noqa: BLE001 — a failed save costs durability, not the run
+                    pass
+
+        _flush()
+        report.subjects = len(subjects)
+        if report.asserted and record:
+            try:
+                grounder.note_ingest(source=source, path=str(path),
+                                     digest=report.digest, count=report.asserted,
+                                     form="text")
+            except TypeError:
+                # An older grounder with no `form` argument would record this corpus as triples,
+                # and the replay would then read a text file with the triple reader and restore
+                # nothing at all. Not recording is the safe half of that trade: the facts go to
+                # the sidecar in full, which costs space and loses nothing.
+                pass
             except AttributeError:
                 pass
         return report

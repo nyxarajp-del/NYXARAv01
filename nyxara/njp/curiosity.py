@@ -97,6 +97,18 @@ _COST_GATHER = 0.15
 # silences every question.
 _PEER_MAJORITY = 0.6
 
+#: How many entities the peer comparison may consider at once.
+#:
+#: `_from_missing_relations` compares every entity with every other, which is **quadratic in the
+#: number of subjects** — fine at conversational scale and fatal the moment a corpus arrives.
+#: Measured on ConceptNet, timing the call alone: 747 subjects 0.10 s, 1,898 subjects 0.47 s,
+#: 3,291 subjects 1.41 s, 8,495 subjects **12.2 s**. The full 198,455-triple load carries ~118,000
+#: subjects, which extrapolates to roughly **forty minutes for one call** — and it is called on
+#: the slow path of an ordinary turn, so she does not get slower, she stops answering.
+#:
+#: The cap is the guarantee, not the design. The design is the bulk exclusion below.
+_MAX_PEER_SUBJECTS = 400
+
 
 class Curiosity:
     """Finds her own gaps, and decides which one is worth closing."""
@@ -171,13 +183,52 @@ class Curiosity:
             grounder = getattr(self.brain, "grounder", None)
             if grounder is None:
                 return out
-            # subject -> the predicates it participates in
-            by_subject: Dict[str, Set[str]] = {}
+            # subject -> the predicates it participates in, over the entities that are *hers*
+            #
+            # Bulk-loaded subjects are excluded, and that is a claim about what this question is
+            # for rather than a way to make it cheap. The asymmetry it looks for — Ravi and Sara
+            # have an employer, Amit does not — is a gap in what the Master has told her about
+            # people she knows. Run over a crowd-sourced corpus it produces "what is aardvark's
+            # purpose?" because most animals in ConceptNet have one, which is not curiosity, it is
+            # a statistic about somebody else's dataset. It is the same argument `ingest_triples`
+            # makes for keeping a commonsense corpus out of the world model: testimony about the
+            # world in general is not observation of her situation.
+            #
+            # It is also what makes the cost survivable, because the exclusion is what keeps the
+            # count small in the case that actually occurs. `_MAX_PEER_SUBJECTS` is the backstop
+            # for the case that does not.
+            bulk = {str(row.get("source") or "") for row in getattr(grounder, "ingested", ())}
+            bulk.discard("")
+            # Two passes, because subject-hood is a property of the *subject* and the store is
+            # keyed by (subject, predicate). Deciding it per key instead would drop a bulk-loaded
+            # *relation* rather than a bulk-loaded entity — so an entity the Master has spoken
+            # about would enter the comparison carrying only the predicates he happened to
+            # mention, and the asymmetry against its peers would be an artefact of that.
+            hers: Set[str] = set()
+            live_by_key: Dict[Tuple[str, str], bool] = {}
             for (subject, predicate), triples in grounder.facts.items():
-                if any(not t.superseded for t in triples):
+                live = [t for t in triples if not t.superseded]
+                if not live:
+                    continue
+                live_by_key[(subject, predicate)] = True
+                # A subject is hers if *any* live fact about it came from somewhere other than a
+                # bulk load. One thing the Master said about a ConceptNet entity is enough to make
+                # it an entity she has met. `ingest_text` tags provenance as "wikipedia:<url>", so
+                # the load's own name is the part before the colon.
+                if not bulk or any(t.source.split(":", 1)[0] not in bulk for t in live):
+                    hers.add(subject)
+            by_subject: Dict[str, Set[str]] = {}
+            for (subject, predicate) in live_by_key:
+                if subject in hers:
                     by_subject.setdefault(subject, set()).add(predicate)
             if len(by_subject) < 3:
                 return out                    # too few entities for "peers" to mean anything
+            if len(by_subject) > _MAX_PEER_SUBJECTS:
+                # The most recently asserted, which in an insertion-ordered dict is the tail.
+                # Dropping the oldest is right for a question generator: an asymmetry she has
+                # already had a thousand turns to notice is not news.
+                keep = list(by_subject)[-_MAX_PEER_SUBJECTS:]
+                by_subject = {s: by_subject[s] for s in keep}
             for subject, predicates in by_subject.items():
                 peers = [p for s, p in by_subject.items()
                          if s != subject and len(p & predicates) >= 1]

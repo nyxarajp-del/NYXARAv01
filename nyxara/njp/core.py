@@ -399,6 +399,8 @@ class CognitiveLearningCore:
         self.schemas_tautological = 0
         self.schemas_dropped = 0
         self.last: Dict[str, Any] = {}
+        #: ``fit_only -> (store revision, edges)``. See :meth:`_edges`.
+        self._edge_cache: Dict[bool, Tuple[int, List[Tuple[str, str, str, float]]]] = {}
 
     # ---- the relation graph, read from wherever the facts actually live ---- #
     def _facts(self) -> Dict[Tuple[str, str], List[Any]]:
@@ -413,7 +415,27 @@ class CognitiveLearningCore:
 
         ``fit_only`` drops the held-out fold, and is what REPRESENT uses. TEST uses its
         complement. Nothing else in this module may look at both.
+
+        **Memoised against the store's revision, because at corpus scale this became the turn.**
+        It copies the fact dict, normalises every subject and object, and hashes each triple for
+        the fold test — cheap over a conversation's few hundred facts, and measured at **161 ms**
+        over ConceptNet's 195,897. Nothing calls it once: ``answer`` reaches it through
+        ``_compose_by_entity``, ``connects`` and ``_compose_inverse``, and ``cycle`` through
+        ``represent`` and ``test``. Measured on a brain given ConceptNet: **2.5 calls per turn,
+        and 68% of the wall-clock of a turn spent rebuilding a list that had not changed.**
+
+        The cache is keyed on ``Grounder.revision`` rather than on the store's size, because a
+        second object under an existing ``(subject, predicate)`` key leaves the key count
+        unchanged — a cache keyed on length would go stale invisibly, which is worse than no
+        cache. Both values of ``fit_only`` are held, since ``cycle`` alternates between them and a
+        single slot would thrash. Callers only ever iterate the result; nothing mutates it.
         """
+        revision = getattr(getattr(self, "grounder", None), "revision", None)
+        if revision is not None:
+            cached = self._edge_cache.get(fit_only)
+            if cached is not None and cached[0] == revision:
+                return cached[1]
+
         out: List[Tuple[str, str, str, float]] = []
         for (subject, predicate), triples in self._facts().items():
             for triple in triples:
@@ -429,6 +451,8 @@ class CognitiveLearningCore:
                                 float(getattr(triple, "confidence", 0.5) or 0.5)))
                 except Exception:  # noqa: BLE001
                     continue
+        if revision is not None:
+            self._edge_cache[fit_only] = (revision, out)
         return out
 
     def _held_out(self, subject: str, predicate: str, obj: str) -> bool:

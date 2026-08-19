@@ -853,6 +853,62 @@ in the package **composed** two facts (a grep for transitive closure returned no
 
 Run it: `python -m nyxara.eval --intelligence`.
 
+### What she is fed — the ten corpora (`nyxara.njp.corpora`, `nyxara.njp.train`)
+
+The Master named ten data sources in priority order. Turning that list into a trained brain is
+two decisions, and they are kept in two different places on purpose.
+
+**What each source is allowed to become** lives in `nyxara.njp.corpora`. There are exactly three
+ways into this brain, so every source is assigned exactly one of them:
+
+| # | Source | What she gets | Shape | Why that shape |
+|---|--------|---------------|-------|----------------|
+| 1 | ConceptNet 5.7 | concepts, relations, commonsense | `triples` | already edges; converted by `scripts/prepare_conceptnet.py` |
+| 2 | Wikipedia | broad world knowledge | `text` | lead-paragraph definitions, run through her own extractor |
+| 3 | OpenWebMath | mathematical reasoning | `text` | the prose definitions; sentences carrying LaTeX are dropped |
+| 4 | ProofNet | formal reasoning | `pairs` | a proof is checkable reasoning, so it belongs where a holdout exists |
+| 5 | OASST1 | human-style conversation | `pairs` | best-ranked reply per prompt, English and Hindi |
+| 6 | CodeSearchNet | programming, algorithms | `triples` | the docstring's `purpose`, never the source — a fact store cannot execute code |
+| 7 | arXiv abstracts | scientific concepts | `text` | what a paper says its object *is*, before what it did with it |
+| 8 | GSM8K + MATH | arithmetic, problem solving | `pairs` | two corpora, not one: they fail differently and a merged row could not say which |
+| 9 | Project Gutenberg | language, long context | `text` | archive boilerplate stripped, or the Foundation becomes her best-known fact |
+| 10 | IITB English–Hindi | Hindi/English | `triples` | short rows only — `also_known_as`, the dictionary `nyxara.njp.tongue` says it does not ship |
+
+Two of those decisions are load-bearing and neither is obvious. **Prose gets selected, not
+parsed.** Writing subject/predicate/object regexes for Wikipedia would be a second extractor
+drifting silently against `Grounder._extract` — facts stored under predicate names her question
+grammar never forms. So the prose converters only choose sentences and trim them to the clause
+that makes the claim, and the one extractor in the package does the rest. The selection filter is
+itself measured against that extractor: `contains`, `includes`, `belongs to` and auxiliary `have`
+return **no triple at all**, so a sentence admitted on one of them is not a fact stored badly, it
+is an `unparsed` row that cost an extraction call. They are not in the filter.
+
+**Bulk prose does not go through `Grounder.ground`.** `ingest_text` in `nyxara.njp.ingest` runs the
+extractor directly, for the reasons `ingest_triples` already gives about `think` and two more of
+its own: `ground` increments `turns` and files each result under `unparsed`, which would make
+`stats()["extraction_rate"]` — a number about how well she reads *the Master* — into a number
+about a file somebody downloaded; and it runs `_contradicts`/`_revise` per extraction, which on an
+encyclopedia means spending the run retracting articles against each other in file order.
+`TextReport` carries the file's own extraction rate instead, and the two never mix.
+
+**How they are run** lives in `nyxara.njp.train`. `study.main` exams twice, before and after,
+which is enough for one corpus and stops being enough at two: a run that loaded four sources and
+reported one delta would say something moved and nothing in it would say which. So this is the
+same idea taken seriously — **the same held-out questions, asked after every stage**, one row per
+corpus, and the fact sources first because a triple corpus mechanically converts abstentions into
+answers and running it last would fold that rise into everything else unrecoverably.
+
+```
+python scripts/prepare_conceptnet.py --download --out data/njp/conceptnet.triples.jsonl.gz
+python scripts/prepare_datasets.py --out data/njp
+python -m nyxara.njp.train --data data/njp --save ~/.nyxara/njp_state.json
+```
+
+Read `precision` down the table, never `coverage`. Every load raises coverage, good or bad. Only
+a load that held precision up while doing it added knowledge rather than noise — one that raised
+coverage as precision fell is now answering questions it previously had the sense to abstain on,
+and the table is laid out so that failure has to be visible.
+
 ### Her organs
 
 The fabric is the brain; these hang off it. `nyxara.njp.memory` is content-addressed recall with no
