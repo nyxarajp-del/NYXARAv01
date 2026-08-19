@@ -139,8 +139,6 @@ def test_each_corpus_is_tagged_with_its_own_source(prepared, bundled):
 def test_the_held_out_tenth_of_a_pair_corpus_is_never_studied(prepared, bundled):
     """Split before any stage runs, not at the point of study — otherwise the exam set would
     depend on which stages were selected and two runs would not be comparable."""
-    from nyxara.njp.study import Corpus
-
     files = train.discover(prepared)
     exam, study = train._exam_corpus(files, bundled=bundled, pool=200, seed=0)
     exam_keys = {p.key for p in exam}

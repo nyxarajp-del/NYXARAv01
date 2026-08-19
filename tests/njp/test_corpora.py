@@ -12,8 +12,6 @@ Every fixture row is shaped like a real one from the source it names. No socket 
 
 from __future__ import annotations
 
-import pytest
-
 from nyxara.njp import corpora
 
 

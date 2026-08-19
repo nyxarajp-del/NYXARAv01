@@ -42,7 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
