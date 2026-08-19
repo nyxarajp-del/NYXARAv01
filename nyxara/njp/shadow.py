@@ -194,9 +194,13 @@ class ShadowCognition:
 
     def __init__(self, *, teacher: Any = None, concepts: Any = None, adversary: Any = None,
                  universe: Any = None, predictor: Any = None, readout: Any = None,
-                 lingua: Any = None, ledger: Any = None,
+                 lingua: Any = None, ledger: Any = None, voice: Any = None,
                  min_gap: float = MIN_GAP, max_claims: int = 8) -> None:
         self.teacher = teacher
+        #: Her voice, read only to find out WHICH rung phrased her side of a comparison. With
+        #: ``gguf`` leading the ladder that rung is the teacher itself, so this is what lets the
+        #: circularity guard arm itself instead of waiting to be told.
+        self.voice = voice
         self.concepts = concepts
         self.adversary = adversary
         self.universe = universe
@@ -221,14 +225,14 @@ class ShadowCognition:
                 njp_rendered_by: str = "") -> ShadowReading:
         """One stimulus through both paths. Returns investigations, never outcomes.
 
-        ``njp_rendered_by`` names the provider that phrased her side, and it exists because of a
-        loop the ladder creates. ``gguf`` leads ``LLM._AUTO_LADDER``, so on a machine where the
-        Qwythos weights are present *her voice is rendered by the same model that is the teacher*.
-        The semantic comparison then puts a model's wording next to its own wording, finds almost
-        no missing concepts, and reports a near-empty gap — which reads exactly like "she already
-        knows all of this" and would make the distillation look finished the day it started.
-        Pass the rendering provider and the semantic gap is skipped and *said to be skipped*,
-        rather than coming back falsely clean.
+        ``njp_rendered_by`` names the provider that phrased her side. **Leave it empty and it is
+        resolved from the live ladder**, which is the important behaviour rather than a
+        convenience: ``gguf`` leads ``LLM._AUTO_LADDER``, so on any machine where the Qwythos
+        weights are present her voice *is* the teacher. The semantic comparison would then put a
+        model's wording next to its own wording, find almost no missing concepts, and report a
+        near-empty gap — which reads exactly like "she already knows all of this" and would make
+        the distillation look finished the day it started. When the two are the same model the
+        semantic gap is skipped and **said to be skipped**, rather than coming back falsely clean.
         """
         t0 = time.perf_counter()
         out = ShadowReading(stimulus=str(stimulus or ""))
@@ -443,9 +447,31 @@ class ShadowCognition:
             return None
 
     # ---- helpers --------------------------------------------------------- #
+    def _rendering_provider(self) -> str:
+        """Which rung would phrase her side right now. Empty when it cannot be established.
+
+        Asked of the live ladder rather than taken on trust from the caller, because under the
+        shipped ordering the answer is ``gguf`` — the teacher — and a guard that only works when
+        someone remembers to pass an argument is a guard that is off in every path nobody
+        updated. ``scripts/distill_recursive.py`` passes it explicitly; every other caller,
+        including a bare ``compare()``, gets it from here.
+        """
+        try:
+            if self.voice is not None:
+                return str(self.voice.surface().provider or "")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from nyxara.mind.llm import LLM
+            return str(LLM().chosen_provider().name or "")
+        except Exception:  # noqa: BLE001 — unknowable is not the same as "different"
+            return ""
+
     def _same_model(self, rendered_by: str) -> bool:
         """Is the provider that phrased her side the same model serving as the teacher?"""
         name = str(rendered_by or "").strip().lower()
+        if not name:
+            name = self._rendering_provider().strip().lower()
         if not name:
             return False
         if name == "gguf":

@@ -1074,6 +1074,10 @@ class NJPBrain:
                 readout=getattr(self, "readout", None),
                 lingua=getattr(self, "tongue", None),
                 ledger=getattr(self, "ledger", None),
+                # Handed the voice so the circularity guard can read which rung phrased her side.
+                # With `gguf` leading the ladder that rung is the teacher, so this is what stops
+                # the semantic gap from comparing the model to itself and calling it agreement.
+                voice=getattr(self, "voice", None),
                 min_gap=self._cfg("shadow_min_gap", 0.05))
         except Exception:  # noqa: BLE001
             return None

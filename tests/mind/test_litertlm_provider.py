@@ -312,9 +312,19 @@ def test_availability_never_downloads(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 # 2. The ladder head — this is what "primary" means
 # --------------------------------------------------------------------------- #
-def test_litertlm_leads_the_auto_ladder():
-    assert LLM._AUTO_LADDER[0] == "litertlm"
-    assert LLM._AUTO_LADDER == ("litertlm", "gguf", "self", "native")
+def test_litertlm_is_the_first_rung_that_never_needs_a_fetch_decision():
+    """``litertlm`` no longer leads: the Master put the Qwythos 9B ahead of it, and this test was
+    renamed rather than deleted because what it is really pinning still holds — litertlm is the
+    strongest rung that boots *without* a decision, since its 2.4 GB fetch is automatic where
+    Qwythos's 5.6-17.9 GB one is opt-in. On a machine nobody has configured, this is the rung she
+    lands on."""
+    assert LLM._AUTO_LADDER == ("gguf", "litertlm", "self", "native")
+    assert LLM._AUTO_LADDER[1] == "litertlm"
+    # The DEFAULTS, not the live settings: the suite fixture turns downloads off everywhere, so
+    # reading the instance would only re-measure the fixture.
+    from nyxara.kernel.config import LLMConfig
+    assert LLMConfig.model_fields["litertlm_auto_download"].default is True
+    assert LLMConfig.model_fields["gguf_auto_download"].default is False
 
 
 def test_it_drafts_the_turn_when_the_weights_are_present(monkeypatch, weights):

@@ -111,6 +111,25 @@ def test_a_semantic_comparison_against_the_same_model_is_skipped_not_reported_as
     assert shadow.stats()["semantic_skipped_as_circular"] == 1
 
 
+def test_the_circularity_guard_arms_itself_from_the_live_ladder():
+    """``gguf`` leads ``_AUTO_LADDER``, so wherever the Qwythos weights exist her voice IS the
+    teacher. A guard that only works when a caller remembers to pass the rendering provider is a
+    guard that is off in every path nobody updated — so it resolves the provider itself."""
+    class _Surface:
+        provider = "gguf"
+
+    class _Voice:
+        def surface(self):
+            return _Surface()
+
+    shadow = ShadowCognition(concepts=ConceptGenesis(), voice=_Voice())
+    reading = shadow.compare("q", teacher_text=TEACHER, njp_text="it changed")  # nothing passed
+
+    assert reading.same_model is True
+    assert reading.by_kind(GapKind.SEMANTIC)[0].magnitude == 0.0
+    assert shadow.stats()["semantic_skipped_as_circular"] == 1
+
+
 def test_a_different_rendering_provider_does_not_trip_the_circularity_guard():
     shadow = _shadow()
     reading = shadow.compare("q", teacher_text=TEACHER, njp_text="it changed",

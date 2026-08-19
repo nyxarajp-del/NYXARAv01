@@ -588,23 +588,22 @@ class GGUFProvider(LLMProviderBase):
     proposal the kernel gates. Being local and being large both make it *reachable*, neither makes
     it authoritative.
 
-    **It sits BEHIND ``litertlm`` on the ladder, not in front of it**, even though it is a 9B model
-    where ``litertlm`` is a 2B one. Two reasons, and the second is the load-bearing one.
+    **It leads ``_AUTO_LADDER``** — the Master's decision, and the plain reading of the numbers:
+    a 9B reasoning model against ``litertlm``'s 2B. Whenever the weights are on disk she drafts on
+    the strongest thing she owns. It costs nothing when they are absent: :meth:`available` is a
+    flag, a file and an import.
 
-    ``litertlm`` is this repo's documented PRIMARY brain and a test says so by name; displacing it
-    is a decision for the Master, not a side effect of adding a rung.
+    **The consequence that this ordering makes load-bearing.** These same weights are also NJP's
+    *teacher* (``njp/cortex.py``), and ``njp/shadow.py`` compares what the teacher says against
+    what she says — but her side is phrased by whichever rung the ladder picked, which is now this
+    one. Both halves of that comparison therefore come from the same model, the semantic gap
+    collapses toward nothing, and a near-empty gap reads exactly like *"she already knows all of
+    this"*. Left alone, the distillation would look finished on the day it started.
 
-    And these same weights are NJP's *teacher*. ``njp/shadow.py`` compares what the teacher says
-    against what she says — but her side is phrased by whichever rung the ladder picked. Put this
-    one first and, on any machine where the weights are present, both halves of that comparison
-    are written by the same model: the semantic gap collapses, almost nothing looks missing, and
-    the distillation reads as finished on the day it started. Keeping a *different* model on her
-    voice makes the comparison honest by construction. ``ShadowCognition``'s circularity guard
-    still exists for the case where this rung is pinned or ``litertlm`` is absent, but it is a
-    backstop rather than the mechanism.
-
-    It costs nothing when its weights are absent: :meth:`available` is a flag, a file and an
-    import.
+    So ``ShadowCognition`` detects it and **skips the semantic comparison, saying it skipped**,
+    rather than reporting the collapse as agreement. Under this ordering that guard is not a
+    backstop, it is the mechanism, and it arms itself from the live ladder rather than waiting for
+    a caller to remember to pass the rendering provider.
 
     **The same weights are also NJP's teacher** (``njp/cortex.py``) and the source its fabric
     grafts from (``njp/graft.py``). All three reach the engine through
@@ -1256,7 +1255,7 @@ class LLM:
     # always-on dependency-free native own-brain as the guaranteed floor (never an echo mock). The
     # cloud rungs that used to sit in the middle are gone; nothing on this ladder can be taken away
     # by an outage, a bill, or a rate limit, because nothing on it is reached over a wire.
-    _AUTO_LADDER = ("litertlm", "gguf", "self", "native")
+    _AUTO_LADDER = ("gguf", "litertlm", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
