@@ -135,3 +135,54 @@ def test_check_removed_reports_a_clean_core_as_verified():
     ok, detail = TeacherRemoval.check_removed(_RemovedCore())
     assert ok is True
     assert "no cortex" in detail
+
+
+# --------------------------------------------------------------------------- #
+# The scoring adapter — where a misread contract silently perfects every arm
+# --------------------------------------------------------------------------- #
+def test_an_empty_answer_does_not_pass_a_benchmark_task():
+    """The bug this exists to prevent, caught on the first live run: `Benchmark.grade` returns a
+    `(score, reason)` TUPLE, and every non-empty tuple is truthy. `bool(task.grade(answer))`
+    therefore passes every task including the failures — arm A scored 20/20 on a battery where
+    nineteen of twenty answers were the empty string, and the verdict would have been a confident
+    `inert` built on nothing."""
+    from nyxara.eval.general_novel import build_general_novel_benchmark
+    from nyxara.eval.teacher_removal import score_benchmark_task
+
+    task = build_general_novel_benchmark().tasks()[0]
+    assert bool(task.grade("")), "the naive read is truthy — that is the trap"
+    assert score_benchmark_task(task, "") is False
+    assert score_benchmark_task(task, "nonsense") is False
+
+
+def test_the_adapter_accepts_a_correct_answer():
+    from nyxara.eval.general_novel import build_general_novel_benchmark
+    from nyxara.eval.teacher_removal import score_benchmark_task
+
+    task = build_general_novel_benchmark().tasks()[0]   # x + y = 7, x - y = 3
+    assert score_benchmark_task(task, "x=5, y=2") is True
+
+
+def test_the_adapter_handles_the_other_grade_shapes():
+    from nyxara.eval.teacher_removal import score_benchmark_task
+
+    class _Tuple:
+        def grade(self, a):
+            return (1.0 if a == "ok" else 0.0, "reason")
+
+    class _Object:
+        def grade(self, a):
+            return type("V", (), {"passed": a == "ok"})()
+
+    class _Scalar:
+        def grade(self, a):
+            return 1.0 if a == "ok" else 0.0
+
+    class _Raises:
+        def grade(self, a):
+            raise RuntimeError("grader exploded")
+
+    for cls in (_Tuple, _Object, _Scalar):
+        assert score_benchmark_task(cls(), "ok") is True
+        assert score_benchmark_task(cls(), "no") is False
+    assert score_benchmark_task(_Raises(), "ok") is False

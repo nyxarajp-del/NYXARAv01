@@ -57,7 +57,39 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nyxara.eval.ablation import mcnemar_exact
 
-__all__ = ["Arm", "ArmRun", "TeacherRemovalResult", "TeacherRemoval", "run_teacher_removal"]
+__all__ = ["Arm", "ArmRun", "TeacherRemovalResult", "TeacherRemoval", "run_teacher_removal",
+           "score_benchmark_task"]
+
+def score_benchmark_task(task: Any, answer: str, *, threshold: float = 1.0) -> bool:
+    """Did ``answer`` pass ``task``? Use this rather than hand-rolling the grading.
+
+    ``Benchmark`` tasks grade to a **tuple** ``(score, reason)``, and every non-empty tuple is
+    truthy. A caller who writes the obvious ``bool(task.grade(answer))`` therefore scores *every*
+    task as passed — failures included — and the arms of this experiment all come back perfect.
+    That is not a hypothetical: the first live run of arm A scored 20/20 on a battery where
+    nineteen of the twenty answers were the empty string, and the verdict would have been a
+    confident ``inert``.
+
+    A measurement instrument whose scoring contract is easy to get wrong is an instrument that
+    reports numbers nobody checked, so the adapter lives here beside the harness rather than in
+    each caller.
+    """
+    try:
+        verdict = task.grade(answer)
+    except Exception:  # noqa: BLE001 — a grader that raises is a failed task, not a crash
+        return False
+    if isinstance(verdict, tuple):
+        return bool(float(verdict[0]) >= threshold)
+    passed = getattr(verdict, "passed", None)
+    if passed is not None:
+        return bool(passed)
+    score = getattr(verdict, "score", None)
+    if score is not None:
+        return bool(float(score) >= threshold)
+    if isinstance(verdict, (int, float)):
+        return bool(float(verdict) >= threshold)
+    return bool(verdict)
+
 
 #: Fewer discordant pairs than this and the comparison is reported ``underpowered`` rather than
 #: given a verdict. Mirrors the floor `eval/ablation.py` uses, and for the same reason: below it,
