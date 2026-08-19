@@ -69,6 +69,29 @@ def test_a_reply_cut_off_mid_reasoning_yields_no_answer_rather_than_the_monologu
     assert "still working" in reasoning
 
 
+def test_a_closing_tag_without_an_opening_one_is_the_shape_the_real_model_produces():
+    """Qwen3.5's chat template opens the reasoning block in the PROMPT, so generation starts
+    already inside it and the model only ever emits ``</think>``. Measured against the real
+    weights: ``contains <think>: False | contains </think>: True``.
+
+    A splitter that requires the opening tag matches nothing here. The Master then receives the
+    entire raw monologue as the answer and njp/genome.py gets no trace to mine — both halves of
+    the design failing silently while every field on the reply looks populated."""
+    answer, reasoning, truncated = split_think(
+        "I need to work this out.\nStep 1: 2+2=4.</think>The answer is 4.")
+    assert answer == "The answer is 4."
+    assert "Step 1" in reasoning
+    assert truncated is False
+
+
+def test_an_unmatched_closing_tag_is_complete_not_truncated():
+    """Order matters between the two unmatched cases: an orphan ``</think>`` is a COMPLETE block
+    whose opener the template consumed, while an orphan ``<think>`` is a broken one. Checking
+    truncation first would mark every real reply truncated."""
+    _a, _r, truncated = split_think("reasoning</think>answer")
+    assert truncated is False
+
+
 def test_text_without_reasoning_passes_through_unchanged():
     answer, reasoning, truncated = split_think("just an answer")
     assert (answer, reasoning, truncated) == ("just an answer", "", False)

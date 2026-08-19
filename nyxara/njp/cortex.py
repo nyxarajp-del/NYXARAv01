@@ -45,11 +45,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["TeacherReply", "Cortex"]
 
-#: A reasoning block, non-greedy and DOTALL. Unterminated blocks are handled separately: a reply
-#: truncated by the token budget mid-``<think>`` has an opening tag and no closing one, and a
-#: pattern that requires both would hand the Master the entire raw monologue.
+#: A complete reasoning block, non-greedy and DOTALL.
 _THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+#: A reply the token budget cut off *inside* the reasoning: an opening tag and no closing one.
 _THINK_OPEN = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
+#: Everything up to a closing tag that never had an opening one — **the shape this model actually
+#: produces**. Qwen3.5's chat template opens the reasoning block in the PROMPT, so generation
+#: starts already inside it and the model only ever emits ``</think>``. Measured against the real
+#: weights: ``contains <think>: False | contains </think>: True``. A splitter that requires the
+#: opening tag matches nothing here, hands the Master the entire raw monologue as the answer, and
+#: leaves njp/genome.py with no trace to mine — both halves of the design failing silently while
+#: every field looks populated.
+_THINK_CLOSE_ONLY = re.compile(r"\A(?P<reasoning>.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass
@@ -84,14 +91,30 @@ def split_think(raw: str) -> Tuple[str, str, bool]:
     that returns an empty answer and says ``truncated``, which is honest: there is no answer yet.
     """
     text = str(raw or "")
-    reasoning_parts = [m.group(0) for m in _THINK.finditer(text)]
-    body = _THINK.sub("", text)
+    reasoning_parts: List[str] = []
     truncated = False
+
+    # Case 1: the template left the opening tag to the model — a complete <think>...</think>.
+    reasoning_parts.extend(m.group(0) for m in _THINK.finditer(text))
+    body = _THINK.sub("", text)
+
+    # Case 2: the template opened the block itself, so only the closing tag is generated. This is
+    # what the real weights do, and it has to be checked BEFORE the truncation case: an unmatched
+    # </think> is a *complete* reasoning block whose opener was consumed, not a broken one.
+    close_only = _THINK_CLOSE_ONLY.match(body)
+    if close_only:
+        reasoning_parts.append(close_only.group("reasoning"))
+        body = body[close_only.end():]
+
+    # Case 3: cut off by the token budget mid-reasoning — an opener with no closer. There is no
+    # answer yet, and returning the monologue as one would be a lie about what happened.
     open_tail = _THINK_OPEN.search(body)
     if open_tail:
         reasoning_parts.append(open_tail.group(0))
         body = body[:open_tail.start()]
         truncated = True
+
+    # Case 4: no tags at all — the whole reply is the answer, and `body` already holds it.
     reasoning = "\n".join(
         re.sub(r"</?think>", "", p, flags=re.IGNORECASE).strip() for p in reasoning_parts)
     return body.strip(), reasoning.strip(), truncated
