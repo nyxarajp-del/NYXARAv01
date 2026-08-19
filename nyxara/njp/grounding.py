@@ -1987,9 +1987,26 @@ class Grounder:
             # Declining is what lets deliberation happen. It is not a refusal to answer — it is a
             # refusal to answer *arbitrarily*, at the one layer that had no way to say "two".
             rival = self._tied_rival(found, best, inverse)
-            if rival:
+            if rival and predicate not in _MULTI_VALUED:
                 out.why = (f"two readings are equally supported: "
                            f"{best.subject if inverse else best.object} and {rival}")
+                return out
+            if rival:
+                # A tie on a multi-valued relation is not a dead heat, it is two true facts, and
+                # falling silent on it is a false refusal. Measured on ConceptNet: `piano is_a`
+                # holds "instrument of music" and "percussion instrument" both at 0.9, and
+                # `hammer purpose` holds "driving nails" and "pounding nails" both at 0.9 — so
+                # "what is a piano?" and "what is a hammer used for?" both came back empty from a
+                # store that knew the answer perfectly well. A piano *is* both of those things.
+                #
+                # The principle the refusal protects is kept: she still does not pick one
+                # arbitrarily. She says both. What changes is only that "I cannot choose" stops
+                # being rendered as "I do not know".
+                out.text = self._tied_answer(found, best, inverse)
+                out.triples = found
+                out.confidence = best.confidence
+                out.state = Epistemic.BELIEVED
+                out.why = f"{subject} —{predicate}→ {out.text}"
                 return out
             out.triples = found
             out.text = best.subject if inverse else best.object
@@ -2014,6 +2031,30 @@ class Grounder:
             return out
         except Exception:  # noqa: BLE001
             return out
+
+    @staticmethod
+    def _tied_answer(found: List[GroundedTriple], best: GroundedTriple,
+                     inverse: bool, *, limit: int = 3, epsilon: float = 1e-6) -> str:
+        """Every reading held as strongly as the best one, joined — the answer to a real tie.
+
+        Capped, because ConceptNet lists ten things a hammer is for and a reply that recites all
+        of them is a data dump rather than an answer. Ordered by how often each was stated, so the
+        most corroborated reading leads; ties within the cap are broken alphabetically so the same
+        store gives the same sentence twice.
+        """
+        def _end(triple: GroundedTriple) -> str:
+            return (triple.subject if inverse else triple.object).strip()
+
+        standing: Dict[str, Tuple[float, int, str]] = {}
+        for triple in found:
+            key = _end(triple).lower()
+            conf, count, surface = standing.get(key, (0.0, 0, ""))
+            standing[key] = (max(conf, triple.confidence), count + 1, surface or _end(triple))
+        top = max((conf for conf, _c, _s in standing.values()), default=0.0)
+        tied = [(count, surface) for conf, count, surface in standing.values()
+                if conf >= top - epsilon]
+        tied.sort(key=lambda kv: (-kv[0], kv[1].lower()))
+        return " and ".join(surface for _count, surface in tied[:max(1, limit)])
 
     @staticmethod
     def _tied_rival(found: List[GroundedTriple], best: GroundedTriple,
@@ -2732,6 +2773,20 @@ _PREDICATE_ALIASES: Dict[str, str] = {
 # `blue whale is_a animal on Earth` and was superseded on the turn it was learned, which left
 # `core._inherit` walking a graph whose every kind edge but one was marked dead. `learner`
 # reported 9 schemas and `answers_given` 0 across 1,320 turns.
+#: Relations that genuinely hold **more than one value at once**, where a tie between two equally
+#: supported readings means both are true rather than that one of them is wrong.
+#:
+#: `causes` is deliberately absent. Its tie is the one `_tied_rival` was written for — "garmi ka
+#: karan aag ya dhoop" — and the refusal there is load-bearing beyond politeness: `brain._deliberate`
+#: only runs when this method comes back empty, so answering a causal tie here would stop the
+#: debate in `nyxara.njp.reason` from ever running. The ladder descends only when the rung above
+#: returns nothing.
+_MULTI_VALUED = frozenset({
+    "is_a", "purpose", "capable_of", "has_part", "part_of", "consists_of",
+    "has_property", "has_kind", "means", "occurs_when", "requires", "owns",
+    "also_known_as", "known_for", "involves",
+})
+
 _FUNCTIONAL = frozenset({
     "has_name", "located_in", "born_in", "age", "birthday",
     "works_at", "capital_of", "married_to",
