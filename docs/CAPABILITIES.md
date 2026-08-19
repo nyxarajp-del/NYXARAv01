@@ -937,11 +937,35 @@ structure are counted separately** in `Fabric.stats()` — folding five billion 
 into the same counter as forty grown ones would not make the fabric look bigger, it would make
 `growing` unfalsifiable.
 
-Roughly 60% of a 9B model converts: FFN/MLP blocks are the ReLU-family layers the technique
-targets. Attention (~20%) stays hybrid — softmax is not a rate-coded nonlinearity — and embeddings
-(~14%) are lookup tables that drive cells directly rather than synapses. That is an architectural
-fact, not a budget, and `nyxara.njp.graft` carries it as data (`TENSOR_POLICY`) so the reported
-coverage is traceable to a reason.
+**Run against the real weights.** `empero-ai/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf`,
+SHA-256 verified against the repository's published sums, converted in 324 s:
+
+| | |
+|---|---|
+| parameters grafted | **4,831,838,208 of 8,947,240,960 — 54.0%** |
+| regions | 96 kept, **0 rejected** |
+| cells minted | 1,572,864 |
+| resident | 5.44 GB (int8, group 32) |
+| fidelity vs the original arithmetic | min 0.99965 · median 0.99974 · max 0.99979 |
+| fabric's own counters afterwards | grown cells 0, grown synapses 0 |
+
+That last row is the one to read twice: 4.8 billion parameters are in the fabric and her growth
+counters are untouched, because declared structure is never added to them.
+
+**54%, not the 60% first estimated — and the file is why.** This model is a hybrid
+transformer/SSM: 24 of its 32 blocks carry gated-deltanet `ssm_*` tensors and a *fused* `attn_qkv`
+projection. The conversion targets FFN gate/up/down (4.83B); attention (1.68B), the state-space
+layers (403M) and the embedding/output tables (2.03B) are counted in the denominator and not
+converted. `nyxara.njp.graft` carries that as ordered data (`TENSOR_POLICY`) so the coverage figure
+is traceable to a reason rather than to what happened to be attempted.
+
+Two failures the real file surfaced that synthetic tensors never could, both silent and both fatal
+to the certificate's meaning. `GGUFReader` returns **packed quantisation bytes**, not weights — a
+`(4096, 12288)` layer arrives as `(12288, 2304)` `uint8` — so `.astype(float32)` yields plausible
+numbers that are not weights, and every downstream stage stays internally consistent while
+certifying a layer that computes nothing. And an unordered policy table matched `attn_q` inside
+`attn_qkv`, reading a fused projection as a separate one: the right verdict for entirely the wrong
+reason. The full certificate, region by region, is in `docs/graft-certificate.json`.
 
 ### The measurement that decides whether any of it worked
 
