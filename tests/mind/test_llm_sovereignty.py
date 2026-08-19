@@ -123,5 +123,10 @@ def test_the_ladder_is_hers_end_to_end():
     """The structural claim after the cloud rungs were removed: every rung runs in-process."""
     from nyxara.kernel.config import OWN_PROVIDERS
 
-    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
+    assert LLM._AUTO_LADDER == ("gguf", "litertlm", "self", "native")
     assert set(LLM._AUTO_LADDER) == set(OWN_PROVIDERS)
+    # The two properties the literal above only encoded by accident, stated so that adding a rung
+    # has to preserve them rather than merely re-snapshot the tuple: her always-on dependency-free
+    # own-brain is the guaranteed FLOOR and is reached last, and no rung repeats.
+    assert LLM._AUTO_LADDER[-1] == "native"
+    assert len(set(LLM._AUTO_LADDER)) == len(LLM._AUTO_LADDER)

@@ -307,7 +307,12 @@ class NJPBrain:
         # shadow reads (concepts, adversary, universe, predictive), because it is handed those
         # objects rather than rebuilding them.
         self.cortex = self._build_cortex(c)
-        self.shadow = self._build_shadow(c)
+        # `shadow_cognition`, NOT `shadow`: `NJPBrain.shadow()` already exists and means something
+        # else entirely — the shadow model of her own IGNORANCE (gaps, stale beliefs, weak
+        # faculties). Binding an organ over it replaced a method with an object and broke every
+        # caller with "'ShadowCognition' object is not callable". Two different ideas that both
+        # earned the word; the collision is resolved here rather than by renaming hers.
+        self.shadow_cognition = self._build_shadow(c)
         # The Cognitive Learning Core, before `metareason` because that registers a strategy
         # bound to it. Everything the Core reads — the grounder, the world, the concept layer,
         # the universe, curiosity — is already built by this line; it needs nothing from `field`,
@@ -2642,7 +2647,8 @@ class NJPBrain:
                             ("calculate", self.calculator),
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
-                            ("cortex", self.cortex), ("shadow", self.shadow)):
+                            ("cortex", self.cortex),
+                            ("shadow_cognition", self.shadow_cognition)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:

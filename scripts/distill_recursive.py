@@ -40,7 +40,7 @@ from nyxara.njp.brain import NJPBrain  # noqa: E402
 def run(mode: str, turns: int, topics: str, verify: bool) -> int:
     brain = NJPBrain()
     cortex = getattr(brain, "cortex", None)
-    shadow = getattr(brain, "shadow", None)
+    shadow = getattr(brain, "shadow_cognition", None)
 
     if shadow is None:
         print("shadow cognition is not built on this core — nothing to distil into.")
@@ -69,7 +69,17 @@ def run(mode: str, turns: int, topics: str, verify: bool) -> int:
             thought = brain.think(prompt)
         except Exception:  # noqa: BLE001 — a failed turn is a skipped comparison
             pass
-        reading = shadow.compare(prompt, njp_thought=thought, teacher_text=reply.text)
+        # Tell the comparator who phrased her side. With the Qwythos weights present, `gguf`
+        # leads the ladder and renders her voice too — the semantic gap would then compare the
+        # model to itself and come back falsely clean.
+        rendered_by = ""
+        try:
+            voice = getattr(brain, "voice", None)
+            rendered_by = str(voice.surface().provider) if voice is not None else ""
+        except Exception:  # noqa: BLE001
+            rendered_by = ""
+        reading = shadow.compare(prompt, njp_thought=thought, teacher_text=reply.text,
+                                 njp_rendered_by=rendered_by)
         if i % 10 == 0 or verify:
             d = reading.to_dict()
             print(f"  [{i:4d}] gaps={d['n_gaps']:2d} "
@@ -98,7 +108,7 @@ def main(argv=None) -> int:
     if args.report:
         brain = NJPBrain()
         print(json.dumps({"cortex": getattr(brain, "cortex", None) and brain.cortex.stats(),
-                          "shadow": getattr(brain, "shadow", None) and brain.shadow.stats(),
+                          "shadow": getattr(brain, "shadow_cognition", None) and brain.shadow_cognition.stats(),
                           "fabric": brain.fabric.stats().get("grafted")}, indent=2, default=str))
         return 0
     return run(args.mode, args.turns, args.topics, args.verify)

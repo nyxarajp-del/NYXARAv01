@@ -590,6 +590,7 @@ class LLMConfig(BaseModel):
         # loudly at first use instead of silently reporting the wrong model.
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.GGUF: self.gguf_model,
             LLMProvider.LITERTLM: self.litertlm_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",

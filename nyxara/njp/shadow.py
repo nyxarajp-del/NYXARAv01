@@ -48,6 +48,11 @@ claim through the four attacks, and a claim that cannot be settled from the reco
 ``UNDECIDED``, which never raises confidence. The teacher is a hypothesis generator whose
 hypotheses are cheap and whose authority is zero.
 
+**Not to be confused with** :meth:`nyxara.njp.brain.NJPBrain.shadow`, which is her shadow model of
+her own *ignorance* — the gaps, the stale beliefs, the faculties measuring weak. Both ideas earned
+the word honestly and they are unrelated: that one is about what she does not know, this one is
+about where she and a teacher disagree. The brain holds this organ as ``shadow_cognition``.
+
 Pure standard library plus numpy. Every entry point is fail-soft: any organ that raises degrades
 to a null result and the turn still completes.
 """
@@ -125,6 +130,9 @@ class ShadowReading:
     residuals_offered: int = 0
     residuals_trained: int = 0      # only those an independent check established
     teacher_present: bool = False
+    #: True when her side was phrased by the same model that is the teacher, which makes the
+    #: semantic comparison circular. Reported rather than silently absorbed.
+    same_model: bool = False
     ms: float = 0.0
 
     @property
@@ -158,6 +166,7 @@ class ShadowReading:
                 "residuals_offered": self.residuals_offered,
                 "residuals_trained": self.residuals_trained,
                 "teacher_present": self.teacher_present,
+                "same_model": self.same_model,
                 "outcomes": 0,           # stated in every report, so its absence is visible
                 "ms": round(self.ms, 3)}
 
@@ -202,13 +211,25 @@ class ShadowCognition:
         self.gaps_routed = 0
         self.claims_challenged = 0
         self.claims_refuted = 0
+        self.semantic_skipped = 0
         self.residuals_trained = 0
         self.residuals_refused = 0
 
     # ---- the comparison -------------------------------------------------- #
     def compare(self, stimulus: str, *, njp_thought: Any = None,
-                teacher_text: str = "", njp_text: str = "") -> ShadowReading:
-        """One stimulus through both paths. Returns investigations, never outcomes."""
+                teacher_text: str = "", njp_text: str = "",
+                njp_rendered_by: str = "") -> ShadowReading:
+        """One stimulus through both paths. Returns investigations, never outcomes.
+
+        ``njp_rendered_by`` names the provider that phrased her side, and it exists because of a
+        loop the ladder creates. ``gguf`` leads ``LLM._AUTO_LADDER``, so on a machine where the
+        Qwythos weights are present *her voice is rendered by the same model that is the teacher*.
+        The semantic comparison then puts a model's wording next to its own wording, finds almost
+        no missing concepts, and reports a near-empty gap — which reads exactly like "she already
+        knows all of this" and would make the distillation look finished the day it started.
+        Pass the rendering provider and the semantic gap is skipped and *said to be skipped*,
+        rather than coming back falsely clean.
+        """
         t0 = time.perf_counter()
         out = ShadowReading(stimulus=str(stimulus or ""))
         try:
@@ -223,7 +244,17 @@ class ShadowCognition:
             njp_text = str(njp_text or self._njp_text(njp_thought))
             self.comparisons += 1
 
-            self._semantic_gap(out, teacher_text, njp_text)
+            out.same_model = self._same_model(njp_rendered_by)
+            if out.same_model:
+                self.semantic_skipped += 1
+                out.gaps.append(Gap(
+                    kind=GapKind.SEMANTIC, subject="<not compared>",
+                    magnitude=0.0, routed_to="",
+                    detail=(f"her side was rendered by '{njp_rendered_by}', the same model as the "
+                            f"teacher — a semantic comparison here measures the model against "
+                            f"itself, so it was skipped rather than reported as agreement")))
+            else:
+                self._semantic_gap(out, teacher_text, njp_text)
             self._causal_gap(out, teacher_text)
             self._prediction_gap(out, njp_thought, teacher_text)
 
@@ -412,6 +443,19 @@ class ShadowCognition:
             return None
 
     # ---- helpers --------------------------------------------------------- #
+    def _same_model(self, rendered_by: str) -> bool:
+        """Is the provider that phrased her side the same model serving as the teacher?"""
+        name = str(rendered_by or "").strip().lower()
+        if not name:
+            return False
+        if name == "gguf":
+            return True
+        try:
+            teacher_model = str(self.teacher.stats().get("model", "")).lower()
+        except Exception:  # noqa: BLE001
+            return False
+        return bool(teacher_model) and name == teacher_model
+
     def _ask_teacher(self, stimulus: str) -> str:
         try:
             fn = getattr(self.teacher, "complete", None) or getattr(self.teacher, "ask", None)
@@ -475,6 +519,7 @@ class ShadowCognition:
             "gaps_routed": self.gaps_routed,
             "claims_challenged": self.claims_challenged,
             "claims_refuted": self.claims_refuted,
+            "semantic_skipped_as_circular": self.semantic_skipped,
             "residuals_trained": self.residuals_trained,
             "residuals_refused": self.residuals_refused,
             "teacher_attached": self.teacher is not None,

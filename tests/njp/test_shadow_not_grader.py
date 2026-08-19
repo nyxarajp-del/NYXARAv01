@@ -88,3 +88,32 @@ def test_an_absent_teacher_is_reported_not_faked():
     reading = ShadowCognition().compare("why?", teacher_text="")
     assert reading.teacher_present is False
     assert reading.gaps == []
+
+
+def test_a_semantic_comparison_against_the_same_model_is_skipped_not_reported_as_agreement():
+    """``gguf`` leads ``LLM._AUTO_LADDER``, so where the Qwythos weights are present her voice is
+    rendered by the very model that is the teacher. Comparing that wording to its own wording
+    finds almost nothing missing — which reads as "she already knows all of this" and would make
+    the distillation look finished on day one."""
+    shadow = _shadow()
+    honest = shadow.compare("q", teacher_text=TEACHER, njp_text="it changed")
+    circular = shadow.compare("q", teacher_text=TEACHER, njp_text="it changed",
+                              njp_rendered_by="gguf")
+
+    assert honest.same_model is False
+    assert honest.by_kind(GapKind.SEMANTIC)[0].magnitude > 0
+
+    assert circular.same_model is True
+    skipped = circular.by_kind(GapKind.SEMANTIC)[0]
+    assert skipped.magnitude == 0.0
+    assert skipped.routed_to == "", "a skipped comparison must not be routed anywhere"
+    assert "measures the model against itself" in skipped.detail
+    assert shadow.stats()["semantic_skipped_as_circular"] == 1
+
+
+def test_a_different_rendering_provider_does_not_trip_the_circularity_guard():
+    shadow = _shadow()
+    reading = shadow.compare("q", teacher_text=TEACHER, njp_text="it changed",
+                             njp_rendered_by="native")
+    assert reading.same_model is False
+    assert shadow.stats()["semantic_skipped_as_circular"] == 0

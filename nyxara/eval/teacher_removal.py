@@ -269,9 +269,13 @@ class TeacherRemoval:
                         return False, "cortex is still available on this core"
                 except Exception:  # noqa: BLE001
                     return False, "cortex present and could not be interrogated"
-            shadow = getattr(njp, "shadow", None)
+            # `shadow_cognition`, not `shadow`: `NJPBrain.shadow()` is a method about her own
+            # ignorance and has nothing to do with the teacher. Reading it here would find a bound
+            # method with no `teacher` attribute, conclude the teacher was gone, and verify a
+            # removal that never happened — which is the one path to a false `distilled`.
+            shadow = getattr(njp, "shadow_cognition", None)
             if shadow is not None and getattr(shadow, "teacher", None) is not None:
-                return False, "shadow still holds a teacher reference"
+                return False, "shadow cognition still holds a teacher reference"
             fabric = getattr(njp, "fabric", None)
             grafts = list(getattr(fabric, "grafts", []) or []) if fabric is not None else []
             if grafts:

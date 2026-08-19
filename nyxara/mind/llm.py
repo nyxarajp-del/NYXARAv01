@@ -580,6 +580,84 @@ _JSON_NUDGE = "Respond with ONLY valid JSON — no prose, no code fences."
 _GEMMA_STOPS = ("<turn|>", "<|turn>")
 
 
+class GGUFProvider(LLMProviderBase):
+    """Serve a llama.cpp GGUF in-process — the Qwythos teacher, and the ladder's strongest rung.
+
+    ``empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF``: Qwen3.5-9B post-trained on reasoning traces.
+    Same contract as every other provider here — stateless, persona-free, and its output is a
+    proposal the kernel gates. Being local and being large both make it *reachable*, neither makes
+    it authoritative.
+
+    It leads ``_AUTO_LADDER`` because it is a 9B model where ``litertlm`` is a 2B one, and it costs
+    nothing when its weights are absent: :meth:`available` is a flag, a file and an import.
+
+    **The same weights are also NJP's teacher** (``njp/cortex.py``) and the source its fabric
+    grafts from (``njp/graft.py``). All three reach the engine through
+    ``mind/gguf_assets.load_engine``, so one process holds one copy of a file that is 5.6-17.9 GB
+    on disk. The engine cache lives there rather than here for exactly that reason: a cache per
+    consumer is the same weights resident three times.
+    """
+
+    name = "gguf"
+
+    def _cfg(self, key: str, default: Any) -> Any:
+        return getattr(self.settings.llm, key, default)
+
+    def model_path(self) -> Any:
+        from nyxara.mind.gguf_assets import model_path
+        return model_path(self.settings)
+
+    def why_unavailable(self) -> Optional[str]:
+        """``None`` when this rung can serve, else the reason — which is what gets reported."""
+        from nyxara.mind.gguf_assets import binding, engine_dead
+        dead = engine_dead()
+        if dead:
+            return dead
+        if not bool(self._cfg("gguf_enabled", True)):
+            return "disabled by config (llm.gguf_enabled=false)"
+        path = self.model_path()
+        if not path.is_file():
+            return f"weights missing at {path} (python scripts/fetch_qwythos_model.py)"
+        if binding() is None:
+            return "llama_cpp is not installed (pip install llama-cpp-python)"
+        return None
+
+    def available(self) -> bool:
+        return self.why_unavailable() is None
+
+    def default_model(self) -> str:
+        return str(self._cfg("gguf_model", "qwythos"))
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        from nyxara.mind.gguf_assets import load_engine
+        engine = load_engine(self.settings)
+        if engine is None:
+            raise LLMError("gguf engine could not be loaded", context={"provider": self.name})
+        messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        resp = engine.create_chat_completion(
+            messages=messages,
+            max_tokens=int(req.max_tokens or self._cfg("gguf_max_output_tokens", 16384)),
+            temperature=float(req.temperature if req.temperature is not None
+                              else self._cfg("gguf_temperature", 0.6)),
+            top_p=float(self._cfg("gguf_top_p", 0.95)),
+            top_k=int(self._cfg("gguf_top_k", 20)),
+            repeat_penalty=float(self._cfg("gguf_repeat_penalty", 1.05)),
+        )
+        choice = resp["choices"][0]
+        raw = str(choice["message"]["content"] or "")
+        text = raw
+        if bool(self._cfg("gguf_strip_think", True)):
+            # Qwythos opens every answer with a <think> block. It is stripped from what the caller
+            # reads and kept on `raw`, because njp/genome.py mines those traces for recurring
+            # reasoning shapes — this is a rendering choice, never a discarding of the trace.
+            from nyxara.njp.cortex import split_think
+            text, _reasoning, _truncated = split_think(raw)
+        usage_raw = resp.get("usage") or {}
+        usage = Usage(prompt_tokens=int(usage_raw.get("prompt_tokens", 0) or 0),
+                      completion_tokens=int(usage_raw.get("completion_tokens", 0) or 0))
+        return text, str(choice.get("finish_reason", "stop") or "stop"), usage, resp
+
+
 class LiteRTLMProvider(LLMProviderBase):
     """Serve a LiteRT-LM ``.litertlm`` model in-process — NYXARA's PRIMARY brain.
 
@@ -1121,6 +1199,7 @@ class LiteRTLMProvider(LLMProviderBase):
 
 
 _PROVIDER_CLASSES = {
+    ProviderName.GGUF: GGUFProvider,
     ProviderName.LITERTLM: LiteRTLMProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
@@ -1162,7 +1241,7 @@ class LLM:
     # always-on dependency-free native own-brain as the guaranteed floor (never an echo mock). The
     # cloud rungs that used to sit in the middle are gone; nothing on this ladder can be taken away
     # by an outage, a bill, or a rate limit, because nothing on it is reached over a wire.
-    _AUTO_LADDER = ("litertlm", "self", "native")
+    _AUTO_LADDER = ("gguf", "litertlm", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.

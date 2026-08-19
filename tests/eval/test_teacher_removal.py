@@ -98,7 +98,7 @@ def test_a_lingering_shadow_teacher_counts_too():
         class njp:
             cortex = None
 
-            class shadow:
+            class shadow_cognition:
                 teacher = object()
             fabric = None
 

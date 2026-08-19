@@ -106,12 +106,6 @@ class Cortex:
     downstream should have to special-case it.
     """
 
-    #: Loaded engines, shared across every instance in the process. Keyed by
-    #: ``(path, n_gpu_layers, context_tokens)`` — see the module docstring for why the backend is
-    #: part of the key rather than the path alone.
-    _ENGINES: Dict[Tuple[str, int, int], Any] = {}
-    _ENGINE_LOCK = threading.Lock()
-
     def __init__(self, *, settings: Any = None, model_path: Any = None) -> None:
         self.settings = settings
         self._explicit_path = Path(model_path) if model_path else None
@@ -143,18 +137,23 @@ class Cortex:
     def binding(self) -> Any:
         """The ``llama_cpp`` module, or ``None`` when the optional wheel is not installed."""
         try:
-            import llama_cpp
-        except Exception:  # noqa: BLE001 — an unbuilt/ABI-mismatched wheel is unavailability
+            from nyxara.mind.gguf_assets import binding
+            return binding()
+        except Exception:  # noqa: BLE001
             return None
-        return llama_cpp
 
     def available(self) -> bool:
         return self.why_unavailable() is None
 
     def why_unavailable(self) -> Optional[str]:
         """``None`` when the organ can serve, else the reason — which is what gets reported."""
-        if self._dead:
-            return self._dead
+        try:
+            from nyxara.mind.gguf_assets import engine_dead
+            shared_dead = engine_dead()
+        except Exception:  # noqa: BLE001
+            shared_dead = None
+        if self._dead or shared_dead:
+            return self._dead or shared_dead
         if not bool(self._cfg("gguf_enabled", True)):
             return "disabled by config (llm.gguf_enabled=false)"
         path = self.model_path()
@@ -169,36 +168,23 @@ class Cortex:
 
     # ---- the engine ------------------------------------------------------- #
     def _engine(self) -> Any:
-        path = self.model_path()
-        if path is None:
-            return None
-        key = (str(path), int(self._cfg("gguf_n_gpu_layers", 0)),
-               int(self._cfg("gguf_context_tokens", 16384)))
-        with self._ENGINE_LOCK:
-            got = self._ENGINES.get(key)
-            if got is not None:
-                return got
-            binding = self.binding()
-            if binding is None:
-                return None
-            try:
-                kwargs: Dict[str, Any] = {
-                    "model_path": str(path),
-                    "n_ctx": key[2],
-                    "n_gpu_layers": key[1],
-                    "verbose": False,
-                }
-                threads = self._cfg("gguf_threads", None)
-                if threads:
-                    kwargs["n_threads"] = int(threads)
-                engine = binding.Llama(**kwargs)
-            except Exception as exc:  # noqa: BLE001
-                # Latch. A runtime that cannot start will not start on the next turn either, and
-                # a rung that fails loudly every turn is worse than one that stands down.
-                self._dead = f"llama_cpp could not load the model: {exc}"
-                return None
-            self._ENGINES[key] = engine
+        """The shared llama.cpp engine from ``mind/gguf_assets``.
+
+        Not a private one. These same weights are also the ladder's ``gguf`` rung
+        (``mind/llm.py``) and the source ``njp/graft.py`` converts from; a cache per consumer
+        would hold a 5.6-17.9 GB file in memory three times over for one copy on disk. The dead
+        latch is shared for the same reason — a runtime that cannot start here cannot start there.
+        """
+        try:
+            from nyxara.mind.gguf_assets import load_engine
+            engine = load_engine(self.settings, path=self._explicit_path)
+            if engine is None:
+                from nyxara.mind.gguf_assets import engine_dead
+                self._dead = self._dead or engine_dead()
             return engine
+        except Exception as exc:  # noqa: BLE001
+            self._dead = f"gguf engine unavailable: {exc}"
+            return None
 
     # ---- asking the teacher ---------------------------------------------- #
     def ask(self, prompt: str, *, system: str = "", max_tokens: Optional[int] = None,

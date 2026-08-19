@@ -38,15 +38,17 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from nyxara.kernel.config import NyxaraSettings, Profile, get_settings
 
 log = logging.getLogger("nyxara.mind.gguf_assets")
 
 __all__ = ["model_path", "model_present", "expected_url", "available_quants",
-           "filename_for_quant", "fetch_checksums", "verify_checksum", "ensure_gguf_model"]
+           "filename_for_quant", "fetch_checksums", "verify_checksum", "ensure_gguf_model",
+           "binding", "load_engine", "engine_dead", "reset_engines"]
 
 ProgressFn = Callable[[int, Optional[int]], None]
 
@@ -332,3 +334,84 @@ def main(argv: Optional[list] = None) -> int:  # pragma: no cover
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# --------------------------------------------------------------------------- #
+# The shared engine — one process, one set of weights
+# --------------------------------------------------------------------------- #
+#: Loaded llama.cpp engines, shared across everything in the process. Keyed by
+#: ``(path, n_gpu_layers, n_ctx)`` rather than by path alone: the backend is part of what an engine
+#: *is*, and sharing across it would hand a CPU engine to a caller that asked for the GPU —
+#: silently, since both answer.
+#:
+#: It lives here rather than in either consumer because there are two: ``mind/llm.py``'s rung
+#: serves the ladder and ``njp/cortex.py`` serves the teacher organ. A cache per consumer means a
+#: 5.6-17.9 GB file resident twice on a machine that has one copy of it on disk.
+_ENGINES: Dict[Any, Any] = {}
+_ENGINE_LOCK = threading.Lock()
+
+#: Latched load failure. Once llama_cpp has proved it cannot start on this host it will not start
+#: on the next turn either, and a rung that fails loudly every turn is worse than one that stands
+#: down. Cleared only by :func:`reset_engines`.
+_DEAD: Optional[str] = None
+
+
+def binding() -> Any:
+    """The ``llama_cpp`` module, or ``None`` when the optional wheel is not installed."""
+    try:
+        import llama_cpp
+    except Exception:  # noqa: BLE001 — an unbuilt or ABI-mismatched wheel is unavailability
+        return None
+    return llama_cpp
+
+
+def engine_dead() -> Optional[str]:
+    """Why the runtime is off, if it has already proved it cannot start here."""
+    return _DEAD
+
+
+def reset_engines() -> None:
+    """Drop every cached engine and clear the dead latch. For tests and for a deliberate reload."""
+    global _DEAD
+    with _ENGINE_LOCK:
+        _ENGINES.clear()
+        _DEAD = None
+
+
+def load_engine(settings: Optional[NyxaraSettings] = None, *,
+                path: Optional[Path] = None) -> Any:
+    """The llama.cpp engine for the configured weights, or ``None`` — never raises.
+
+    Loading is the expensive, failable part, so it is deliberately NOT what availability checks
+    call: :func:`model_present` plus :func:`binding` answer "can this serve?" without touching a
+    gigabyte.
+    """
+    global _DEAD
+    if _DEAD:
+        return None
+    settings = settings or get_settings()
+    target = Path(path) if path is not None else model_path(settings)
+    if not target.is_file():
+        return None
+    llama = binding()
+    if llama is None:
+        return None
+    key = (str(target), int(getattr(settings.llm, "gguf_n_gpu_layers", 0)),
+           int(getattr(settings.llm, "gguf_context_tokens", 16384)))
+    with _ENGINE_LOCK:
+        got = _ENGINES.get(key)
+        if got is not None:
+            return got
+        try:
+            kwargs: Dict[str, Any] = {"model_path": key[0], "n_ctx": key[2],
+                                      "n_gpu_layers": key[1], "verbose": False}
+            threads = getattr(settings.llm, "gguf_threads", None)
+            if threads:
+                kwargs["n_threads"] = int(threads)
+            engine = llama.Llama(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            _DEAD = f"llama_cpp could not load the model: {exc}"
+            log.warning("gguf engine could not start; taking the rung off the ladder: %s", exc)
+            return None
+        _ENGINES[key] = engine
+        return engine

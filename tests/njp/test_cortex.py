@@ -16,10 +16,25 @@ def test_absent_weights_report_the_reason_and_the_fix():
 def test_availability_never_loads_an_engine():
     """It is called on every turn. Loading 5.6 GB to answer 'are you there' would make the check
     more expensive than the answer."""
+    from nyxara.mind import gguf_assets
+
+    gguf_assets.reset_engines()
     cortex = Cortex()
     for _ in range(50):
         cortex.available()
-    assert cortex._ENGINES == {}
+    assert gguf_assets._ENGINES == {}
+
+
+def test_the_engine_cache_is_shared_with_the_ladder_rung_not_private():
+    """The same weights serve three consumers — the `gguf` rung in mind/llm.py, this organ, and
+    njp/graft.py's tensor source. A cache per consumer holds a 5.6-17.9 GB file in memory three
+    times over for one copy on disk."""
+    from nyxara.mind import gguf_assets
+    from nyxara.mind.llm import GGUFProvider
+
+    assert not hasattr(Cortex, "_ENGINES"), "the organ must not keep a private engine cache"
+    assert not hasattr(GGUFProvider, "_ENGINES")
+    assert hasattr(gguf_assets, "load_engine")
 
 
 def test_a_dead_runtime_latches_instead_of_failing_every_turn():
