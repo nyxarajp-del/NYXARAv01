@@ -6,9 +6,40 @@ The pointer write must be atomic (readers poll it per request)."""
 
 from __future__ import annotations
 
+import pytest
+
 from nyxara.growth import promotion
 from nyxara.growth.foundry import Foundry
 from nyxara.kernel.config import NyxaraSettings, Profile
+
+
+@pytest.fixture(autouse=True)
+def _isolated_bus():
+    """Give each test the bus to itself.
+
+    ``promotion._listeners`` is a module global, and several tests here assert an ABSOLUTE count —
+    ``notify(...) == 1``, ``== 0``. That only holds if nothing else in the process is subscribed,
+    and by the time this file runs in a full suite, several are: every ``NyxaraCore`` built by an
+    earlier test subscribes ``on_promotion``.
+
+    The bus was designed for that. It holds bound methods through a ``WeakMethod`` precisely "so a
+    dead core unsubscribes itself" — but those cores never die, because ``Heartbeat.start`` hands
+    ``threading.Thread`` the bound method ``self._run`` as its target, and the running thread then
+    holds a strong reference to the core for the life of the process. So the weak reference never
+    clears and the bus keeps growing. In production that is one core and harmless; in a suite it
+    is one per test, and it made these assertions fail on a run they had nothing to do with.
+
+    Isolating the global here fixes the fragility at its own level. The leak itself is a separate
+    matter and lives in ``void/heartbeat.py``.
+    """
+    with promotion._lock:
+        saved = list(promotion._listeners)
+        promotion._listeners.clear()
+    try:
+        yield
+    finally:
+        with promotion._lock:
+            promotion._listeners[:] = saved
 
 CORPUS = ["the master is jp. nyxara serves the master with absolute loyalty."] * 6 + [
     "loyalty to the master is absolute and never changes, in every world."] * 6
