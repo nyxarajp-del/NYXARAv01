@@ -179,5 +179,40 @@ def test_tensor_policy_routes_each_family_to_its_honest_destination():
     assert classify_tensor("rope_freqs") == "skip"
 
 
+def test_the_policy_is_ordered_so_a_fused_projection_is_not_read_as_a_separate_one():
+    """Found against the real file: `attn_qkv` contains `attn_q` as a substring, so an unordered
+    table classified this model's FUSED qkv projection (24 of its 32 blocks) as a separate q
+    projection. It landed on the right verdict for entirely the wrong reason — an accident that
+    stops being harmless the moment the two verdicts differ."""
+    assert classify_tensor("blk.0.attn_qkv.weight") == "hybrid"
+    assert classify_tensor("output_norm.weight") == "scale"      # not swallowed by "output"
+    assert classify_tensor("output.weight") == "lookup"
+
+
+def test_state_space_tensors_are_counted_rather_than_skipped():
+    """This model is a hybrid transformer/SSM: 24 blocks carry gated-deltanet `ssm_*` tensors.
+    A recurrent state update is not a feedforward activation, so the conversion does not apply —
+    but 400M+ parameters silently outside the denominator would inflate the coverage figure this
+    module publishes."""
+    assert classify_tensor("blk.0.ssm_out.weight") == "hybrid"
+    assert classify_tensor("blk.0.ssm_norm.weight") == "scale"
+    assert classify_tensor("blk.0.attn_gate.weight") == "hybrid"
+
+
+def test_dequantize_refuses_anything_that_is_not_float_weights():
+    """The silent failure this guards: GGUFReader hands back PACKED quantisation bytes, and
+    `.astype(float32)` on them yields plausible numbers that are not weights. Every downstream
+    stage — threshold, quantise, simulate, verify — stays internally consistent and issues a
+    certificate for a layer computing nothing."""
+    from nyxara.njp.graft import dequantize_tensor
+
+    class _Raw:
+        name = "blk.0.ffn_gate.weight"
+        data = np.zeros((4, 8), dtype=np.uint8)
+        tensor_type = None            # no qtype: passes straight through, must still be float32
+
+    assert dequantize_tensor(_Raw()).dtype == np.float32
+
+
 def test_an_unreadable_gguf_is_unavailability_not_an_exception():
     assert read_gguf_tensors("/definitely/not/here.gguf") == []

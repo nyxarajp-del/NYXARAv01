@@ -682,24 +682,50 @@ def _default_probe(n_pre: int, *, n: int = 24, seed: int = 0) -> List[Any]:
 #: The tensor families a graft can and cannot take, and why. Kept as data rather than as prose in
 #: a commit message, because the coverage number the certificate reports is derived from it and
 #: should be traceable to a reason.
-TENSOR_POLICY: Dict[str, str] = {
-    "ffn_gate": "graft",      # SwiGLU's gate/up/down are the ReLU-family layers conversion targets
-    "ffn_up": "graft",
-    "ffn_down": "graft",
-    "attn_q": "hybrid",       # softmax is not a rate-coded nonlinearity; see the module docstring
-    "attn_k": "hybrid",
-    "attn_v": "hybrid",
-    "attn_output": "hybrid",
-    "token_embd": "lookup",   # a table, not a layer — tokens drive cells directly (brain._cell_id)
-    "output": "lookup",
-    "attn_norm": "scale",     # applied around the region, not converted into it
-    "ffn_norm": "scale",
-}
+#: Order matters: the first entry whose key appears in the tensor name wins, so the longer, more
+#: specific names come first. Measured against the real file this is not pedantry — ``attn_qkv``
+#: contains ``attn_q`` as a substring, so an unordered table classified a *fused* projection as a
+#: separate one. It happened to land on the right verdict and for entirely the wrong reason, which
+#: is the kind of accident that stops being harmless the moment the verdicts differ.
+TENSOR_POLICY: Tuple[Tuple[str, str], ...] = (
+    # --- the conversion targets: SwiGLU's gate/up/down are the ReLU-family layers ------------- #
+    ("ffn_gate", "graft"),
+    ("ffn_up", "graft"),
+    ("ffn_down", "graft"),
+    # --- attention: softmax is not a rate-coded nonlinearity; see the module docstring --------- #
+    ("attn_qkv", "hybrid"),      # this model fuses q/k/v in 24 of its 32 blocks
+    ("attn_gate", "hybrid"),
+    ("attn_output", "hybrid"),
+    ("attn_q", "hybrid"),
+    ("attn_k", "hybrid"),
+    ("attn_v", "hybrid"),
+    # --- state space: this is a HYBRID transformer/SSM, not a pure transformer ----------------- #
+    # 24 of its blocks carry ssm_* tensors (gated-deltanet). A recurrent state update is not a
+    # feedforward activation, so rate-coded conversion does not apply to it — and it is counted
+    # rather than skipped, because 400M+ parameters silently outside the denominator would inflate
+    # the coverage figure this module publishes.
+    ("ssm_out", "hybrid"),
+    ("ssm_in", "hybrid"),
+    ("ssm_conv1d", "hybrid"),
+    ("ssm_norm", "scale"),
+    ("ssm_dt", "scale"),
+    ("ssm_a", "scale"),
+    ("ssm_alpha", "scale"),
+    ("ssm_beta", "scale"),
+    # --- tables, not layers: tokens drive cells directly (brain._cell_id) ---------------------- #
+    ("token_embd", "lookup"),
+    ("output_norm", "scale"),    # before "output", which would otherwise swallow it
+    ("output", "lookup"),
+    # --- norms: applied around a region, never converted into one ----------------------------- #
+    ("attn_norm", "scale"),
+    ("ffn_norm", "scale"),
+    ("post_attention_norm", "scale"),
+)
 
 
 def classify_tensor(name: str) -> str:
     """``graft`` | ``hybrid`` | ``lookup`` | ``scale`` | ``skip`` for one GGUF tensor name."""
-    for key, verdict in TENSOR_POLICY.items():
+    for key, verdict in TENSOR_POLICY:
         if key in name:
             return verdict
     return "skip"
@@ -726,10 +752,35 @@ def read_gguf_tensors(path: Any, *, only: Optional[str] = None) -> List[Tuple[st
         if only and classify_tensor(name) != only:
             continue
         try:
-            out.append((name, _np.asarray(tensor.data)))
+            out.append((name, dequantize_tensor(tensor)))
         except Exception:  # noqa: BLE001 — one unreadable tensor must not lose the rest
             continue
     return out
+
+
+def dequantize_tensor(tensor: Any) -> Any:
+    """One GGUF tensor as float32 weights in its **logical** shape.
+
+    This is not a convenience wrapper. ``GGUFReader`` hands back ``tensor.data`` as the *packed
+    quantisation bytes*: for a Q4_K tensor of logical shape ``(4096, 12288)`` that is a
+    ``(12288, 2304)`` array of ``uint8`` in ``[0, 255]``, where the bytes are interleaved 4-bit
+    values, block scales and block minima. Calling ``.astype(float32)`` on it produces a matrix of
+    plausible-looking numbers that are not weights at all.
+
+    That failure is silent all the way through. The converter would balance a threshold on it,
+    quantise it, simulate it, and verify it against *itself* — every stage internally consistent —
+    and issue a fidelity certificate for a layer computing nothing. It is exactly the case this
+    module's docstring warns about, and the only defence is to never hand it raw bytes.
+    """
+    from gguf import quants  # local: the reader is optional and so is this
+
+    data = getattr(tensor, "data", None)
+    qtype = getattr(tensor, "tensor_type", None)
+    arr = quants.dequantize(data, qtype) if qtype is not None else _np.asarray(data)
+    arr = _np.asarray(arr, dtype=_np.float32)
+    if arr.dtype != _np.float32:                      # pragma: no cover — belt and braces
+        raise ValueError(f"{getattr(tensor, 'name', '?')} did not dequantise to float32")
+    return arr
 
 
 # --------------------------------------------------------------------------- #
