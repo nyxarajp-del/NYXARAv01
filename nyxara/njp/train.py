@@ -579,9 +579,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if stage.skipped:
             print(f"  {stage.priority:>2} {stage.key:<13} {stage.skipped}", flush=True)
             return
+        # `hit` is printed live as well as in the final table. With lookup questions in the exam
+        # the F1 column reads 0.000 for long stretches — a gold answer listing eight objects
+        # cannot be matched by a correct one-word reply — and a run that shows only that number
+        # looks like nothing is happening when something is.
         print(f"  {stage.priority:>2} {stage.key:<13} {stage.rows:>7} rows  "
               f"cover {stage.coverage:.3f} ({stage.d_coverage:+.3f})  "
               f"prec {stage.precision:.3f} ({stage.d_precision:+.3f})  "
+              f"hit {stage.on_topic:.3f}  "
               f"{stage.ms / 1000.0:.1f}s", flush=True)
 
     print(f"data directory: {args.data} — {len(files)} of {len(corpora.SOURCES)} corpora ready\n")
