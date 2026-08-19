@@ -2522,18 +2522,26 @@ class Grounder:
             "ingest_gaps": list(self.ingest_gaps),
         }
 
-    def note_ingest(self, *, source: str, path: str, digest: str, count: int) -> None:
+    def note_ingest(self, *, source: str, path: str, digest: str, count: int,
+                    form: str = "triples") -> None:
         """Record that a corpus was bulk-loaded, so its facts need not be written to the sidecar.
 
         Re-noting the same ``source`` replaces the earlier row rather than appending: loading a
         newer ConceptNet over an older one leaves one manifest entry, and the digest on it is the
         file that is actually on disk.
+
+        ``form`` names which loader can read the file back. It defaults to ``"triples"`` because
+        that is what every manifest written before prose corpora existed contains, and a row
+        without it must keep replaying exactly as it always did. A ``"text"`` corpus replayed with
+        the triple reader would restore **nothing** — the reader looks for a ``subject`` key that
+        a statement file does not have — and the loss would be silent, because a replay that
+        stores zero facts and a corpus that had zero to store report identically.
         """
         try:
             self.ingested = [row for row in self.ingested if row.get("source") != source]
             self.ingested.append({"source": str(source), "path": str(path),
                                   "digest": str(digest), "count": int(count),
-                                  "at": time.time()})
+                                  "form": str(form or "triples"), "at": time.time()})
         except Exception:  # noqa: BLE001
             pass
 
@@ -2590,9 +2598,18 @@ class Grounder:
                 # Facts only. The concept layer and the world model persist their own bounded
                 # state in their own sidecars, so fanning out again here would double-count what
                 # they already restored.
-                ingest_triples(SimpleNamespace(grounder=self), path, source=source,
-                               max_facts=int(row.get("count", 0)) or 250_000,
-                               to_world=False, record=False)
+                #
+                # The reader is chosen by the row's own `form`, not guessed from the filename. A
+                # manifest written before prose corpora existed has no `form` and must keep
+                # replaying as triples, which is what the default says.
+                if str(row.get("form") or "triples") == "text":
+                    from nyxara.njp.ingest import ingest_text
+                    ingest_text(SimpleNamespace(grounder=self), path, source=source,
+                                max_facts=int(row.get("count", 0)) or 250_000, record=False)
+                else:
+                    ingest_triples(SimpleNamespace(grounder=self), path, source=source,
+                                   max_facts=int(row.get("count", 0)) or 250_000,
+                                   to_world=False, record=False)
             except Exception as exc:  # noqa: BLE001
                 self.ingest_gaps.append(f"{source}: {exc}")
 
