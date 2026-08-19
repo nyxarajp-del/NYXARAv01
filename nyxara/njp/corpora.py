@@ -49,6 +49,7 @@ Pure standard library.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -57,6 +58,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequ
 __all__ = [
     "Source", "SOURCES", "FORMS", "by_key", "in_priority_order",
     "convert", "converter_for", "definitional_sentences", "sentences", "trim_clause",
+    "QUESTION_FORMS", "HOLDOUT_PERCENT", "held_out_subject", "question_for",
 ]
 
 #: The three ways into this brain. Anything else is a shape no loader reads.
@@ -668,3 +670,67 @@ def convert(key: str, rows: Iterable[Dict[str, Any]], *,
         emitted += 1
         if limit and emitted >= limit:
             return
+
+
+# --------------------------------------------------------------------------- #
+# Holding a corpus's own subjects back, so a fact load can be measured at all
+# --------------------------------------------------------------------------- #
+#: Share of *subjects* reserved from every fact corpus and never loaded.
+HOLDOUT_PERCENT = 10
+
+#: How to ask for each relation, in a form :meth:`Grounder._read_question` actually routes.
+#:
+#: Verified one at a time against that method rather than written from the pattern table: a
+#: template that parses to the wrong predicate produces an exam question the fact store cannot
+#: answer *by construction*, which would read as the corpus having taught nothing.
+#:
+#: Three relations this package stores have **no question form at all** and are therefore absent:
+#: ``part_of`` and ``known_for`` parse as ``is_a`` with the tail swallowed into the subject, and
+#: ``also_known_as`` does the same. That is the read/write asymmetry ``grounding._QUESTION_PATTERNS``
+#: documents twice in its own comments, met a third time. It is a real gap and it is left visible
+#: here rather than papered over: it means the **code** and **multilingual** corpora — whose whole
+#: output is ``part_of`` and ``also_known_as`` — cannot be examined by lookup at all, and their
+#: rows in the table have to be read as measuring something else.
+QUESTION_FORMS: Dict[str, str] = {
+    "is_a": "what is {subject}?",
+    "purpose": "what is {subject} used for?",
+    "capable_of": "what is {subject} capable of?",
+    "causes": "what does {subject} cause?",
+    "has_part": "what are the parts of {subject}?",
+    "consists_of": "what does {subject} consist of?",
+    "means": "what does {subject} mean?",
+    "occurs_when": "when does {subject} occur?",
+    "requires": "what does {subject} require?",
+    "has_property": "what are the properties of {subject}?",
+    "has_kind": "what are the types of {subject}?",
+    "owns": "what does {subject} own?",
+}
+
+
+def held_out_subject(subject: Any, *, percent: int = HOLDOUT_PERCENT) -> bool:
+    """Is this subject reserved for the exam, and therefore never to be loaded?
+
+    Hashed on the **subject**, not on the triple, and that is the whole design. Holding back one
+    object of ``dog is_a`` while loading the other fourteen is not a held-out question, it is a
+    question she has already been told the answer to in a slightly different spelling. Subject-
+    level means she has never heard the name at all, which is the only version of "she learned it"
+    that is worth measuring.
+
+    Deterministic, for the reason :meth:`nyxara.njp.study.Pair.held_out` gives: a split that
+    reshuffles between runs is a split that has already leaked. The same subject is held out on
+    every machine, across restarts, and across a corpus that grew.
+    """
+    name = " ".join(str(subject or "").strip().lower().split())
+    if not name:
+        return False
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=8).hexdigest()
+    return int(digest[:4], 16) % 100 < max(0, min(100, int(percent)))
+
+
+def question_for(subject: Any, predicate: Any) -> str:
+    """The way to ask for ``(subject, predicate)``, or ``""`` if it cannot be asked in English."""
+    template = QUESTION_FORMS.get(str(predicate or ""))
+    name = " ".join(str(subject or "").strip().split())
+    if not template or not name:
+        return ""
+    return template.format(subject=name)

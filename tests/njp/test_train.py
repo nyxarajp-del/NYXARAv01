@@ -222,3 +222,91 @@ def test_no_seed_leaves_the_kind_layer_out_entirely(prepared, bundled):
     train.train(brain, prepared, only=["gsm8k"], bundled=bundled, exam_limit=10, pool=200,
                 seed_kinds=False)
     assert not any(r["source"] == "seed" for r in brain.grounder.ingested)
+
+
+# --------------------------------------------------------------------------- #
+# The lookup holdout
+# --------------------------------------------------------------------------- #
+
+def _held_out_name(prefix: str) -> str:
+    """A subject the holdout actually reserves, so a fixture cannot silently test nothing."""
+    for i in range(10_000):
+        name = f"{prefix}{i}"
+        if corpora.held_out_subject(name):
+            return name
+    raise AssertionError("no held-out name found")
+
+
+def _kept_name(prefix: str) -> str:
+    for i in range(10_000):
+        name = f"{prefix}{i}"
+        if not corpora.held_out_subject(name):
+            return name
+    raise AssertionError("no kept name found")
+
+
+def test_a_held_out_subject_never_reaches_the_brain(tmp_path, bundled):
+    """The whole point. If it leaks, the fact stage is measuring memorisation."""
+    held, kept = _held_out_name("beast"), _kept_name("beast")
+    _write(tmp_path / "conceptnet.triples.jsonl.gz",
+           [{"subject": held, "predicate": "is_a", "object": "animal"},
+            {"subject": kept, "predicate": "is_a", "object": "animal"}])
+    brain = NJPBrain()
+    train.train(brain, tmp_path, only=["conceptnet"], bundled=bundled,
+                exam_limit=10, pool=200, fact_pool=50)
+    subjects = {s for (s, _p) in brain.grounder.facts}
+    assert kept in subjects
+    assert held not in subjects
+
+
+def test_the_exam_carries_lookup_questions_from_the_fact_corpora(tmp_path, bundled):
+    """Without these the fact stages have no instrument: every other question in the exam comes
+    from a conversational corpus and essentially none of them is a lookup."""
+    held = _held_out_name("beast")
+    _write(tmp_path / "conceptnet.triples.jsonl.gz",
+           [{"subject": held, "predicate": "is_a", "object": "animal"}])
+    report = train.train(NJPBrain(), tmp_path, only=["conceptnet"], bundled=bundled,
+                         exam_limit=50, pool=200, fact_pool=50)
+    assert report.fact_questions >= 1
+
+
+def test_the_load_reports_what_it_withheld(tmp_path):
+    """A holdout that stops working must show as a number going to zero, not as a silent leak."""
+    import json
+
+    from nyxara.njp.ingest import ingest_triples
+
+    held, kept = _held_out_name("beast"), _kept_name("beast")
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in [
+        {"subject": held, "predicate": "is_a", "object": "animal"},
+        {"subject": kept, "predicate": "is_a", "object": "animal"}]) + "\n", encoding="utf-8")
+    got = ingest_triples(NJPBrain(), path, exclude=corpora.held_out_subject)
+    assert got.held_out == 1 and got.asserted == 1
+    assert got.to_dict()["held_out"] == 1
+
+
+def test_fact_pool_zero_disables_the_holdout_and_loads_everything(tmp_path, bundled):
+    held = _held_out_name("beast")
+    _write(tmp_path / "conceptnet.triples.jsonl.gz",
+           [{"subject": held, "predicate": "is_a", "object": "animal"}])
+    brain = NJPBrain()
+    report = train.train(brain, tmp_path, only=["conceptnet"], bundled=bundled,
+                         exam_limit=10, pool=200, fact_pool=0)
+    assert held in {s for (s, _p) in brain.grounder.facts}
+    assert report.fact_questions == 0
+
+
+def test_a_prose_corpus_is_held_out_through_the_extractor_not_a_second_parser(tmp_path):
+    """A sentence's subject is not known until the extractor has read it. Guessing at it with a
+    regex would guess differently from the loader, and the exam would quietly start asking about
+    facts that were never withheld."""
+    source = corpora.by_key("wikipedia")
+    held = _held_out_name("widget")
+    path = _write(tmp_path / "wikipedia.text.jsonl.gz",
+                  [{"text": f"{held} is a mechanical device."},
+                   {"text": f"{_kept_name('widget')} is a mechanical device."}])
+    got = list(train._held_out_triples(source, path))
+    # More than one row per sentence is right: the extractor's head-noun backoff yields both
+    # "mechanical device" and "device". What matters is that only the withheld subject appears.
+    assert {t[0] for t in got} == {held.lower()}

@@ -42,8 +42,10 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import (Any, Dict, Iterator, List, Optional, Sequence,
+                    Tuple)
 
 from nyxara.njp import corpora
 
@@ -85,6 +87,9 @@ class TrainReport:
     """The whole ladder: the control, every stage, and what the curriculum says at the end."""
 
     exam_size: int = 0
+    #: How many of the held-out questions are lookups drawn from the fact corpora themselves.
+    #: Zero means the fact stages have no instrument and their rows measure nothing.
+    fact_questions: int = 0
     stages: List[StageResult] = field(default_factory=list)
     control: Dict[str, Any] = field(default_factory=dict)
     final: Dict[str, Any] = field(default_factory=dict)
@@ -93,6 +98,7 @@ class TrainReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"exam_size": self.exam_size,
+                "fact_questions": self.fact_questions,
                 "stages": [s.to_dict() for s in self.stages],
                 "control": self.control, "final": self.final,
                 "curriculum": self.curriculum, "ms": round(self.ms, 1)}
@@ -145,8 +151,9 @@ def _count_rows(path: Path) -> int:
         return 0
 
 
-def _exam_corpus(files: Dict[str, Path], *, bundled: Any, pool: int,
-                 seed: int) -> Tuple[List[Any], Dict[str, List[Any]]]:
+def _exam_corpus(files: Dict[str, Path], *, bundled: Any, pool: int, seed: int,
+                 extra: Optional[Sequence[List[Any]]] = None
+                 ) -> Tuple[List[Any], Dict[str, List[Any]]]:
     """The exam set, and the study half of every pair corpus, split before anything is taught.
 
     One exam set for the whole run, drawn from **every** conversational source plus the bundled
@@ -179,6 +186,9 @@ def _exam_corpus(files: Dict[str, Path], *, bundled: Any, pool: int,
             study[key] = kept
         if held:
             per_source.append(held)
+    # The lookup questions from `_fact_exam` are already held out — their subjects are refused by
+    # the loaders — so they are not split again here, only interleaved with everything else.
+    per_source.extend([block for block in (extra or ()) if block])
 
     # Round-robin, not concatenated, and this is the difference between a real measurement and a
     # flattering one. `Tutor.exam` applies its limit by taking the **head** of what it is given,
@@ -196,11 +206,94 @@ def _exam_corpus(files: Dict[str, Path], *, bundled: Any, pool: int,
     return exam, study
 
 
+def _fact_exam(files: Dict[str, Path], *, per_source: int = 400,
+               seed: int = 0) -> Dict[str, List[Any]]:
+    """Lookup questions built from the subjects each fact corpus will never be shown.
+
+    **Why this exists at all.** The first full run measured ConceptNet's 195,897 facts at
+    ``coverage +0.008`` and Wikipedia's 94,461 at ``+0.004``, and the natural reading was that
+    they had taught her almost nothing. Asking her directly said otherwise: four of ten spot-check
+    questions she had abstained on before were answered correctly afterwards, and the store held
+    ``dog is_a canine``, ``photon is_a elementary particle``, ``hammer purpose drive nail``.
+
+    The exam had not measured a small effect. It had been unable to see the effect at all — every
+    question in it came from the bundled instruction corpus, GSM8K, MATH, OASST1 or ProofNet, and
+    essentially none of those is a lookup. That is the same denominator failure
+    :mod:`nyxara.njp.study` documents about the bundled corpus, reached from a different side, and
+    a table whose fact rows cannot move is worse than no table: it reports "no effect" for
+    "no instrument".
+
+    So each fact corpus supplies its own held-out questions. A tenth of its **subjects** are
+    reserved by :func:`~nyxara.njp.corpora.held_out_subject`, the loaders are told to refuse them,
+    and what she is asked about is a name she has provably never been given.
+
+    The gold answer is every object the corpus states for that (subject, predicate) — she is right
+    if she says any of them, which is the honest bar: ConceptNet lists fifteen things a dog is, and
+    demanding a particular one would be scoring her against an arbitrary row.
+    """
+    from nyxara.njp.study import Pair
+
+    out: Dict[str, List[Any]] = {}
+    for source in corpora.in_priority_order():
+        if source.form not in ("triples", "text") or source.key not in files:
+            continue
+        gold: Dict[Tuple[str, str], List[str]] = {}
+        for subject, predicate, obj in _held_out_triples(source, files[source.key]):
+            if not corpora.question_for(subject, predicate):
+                continue
+            bucket = gold.setdefault((subject, predicate), [])
+            if len(bucket) < 8:
+                bucket.append(obj)
+            if len(gold) >= per_source * 4:
+                break
+        pairs = [Pair(question=corpora.question_for(subject, predicate),
+                      answer=", ".join(objects))
+                 for (subject, predicate), objects in gold.items()]
+        # Sampled rather than truncated, for the reason `Corpus.load` gives: a prepared corpus is
+        # written in whatever order its source had, so the first N subjects are one corner of it.
+        rng = random.Random(seed)
+        rng.shuffle(pairs)
+        if pairs:
+            out[source.key] = pairs[:per_source]
+    return out
+
+
+def _held_out_triples(source: Any, path: Any) -> Iterator[Tuple[str, str, str]]:
+    """The (subject, predicate, object) rows of a fact corpus that its load will refuse.
+
+    A triples corpus states them directly. A prose corpus does not — its rows are sentences, and
+    what a sentence yields is whatever the extractor makes of it — so the extractor is run here,
+    on a throwaway grounder that asserts nothing. Guessing at the subject with a regex instead
+    would be the second parser :mod:`nyxara.njp.corpora` exists to refuse, and it would guess
+    differently from the loader, which is how an exam quietly starts asking about facts that were
+    never held out in the first place.
+    """
+    from nyxara.njp.grounding import Grounder
+    from nyxara.njp.ingest import stream_statements, stream_triples
+
+    if source.form == "triples":
+        for subject, predicate, obj, _conf in stream_triples(path):
+            if corpora.held_out_subject(subject):
+                yield subject.strip().lower(), predicate, obj
+        return
+
+    reader = Grounder()
+    for statement, _provenance in stream_statements(path):
+        try:
+            extracted = reader._extract(statement)
+        except Exception:  # noqa: BLE001
+            continue
+        for triple in extracted:
+            if corpora.held_out_subject(triple.subject):
+                yield triple.subject.strip().lower(), triple.predicate, triple.object
+
+
 def train(brain: Any, directory: Any, *,
           only: Optional[Sequence[str]] = None,
           skip: Optional[Sequence[str]] = None,
           exam_limit: int = 300,
           pool: int = 4000,
+          fact_pool: int = 400,
           seed: int = 0,
           bundled: Any = None,
           max_facts: int = 250_000,
@@ -225,10 +318,15 @@ def train(brain: Any, directory: Any, *,
     chosen = corpora.in_priority_order(only)
     denied = {str(k).strip().lower() for k in (skip or ())}
 
+    # The conversational half and the lookup half are built separately and interleaved together,
+    # so a shortened exam stays balanced across both — see `_exam_corpus` on why the limit takes
+    # the head of the list.
+    fact_sets = _fact_exam(files, per_source=fact_pool, seed=seed) if fact_pool else {}
     exam, study_sets = _exam_corpus(
         files, bundled=(bundled if bundled is not None else DEFAULT_CORPUS),
-        pool=pool, seed=seed)
+        pool=pool, seed=seed, extra=list(fact_sets.values()))
     report.exam_size = min(len(exam), exam_limit) if exam_limit else len(exam)
+    report.fact_questions = sum(len(v) for v in fact_sets.values())
 
     tutor = Tutor(brain, seed=seed_kinds, f1_threshold=f1_threshold)
 
@@ -263,6 +361,7 @@ def train(brain: Any, directory: Any, *,
                        study_sets.get(source.key, []),
                        max_facts=max_facts, max_statements=max_statements,
                        study_limit=study_limit,
+                       exclude=(corpora.held_out_subject if fact_pool else None),
                        checkpoint=checkpoint, checkpoint_every=checkpoint_every)
             got = tutor.exam(exam, limit=exam_limit)
             stage.coverage, stage.precision = got.coverage, got.precision
@@ -288,7 +387,8 @@ def train(brain: Any, directory: Any, *,
 
 def _run_stage(brain: Any, tutor: Any, source: Any, path: Any, stage: StageResult,
                study_pairs: Sequence[Any], *, max_facts: int, max_statements: int,
-               study_limit: int, checkpoint: Any, checkpoint_every: int) -> None:
+               study_limit: int, exclude: Any, checkpoint: Any,
+               checkpoint_every: int) -> None:
     """Load one corpus by whichever of the three doors its form names.
 
     ``source=source.key`` on every loader, and that is not cosmetic. ``Grounder._regenerable``
@@ -300,12 +400,13 @@ def _run_stage(brain: Any, tutor: Any, source: Any, path: Any, stage: StageResul
     if source.form == "triples":
         from nyxara.njp.ingest import ingest_triples
         got = ingest_triples(brain, path, source=source.key, max_facts=max_facts,
+                             exclude=exclude,
                              checkpoint=checkpoint, checkpoint_every=checkpoint_every)
         stage.report = got.to_dict()
     elif source.form == "text":
         from nyxara.njp.ingest import ingest_text
         got = ingest_text(brain, path, source=source.key, max_facts=max_facts,
-                          max_statements=max_statements,
+                          max_statements=max_statements, exclude=exclude,
                           checkpoint=checkpoint, checkpoint_every=checkpoint_every)
         stage.report = got.to_dict()
     elif source.form == "pairs":
@@ -351,6 +452,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--exam", type=int, default=300, help="held-out questions per exam")
     parser.add_argument("--pool", type=int, default=4000,
                         help="pairs sampled from each conversational corpus (study + exam)")
+    parser.add_argument("--fact-pool", type=int, default=400,
+                        help="lookup questions held out of each fact corpus; 0 disables the "
+                             "holdout entirely and leaves the fact stages unmeasured")
     parser.add_argument("--sample-seed", type=int, default=0)
     parser.add_argument("--max-facts", type=int, default=250_000,
                         help="hard cap on facts taken from any one corpus")
@@ -434,14 +538,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"data directory: {args.data} — {len(files)} of {len(corpora.SOURCES)} corpora ready\n")
     report = train(brain, args.data, only=only, skip=skip,
-                   exam_limit=args.exam, pool=args.pool, seed=args.sample_seed,
+                   exam_limit=args.exam, pool=args.pool, fact_pool=args.fact_pool,
+                   seed=args.sample_seed,
                    max_facts=args.max_facts, max_statements=args.max_statements,
                    study_limit=args.study_limit, seed_kinds=not args.no_seed,
                    f1_threshold=args.f1_threshold,
                    checkpoint=_checkpoint, checkpoint_every=args.checkpoint_every,
                    on_stage=_announce)
 
-    print(f"\n— attribution, on {report.exam_size} held-out questions asked after every stage —")
+    print(f"\n— attribution, on {report.exam_size} held-out questions asked after every stage "
+          f"({report.fact_questions} of them lookups from the fact corpora's own withheld "
+          f"subjects) —")
     print(report.table())
     print("\nRead precision down the column, not coverage: every load raises coverage by turning "
           "abstentions\ninto answers, and only a load that held precision up while doing it "

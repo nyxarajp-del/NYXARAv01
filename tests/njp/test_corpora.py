@@ -224,3 +224,50 @@ def test_convert_respects_a_limit():
     rows = [{"question": f"Question number {i} about arithmetic?", "answer": f"#### {i}"}
             for i in range(50)]
     assert len(list(corpora.convert("gsm8k", rows, limit=7))) == 7
+
+
+# --------------------------------------------------------------------------- #
+# The holdout that makes a fact corpus measurable
+# --------------------------------------------------------------------------- #
+
+def test_the_holdout_is_by_subject_not_by_triple():
+    """Withholding one object of `dog is_a` while loading the other fourteen is not a held-out
+    question, it is one she has already been told the answer to in another spelling."""
+    for subject in ("dog", "photon", "gravity", "aardvark", "violin"):
+        assert corpora.held_out_subject(subject) == corpora.held_out_subject(subject.upper())
+        assert corpora.held_out_subject(subject) == corpora.held_out_subject(f"  {subject} ")
+
+
+def test_the_holdout_is_stable_across_runs():
+    """A split that reshuffles between runs is a split that has already leaked."""
+    sample = [f"entity{i}" for i in range(500)]
+    first = {s for s in sample if corpora.held_out_subject(s)}
+    second = {s for s in sample if corpora.held_out_subject(s)}
+    assert first == second
+    assert 0.02 < len(first) / len(sample) < 0.20      # ~10%, allowing for a small sample
+
+
+def test_an_empty_subject_is_never_held_out():
+    assert corpora.held_out_subject("") is False
+    assert corpora.held_out_subject(None) is False
+
+
+def test_every_question_form_routes_to_the_predicate_it_names():
+    """A template that parses to the wrong predicate produces an exam question the fact store
+    cannot answer by construction, which reads as the corpus having taught nothing."""
+    from nyxara.njp.grounding import Grounder
+
+    reader = Grounder()
+    for predicate in corpora.QUESTION_FORMS:
+        question = corpora.question_for("widget", predicate)
+        subject, got = reader._read_question(question.lower())
+        assert got == predicate, f"{question!r} parsed as {got!r}"
+        assert subject.strip() == "widget", f"{question!r} read the subject as {subject!r}"
+
+
+def test_a_relation_with_no_question_form_is_left_out_rather_than_guessed():
+    """`part_of`, `known_for` and `also_known_as` parse as `is_a` with the tail swallowed into
+    the subject. Emitting them anyway would put unanswerable questions in the exam and read as
+    the corpus having failed."""
+    for predicate in ("part_of", "known_for", "also_known_as"):
+        assert corpora.question_for("widget", predicate) == ""

@@ -69,6 +69,10 @@ class IngestReport:
     asserted: int = 0
     skipped: int = 0
     duplicate: int = 0
+    # Rows refused because their subject belongs to the exam. Counted separately from `skipped`
+    # on purpose: a skip is a row that failed a filter, and this is a row deliberately withheld.
+    # Reading them as one number would hide a holdout that had silently stopped working.
+    held_out: int = 0
     capped: bool = False
     subjects: int = 0
     predicates: Dict[str, int] = field(default_factory=dict)
@@ -80,7 +84,7 @@ class IngestReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"read": self.read, "asserted": self.asserted, "skipped": self.skipped,
-                "duplicate": self.duplicate, "capped": self.capped,
+                "duplicate": self.duplicate, "held_out": self.held_out, "capped": self.capped,
                 "subjects": self.subjects,
                 "predicates": dict(sorted(self.predicates.items(),
                                           key=lambda kv: (-kv[1], kv[0]))[:16]),
@@ -205,6 +209,7 @@ def ingest_triples(brain: Any, path: Any, *,
                    min_confidence: float = 0.0,
                    default_confidence: float = _DEFAULT_CONFIDENCE,
                    allow: Optional[Collection[str]] = None,
+                   exclude: Optional[Callable[[str], bool]] = None,
                    batch: int = 5_000,
                    to_world: bool = False,
                    record: bool = True,
@@ -215,6 +220,13 @@ def ingest_triples(brain: Any, path: Any, *,
 
     ``allow`` is checked **after** folding, because the caller names relations the way this
     package names them and the file names them the way its source did.
+
+    ``exclude`` is asked about each **subject** and refuses the whole row when it says yes. It is
+    how :mod:`nyxara.njp.train` keeps a tenth of every fact corpus out of the brain so it has
+    something to examine her on: a corpus she has entirely memorised cannot be measured, and
+    before this existed the only questions available were from conversational corpora that ask
+    nothing a fact store can look up. Refusals are counted as :attr:`IngestReport.held_out` rather
+    than as skips, so a holdout that stops working shows up as a number going to zero.
 
     ``max_facts`` is a hard stop that sets :attr:`IngestReport.capped` — a load that silently
     dropped its tail would report the same numbers as one that finished, and the difference
@@ -297,6 +309,9 @@ def ingest_triples(brain: Any, path: Any, *,
         for subject, predicate, obj, confidence in stream_triples(
                 path, default_confidence=default_confidence):
             report.read += 1
+            if exclude is not None and exclude(subject):
+                report.held_out += 1
+                continue
             if confidence < min_confidence:
                 report.skipped += 1
                 continue
@@ -376,6 +391,7 @@ class TextReport:
     asserted: int = 0
     duplicate: int = 0
     skipped: int = 0
+    held_out: int = 0
     capped: bool = False
     subjects: int = 0
     predicates: Dict[str, int] = field(default_factory=dict)
@@ -398,7 +414,8 @@ class TextReport:
         return {"read": self.read, "parsed": self.parsed, "unparsed": self.unparsed,
                 "extraction_rate": self.extraction_rate,
                 "asserted": self.asserted, "duplicate": self.duplicate,
-                "skipped": self.skipped, "capped": self.capped, "subjects": self.subjects,
+                "skipped": self.skipped, "held_out": self.held_out,
+                "capped": self.capped, "subjects": self.subjects,
                 "predicates": dict(sorted(self.predicates.items(),
                                           key=lambda kv: (-kv[1], kv[0]))[:16]),
                 "concepts": self.concepts, "source": self.source, "digest": self.digest,
@@ -428,6 +445,7 @@ def ingest_text(brain: Any, path: Any, *,
                 max_statements: int = 0,
                 min_confidence: float = 0.0,
                 allow: Optional[Collection[str]] = None,
+                exclude: Optional[Callable[[str], bool]] = None,
                 batch: int = 5_000,
                 record: bool = True,
                 progress: Optional[Callable[[int], None]] = None,
@@ -454,6 +472,12 @@ def ingest_text(brain: Any, path: Any, *,
     retracting facts against each other in file order and finish holding whichever one happened to
     be last. Bulk facts are *testimony*, entered side by side, and the first conversational turn
     about one of them is where the revision belongs.
+
+    ``exclude`` is asked about the **subject of each extracted triple**, not about the sentence.
+    It has to be: a statement's subject is not known until the extractor has read it, and a
+    sentence-level filter would need this module to guess at the subject with a second, worse
+    parser — the thing :mod:`nyxara.njp.corpora` refuses to write. So the sentence is extracted
+    and then its triples are individually withheld.
 
     ``max_statements`` bounds the read where ``max_facts`` bounds the write. Both exist because
     they answer different questions: a corpus can be too large to *read* in the time available
@@ -513,6 +537,9 @@ def ingest_text(brain: Any, path: Any, *,
             report.parsed += 1
 
             for triple in extracted:
+                if exclude is not None and exclude(triple.subject):
+                    report.held_out += 1
+                    continue
                 if triple.confidence < min_confidence:
                     report.skipped += 1
                     continue
