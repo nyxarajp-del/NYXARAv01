@@ -231,6 +231,19 @@ def train(brain: Any, directory: Any, *,
     report.exam_size = min(len(exam), exam_limit) if exam_limit else len(exam)
 
     tutor = Tutor(brain, seed=seed_kinds, f1_threshold=f1_threshold)
+
+    # Seeded here, before the control, rather than left to `Tutor.study`.
+    #
+    # `Tutor` seeds the kind layer lazily, on its first `study` call. In a one-corpus run that is
+    # the same thing as seeding at the start. In this ladder it is not: the first `study` call is
+    # stage 4, so 137 kind-level facts — the ones `core._inherit` needs before it can inherit
+    # anything — would land inside ProofNet's row and be measured as ProofNet's contribution.
+    # `Tutor.study`'s own comment gives the reason to move it: the kind layer should be part of
+    # what she starts from, not growth a corpus produced.
+    if seed_kinds:
+        from nyxara.njp.study import seed_kinds as _seed_kinds
+        tutor.seeded = _seed_kinds(brain)
+
     control = tutor.exam(exam, limit=exam_limit)
     report.control = control.to_dict()
     last_coverage, last_precision = control.coverage, control.precision

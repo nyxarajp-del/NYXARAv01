@@ -130,7 +130,10 @@ def test_each_corpus_is_tagged_with_its_own_source(prepared, bundled):
     brain = NJPBrain()
     train.train(brain, prepared, only=["conceptnet", "wikipedia"], bundled=bundled,
                 exam_limit=10, pool=200)
-    assert {r["source"] for r in brain.grounder.ingested} == {"conceptnet", "wikipedia"}
+    # "seed" is the kind-level file, which the trainer loads before the control exam; the point
+    # here is that the two corpora did not share one row between them.
+    assert {"conceptnet", "wikipedia"} <= {r["source"] for r in brain.grounder.ingested}
+    assert len(brain.grounder.ingested) == len({r["source"] for r in brain.grounder.ingested})
 
 
 def test_the_held_out_tenth_of_a_pair_corpus_is_never_studied(prepared, bundled):
@@ -205,3 +208,19 @@ def test_plan_prints_the_ladder_and_loads_nothing(prepared, capsys):
 def test_an_empty_data_directory_fails_loudly(tmp_path, capsys):
     assert train.main(["--data", str(tmp_path)]) == 1
     assert "no prepared corpora" in capsys.readouterr().out
+
+
+def test_the_kind_seed_lands_before_the_control_not_inside_a_stage(prepared, bundled):
+    """`Tutor` seeds kinds lazily on its first `study` call, which in this ladder is stage 4 —
+    so 137 kind-level facts would be measured as ProofNet's contribution. They belong to the
+    brain she starts from."""
+    brain = NJPBrain()
+    train.train(brain, prepared, only=["gsm8k"], bundled=bundled, exam_limit=10, pool=200)
+    assert any(r["source"] == "seed" for r in brain.grounder.ingested)
+
+
+def test_no_seed_leaves_the_kind_layer_out_entirely(prepared, bundled):
+    brain = NJPBrain()
+    train.train(brain, prepared, only=["gsm8k"], bundled=bundled, exam_limit=10, pool=200,
+                seed_kinds=False)
+    assert not any(r["source"] == "seed" for r in brain.grounder.ingested)
