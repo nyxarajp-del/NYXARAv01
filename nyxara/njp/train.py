@@ -44,7 +44,7 @@ import time
 from dataclasses import dataclass, field
 import random
 from pathlib import Path
-from typing import (Any, Dict, Iterator, List, Optional, Sequence,
+from typing import (Any, Dict, Iterator, List, Optional, Sequence, Set,
                     Tuple)
 
 from nyxara.njp import corpora
@@ -90,6 +90,10 @@ class TrainReport:
     #: How many of the held-out questions are lookups drawn from the fact corpora themselves.
     #: Zero means the fact stages have no instrument and their rows measure nothing.
     fact_questions: int = 0
+    #: The control: the same lookups, on pairs that *were* loaded. Never a generalisation score.
+    #: If this is near zero the corpus is stored and unreachable, and every delta above it is
+    #: noise about a store nothing can read.
+    recall: Dict[str, Any] = field(default_factory=dict)
     stages: List[StageResult] = field(default_factory=list)
     control: Dict[str, Any] = field(default_factory=dict)
     final: Dict[str, Any] = field(default_factory=dict)
@@ -101,16 +105,22 @@ class TrainReport:
                 "fact_questions": self.fact_questions,
                 "stages": [s.to_dict() for s in self.stages],
                 "control": self.control, "final": self.final,
+                "recall": self.recall,
                 "curriculum": self.curriculum, "ms": round(self.ms, 1)}
 
     def table(self) -> str:
         """The attribution table. The point of the whole module, in one block of text."""
+        # `prec` and `hit` are both printed, for the reason `study._hit` gives: F1 asks whether
+        # the reply was right *and* complete, and a lookup gold answer here lists up to eight
+        # objects, so a correct one-word answer scores about 0.22 and reads as wrong. Neither is
+        # the score alone and the gap between them is itself the reading.
         head = (f"{'#':>2}  {'source':<13} {'form':<8} {'rows':>8}  "
-                f"{'cover':>6} {'Δ':>7}  {'prec':>6} {'Δ':>7}")
+                f"{'cover':>6} {'Δ':>7}  {'prec':>6} {'Δ':>7}  {'hit':>6}")
         lines = [head, "-" * len(head)]
         lines.append(f"{'':>2}  {'(control)':<13} {'':<8} {'':>8}  "
                      f"{self.control.get('coverage', 0.0):>6.3f} {'':>7}  "
-                     f"{self.control.get('precision_when_answered', 0.0):>6.3f} {'':>7}")
+                     f"{self.control.get('precision_when_answered', 0.0):>6.3f} {'':>7}  "
+                     f"{self.control.get('on_topic_when_answered', 0.0):>6.3f}")
         for stage in self.stages:
             if stage.skipped:
                 lines.append(f"{stage.priority:>2}  {stage.key:<13} {stage.form:<8} "
@@ -119,7 +129,8 @@ class TrainReport:
             lines.append(
                 f"{stage.priority:>2}  {stage.key:<13} {stage.form:<8} {stage.rows:>8}  "
                 f"{stage.coverage:>6.3f} {stage.d_coverage:>+7.3f}  "
-                f"{stage.precision:>6.3f} {stage.d_precision:>+7.3f}")
+                f"{stage.precision:>6.3f} {stage.d_precision:>+7.3f}  "
+                f"{stage.on_topic:>6.3f}")
         return "\n".join(lines)
 
 
@@ -206,86 +217,110 @@ def _exam_corpus(files: Dict[str, Path], *, bundled: Any, pool: int, seed: int,
     return exam, study
 
 
-def _fact_exam(files: Dict[str, Path], *, per_source: int = 400,
-               seed: int = 0) -> Dict[str, List[Any]]:
-    """Lookup questions built from the subjects each fact corpus will never be shown.
+def _fact_exam(files: Dict[str, Path], *, per_source: int = 400, recall: int = 200,
+               seed: int = 0) -> Tuple[Dict[str, List[Any]], Dict[str, List[Any]]]:
+    """``(withheld, recall)`` lookup questions, built from each fact corpus's own rows.
 
-    **Why this exists at all.** The first full run measured ConceptNet's 195,897 facts at
-    ``coverage +0.008`` and Wikipedia's 94,461 at ``+0.004``, and the natural reading was that
-    they had taught her almost nothing. Asking her directly said otherwise: four of ten spot-check
-    questions she had abstained on before were answered correctly afterwards, and the store held
-    ``dog is_a canine``, ``photon is_a elementary particle``, ``hammer purpose drive nail``.
+    **Why this exists, and why it is the third version of it.** The first full run measured
+    ConceptNet's 195,897 facts at ``coverage +0.008``, and the natural reading was that two
+    hundred thousand facts had taught her nothing. Asking her directly said otherwise — four of
+    ten spot-check questions she had abstained on before came back correct. The exam had no
+    instrument: every question in it came from the bundled instruction corpus, GSM8K, MATH, OASST1
+    or ProofNet, and essentially none of those is a lookup.
 
-    The exam had not measured a small effect. It had been unable to see the effect at all — every
-    question in it came from the bundled instruction corpus, GSM8K, MATH, OASST1 or ProofNet, and
-    essentially none of those is a lookup. That is the same denominator failure
-    :mod:`nyxara.njp.study` documents about the bundled corpus, reached from a different side, and
-    a table whose fact rows cannot move is worse than no table: it reports "no effect" for
-    "no instrument".
+    The second version held out whole **subjects** and measured **0 of 60** — correctly, and
+    uselessly. A fact store asked about an entity it has never been given a single fact about has
+    nothing to answer from, so that number was a restatement of the holdout rather than a
+    measurement of anything. It is the more dangerous of the two failures, because it looks like a
+    result.
 
-    So each fact corpus supplies its own held-out questions. A tenth of its **subjects** are
-    reserved by :func:`~nyxara.njp.corpora.held_out_subject`, the loaders are told to refuse them,
-    and what she is asked about is a name she has provably never been given.
+    So two sets, and the pair of them is the reading:
 
-    The gold answer is every object the corpus states for that (subject, predicate) — she is right
-    if she says any of them, which is the honest bar: ConceptNet lists fifteen things a dog is, and
-    demanding a particular one would be scoring her against an arbitrary row.
+    * **withheld** — questions about a ``(subject, predicate)`` this load will refuse, where the
+      subject is otherwise present. She has ``dog``; ``dog capable_of`` is gone entirely. Only
+      inheritance or composition can answer it, which is what :mod:`nyxara.njp.core` claims.
+    * **recall** — questions about pairs that *were* loaded. Not a generalisation score and never
+      to be read as one; it is the control, in the sense ``nyxara.eval.intelligence`` uses the
+      word. If recall is near zero the corpus is stored and unreachable and every other number in
+      the table is noise; if it is high, the withheld number means what it says.
+
+    The gold answer is every object the corpus states for that pair — she is right if she says any
+    of them. ConceptNet lists fifteen things a dog is, and demanding a particular one would score
+    her against an arbitrary row.
     """
     from nyxara.njp.study import Pair
 
-    out: Dict[str, List[Any]] = {}
+    withheld: Dict[str, List[Any]] = {}
+    kept: Dict[str, List[Any]] = {}
     for source in corpora.in_priority_order():
         if source.form not in ("triples", "text") or source.key not in files:
             continue
-        gold: Dict[Tuple[str, str], List[str]] = {}
-        for subject, predicate, obj in _held_out_triples(source, files[source.key]):
+        out_gold: Dict[Tuple[str, str], List[str]] = {}
+        in_gold: Dict[Tuple[str, str], List[str]] = {}
+        subjects_seen: Set[str] = set()
+        cap = max(per_source, recall) * 8
+        for subject, predicate, obj in _corpus_triples(source, files[source.key]):
             if not corpora.question_for(subject, predicate):
                 continue
-            bucket = gold.setdefault((subject, predicate), [])
-            if len(bucket) < 8:
-                bucket.append(obj)
-            if len(gold) >= per_source * 4:
+            subjects_seen.add(subject)
+            bucket = (out_gold if corpora.held_out_relation(subject, predicate) else in_gold)
+            values = bucket.setdefault((subject, predicate), [])
+            if len(values) < 8:
+                values.append(obj)
+            if len(out_gold) >= cap and len(in_gold) >= cap:
                 break
-        pairs = [Pair(question=corpora.question_for(subject, predicate),
-                      answer=", ".join(objects))
-                 for (subject, predicate), objects in gold.items()]
-        # Sampled rather than truncated, for the reason `Corpus.load` gives: a prepared corpus is
-        # written in whatever order its source had, so the first N subjects are one corner of it.
-        rng = random.Random(seed)
-        rng.shuffle(pairs)
-        if pairs:
-            out[source.key] = pairs[:per_source]
-    return out
+
+        # A withheld pair is only a fair question if the subject survives the load with something
+        # else attached. Where it does not, the question is the subject-level holdout again under
+        # another name, and it would read as a failure to generalise rather than as an absence.
+        with_other = {s for (s, _p) in in_gold}
+        out_gold = {(s, p): v for (s, p), v in out_gold.items() if s in with_other}
+
+        withheld[source.key] = _sample_questions(Pair, out_gold, per_source, seed)
+        kept[source.key] = _sample_questions(Pair, in_gold, recall, seed)
+    return ({k: v for k, v in withheld.items() if v},
+            {k: v for k, v in kept.items() if v})
 
 
-def _held_out_triples(source: Any, path: Any) -> Iterator[Tuple[str, str, str]]:
-    """The (subject, predicate, object) rows of a fact corpus that its load will refuse.
+def _sample_questions(Pair: Any, gold: Dict[Tuple[str, str], List[str]],
+                      limit: int, seed: int) -> List[Any]:
+    """Sampled rather than truncated, for the reason :meth:`Corpus.load` gives: a prepared corpus
+    is written in whatever order its source had, so the first N are one corner of it."""
+    pairs = [Pair(question=corpora.question_for(subject, predicate),
+                  answer=", ".join(objects))
+             for (subject, predicate), objects in gold.items()]
+    random.Random(seed).shuffle(pairs)
+    return pairs[:limit] if limit else pairs
 
-    A triples corpus states them directly. A prose corpus does not — its rows are sentences, and
-    what a sentence yields is whatever the extractor makes of it — so the extractor is run here,
-    on a throwaway grounder that asserts nothing. Guessing at the subject with a regex instead
-    would be the second parser :mod:`nyxara.njp.corpora` exists to refuse, and it would guess
-    differently from the loader, which is how an exam quietly starts asking about facts that were
-    never held out in the first place.
+
+def _corpus_triples(source: Any, path: Any) -> Iterator[Tuple[str, str, str]]:
+    """Every ``(subject, predicate, object)`` a fact corpus states, held out or not.
+
+    A triples corpus states them directly, and the predicate is folded here because the loader
+    folds it — an unfolded name would put the exam's holdout on a different key from the load's,
+    which is a leak that reports as a generalisation.
+
+    A prose corpus states sentences, and what a sentence yields is whatever the extractor makes of
+    it, so the extractor is run here on a throwaway grounder that asserts nothing. Guessing with a
+    regex instead would be the second parser :mod:`nyxara.njp.corpora` exists to refuse, and it
+    would guess differently from the loader.
     """
     from nyxara.njp.grounding import Grounder
     from nyxara.njp.ingest import stream_statements, stream_triples
 
+    reader = Grounder()
     if source.form == "triples":
         for subject, predicate, obj, _conf in stream_triples(path):
-            if corpora.held_out_subject(subject):
-                yield subject.strip().lower(), predicate, obj
+            yield subject.strip().lower(), reader._predicate(predicate), obj
         return
 
-    reader = Grounder()
     for statement, _provenance in stream_statements(path):
         try:
             extracted = reader._extract(statement)
         except Exception:  # noqa: BLE001
             continue
         for triple in extracted:
-            if corpora.held_out_subject(triple.subject):
-                yield triple.subject.strip().lower(), triple.predicate, triple.object
+            yield triple.subject.strip().lower(), triple.predicate, triple.object
 
 
 def train(brain: Any, directory: Any, *,
@@ -294,6 +329,7 @@ def train(brain: Any, directory: Any, *,
           exam_limit: int = 300,
           pool: int = 4000,
           fact_pool: int = 400,
+          recall_pool: int = 200,
           seed: int = 0,
           bundled: Any = None,
           max_facts: int = 250_000,
@@ -321,12 +357,14 @@ def train(brain: Any, directory: Any, *,
     # The conversational half and the lookup half are built separately and interleaved together,
     # so a shortened exam stays balanced across both — see `_exam_corpus` on why the limit takes
     # the head of the list.
-    fact_sets = _fact_exam(files, per_source=fact_pool, seed=seed) if fact_pool else {}
+    fact_sets, recall_sets = (_fact_exam(files, per_source=fact_pool, recall=recall_pool,
+                                         seed=seed) if fact_pool else ({}, {}))
     exam, study_sets = _exam_corpus(
         files, bundled=(bundled if bundled is not None else DEFAULT_CORPUS),
         pool=pool, seed=seed, extra=list(fact_sets.values()))
     report.exam_size = min(len(exam), exam_limit) if exam_limit else len(exam)
     report.fact_questions = sum(len(v) for v in fact_sets.values())
+    recall_exam = [p for block in recall_sets.values() for p in block]
 
     tutor = Tutor(brain, seed=seed_kinds, f1_threshold=f1_threshold)
 
@@ -361,7 +399,7 @@ def train(brain: Any, directory: Any, *,
                        study_sets.get(source.key, []),
                        max_facts=max_facts, max_statements=max_statements,
                        study_limit=study_limit,
-                       exclude=(corpora.held_out_subject if fact_pool else None),
+                       exclude=(corpora.held_out_relation if fact_pool else None),
                        checkpoint=checkpoint, checkpoint_every=checkpoint_every)
             got = tutor.exam(exam, limit=exam_limit)
             stage.coverage, stage.precision = got.coverage, got.precision
@@ -380,6 +418,14 @@ def train(brain: Any, directory: Any, *,
 
     if not report.final:
         report.final = dict(report.control)
+
+    # Run once, after every stage, rather than between them. It is a control rather than a
+    # measurement of any one corpus — "is what she was given reachable at all" — and asking it
+    # eleven times would double the wall-clock to answer the same question eleven times.
+    if recall_exam:
+        got = tutor.exam(recall_exam, limit=exam_limit)
+        report.recall = got.to_dict()
+
     report.curriculum = _assess(brain)
     report.ms = (time.perf_counter() - started) * 1000.0
     return report
@@ -452,6 +498,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--exam", type=int, default=300, help="held-out questions per exam")
     parser.add_argument("--pool", type=int, default=4000,
                         help="pairs sampled from each conversational corpus (study + exam)")
+    parser.add_argument("--recall-pool", type=int, default=200,
+                        help="control questions per fact corpus, on pairs that WERE loaded")
     parser.add_argument("--fact-pool", type=int, default=400,
                         help="lookup questions held out of each fact corpus; 0 disables the "
                              "holdout entirely and leaves the fact stages unmeasured")
@@ -539,6 +587,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"data directory: {args.data} — {len(files)} of {len(corpora.SOURCES)} corpora ready\n")
     report = train(brain, args.data, only=only, skip=skip,
                    exam_limit=args.exam, pool=args.pool, fact_pool=args.fact_pool,
+                   recall_pool=args.recall_pool,
                    seed=args.sample_seed,
                    max_facts=args.max_facts, max_statements=args.max_statements,
                    study_limit=args.study_limit, seed_kinds=not args.no_seed,
@@ -553,6 +602,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("\nRead precision down the column, not coverage: every load raises coverage by turning "
           "abstentions\ninto answers, and only a load that held precision up while doing it "
           "added knowledge rather than noise.")
+
+    if report.recall:
+        print(f"\ncontrol — the same lookups on pairs that WERE loaded, {report.recall['asked']} "
+              f"asked:\n  coverage {report.recall['coverage']:.3f}   "
+              f"precision {report.recall['precision_when_answered']:.3f}   "
+              f"hit {report.recall['on_topic_when_answered']:.3f}")
+        print("  Not a generalisation score. It answers only 'is what she was given reachable',\n"
+              "  and if it is near zero every delta above it is noise about an unreadable store.")
 
     blocked = (report.curriculum or {}).get("blocked_by")
     if blocked:

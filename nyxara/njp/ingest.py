@@ -209,7 +209,7 @@ def ingest_triples(brain: Any, path: Any, *,
                    min_confidence: float = 0.0,
                    default_confidence: float = _DEFAULT_CONFIDENCE,
                    allow: Optional[Collection[str]] = None,
-                   exclude: Optional[Callable[[str], bool]] = None,
+                   exclude: Optional[Callable[[str, str], bool]] = None,
                    batch: int = 5_000,
                    to_world: bool = False,
                    record: bool = True,
@@ -221,7 +221,9 @@ def ingest_triples(brain: Any, path: Any, *,
     ``allow`` is checked **after** folding, because the caller names relations the way this
     package names them and the file names them the way its source did.
 
-    ``exclude`` is asked about each **subject** and refuses the whole row when it says yes. It is
+    ``exclude`` is asked about each ``(subject, folded predicate)`` and refuses the row when it
+    says yes. Asked **after** folding, for the same reason ``allow`` is: the caller names relations
+    the way this package names them. It is
     how :mod:`nyxara.njp.train` keeps a tenth of every fact corpus out of the brain so it has
     something to examine her on: a corpus she has entirely memorised cannot be measured, and
     before this existed the only questions available were from conversational corpora that ask
@@ -309,13 +311,13 @@ def ingest_triples(brain: Any, path: Any, *,
         for subject, predicate, obj, confidence in stream_triples(
                 path, default_confidence=default_confidence):
             report.read += 1
-            if exclude is not None and exclude(subject):
-                report.held_out += 1
-                continue
             if confidence < min_confidence:
                 report.skipped += 1
                 continue
             folded = grounder._predicate(predicate)
+            if exclude is not None and exclude(subject, folded):
+                report.held_out += 1
+                continue
             if allowed is not None and folded not in allowed:
                 report.skipped += 1
                 continue
@@ -445,7 +447,7 @@ def ingest_text(brain: Any, path: Any, *,
                 max_statements: int = 0,
                 min_confidence: float = 0.0,
                 allow: Optional[Collection[str]] = None,
-                exclude: Optional[Callable[[str], bool]] = None,
+                exclude: Optional[Callable[[str, str], bool]] = None,
                 batch: int = 5_000,
                 record: bool = True,
                 progress: Optional[Callable[[int], None]] = None,
@@ -473,11 +475,11 @@ def ingest_text(brain: Any, path: Any, *,
     be last. Bulk facts are *testimony*, entered side by side, and the first conversational turn
     about one of them is where the revision belongs.
 
-    ``exclude`` is asked about the **subject of each extracted triple**, not about the sentence.
-    It has to be: a statement's subject is not known until the extractor has read it, and a
-    sentence-level filter would need this module to guess at the subject with a second, worse
-    parser — the thing :mod:`nyxara.njp.corpora` refuses to write. So the sentence is extracted
-    and then its triples are individually withheld.
+    ``exclude`` is asked about **each extracted triple**, not about the sentence. It has to be: a
+    statement's subject and relation are not known until the extractor has read it, and a
+    sentence-level filter would need this module to guess at them with a second, worse parser —
+    the thing :mod:`nyxara.njp.corpora` refuses to write. So the sentence is extracted and then
+    its triples are individually withheld.
 
     ``max_statements`` bounds the read where ``max_facts`` bounds the write. Both exist because
     they answer different questions: a corpus can be too large to *read* in the time available
@@ -537,7 +539,7 @@ def ingest_text(brain: Any, path: Any, *,
             report.parsed += 1
 
             for triple in extracted:
-                if exclude is not None and exclude(triple.subject):
+                if exclude is not None and exclude(triple.subject, triple.predicate):
                     report.held_out += 1
                     continue
                 if triple.confidence < min_confidence:

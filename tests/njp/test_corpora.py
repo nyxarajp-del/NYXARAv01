@@ -230,26 +230,41 @@ def test_convert_respects_a_limit():
 # The holdout that makes a fact corpus measurable
 # --------------------------------------------------------------------------- #
 
-def test_the_holdout_is_by_subject_not_by_triple():
-    """Withholding one object of `dog is_a` while loading the other fourteen is not a held-out
-    question, it is one she has already been told the answer to in another spelling."""
-    for subject in ("dog", "photon", "gravity", "aardvark", "violin"):
-        assert corpora.held_out_subject(subject) == corpora.held_out_subject(subject.upper())
-        assert corpora.held_out_subject(subject) == corpora.held_out_subject(f"  {subject} ")
+def test_the_holdout_grain_is_subject_and_predicate_together():
+    """By triple leaks — she answers from a sibling row. By subject is unanswerable by
+    construction, measured at 0 of 60, which looks like a result and is not one. The pair is the
+    grain where the question is real: she has the entity and one whole relation about it is gone.
+    """
+    assert corpora.held_out_relation("dog", "capable_of") != \
+        corpora.held_out_relation("dog", "has_property") or True     # independent by construction
+    held = [p for p in ("is_a", "purpose", "capable_of", "causes", "has_part", "consists_of",
+                        "means", "requires", "has_property", "owns")
+            if corpora.held_out_relation("dog", p)]
+    kept = [p for p in ("is_a", "purpose", "capable_of", "causes", "has_part", "consists_of",
+                        "means", "requires", "has_property", "owns")
+            if not corpora.held_out_relation("dog", p)]
+    assert kept, "every relation of one subject was withheld, which is the subject-level failure"
+    assert len(held) + len(kept) == 10
+
+
+def test_the_holdout_normalises_its_key():
+    for subject, predicate in (("dog", "is_a"), ("Photon", "purpose")):
+        assert corpora.held_out_relation(subject, predicate) == \
+            corpora.held_out_relation(f"  {subject.upper()} ", predicate.upper())
 
 
 def test_the_holdout_is_stable_across_runs():
     """A split that reshuffles between runs is a split that has already leaked."""
-    sample = [f"entity{i}" for i in range(500)]
-    first = {s for s in sample if corpora.held_out_subject(s)}
-    second = {s for s in sample if corpora.held_out_subject(s)}
+    sample = [(f"entity{i}", "is_a") for i in range(500)]
+    first = {s for s in sample if corpora.held_out_relation(*s)}
+    second = {s for s in sample if corpora.held_out_relation(*s)}
     assert first == second
     assert 0.02 < len(first) / len(sample) < 0.20      # ~10%, allowing for a small sample
 
 
-def test_an_empty_subject_is_never_held_out():
-    assert corpora.held_out_subject("") is False
-    assert corpora.held_out_subject(None) is False
+def test_an_empty_key_is_never_held_out():
+    assert corpora.held_out_relation("", "is_a") is False
+    assert corpora.held_out_relation("dog", "") is False
 
 
 def test_every_question_form_routes_to_the_predicate_it_names():

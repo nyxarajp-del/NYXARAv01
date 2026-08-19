@@ -58,7 +58,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequ
 __all__ = [
     "Source", "SOURCES", "FORMS", "by_key", "in_priority_order",
     "convert", "converter_for", "definitional_sentences", "sentences", "trim_clause",
-    "QUESTION_FORMS", "HOLDOUT_PERCENT", "held_out_subject", "question_for",
+    "QUESTION_FORMS", "HOLDOUT_PERCENT", "held_out_relation", "question_for",
 ]
 
 #: The three ways into this brain. Anything else is a shape no loader reads.
@@ -675,7 +675,7 @@ def convert(key: str, rows: Iterable[Dict[str, Any]], *,
 # --------------------------------------------------------------------------- #
 # Holding a corpus's own subjects back, so a fact load can be measured at all
 # --------------------------------------------------------------------------- #
-#: Share of *subjects* reserved from every fact corpus and never loaded.
+#: Share of each fact corpus's ``(subject, predicate)`` pairs reserved and never loaded.
 HOLDOUT_PERCENT = 10
 
 #: How to ask for each relation, in a form :meth:`Grounder._read_question` actually routes.
@@ -707,23 +707,38 @@ QUESTION_FORMS: Dict[str, str] = {
 }
 
 
-def held_out_subject(subject: Any, *, percent: int = HOLDOUT_PERCENT) -> bool:
-    """Is this subject reserved for the exam, and therefore never to be loaded?
+def held_out_relation(subject: Any, predicate: Any,
+                      *, percent: int = HOLDOUT_PERCENT) -> bool:
+    """Is this ``(subject, predicate)`` reserved for the exam, and therefore never to be loaded?
 
-    Hashed on the **subject**, not on the triple, and that is the whole design. Holding back one
-    object of ``dog is_a`` while loading the other fourteen is not a held-out question, it is a
-    question she has already been told the answer to in a slightly different spelling. Subject-
-    level means she has never heard the name at all, which is the only version of "she learned it"
-    that is worth measuring.
+    **The grain of this split is the whole measurement, and the first two attempts at it were
+    both wrong in ways that were only visible once the numbers came back.**
+
+    *By triple* — withhold one object of ``dog is_a`` and load the other fourteen — leaks
+    outright. She answers "canine" from a row that was never held back, and the exam scores it as
+    though she had worked it out.
+
+    *By subject* — withhold everything about ``dog`` — is unanswerable by construction, which is
+    worse than leaking because it looks like a result. Measured: with ConceptNet loaded under a
+    subject-level holdout she answered **0 of 60** held-out questions, and precision read 0.000.
+    That is not a fact store failing to generalise. It is a fact store being asked about an entity
+    it has never been given a single fact about, which nothing in this package claims to do.
+
+    *By ``(subject, predicate)``* is the grain where the question is real. She is given ``dog``,
+    its ``is_a``, its ``has_part``, its ``purpose`` — and ``capable_of`` is withheld entirely, so
+    no sibling row can supply it. Answering it requires :meth:`~nyxara.njp.core.CognitiveLearningCore._inherit`
+    to walk ``dog is_a canine`` to what canines can do, which is precisely the claim ``njp.core``
+    makes and the only claim a lookup exam can put to the test.
 
     Deterministic, for the reason :meth:`nyxara.njp.study.Pair.held_out` gives: a split that
-    reshuffles between runs is a split that has already leaked. The same subject is held out on
-    every machine, across restarts, and across a corpus that grew.
+    reshuffles between runs is a split that has already leaked.
     """
     name = " ".join(str(subject or "").strip().lower().split())
-    if not name:
+    relation = str(predicate or "").strip().lower()
+    if not name or not relation:
         return False
-    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=8).hexdigest()
+    digest = hashlib.blake2b(f"{name}\x00{relation}".encode("utf-8"),
+                             digest_size=8).hexdigest()
     return int(digest[:4], 16) % 100 < max(0, min(100, int(percent)))
 
 
