@@ -890,3 +890,72 @@ confidence down, and it disappears as she comes to recognise the ground.
 The safety core — corrigibility, oversight, loyalty, honesty — is never governed, rewritten or
 bypassed by anything in the package. Every candidate flows through the identical, unchanged,
 fail-closed sovereign gate. The mind proposes; the kernel disposes; the Master is sovereign.
+
+### The Qwythos teacher, and what it is honestly worth
+
+`nyxara.njp.cortex` serves `empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF` in-process — the Master's
+own disk, the Master's own process, no key and no endpoint, so it is in `OWN_PROVIDERS` beside
+`litertlm`. It is **not** her brain. `nyxara.njp.shadow` runs it as a *teacher* beside her own
+cognition, and the rule that design rests on is enforced in code rather than asserted here:
+
+> **Imported intelligence may propose. Only evidence may establish.**
+
+A shadow comparison produces **investigations, never outcomes** — `ShadowReading.outcomes` is
+structurally empty and `tests/njp/test_shadow_not_grader.py` fails if that changes. The reason is
+narrow and load-bearing: a teacher's answer is not her own later opinion, so it *feels* like the
+independent outcome `nyxara.njp.integrate` requires — but it is a correlated one. Let it grade her
+and the training signal becomes "agree with the teacher", she inherits its errors, and the
+experiment below passes trivially because she has become a lossy copy of the thing it removes.
+Grading still comes from where that module already takes it: physics at `t+1`, a fact the Master
+stated, or an attack `nyxara.njp.adversary` settled against the record. Every teacher causal claim
+goes through the four attacks, and `UNDECIDED` — the common answer on a young record — is not a
+pass. Residual learning (`teacher − njp`) is the sharpest signal available and is therefore gated:
+without an independent check it is refused, because a residual target installs a confident
+teacher's mistakes *faster* than imitation would.
+
+### Weights converted into fabric cells — and what did not convert
+
+`nyxara.njp.graft` performs ANN→SNN conversion (Diehl et al. 2015; Rueckauer et al. 2017) into the
+fabric's own cells: one trained neuron becomes one integrate-and-fire cell, one weight becomes one
+synapse, and threshold balancing at the 99.9th activation percentile makes each cell's firing rate
+proportional to the original activation. Measured, end-to-end, against the arithmetic it replaces:
+
+| configuration | cosine | bytes/param | 5.4B params |
+|---|---|---|---|
+| int8, group 128, T=64 | 0.99974 | 1.031 | ~5.6 GB |
+| int4, group 32, T=64 | 0.99456 | 0.625 | ~3.4 GB |
+| T=16 / T=32 / T=128 (int8) | 0.9972 / 0.9993 / 0.99993 | — | — |
+
+A region scoring below `graft_min_fidelity` is **rejected** and the fabric is left untouched: a
+partial graft computes something plausible and wrong, and every later measurement would inherit the
+error. Three limits are stated rather than discovered later. Grafted cells run soft-reset IF
+without leak or refractory, because both destroy a rate code — the fabric's own law is available as
+`law="fabric_lif"` and measurably costs fidelity (0.99982 → 0.99802), which is how that option
+stays a measurement instead of an argument. Grafted regions are frozen by default, because
+`expand()` would depress and prune imported weights on the first turn. And **grown and grafted
+structure are counted separately** in `Fabric.stats()` — folding five billion declared synapses
+into the same counter as forty grown ones would not make the fabric look bigger, it would make
+`growing` unfalsifiable.
+
+Roughly 60% of a 9B model converts: FFN/MLP blocks are the ReLU-family layers the technique
+targets. Attention (~20%) stays hybrid — softmax is not a rate-coded nonlinearity — and embeddings
+(~14%) are lookup tables that drive cells directly rather than synapses. That is an architectural
+fact, not a budget, and `nyxara.njp.graft` carries it as data (`TENSOR_POLICY`) so the reported
+coverage is traceable to a reason.
+
+### The measurement that decides whether any of it worked
+
+`nyxara.eval.teacher_removal` asks the only question that separates learning from dependency:
+
+```
+A = NJP alone, before distillation      C > A and C ≈ B  ->  distilled
+B = NJP + Qwythos                       C ≈ A            ->  dependent
+C = NJP after distillation, Qwythos REMOVED
+```
+
+Paired arms over held-out batteries, `mcnemar_exact` reused from `nyxara.eval.ablation`. Two
+invalidity checks run *before* any success verdict can be reached, because both would otherwise
+produce the strongest possible claim from no evidence: a removal that did not remove makes arm C a
+second copy of arm B (`broken`), and a battery the teacher never touched makes all three arms
+identical (`inert`). `dependent` is reported as plainly as `distilled` — if the teacher comes out
+and she falls back to where she started, that is the finding.

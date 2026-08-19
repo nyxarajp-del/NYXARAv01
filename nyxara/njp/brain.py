@@ -303,6 +303,11 @@ class NJPBrain:
         # and `beliefs`, because every one of its four attacks is settled against one of them —
         # an adversary with nothing to check against is a generator of rhetorical questions.
         self.adversary = self._build_adversary(c)
+        # The teacher, and the comparator that runs it beside her. Built LAST among the organs
+        # shadow reads (concepts, adversary, universe, predictive), because it is handed those
+        # objects rather than rebuilding them.
+        self.cortex = self._build_cortex(c)
+        self.shadow = self._build_shadow(c)
         # The Cognitive Learning Core, before `metareason` because that registers a strategy
         # bound to it. Everything the Core reads — the grounder, the world, the concept layer,
         # the universe, curiosity — is already built by this line; it needs nothing from `field`,
@@ -1024,6 +1029,56 @@ class NJPBrain:
                 world=self.world, universe=self.universe, beliefs=self.beliefs,
                 min_support=self._cfg("adversary_min_support", 3),
                 coincidence_lift=self._cfg("adversary_coincidence_lift", 0.1))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_cortex(self, c: Any) -> Any:
+        """The teacher organ: the Qwythos weights, served in-process.
+
+        Off unless the weights are actually on disk — and that check is inside ``Cortex`` itself,
+        which is why this builds unconditionally and cheaply. Constructing it never loads the
+        5.6 GB engine; ``available()`` is a flag, a file and an import, because the ladder asks
+        every turn.
+        """
+        if not self._gate("cortex", True):
+            return None
+        try:
+            from nyxara.njp.cortex import Cortex
+            return Cortex(settings=self._settings())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_shadow(self, c: Any) -> Any:
+        """Shadow cognition: the teacher run beside her, and the gaps routed to their owners.
+
+        Every organ it needs is handed in rather than rebuilt — the adversary must attack against
+        the same record her beliefs were built from, and the concept layer must receive teacher
+        observations into the same store her own observations go to. A second private copy of
+        either would let a teacher claim survive an attack on evidence that is not hers.
+        """
+        if not self._gate("shadow", True):
+            return None
+        try:
+            from nyxara.njp.shadow import ShadowCognition
+            return ShadowCognition(
+                teacher=getattr(self, "cortex", None),
+                concepts=getattr(self, "genesis", None),
+                adversary=getattr(self, "adversary", None),
+                universe=getattr(self, "universe", None),
+                predictor=getattr(self, "predictive", None),
+                readout=getattr(self, "readout", None),
+                lingua=getattr(self, "tongue", None),
+                ledger=getattr(self, "ledger", None),
+                min_gap=self._cfg("shadow_min_gap", 0.05))
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _settings() -> Any:
+        """Live settings, or ``None`` — an organ that cannot read config uses its own defaults."""
+        try:
+            from nyxara.kernel.config import get_settings
+            return get_settings()
         except Exception:  # noqa: BLE001
             return None
 
@@ -2586,7 +2641,8 @@ class NJPBrain:
                             ("agency", self.agent), ("curriculum", self.curriculum),
                             ("calculate", self.calculator),
                             ("field", self.field), ("learner", self.learner),
-                            ("adversary", self.adversary)):
+                            ("adversary", self.adversary),
+                            ("cortex", self.cortex), ("shadow", self.shadow)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
             try:

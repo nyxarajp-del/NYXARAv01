@@ -71,6 +71,11 @@ from nyxara.njp.manifold import Manifold, Prediction, Snapshot
 
 __all__ = ["GrowthReport", "SettleResult", "Fabric"]
 
+#: Sentinel for "this fabric holds no grafted cells". Above every id she could grow: `next_id`
+#: counts up from 1, and njp/graft.py allocates from 2**40, so a single integer comparison
+#: separates the two populations without a set lookup on the hot path.
+_GRAFT_NONE = 1 << 62
+
 
 @dataclass
 class SettleResult:
@@ -227,6 +232,18 @@ class Fabric:
         self.out: Dict[int, Dict[int, float]] = {}   # pre  -> {post: weight}
         self.inn: Dict[int, Set[int]] = {}           # post -> {pre}
 
+        # The second synapse tier: weights she did not grow. `out`/`inn` are the right shape for
+        # growth (one insert is O(1)) and the wrong one for a converted layer, where a Python dict
+        # entry per weight runs ~100 bytes and a billion-parameter graft would be hundreds of GB.
+        # A grafted region keeps its weights quantised and dense instead (njp/graft.py), and the
+        # two tiers are kept apart on purpose: `grown` and `grafted` are different claims, and
+        # folding them into one counter would make `growing` unfalsifiable.
+        self.grafts: List[Any] = []
+        self._frozen_ranges: Tuple[Tuple[int, int], ...] = ()
+        self._graft_min = _GRAFT_NONE          # fast reject — any id below this she grew herself
+        self._frozen_min = _GRAFT_NONE
+        self._n_grafted_cells = 0
+
         self.manifold = manifold if manifold is not None else Manifold(dim=manifold_dim, seed=seed)
 
         self.tick = 0
@@ -291,6 +308,152 @@ class Fabric:
             return fresh
         except Exception:  # noqa: BLE001
             return False
+
+    # ---- the grafted tier ------------------------------------------------ #
+    def attach_graft(self, region: Any) -> None:
+        """Attach a converted region (see :mod:`nyxara.njp.graft`) and refresh the id index."""
+        self.grafts.append(region)
+        self.refresh_grafts()
+        self._dirty = True
+
+    def refresh_grafts(self) -> None:
+        """Recompute the id ranges the freeze and the drive path both read.
+
+        Two different questions, two different ranges. *Grafted at all* decides whether apoptosis
+        may remove a cell — and it must cover plastic regions too, because the check apoptosis
+        actually performs (``no entry in out/inn and never fired``) is true of every grafted cell
+        by construction: its synapses live in the region, not in the dicts. Reading that as "this
+        cell connects to nothing" would delete a correctly wired layer. *Frozen* decides whether
+        plasticity may touch it, and that one genuinely excludes ``plastic=True``.
+        """
+        frozen: List[Tuple[int, int]] = []
+        graft_min = _GRAFT_NONE
+        frozen_min = _GRAFT_NONE
+        for r in self.grafts:
+            spans = ((int(r.pre_lo), int(r.pre_lo) + int(r.n_pre)),
+                     (int(r.post_lo), int(r.post_lo) + int(r.n_post)))
+            for lo, hi in spans:
+                graft_min = min(graft_min, lo)
+                if not getattr(r, "plastic", False):
+                    frozen.append((lo, hi))
+                    frozen_min = min(frozen_min, lo)
+        self._frozen_ranges = tuple(sorted(frozen))
+        self._graft_min = graft_min
+        self._frozen_min = frozen_min
+        # Union rather than sum: regions that share a presynaptic block (a SwiGLU gate and up
+        # projection read the same input) would otherwise count those cells twice, and the
+        # grafted-cell total is one of the numbers `stats` publishes.
+        spans = sorted((int(r.pre_lo), int(r.pre_lo) + int(r.n_pre)) for r in self.grafts)
+        spans += sorted((int(r.post_lo), int(r.post_lo) + int(r.n_post)) for r in self.grafts)
+        total, cursor = 0, -1
+        for lo, hi in sorted(spans):
+            lo = max(lo, cursor)
+            if hi > lo:
+                total += hi - lo
+                cursor = hi
+        self._n_grafted_cells = total
+
+    def is_grafted(self, cell_id: int) -> bool:
+        """True when this cell was placed by a graft rather than grown. O(1) in the common case."""
+        return int(cell_id) >= self._graft_min
+
+    def is_frozen(self, cell_id: int) -> bool:
+        """True when plasticity must leave this cell alone."""
+        cid = int(cell_id)
+        if cid < self._frozen_min:
+            return False
+        for lo, hi in self._frozen_ranges:
+            if lo <= cid < hi:
+                return True
+        return False
+
+    @property
+    def n_grafted_synapses(self) -> int:
+        """Parameters held in grafted regions. Counted apart from ``n_synapses`` throughout."""
+        return sum(int(r.n_params) for r in self.grafts)
+
+    def _graft_drive(self, fired_mask: Any, drive: Any) -> None:
+        """Add the current that grafted regions contribute from whatever just fired.
+
+        The regions carry the same arithmetic the CSR path carries, in a different container: for
+        each region, the presynaptic cells that spiked this step are gathered into a 0/1 vector,
+        multiplied by the quantised weight block, and accumulated onto the region's post cells.
+        Over a settle this is exactly the rate code :mod:`nyxara.njp.graft` converts against —
+        the fabric's own law then integrates it and decides who fires, unchanged.
+        """
+        if not self.grafts or self._index is None:
+            return
+        for r in self.grafts:
+            try:
+                rows = getattr(r, "_pre_rows", None)
+                prows = getattr(r, "_post_rows", None)
+                if rows is None or prows is None:
+                    continue
+                act = fired_mask[rows]
+                if not act.any():
+                    continue
+                drive[prows] += r.weights.matvec(act.astype(_np.float32))
+            except Exception:  # noqa: BLE001 — one bad region must not lose the step
+                continue
+
+    def run_graft(self, region: Any, x: Any, *, timesteps: Optional[int] = None) -> Any:
+        """Drive one converted region for ``T`` steps and return its output rates.
+
+        **Why a graft needs its own driver, and why that is not a workaround.** A settle is
+        *event-driven*: :meth:`stimulate` marks cells as having fired, :meth:`step` propagates from
+        whatever fired last, and when nothing fires the settle is over. One stimulation therefore
+        buys one propagation step per layer — which is exactly right for an automaton whose
+        signals are events, and fatal for a rate code, where the information is *how often* a cell
+        fires over a window. Measured directly: 30 turns of stimulate/settle/expand across a
+        grafted layer produced zero spikes in its output cells, because each turn delivered a
+        single sub-threshold step and the leak took it back before the next one.
+
+        So the input is **held** for ``T`` steps here rather than injected once. That is the honest
+        difference between the two tiers and it is a property of rate coding, not a defect: the
+        converted layer is a function evaluated over a window, the grown fabric is a network of
+        events. Both run on the same cells, and the spikes counted here land on those cells'
+        real ``hits``/``last_fired``, so a grafted region that computed shows up in the fabric's
+        own activity rather than in a private counter.
+        """
+        # No `decay=` override: the region carries the decay it was grafted under, and passing
+        # this fabric's current one would simulate a law the fidelity certificate never measured.
+        rates = region.forward(x, timesteps=timesteps, tau_ref_steps=0)
+        try:
+            T = int(timesteps if timesteps is not None else region.timesteps)
+            counts = _np.rint(_np.asarray(rates) * T).astype(int)
+            for k, n in enumerate(counts):
+                if n <= 0:
+                    continue
+                cell = self.cells.get(region.post_lo + k)
+                if cell is not None:
+                    cell.hits += int(n)
+                    cell.last_fired = self.now
+            self._synced = False
+            self._dirty = True
+        except Exception:  # noqa: BLE001 — bookkeeping must never lose the computed answer
+            pass
+        return rates
+
+    def _index_graft_rows(self) -> None:
+        """Cache each region's compiled row numbers. Rebuilt with the CSR arrays, never per step.
+
+        A region whose cells are not all present is left un-indexed rather than partially wired:
+        a graft that computes over some of its inputs is not a slower graft, it is a different
+        function, and it would pass every count-based check while returning the wrong numbers.
+        """
+        for r in self.grafts:
+            try:
+                pre = [self._index.get(r.pre_lo + k, -1) for k in range(r.n_pre)]
+                post = [self._index.get(r.post_lo + k, -1) for k in range(r.n_post)]
+                if min(pre) < 0 or min(post) < 0:
+                    r._pre_rows = None
+                    r._post_rows = None
+                    continue
+                r._pre_rows = _np.asarray(pre, dtype=_np.int64)
+                r._post_rows = _np.asarray(post, dtype=_np.int64)
+            except Exception:  # noqa: BLE001
+                r._pre_rows = None
+                r._post_rows = None
 
     def disconnect(self, pre: int, post: int) -> bool:
         try:
@@ -357,6 +520,11 @@ class Fabric:
         self._hits = _np.asarray([self.cells[c].hits for c in order], dtype=_np.int64)
         self._last_fired = _np.asarray(
             [self.cells[c].last_fired for c in order], dtype=_np.float64)
+        # Grafted regions address cells by row like everything else on the hot path, so their row
+        # numbers are rebuilt here — with the CSR arrays, on the same structural-change trigger,
+        # never per step.
+        if self.grafts:
+            self._index_graft_rows()
         self._dirty = False
         self._synced = True
         self._touched = None
@@ -440,6 +608,14 @@ class Fabric:
             idx = _np.concatenate([self._indices[lo:hi] for lo, hi in spans])
             wts = _np.concatenate([self._weights[lo:hi] for lo, hi in spans])
             drive = _np.bincount(idx, weights=wts, minlength=len(self._order))
+
+            # Converted layers contribute to the SAME drive vector, and then the same local law
+            # decides who fires. This is what keeps a graft inside the automaton rather than
+            # beside it: nothing downstream can tell which tier a milliamp came from.
+            if self.grafts:
+                fired_now = _np.zeros(len(self._order), dtype=bool)
+                fired_now[rows] = True
+                self._graft_drive(fired_now, drive)
 
             touched = drive != 0.0
             if not touched.any():
@@ -714,6 +890,16 @@ class Fabric:
                     pairs.append((j, i))
         except Exception:  # noqa: BLE001
             pass
+        # A frozen graft is excluded here, at the source, rather than inside each of the five
+        # phases. Potentiation, synaptogenesis and depression all read this one list, so filtering
+        # it once is both cheaper and harder to get wrong than remembering the rule four times.
+        # Note what this protects against: the imported weights themselves live in the region and
+        # are already out of reach of `_depress`/`_prune` (which only walk `out`), but
+        # synaptogenesis would happily grow NEW dict synapses across a converted layer — quietly
+        # turning a verified function into a different one that no certificate describes.
+        if self._frozen_ranges and pairs:
+            pairs = [(j, i) for j, i in pairs
+                     if not (self.is_frozen(j) or self.is_frozen(i))]
         return pairs
 
     def _potentiate_and_grow(self, res: SettleResult, outcome: float,
@@ -793,6 +979,13 @@ class Fabric:
             doomed: List[int] = []
             for cid, cell in self.cells.items():
                 if cell.hits > 0:
+                    continue
+                # Every grafted cell looks unconnected to the test below, because a graft's
+                # synapses are held in its region rather than in `out`/`inn`. It is not
+                # unconnected; it is wired somewhere this loop cannot see. Left in, this test
+                # would delete a freshly converted layer 64 ticks after it was attached and
+                # before it had ever been driven.
+                if self._graft_min != _GRAFT_NONE and cid >= self._graft_min:
                     continue
                 if self.out.get(cid) or self.inn.get(cid):
                     continue
@@ -883,10 +1076,24 @@ class Fabric:
 
     # ---- reporting ------------------------------------------------------- #
     def stats(self) -> Dict[str, Any]:
-        n_syn, n_cell = self.n_synapses, self.n_cells
+        # `cells`/`synapses` are what she GREW, with grafted structure subtracted out. This is
+        # the whole reason the two tiers are counted apart. A 5-billion-parameter graft next to
+        # forty grown synapses would swamp every growth number this dict reports, and `growing`
+        # — the one counter that answers "is the automaton still an automaton" — would read true
+        # forever on the strength of weights somebody else trained. Declared structure is
+        # reported below, separately, and never added in.
+        n_syn, n_cell = self.n_synapses, max(0, self.n_cells - self._n_grafted_cells)
         recent = self._errors[-self.neurogenesis_window:] if self._errors else []
         return {
             "cells": n_cell, "synapses": n_syn,
+            "grafted": ({"regions": len(self.grafts),
+                         "cells": self._n_grafted_cells,
+                         "parameters": self.n_grafted_synapses,
+                         "frozen_regions": sum(1 for r in self.grafts
+                                               if not getattr(r, "plastic", False)),
+                         "bytes": sum(int(getattr(r, "nbytes", 0)) for r in self.grafts),
+                         "names": [str(getattr(r, "name", "")) for r in self.grafts[:8]]}
+                        if self.grafts else None),
             "mean_degree": round(n_syn / n_cell, 4) if n_cell else 0.0,
             "tick": self.tick, "expansions": self.expansions,
             "born_total": self.born_total, "grown_total": self.grown_total,
@@ -913,10 +1120,27 @@ class Fabric:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        """Everything learned. This is what makes tomorrow's fabric today's fabric."""
+        """Everything **learned**. This is what makes tomorrow's fabric today's fabric.
+
+        Grafted regions are deliberately NOT here, and the omission is worth stating because a
+        reader would otherwise assume the round trip is lossless. Two reasons. They are not
+        learned — re-running the converter over the same GGUF is deterministic and reproduces
+        them exactly, so persisting them would be storing a derived artefact. And they are
+        gigabytes: writing 5 billion quantised weights into the same JSON as her synapses would
+        make every save of a fabric she grew by forty synapses cost minutes and disk.
+        ``stats()["grafted"]`` reports what is currently attached; ``python -m nyxara.njp.graft``
+        re-attaches it.
+        """
+        # Grafted CELLS are excluded here as well as grafted weights, and this is not a detail.
+        # Persisting them without their regions writes cells carrying converted thresholds and
+        # biases into the save; on reload `_n_grafted_cells` is zero, nothing claims them, and
+        # they are counted as cells she GREW. Measured: a fabric of 20 grown cells with one small
+        # graft reloaded as 68 grown cells — the growth claim inflating by itself, silently, once
+        # per restart. Excluding them keeps a reload honest, and the converter puts them back.
         return {
             "seed": self.seed, "tick": self.tick, "next_id": self.next_id,
-            "cells": {str(cid): c.to_dict() for cid, c in self.cells.items()},
+            "cells": {str(cid): c.to_dict() for cid, c in self.cells.items()
+                      if not (self._graft_min != _GRAFT_NONE and cid >= self._graft_min)},
             "synapses": [[pre, post, round(w, 6)]
                          for pre, targets in self.out.items()
                          for post, w in targets.items()],

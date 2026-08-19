@@ -44,7 +44,7 @@ __all__ = ["Surface", "Reply", "Dialogue"]
 
 # Rungs that can genuinely hold a conversation. Everything else on the ladder is a fallback
 # that must be reported rather than spoken through.
-FLUENT_PROVIDERS = frozenset({"litertlm"})
+FLUENT_PROVIDERS = frozenset({"gguf", "litertlm"})
 
 
 @dataclass
@@ -127,8 +127,9 @@ class Dialogue:
             if not out.fluent:
                 out.note = (
                     f"the fluent on-device brain is not installed (running '{out.provider}', "
-                    f"a fallback that cannot hold a conversation); "
-                    f"fetch it with: python scripts/fetch_litertlm_model.py")
+                    f"a fallback that cannot hold a conversation); fetch one with: "
+                    f"python scripts/fetch_litertlm_model.py  (2.4 GB, her primary)  or  "
+                    f"python scripts/fetch_qwythos_model.py  (5.6 GB, the Qwythos teacher)")
             return out
         except Exception:  # noqa: BLE001
             out.note = "the language surface could not be inspected; answering in her own words"

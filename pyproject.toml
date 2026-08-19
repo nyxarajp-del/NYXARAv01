@@ -41,6 +41,10 @@ reasoning = ["z3-solver>=4.12", "sympy>=1.12", "numpy>=1.26", "networkx>=3.2", "
 # LLM — DistilGPT-2, downloaded & run in-process via HuggingFace (no API keys).
 # accelerate enables device_map="auto"; httpx stays for web senses.
 llm = ["transformers>=4.40", "torch>=2.2", "accelerate>=0.30", "httpx>=0.27"]
+# The Qwythos teacher: llama-cpp-python serves the GGUF in-process (njp/cortex.py) and
+# `gguf` reads its tensors for the ANN->SNN conversion (njp/graft.py). Both optional —
+# absent, the organ reports itself absent and the ladder starts one rung lower.
+gguf = ["llama-cpp-python>=0.3", "gguf>=0.10", "huggingface-hub>=0.23"]
 # Alias for the same local stack (kept as an obvious install target for the provider).
 distilgpt2 = ["transformers>=4.40", "torch>=2.2", "accelerate>=0.30"]
 # Deprecated aliases for `distilgpt2` (the provider key is still `qwen` internally).

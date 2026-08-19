@@ -103,6 +103,10 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
+    GGUF = "gguf"                 # the Qwythos teacher: Qwen3.5-9B reasoning weights served
+    #                               in-process by llama.cpp. Also the source the fabric grafts
+    #                               from (njp/graft.py) and the teacher njp/shadow.py compares
+    #                               against — a proposer, never an authority.
     AUTO = "auto"                 # ladder litertlm→aicredits→groq→airouter→self→native: her strongest
     #                               reachable brain serves; she always degrades to her OWN offline
     #                               brain — no manual flip. THE SHIPPED DEFAULT.
@@ -122,7 +126,7 @@ class LLMProvider(str, Enum):
 # hands off to a teacher (mind/router.py), and the vs-teacher benchmark is skipped when there is none
 # (growth/foundry.py). It lives here, beside the enum, because every module that asks the question
 # already imports this one — so there is exactly ONE answer to keep in step with the ladder.
-OWN_PROVIDERS: Tuple[str, ...] = ("litertlm", "self", "native")
+OWN_PROVIDERS: Tuple[str, ...] = ("gguf", "litertlm", "self", "native")
 
 
 class VectorBackend(str, Enum):
@@ -390,6 +394,63 @@ class LLMConfig(BaseModel):
     # previous version from its on-disk dir.
     self_reload_lean: bool = True
 
+    # ---- gguf — the Qwythos teacher, and the weights the fabric grafts from ---------------- #
+    # empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF: Qwen3.5-9B post-trained on 500M+ tokens of
+    # reasoning traces, served in-process through llama.cpp. Like `litertlm` it is in
+    # `OWN_PROVIDERS` — no key, no endpoint, nothing leaves the machine — and like every other
+    # rung its output is a PROPOSAL the kernel gates.
+    #
+    # Its role is deliberately NOT "her brain". njp/shadow.py runs it as a *teacher*: it proposes,
+    # njp/adversary.py challenges, and only independent evidence establishes anything. The
+    # measurement that decides whether that worked is eval/teacher_removal.py, which takes the
+    # teacher away again.
+    gguf_enabled: bool = True
+    # The weights. ``None`` -> ``paths.data_dir/"models"/<gguf_filename>``. Absent weights make
+    # the rung honestly unavailable and the ladder simply starts one rung lower.
+    gguf_model_path: Optional[Path] = None
+    gguf_repo_id: str = "empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF"
+    # Q4_K_M (5.63 GB) is the model card's own recommended default: the smallest practical quant
+    # with good quality preservation. BF16 (17.92 GB) is the full-precision conversion base and is
+    # what to fetch when the graft's fidelity floor is the binding constraint rather than disk.
+    gguf_filename: str = "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf"
+    gguf_model: str = "qwythos-9b-claude-mythos-5-1m"
+    # OFF by default, and this differs from `litertlm_auto_download` on purpose. That one fetches
+    # 2.4 GB; this one fetches 5.6-17.9 GB, which on a metered connection is a real event to
+    # spring on someone. Rule 6: no surprises. `scripts/fetch_qwythos_model.py` is the manual door
+    # and works regardless of this flag.
+    gguf_auto_download: bool = False
+    # Vision: the repo ships mmproj-...-F16.gguf (0.92 GB). Left unset — the model card is explicit
+    # that the vision tower was FROZEN during SFT and its behaviour is base Qwen3.5-9B's, not
+    # independently evaluated as part of that release. Enabling it should be a decision, not a
+    # default that quietly inherits someone else's untested claim.
+    gguf_mmproj_filename: Optional[str] = None
+    # Working context. The GGUFs ship YaRN rope-scaling for a 1,048,576-token window, and the
+    # ceiling below records that. The DEFAULT is the model card's own quick-start `-c 16384`,
+    # because a 1M KV-cache does not fit on one machine (the card says 256k-512k needs an
+    # H100/H200 and the full 1M needs tensor-parallel multi-GPU or aggressive offload).
+    # Allocating the ceiling by default would turn an honest capability into an OOM.
+    gguf_context_tokens: int = Field(default=16384, ge=256)
+    gguf_max_context_tokens: int = Field(default=1_048_576, ge=256)
+    gguf_n_gpu_layers: int = Field(default=0, ge=0)     # CPU is the honest default, as elsewhere
+    gguf_threads: Optional[int] = Field(default=None, ge=1)
+    # The chat template lives inside the GGUF and llama.cpp loads it correctly, so unlike the
+    # litertlm rung there is nothing to override here. Set this only to override deliberately.
+    gguf_chat_template: Optional[str] = None
+    # --- sampling: the model card's "Sampling recommendations" table, verbatim --------------- #
+    # The card warns that greedy decoding and T <= 0.3 cause repetition loops on long reasoning
+    # generations, so these are not neutral defaults to be tuned away casually.
+    gguf_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
+    gguf_top_p: float = Field(default=0.95, ge=0.0, le=1.0)
+    gguf_top_k: int = Field(default=20, ge=1)
+    gguf_repeat_penalty: float = Field(default=1.05, ge=0.0)
+    # A generous budget on purpose: every Qwythos answer opens with a <think> block, and a cap
+    # sized for the answer alone truncates the reasoning and then the answer with it.
+    gguf_max_output_tokens: int = Field(default=16384, ge=1)
+    # Strip <think>...</think> from what the Master reads. The raw text including the reasoning is
+    # kept on the response, because njp/genome.py mines those traces for reasoning shapes — this
+    # is a rendering choice, never a discarding of the trace.
+    gguf_strip_think: bool = True
+
     # ---- litertlm — her PRIMARY brain, and the only strong one that never leaves the machine ---- #
     # Gemma-4-E2B-it converted to Google's LiteRT-LM on-device format: one ~2.4 GB INT4
     # ``model.litertlm`` file served in-process by the ``litert_lm`` binding (pip package
@@ -456,6 +517,33 @@ class LLMConfig(BaseModel):
         '{% for c in m.content %}{{ c.text }}{% endfor %}<turn|>{{ "\\n" }}'
         '{% endfor %}<|turn>model{{ "\\n" }}'
     )
+
+    # ---- graft — converting those weights into fabric cells (njp/graft.py) ------------------ #
+    # ANN->SNN conversion (Diehl et al. 2015; Rueckauer et al. 2017). Off by default: a graft is a
+    # large, deliberate act on her substrate, not something a boot should do on her behalf.
+    graft_enabled: bool = False
+    # 8-bit at group 32 measured cosine 0.99975 against the original arithmetic; 4-bit at the same
+    # group measured 0.99456 and halves the memory (5.4B params: ~6.1 GB vs ~3.4 GB). 8 is the
+    # default because the fidelity gate is the thing that must not be spent casually.
+    graft_bits: Literal[4, 8] = 8
+    graft_group: int = Field(default=32, ge=1)
+    # Simulation length for the rate code. Quantisation error is O(1/T), so this is a direct
+    # accuracy/latency dial: measured cosine 0.9972 at T=16 and 0.9998 at T=64 on a 48x96 layer.
+    graft_timesteps: int = Field(default=64, ge=1)
+    # Activation percentile for threshold balancing. NOT the maximum — one outlier activation
+    # would set the threshold so high the rest of the layer quantises to silence.
+    graft_percentile: float = Field(default=99.9, gt=0.0, le=100.0)
+    # A region scoring below this against the arithmetic it replaces is REJECTED and the fabric is
+    # left untouched. A partial graft that silently computes something else is worse than none,
+    # because every measurement afterwards inherits the error without knowing it.
+    graft_min_fidelity: float = Field(default=0.95, ge=0.0, le=1.0)
+    # Frozen by default. `Fabric.expand` depresses and prunes synapses that fire without their
+    # target following, which after a graft would delete imported weights wholesale. The honest
+    # cost is that a frozen region does not learn.
+    graft_plastic: bool = False
+    # Where the teacher stands in the scaffold -> co-learning -> autonomous progression. Promotion
+    # is earned from measurement (eval/teacher_removal.py), never set by hand as an aspiration.
+    graft_mode: Literal["scaffold", "colearn", "autonomous"] = "scaffold"
 
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
