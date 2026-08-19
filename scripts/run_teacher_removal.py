@@ -12,7 +12,9 @@ It did not bite on the first run: C matched A exactly, 0 gained and 0 lost, so w
 learning changed nothing on this battery. It would bite the moment C moves. Before reading any
 future C > A from this driver as transfer, give each arm its own freshly constructed brain.
 """
-import json, sys, time
+import json
+import sys
+import time
 from nyxara.eval.general_novel import build_general_novel_benchmark
 from nyxara.eval.teacher_removal import TeacherRemoval, score_benchmark_task
 from nyxara.njp.brain import NJPBrain
