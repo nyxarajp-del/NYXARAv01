@@ -35,9 +35,9 @@ hand them to the one extractor this package has.
 **Selection is aggressive, and that is the point.** :meth:`Grounder.stats` reports ``unparsed`` —
 54% of the bundled corpus's answers extract no triple at all. Feeding a million unfiltered
 sentences would not raise what she knows, it would raise that number and the wall-clock. So
-:func:`definitional_sentences` keeps only sentences with a copula or one of the relation verbs the
-extractor reads, under a length bound, and drops the rest without apology. A prose corpus is
-mostly narration; the fact store wants the definitions.
+:func:`definitional_sentences` keeps only sentences that *look like a definition* — a short
+subject, then one of the verbs the extractor has a pattern for — and drops the rest without
+apology. A prose corpus is mostly narration; the fact store wants the definitions.
 
 **No network, no third-party package, no brain.** Every function here takes rows that somebody
 else fetched and returns rows somebody else writes. That is what makes the converters testable
