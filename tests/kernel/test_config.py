@@ -86,18 +86,25 @@ def test_test_profile_seals_the_on_device_primary():
 
 
 def test_own_providers_are_the_in_process_rungs():
-    """One list answers 'is this hers or a teacher?' everywhere — keep it in step with the ladder."""
+    """One list answers 'is this hers or a teacher?' everywhere.
+
+    It used to be kept *equal* to the ladder, and that stopped being right when the cortex took
+    rung 1. The two answer different questions: ``OWN_PROVIDERS`` is about WHERE a provider runs,
+    the ladder is about which of them she reaches for first. Her on-device Gemma is entirely hers
+    and is deliberately off the shipped ladder, so equality would force one of those facts to be
+    misstated — and the one that would break is the one ``growth/distill.py`` and
+    ``growth/foundry.py`` branch on, which would class her own model as an external teacher.
+    """
     from nyxara.kernel.config import OWN_PROVIDERS
     from nyxara.mind.llm import LLM
 
-    assert OWN_PROVIDERS == ("litertlm", "self", "native")
-    assert set(OWN_PROVIDERS) <= set(LLM._AUTO_LADDER)
+    assert OWN_PROVIDERS == ("qwythos", "litertlm", "self", "native")
     for name in OWN_PROVIDERS:            # nothing of hers is reached over a wire, so none has a key
         s = NyxaraSettings()
         s.llm.provider = LLMProvider(name)
         assert s.llm.active_key() is None
-    # OWN_PROVIDERS is now the whole ladder — that IS the claim: nothing she runs is remote.
-    assert set(OWN_PROVIDERS) == set(LLM._AUTO_LADDER)
+    # Every rung she reaches for is one of hers — that IS the claim: nothing she runs is remote.
+    assert set(LLM._AUTO_LADDER) <= set(OWN_PROVIDERS)
 
 
 def test_real_learning_defaults_on():
@@ -139,21 +146,27 @@ def test_llm_active_model_and_key():
     assert s.llm.active_model() == "nyxara-native"
     assert s.llm.active_key() is None
 
-def test_litertlm_is_primary_and_foundry_base_is_local():
+def test_qwythos_is_primary_and_foundry_base_is_local():
     """The shipped defaults put her ON-DEVICE brain first while the foundry LoRA-tunes its own base."""
     s = NyxaraSettings()
-    # serving: ``auto`` ships as the default, which makes her on-device ``litertlm`` brain her PRIMARY
-    # model while keeping the degradation path intact (a *pinned* rung would skip the other rungs and
-    # drop straight to her native own-brain). Either way the facade degrades to her own brains when
-    # nothing above is reachable, keeping her sovereign.
+    # serving: ``auto`` ships as the default, which makes her on-device ``qwythos`` cortex her
+    # PRIMARY model while keeping the degradation path intact (a *pinned* rung would skip the other
+    # rungs and drop straight to her native own-brain). Either way the facade degrades to her own
+    # brains when nothing above is reachable, keeping her sovereign.
     assert s.llm.provider is LLMProvider.AUTO
     assert s.llm.active_model() == "auto"
     # her primary needs no endpoint and no key — that is what makes it un-outage-able.
-    # Asserted against the SCHEMA default, not the instance: the suite-wide conftest pins
-    # ``NYXARA_LLM__LITERTLM_ENABLED=false`` for hermeticity, so a live instance here is honestly
-    # off. What ships enabled is the field's default, and that is what this line is about.
+    # Asserted against the SCHEMA default, not the instance: the TEST profile seals both on-device
+    # rungs for hermeticity, so a live instance here is honestly off. What ships enabled is the
+    # field's default, and that is what these lines are about.
     from nyxara.kernel.config import LLMConfig
-    assert LLMConfig.model_fields["litertlm_enabled"].default is True
+    assert LLMConfig.model_fields["qwythos_enabled"].default is True
+    assert s.llm.qwythos_repo_id == "empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF"
+    assert s.llm.qwythos_filename.endswith("Q4_K_M.gguf")
+    # Gemma ships OFF: a second local rung the Master turns on, not the primary. Deleting it would
+    # have been the other option and a worse one — on a host that cannot hold 5.6 GB, the step below
+    # the cortex is otherwise the n-gram floor.
+    assert LLMConfig.model_fields["litertlm_enabled"].default is False
     assert s.llm.litertlm_repo_id == "jamarag/gemma-4-E2B-it-ultra-uncensored-heretic-litertlm"
     assert s.llm.litertlm_filename == "model.litertlm"
     assert s.llm.litertlm_backend == "cpu"
@@ -165,7 +178,7 @@ def test_litertlm_is_primary_and_foundry_base_is_local():
     assert s.llm.active_key() is None
     # nothing sits beneath it but her own brains — no endpoints, no keys, no cloud
     from nyxara.kernel.config import OWN_PROVIDERS
-    assert set(OWN_PROVIDERS) == {"litertlm", "self", "native"}
+    assert set(OWN_PROVIDERS) == {"qwythos", "litertlm", "self", "native"}
     s.llm.provider = LLMProvider.AUTO
     # training: the foundry LoRA-tunes its own DistilGPT-2 base — everything above it is hers
     assert s.foundry.base_model == "distilgpt2"
