@@ -314,7 +314,7 @@ def test_availability_never_downloads(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 def test_litertlm_leads_the_auto_ladder():
     assert LLM._AUTO_LADDER[0] == "litertlm"
-    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
+    assert LLM._AUTO_LADDER == ("litertlm", "gguf", "self", "native")
 
 
 def test_it_drafts_the_turn_when_the_weights_are_present(monkeypatch, weights):

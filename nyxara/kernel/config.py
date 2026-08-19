@@ -106,7 +106,10 @@ class LLMProvider(str, Enum):
     GGUF = "gguf"                 # the Qwythos teacher: Qwen3.5-9B reasoning weights served
     #                               in-process by llama.cpp. Also the source the fabric grafts
     #                               from (njp/graft.py) and the teacher njp/shadow.py compares
-    #                               against — a proposer, never an authority.
+    #                               against — a proposer, never an authority. It sits BEHIND
+    #                               litertlm on the auto ladder even though it is the larger
+    #                               model, so that her voice and her teacher are never the same
+    #                               model (see mind/llm.py::GGUFProvider).
     AUTO = "auto"                 # ladder litertlm→aicredits→groq→airouter→self→native: her strongest
     #                               reachable brain serves; she always degrades to her OWN offline
     #                               brain — no manual flip. THE SHIPPED DEFAULT.

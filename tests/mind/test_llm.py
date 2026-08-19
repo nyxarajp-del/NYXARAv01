@@ -154,10 +154,12 @@ def test_provider_status():
     llm = _native_llm()
     status = llm.provider_status()
     assert status["native"] is True
-    assert set(status) == {"litertlm", "self", "native"}
+    assert set(status) == {"litertlm", "gguf", "self", "native"}
     # Under TEST every rung but her native floor is honestly unavailable — including the on-device
-    # primary, which the profile seals so the suite never loads 2.4 GB of weights.
+    # primary, which the profile seals so the suite never loads 2.4 GB of weights, and the Qwythos
+    # teacher, whose weights are a 5.6-17.9 GB fetch the suite must never make.
     assert status["litertlm"] is False
+    assert status["gguf"] is False
 
 
 def test_async_complete():

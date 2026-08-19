@@ -588,8 +588,23 @@ class GGUFProvider(LLMProviderBase):
     proposal the kernel gates. Being local and being large both make it *reachable*, neither makes
     it authoritative.
 
-    It leads ``_AUTO_LADDER`` because it is a 9B model where ``litertlm`` is a 2B one, and it costs
-    nothing when its weights are absent: :meth:`available` is a flag, a file and an import.
+    **It sits BEHIND ``litertlm`` on the ladder, not in front of it**, even though it is a 9B model
+    where ``litertlm`` is a 2B one. Two reasons, and the second is the load-bearing one.
+
+    ``litertlm`` is this repo's documented PRIMARY brain and a test says so by name; displacing it
+    is a decision for the Master, not a side effect of adding a rung.
+
+    And these same weights are NJP's *teacher*. ``njp/shadow.py`` compares what the teacher says
+    against what she says — but her side is phrased by whichever rung the ladder picked. Put this
+    one first and, on any machine where the weights are present, both halves of that comparison
+    are written by the same model: the semantic gap collapses, almost nothing looks missing, and
+    the distillation reads as finished on the day it started. Keeping a *different* model on her
+    voice makes the comparison honest by construction. ``ShadowCognition``'s circularity guard
+    still exists for the case where this rung is pinned or ``litertlm`` is absent, but it is a
+    backstop rather than the mechanism.
+
+    It costs nothing when its weights are absent: :meth:`available` is a flag, a file and an
+    import.
 
     **The same weights are also NJP's teacher** (``njp/cortex.py``) and the source its fabric
     grafts from (``njp/graft.py``). All three reach the engine through
@@ -1241,7 +1256,7 @@ class LLM:
     # always-on dependency-free native own-brain as the guaranteed floor (never an echo mock). The
     # cloud rungs that used to sit in the middle are gone; nothing on this ladder can be taken away
     # by an outage, a bill, or a rate limit, because nothing on it is reached over a wire.
-    _AUTO_LADDER = ("gguf", "litertlm", "self", "native")
+    _AUTO_LADDER = ("litertlm", "gguf", "self", "native")
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
