@@ -79,6 +79,21 @@ os.environ.setdefault("NYXARA_MIND_EVOLUTION__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_META_RESEARCH__META_META_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_ENABLED", "false")
 os.environ.setdefault("NYXARA_LLM__LITERTLM_AUTO_DOWNLOAD", "false")
+# The cortex needs the same two lines, and the reason it was missing them is worth writing down.
+# `Profile.TEST` seals `qwythos_enabled`/`qwythos_auto_download` already, and `mind/gguf_assets.py`
+# refuses to fetch under that profile — so the guard reads as complete. It is not: the suite does
+# not run under TEST, and plenty of tests legitimately build a **DEV** settings object and then
+# call a boot path. `tests/growth/test_bootstrap.py::_self_settings` is five of them, and each one
+# reaches `growth/bootstrap._ensure_qwythos` with auto-download on.
+#
+# Measured, not suspected: those five tests pulled the real 5.6 GB Q4_K_M weights and the 0.9 GB
+# projector out of HuggingFace mid-run — ten fetches, into the per-process suite home, plus
+# another 6.1 GB left in the HuggingFace cache. A second run hit "No space left on device" and a
+# pytest process was killed outright, which is what makes a green suite look like a flaky one.
+# The profile a suite says it is under does not make it hermetic; not reaching the network does.
+# Tests that exercise the fetcher switch it back on for their OWN settings object, exactly as
+# tests/mind/test_gguf_assets.py already does.
+os.environ.setdefault("NYXARA_LLM__QWYTHOS_AUTO_DOWNLOAD", "false")
 # The model foundry TRAINS. `AutonomicLoop._maybe_grow` -> `GrowthEngine.run` -> `improve_self` ->
 # `Foundry.self_improve` -> `train_candidate` -> `model.train_on(steps=train_steps)` is real
 # backprop, in pure NumPy, and it ran on every autonomic tick the suite drove — so a test that

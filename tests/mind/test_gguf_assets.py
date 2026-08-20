@@ -259,3 +259,42 @@ def test_a_failed_projector_still_leaves_a_working_cortex(tmp_path, monkeypatch)
     s = _settings(tmp_path, qwythos_vision_enabled=True)
     assert assets.ensure_gguf_model(s) == tmp_path / _MODEL
     assert not (tmp_path / _MMPROJ).exists()
+
+
+# --------------------------------------------------------------------------- #
+# The suite-wide seal — Profile.TEST is not the guard it looks like
+# --------------------------------------------------------------------------- #
+def test_a_dev_settings_object_cannot_reach_the_network_from_inside_the_suite():
+    """Every test above builds its own settings and opts back in. This pins the default.
+
+    ``Profile.TEST`` seals ``qwythos_auto_download`` and this module refuses to fetch under it, so
+    the guard reads as complete — but the suite does not run under TEST, and plenty of tests
+    legitimately build a **DEV** object and then call a boot path.
+    ``tests/growth/test_bootstrap.py::_self_settings`` is five of them, and each reaches
+    ``growth/bootstrap._ensure_qwythos`` with auto-download on. Measured before the seal in
+    ``tests/conftest.py``: ten real fetches, 6.5 GB into the suite home plus 6.1 GB of HuggingFace
+    cache, and a second run that died on "No space left on device".
+    """
+    import os
+
+    assert os.environ.get("NYXARA_LLM__QWYTHOS_AUTO_DOWNLOAD") == "false"
+    for profile in (Profile.DEV, Profile.PROD, Profile.TEST):
+        settings = NyxaraSettings.for_profile(profile)
+        assert settings.llm.qwythos_auto_download is False, profile
+        assert settings.llm.litertlm_auto_download is False, profile
+
+
+def test_the_boot_path_declines_when_the_seal_is_in_force(tmp_path, monkeypatch):
+    """The seal has to stop the *caller*, not merely the fetcher — so drive the real boot path."""
+    def _boom(*a, **k):
+        raise AssertionError("growth/bootstrap reached the network from inside the suite")
+
+    monkeypatch.setattr(assets, "_fetch_via_hub", _boom)
+    monkeypatch.setattr(assets, "_fetch_via_http", _boom)
+
+    from nyxara.growth.bootstrap import ensure_primary_model
+
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.llm.self_model_dir = tmp_path / "foundry"
+    ensure_primary_model(s, log=lambda _m: None)
+    assert not assets.model_present(s)
