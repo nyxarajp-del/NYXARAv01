@@ -510,6 +510,20 @@ class LLMConfig(BaseModel):
     # flag: set it False on a metered or air-gapped host and run scripts/fetch_qwythos_model.py by
     # hand instead. NEVER fires under the TEST profile.
     qwythos_auto_download: bool = True
+    # Install the runtime (``llama-cpp-python``) on first boot when the import is missing.
+    #
+    # Weights without a runtime are 5.6 GB of nothing: ``available()`` stays False, the ladder
+    # walks past the rung, and ``njp/cortex.py`` reports that it has nothing to ask — all of it
+    # correct, all of it silent about the one-line fix. Auto-download already spares the Master
+    # the larger half of the setup; leaving the smaller half manual is the odd arrangement, not
+    # the automatic one.
+    #
+    # It is bounded the same way every other autonomous install in this codebase is: it never
+    # fires under the TEST profile, it obeys ``explorer.autonomous_install`` (the Master's
+    # standing mandate, which is what actually authorises a pip install) and ``features.web_access``,
+    # it installs exactly one named distribution and never a resolved list, and a failure is
+    # reported rather than retried. Set False to keep the runtime a manual step.
+    qwythos_auto_install: bool = True
     # Check each downloaded file against the repo's published SHA256SUMS. A checksum that is
     # obtained and MISMATCHES is fatal (nothing is installed); a checksum that cannot be obtained
     # is logged and the file is reported ``unverified`` rather than silently trusted.
@@ -3848,6 +3862,10 @@ class NyxaraSettings(BaseSettings):
             # fake binding rather than loading any of it.
             self.llm.qwythos_enabled = False
             self.llm.qwythos_auto_download = False
+            # And it must not reach for pip either. A suite that installs a package is not
+            # hermetic, and llama-cpp-python may compile from source on a box with no wheel —
+            # which is minutes of CPU inside a test run, on top of not being reproducible.
+            self.llm.qwythos_auto_install = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so

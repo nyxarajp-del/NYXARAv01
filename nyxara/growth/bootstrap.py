@@ -22,6 +22,7 @@ This module never raises into boot, and imports the heavy foundry lazily.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -240,6 +241,81 @@ def _warm_litertlm(settings: NyxaraSettings, say: Callable[[str], None]) -> None
         say(f"primary brain      : warm-up skipped ({exc})")
 
 
+def _cortex_runtime_present() -> bool:
+    """True when ``llama_cpp`` imports here. The import IS the probe — it dlopens ``libllama``."""
+    try:
+        import llama_cpp  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001 — not installed, or installed and unloadable; same answer
+        return False
+
+
+def _ensure_cortex_runtime(settings: NyxaraSettings, say: Callable[[str], None]) -> bool:
+    """Install ``llama-cpp-python`` if it is missing, so the weights have something to run on.
+
+    **Why this is a boot step and not a README line.** Auto-download already spares the Master the
+    larger half of the setup — 6.5 GB of weights arrive on their own. Leaving the ~30 MB runtime a
+    manual step produced the worst state of the three: weights on disk, no runtime, and a system
+    that is *correctly* silent about it. ``available()`` returns False, the ladder walks past the
+    rung, ``njp/cortex.py`` reports it has nothing to ask — every one of those is honest, and none
+    of them says "run one pip command". Nobody notices a 9B model is not being used; they notice
+    the answers are worse.
+
+    **What bounds it**, and each bound is the same one the rest of the codebase uses for an
+    autonomous install:
+
+    * never under the TEST profile — a suite that installs a package is not hermetic, and this
+      wheel may compile from source, which is minutes of CPU inside a test run;
+    * ``llm.qwythos_auto_install`` off, or ``llm.qwythos_enabled`` off, and it does not fire;
+    * ``explorer.autonomous_install`` is what actually *authorises* a pip install here — it is the
+      Master's standing mandate and this borrows it rather than inventing a second one;
+    * ``features.web_access`` off means no network, so no install;
+    * exactly one named distribution, never a resolved list, through ``safe_shell`` with
+      ``shell=False`` so there is no word-splitting surprise;
+    * one attempt. A failure is reported and the boot continues one rung lower — it is never
+      retried on the next boot's behalf, because a wheel that cannot build here will not build in
+      thirty seconds either.
+
+    Returns whether the runtime is importable when this returns.
+    """
+    if _cortex_runtime_present():
+        return True
+    try:
+        from nyxara.kernel.config import Profile
+        if settings.profile is Profile.TEST:
+            return False
+        if not bool(getattr(settings.llm, "qwythos_enabled", True)):
+            return False
+        if not bool(getattr(settings.llm, "qwythos_auto_install", False)):
+            say("cortex runtime     : not installed — pip install 'nyxara[qwythos]' "
+                "(auto-install is off)")
+            return False
+        if not bool(getattr(settings.explorer, "autonomous_install", False)):
+            say("cortex runtime     : not installed — pip install 'nyxara[qwythos]' "
+                "(autonomous install is not authorised)")
+            return False
+        if not bool(getattr(settings.features, "web_access", False)):
+            say("cortex runtime     : not installed — pip install 'nyxara[qwythos]' "
+                "(no network access)")
+            return False
+
+        from nyxara.agency.code_sandbox import safe_shell
+        say("cortex runtime     : installing llama-cpp-python (one time, may build from source)…")
+        result = safe_shell([sys.executable, "-m", "pip", "install", "--quiet",
+                             "llama-cpp-python"], timeout_s=1800.0)
+        if _cortex_runtime_present():
+            say("cortex runtime     : ready")
+            return True
+        detail = (getattr(result, "stderr", "") or getattr(result, "error", "") or "").strip()
+        say(f"cortex runtime     : install failed — {detail.splitlines()[-1] if detail else 'unknown'}")
+        say("cortex runtime     : she runs one rung lower; "
+            "`pip install 'nyxara[qwythos]'` when convenient")
+        return False
+    except Exception as exc:  # noqa: BLE001 — boot must survive a failed install
+        say(f"cortex runtime     : install skipped ({exc})")
+        return False
+
+
 def _ensure_qwythos(settings: NyxaraSettings, say: Callable[[str], None]) -> None:
     """Put her CORTEX on disk if it isn't already. Best-effort, never raises.
 
@@ -252,6 +328,11 @@ def _ensure_qwythos(settings: NyxaraSettings, say: Callable[[str], None]) -> Non
         from nyxara.mind.gguf_assets import ensure_gguf_model, model_present
         if not bool(getattr(settings.llm, "qwythos_enabled", True)):
             return
+        # The runtime FIRST, and deliberately before the weights: 6.5 GB of GGUF with nothing able
+        # to load it is the one outcome worth avoiding, and it is the outcome a missing 30 MB
+        # wheel produces. A failed install is not fatal — the fetch still runs, so the weights are
+        # there the moment the runtime is.
+        _ensure_cortex_runtime(settings, say)
         if model_present(settings):
             _warm_qwythos(settings, say)
             return

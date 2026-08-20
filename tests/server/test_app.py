@@ -133,3 +133,33 @@ def test_prod_refuses_to_start_without_token():
     s.server.api_token = None
     with pytest.raises(RuntimeError):
         create_app(core=_core(), settings=s)
+
+
+# --------------------------------------------------------------------------- #
+# Boot provisioning — every front door, not just the one a person sits at
+# --------------------------------------------------------------------------- #
+def test_the_server_provisions_her_own_brains_on_startup(monkeypatch):
+    """The daemon and the HTTP server are how she runs unattended, and they never bootstrapped.
+
+    ``ensure_primary_model`` — install the cortex runtime, fetch the weights, warm them, forge the
+    self model — ran only in ``__main__.main``, the interactive console. Nothing failed without
+    it: the ladder simply walked past the missing rung and answered on the n-gram floor, correctly
+    and silently, for the whole life of the process. "Boot her and it just works" has to mean
+    every front door.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr("nyxara.growth.bootstrap.ensure_primary_model",
+                        lambda **kw: calls.append("provisioned"))
+    with _client():
+        pass
+    assert calls == ["provisioned"]
+
+
+def test_a_failed_provision_never_blocks_the_port(monkeypatch):
+    """A cold or offline box must still serve, one rung lower, rather than not serve at all."""
+    def _boom(**kw):
+        raise RuntimeError("no network, no weights, no runtime")
+
+    monkeypatch.setattr("nyxara.growth.bootstrap.ensure_primary_model", _boom)
+    with _client() as client:
+        assert client.get("/health").status_code in (200, 401)

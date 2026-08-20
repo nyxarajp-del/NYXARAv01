@@ -188,3 +188,133 @@ def test_richer_corpus_makes_a_stronger_offline_brain():
     tiny = WordKNGramLM(order=3); tiny.train_on(IDENTITY_SEED)
     rich = WordKNGramLM(order=3); rich.train_on(build_seed_corpus())
     assert rich.perplexity(probe) < tiny.perplexity(probe)
+
+
+# --------------------------------------------------------------------------- #
+# The cortex runtime — provisioned on boot, and bounded at every step
+# --------------------------------------------------------------------------- #
+def _cortex_settings(**over) -> NyxaraSettings:
+    """DEV, with every gate open. Each test then closes exactly one and checks the refusal."""
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.llm.qwythos_enabled = True
+    s.llm.qwythos_auto_install = True
+    s.explorer.autonomous_install = True
+    s.features.web_access = True
+    for k, v in over.items():
+        target, _, field = k.partition("__")
+        setattr(getattr(s, target), field, v)
+    return s
+
+
+def _no_real_pip(monkeypatch):
+    """Fail loudly if a test reaches pip. Nothing here may install anything."""
+    import nyxara.growth.bootstrap as boot
+
+    def _boom(*a, **k):
+        raise AssertionError("a test reached pip")
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell", _boom)
+
+
+def test_the_runtime_is_a_no_op_when_it_is_already_importable(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: True)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("reached pip")))
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is True
+    assert said == []                      # a present runtime is not news
+
+
+def test_the_test_profile_never_installs(monkeypatch):
+    """A suite that installs a package is not hermetic, and this wheel may build from source."""
+    import nyxara.growth.bootstrap as boot
+
+    _no_real_pip(monkeypatch)
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(
+        NyxaraSettings.for_profile(Profile.TEST), said.append) is False
+    assert said == []                      # silent, because under TEST it is not a degradation
+
+
+def test_each_closed_gate_refuses_with_its_own_reason(monkeypatch):
+    """Four different things stop the install, and an operator must be told which one."""
+    import nyxara.growth.bootstrap as boot
+
+    _no_real_pip(monkeypatch)
+    for override, expect in (
+        ({"llm__qwythos_auto_install": False}, "auto-install is off"),
+        ({"explorer__autonomous_install": False}, "not authorised"),
+        ({"features__web_access": False}, "no network"),
+    ):
+        said: list[str] = []
+        assert boot._ensure_cortex_runtime(_cortex_settings(**override), said.append) is False
+        assert any(expect in line for line in said), (override, said)
+        # and every refusal still names the one-line manual fix
+        assert any("nyxara[qwythos]" in line for line in said), override
+
+    said = []
+    assert boot._ensure_cortex_runtime(
+        _cortex_settings(llm__qwythos_enabled=False), said.append) is False
+
+
+def test_it_installs_exactly_one_named_distribution(monkeypatch):
+    """Never a resolved list, never a shell string — one distribution, argv-style."""
+    import nyxara.growth.bootstrap as boot
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(boot, "_cortex_runtime_present",
+                        lambda: len(calls) > 0)          # absent, then present after the install
+
+    def _fake_shell(argv, **kwargs):
+        calls.append(list(argv))
+        return type("_R", (), {"ok": True, "stderr": "", "error": ""})()
+
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell", _fake_shell)
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is True
+    assert len(calls) == 1
+    assert calls[0][-3:] == ["install", "--quiet", "llama-cpp-python"]
+    assert "-m" in calls[0] and "pip" in calls[0]         # the running interpreter's pip
+
+
+def test_a_failed_install_is_reported_and_the_boot_continues(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr(
+        "nyxara.agency.code_sandbox.safe_shell",
+        lambda argv, **k: type("_R", (), {"ok": False, "stderr": "error: no C compiler",
+                                          "error": ""})())
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is False
+    assert any("no C compiler" in line for line in said)
+    assert any("one rung lower" in line for line in said)
+
+
+def test_a_raising_installer_never_takes_the_boot_down(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("pip is not on PATH")))
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is False
+    assert any("skipped" in line for line in said)
+
+
+def test_the_runtime_is_provisioned_before_the_weights(tmp_path, monkeypatch):
+    """6.5 GB of GGUF with nothing able to load it is the one outcome worth avoiding."""
+    import nyxara.growth.bootstrap as boot
+
+    order: list[str] = []
+    monkeypatch.setattr(boot, "_ensure_cortex_runtime",
+                        lambda s, say: order.append("runtime") or False)
+    monkeypatch.setattr("nyxara.mind.gguf_assets.model_present",
+                        lambda s=None: order.append("weights") or False)
+    s = _self_settings(tmp_path)
+    s.llm.qwythos_enabled = True
+    boot._ensure_qwythos(s, lambda _m: None)
+    assert order[:2] == ["runtime", "weights"]
