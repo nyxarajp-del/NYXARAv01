@@ -198,11 +198,19 @@ def _settings(weights_path, **over):
 
 
 def _only_local(s, foundry_dir=None):
-    """The ladder is already litertlm -> self -> native (there are no cloud rungs left).
+    """Put Gemma at the head of the ladder, which is the configuration these tests are about.
+
+    The shipped ladder is ``qwythos -> self -> native``; ``litertlm`` is off it by default and is
+    spliced back in by ``LLM.ladder_names()`` when the Master re-enables it. These tests exercise
+    that supported configuration, so they enable Gemma and switch the cortex off — otherwise every
+    assertion about which rung answered would really be an assertion about whether a 5.6 GB file
+    happened to be on the developer's machine.
 
     ``foundry_dir`` points ``self`` at an empty directory so a promoted model that happens to exist
     on the developer's machine cannot change which rung the fallback lands on.
     """
+    s.llm.litertlm_enabled = True
+    s.llm.qwythos_enabled = False
     if foundry_dir is not None:
         s.llm.self_model_dir = foundry_dir
     return s
@@ -312,9 +320,18 @@ def test_availability_never_downloads(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 # 2. The ladder head — this is what "primary" means
 # --------------------------------------------------------------------------- #
-def test_litertlm_leads_the_auto_ladder():
-    assert LLM._AUTO_LADDER[0] == "litertlm"
-    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
+def test_litertlm_is_off_the_shipped_ladder_and_returns_when_re_enabled():
+    """It stopped leading when the cortex took rung 1. It did not stop working, and it did not
+    stop being hers — the provider, this file, and every test in it are all still here."""
+    from nyxara.kernel.config import OWN_PROVIDERS
+
+    assert "litertlm" not in LLM._AUTO_LADDER
+    assert "litertlm" in OWN_PROVIDERS, "it runs in-process; it is not an external teacher"
+
+    s = NyxaraSettings(profile=Profile.DEV)
+    assert "litertlm" not in LLM(settings=s).ladder_names()
+    s.llm.litertlm_enabled = True
+    assert LLM(settings=s).ladder_names() == ("qwythos", "litertlm", "self", "native")
 
 
 def test_it_drafts_the_turn_when_the_weights_are_present(monkeypatch, weights):

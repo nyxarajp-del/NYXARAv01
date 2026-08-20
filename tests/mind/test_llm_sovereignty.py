@@ -120,8 +120,31 @@ def test_a_provider_forwards_only_the_callers_system(monkeypatch, tmp_path):
 
 
 def test_the_ladder_is_hers_end_to_end():
-    """The structural claim after the cloud rungs were removed: every rung runs in-process."""
+    """The structural claim after the cloud rungs were removed: every rung runs in-process.
+
+    Equality would be the wrong assertion now, and the difference matters. ``OWN_PROVIDERS`` is
+    about WHERE a provider runs; the ladder is about which of them she reaches for first. Her
+    on-device Gemma is entirely hers and is deliberately off the shipped ladder — asserting the two
+    sets equal would force one of those facts to be misstated.
+    """
     from nyxara.kernel.config import OWN_PROVIDERS
 
-    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
-    assert set(LLM._AUTO_LADDER) == set(OWN_PROVIDERS)
+    assert LLM._AUTO_LADDER == ("qwythos", "self", "native")
+    assert set(LLM._AUTO_LADDER) <= set(OWN_PROVIDERS)
+
+
+def test_re_enabling_gemma_actually_puts_it_back_on_the_ladder():
+    """The config comment promises this in so many words, so it has to be true.
+
+    Before ``ladder_names()`` existed it was not: the ladder was a frozen class constant, so
+    ``litertlm_enabled=True`` changed only whether that provider reported itself *available* — a
+    rung nothing ever consulted, because ``auto`` never looked at its name.
+    """
+    shipped = LLM(settings=_settings())
+    assert "litertlm" not in shipped.ladder_names()
+
+    s = _settings()
+    s.llm.litertlm_enabled = True
+    reenabled = LLM(settings=s).ladder_names()
+    assert reenabled == ("qwythos", "litertlm", "self", "native")
+    assert reenabled[0] == "qwythos", "the cortex still leads; Gemma is the rung behind it"

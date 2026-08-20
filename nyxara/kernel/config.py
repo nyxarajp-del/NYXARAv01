@@ -103,9 +103,14 @@ class LogLevel(str, Enum):
 class LLMProvider(str, Enum):
     """Selectable backend for the stateless LLM faculty (mind/llm.py)."""
 
-    AUTO = "auto"                 # ladder litertlm→aicredits→groq→airouter→self→native: her strongest
-    #                               reachable brain serves; she always degrades to her OWN offline
-    #                               brain — no manual flip. THE SHIPPED DEFAULT.
+    AUTO = "auto"                 # ladder qwythos→self→native: her strongest reachable brain serves;
+    #                               she always degrades to her OWN offline brain — no manual flip.
+    #                               THE SHIPPED DEFAULT. Every rung runs on her own hardware.
+    QWYTHOS = "qwythos"           # her CORTEX: Qwythos-9B (Qwen3.5-based) in GGUF, served in-process
+    #                               by llama.cpp. No key, no network, nothing leaves the machine.
+    #                               First rung of ``auto`` whenever the weights are on disk — and,
+    #                               unlike every rung before it, it is asked for HYPOTHESES rather
+    #                               than for prettier sentences (njp/cortex.py).
     LITERTLM = "litertlm"         # her PRIMARY brain: Gemma-4-E2B-it in Google's LiteRT-LM format,
     #                               running fully ON-DEVICE through the ``litert_lm`` binding — no key,
     #                               no network, nothing ever leaves the machine. First rung of the
@@ -122,7 +127,14 @@ class LLMProvider(str, Enum):
 # hands off to a teacher (mind/router.py), and the vs-teacher benchmark is skipped when there is none
 # (growth/foundry.py). It lives here, beside the enum, because every module that asks the question
 # already imports this one — so there is exactly ONE answer to keep in step with the ladder.
-OWN_PROVIDERS: Tuple[str, ...] = ("litertlm", "self", "native")
+#
+# Note what this is NOT: it is not the auto ladder. ``litertlm`` is off the shipped ladder and is
+# still entirely hers — it runs in-process, needs no key, and nothing it sees leaves the machine.
+# Conflating the two would class her own on-device Gemma as an external *teacher*, which is what
+# ``growth/distill.py`` and ``growth/foundry.py`` both branch on. Membership here is about WHERE a
+# provider runs; the ladder is about which of them she reaches for first
+# (``mind/llm.py::LLM.ladder_names``).
+OWN_PROVIDERS: Tuple[str, ...] = ("qwythos", "litertlm", "self", "native")
 
 
 class VectorBackend(str, Enum):
@@ -340,11 +352,14 @@ class MetaControlConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Stateless LLM faculty settings (mind/llm.py).
 
-    Her PRIMARY brain is ``litertlm`` and it runs ON HER OWN MACHINE: Gemma-4-E2B-it in Google's
-    LiteRT-LM format (a single ~2.4 GB INT4 ``model.litertlm``), served in-process through the
-    ``litert_lm`` binding. No API key, no endpoint, no network — the prompt never leaves the host,
-    which is why it needs no isolation envelope and is classed with her own brains in
-    ``OWN_PROVIDERS``.
+    Her PRIMARY brain is ``qwythos`` and it runs ON HER OWN MACHINE: Qwythos-9B (Qwen3.5-based,
+    post-trained for reasoning) as a ~5.6 GB Q4_K_M GGUF, served in-process through ``llama.cpp``.
+    No API key, no endpoint, no network — the prompt never leaves the host, which is why it needs no
+    isolation envelope and is classed with her own brains in ``OWN_PROVIDERS``.
+
+    ``litertlm`` (Gemma-4-E2B-it) is still here, still tested, and now off by default: it is a second
+    local rung for a host that cannot hold the cortex, re-enabled with
+    ``NYXARA_LLM__LITERTLM_ENABLED=true``. Nothing was deleted; the ladder changed.
 
     Below it, everything is *hers* too: the foundry (growth/foundry.py) LoRA-fine-tunes its own base
     on her lived memory and ``self`` serves the promoted adapter; ``native`` is her always-on,
@@ -352,8 +367,8 @@ class LLMConfig(BaseModel):
     backend degrades to ``native`` when its heavy/optional deps are absent. There is no echo mock,
     there are no cloud rungs, and no raw third-party model ever speaks as her.
 
-    The default is ``auto``, which makes ``litertlm`` her PRIMARY model *without* making her depend on
-    it: the ladder litertlm→self→native drafts on the strongest reachable rung,
+    The default is ``auto``, which makes ``qwythos`` her PRIMARY model *without* making her depend on
+    it: the ladder qwythos→self→native drafts on the strongest reachable rung,
     so her on-device brain answers every turn it can, a missing weights file or an unbuilt binding
     costs her speed rather than a voice, and she still ends on her own promoted foundry weights (past
     the serve gate — see ``self_serve_any_backend``) and finally her always-on native own-brain. A
@@ -366,10 +381,9 @@ class LLMConfig(BaseModel):
 
     model_config = {"validate_assignment": True}
 
-    # ``auto`` is the shipped default and makes ``litertlm`` her PRIMARY model: the ladder
-    # litertlm→aicredits→groq→airouter→self→native always drafts on the strongest REACHABLE rung, so
-    # her on-device Gemma answers every turn it can while a missing weights file (or a cloud outage
-    # below it) costs her speed rather than a voice. Sovereignty holds regardless — the facade
+    # ``auto`` is the shipped default and makes ``qwythos`` her PRIMARY model: the ladder
+    # qwythos→self→native always drafts on the strongest REACHABLE rung, so her on-device cortex
+    # answers every turn it can while a missing weights file costs her speed rather than a voice. Sovereignty holds regardless — the facade
     # (mind/llm.py complete()) walks down to her own brains when nothing above is reachable, the reply
     # is always a PROPOSAL under the guards, and no persona is injected. Pin a provider by name to
     # force one rung (see the class docstring for the caveat: a pinned rung that fails skips the other
@@ -397,9 +411,13 @@ class LLMConfig(BaseModel):
     # present, and it is classed in ``OWN_PROVIDERS`` — no API key, no endpoint, no isolation envelope,
     # because the prompt is never transmitted anywhere. Its output is still a PROPOSAL under the guards
     # like every other rung; primary is about reach, never about authority.
-    litertlm_enabled: bool = True
+    # OFF by default since the Qwythos cortex took rung 1. The provider, its assets module and its
+    # tests are all still here and still work — this is a ladder decision, not a deletion. Set
+    # ``NYXARA_LLM__LITERTLM_ENABLED=true`` to put Gemma-4-E2B back on the ladder as a second local
+    # rung, which is the right move on a host that cannot hold 5.6 GB of cortex.
+    litertlm_enabled: bool = False
     # The weights. ``None`` -> ``paths.data_dir/"models"/<litertlm_filename>``. Absent weights make the
-    # provider honestly unavailable and the ladder simply starts at aicredits instead.
+    # provider honestly unavailable and the ladder simply starts one rung lower.
     litertlm_model_path: Optional[Path] = None
     litertlm_repo_id: str = "jamarag/gemma-4-E2B-it-ultra-uncensored-heretic-litertlm"
     litertlm_filename: str = "model.litertlm"
@@ -457,6 +475,72 @@ class LLMConfig(BaseModel):
         '{% endfor %}<|turn>model{{ "\\n" }}'
     )
 
+    # ---- qwythos — her CORTEX, and the first rung that is asked to THINK ---------------------- #
+    # Qwythos-9B (Qwen3.5-based, post-trained for reasoning) in GGUF, served in-process by
+    # llama.cpp through the ``llama-cpp-python`` binding. It leads the ``auto`` ladder and is classed
+    # in ``OWN_PROVIDERS``: no API key, no endpoint, no isolation envelope, because the prompt is
+    # never transmitted anywhere.
+    #
+    # What makes this rung different from every rung before it is not its size. Until now the only
+    # consumer of a language model inside ``njp/`` was ``njp/voice.py``, whose documented job is
+    # "the LLM only renders" — so a stronger model bought prettier sentences and nothing else.
+    # ``njp/cortex.py`` asks this one for competing HYPOTHESES, causal claims and predictions, and
+    # every one of them enters NJP as a PROPOSAL that the existing gates judge. Primary is about
+    # reach; it was never about authority.
+    qwythos_enabled: bool = True
+    # The weights. ``None`` -> ``paths.data_dir/"models"/<qwythos_filename>``. Absent weights make the
+    # provider honestly unavailable and the ladder simply starts one rung lower.
+    qwythos_model_path: Optional[Path] = None
+    qwythos_repo_id: str = "empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF"
+    # Q4_K_M: 5.63 GB, runs in ~8 GB of RAM, and the quality loss against BF16 is small. The repo
+    # also publishes Q5_K_M / Q6_K / Q8_0 / BF16 and an MTP variant of each; point this at whichever
+    # one the host can actually hold. The non-MTP files are the ones plain llama.cpp serves.
+    qwythos_filename: str = "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf"
+    # The vision projector — a SEPARATE 918 MB GGUF. Text works without it.
+    qwythos_mmproj_filename: str = "mmproj-Qwythos-9B-Claude-Mythos-5-1M-F16.gguf"
+    qwythos_mmproj_path: Optional[Path] = None
+    # Fetch the projector too, and offer the vision path at all. When this is on but the installed
+    # ``llama_cpp`` has no chat handler that fits this projector, ``GGUFProvider.vision_available()``
+    # returns False WITH THE REASON — she never answers about an image she could not actually see.
+    qwythos_vision_enabled: bool = True
+    # Display label for reports/costing — a GGUF file carries no canonical model name.
+    qwythos_model: str = "qwythos-9b-q4_k_m"
+    # Fetch the weights from HuggingFace on first boot when they are missing
+    # (mind/gguf_assets.py, called from growth/bootstrap.py). 5.6 GB is a real event, so it is a
+    # flag: set it False on a metered or air-gapped host and run scripts/fetch_qwythos_model.py by
+    # hand instead. NEVER fires under the TEST profile.
+    qwythos_auto_download: bool = True
+    # Install the runtime (``llama-cpp-python``) on first boot when the import is missing.
+    #
+    # Weights without a runtime are 5.6 GB of nothing: ``available()`` stays False, the ladder
+    # walks past the rung, and ``njp/cortex.py`` reports that it has nothing to ask — all of it
+    # correct, all of it silent about the one-line fix. Auto-download already spares the Master
+    # the larger half of the setup; leaving the smaller half manual is the odd arrangement, not
+    # the automatic one.
+    #
+    # It is bounded the same way every other autonomous install in this codebase is: it never
+    # fires under the TEST profile, it obeys ``explorer.autonomous_install`` (the Master's
+    # standing mandate, which is what actually authorises a pip install) and ``features.web_access``,
+    # it installs exactly one named distribution and never a resolved list, and a failure is
+    # reported rather than retried. Set False to keep the runtime a manual step.
+    qwythos_auto_install: bool = True
+    # Check each downloaded file against the repo's published SHA256SUMS. A checksum that is
+    # obtained and MISMATCHES is fatal (nothing is installed); a checksum that cannot be obtained
+    # is logged and the file is reported ``unverified`` rather than silently trusted.
+    qwythos_verify_sha256: bool = True
+    # The context window to ALLOCATE. The model advertises 1M tokens; that is a claim about the
+    # weights, not about the RAM on this box — a 1M-token KV cache is tens of gigabytes. 8192 is
+    # what a normal turn needs. Raise it deliberately, on a host that can hold it.
+    qwythos_context_tokens: int = Field(default=8192, ge=512)
+    # Layers to offload to the GPU. 0 = pure CPU, the only setting guaranteed to work anywhere.
+    qwythos_n_gpu_layers: int = Field(default=0, ge=-1)
+    # CPU threads for llama.cpp. ``None`` -> let the runtime choose.
+    qwythos_threads: Optional[int] = Field(default=None, ge=1)
+    # Pinned so an identical request yields identical text: NJP scores its own predictions against
+    # what it actually said, and a sampler that wanders makes that measurement meaningless.
+    qwythos_seed: int = 0
+    qwythos_top_k: int = Field(default=40, ge=1)
+
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     max_output_tokens: int = Field(default=8192, ge=1, le=131072)
@@ -502,6 +586,7 @@ class LLMConfig(BaseModel):
         # loudly at first use instead of silently reporting the wrong model.
         return {
             LLMProvider.AUTO: "auto",
+            LLMProvider.QWYTHOS: self.qwythos_model,
             LLMProvider.LITERTLM: self.litertlm_model,
             LLMProvider.SELF: "nyxara-self",
             LLMProvider.NATIVE: "nyxara-native",
@@ -2391,6 +2476,25 @@ class NJPConfig(BaseModel):
     calculate_enabled: bool = True      # arithmetic evaluation (njp/calculate.py)
     learner_enabled: bool = True        # the Cognitive Learning Core (njp/core.py)
 
+    # --- NJP V.06: the cortex, and the two organs that keep it honest --- #
+    #
+    # Until these existed, the only consumer of a language model inside njp/ was njp/voice.py,
+    # whose job is to RENDER content the cycle produced. A stronger model therefore bought better
+    # sentences and, by construction, no better reasoning. These three change what the model is
+    # asked for; none of them changes who decides.
+    cortex_enabled: bool = True         # ask her cortex for hypotheses (njp/cortex.py)
+    router_enabled: bool = True         # which seat answers, and what a clash is worth (njp/router.py)
+    epistemic_enabled: bool = True      # UNDECIDED -> the experiment that settles it (njp/epistemic.py)
+    # Which provider the cortex speaks through. It is named rather than taken from the ladder on
+    # purpose: `complete_with` raises if that rung is down, where `complete` would quietly hand back
+    # the n-gram floor — and hypotheses from an n-gram are noise wearing the shape of reasoning,
+    # which every gate downstream would then spend real evidence testing.
+    cortex_provider: str = "qwythos"
+    cortex_max_tokens: int = Field(default=768, ge=64)
+    # What it costs to stay wrong, which is what EVPI is multiplied by when the compiler prices an
+    # experiment. Raise it where being wrong is expensive and she will pay more to find out.
+    epistemic_stakes: float = Field(default=0.5, ge=0.0, le=1.0)
+
     # --- bulk fact intake (njp/ingest.py) --- #
     #
     # Facts from a corpus rather than from a turn. Nothing here runs on its own: these are the
@@ -3753,6 +3857,15 @@ class NyxaraSettings(BaseSettings):
             # tests build their own settings and inject a fake binding instead.
             self.llm.litertlm_enabled = False
             self.llm.litertlm_auto_download = False
+            # Same reasoning, one rung up and twice the weight: the cortex is 5.6 GB and the
+            # projector another 0.9 GB. The provider tests build their own settings and inject a
+            # fake binding rather than loading any of it.
+            self.llm.qwythos_enabled = False
+            self.llm.qwythos_auto_download = False
+            # And it must not reach for pip either. A suite that installs a package is not
+            # hermetic, and llama-cpp-python may compile from source on a box with no wheel —
+            # which is minutes of CPU inside a test run, on top of not being reproducible.
+            self.llm.qwythos_auto_install = False
             self.observability.telemetry_enabled = False
             # The foundry is ON by default in live runs (real, weight-changing learning),
             # but a forge writes model dirs + manifests to disk — sealed off under TEST so
@@ -3766,6 +3879,13 @@ class NyxaraSettings(BaseSettings):
             self.self_improvement.autonomous_enact = False
             self.self_improvement.allow_tuning = False
             self.self_improvement.allow_llm_edits = False
+            # Ouroboros edits her own source, and ``ouroboros_enabled`` is the only thing standing
+            # between a caller and that edit (growth/__main__.py checks it and nothing else does).
+            # It ships ON under the max-power posture, which is the Master's deliberate choice for a
+            # real run — and leaves a hermetic suite one function call away from rewriting the live
+            # tree it is testing. Sealed here for the same reason the three lines above are, and the
+            # same reason ``njp.evolve_enabled`` is.
+            self.self_improvement.ouroboros_enabled = False
             # The autonomic loop is ON by default in DEV/PROD (L-AGENCY), but a hermetic suite must
             # never sprout a background thread that reaches the network, trains, or writes state
             # underneath the test that is running. A test that wants the loop drives AutonomicLoop
@@ -4044,16 +4164,18 @@ if __name__ == "__main__":  # pragma: no cover
     print("active_model() covers every LLMProvider member OK")
 
     # Her own brains are exactly the ones that run in-process; everything else is a cloud tool.
-    assert OWN_PROVIDERS == ("litertlm", "self", "native")
+    assert OWN_PROVIDERS == ("qwythos", "litertlm", "self", "native")
     for _p in OWN_PROVIDERS:
         probe = NyxaraSettings(profile="dev")
         probe.llm.provider = LLMProvider(_p)
         assert probe.llm.active_key() is None, f"own provider {_p} must need no API key"
     _dev = NyxaraSettings(profile="dev")
     assert _dev.llm.provider is LLMProvider.AUTO
-    assert _dev.llm.litertlm_model == "gemma-4-E2B-it-litertlm"
-    assert _dev.llm.litertlm_enabled is True
-    print("OWN_PROVIDERS need no key; litertlm is the shipped primary OK")
+    assert _dev.llm.qwythos_model == "qwythos-9b-q4_k_m"
+    assert _dev.llm.qwythos_enabled is True
+    # litertlm is deliberately OFF by default now — a second local rung, not the primary one.
+    assert _dev.llm.litertlm_enabled is False
+    print("OWN_PROVIDERS need no key; qwythos is the shipped primary OK")
 
     # Secret redaction
     s = NyxaraSettings(profile="dev")

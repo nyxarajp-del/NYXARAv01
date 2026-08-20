@@ -299,3 +299,180 @@ def test_the_pulse_hook_survives_a_core_without_njp():
     loop = AutonomicLoop(core=Bare())
     loop._maybe_njp_pulse()
     assert loop.njp_pulses == 0
+
+
+# --------------------------------------------------------------------------- #
+# NJP V.06 — the cortex is CONNECTED, not merely built
+# --------------------------------------------------------------------------- #
+def test_the_cortex_organs_are_built_and_reachable(core: NyxaraCore):
+    """The defect this guards against has happened in this repo before: organs that were built,
+    reachable, and connected to nothing. A cortex nothing calls is exactly the arrangement that
+    produced weights with no capability behind them."""
+    assert core.njp.cortex is not None
+    assert core.njp.router is not None
+    assert core.njp.epistemic is not None
+    for organ in ("cortex", "router", "epistemic"):
+        assert organ in core.njp.stats(), f"{organ} must report itself"
+
+
+def test_a_turn_actually_consults_the_router():
+    """Not "the router exists" — that the turn path reaches it."""
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    thought = brain.think("why does aag cause garmi?")
+    assert thought.routing is not None, "think() must reach the router"
+    assert thought.routing.cortex_permitted is True
+    assert brain.router.routed >= 1
+
+
+def test_a_greeting_still_cannot_reach_the_cortex_through_the_turn_path():
+    """The hole `relevance.py` closed must not reopen behind a bigger model."""
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.router import Seat
+
+    thought = NJPBrain().think("hi NYXARA")
+    assert thought.routing is not None
+    assert thought.routing.cortex_permitted is False
+    assert thought.routing.seats == (Seat.NJP,)
+    assert thought.cortex is None, "an unconsulted cortex reports nothing, not an empty pass"
+
+
+def test_an_unreachable_cortex_costs_the_turn_nothing():
+    """No weights on this machine — and the turn must be indistinguishable from before."""
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    assert brain.cortex.available() is False
+    thought = brain.think("aag se garmi hoti hai")
+    assert thought.cortex is None and thought.arbitration is None
+    assert thought.growth is not None, "the rest of the turn ran exactly as it always did"
+
+
+def test_a_cortex_that_raises_never_takes_the_turn_down():
+    from nyxara.njp.brain import NJPBrain
+
+    class _Hostile:
+        def available(self):
+            raise RuntimeError("the runtime fell over mid-turn")
+
+    brain = NJPBrain()
+    brain.cortex = _Hostile()
+    thought = brain.think("why does aag cause garmi?")
+    assert thought.growth is not None
+    assert thought.cortex is None
+
+
+def test_the_cortex_organs_have_config_gates():
+    from nyxara.njp.brain import NJPBrain
+
+    class _Off:
+        cortex_enabled = False
+        router_enabled = False
+        epistemic_enabled = False
+
+    brain = NJPBrain(_Off())
+    assert brain.cortex is None and brain.router is None and brain.epistemic is None
+    stats = brain.stats()
+    assert "cortex" not in stats and "router" not in stats and "epistemic" not in stats
+
+
+def test_a_turn_with_no_router_does_not_consult_the_cortex_either():
+    """The router is the gate. Without it, nothing downstream may run on its own initiative."""
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    brain.router = None
+    thought = brain.think("why does aag cause garmi?")
+    assert thought.routing is None and thought.cortex is None
+
+
+def test_a_statement_runs_the_world_model_generator_and_a_question_runs_hypotheses():
+    """Both halves of the cortex have to be reachable from the turn path.
+
+    A question asks for rivals; a statement is where relations and causal claims actually live, and
+    a statement permits no reasoning — so gating both halves on the same permission would have left
+    the World Model Generator built and unreachable, which is the defect this repo has shipped
+    before.
+    """
+    import json
+
+    from nyxara.njp.brain import NJPBrain
+    from nyxara.njp.cortex import Cortex
+    from nyxara.njp.grounding import Provenance
+
+    class _Reply:
+        def __init__(self, text):
+            self.text, self.model = text, "fake-cortex"
+
+        def parse_json(self):
+            return json.loads(self.text)
+
+    class _FakeLLM:
+        def __init__(self, *replies):
+            self._replies = list(replies)
+            self.asked = []
+            self._providers = {}
+
+        def provider_status(self):
+            return {"qwythos": True}
+
+        def complete_with(self, name, req):
+            self.asked.append(req.messages[-1].content if req.messages else "")
+            return _Reply(self._replies.pop(0) if self._replies else "{}")
+
+    relations = json.dumps({"relations": [
+        {"subject": "aag", "predicate": "causes", "object": "garmi", "confidence": 0.9}]})
+    brain = NJPBrain()
+    brain.cortex = Cortex(llm=_FakeLLM(relations))
+    stated = brain.think("aag se garmi hoti hai")
+    assert stated.routing.extraction_permitted is True
+    assert stated.routing.cortex_permitted is False
+    assert stated.cortex is not None and len(stated.cortex.triples) == 1
+    assert "Extract only what the text supports" in brain.cortex._llm.asked[0]
+
+    # and what it extracted went in as a proposal, beside the Master's own observed statement
+    provenances = {t.provenance for bucket in brain.grounder.facts.values() for t in bucket}
+    assert Provenance.PROPOSED in provenances
+    assert Provenance.OBSERVED in provenances, "the Master's own words are not a hypothesis"
+
+    hypotheses = json.dumps({"hypotheses": [
+        {"claim": "a", "predicts": ["x"], "confidence": 0.4},
+        {"claim": "b", "predicts": ["y"], "confidence": 0.3},
+        {"claim": "c", "predicts": ["z"], "confidence": 0.2}]})
+    asking = NJPBrain()
+    asking.cortex = Cortex(llm=_FakeLLM(hypotheses))
+    asked = asking.think("why does aag cause garmi?")
+    assert asked.routing.cortex_permitted is True
+    assert asked.cortex is not None and len(asked.cortex.hypotheses) == 3
+    assert "competing" in asking.cortex._llm.asked[0].lower() or \
+           "compete" in asking.cortex._llm.asked[0].lower()
+
+
+def test_a_greeting_runs_neither_half_of_the_cortex():
+    from nyxara.njp.brain import NJPBrain
+
+    thought = NJPBrain().think("hi NYXARA")
+    assert thought.routing.cortex_permitted is False
+    assert thought.routing.extraction_permitted is False
+
+
+def test_the_router_uses_the_brains_own_bandit_not_a_private_one():
+    """It was reading a ``meta_learner`` attribute the self-model does not have, so the bandit
+    branch was unreachable and the seat order silently fell through to the posteriors every time.
+
+    One learner, shared with ``metareason``: two private bandits would split the evidence about
+    what actually works across two records that never see each other.
+    """
+    from nyxara.njp.brain import NJPBrain
+
+    brain = NJPBrain()
+    assert brain.router.learner is brain.meta
+    assert brain.metareason.meta_learner is brain.meta
+
+    routing = brain.router.route("why does aag cause garmi?")
+    assert routing.basis == "bandit"
+    # arms are namespaced, so the seat arm cannot collide with the strategy arms
+    assert "seat:causal" in brain.meta.strategies
+    assert not any(a.startswith("seat:") and a.startswith("strategy:")
+                   for a in brain.meta.strategies)

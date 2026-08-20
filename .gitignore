@@ -9,3 +9,10 @@ venv/
 
 # Code NYXARA authored herself at runtime — a live artifact, never a committed one.
 nyxara/growth/_forged/
+
+# Model weights never belong in the repo. The cortex alone is 5.6 GB and the projector another
+# 0.9 GB; both are fetched by scripts/fetch_qwythos_model.py and verified against SHA256SUMS.
+*.gguf
+*.gguf.part
+*.litertlm
+*.litertlm.part

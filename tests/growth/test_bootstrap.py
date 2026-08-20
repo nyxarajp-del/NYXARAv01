@@ -29,9 +29,11 @@ def _self_settings(tmp_path: Path) -> NyxaraSettings:
 
 def test_noop_when_provider_is_not_self(tmp_path: Path):
     # her own model is forged only when it would actually serve (`self`, or the `auto` ladder
-    # once its serve gate is open). An explicit non-self provider like `airouter` is a clean no-op.
+    # once its serve gate is open). An explicit non-self provider is a clean no-op. This used to
+    # name `airouter`; the cloud rungs were removed from LLMProvider and the test kept naming one,
+    # so it died in the enum lookup before it could assert anything about the forge at all.
     s = NyxaraSettings.for_profile(Profile.DEV)
-    s.llm.provider = LLMProvider.AIROUTER
+    s.llm.provider = LLMProvider.NATIVE
     s.llm.self_model_dir = tmp_path / "foundry"
     assert ensure_primary_model(s) is None
     assert not primary_model_present(s)
@@ -63,7 +65,28 @@ def test_records_distilgpt2_base_even_when_degraded(tmp_path: Path):
     spec = json.loads((tmp_path / "foundry" / "manifest.json").read_text())["versions"][0]["spec"]
     assert spec["base_model"] == DISTILGPT2
     assert spec["kind"] == "lora"
-    assert spec["trust_remote_code"] is False   # DistilGPT-2 (GPT-2 arch) is native — no remote code
+    # The spec must record the CONFIGURED posture, whatever it is. This asserted a literal False,
+    # which was the shipped default until `foundry.trust_remote_code` was deliberately turned on
+    # (config.py: "ON by Master JP's explicit instruction"), and then failed on every run without
+    # telling anyone which of the two had moved. What is worth pinning is that the flag survives
+    # the trip into the manifest in BOTH directions — a spec that silently dropped it would hand a
+    # rebuilding machine a different security posture than the one that was configured.
+    assert spec["trust_remote_code"] is s.foundry.trust_remote_code
+
+
+def test_spec_records_the_configured_remote_code_posture(tmp_path: Path):
+    # Both directions, because only one of them is the dangerous one to get wrong: a manifest that
+    # recorded True when False was configured would hand a rebuilding machine permission to execute
+    # a model repo's own Python, unreviewed, that the Master never granted.
+    for posture in (False, True):
+        root = tmp_path / f"foundry-{posture}"
+        s = NyxaraSettings.for_profile(Profile.DEV)
+        s.llm.provider = LLMProvider.SELF
+        s.llm.self_model_dir = root
+        s.foundry.trust_remote_code = posture
+        ensure_primary_model(s, log=lambda _m: None)
+        spec = json.loads((root / "manifest.json").read_text())["versions"][0]["spec"]
+        assert spec["trust_remote_code"] is posture
 
 
 def test_tiny_placeholder_base_is_upgraded_to_distilgpt2(tmp_path: Path):
@@ -165,3 +188,133 @@ def test_richer_corpus_makes_a_stronger_offline_brain():
     tiny = WordKNGramLM(order=3); tiny.train_on(IDENTITY_SEED)
     rich = WordKNGramLM(order=3); rich.train_on(build_seed_corpus())
     assert rich.perplexity(probe) < tiny.perplexity(probe)
+
+
+# --------------------------------------------------------------------------- #
+# The cortex runtime — provisioned on boot, and bounded at every step
+# --------------------------------------------------------------------------- #
+def _cortex_settings(**over) -> NyxaraSettings:
+    """DEV, with every gate open. Each test then closes exactly one and checks the refusal."""
+    s = NyxaraSettings.for_profile(Profile.DEV)
+    s.llm.qwythos_enabled = True
+    s.llm.qwythos_auto_install = True
+    s.explorer.autonomous_install = True
+    s.features.web_access = True
+    for k, v in over.items():
+        target, _, field = k.partition("__")
+        setattr(getattr(s, target), field, v)
+    return s
+
+
+def _no_real_pip(monkeypatch):
+    """Fail loudly if a test reaches pip. Nothing here may install anything."""
+    import nyxara.growth.bootstrap as boot
+
+    def _boom(*a, **k):
+        raise AssertionError("a test reached pip")
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell", _boom)
+
+
+def test_the_runtime_is_a_no_op_when_it_is_already_importable(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: True)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("reached pip")))
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is True
+    assert said == []                      # a present runtime is not news
+
+
+def test_the_test_profile_never_installs(monkeypatch):
+    """A suite that installs a package is not hermetic, and this wheel may build from source."""
+    import nyxara.growth.bootstrap as boot
+
+    _no_real_pip(monkeypatch)
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(
+        NyxaraSettings.for_profile(Profile.TEST), said.append) is False
+    assert said == []                      # silent, because under TEST it is not a degradation
+
+
+def test_each_closed_gate_refuses_with_its_own_reason(monkeypatch):
+    """Four different things stop the install, and an operator must be told which one."""
+    import nyxara.growth.bootstrap as boot
+
+    _no_real_pip(monkeypatch)
+    for override, expect in (
+        ({"llm__qwythos_auto_install": False}, "auto-install is off"),
+        ({"explorer__autonomous_install": False}, "not authorised"),
+        ({"features__web_access": False}, "no network"),
+    ):
+        said: list[str] = []
+        assert boot._ensure_cortex_runtime(_cortex_settings(**override), said.append) is False
+        assert any(expect in line for line in said), (override, said)
+        # and every refusal still names the one-line manual fix
+        assert any("nyxara[qwythos]" in line for line in said), override
+
+    said = []
+    assert boot._ensure_cortex_runtime(
+        _cortex_settings(llm__qwythos_enabled=False), said.append) is False
+
+
+def test_it_installs_exactly_one_named_distribution(monkeypatch):
+    """Never a resolved list, never a shell string — one distribution, argv-style."""
+    import nyxara.growth.bootstrap as boot
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(boot, "_cortex_runtime_present",
+                        lambda: len(calls) > 0)          # absent, then present after the install
+
+    def _fake_shell(argv, **kwargs):
+        calls.append(list(argv))
+        return type("_R", (), {"ok": True, "stderr": "", "error": ""})()
+
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell", _fake_shell)
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is True
+    assert len(calls) == 1
+    assert calls[0][-3:] == ["install", "--quiet", "llama-cpp-python"]
+    assert "-m" in calls[0] and "pip" in calls[0]         # the running interpreter's pip
+
+
+def test_a_failed_install_is_reported_and_the_boot_continues(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr(
+        "nyxara.agency.code_sandbox.safe_shell",
+        lambda argv, **k: type("_R", (), {"ok": False, "stderr": "error: no C compiler",
+                                          "error": ""})())
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is False
+    assert any("no C compiler" in line for line in said)
+    assert any("one rung lower" in line for line in said)
+
+
+def test_a_raising_installer_never_takes_the_boot_down(monkeypatch):
+    import nyxara.growth.bootstrap as boot
+
+    monkeypatch.setattr(boot, "_cortex_runtime_present", lambda: False)
+    monkeypatch.setattr("nyxara.agency.code_sandbox.safe_shell",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("pip is not on PATH")))
+    said: list[str] = []
+    assert boot._ensure_cortex_runtime(_cortex_settings(), said.append) is False
+    assert any("skipped" in line for line in said)
+
+
+def test_the_runtime_is_provisioned_before_the_weights(tmp_path, monkeypatch):
+    """6.5 GB of GGUF with nothing able to load it is the one outcome worth avoiding."""
+    import nyxara.growth.bootstrap as boot
+
+    order: list[str] = []
+    monkeypatch.setattr(boot, "_ensure_cortex_runtime",
+                        lambda s, say: order.append("runtime") or False)
+    monkeypatch.setattr("nyxara.mind.gguf_assets.model_present",
+                        lambda s=None: order.append("weights") or False)
+    s = _self_settings(tmp_path)
+    s.llm.qwythos_enabled = True
+    boot._ensure_qwythos(s, lambda _m: None)
+    assert order[:2] == ["runtime", "weights"]

@@ -70,6 +70,7 @@ __all__ = [
     "NativeProvider",
     "SelfProvider",
     "LiteRTLMProvider",
+    "GGUFProvider",
     "format_self_prompt",
     "format_self_training_doc",
     "truncate_at_stops",
@@ -1120,7 +1121,468 @@ class LiteRTLMProvider(LLMProviderBase):
                 {"litertlm": True, "model": model, "on_device": True})
 
 
+# --------------------------------------------------------------------------- #
+# Qwythos provider — her CORTEX, and the first rung ever asked to think
+# --------------------------------------------------------------------------- #
+#: Qwen-family turn markers. llama.cpp applies the template embedded in the GGUF, so these are a
+#: backstop for a model that runs past its turn rather than the primary mechanism.
+_QWEN_STOPS = ("<|im_end|>", "<|endoftext|>")
+
+#: Chat handlers that can drive a vision projector, newest first. Each name either exists in the
+#: installed ``llama_cpp`` or it does not — and which one fits THIS projector is a fact about the
+#: binding's version, not something this file can assert on its own.
+_VISION_HANDLERS = (
+    "Qwen25VLChatHandler",
+    "Qwen2VLChatHandler",
+    "NanoLlavaChatHandler",
+    "Llava15ChatHandler",
+)
+
+
+class GGUFProvider(LLMProviderBase):
+    """Serve a GGUF model in-process through ``llama.cpp`` — NYXARA's CORTEX.
+
+    The ladder's first rung, and like the rung it replaced it never touches the network: the weights
+    sit on her own disk, inference happens in her own process, and the prompt is never transmitted
+    anywhere. So there is no isolation envelope here — ``guard/isolation_envelope.py`` abstracts her
+    identity before it leaves for a cloud tool, and nothing leaves.
+
+    **What is genuinely new is not the size of the model.** Until this rung existed, the only
+    consumer of a language model inside ``njp/`` was ``njp/voice.py``, whose documented division of
+    labour is "content comes from NYX's cycle; the LLM only renders". Every other organ in that
+    package says *"Pure standard library. No LLM."* in its own header. A stronger model on that
+    ladder bought better sentences and could not, by construction, buy better reasoning — which is
+    exactly the outcome the Master measured when he loaded weights and saw no capability follow.
+    ``njp/cortex.py`` is what changes: it asks this provider for competing HYPOTHESES, causal claims
+    and predictions, and hands each one to the gates that already existed to judge them.
+
+    None of that changes the power relation. This is the same contract as every other provider in
+    this module: stateless, persona-free, callback-free, and its output is a mere proposal the
+    kernel gates (``kernel/orchestrator.py::_gate``). Being local and strong makes it *reachable*,
+    not authoritative — and an unaligned base model is precisely why the guards, not the model,
+    decide what she acts on.
+
+    **Statelessness with a KV cache.** ``llama.cpp`` keeps a KV cache inside the model object, which
+    is state. A ``Llama`` handle is therefore reset before each request and the full conversation is
+    re-sent, so two identical requests give the same answer regardless of what ran between them.
+    Only the loaded weights are cached — a ~5.6 GB, tens-of-seconds read.
+    """
+
+    name = "qwythos"
+
+    #: Loaded models, shared across every instance in the process.
+    #:
+    #: Per-instance was wrong here for the same two reasons it was wrong for the LiteRT rung: the
+    #: weights are 5.6 GB, so a second provider object would hold a second full copy; and warming
+    #: would be impossible, because the object that paid for the load would not be the one that
+    #: later served the turn. One process, one set of weights.
+    #:
+    #: Keyed by everything that changes what the loaded object *is* — path, context size, GPU
+    #: offload, and the projector — because sharing across any of those hands a caller a model it
+    #: did not ask for, silently, since all of them answer.
+    _MODELS: Dict[Tuple[Any, ...], Any] = {}
+    _MODEL_LOCK = threading.Lock()
+
+    def __init__(self, settings: Optional[NyxaraSettings] = None) -> None:
+        super().__init__(settings)
+        self._lock = threading.Lock()
+        # Latched load failure. Once the runtime has proved it cannot start on this host, the rung
+        # takes itself off the ladder instead of failing — and logging — on every single turn.
+        self._dead: Optional[str] = None
+        self._import_error: Optional[str] = None
+
+    # ---- honest availability (cheap: never loads the weights, never downloads) ---- #
+    def model_path(self) -> Any:
+        from nyxara.mind.gguf_assets import model_path
+        return model_path(self.settings)
+
+    def mmproj_path(self) -> Any:
+        from nyxara.mind.gguf_assets import mmproj_path
+        return mmproj_path(self.settings)
+
+    def _binding(self) -> Any:
+        """The ``llama_cpp`` module, or None when the optional wheel is not installed.
+
+        Unlike the LiteRT binding, importing this one *does* dlopen ``libllama``, so a successful
+        import is real evidence that the runtime loads here. The failure message is kept because
+        "not installed" and "installed but built for another CPU" are different problems with
+        different fixes, and the operator needs to be told which one he has.
+        """
+        try:
+            import llama_cpp
+        except Exception as exc:  # noqa: BLE001 — an unbuilt/ABI-mismatched wheel is unavailability
+            self._import_error = str(exc)
+            return None
+        self._import_error = None
+        return llama_cpp
+
+    def available(self) -> bool:
+        if not bool(getattr(self.settings.llm, "qwythos_enabled", True)):
+            return False
+        if self._dead is not None:
+            return False                          # already proved unusable on this host
+        if self._binding() is None:
+            return False
+        try:
+            return self.model_path().is_file()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def default_model(self) -> str:
+        return self.settings.llm.qwythos_model
+
+    def vision_available(self) -> Tuple[bool, str]:
+        """``(can_she_see, why_not)``. The reason is the point of the method.
+
+        A projector she cannot drive must never degrade into answering about an image from the
+        surrounding text alone — that is the one failure mode a multimodal rung can have that looks
+        exactly like success. ``njp/voice.py`` already keeps this rule for the language surface
+        ("a degraded substrate is reported, never disguised"); this is the same rule for sight.
+        """
+        if not bool(getattr(self.settings.llm, "qwythos_vision_enabled", False)):
+            return False, "vision disabled by config (llm.qwythos_vision_enabled)"
+        binding = self._binding()
+        if binding is None:
+            return False, f"llama_cpp is not installed ({self._import_error})"
+        try:
+            path = self.mmproj_path()
+            if not path.is_file():
+                return False, (f"the vision projector is missing at {path} "
+                               "(python scripts/fetch_qwythos_model.py)")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"the vision projector path is unreadable: {exc}"
+        if self._vision_handler_name(binding) is None:
+            return False, ("the installed llama-cpp-python has no chat handler for this projector "
+                           f"(looked for: {', '.join(_VISION_HANDLERS)})")
+        return True, ""
+
+    @staticmethod
+    def _vision_handler_name(binding: Any) -> Optional[str]:
+        """The first handler this build actually ships, or None. A probe, never an assumption."""
+        try:
+            from llama_cpp import llama_chat_format
+        except Exception:  # noqa: BLE001
+            return None
+        for name in _VISION_HANDLERS:
+            if hasattr(llama_chat_format, name):
+                return name
+        return None
+
+    # ---- the model (cached; the KV cache deliberately is not trusted across requests) ---- #
+    def _model_key(self) -> Tuple[Any, ...]:
+        """What makes one loaded model interchangeable with another."""
+        cfg = self.settings.llm
+        can_see, _ = self.vision_available()
+        return (str(self.model_path()),
+                int(getattr(cfg, "qwythos_context_tokens", 8192)),
+                int(getattr(cfg, "qwythos_n_gpu_layers", 0)),
+                str(self.mmproj_path()) if can_see else None)
+
+    def _model_for(self, key: Tuple[Any, ...]) -> Any:
+        return type(self)._MODELS.get(key)
+
+    @staticmethod
+    def _supported(fn: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Drop kwargs this build of the binding does not accept.
+
+        ``llama-cpp-python`` moves constructor and completion parameters between releases (``seed``
+        has lived in both places and neither). Passing one it does not know raises ``TypeError`` and
+        would take the whole rung down on an otherwise healthy host, so the signature decides. A
+        dropped parameter is a smaller loss than a dead cortex, and it is logged.
+        """
+        try:
+            import inspect
+            params = inspect.signature(fn).parameters
+            if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                return kwargs
+            keep = {k: v for k, v in kwargs.items() if k in params}
+            dropped = sorted(set(kwargs) - set(keep))
+            if dropped:
+                log.debug("llama_cpp build does not accept %s; continuing without", dropped)
+            return keep
+        except Exception:  # noqa: BLE001 — an un-inspectable callable gets the lot
+            return kwargs
+
+    def _chat_handler(self, binding: Any) -> Any:
+        """A vision chat handler when she can genuinely see, else None."""
+        can_see, _ = self.vision_available()
+        if not can_see:
+            return None
+        try:
+            from llama_cpp import llama_chat_format
+            name = self._vision_handler_name(binding)
+            handler = getattr(llama_chat_format, name)
+            return handler(clip_model_path=str(self.mmproj_path()), verbose=False)
+        except Exception as exc:  # noqa: BLE001 — sight is optional; the language rung is not
+            log.warning("the vision handler could not be built (%s); she will answer on text and "
+                        "report that she cannot see", exc)
+            return None
+
+    def _get_model(self, binding: Any) -> Any:
+        """Load once per process, reuse forever. 5.6 GB — never per request, never per instance."""
+        key = self._model_key()
+        model = self._model_for(key)
+        if model is not None:
+            return model
+        with type(self)._MODEL_LOCK:
+            model = self._model_for(key)
+            if model is not None:
+                return model
+            cfg = self.settings.llm
+            kwargs: Dict[str, Any] = {
+                "model_path": str(self.model_path()),
+                "n_ctx": int(getattr(cfg, "qwythos_context_tokens", 8192)),
+                "n_gpu_layers": int(getattr(cfg, "qwythos_n_gpu_layers", 0)),
+                "seed": int(getattr(cfg, "qwythos_seed", 0)),
+                "verbose": False,
+            }
+            threads = getattr(cfg, "qwythos_threads", None)
+            if threads:
+                kwargs["n_threads"] = int(threads)
+            handler = self._chat_handler(binding)
+            if handler is not None:
+                kwargs["chat_handler"] = handler
+            try:
+                model = binding.Llama(**self._supported(binding.Llama.__init__, kwargs))
+            except Exception as exc:  # noqa: BLE001
+                # A host that cannot load 5.6 GB will not load it on the next turn either (too
+                # little RAM, a corrupt file, an unsupported quant). Latch it so the rung leaves the
+                # ladder rather than failing — and logging — once per turn, forever. ``reset()``
+                # clears this after the operator fixes the host.
+                self._dead = str(exc)
+                log.warning("qwythos model could not load; taking the rung off the ladder "
+                            "until reset: %s", self._dead)
+                raise
+            type(self)._MODELS[key] = model
+            log.info("qwythos cortex loaded: %s", key[0])
+            return model
+
+    def close(self) -> None:
+        """Release the model and its weights (used by the tests and by a lean reload)."""
+        with type(self)._MODEL_LOCK:
+            model = type(self)._MODELS.pop(self._model_key(), None)
+        if model is not None:
+            try:
+                model.close()
+            except Exception:  # noqa: BLE001 — releasing must never raise
+                pass
+        gc.collect()
+
+    def reset(self) -> None:
+        """Forget a latched failure and try the host again.
+
+        The latch exists so a broken host costs one warning instead of one per turn; it must not
+        mean an operator has to restart her after freeing the RAM or re-fetching the file.
+        """
+        self._dead = None
+        self._import_error = None
+
+    def warm(self) -> bool:
+        """Load the weights now, so the first turn does not pay for it.
+
+        The cost is unavoidable and paid once; what would be wrong is *when*. Boot is the honest
+        place for it — the Master is already watching a progress line there — rather than inside his
+        first message. Never raises: a host that cannot start latches ``_dead`` exactly as it would
+        have on the first turn, and the ladder steps down.
+        """
+        if not self.available():
+            return False
+        try:
+            binding = self._binding()
+            return binding is not None and self._get_model(binding) is not None
+        except Exception:  # noqa: BLE001 — warming is an optimisation, never a boot failure
+            return False
+
+    def learning_view(self) -> Dict[str, Any]:
+        """Truthful serving state for the learning report — never fabricates.
+
+        The interesting field is ``reason``: when her cortex is *not* serving, an operator should
+        see at a glance whether that is a missing wheel, a missing 5.6 GB file, or a switch someone
+        turned off — rather than only noticing that her answers got shallower.
+        """
+        from nyxara.mind.gguf_assets import verification_state
+        try:
+            path = self.model_path()
+            weights = path.is_file()
+        except Exception:  # noqa: BLE001
+            path, weights = None, False
+        enabled = bool(getattr(self.settings.llm, "qwythos_enabled", True))
+        binding = self._binding() is not None
+        can_see, sight_reason = self.vision_available()
+        if not enabled:
+            reason = "disabled by config"
+        elif not binding:
+            reason = f"llama_cpp not installed ({self._import_error}) — pip install llama-cpp-python"
+        elif self._dead is not None:
+            reason = f"unusable on this host: {self._dead}"
+        elif not weights:
+            reason = f"weights missing at {path} (python scripts/fetch_qwythos_model.py)"
+        else:
+            reason = None
+        return {"available": reason is None, "enabled": enabled,
+                "binding_installed": binding, "weights_present": weights,
+                "model_path": str(path) if path is not None else None,
+                "weights_verified": verification_state(path) if path is not None else "absent",
+                "model": self.settings.llm.qwythos_model,
+                "context_tokens": int(getattr(self.settings.llm, "qwythos_context_tokens", 8192)),
+                "n_gpu_layers": int(getattr(self.settings.llm, "qwythos_n_gpu_layers", 0)),
+                "model_loaded": self._model_for(self._model_key()) is not None,
+                "vision": can_see, "vision_reason_unavailable": sight_reason or None,
+                "reason_unavailable": reason}
+
+    # ---- request → chat messages ---- #
+    def _messages(self, req: LLMRequest) -> List[Dict[str, str]]:
+        """The request as llama.cpp chat messages.
+
+        Note what is NOT here: no "you are NYXARA" persona. The system text is whatever the caller
+        passed — her identity is composed in ``identity/soul.py``, never injected by a provider.
+        """
+        system = (req.system or "").strip()
+        if req.json_mode:
+            system = f"{system}\n\n{_JSON_NUDGE}" if system else _JSON_NUDGE
+        out: List[Dict[str, str]] = []
+        if system:
+            out.append({"role": "system", "content": system})
+        for m in req.messages:
+            if m.role in (Role.USER, Role.ASSISTANT):
+                role = "user" if m.role is Role.USER else "assistant"
+                out.append({"role": role, "content": m.content})
+        if not any(m["role"] == "user" for m in out):
+            out.append({"role": "user", "content": ""})
+        return out
+
+    def _fit_context(self, messages: List[Dict[str, str]],
+                     req: LLMRequest) -> List[Dict[str, str]]:
+        """Trim the conversation to what the loaded context can actually accept.
+
+        The window here is what was *allocated* (``qwythos_context_tokens``), not the million the
+        model advertises: a 1M-token KV cache is tens of gigabytes and is not on this machine. Over
+        the allocated window llama.cpp raises, which — before this budgeted — would latch the rung
+        dead and drop her to the n-gram floor for the rest of the process.
+
+        What gets cut, in order, and why:
+
+        1. **history first** — oldest turns are the least load-bearing thing in the window, and
+           conversation state lives in :mod:`nyxara.njp.memory` rather than here anyway;
+        2. **then the system prompt's middle**, keeping head and tail — the head carries her
+           identity and the tail carries the task instructions, and losing either changes what she
+           is being asked to do;
+        3. **the user's actual message last**, and only if it alone exceeds the window.
+        """
+        try:
+            window = int(getattr(self.settings.llm, "qwythos_context_tokens", 8192))
+            budget = window - int(req.max_tokens) - _CONTEXT_SAFETY_TOKENS
+            if budget <= 0:
+                budget = max(256, window // 2)
+
+            def total(msgs: List[Dict[str, str]]) -> int:
+                return sum(estimate_tokens(m.get("content") or "") for m in msgs)
+
+            if total(messages) <= budget:
+                return messages
+
+            trimmed = list(messages)
+            # 1. drop the oldest non-system turns, never the final user turn
+            while len(trimmed) > 1 and total(trimmed) > budget:
+                cut = next((i for i, m in enumerate(trimmed)
+                            if m["role"] != "system" and i < len(trimmed) - 1), None)
+                if cut is None:
+                    break
+                trimmed.pop(cut)
+            if total(trimmed) <= budget:
+                log.info("qwythos: trimmed %d history turn(s) to fit the %d-token window",
+                         len(messages) - len(trimmed), window)
+                return trimmed
+
+            # 2. shrink the system prompt from the middle, keeping head and tail
+            idx = next((i for i, m in enumerate(trimmed) if m["role"] == "system"), None)
+            if idx is not None:
+                tail_cost = total([m for i, m in enumerate(trimmed) if i != idx])
+                room = max(0, budget - tail_cost)
+                text = trimmed[idx]["content"]
+                if estimate_tokens(text) > room:
+                    keep = max(0, room * 4)
+                    if keep <= 0:
+                        trimmed.pop(idx)
+                        log.warning("qwythos: the system prompt did not fit the %d-token window "
+                                    "at all and was dropped", window)
+                    else:
+                        head, tail = text[: keep // 2], text[-(keep // 2):] if keep // 2 else ""
+                        trimmed[idx] = {"role": "system",
+                                        "content": f"{head}\n…[trimmed to fit the context "
+                                                   f"window]…\n{tail}"}
+                        log.warning("qwythos: system prompt trimmed to fit the %d-token window",
+                                    window)
+
+            # 3. last resort — the message itself is bigger than the window
+            if total(trimmed) > budget and trimmed:
+                last = trimmed[-1]
+                keep_chars = max(256, (budget - _CONTEXT_SAFETY_TOKENS) * 4)
+                content = last.get("content") or ""
+                if len(content) > keep_chars:
+                    trimmed[-1] = {**last,
+                                   "content": content[: keep_chars // 2] + "\n…[trimmed]…\n"
+                                              + content[-(keep_chars // 2):]}
+                    log.warning("qwythos: the request itself exceeded the context window "
+                                "and was trimmed")
+            return trimmed
+        except Exception:  # noqa: BLE001 — a failed trim sends the original and lets llama.cpp say so
+            return messages
+
+    def _complete(self, req: LLMRequest, model: str) -> Tuple[str, str, Usage, Any]:
+        binding = self._binding()
+        if binding is None:
+            raise LLMError("llama_cpp is not installed",
+                           context={"provider": self.name, "detail": self._import_error})
+        llama = self._get_model(binding)
+        messages = self._fit_context(self._messages(req), req)
+
+        kwargs: Dict[str, Any] = {
+            "messages": messages,
+            "max_tokens": int(req.max_tokens),
+            "temperature": float(req.temperature),
+            "top_p": float(req.top_p),
+            "top_k": int(getattr(self.settings.llm, "qwythos_top_k", 40)),
+            "seed": int(req.seed if req.seed is not None
+                        else getattr(self.settings.llm, "qwythos_seed", 0)),
+            "stop": list(req.stop) or None,
+        }
+        if req.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        # One model, serialized. llama.cpp holds a single set of weights and a single KV cache, so
+        # concurrent turns would interleave each other's tokens rather than run in parallel. The
+        # reset is what keeps this provider stateless in the sense the facade promises: whatever the
+        # previous request left in the cache cannot leak into this one's answer.
+        with self._lock:
+            try:
+                llama.reset()
+            except Exception:  # noqa: BLE001 — some builds have no reset; the full re-send covers it
+                pass
+            raw = llama.create_chat_completion(
+                **self._supported(llama.create_chat_completion, kwargs))
+
+        choice = (raw.get("choices") or [{}])[0]
+        text = str((choice.get("message") or {}).get("content") or "")
+        text, hit = truncate_at_stops(text, tuple(req.stop) + _QWEN_STOPS)
+        usage_in = raw.get("usage") or {}
+        completion = int(usage_in.get("completion_tokens") or estimate_tokens(text))
+        # Honest finish reason. A stop marker in the text means the model ran past its turn and we
+        # cut it. Otherwise it stopped on EOS *or* on the token cap — and only a reply that actually
+        # reached the cap is a truncation, so don't report one that plainly didn't.
+        if hit:
+            finish = "stop"
+        else:
+            finish = str(choice.get("finish_reason") or
+                         ("length" if completion >= int(req.max_tokens) else "stop"))
+        usage = Usage(prompt_tokens=int(usage_in.get("prompt_tokens")
+                                        or estimate_tokens("".join(m["content"] for m in messages))),
+                      completion_tokens=completion)
+        return text, finish, usage, {"qwythos": True, "model": model, "on_device": True}
+
+
 _PROVIDER_CLASSES = {
+    ProviderName.QWYTHOS: GGUFProvider,
     ProviderName.LITERTLM: LiteRTLMProvider,
     ProviderName.SELF: SelfProvider,
     ProviderName.NATIVE: NativeProvider,
@@ -1157,12 +1619,40 @@ class LLM:
         # invariant: a stateless facade keeps NO mutable conversation memory.
         self.stateless = True
 
-    # The auto ladder, and every rung of it runs on her own hardware: her PRIMARY on-device brain
-    # (litertlm — Gemma-4-E2B-it in-process), then her OWN promoted foundry weights, and finally her
-    # always-on dependency-free native own-brain as the guaranteed floor (never an echo mock). The
-    # cloud rungs that used to sit in the middle are gone; nothing on this ladder can be taken away
-    # by an outage, a bill, or a rate limit, because nothing on it is reached over a wire.
-    _AUTO_LADDER = ("litertlm", "self", "native")
+    # The auto ladder, and every rung of it runs on her own hardware: her CORTEX (qwythos —
+    # Qwythos-9B in-process through llama.cpp), then her OWN promoted foundry weights, and finally
+    # her always-on dependency-free native own-brain as the guaranteed floor (never an echo mock).
+    # The cloud rungs that used to sit in the middle are gone; nothing on this ladder can be taken
+    # away by an outage, a bill, or a rate limit, because nothing on it is reached over a wire.
+    #
+    # ``litertlm`` is deliberately absent, not deleted: the provider, its assets module and its tests
+    # all still work, and ``NYXARA_LLM__LITERTLM_ENABLED=true`` puts Gemma-4-E2B back as a second
+    # local rung. That matters on a host that cannot hold 5.6 GB, because without it the step below
+    # the cortex is the n-gram floor — a real cost of leading with a 9B model, and one the Master
+    # chose knowingly.
+    _AUTO_LADDER = ("qwythos", "self", "native")
+
+    #: Where ``litertlm`` is spliced in when the Master re-enables it. Second, behind the cortex:
+    #: it is the smaller model, and it is worth having precisely as the rung between a cortex that
+    #: may not fit and an n-gram floor that cannot really answer.
+    _OPTIONAL_RUNGS = ((1, "litertlm", "litertlm_enabled"),)
+
+    def ladder_names(self) -> Tuple[str, ...]:
+        """The ladder this configuration actually has, not the one that shipped.
+
+        ``_AUTO_LADDER`` is a class constant, so switching ``litertlm_enabled`` back on used to
+        change only whether that provider *reported itself available* — a rung nothing consulted,
+        because ``auto`` never looked at its name. The config comment and the docs both promised
+        the opposite. This is what makes the promise true, and it is a method rather than a second
+        constant so there is still exactly one shipped ladder to reason about.
+        """
+        names = list(self._AUTO_LADDER)
+        for index, name, flag in self._OPTIONAL_RUNGS:
+            if name in names:
+                continue
+            if bool(getattr(self.settings.llm, flag, False)):
+                names.insert(min(index, len(names)), name)
+        return tuple(names)
 
     def _auto_ladder(self) -> List[LLMProviderBase]:
         """Usable providers under ``provider=auto``, strongest-first.
@@ -1172,7 +1662,7 @@ class LLM:
         ``self_serve_any_backend`` opt-in). ``native`` (her always-on own-brain) is always the
         guaranteed floor."""
         out: List[LLMProviderBase] = []
-        for name in self._AUTO_LADDER:
+        for name in self.ladder_names():
             prov = self._providers.get(name)
             if prov is None or not prov.available():
                 continue
@@ -1231,7 +1721,7 @@ class LLM:
             view["actual"] = get_ledger().view()
         except Exception:  # noqa: BLE001 — the honest view degrades, it never breaks the report
             view["actual"] = None
-        for name in ("litertlm", "self"):
+        for name in ("qwythos", "litertlm", "self"):
             prov = self._providers.get(name)
             if prov is not None and hasattr(prov, "learning_view"):
                 try:
@@ -1424,19 +1914,24 @@ if __name__ == "__main__":  # pragma: no cover
     # adapters report availability honestly (bare machine -> only native)
     status = llm.provider_status()
     print(f"\nadapter availability : {status}")
-    assert set(status) == {"litertlm", "self", "native"}
-    for p in ("litertlm", "self", "native"):
+    assert set(status) == {"qwythos", "litertlm", "self", "native"}
+    for p in ("qwythos", "litertlm", "self", "native"):
         assert p in status, f"provider '{p}' must be registered"
     assert status["self"] is False       # no model trained/promoted yet on a bare machine
-    # TEST seals her on-device primary too: no 2.4 GB load inside a hermetic run
+    # TEST seals every on-device rung: no 5.6 GB cortex and no 2.4 GB Gemma inside a hermetic run
+    assert status["qwythos"] is False
     assert status["litertlm"] is False
-    # her PRIMARY on-device brain leads the ladder, her own brain is always its floor
-    assert LLM._AUTO_LADDER == ("litertlm", "self", "native")
-    assert LLM._AUTO_LADDER[0] == "litertlm" and LLM._AUTO_LADDER[-1] == "native"
+    # her CORTEX leads the ladder, her own brain is always its floor
+    assert LLM._AUTO_LADDER == ("qwythos", "self", "native")
+    assert LLM._AUTO_LADDER[0] == "qwythos" and LLM._AUTO_LADDER[-1] == "native"
     # the rungs that are HERS are the ones that run in-process — top and bottom of the ladder
     from nyxara.kernel.config import OWN_PROVIDERS
     # every rung is hers now — the cloud providers were removed entirely
-    assert set(OWN_PROVIDERS) == set(LLM._AUTO_LADDER)
+    # Every rung she reaches for must be one of hers — but not every one of hers is on the
+    # shipped ladder. `litertlm` is the standing example: entirely in-process, deliberately behind
+    # the cortex, and spliced back in by `ladder_names()` when the Master re-enables it.
+    assert set(LLM._AUTO_LADDER) <= set(OWN_PROVIDERS)
+    assert set(LLM(settings=NyxaraSettings(profile=Profile.DEV)).ladder_names()) <= set(OWN_PROVIDERS)
     print("litertlm/self/native : registered; every rung in-process; degrade honestly ✓")
 
     # a missing weights file is honest unavailability, never a crash (the bare-machine path)

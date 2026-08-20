@@ -38,8 +38,11 @@ quality of the model doing the writing, and hers is currently a small NumPy tran
 delivered here is a loop that finds the hot code, applies provably-equivalent improvements, proves
 the result is faster on the real workload, and rolls back byte-for-byte when it is not.
 
-Off by default (``ouroboros_enabled``): every other layer added here is additive, and this one
-edits her own source.
+Gated by ``ouroboros_enabled``: every other layer added here is additive, and this one edits her
+own source. It ships **ON** under the max-power posture (the Master's deliberate choice) and is
+**sealed off under the TEST profile**, because a hermetic suite must never be one call away from
+rewriting the tree it is testing. That flag is the whole gate — nothing else here checks
+``autonomous_enact`` or ``allow_llm_edits``.
 
 Depends on ``growth/self_optimize`` (gauntlet + rollback), ``growth/hotspot_profiler``,
 ``growth/weakness`` and the stdlib. Nothing imports back.

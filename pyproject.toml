@@ -36,6 +36,13 @@ nyxara-study = "nyxara.njp.study:main"
 # mind/vulkan_shim.py generates a stub that satisfies it. `apt install libvulkan1` only if
 # you want the real loader (required for the gpu/npu backends, where the stub declines).
 litertlm = ["litert-lm-api>=0.15.0"]
+# Her CORTEX: Qwythos-9B (Qwen3.5-based) served ON-DEVICE by llama.cpp (import name `llama_cpp`).
+# This installs the runtime only — fetch the ~5.6 GB weights once with
+# `python scripts/fetch_qwythos_model.py`, or just boot her and let growth/bootstrap.py do it.
+# Without either, mind/llm.py reports the rung honestly unavailable and the auto ladder starts one
+# rung lower. Prebuilt CPU wheels exist for linux/macos/windows; a CUDA/Metal build is a source
+# install (see the llama-cpp-python README) and only changes speed, never availability.
+qwythos = ["llama-cpp-python>=0.3.2"]
 # Reasoning / math / data
 reasoning = ["z3-solver>=4.12", "sympy>=1.12", "numpy>=1.26", "networkx>=3.2", "scikit-learn>=1.4"]
 # LLM — DistilGPT-2, downloaded & run in-process via HuggingFace (no API keys).

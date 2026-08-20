@@ -462,6 +462,23 @@ def create_app(core: Any = None, *, settings: Optional[NyxaraSettings] = None) -
     async def _lifespan(app_: Any):
         loop = None
         runtime = None
+        # Her own brains, provisioned before she serves a single request.
+        #
+        # This ran only in ``__main__.main`` — the interactive console — so the daemon and the
+        # HTTP server, which are how she actually runs unattended, never installed the cortex
+        # runtime, never fetched the weights, and never warmed them. Nothing failed: the ladder
+        # walked past the missing rung and answered on the n-gram floor, correctly and silently,
+        # for the entire life of the process. "Boot her and it just works" has to mean every
+        # front door, not the one a person happens to be sitting at.
+        #
+        # It is the same call the console makes, with the same guarantees: already provisioned is
+        # a file check, every download and install is flag-gated, and any failure is logged and
+        # never raised — so a cold or offline box still serves, one rung lower, and says so.
+        try:
+            from nyxara.growth.bootstrap import ensure_primary_model
+            ensure_primary_model(log=print)
+        except Exception as bexc:  # noqa: BLE001 — a failed provision must never block the port
+            print(f"NYXARA primary brain: provisioning skipped ({bexc})")
         # Lifelong continuity: the always-on daemon MUST resume prior learning on startup —
         # the whole point of "gets better every minute" is that minute N+1 builds on minute N,
         # across restarts, not from a blank slate. Load the complete learned state (memory +

@@ -46,6 +46,15 @@ def _build_foundry(args: argparse.Namespace) -> Any:
     if args.distilgpt2:
         settings.foundry.backend = "lora"
         settings.foundry.base_model = DISTILGPT2
+        # Record the REAL LoRA spec even on a CPU box. ``Foundry._effective_backend`` downshifts
+        # ``lora`` to ``auto``/``nanogpt`` when there is no CUDA — a sensible clamp for the
+        # *unattended* autonomous loop, and the wrong one here: somebody typed this flag, so the
+        # manifest should say what they asked for. Without this the promoted spec came back
+        # ``kind="auto"``, and a GPU machine reading that manifest later could not rebuild the very
+        # same adapter, which is the whole reason the base is recorded in it.
+        # ``growth/bootstrap.py::_forge`` clears the clamp for exactly this reason on exactly this
+        # path; the one-command shortcut for the same forge was simply missed.
+        settings.foundry.lora_requires_gpu = False
     # A dataset forge trains HER OWN brain by default. The stock backend is "lora" — an adapter
     # over DistilGPT-2, i.e. standing on someone else's base. "auto" resolves through
     # build_model() to a from-scratch net instead: the torch nano-GPT when torch is present, else
