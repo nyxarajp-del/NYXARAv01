@@ -115,13 +115,21 @@ class NyxaraReasoner:
         # decides whether this turn is one forward pass or a deep search.
         self.metacontrol = metacontrol
         self._turn_plan: Any = None
+        #: Did a *caller* install this turn's plan, or did this object compute one for itself?
+        #: The difference decides who may clear it — see :meth:`__call__`.
+        self._plan_installed = False
 
     # ------------------------------------------------------------------ #
     # Metacognitive compute allocation (mind/metacontrol.py)
     # ------------------------------------------------------------------ #
     def install_turn_plan(self, plan: Any) -> None:
-        """The kernel hands this turn's ComputeBudget in before invoking the reasoner."""
+        """The kernel hands this turn's ComputeBudget in before invoking the reasoner.
+
+        ``None`` clears it, which is how the kernel ends a turn: an installed plan outlives a
+        single call on purpose (see :meth:`__call__`), so something has to retire it.
+        """
         self._turn_plan = plan
+        self._plan_installed = plan is not None
         if self.llm_reasoner is not None:
             try:
                 self.llm_reasoner.turn_plan = plan  # the self-model router reads the difficulty
@@ -143,12 +151,22 @@ class NyxaraReasoner:
         except Exception:  # noqa: BLE001 — never let the mind crash the loop
             return _default_reasoner(stimulus, focus)
         finally:
-            self._turn_plan = None  # a stale plan must never leak into the next turn
-            if self.llm_reasoner is not None:
-                try:
-                    self.llm_reasoner.turn_plan = None
-                except Exception:  # noqa: BLE001
-                    pass
+            # Clear only a plan this object computed for itself. An INSTALLED plan belongs to the
+            # turn, not to this call, and clearing it here was a race with real teeth: the kernel
+            # runs its hypothesis framings CONCURRENTLY through one shared reasoner
+            # (``orchestrator._reason_parallel``), so the first framing to finish wiped the budget
+            # out from under its siblings — and every guard downstream reads
+            # ``if plan is not None and entry_rung <= 0``, which fails OPEN. Measured on "kya kar
+            # rahi ho" with a rung-0 allocation: 183 cortex generations, 96 of them MCTS rollouts,
+            # for a turn her own metacontroller had priced at one forward pass. The count moved
+            # between 12 and 524 run to run, because it was thread interleaving.
+            if not self._plan_installed:
+                self._turn_plan = None
+                if self.llm_reasoner is not None:
+                    try:
+                        self.llm_reasoner.turn_plan = None
+                    except Exception:  # noqa: BLE001
+                        pass
 
     def _reason(self, stimulus: str, focus: Any, memories: Optional[List[Any]]) -> Candidate:
         # Standalone use (no kernel installed a plan): compute the metacognitive allocation
@@ -157,8 +175,10 @@ class NyxaraReasoner:
             try:
                 if self.metacontrol.enabled():
                     self.install_turn_plan(self.metacontrol.plan(stimulus))
+                    self._plan_installed = False   # ours to compute, and ours to clear
             except Exception:  # noqa: BLE001 — allocation is advisory, never fatal
                 self._turn_plan = None
+                self._plan_installed = False
         mems = self._gather_memories(stimulus, memories)
         outcome = self._route(stimulus, mems)
         if self._looks_like_action(stimulus):
