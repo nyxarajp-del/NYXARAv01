@@ -6097,6 +6097,11 @@ class NyxaraCore:
         self._last_latent_novelty = None   # fresh hyperdimensional novelty per turn
         self._last_manifold = None         # fresh hyperbolic-manifold observation per turn
         self._last_compute_plan = None     # fresh metacognitive allocation per turn
+        # And retire the previous turn's plan from the reasoner. An installed plan deliberately
+        # outlives a single call — the hypothesis framings run concurrently through one shared
+        # reasoner and every one of them needs the same budget — so the turn boundary, not the
+        # first framing to finish, is what ends it.
+        self._retire_turn_plan()
         self._turn_clock = time.monotonic()   # the turn's own wall clock (see _budget_spent)
         self._skipped_stages = []             # optional cognition dropped to keep the budget
 
@@ -6768,7 +6773,8 @@ class NyxaraCore:
                 except Exception:  # noqa: BLE001
                     competence = None
             plan = mc.plan(stimulus, novelty=self._last_latent_novelty,
-                           recall_strength=recall_strength, competence=competence)
+                           recall_strength=recall_strength, competence=competence,
+                           act=self._speech_act(stimulus))
             self._last_compute_plan = plan
             install = getattr(self.reasoner, "install_turn_plan", None)
             if callable(install):
@@ -6783,6 +6789,45 @@ class NyxaraCore:
             return plan
         except Exception:  # noqa: BLE001 — allocation is advisory, never fatal
             self._last_compute_plan = None
+            return None
+
+    def _retire_turn_plan(self) -> None:
+        """Clear any compute plan left on the reasoner. Best-effort, never fatal."""
+        install = getattr(self.reasoner, "install_turn_plan", None)
+        if callable(install):
+            try:
+                install(None)
+            except Exception:  # noqa: BLE001 — a reasoner that cannot be cleared still reasons
+                pass
+
+    def _speech_act(self, stimulus: str) -> Optional[str]:
+        """What the Master was *doing* with this turn, for the compute allocation.
+
+        The one signal the metacontroller had no way to compute for itself. Its estimate blends
+        novelty, recall and competence — all of which answer "have I met this before" — and for
+        smalltalk that is the wrong question. Measured: an unfamiliar "Hii" scored novelty ~1.0,
+        which alone carried difficulty to 0.38, off the fast path and into the full apparatus —
+        six role-council queries plus five recursive-improve iterations, twelve generations of a
+        9B model for a word. A greeting she has never seen is still a greeting.
+
+        Read by :class:`~nyxara.njp.relevance.SpeechActReader`, which already does exactly this
+        job one layer down and is where "never reason merely because reasoning is available" is
+        already written down. Cached per process — the reader is stateless and deterministic —
+        and every failure returns ``None``, which restores the previous behaviour exactly.
+        """
+        reader = getattr(self, "_act_reader", None)
+        if reader is None:
+            try:
+                from nyxara.njp.relevance import SpeechActReader
+                reader = SpeechActReader()
+            except Exception:  # noqa: BLE001 — without it the allocation is simply less informed
+                reader = False
+            self._act_reader = reader
+        if not reader:
+            return None
+        try:
+            return str(reader.read(stimulus).kind)
+        except Exception:  # noqa: BLE001
             return None
 
     def _recall_for(self, stimulus: str) -> List[Any]:

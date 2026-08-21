@@ -195,6 +195,19 @@ class LLMResponse:
 # back into the INVALID_ARGUMENT this budgeting exists to prevent.
 _CONTEXT_SAFETY_TOKENS = 192
 
+#: Written into the gap wherever a prompt is cut. Counted against the budget rather than added on
+#: top of it — see :meth:`GGUFProvider._shrink`.
+_TRIM_MARK = "\n…[trimmed to fit the context window]…\n"
+
+#: The most of an allocated context window one request's *output* may claim; the rest belongs to
+#: its input. The split has to exist because the two share one KV cache, and without it the
+#: shipped defaults contradict each other: ``llm.max_output_tokens`` is 8192 while
+#: ``qwythos_context_tokens`` is 8192 and ``litertlm_context_tokens`` is 4096, so a caller asking
+#: for a full-length answer left zero — or negative — room for its own prompt.
+_OUTPUT_SHARE = 0.5
+#: A reply shorter than this is not worth generating, so the cap never shrinks past it.
+_MIN_OUTPUT_TOKENS = 128
+
 
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token) for budgeting and native usage."""
@@ -914,6 +927,23 @@ class LiteRTLMProvider(LLMProviderBase):
                 history.append(litert_lm.Message.model(litert_lm.Contents.of(content)))
         return history, turns[send_at][1]
 
+    def _budget(self, req: LLMRequest) -> Tuple[int, int, int]:
+        """``(window, input_budget, output_cap)`` that can actually coexist in one KV cache.
+
+        Identical arithmetic to ``GGUFProvider._budget`` and identical reason: ``max_output_tokens``
+        ships at 8192 and this window is 4096, so ``window - max_tokens - safety`` was **negative**
+        for every full-length ask, the old fallback quietly halved the window, and the runtime was
+        then handed the caller's original 8192-token ask anyway — twice the window, in a rung whose
+        documented failure mode is that one INVALID_ARGUMENT takes it off the ladder for the whole
+        process.
+        """
+        window = max(512, int(getattr(self.settings.llm, "litertlm_context_tokens", 4096)))
+        ask = max(1, int(req.max_tokens))
+        out = max(_MIN_OUTPUT_TOKENS, min(ask, int(window * _OUTPUT_SHARE)))
+        out = min(out, max(_MIN_OUTPUT_TOKENS, window - _CONTEXT_SAFETY_TOKENS))
+        budget = max(256, window - out - _CONTEXT_SAFETY_TOKENS)
+        return window, budget, out
+
     def _fit_context(self, litert_lm: Any, history: List[Any], prompt: str,
                      req: LLMRequest) -> Tuple[List[Any], str]:
         """Trim the prompt to what the model can actually accept.
@@ -937,10 +967,7 @@ class LiteRTLMProvider(LLMProviderBase):
         Room is reserved for the completion, because the limit is on input *plus* output.
         """
         try:
-            window = int(getattr(self.settings.llm, "litertlm_context_tokens", 4096))
-            budget = window - int(req.max_tokens) - _CONTEXT_SAFETY_TOKENS
-            if budget <= 0:
-                budget = max(256, window // 2)
+            window, budget, _out = self._budget(req)
 
             def size(text: str) -> int:
                 return estimate_tokens(text)
@@ -1105,8 +1132,13 @@ class LiteRTLMProvider(LLMProviderBase):
         )
         # One engine, serialized: the runtime holds a single set of weights, and a 2.4 GB INT4 model
         # on CPU is the bottleneck anyway — concurrent turns queue rather than corrupt each other.
+        window, _budget_in, max_out = self._budget(req)
+        if max_out < int(req.max_tokens):
+            log.info("litertlm: output capped at %d tokens (caller asked for %d) to leave room "
+                     "for its own prompt in the %d-token window",
+                     max_out, int(req.max_tokens), window)
         with self._lock:
-            raw = self._send(engine, litert_lm, history, prompt, sampler, int(req.max_tokens))
+            raw = self._send(engine, litert_lm, history, prompt, sampler, max_out)
         text, hit = truncate_at_stops(self._extract_text(raw), tuple(req.stop) + _GEMMA_STOPS)
         completion = estimate_tokens(text)
         # Honest finish reason. A stop marker in the text means the model ran past its turn and we
@@ -1115,7 +1147,7 @@ class LiteRTLMProvider(LLMProviderBase):
         if hit:
             finish = "stop"
         else:
-            finish = "length" if completion >= int(req.max_tokens) else "stop"
+            finish = "length" if completion >= max_out else "stop"
         usage = Usage(prompt_tokens=estimate_tokens(prompt), completion_tokens=completion)
         return (text, finish, usage,
                 {"litertlm": True, "model": model, "on_device": True})
@@ -1127,6 +1159,7 @@ class LiteRTLMProvider(LLMProviderBase):
 #: Qwen-family turn markers. llama.cpp applies the template embedded in the GGUF, so these are a
 #: backstop for a model that runs past its turn rather than the primary mechanism.
 _QWEN_STOPS = ("<|im_end|>", "<|endoftext|>")
+
 
 #: Chat handlers that can drive a vision projector, newest first. Each name either exists in the
 #: installed ``llama_cpp`` or it does not — and which one fits THIS projector is a fact about the
@@ -1451,6 +1484,65 @@ class GGUFProvider(LLMProviderBase):
             out.append({"role": "user", "content": ""})
         return out
 
+    @staticmethod
+    def _shrink(message: Dict[str, str], room: int, what: str, window: int, *,
+                warn: bool = False, before: int = 0, budget: int = 0) -> Dict[str, str]:
+        """Cut ``message`` to ``room`` tokens, keeping its head and its tail.
+
+        Head and tail rather than a prefix: the head of a system prompt carries her identity and
+        the tail carries the task instructions, and a message that keeps only one of them is being
+        asked a different question than the caller wrote.
+
+        ``_TRIM_MARK`` is paid for out of ``room`` rather than added on top — not doing that left
+        every shrunken prompt ~10 tokens over budget, which fired the next step immediately and
+        printed a pair of alarming warnings for an overshoot no caller could have caused.
+        """
+        text = message.get("content") or ""
+        if room <= 0 or estimate_tokens(text) <= room:
+            return message
+        keep = max(0, room * 4 - len(_TRIM_MARK))
+        if keep <= 0:
+            return message                       # nothing survives a cut this deep; leave it whole
+        out = {**message,
+               "content": text[: keep // 2] + _TRIM_MARK + text[-(keep // 2):]}
+        if warn:
+            # A warning, because everything else has already been cut and the Master's own words
+            # are going now. With numbers: "exceeded the context window" said nothing about
+            # whether ten tokens went or ten thousand.
+            log.warning("qwythos: the %s did not fit — dropped %d of %d tokens to reach the "
+                        "%d-token input budget", what,
+                        before - estimate_tokens(out["content"]), before, budget)
+        else:
+            # INFO. A system prompt longer than the window it has to share is an ordinary fact
+            # about a long-context assembler meeting a small allocation; it is not something the
+            # operator can act on, and printing it at WARNING every turn taught him to ignore the
+            # log — which is how the real warning below would have been missed too.
+            log.info("qwythos: %s trimmed from %d to ~%d tokens to fit the %d-token window",
+                     what, estimate_tokens(text), estimate_tokens(out["content"]), window)
+        return out
+
+    def _budget(self, req: LLMRequest) -> Tuple[int, int, int]:
+        """``(window, input_budget, output_cap)`` that can actually coexist in one KV cache.
+
+        The bug this replaces was arithmetic, and it was silent. ``budget = window - max_tokens -
+        safety`` reads correctly until the two numbers are the same: ``llm.max_output_tokens``
+        ships at 8192 and ``llm.qwythos_context_tokens`` is allocated at 8192, so every caller that
+        asked for a full-length answer produced a **negative** input budget. The old fallback then
+        quietly halved the window and — this is the part that mattered — still handed llama.cpp the
+        caller's original 8192-token ask. Measured on a real turn: 3,907 tokens of trimmed input
+        plus an 8,192-token output ask against an 8,192-token window, a 3,907-token overflow, after
+        two warnings claiming the prompt had been made to fit.
+
+        So the output ask is capped here rather than trusted. A caller may want a document; what it
+        may not do is claim the whole window it has to share with its own prompt.
+        """
+        window = max(512, int(getattr(self.settings.llm, "qwythos_context_tokens", 8192)))
+        ask = max(1, int(req.max_tokens))
+        out = max(_MIN_OUTPUT_TOKENS, min(ask, int(window * _OUTPUT_SHARE)))
+        out = min(out, max(_MIN_OUTPUT_TOKENS, window - _CONTEXT_SAFETY_TOKENS))
+        budget = max(256, window - out - _CONTEXT_SAFETY_TOKENS)
+        return window, budget, out
+
     def _fit_context(self, messages: List[Dict[str, str]],
                      req: LLMRequest) -> List[Dict[str, str]]:
         """Trim the conversation to what the loaded context can actually accept.
@@ -1470,10 +1562,7 @@ class GGUFProvider(LLMProviderBase):
         3. **the user's actual message last**, and only if it alone exceeds the window.
         """
         try:
-            window = int(getattr(self.settings.llm, "qwythos_context_tokens", 8192))
-            budget = window - int(req.max_tokens) - _CONTEXT_SAFETY_TOKENS
-            if budget <= 0:
-                budget = max(256, window // 2)
+            window, budget, _out = self._budget(req)
 
             def total(msgs: List[Dict[str, str]]) -> int:
                 return sum(estimate_tokens(m.get("content") or "") for m in msgs)
@@ -1494,37 +1583,29 @@ class GGUFProvider(LLMProviderBase):
                          len(messages) - len(trimmed), window)
                 return trimmed
 
-            # 2. shrink the system prompt from the middle, keeping head and tail
+            # 2. shrink the system prompt from the middle, keeping head and tail.
+            #
+            # It keeps a floor share rather than only the leftovers. Sized against the leftovers
+            # alone, an oversized user message drove `room` to zero and her identity and task
+            # instructions were **deleted outright** — to make room for a message step 3 then went
+            # on to truncate anyway. Whatever else is cut, she must still know who she is and what
+            # she was asked to do.
             idx = next((i for i, m in enumerate(trimmed) if m["role"] == "system"), None)
             if idx is not None:
-                tail_cost = total([m for i, m in enumerate(trimmed) if i != idx])
-                room = max(0, budget - tail_cost)
-                text = trimmed[idx]["content"]
-                if estimate_tokens(text) > room:
-                    keep = max(0, room * 4)
-                    if keep <= 0:
-                        trimmed.pop(idx)
-                        log.warning("qwythos: the system prompt did not fit the %d-token window "
-                                    "at all and was dropped", window)
-                    else:
-                        head, tail = text[: keep // 2], text[-(keep // 2):] if keep // 2 else ""
-                        trimmed[idx] = {"role": "system",
-                                        "content": f"{head}\n…[trimmed to fit the context "
-                                                   f"window]…\n{tail}"}
-                        log.warning("qwythos: system prompt trimmed to fit the %d-token window",
-                                    window)
+                others = total([m for i, m in enumerate(trimmed) if i != idx])
+                room = max(budget // 4, budget - others)
+                trimmed[idx] = self._shrink(trimmed[idx], room, "system prompt", window)
 
-            # 3. last resort — the message itself is bigger than the window
+            # 3. last resort — the message itself, against what the budget has actually left.
+            #
+            # Sized against `budget` alone, this ignored the system prompt still sitting beside it
+            # and returned a conversation that was *still* over — which is how a request that had
+            # been trimmed twice reached llama.cpp too large anyway.
             if total(trimmed) > budget and trimmed:
-                last = trimmed[-1]
-                keep_chars = max(256, (budget - _CONTEXT_SAFETY_TOKENS) * 4)
-                content = last.get("content") or ""
-                if len(content) > keep_chars:
-                    trimmed[-1] = {**last,
-                                   "content": content[: keep_chars // 2] + "\n…[trimmed]…\n"
-                                              + content[-(keep_chars // 2):]}
-                    log.warning("qwythos: the request itself exceeded the context window "
-                                "and was trimmed")
+                room = budget - total(trimmed[:-1])
+                before = estimate_tokens(trimmed[-1].get("content") or "")
+                trimmed[-1] = self._shrink(trimmed[-1], room, "message", window, warn=True,
+                                           before=before, budget=budget)
             return trimmed
         except Exception:  # noqa: BLE001 — a failed trim sends the original and lets llama.cpp say so
             return messages
@@ -1535,11 +1616,18 @@ class GGUFProvider(LLMProviderBase):
             raise LLMError("llama_cpp is not installed",
                            context={"provider": self.name, "detail": self._import_error})
         llama = self._get_model(binding)
+        window, _budget_in, max_out = self._budget(req)
+        if max_out < int(req.max_tokens):
+            # Said once, at INFO, and with both numbers: a caller that keeps asking for more than
+            # the window can hold is worth noticing, and silently granting it was how a request
+            # that could not fit reached llama.cpp in the first place.
+            log.info("qwythos: output capped at %d tokens (caller asked for %d) to leave room for "
+                     "its own prompt in the %d-token window", max_out, int(req.max_tokens), window)
         messages = self._fit_context(self._messages(req), req)
 
         kwargs: Dict[str, Any] = {
             "messages": messages,
-            "max_tokens": int(req.max_tokens),
+            "max_tokens": max_out,
             "temperature": float(req.temperature),
             "top_p": float(req.top_p),
             "top_k": int(getattr(self.settings.llm, "qwythos_top_k", 40)),
@@ -1574,7 +1662,7 @@ class GGUFProvider(LLMProviderBase):
             finish = "stop"
         else:
             finish = str(choice.get("finish_reason") or
-                         ("length" if completion >= int(req.max_tokens) else "stop"))
+                         ("length" if completion >= max_out else "stop"))
         usage = Usage(prompt_tokens=int(usage_in.get("prompt_tokens")
                                         or estimate_tokens("".join(m["content"] for m in messages))),
                       completion_tokens=completion)

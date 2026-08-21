@@ -63,6 +63,22 @@ _HARD_CUES = ("prove", "theorem", "derive", "derivation", "from first principles
               "strategy", "analyze", "analyse", "compare and", "trade-off", "tradeoff",
               "implement", "refactor", "debug", "integral", "equation", "conjecture", "lemma",
               "what would happen if", "counterfactual", "simulate")
+#: Speech acts that are about the two of them, or about her, rather than about the world — the
+#: names :class:`nyxara.njp.relevance.SpeechAct` uses. Kept as bare strings so this module keeps
+#: its "deterministic, no dependencies" character: the caller does the reading, this only prices it.
+_SOCIAL_ACTS = frozenset({"greeting", "farewell", "thanks", "social_checkin", "state_query"})
+
+#: What a social turn's difficulty may reach, whatever the runtime signals say. Below
+#: ``easy_below`` (0.30) by design, so such a turn lands on the fast path.
+#:
+#: The bug this exists for: latent novelty answers "have I met this input before", and for
+#: smalltalk that has nothing to do with how hard the turn is. A greeting she has not seen
+#: scores novelty ~1.0, ``0.35 * introspected`` alone carries it to 0.38, and the first "Hii" of
+#: every session bought the full apparatus — six role-council queries, five recursive-improve
+#: iterations — for a word she could answer in one pass. A greeting she has never seen is still
+#: a greeting.
+_SOCIAL_CEILING = 0.12
+
 _SMALLTALK = ("hello", "hi ", "hi!", "hi.", "hey", "thanks", "thank you", "good morning",
               "good evening", "good night", "how are you", "nice to", "ok", "okay", "yes",
               "no problem", "great", "cool", "bye", "goodbye", "see you")
@@ -84,10 +100,13 @@ class DifficultySignals:
     length: float = 0.0                        # word-count ramp (full at ~120 words)
     stakes: float = 0.0                        # keyword stakes (mirrors effort_memory buckets)
     shape: str = "statement"                   # math | command | question | statement
+    act: str = ""                              # speech act, when the caller read one
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"length": round(self.length, 4), "stakes": round(self.stakes, 4),
                                "shape": self.shape}
+        if self.act:
+            out["act"] = self.act
         for name in ("novelty", "recall_strength", "competence", "effort_history",
                      "self_consistency"):
             v = getattr(self, name)
@@ -197,8 +216,15 @@ class MetacognitiveController:
     def estimate(self, stimulus: str, *, novelty: Optional[float] = None,
                  recall_strength: Optional[float] = None,
                  competence: Optional[float] = None,
-                 self_consistency: Optional[float] = None) -> DifficultyEstimate:
-        """Blend NYXARA's own signals into one calibrated difficulty for this turn."""
+                 self_consistency: Optional[float] = None,
+                 act: Optional[str] = None) -> DifficultyEstimate:
+        """Blend NYXARA's own signals into one calibrated difficulty for this turn.
+
+        ``act`` is the caller's reading of what the Master was *doing* with the turn
+        (:class:`nyxara.njp.relevance.SpeechAct`). It is not another hardness cue — it is the one
+        signal that can say a turn is trivial *regardless* of what the runtime signals think, and
+        without it an unfamiliar greeting was priced as a hard problem. See :data:`_SOCIAL_CEILING`.
+        """
         sig = signature(stimulus)
         parts = sig.split("/")
         shape = parts[0] if parts else "statement"
@@ -243,15 +269,27 @@ class MetacognitiveController:
         elif shape == "statement":
             difficulty -= 0.05
         difficulty = _clamp(difficulty)
+
+        # A social or reflexive act caps the whole estimate. Deliberately a cap rather than another
+        # subtracted term: the terms it has to beat are unbounded blends of runtime signals, and a
+        # −0.15 nudge lost to a novelty spike every time — which is exactly how this was missed.
+        # Guarded by `hardness == 0.0` so "hey, why does the reactor scram at 400K" is still work.
+        act = str(act or "").strip().lower()
+        capped = bool(act in _SOCIAL_ACTS and hardness == 0.0)
+        if capped:
+            difficulty = min(difficulty, _SOCIAL_CEILING)
         calibrated = self._calibrate(difficulty)
 
         signals = DifficultySignals(
             novelty=novelty, recall_strength=recall_strength, competence=competence,
             effort_history=(None if nudge == 0.0 else _clamp(0.5 + nudge)),
-            self_consistency=self_consistency, length=length, stakes=stakes, shape=shape)
+            self_consistency=self_consistency, length=length, stakes=stakes, shape=shape,
+            act=act)
         reason = (f"introspected={introspected:.2f} hardness={hardness:.2f} length={length:.2f} "
-                  f"stakes={stakes:.2f} nudge={nudge:+.2f} shape={shape} -> "
-                  f"difficulty={difficulty:.2f} (calibrated {calibrated:.2f})")
+                  f"stakes={stakes:.2f} nudge={nudge:+.2f} shape={shape}"
+                  + (f" act={act} (capped at {_SOCIAL_CEILING})" if capped
+                     else (f" act={act}" if act else ""))
+                  + f" -> difficulty={difficulty:.2f} (calibrated {calibrated:.2f})")
         return DifficultyEstimate(difficulty=difficulty, calibrated=calibrated,
                                   signature=sig, signals=signals, reason=reason)
 
@@ -339,7 +377,8 @@ class MetacognitiveController:
 
     def plan(self, stimulus: str, *, novelty: Optional[float] = None,
              recall_strength: Optional[float] = None, competence: Optional[float] = None,
-             self_consistency: Optional[float] = None) -> ComputeBudget:
+             self_consistency: Optional[float] = None,
+             act: Optional[str] = None) -> ComputeBudget:
         """Estimate + allocate in one act; remembers the plan for outcome recording / reporting."""
         if (self_consistency is None and self.probe is not None
                 and bool(self._cfgv("probe_self_consistency", False))):
@@ -348,7 +387,7 @@ class MetacognitiveController:
             except Exception:  # noqa: BLE001 — the probe is optional evidence, never required
                 self_consistency = None
         est = self.estimate(stimulus, novelty=novelty, recall_strength=recall_strength,
-                            competence=competence, self_consistency=self_consistency)
+                            competence=competence, self_consistency=self_consistency, act=act)
         budget = self.allocate(est)
         self.last_plan = budget
         return budget

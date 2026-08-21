@@ -121,3 +121,47 @@ def test_recursive_improve_respects_fast_path():
     nyx._last_compute_plan = None
     nyx._recursive_improve("hello", cand)
     assert imp.called is True                   # without a fast-path plan it runs as before
+
+
+# --------------------------------------------------------------------------- #
+# The act reaches the allocation, and the allocation survives the turn
+# --------------------------------------------------------------------------- #
+def test_the_speech_act_reaches_the_compute_plan():
+    """The signal the metacontroller could not compute for itself.
+
+    Its estimate blends novelty, recall and competence — all of which answer "have I met this
+    before" — so an unfamiliar greeting scored as a hard problem and bought the full apparatus.
+    ``relevance.SpeechActReader`` already answers "what was he *doing*" one layer down; this is
+    the kernel handing that answer up.
+    """
+    nyx = NyxaraCore()
+    assert nyx._speech_act("Hii") == "greeting"
+    assert nyx._speech_act("kya kar rahi ho") == "state_query"
+    assert nyx._speech_act("why does iron rust") == "causal_query"
+
+
+def test_an_unfamiliar_greeting_is_still_priced_as_a_greeting():
+    nyx = NyxaraCore()
+    nyx.process("Hii")                          # never seen before: novelty is at its maximum
+    plan = nyx.metacontrol.last_plan
+    assert plan.entry_rung == 0
+    assert plan.estimate.signals.to_dict().get("act") == "greeting"
+
+
+def test_the_turn_plan_is_installed_on_the_reasoner_and_survives_the_turn():
+    """It has to outlive one call: the hypothesis framings run concurrently through one reasoner,
+    and each of them needs the same budget. The turn boundary retires it, not the first framing
+    to finish."""
+    nyx = NyxaraCore()
+    nyx.process("Hii")
+    installed = getattr(nyx.reasoner, "_turn_plan", None)
+    assert installed is not None and installed.entry_rung == 0
+
+
+def test_the_next_turn_retires_the_previous_plan():
+    nyx = NyxaraCore()
+    nyx.process("Hii")
+    nyx.process(HARD)
+    installed = getattr(nyx.reasoner, "_turn_plan", None)
+    # A hard turn must not inherit the greeting's one-forward-pass allocation.
+    assert installed is None or installed.entry_rung > 0

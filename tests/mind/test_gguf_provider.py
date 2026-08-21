@@ -13,13 +13,15 @@ everything that decides whether she is honest about what she can do:
 """
 from __future__ import annotations
 
+import logging
 import sys
 import types
 
 import pytest
 
 from nyxara.kernel.config import NyxaraSettings, Profile
-from nyxara.mind.llm import GGUFProvider, LLMError, LLMRequest
+from nyxara.mind.llm import (GGUFProvider, LLMError, LLMRequest, Message, Role,
+                            estimate_tokens)
 
 _MODEL = "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf"
 _MMPROJ = "mmproj-Qwythos-9B-Claude-Mythos-5-1M-F16.gguf"
@@ -331,3 +333,109 @@ def test_a_budget_too_small_for_the_system_prompt_drops_it_rather_than_keeping_a
     GGUFProvider(settings).complete(request)
     sent = _FakeLlama.instances[0].calls[0]["messages"]
     assert sum(len(m["content"]) for m in sent) < 20_000
+
+
+# --------------------------------------------------------------------------- #
+# Input and output share one KV cache
+#
+# The defect these pin, from a real "Hii" on the Master's machine: `llm.max_output_tokens` ships
+# at 8192 and `qwythos_context_tokens` is allocated at 8192, so `window - max_tokens - safety`
+# was NEGATIVE for every full-length ask. The old fallback quietly halved the window, trimmed the
+# prompt against that half, warned twice about it — and then handed llama.cpp the caller's
+# original 8192-token output ask anyway. Measured: 3,907 tokens of input plus an 8,192-token ask
+# against an 8,192-token window. A request that could not fit, presented as one that had been
+# made to fit.
+# --------------------------------------------------------------------------- #
+def _tokens(messages) -> int:
+    return sum(estimate_tokens(m.get("content") or "") for m in messages)
+
+
+def _sent(provider, *, system: str, user: str, max_tokens: int):
+    provider.complete(LLMRequest(messages=(Message(role=Role.USER, content=user),),
+                                 system=system, max_tokens=max_tokens))
+    return _FakeLlama.instances[0].calls[-1]
+
+
+@pytest.mark.parametrize("system_words,user_words,ask", [
+    (40, 1, 8192),          # the Master's "Hii" — a big-ish system prompt and three characters
+    (4000, 3800, 8192),     # both halves oversized
+    (2, 5000, 512),         # a huge message under a modest ask
+    (2, 2, 512),            # the ordinary turn, which must be left alone
+])
+def test_input_plus_output_always_fits_the_window(tmp_path, monkeypatch, system_words,
+                                                  user_words, ask):
+    _install_binding(monkeypatch)
+    settings = _settings(tmp_path, qwythos_context_tokens=8192)
+    provider = GGUFProvider(settings)
+    call = _sent(provider, system="you are helpful. " * system_words,
+                 user="word " * user_words, max_tokens=ask)
+    total = _tokens(call["messages"]) + call["max_tokens"]
+    assert total <= settings.llm.qwythos_context_tokens, (
+        f"asked llama.cpp for {total} tokens of work in a "
+        f"{settings.llm.qwythos_context_tokens}-token window")
+
+
+def test_the_output_ask_is_capped_not_trusted(tmp_path, monkeypatch):
+    _install_binding(monkeypatch)
+    provider = GGUFProvider(_settings(tmp_path, qwythos_context_tokens=8192))
+    call = _sent(provider, system="be brief", user="hi", max_tokens=8192)
+    # Half the window, so the prompt it has to share with always has room. Passing the caller's
+    # 8192 through was the bug: nothing downstream could have made that fit.
+    assert call["max_tokens"] == 4096
+
+
+def test_a_modest_ask_is_left_exactly_as_asked(tmp_path, monkeypatch):
+    _install_binding(monkeypatch)
+    provider = GGUFProvider(_settings(tmp_path, qwythos_context_tokens=8192))
+    assert _sent(provider, system="be brief", user="hi", max_tokens=512)["max_tokens"] == 512
+
+
+def test_a_greeting_is_sent_untouched_and_says_nothing(tmp_path, monkeypatch, caplog):
+    """The reported symptom: two WARNINGs per call, three times over, for the word "Hii"."""
+    _install_binding(monkeypatch)
+    provider = GGUFProvider(_settings(tmp_path, qwythos_context_tokens=8192))
+    with caplog.at_level(logging.WARNING, logger="nyxara.mind.llm"):
+        call = _sent(provider, system="you are helpful. " * 40, user="Hii", max_tokens=8192)
+    assert [m["content"] for m in call["messages"] if m["role"] == "user"] == ["Hii"]
+    assert caplog.records == [], [r.getMessage() for r in caplog.records]
+
+
+def test_her_identity_is_never_deleted_to_make_room(tmp_path, monkeypatch):
+    """A system prompt keeps a floor share, whatever else has to go.
+
+    Sized against the leftovers alone, an oversized user message drove its room to zero and the
+    system prompt was dropped outright — to make space for a message the next step then truncated
+    anyway. Whatever else is cut, she must still know who she is and what she was asked to do.
+    """
+    _install_binding(monkeypatch)
+    provider = GGUFProvider(_settings(tmp_path, qwythos_context_tokens=8192))
+    call = _sent(provider, system="you are NYXARA. " * 4000, user="word " * 3800, max_tokens=8192)
+    system = [m for m in call["messages"] if m["role"] == "system"]
+    assert system and system[0]["content"].startswith("you are NYXARA")
+
+
+def test_a_trim_lands_under_budget_in_one_pass(tmp_path, monkeypatch, caplog):
+    """One cut per message, not a cut that overshoots and triggers the next one.
+
+    The trim marker is part of what gets sent, and charging it on top of the room rather than out
+    of it left every shrunken prompt ~10 tokens over — which fired the next step immediately and
+    printed the second of the two warnings the Master saw.
+    """
+    _install_binding(monkeypatch)
+    provider = GGUFProvider(_settings(tmp_path, qwythos_context_tokens=8192))
+    with caplog.at_level(logging.WARNING, logger="nyxara.mind.llm"):
+        _sent(provider, system="you are NYXARA. " * 4000, user="word " * 3800, max_tokens=8192)
+    # Exactly one warning, and it is about the Master's own words — the only cut worth a warning.
+    warnings = [r.getMessage() for r in caplog.records]
+    assert len(warnings) == 1, warnings
+    assert "the message did not fit" in warnings[0]
+
+
+def test_a_tiny_window_still_yields_a_usable_request(tmp_path, monkeypatch):
+    """The arithmetic must not invert on a window smaller than the minimum reply."""
+    _install_binding(monkeypatch)
+    settings = _settings(tmp_path, qwythos_context_tokens=512)
+    provider = GGUFProvider(settings)
+    call = _sent(provider, system="be brief", user="word " * 2000, max_tokens=8192)
+    assert call["max_tokens"] >= 1
+    assert _tokens(call["messages"]) + call["max_tokens"] <= 512

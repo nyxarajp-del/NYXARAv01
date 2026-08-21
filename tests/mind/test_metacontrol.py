@@ -221,3 +221,57 @@ def test_effort_history_nudges_difficulty():
     known_hard = MetacognitiveController(settings=s, path=None, effort_memory=_HardEM())
     q = "what is the tallest mountain on each continent of the world today"
     assert known_easy.estimate(q).difficulty < known_hard.estimate(q).difficulty
+
+
+# --------------------------------------------------------------------------- #
+# The speech act is the signal the runtime signals cannot supply
+#
+# Novelty, recall and competence all answer "have I met this input before". For smalltalk that has
+# nothing to do with how hard the turn is: an unfamiliar "Hii" scores novelty ~1.0, `0.35 *
+# introspected` alone carries difficulty to 0.38 — off the fast path — and the first greeting of
+# every session bought the full apparatus. A greeting she has never seen is still a greeting.
+# --------------------------------------------------------------------------- #
+import pytest
+
+from nyxara.mind.metacontrol import _SOCIAL_CEILING
+
+
+@pytest.mark.parametrize("text,act", [
+    ("Hii", "greeting"),
+    ("thanks", "thanks"),
+    ("kya kar rahi ho", "state_query"),
+    ("see you tomorrow", "farewell"),
+])
+def test_a_social_act_lands_on_the_fast_path_however_novel(text, act):
+    mc = MetacognitiveController(path=None)
+    plan = mc.plan(text, novelty=1.0, act=act)
+    assert plan.estimate.calibrated <= _SOCIAL_CEILING
+    assert plan.entry_rung == 0, "one forward pass is what a greeting is worth"
+
+
+def test_without_an_act_the_estimate_is_unchanged():
+    """The signal is additive: a caller that reads no act gets exactly the prior behaviour."""
+    mc = MetacognitiveController(path=None)
+    assert mc.plan("Hii", novelty=1.0).entry_rung >= 1
+
+
+def test_a_greeting_wrapped_around_real_work_is_still_work():
+    """The `hardness == 0.0` guard: "hey, why does X" is a question with a hello on the front."""
+    mc = MetacognitiveController(path=None)
+    plan = mc.plan("hey why does the reactor scram at 400K", novelty=1.0, act="greeting")
+    assert plan.entry_rung >= 1
+    assert plan.estimate.calibrated > _SOCIAL_CEILING
+
+
+def test_a_working_act_is_never_capped():
+    mc = MetacognitiveController(path=None)
+    plan = mc.plan("why does iron rust in humid air", novelty=1.0, act="causal_query")
+    assert plan.estimate.calibrated > _SOCIAL_CEILING
+
+
+def test_the_act_is_reported_in_the_signals():
+    """Auditable, like every other term in the estimate."""
+    mc = MetacognitiveController(path=None)
+    est = mc.estimate("Hii", novelty=1.0, act="greeting")
+    assert est.signals.to_dict()["act"] == "greeting"
+    assert "act=greeting" in est.reason and "capped" in est.reason

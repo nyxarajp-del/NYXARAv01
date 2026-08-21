@@ -735,3 +735,28 @@ def test_the_embedded_template_is_the_last_resort(weights):
     assert names[-1] == "model-embedded"
     templates = dict(LiteRTLMProvider(_settings(weights))._templates())
     assert templates["model-embedded"] is None, "None means: let the model's own template run"
+
+
+# --------------------------------------------------------------------------- #
+# Input and output share one window here too
+#
+# The same arithmetic defect that was found on the cortex rung lives here, and it is worse: this
+# window is 4096 while `llm.max_output_tokens` ships at 8192, so a full-length ask was handed to a
+# runtime whose documented failure mode is that one INVALID_ARGUMENT takes the rung off the ladder
+# for the rest of the process — and every later turn then falls silently to the n-gram floor.
+# --------------------------------------------------------------------------- #
+def test_the_output_ask_never_exceeds_what_the_window_can_hold(monkeypatch, weights):
+    _install_fake(monkeypatch)
+    settings = _settings(weights)
+    provider = LiteRTLMProvider(settings)
+    provider.complete(LLMRequest.from_prompt("who are you?", max_tokens=8192))
+    _message, asked = _Engine.instances[0].sent[-1]
+    window = settings.llm.litertlm_context_tokens
+    assert asked <= window // 2, f"asked for {asked} output tokens in a {window}-token window"
+
+
+def test_a_modest_ask_reaches_the_runtime_unchanged(monkeypatch, weights):
+    _install_fake(monkeypatch)
+    provider = LiteRTLMProvider(_settings(weights))
+    provider.complete(LLMRequest.from_prompt("hi", max_tokens=256))
+    assert _Engine.instances[0].sent[-1][1] == 256
