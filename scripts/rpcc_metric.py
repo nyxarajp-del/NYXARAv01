@@ -123,7 +123,10 @@ BATTERY: Tuple[Case, ...] = (
          "THE reproduced bug: parsed as an intervention, never reached the do-operator"),
     Case("counterfactual", _PLANT, "agar paani aadha ho to kya hoga", ANSWERS,
          "same question, the variable-first surface"),
-    Case("counterfactual", _PLANT, "what if the water is halved", ANSWERS,
+    # Taught in English so this measures the English *surface* of a counterfactual and not
+    # whether she knows that "water" and "paani" are the same variable, which is a different
+    # question and one nothing here has told her the answer to.
+    Case("counterfactual", ("water causes growth",), "what if the water is halved", ANSWERS,
          "same question, English passive"),
     Case("counterfactual", _PLANT, "agar paani band kar doon to kya hoga", ANSWERS,
          "the zero intervention — a different question from halving"),

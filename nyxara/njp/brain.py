@@ -200,6 +200,11 @@ class NJPThought:
     # it. Carried so a reply that reached for something irrelevant is visible from outside rather
     # than having to be inferred from the reply itself.
     act: Any = None
+    #: This turn compiled into one executable operation — a ``njp.compile.CognitiveOp``. The
+    #: three readings of a turn (intent, speech act, pattern match) meet here and nowhere else;
+    #: before it they never met at all, and the one that could reach the causal engine was the
+    #: one that knew least.
+    op: Any = None
     relevance: List[Any] = dc_field(default_factory=list)
     # The meta-reasoner's own record of how this answer was reached, kept so that when reality
     # grades the answer later the credit can reach the strategy that actually produced it.
@@ -339,6 +344,9 @@ class NJPBrain:
         # an experiment designer that measures information gain; and a belief ledger where every
         # claim carries its own case. Built before `loop` and `field` because both read them.
         self.genesis = self._build_concepts(c)
+        # The one place the three readings of a turn meet. Before `universe`, because the
+        # counterfactual context is compiled through it and the universe is what executes it.
+        self.compiler = self._build_compiler(c)
         self.universe = self._build_universe(c)
         self.designer = self._build_designer(c)
         self.beliefs = self._build_beliefs(c)
@@ -913,14 +921,37 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — without it she has facts and no kinds
             return None
 
+    def _build_compiler(self, c: Any) -> Any:
+        """Language into a typed operation. See :mod:`nyxara.njp.compile`."""
+        if not self._gate("compiler", True):
+            return None
+        try:
+            from nyxara.njp.compile import ThoughtCompiler
+            return ThoughtCompiler()
+        except Exception:  # noqa: BLE001 — without it interventions simply are not compiled
+            return None
+
     def _build_universe(self, c: Any) -> Any:
         """The internal simulation universe. Takes the world model as its causal skeleton."""
         if not self._gate("universe", True):
             return None
         try:
             from nyxara.njp.universe import InternalUniverse
-            return InternalUniverse(world=self.world,
-                                    max_depth=self._cfg("universe_depth", 6))
+            universe = InternalUniverse(world=self.world,
+                                        max_depth=self._cfg("universe_depth", 6))
+            # Import the skeleton the world model already holds, rather than only holding a
+            # reference to it. `InternalUniverse(world=...)` uses the world for `_permitted` —
+            # which arrows *may* be fitted — and nothing else, so a brain-built universe knew
+            # every stated law was permissible and had not declared a single one. `sync_from_world`
+            # is the call that turns "this arrow is allowed" into "this arrow exists, and runs
+            # this way", and the only two places it was called from were the field loop and a
+            # demo. A stated law with no quantities attached is exactly what a text corpus gives
+            # her, and until this it reached the simulator as nothing at all.
+            try:
+                universe.sync_from_world()
+            except Exception:  # noqa: BLE001 — an empty skeleton is not a broken universe
+                pass
+            return universe
         except Exception:  # noqa: BLE001 — without it she can remember but not imagine
             return None
 
@@ -1507,17 +1538,45 @@ class NJPBrain:
             if not variable or self.universe is None:
                 return None
             value = float(ctx.get("value", 0.0))
-            out = self.universe.what_if(variable, value)
+            direction = int(ctx.get("direction", 0) or 0)
+            out = self.universe.intervene({variable: value},
+                                          stated_direction={variable: direction})
             if not out.answerable:
                 return None
-            effects = [d for d in out.changed() if d.variable != variable]
+            effects = [d for d in out.deltas
+                       if d.variable != variable
+                       and (d.qualitative or (d.change is not None and abs(d.change) > 1e-6))]
             if not effects:
                 return None
+
             was = out.factual.get(variable)
-            done = (f"{variable} {float(was):g} → {value:g}" if was is not None
-                    else f"{variable} = {value:g}")
-            entails = "; ".join(f"{d.variable} {d.before:g} → {d.after:g}" for d in effects[:3])
-            return f"{done} predicts {entails} (confidence {out.confidence:.2f})"
+            if was is not None:
+                done = f"{variable} {float(was):g} → {value:g}"
+            elif direction:
+                # No quantity was ever observed for this variable, so there is no "6 → 3" to
+                # state. The sentence still said which way, and saying that is not the same as
+                # inventing a number for it.
+                done = f"{variable} {'lower' if direction < 0 else 'higher'}"
+            else:
+                done = f"{variable} = {value:g}"
+
+            said: List[str] = []
+            for delta in effects[:3]:
+                if delta.qualitative or delta.after is None or delta.before is None:
+                    # Direction only. Rendered as a direction, never as a number she does not
+                    # have — the old rendering formatted `before`/`after` unconditionally and
+                    # raised on exactly this case, so a qualitative answer became no answer.
+                    if delta.direction > 0:
+                        said.append(f"{delta.variable} higher")
+                    elif delta.direction < 0:
+                        said.append(f"{delta.variable} lower")
+                    else:
+                        said.append(f"{delta.variable} changes, direction unknown")
+                else:
+                    said.append(f"{delta.variable} {delta.before:g} → {delta.after:g}")
+            entails = "; ".join(said)
+            note = f" — {out.reason}" if out.reason else ""
+            return f"{done} predicts {entails} (confidence {out.confidence:.2f}){note}"
         except Exception:  # noqa: BLE001
             return None
 
@@ -1537,46 +1596,55 @@ class NJPBrain:
             for variable in list(getattr(self.universe, "state", None) or {}):
                 if variable == want or variable.rsplit(".", 1)[-1] == want:
                     return variable
+            # A variable she has an *arrow* for but has never put a number to. Measured: over a
+            # session where every stated law reached the skeleton, `state` was `{}` and stayed
+            # `{}`, because it is filled only from concepts carrying numbers and a text corpus
+            # states laws without quantities. Resolving against observed values alone therefore
+            # rejected every variable she actually knew about, and "paani" — sitting in three
+            # relations — came back unresolvable.
+            #
+            # Second, and only second: a measured variable is the better answer whenever there is
+            # one, because it can be intervened on quantitatively.
+            for (cause, effect) in list(getattr(self.universe, "relations", None) or {}):
+                for variable in (cause, effect):
+                    if variable == want or variable.rsplit(".", 1)[-1] == want:
+                        return variable
         except Exception:  # noqa: BLE001 — an unresolvable name simply is not simulated
             return ""
         return ""
 
-    def _counterfactual_context(self, question: str) -> Dict[str, Any]:
-        """The intervention a question asks for, as a variable and the value to set it to.
+    def _counterfactual_context(self, question: str, *, intent: Any = None,
+                                act: Any = None) -> Dict[str, Any]:
+        """The intervention a question asks for, compiled rather than pattern-matched.
 
-        Empty where the question names no intervention, names a variable she has never observed,
-        or names an intervention whose size it does not state — each of which is a reason to
-        decline rather than to simulate something adjacent. This is the dict that makes
-        :meth:`_strategy_simulate` reachable at all; without a ``variable`` key it returns ``None``
-        on every call, which is why the do-operator went unused while working perfectly.
+        This used to be four bare regexes joined by ``or``, and it is the whole reason
+        :mod:`nyxara.njp.compile` exists: ``or`` short-circuits, the English word-order pattern
+        matched a Hinglish sentence and took the verb as the variable, and the pattern written for
+        that word order never ran. Without a ``variable`` key :meth:`_strategy_simulate` returns
+        ``None`` on every call, so the do-operator was registered, chosen, run, and unable to do
+        anything — and ``metareason._miss`` charged each of those losses to ``simulate``.
 
-        A factor resolves against what was actually observed, so "halve the water" means half of
-        what this plant has been getting rather than half of an arbitrary unit.
+        A factor still resolves against what was actually observed, so "halve the water" means
+        half of what this plant has been getting rather than half of an arbitrary unit. What is
+        new is that a sentence stating a direction and no quantity now compiles too: *"paani aadha
+        kar doon"* is a decrease whether or not anything has ever been measured.
         """
-        out: Dict[str, Any] = {}
-        if self.universe is None:
-            return out
+        if self.universe is None or self.compiler is None:
+            return {}
         try:
-            text = str(question or "")
-            absolute = _INTERVENTION_ABSOLUTE.search(text)
-            if absolute is not None:
-                variable = self._resolve_variable(absolute.group("var"))
-                if variable:
-                    return {"variable": variable, "value": float(absolute.group("val"))}
-
-            match = _INTERVENTION.search(text) or _INTERVENTION_TRAILING.search(text)
-            if match is None:
-                return out
-            variable = self._resolve_variable(match.group("var"))
-            factor = _INTERVENTION_FACTOR.get(match.group("op").lower())
-            if not variable or factor is None:
-                return out
-            current = getattr(self.universe, "state", None) or {}
-            observed = current.get(variable)
-            if observed is None:
-                return out
-            return {"variable": variable, "value": float(observed) * factor}
-        except Exception:  # noqa: BLE001 — an unparsed intervention is simply not simulated
+            # Laws stated earlier in this session reach the simulator here. The field loop also
+            # syncs, but it runs at step 11 — after this — so without it a law stated on turn N
+            # was unusable until turn N+1, which reads from outside as her having forgotten it.
+            try:
+                self.universe.sync_from_world()
+            except Exception:  # noqa: BLE001
+                pass
+            op = self.compiler.compile(
+                str(question or ""), intent=intent, act=act,
+                resolve=self._resolve_variable,
+                state=getattr(self.universe, "state", None) or {})
+            return op.to_context()
+        except Exception:  # noqa: BLE001 — an uncompiled intervention is simply not simulated
             return {}
 
     def _strategy_ladder(self, problem: str, ctx: Dict[str, Any]) -> Any:
@@ -2149,7 +2217,17 @@ class NJPBrain:
                 # two keys `_strategy_simulate` returns None on every call, so the do-operator
                 # was registered, chosen, run and unable to do anything — the gap that made a
                 # working causal engine unreachable from a causal question.
-                context.update(self._counterfactual_context(thought.stimulus))
+                compiled = self._counterfactual_context(
+                    thought.stimulus, intent=thought.intent, act=thought.act)
+                thought.op = compiled.get("op")
+                context.update(compiled)
+                # The speech act already decided what kind of question this is, with a margin.
+                # Letting `ProblemClassifier` re-derive it from a bag of words is two classifiers
+                # with no shared channel, and on the reported sentence they disagreed: the act
+                # reader said causal_query at 0.85, the classifier said empirical at 0.50, and the
+                # three strategies empirical selects cannot answer an intervention.
+                if thought.op is not None and getattr(thought.op, "kind", ""):
+                    context["kind_hint"] = thought.op.kind
                 # Whether there is a closed sum in here at all. A parse result rather than a
                 # keyword, for the same reason the intervention above is: the classifier can
                 # count digits and operators but cannot tell "2+2" from "100 degree at 3pm", and
@@ -3080,6 +3158,7 @@ class NJPBrain:
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
+                            ("compiler", self.compiler),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue                       # an organ that is off is ABSENT, not zeroed
@@ -3123,6 +3202,7 @@ class NJPBrain:
                             ("field", self.field), ("learner", self.learner),
                             ("adversary", self.adversary),
                             ("cortex", self.cortex), ("router", self.router),
+                            ("compiler", self.compiler),
                             ("epistemic", self.epistemic)):
             if organ is None:
                 continue

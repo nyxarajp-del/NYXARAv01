@@ -284,6 +284,16 @@ class ProblemClassifier:
             # conditional, and only the parse can tell them apart.
             scores[ProblemKind.CAUSAL] += 0.6
 
+        if ctx.get("kind_hint") in scores:
+            # What the *speech act* reader made of this turn. It read the sentence as a speech
+            # act — with a margin — before any of this ran, and this scores a bag of words. On the
+            # sentence that started all of this the two disagreed: causal_query at 0.85 against
+            # empirical at 0.50, and empirical selects three strategies that cannot answer an
+            # intervention. Weighted to outrank the word cues without erasing them, because a
+            # speech act names what the turn is *doing* and this names what it is *about*, and a
+            # turn can do one while being about the other.
+            scores[str(ctx["kind_hint"])] += 0.55
+
         if words & _SELF_WORDS:
             scores[ProblemKind.INTROSPECTIVE] += 0.4
         if ctx.get("about_self"):
@@ -378,6 +388,20 @@ class MetaReasoner:
                     break
         return strategy
 
+    def _preferred(self, ctx: Dict[str, Any]) -> Optional[Strategy]:
+        """The strategy the *caller's parse* named, when it named one and it is registered.
+
+        ``ctx["prefer"]`` is set only where a turn compiled into an operation with machinery
+        behind it (see :mod:`nyxara.njp.compile`). It is not a hint from a keyword and it is not
+        the bandit being overruled — the strategy still has to exist, still has to run, and its
+        outcome is still scored, so preferring one that keeps failing costs it its record.
+        """
+        name = str(ctx.get("prefer") or "").strip()
+        if not name:
+            return None
+        strategy = self.strategies.get(name)
+        return strategy if (strategy is not None and strategy.solve is not None) else None
+
     def _candidates(self, kind: str) -> List[Strategy]:
         exact = [s for s in self.strategies.values() if kind in s.kinds]
         # A strategy that names no kinds is a generalist and is always eligible — otherwise a
@@ -411,7 +435,19 @@ class MetaReasoner:
             out.classification = self.classifier.classify(out.problem, context=ctx)
             out.kind = out.classification.kind
 
-            strategy = self.choose(out.kind)
+            # A turn that compiled into an executable operation names the strategy that can run
+            # it, and that is a parse result rather than a preference — the same standing the
+            # `variable` key has in the classifier. It does not override the bandit's learning: it
+            # constrains which strategy goes *first* on the turns where something was actually
+            # compiled, and the outcome is scored exactly as any other, so a preferred strategy
+            # that keeps failing still loses its record.
+            #
+            # Without it, measured: an intervention on a stated law classified CAUSAL, the bandit
+            # led with `causal`, that returned nothing, `derive` answered with a fact from the far
+            # end of the chain, the critic threw it out for naming a cause the world model does
+            # not hold — and `simulate`, which had the answer, was never the third attempt because
+            # the loop stops as soon as anything at all comes back.
+            strategy = self._preferred(ctx) or self.choose(out.kind)
             if strategy is None or strategy.solve is None:
                 self.abstained += 1
                 out.critique.defects.append("no strategy registered for this kind")

@@ -432,13 +432,22 @@ class InternalUniverse:
         return [r for r in self.relations.values() if r.directional]
 
     def intervene(self, interventions: Dict[str, Any],
-                  base: Optional[Dict[str, Any]] = None) -> CounterfactualResult:
+                  base: Optional[Dict[str, Any]] = None,
+                  stated_direction: Optional[Dict[str, int]] = None) -> CounterfactualResult:
         """``do(X = x)``: set the variables, sever their incoming arrows, propagate downstream.
 
         Severing is what makes this an intervention rather than an observation. If she merely
         *conditioned* on low water she would also be selecting for the reasons water was low,
         and every one of those reasons would leak into the answer. Setting it cuts those arrows,
         which is precisely the counterfactual the Master asked for.
+
+        ``stated_direction`` carries which way an intervention goes when there is no factual value
+        to work it out from. :meth:`_propagate_direction` reads direction by comparing the new
+        value against the old one, which is right whenever something has been measured and is
+        silent whenever nothing has — and *"halve the water"* says *down* either way. The sentence
+        knows something the arithmetic cannot supply, and this is how it gets in. Values here are
+        ``-1``/``0``/``+1`` and are used **only** where the factual value is missing; a measured
+        baseline always wins, because a claim about a number should come from the number.
         """
         result = CounterfactualResult()
         try:
@@ -506,7 +515,8 @@ class InternalUniverse:
             # way, and refusing to answer at all — which is what happened for every counterfactual
             # over 1,200 corpus pairs — throws away the only causal knowledge a text corpus
             # actually supplies.
-            self._propagate_direction(fixed, factual, settled, result)
+            self._propagate_direction(fixed, factual, settled, result,
+                                      stated=stated_direction or {})
 
             downstream = [d.confidence for d in result.deltas if d.variable not in fixed]
             result.confidence = (sum(downstream) / len(downstream)) if downstream else 0.0
@@ -520,7 +530,8 @@ class InternalUniverse:
             return result
 
     def _propagate_direction(self, fixed: Dict[str, float], factual: Dict[str, float],
-                             settled: Set[str], result: CounterfactualResult) -> None:
+                             settled: Set[str], result: CounterfactualResult,
+                             stated: Optional[Dict[str, int]] = None) -> None:
         """Walk the stated skeleton, carrying a sign where there is no coefficient to carry.
 
         The sign of the intervention matters and is read from the factual state: setting a
@@ -532,13 +543,18 @@ class InternalUniverse:
         knowledge — she was told the arrow exists — and it should never read like a measurement.
         """
         try:
+            told = stated or {}
             direction: Dict[str, int] = {}
             for name, value in fixed.items():
                 before = factual.get(name)
-                if before is None:
-                    direction[name] = 0
-                else:
+                if before is not None:
+                    # A measured baseline always decides. A claim about a number comes from the
+                    # number, never from what the sentence expected the number to do.
                     direction[name] = 1 if value > before else (-1 if value < before else 0)
+                else:
+                    # Nothing measured. The sentence said which way, or nobody did.
+                    said = int(told.get(name, 0) or 0)
+                    direction[name] = 1 if said > 0 else (-1 if said < 0 else 0)
 
             frontier = list(fixed)
             seen: Set[str] = set(fixed)
