@@ -191,6 +191,8 @@ class NJPThought:
     # different epistemic objects: a derived answer is defeasible however confident it reads, and
     # a caller that cannot tell it from a stated fact will eventually state it as one.
     derivation: Any = None
+    #: The ranked field of accounts for this turn — see :mod:`nyxara.njp.compete`.
+    competition: Any = None
     #: The genome's record of this turn's reasoning, kept so the outcome can be graded against
     #: the *shape* that produced it once reality says whether it was right.
     trace: Any = None
@@ -241,8 +243,20 @@ class NJPThought:
         return bool(self.judgement is not None and self.judgement.assertable)
 
     def to_dict(self) -> Dict[str, Any]:
+        # `confidence` and `epistemic_confidence` are different questions and a report that shows
+        # only the first is misread every time. `confidence` is the *gauntlet's* number: it is
+        # 0.0 whenever the verdict was `abstained`, which is the correct, fail-closed outcome for
+        # a claim with no hard evidence source — "Jay" has none, and never will. Meanwhile the
+        # answer itself was `believed` at 0.9. Reading the pair as a contradiction is what an
+        # audit did, and it cost a round trip to establish that nothing was broken.
+        #
+        # So both travel, each labelled with what it is about: what she may *state as fact*, and
+        # how sure she is of what she *said*.
         return {"stimulus": self.stimulus[:200], "answer": self.answer[:400],
                 "cycle_id": self.cycle_id, "confidence": round(self.confidence, 4),
+                "epistemic": self.epistemic,
+                "epistemic_confidence": round(self.epistemic_confidence, 4),
+                "novelty": (round(self.percept.novelty, 4) if self.percept else None),
                 "verified": self.verified, "assertable": self.assertable,
                 "ms": round(self.ms, 3),
                 "percept": self.percept.to_dict() if self.percept else None,
@@ -276,6 +290,12 @@ class NJPBrain:
         # gets no support rather than stale support from a previous one.
         self.observations: List[str] = []
         self.holdout: List[Any] = []
+        #: cell id → the concept label that minted it. The inverse of :func:`_cell_id`, which is a
+        #: one-way digest — so this is the only thing that lets the substrate name anything it
+        #: predicts. Written by :meth:`encode` and persisted with the fabric, because a reloaded
+        #: brain that cannot name its own cells is exactly the failure `_cell_id`'s own docstring
+        #: warns about, one layer up.
+        self.lexicon: Dict[int, str] = {}
         # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
         # which this one does — so three threads call think() on this same object at once. A
         # fabric is one organism: two thoughts rewiring it simultaneously corrupt the adjacency
@@ -346,6 +366,8 @@ class NJPBrain:
         self.cortex = self._build_cortex(c)
         self.router = self._build_router(c)
         self.epistemic = self._build_epistemic(c)
+        self.competition = self._build_competition(c)
+        self.embedding = self._build_embedding(c)
         # The predictive brain: what follows what in the WORLD, as opposed to which of her own
         # cells fire next. Without it she is a fact store that grows; with it she is something
         # that expects, is wrong, and learns from the difference.
@@ -654,6 +676,7 @@ class NJPBrain:
             engine.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
             engine.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
             engine.register_repair(ErrorKind.MEMORY, self._repair_memory)
+            engine.register_repair(ErrorKind.RELATION, self._repair_relation)
             engine.register_repair(ErrorKind.REASONING, self._repair_reasoning)
             return engine
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
@@ -693,6 +716,38 @@ class NJPBrain:
                 return False
             self.memory.remember(f"repair-{self.turns}", str(getattr(outcome, "actual", "")),
                                  kind="conclusion", cue=str(getattr(outcome, "key", "")))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_relation(self, outcome: Any) -> bool:
+        """A value she composed turned out wrong: make **that** inheritance worth less.
+
+        The targeted repair, and the reason :attr:`~nyxara.njp.predict.ErrorKind.RELATION` was
+        worth adding. She answered ``water`` for what a sparrow needs by carrying a property of
+        birds down to a member, the Master said ``food``, and the thing that failed is neither her
+        perception nor her memory nor her facts — every premise was true. It is the defeasible
+        step, for **this predicate**, being more general than the world.
+
+        So exactly one number moves: ``requires`` loses transitivity, and ``is_a``, ``causes`` and
+        every other relation are untouched. That is what makes it a repair rather than a retrain —
+        the alternative on offer was widening a similarity threshold or writing a ledger line, and
+        neither of those makes the next inheritance over the same relation any less confident.
+
+        **Refuted, not zeroed.** :class:`~nyxara.njp.core.Transitivity` is a Beta posterior, so one
+        exception moves it by an amount that shrinks as evidence accumulates: a relation that has
+        chained correctly a hundred times is barely touched by a single counterexample, and one
+        that has never been tested moves a long way. Setting it to zero on a first exception would
+        be treating one sparrow as proof that kinds do not carry properties at all.
+        """
+        try:
+            if self.learner is None:
+                return False
+            context = getattr(outcome, "context", None) or {}
+            predicate = str(context.get("predicate") or "").strip()
+            if not predicate:
+                return False
+            self.learner._transitivity(predicate).refute(1.0)
             return True
         except Exception:  # noqa: BLE001
             return False
@@ -953,6 +1008,28 @@ class NJPBrain:
         try:
             from nyxara.njp.router import Router
             return Router(meta=self.metareason, self_model=self.self_model, learner=self.meta)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_embedding(self, c: Any) -> Any:
+        """Entity similarity over the manifold's own vectors. Off leaves every query unwidened."""
+        if not self._gate("embedding", True):
+            return None
+        try:
+            from nyxara.njp.embed import EntityEmbedding
+            return EntityEmbedding(self.fabric.manifold, cell_id=_cell_id,
+                                   floor=self._cfg("embedding_floor", 0.35))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_competition(self, c: Any) -> Any:
+        """Rank rival accounts. Off leaves the router's two-seat reconciliation exactly as it was."""
+        if not self._gate("competition", True):
+            return None
+        try:
+            from nyxara.njp.compete import Competition
+            return Competition(world=self.world, self_model=self.self_model,
+                               floor=self._cfg("competition_floor", 0.35))
         except Exception:  # noqa: BLE001
             return None
 
@@ -1611,8 +1688,64 @@ class NJPBrain:
             return [w for w in str(text or "").lower().split() if len(w) > 2][:32]
 
     def encode(self, text: str) -> List[int]:
-        """Words to cells. Stable across restarts, which is what makes the fabric reloadable."""
-        return [_cell_id(tok) for tok in self.concepts(text)]
+        """Words to cells. Stable across restarts, which is what makes the fabric reloadable.
+
+        Every call also records the inverse. :func:`_cell_id` is a blake2b digest and is therefore
+        one-way by construction — there is no arithmetic that recovers ``"sparrow"`` from the
+        integer it hashes to. That is fine for addressing a cell and it is exactly what stopped the
+        substrate from ever saying anything: :meth:`~nyxara.njp.learn.Readout.predict` returns
+        gradient-trained probabilities over *cell ids*, which no reader and no other seat can do
+        anything with.
+
+        The map is not hard to recover, though, because she computes it herself on every turn and
+        was throwing it away. Keeping it is the whole of the fix.
+        """
+        out: List[int] = []
+        for token in self.concepts(text):
+            cell = _cell_id(token)
+            # First spelling wins. Two labels colliding on one 48-bit digest is vanishingly
+            # unlikely, and if it ever happens the honest thing is to keep naming the cell what it
+            # was first called rather than to let a later word silently rename an established one.
+            self.lexicon.setdefault(cell, token)
+            out.append(cell)
+        return out
+
+    def fabric_proposes(self, text: str, *, k: int = 5,
+                        floor: float = 0.0) -> List[Tuple[str, float]]:
+        """What the substrate expects to go with this turn, **as concepts she can name**.
+
+        The fabric's own account of a turn, produced by the one learner in the package that uses
+        real gradients rather than local coincidence. It is deliberately not routed into
+        :meth:`_compose`: this is association learned from co-activation, it knows nothing about
+        relations or truth, and an answer path that took it would be guessing fluently.
+
+        What it is *for* is being a third account that was produced differently from the other two
+        — which is the only thing that makes a disagreement between them informative.
+        """
+        try:
+            if self.readout is None:
+                return []
+            cells = self.encode(text)
+            # Widen by entities whose relational context resembles this one's. This is the whole
+            # point of `njp.embed`: the head learned about `sparrow`, and without this `finch`
+            # addresses a slot it has never seen a gradient for. Measured on six groups with no
+            # `is_a` anywhere, held-out MRR went 0.542 → 1.000 against an unmoved control.
+            if self.embedding is not None:
+                for concept in self.concepts(text)[:2]:
+                    for neighbour in self.embedding.expand(concept):
+                        cells = cells + self.encode(neighbour)
+            return self.readout.predict_symbols(
+                cells, lexicon=self.lexicon, k=k, floor=floor)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def name_cell(self, cell_id: int) -> str:
+        """What this cell is called, or ``""`` when she has never encoded that concept.
+
+        Empty rather than a placeholder: a cell she cannot name is one the readout must decline to
+        report, and a stand-in string would be a symbol she never learned appearing in a proposal.
+        """
+        return self.lexicon.get(int(cell_id), "")
 
     # ---- perception ------------------------------------------------------- #
     def perceive(self, text: str, *, remember: bool = True,
@@ -1766,12 +1899,25 @@ class NJPBrain:
                 # happen before deliberation, not after it.
                 if out.answer:
                     self._set_epistemic(out)
+                    # A deliberated answer came by a *form* of reasoning, and the genome has been
+                    # keeping that form's record. Applied here rather than inside
+                    # `_set_epistemic` because only this branch produced one: a grounded answer
+                    # is a lookup with no shape to hold responsible.
+                    out.epistemic_confidence = self._temper_by_shape(
+                        out.epistemic_confidence, out)
                 else:
                     self._ask_back(out)
 
             # 4.5 CONSULT THE CORTEX — the one step that makes a stronger model buy stronger
             # reasoning rather than better sentences. It proposes; the gate below still decides.
             self._consult_cortex(out)
+
+            # 4.6 COMPETE — rank every account of this turn rather than counting them. On the
+            # main path deliberately: the arbitration above needs a cortex and there usually is
+            # not one, and a ranking that only runs when a language model is attached is the
+            # same defect `epistemic` had — an organ reachable in principle and never in fact.
+            # NJP and the fabric are two accounts, which is a field.
+            self._compete(out)
 
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
@@ -1800,6 +1946,7 @@ class NJPBrain:
             # an antecedent and a consequent already, whereas an answer is something she said.
             if self.discoverer is not None and out.percept is not None:
                 self._observe_episodes(out)
+            self._observe_contexts(out)
 
             # 9. EXPAND — the physical growth, after every single turn
             out.growth = self._expand(out, outcome=outcome)
@@ -1845,6 +1992,30 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — a thought that fails is empty, never fatal
             out.ms = (time.perf_counter() - t0) * 1000.0
             return out
+
+    def _observe_contexts(self, thought: NJPThought) -> None:
+        """Give this turn's relations to the entity embedding, as (predicate, object) contexts.
+
+        Read off the *store* rather than the turn, so an entity's vector is the bundle of
+        everything she holds about it rather than of whatever the last sentence happened to
+        mention. A representation rebuilt from one turn's fragment would move an entity every time
+        it was talked about, and similarity would track recency instead of structure.
+        """
+        try:
+            if self.embedding is None or self.grounder is None:
+                return
+            grounding = getattr(thought.percept, "grounding", None)
+            for triple in list(getattr(grounding, "triples", None) or [])[:8]:
+                subject = str(getattr(triple, "subject", "") or "")
+                if not subject:
+                    continue
+                contexts = [(str(t.predicate), str(t.object))
+                            for t in self.grounder._facts_of(subject)
+                            if getattr(t, "predicate", "") and getattr(t, "object", "")]
+                if contexts:
+                    self.embedding.observe(subject, contexts)
+        except Exception:  # noqa: BLE001
+            return
 
     def _observe_episodes(self, thought: NJPThought) -> None:
         """Everything this turn offers the compressor, as ``antecedents → consequent`` episodes.
@@ -2461,11 +2632,23 @@ class NJPBrain:
                 return
 
             from nyxara.njp.grounding import Answer
-            from nyxara.njp.router import Verdict
+            from nyxara.njp.router import DisagreementKind, Verdict
             lead = max(hypotheses, key=lambda h: h.confidence)
             njp_side = Answer(text=out.answer, state=out.epistemic,
                               confidence=out.epistemic_confidence, provenance=out.provenance)
-            out.arbitration = self.router.arbitrate(out.stimulus, cortex=lead, njp=njp_side)
+            # The third seat. It reviews rather than competes — see :class:`~nyxara.njp.router.Seat`
+            # — and what it reviews is whether the substrate had any purchase on this turn at all.
+            fabric_side = getattr(out.percept, "anticipated", None) if self._gate("fabric_seat") else None
+            out.arbitration = self.router.arbitrate(out.stimulus, cortex=lead, njp=njp_side,
+                                                    fabric=fabric_side)
+
+            # A recognition dissent lowers confidence on a verdict that DID settle, so it has to
+            # be applied before the disagreement branch returns — otherwise the one case the
+            # fabric seat exists to catch, a confident answer on unrecognised ground, is the one
+            # case that never reads its result.
+            if out.arbitration.disagreement == DisagreementKind.RECOGNITION:
+                out.epistemic_confidence = min(out.epistemic_confidence,
+                                               out.arbitration.confidence)
 
             if out.arbitration.verdict != Verdict.DISAGREEMENT:
                 return
@@ -2482,6 +2665,135 @@ class NJPBrain:
         except Exception as exc:  # noqa: BLE001 — the cortex is an organ, never a dependency
             log.debug("cortex consult degraded: %s", exc)
 
+    def _compete(self, thought: NJPThought, *, cortex: Any = None, njp: Any = None) -> None:
+        """Rank every account of this turn, including the substrate's, and record the outcome.
+
+        The fabric enters as what it is: :meth:`fabric_proposes` comes from a head trained on
+        turn-to-turn concept succession, measured at MRR 0.238, carrying no provenance and no
+        derivation. It therefore scores ~0 on the two heaviest axes and loses — with the axis
+        that cost it recorded. That is the competition working rather than a reason to leave it
+        out: ranking is what makes entering a weak account safe, where a vote would have made it
+        dangerous.
+
+        Only ever lowers what she will say. On an unsupported or inseparable field the confidence
+        is capped by what the best account actually earned, and the rivals go to
+        :mod:`nyxara.njp.epistemic` — which is the organ that turns exactly this state into an
+        experiment.
+        """
+        try:
+            if self.competition is None:
+                return
+            from nyxara.njp.compete import Hypothesis, Verdict as CVerdict
+
+            accounts: List[Any] = []
+            if njp is None and thought.answer:
+                # Her own answer as it stands, with the epistemic state that licenses it. Built
+                # here so the competition runs on the ordinary path rather than only when a
+                # cortex handed it a rival.
+                from nyxara.njp.grounding import Answer
+                njp = Answer(text=thought.answer, state=thought.epistemic,
+                             confidence=thought.epistemic_confidence,
+                             provenance=thought.provenance,
+                             triples=list(getattr(getattr(thought, "derivation", None),
+                                                  "support", None) or []))
+            for seat, claim in (("cortex", cortex), ("njp", njp)):
+                text = str(getattr(claim, "text", "") or "")
+                if not text:
+                    continue
+                accounts.append(Hypothesis(
+                    seat=seat, claim=text,
+                    confidence=float(getattr(claim, "confidence", 0.0) or 0.0),
+                    provenance=str(getattr(claim, "provenance", "") or "proposed"),
+                    state=str(getattr(claim, "state", "") or "unknown"),
+                    support=list(getattr(claim, "triples", None) or [])))
+
+            for name, probability in self.fabric_proposes(thought.stimulus, k=1):
+                accounts.append(Hypothesis(
+                    seat="fabric", claim=name, confidence=float(probability),
+                    # No provenance and no support, stated rather than implied: the head
+                    # associates, it does not derive, and dressing that as a derivation would be
+                    # the one thing this seat must never do.
+                    provenance="proposed", state="unknown", support=[]))
+
+            if len(accounts) < 2:
+                return
+            outcome = self.competition.compete(accounts)
+            thought.competition = outcome
+            if outcome.verdict in (CVerdict.UNSUPPORTED, CVerdict.TIED):
+                best = outcome.scores[0].total if outcome.scores else 0.0
+                thought.epistemic_confidence = min(thought.epistemic_confidence, float(best))
+                if self.epistemic is not None and len(outcome.rivals) >= 2:
+                    self.epistemic.compile(thought.stimulus, accounts)
+        except Exception as exc:  # noqa: BLE001 — ranking is an organ, never a dependency
+            log.debug("competition degraded: %s", exc)
+
+    @staticmethod
+    def _temper_by_novelty(base: float, thought: NJPThought,
+                           *, damping: float = 0.75) -> float:
+        """Discount a stated confidence by how unfamiliar the fabric found this turn.
+
+        **This is the edge that made the fabric part of cognition.** Before it, the fabric grew on
+        every turn and could not reach the answer path at all — ``"fabric" in
+        getsource(_compose)`` was ``False``, and the only consumer of
+        :attr:`~nyxara.njp.brain.NJPPercept.novelty` was :meth:`nyxara.njp.reasoner.NJPReasoner._temper`,
+        a seat that a grounded turn never reaches. So a structural answer left here carrying the
+        store's confidence and nothing else, and the manifold's opinion about whether she had ever
+        seen anything like this was computed, recorded, and dropped.
+
+        The rule is :meth:`~nyxara.njp.reasoner.NJPReasoner._temper`'s, deliberately unchanged —
+        ``reported = base × (1 − novelty × damping)`` — so the two paths discount identically
+        rather than growing two notions of what a novel turn is worth.
+
+        **It can only ever lower.** ``novelty`` is in ``[0, 1]`` and ``damping`` is below 1, so the
+        factor is never above 1 and a familiar turn is left exactly as it was. That direction is
+        the whole safety property: the fabric is allowed to make her less sure of something she
+        looked up, and is never allowed to make her more sure of anything. Growth earns its way
+        into confidence by *removing* a discount as she comes to recognise the ground, which is
+        also what makes it measurable — an unfamiliar turn and a familiar one now differ in a
+        number that leaves this method.
+        """
+        try:
+            percept = getattr(thought, "percept", None)
+            if percept is None:
+                return max(0.0, min(1.0, float(base)))
+            factor = max(0.0, 1.0 - float(percept.novelty) * float(damping))
+            return max(0.0, min(1.0, float(base) * factor))
+        except Exception:  # noqa: BLE001 — an unreadable percept discounts nothing
+            return max(0.0, min(1.0, float(base)))
+
+    def _temper_by_shape(self, base: float, thought: NJPThought) -> float:
+        """Discount an answer by how the *form of reasoning* behind it has actually done.
+
+        The consumer :mod:`nyxara.njp.genome` never had. It counts the shapes she reasons in,
+        prices each by the MDL saving naming it would earn, and reports the ones that keep being
+        wrong as :meth:`~nyxara.njp.genome.ReasoningGenome.liabilities` — and nothing anywhere
+        read either list. So a recurring form with a measured record of failure went on producing
+        answers at full confidence, and "a habit worth breaking" was a phrase in a docstring.
+
+        This is a different question from :meth:`_temper_by_novelty` and from
+        :class:`~nyxara.njp.core.Transitivity`, which is why it is a third number rather than a
+        tweak to either. Novelty asks whether the substrate recognises the *situation*.
+        Transitivity asks whether a *predicate* chains. This asks whether reasoning of this
+        *shape* works — and the three come apart: inheriting through a stated ``is_a`` edge and
+        chaining a predicate through itself may use the same predicate on equally familiar ground
+        and fail at completely different rates.
+
+        **Untested discounts nothing**, and that is the load-bearing half.
+        :meth:`~nyxara.njp.genome.ReasoningGenome.reliability` returns ``None`` until a shape has
+        been graded enough times to have a record, and a new inference must not be penalised for
+        being new. Only measured failure lowers anything, and it can only lower — the evidence for
+        an answer is the facts it was composed from, and this is evidence about her machinery.
+        """
+        try:
+            if self.genome is None:
+                return max(0.0, min(1.0, float(base)))
+            measured = self.genome.reliability(getattr(thought, "trace", None))
+            if measured is None:
+                return max(0.0, min(1.0, float(base)))
+            return max(0.0, min(1.0, float(base) * max(0.0, min(1.0, float(measured)))))
+        except Exception:  # noqa: BLE001
+            return max(0.0, min(1.0, float(base)))
+
     @staticmethod
     def _set_epistemic(thought: NJPThought) -> None:
         """Record which of the three states this turn's answer is in.
@@ -2497,10 +2809,21 @@ class NJPBrain:
             answer = getattr(grounding, "answer", None)
             if answer is not None and answer.answered:
                 thought.epistemic = answer.state
-                thought.epistemic_confidence = float(answer.confidence)
+                thought.epistemic_confidence = NJPBrain._temper_by_novelty(
+                    float(answer.confidence), thought)
                 # An answer built from proposals is a proposal. Carrying it here is what lets the
                 # router tell "the record says X" from "something guessed X", which is the whole
                 # difference between a contradiction and a disagreement.
+                thought.provenance = getattr(answer, "provenance", thought.provenance)
+                return
+            # A live tie is its own state and must be read before the acknowledgement branch
+            # below, which would otherwise label it KNOWN: that branch means "she is certain about
+            # what she just recorded", and what she recorded here is a contradiction. Confidence
+            # is left at zero deliberately — two answers she cannot separate is not partial
+            # knowledge of either.
+            if answer is not None and answer.conflicting:
+                thought.epistemic = Epistemic.CONFLICTING
+                thought.epistemic_confidence = 0.0
                 thought.provenance = getattr(answer, "provenance", thought.provenance)
                 return
             # An acknowledgement is not a claim about the world. "noted: Master has name Jay"
@@ -2525,8 +2848,22 @@ class NJPBrain:
                 relevance = max((s.total for s in scores), default=0.0)
             judgement = thought.judgement
             supports = int(len(getattr(judgement, "supports", None) or [])) if judgement else 0
+            # A derived answer prices its own chain: `core` multiplies each link's confidence by
+            # that predicate's transitivity and caps the product below the KNOWN floor, so 0.448
+            # for a two-hop inheritance is a real number about a real derivation. Starting from
+            # `thought.confidence` instead threw it away — that field is the *gauntlet's* verdict,
+            # correctly 0.0 whenever it abstains, which it does for every composed claim. So a
+            # two-hop chain and a five-hop one both reported 0.0 and were indistinguishable, and
+            # anything downstream that discounts a derived answer had nothing to discount.
+            #
+            # The prior is still never above what the derivation itself claimed, and
+            # `revise_confidence` remains monotonic from there.
+            prior = float(thought.confidence)
+            derivation = getattr(thought, "derivation", None)
+            if derivation is not None and getattr(derivation, "ok", False):
+                prior = max(prior, float(getattr(derivation, "confidence", 0.0) or 0.0))
             confidence = revise_confidence(
-                thought.confidence, independent_evidence=supports,
+                prior, independent_evidence=supports,
                 relevance=relevance,
                 consistent=not bool(getattr(judgement, "refutations", None)))
             if thought.answer and thought.verified:
@@ -2766,7 +3103,12 @@ class NJPBrain:
 
     # ---- persistence ------------------------------------------------------ #
     def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
+        d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict(),
+                             # Persisted with the fabric, and for the same reason `_cell_id` is a
+                             # stable hash rather than a counter: a reloaded brain wired for cells
+                             # it can no longer name is the one way persistence is worse than
+                             # starting fresh. The lexicon IS the naming.
+                             "lexicon": {str(k): v for k, v in self.lexicon.items()}}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
@@ -2799,6 +3141,11 @@ class NJPBrain:
         """Wake up as the brain that went to sleep. This is what makes tomorrow's NJP today's."""
         try:
             self.turns = int(d.get("turns", 0))
+            for cell, name in (d.get("lexicon") or {}).items():
+                try:
+                    self.lexicon.setdefault(int(cell), str(name))
+                except (TypeError, ValueError):
+                    continue
             if d.get("fabric"):
                 self.fabric.load_dict(d["fabric"])
             if d.get("ledger") and self.ledger is not None:

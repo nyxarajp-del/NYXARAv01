@@ -27,7 +27,7 @@ import sys
 
 
 def _run_intelligence(args: argparse.Namespace) -> int:
-    """The six-stage learning curve.
+    """The seven-stage learning curve.
 
     Exits non-zero only when the **control** stage fails. The other five are measurements, not
     assertions: a low transfer score is a fact about where she currently is, and turning it into
@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")
     parser.add_argument("--intelligence", action="store_true",
-                        help="run the six-stage learning curve (eval/intelligence.py): "
+                        help="run the seven-stage learning curve (eval/intelligence.py): "
                              "memorization -> generalization -> recombination -> causal "
                              "prediction -> self-correction -> transfer. Every stage is scored "
                              "on items the brain was never taught, on generated vocabulary, "
@@ -326,8 +326,27 @@ def main(argv: list[str] | None = None) -> int:
                         help="intelligence: items per stage. Resolution, not difficulty")
     parser.add_argument("--stage", action="append", default=None,
                         help="intelligence: run only this stage (repeatable)")
+    parser.add_argument("--relational", action="store_true",
+                        help="probe whether the gradient head can generalise a relation "
+                             "(eval/relational.py). Always reports the nonsense-subject control "
+                             "beside the real one — the gap between them is the only number here "
+                             "that means anything")
+    parser.add_argument("--teach-is-a", action="store_true",
+                        help="relational: also teach every member's kind, so two hops are "
+                             "composable in principle. It measures worse")
+    parser.add_argument("--expand", action="store_true",
+                        help="relational: widen each query by the subject's neighbours from "
+                             "njp/embed.py — the similarity structure a hashed cell id lacks")
+    parser.add_argument("--epochs", type=int, default=60,
+                        help="relational: passes over the training triples")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
+    if args.relational:
+        from nyxara.eval.relational import probe
+        report = probe(epochs=args.epochs, teach_is_a=args.teach_is_a,
+                       expand=args.expand)
+        print(report.render())
+        return 0
     if args.intelligence:
         return _run_intelligence(args)
     if args.general:

@@ -403,10 +403,20 @@ class MetaLearner:
         except Exception:  # noqa: BLE001
             return None
 
-    def reward(self, arm: str, value: float) -> None:
-        """Tell the chosen strategy how the turn actually went."""
+    def reward(self, arm: str, value: float, *, name: str = "") -> None:
+        """Tell a strategy how the turn actually went.
+
+        ``name`` credits that option explicitly, and exists because ``_pending`` holds only the
+        *last* choice made for an arm. That is right when the reward follows the choice inside one
+        turn, and wrong whenever it does not: a strategy outcome established by the Master's later
+        statement can arrive many turns after the choice, and any question of the same kind in
+        between silently moves ``_pending`` — so the credit lands on whichever strategy happened
+        to be chosen most recently rather than on the one that earned it. Naming it removes the
+        race entirely; omitting it keeps the old behaviour for callers that reward immediately.
+        """
         try:
-            chosen = self._pending.get(str(arm))
+            bucket = self.strategies.get(str(arm)) or {}
+            chosen = bucket.get(str(name)) if name else self._pending.get(str(arm))
             if chosen is None:
                 return
             chosen.trials += 1

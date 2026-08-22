@@ -52,6 +52,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from nyxara.njp.canon import canonical_entity, singular
+
 __all__ = [
     "Epistemic", "Provenance", "GroundedTriple", "Answer", "Pattern", "GroundingResult",
     "Grounder", "SELF_ENTITY",
@@ -70,11 +72,23 @@ _NYXARA = frozenset({"nyxara", "njp", "nyx"})
 
 
 class Epistemic:
-    """What she is entitled to say about a claim. Three states, never two."""
+    """What she is entitled to say about a claim. Four states, never two.
 
-    KNOWN = "known"          # in the graph and corroborated — statable as fact
-    BELIEVED = "believed"    # present, but only with its confidence attached
-    UNKNOWN = "unknown"      # genuinely absent — she says so and does not generate
+    ``CONFLICTING`` is the one that is not about *strength*. The other three sit on a line from
+    absent to certain; this one says the record holds two answers that are equally supported and
+    cannot both be right. Collapsing it into ``UNKNOWN`` loses the fact that she has evidence —
+    and collapsing it into ``BELIEVED`` picks a winner by whichever entry the dict happened to
+    yield first, which is the arbitrary assertion `_tied_rival` exists to refuse.
+
+    It is deliberately narrower than "contested". A claim that was contradicted and then *revised*
+    — the loser superseded, the survivor's confidence cut — has been resolved, and answering it as
+    ``BELIEVED`` with the penalty applied is correct. Only a live, unbroken tie is ``CONFLICTING``.
+    """
+
+    KNOWN = "known"              # in the graph and corroborated — statable as fact
+    BELIEVED = "believed"        # present, but only with its confidence attached
+    UNKNOWN = "unknown"          # genuinely absent — she says so and does not generate
+    CONFLICTING = "conflicting"  # two live readings, equally supported — a tie, not a gap
 
 
 class Provenance:
@@ -243,8 +257,18 @@ class Answer:
         return self.provenance == Provenance.PROPOSED
 
     @property
+    def conflicting(self) -> bool:
+        """Does the record hold two equally-supported answers to this?"""
+        return self.state == Epistemic.CONFLICTING
+
+    @property
     def answered(self) -> bool:
-        """Did she actually find something? ``UNKNOWN`` is an outcome, not an answer."""
+        """Did she actually find something? ``UNKNOWN`` is an outcome, not an answer.
+
+        A ``CONFLICTING`` result carries no ``text`` by construction, so it is unanswered here
+        too — which is the point. Knowing that two things contradict is not the same as having
+        resolved them, and only the resolution is an answer.
+        """
         return self.state != Epistemic.UNKNOWN and bool(self.text)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1375,6 +1399,9 @@ class Grounder:
         self.grounded_turns = 0
         self.answered = 0
         self.unknown = 0
+        #: Times a question named its relation and retrieval offered a different one.
+        #: Each of these was a confidently wrong answer before the check existed.
+        self.recall_refusals = 0
         #: Statements that reached the extractor and produced no triple at all.
         self.unparsed = 0
         self.contradictions_found = 0
@@ -1901,6 +1928,56 @@ class Grounder:
         return cleaned
 
     @staticmethod
+    def _answers_relation(held: str, asked: str) -> bool:
+        """Does a fact stored under ``held`` answer a question that asked for ``asked``?
+
+        The cut is between a question that asks **what a thing is** and one that asks **something
+        specific about it**, and :data:`_GENERAL_ANSWER` already draws it — ``is_a``, ``means``,
+        ``part_of``, ``occurs_when``, ``involves`` and their neighbours are all ways of saying
+        what something *is*, which is why `_affinity` consults that same set when no predicate
+        could be read at all.
+
+        * *"What is deep learning?"* reads as ``is_a`` and the store holds ``part_of``. Both are
+          definitional, so the fact is the answer — this is the measured case the retrieval path
+          was built for: 521 facts held and questions about them answering UNKNOWN because the
+          sentence that taught her chose a different definitional verb than the question did.
+        * *"What does a sparrow need?"* reads as ``requires``, which asks for one specific thing
+          about the sparrow. ``is_a`` is not a weaker answer to it; it is an answer to a different
+          question. Refused.
+
+        Deliberately not a similarity score. A threshold here would reintroduce the confident
+        wrong answer this check exists to stop, one tuning parameter later — and the measurement
+        that motivated the check says a score cannot separate these populations anyway: the worst
+        held-out answer scored 0.394 against a 0.388 median for the correct in-sample ones.
+
+        ``_CAUSE_OF`` is handled explicitly because it is how *"what causes X"* is read and is not
+        a name anything is ever stored under; comparing it to a stored predicate directly would
+        refuse every backwards causal question, including the ones the inverse lookup gets right.
+        """
+        held, asked = str(held or ""), str(asked or "")
+        if held == asked or (asked == _CAUSE_OF and held == "causes"):
+            return True
+        return asked in _GENERAL_ANSWER and held in _GENERAL_ANSWER
+
+    @staticmethod
+    def _key(name: str) -> str:
+        """The store key for an entity. **The only spelling rule for a subject or an object.**
+
+        Every site that builds a ``(subject, predicate)`` key goes through here — the writer
+        (:meth:`_assert`, :meth:`_index`), the readers (:meth:`_lookup`, :meth:`_lookup_inverse`)
+        and the contradiction check — because a key formed one way on the write path and another
+        way on the read path is a fact that cannot be retrieved, and that is not a hypothetical:
+        ``birds --requires--> water`` was stored and then queried as ``(sparrow, requires)`` after
+        a correct inheritance step, and the two never met over one character.
+
+        This used to be ``.lower()`` inline at each of those sites, which is how they were able to
+        drift apart in the first place. :func:`~nyxara.njp.canon.canonical_entity` leaves non-Latin
+        input exactly as ``.strip().lower()`` did, so every Devanagari and Hinglish key is
+        unchanged by this method existing.
+        """
+        return canonical_entity(name)
+
+    @staticmethod
     def _predicate(raw: str) -> str:
         """Normalise a relation name so every spelling of it reaches the same edge.
 
@@ -1934,12 +2011,18 @@ class Grounder:
         gap list, and a word she cannot actually reach must keep counting as a gap.
         """
         try:
-            subject = triple.subject.lower()
+            subject = self._key(triple.subject)
             key = (subject, triple.predicate)
             self._known.add(subject)
             self._known.add(triple.object.lower())
             self._by_subject.setdefault(subject, set()).add(triple.predicate)
-            for form in {triple.object.lower(), triple.object.strip().lower()}:
+            # The canonical form joins the two surface forms rather than replacing them: a
+            # reader that still compares on `.lower()` must keep finding what it found before,
+            # and `_lookup_inverse` — which now canonicalises both ends — needs the canonical key
+            # to be present. A superset index is safe because every reader re-checks its own
+            # condition on the triples it pulls.
+            for form in {triple.object.lower(), triple.object.strip().lower(),
+                         self._key(triple.object)}:
                 self._by_object.setdefault(form, set()).add(key)
             for word in subject.replace("_", " ").split():
                 if len(word) > 2:
@@ -1968,7 +2051,7 @@ class Grounder:
 
     def _assert(self, triple: GroundedTriple) -> None:
         """Record the fact locally and, when one is attached, in the KnowledgeGraph."""
-        key = (triple.subject.lower(), triple.predicate)
+        key = (self._key(triple.subject), triple.predicate)
         self.facts.setdefault(key, []).append(triple)
         self._index(triple)
         try:
@@ -2016,7 +2099,7 @@ class Grounder:
         try:
             if triple.predicate not in _FUNCTIONAL:
                 return None
-            for prior in self.facts.get((triple.subject.lower(), triple.predicate), []):
+            for prior in self.facts.get((self._key(triple.subject), triple.predicate), []):
                 if prior.superseded:
                     continue        # already revised away; it cannot clash a second time
                 if prior.object.strip().lower() != triple.object.strip().lower():
@@ -2066,6 +2149,11 @@ class Grounder:
             # refusal to answer *arbitrarily*, at the one layer that had no way to say "two".
             rival = self._tied_rival(found, best, inverse)
             if rival:
+                # Both readings are carried out, not just named in prose: `epistemic` designs the
+                # experiment that would split them, and it needs the triples to do that.
+                out.state = Epistemic.CONFLICTING
+                out.triples = found
+                out.provenance = Provenance.weakest(*(t.provenance for t in found))
                 out.why = (f"two readings are equally supported: "
                            f"{best.subject if inverse else best.object} and {rival}")
                 return out
@@ -2137,7 +2225,7 @@ class Grounder:
 
     def _lookup(self, subject: str, predicate: str) -> List[GroundedTriple]:
         """Live facts only. A superseded belief stays on record but is never answered with."""
-        return [t for t in self.facts.get((subject.lower(), predicate), []) if not t.superseded]
+        return [t for t in self.facts.get((self._key(subject), predicate), []) if not t.superseded]
 
     def _lookup_inverse(self, obj: str, predicate: str) -> List[GroundedTriple]:
         """The same edges read backwards: everything that ``predicate``\\ s *into* ``obj``.
@@ -2148,15 +2236,17 @@ class Grounder:
         is bounded by what one conversation could state. If that ever stops being true the fix is
         an index, not a cache — a stale reverse index would answer with facts already superseded.
         """
-        low = str(obj or "").strip().lower()
+        low = self._key(obj)
         if not low:
             return []
         out: List[GroundedTriple] = []
         for key in self._by_object.get(low, ()):
             if key[1] != predicate:
                 continue
+            # Compared on the canonical form at both ends, for the same reason the forward
+            # lookup is: "what do birds cause" and a fact recorded about "bird" are one question.
             out.extend(t for t in self.facts.get(key, ())
-                       if not t.superseded and t.object.strip().lower() == low)
+                       if not t.superseded and self._key(t.object) == low)
         return out
 
     def answer_by_recall(self, question: str, out: Optional[Answer] = None) -> Answer:
@@ -2171,6 +2261,19 @@ class Grounder:
         already multiplied by how squarely the question named its subject and by how well the
         relation answers what was asked. It is therefore always at or below what the fact itself
         was worth: this path can lower confidence and can never raise it.
+
+        **A question that named its relation is not answered from a different one.** This is the
+        measured defect, traced end to end: told ``sparrow is_a bird`` and nothing else, asked
+        *"what does a sparrow need?"*, :meth:`answer` correctly returned UNKNOWN — and then this
+        method replaced that honest verdict with ``bird``, because the retrieval only ever asked
+        whether a fact was *about* the sparrow. The score was above the floor, the fact was real,
+        the entity was right, and the answer was wrong.
+
+        So a readable predicate is now a *requirement* on the recalled fact, not a preference.
+        The permissive path stays exactly where it belongs — a question whose relation could not
+        be read at all has nothing to contradict, and recalling what is known about the entity is
+        the best available reply. What is refused is the specific move of answering a question
+        that said what it wanted with a fact that answers something else.
         """
         out = out if out is not None else Answer()
         try:
@@ -2179,6 +2282,13 @@ class Grounder:
                 return out
             best = got[0]
             triple = best.triple
+            asked = self._read_question(_clean(question).lower())[1]
+            if asked and not self._answers_relation(triple.predicate, asked):
+                # An UNKNOWN she arrived at honestly and one she arrived at by finding nothing
+                # are the same state and must be counted the same way, or the gap list that
+                # drives curiosity never learns that this question keeps going unanswered.
+                self.recall_refusals += 1
+                return out
             # Below this the fact is about the right entity but answers a different question, and
             # a wrong answer confidently placed is worse than the honest UNKNOWN it replaces.
             if best.score < self.recall_floor:
@@ -2300,7 +2410,7 @@ class Grounder:
         # license any relation whatsoever, including one that answers a question nobody asked.
         if predicate not in _GENERAL_ANSWER:
             return 0.0
-        low = str(subject or "").lower()
+        low = self._key(subject)
         relations = self._by_subject.get(low, ())
         return 1.0 / max(1, len(relations))
 
@@ -2308,7 +2418,10 @@ class Grounder:
     def _question_tokens(question: str) -> Set[str]:
         """The content words of a question — what it is *about*, not what it is made of."""
         words = "".join(c if c.isalnum() else " " for c in str(question or "").lower()).split()
-        return {w for w in words if w not in _QUESTION_WORDS and len(w) > 2}
+        # Folded to the same singular form `_index` files a subject's words under. Without this
+        # the posting list is keyed on "bird" while a question asking about "birds" looks up
+        # "birds", and retrieval misses an entity the question names in full.
+        return {singular(w) for w in words if w not in _QUESTION_WORDS and len(w) > 2}
 
     def _candidate_subjects(self, tokens: Set[str],
                             floor: float) -> List[Tuple[str, float]]:
@@ -2359,7 +2472,7 @@ class Grounder:
     def _facts_of(self, subject: str) -> List[GroundedTriple]:
         """Every live fact stated of one subject, across all its relations."""
         out: List[GroundedTriple] = []
-        low = str(subject or "").lower()
+        low = self._key(subject)
         for predicate in self._by_subject.get(low, ()):
             out.extend(t for t in self.facts.get((low, predicate), ()) if not t.superseded)
         return out
@@ -2437,7 +2550,7 @@ class Grounder:
     def _features(self, entity: str) -> List[str]:
         """Every relation this entity takes part in, as ``predicate`` / ``predicate_of`` features."""
         out: Set[str] = set()
-        low = entity.lower()
+        low = self._key(entity)
         try:
             out.update(self._by_subject.get(low, ()))
             for key in self._by_object.get(low, ()):
@@ -2598,6 +2711,7 @@ class Grounder:
             "facts": sum(len(v) for v in self.facts.values()),
             "subjects": len({s for s, _p in self.facts}),
             "answered": self.answered, "unknown": self.unknown,
+            "recall_refusals": self.recall_refusals,
             "unparsed": self.unparsed,
             "extraction_rate": (round(self.grounded_turns / (self.grounded_turns + self.unparsed), 4)
                                 if (self.grounded_turns + self.unparsed) else None),

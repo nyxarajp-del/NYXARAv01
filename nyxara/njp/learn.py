@@ -323,6 +323,77 @@ class Readout:
         except Exception:  # noqa: BLE001
             return []
 
+    def predict_symbols(self, cells: Iterable[int], *, lexicon: Dict[int, str],
+                        k: int = 5, floor: float = 0.0) -> List[Tuple[str, float]]:
+        """The concepts this head expects to co-activate next, most confident first.
+
+        **This is the method that lets the substrate say anything.** :meth:`predict` returns
+        gradient-trained probabilities over *cell ids*, and a cell id is a blake2b digest — no
+        reader, and no other seat, can do anything with it. So the fabric could be trained, could
+        be measured, and could not participate in a conversation about what is true. Not because
+        the learning was weak: over a short session the head trains, the loss falls, and every
+        number it produces is about integers nobody can name.
+
+        Nothing is retrained to get here. The same head, the same weights, the same objective —
+        only the output is passed through the ``lexicon`` :meth:`~nyxara.njp.brain.NJPBrain.encode`
+        has been filling in all along.
+
+        **A cell with no name is dropped, never invented.** ``lexicon`` holds the concepts she has
+        actually encoded; a cell absent from it was minted by some other path, and emitting a
+        placeholder for it would put a symbol she never learned into a proposal.
+
+        **What this is, stated precisely, because a consumer must not overstate it.** The head is
+        trained by :meth:`~nyxara.njp.integrate.LearningLoop._train_readout` on
+        ``(what fired last turn) → (what fired this turn)``. Its objective is therefore **concept
+        succession across turns**, and in a conversation that is largely the order the Master
+        happened to raise things in. It is not a claim about the subject, it has no access to a
+        relation or a direction or a truth value, and asked about ``sparrow`` it can rank a concept
+        highly for no better reason than that it usually comes up next.
+
+        Measured on eight taught pairs, ranking the true associate among all named concepts::
+
+            steps   top-1   top-3    MRR
+                7   0/8     1/8     0.141
+               23   0/8     2/8     0.199
+               79   0/8     3/8     0.231
+              239   1/8     1/8     0.238
+
+        It learns — 0.141 to 0.238, and early on the true associate is often not returned at all —
+        and it plateaus weak. So this is honestly reportable as *what tends to come up next*, and
+        is **not** strong enough to carry a hypothesis about what is true. Correcting for the
+        obvious frequency bias was tried, ranking by lift over the head's own prior instead of by
+        raw probability, and measured worse (MRR 0.238 → 0.183), so it is not done here.
+
+        ``floor`` drops anything below a probability, so a head that has learned nothing yet
+        returns nothing instead of its least-arbitrary noise.
+        """
+        if not self._built:
+            return []
+        try:
+            seen = {int(c) for c in cells}
+            out: List[Tuple[str, float]] = []
+            # Ask for more than `k`: the named subset is what is wanted, and unnamed cells and the
+            # query's own concepts are both filtered below, so a top-k taken before filtering
+            # would come back short for no reason the caller can see.
+            for cell, probability in self.predict(seen, k=max(4, int(k) * 6)):
+                if float(probability) < float(floor):
+                    continue
+                # Predicting the concepts that were just put in is not a prediction. The head is
+                # trained on next-state, so a query concept scoring highly usually means it is
+                # simply persistent, and reporting it back would read as agreement with whatever
+                # asked.
+                if int(cell) in seen:
+                    continue
+                name = str(lexicon.get(int(cell), "") or "")
+                if not name:
+                    continue
+                out.append((name, float(probability)))
+                if len(out) >= max(0, int(k)):
+                    break
+            return out
+        except Exception:  # noqa: BLE001
+            return []
+
     # ---- loss --------------------------------------------------------------- #
     def _loss(self, pred: Any, target: Any) -> Any:
         """Binary cross-entropy, summed over slots and averaged over the batch.

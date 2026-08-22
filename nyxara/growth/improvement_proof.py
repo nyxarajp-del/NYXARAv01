@@ -44,6 +44,24 @@ Rice's theorem still forbids a general "this program is better" decider, and we 
 to one: methods A–D each certify improvement only under a well-defined, decidable ordering. What D
 adds is that the ordering is **open-ended** (its difficulty rises without bound) rather than fixed.
 
+**Two vetoes sit in front of all four**, and they exist because of what the methods actually
+measure. Every one is guarded by "no regression", and that reads a single battery: 29 tasks, all
+arithmetic, logic, algebra, calculus, sequence, percent and date. So a whole-file rewrite of the
+grounding layer — extraction, canonicalisation, the epistemic states — could be certified
+``pareto-capability`` with the reason ``deterministic dominance proof`` on the strength of 29 sums
+it never touches.
+
+* **Reasoning must not regress.** :mod:`nyxara.eval.intelligence` already measures memorisation,
+  generalisation, recombination, causal prediction, self-correction, transfer and paraphrase, and
+  the prover was not reading it. Any stage falling withholds the certificate.
+* **The gain must survive the teacher.** A rise that appears only with the cortex attached is a
+  measurement of the language model, and keeping a rewrite on it teaches dependence rather than
+  capability.
+
+They are vetoes rather than a fifth method on purpose: only A–D may say *better*; these may only
+say *not on this evidence*. Adversarial robustness is the one category with no battery here and no
+veto is invented for it — an acknowledged gap beats a check backed by nothing.
+
 No method certifies ⇒ ``better is False`` ⇒ the edit is discarded. Pure standard library plus
 :class:`ProofCarrier`; it reads reports and source, and never touches disk or weights itself.
 """
@@ -95,16 +113,54 @@ class ImprovementProver:
               before_src: str = "", after_src: str = "",
               edit_kind: str = "",
               frontier_before: Optional[Dict[str, Any]] = None,
-              frontier_after: Optional[Dict[str, Any]] = None) -> ImprovementCertificate:
+              frontier_after: Optional[Dict[str, Any]] = None,
+              reasoning_before: Any = None, reasoning_after: Any = None,
+              teacher_before: Optional[Dict[str, float]] = None,
+              teacher_after: Optional[Dict[str, float]] = None) -> ImprovementCertificate:
         """Return a certificate. ``before``/``after`` are :class:`BenchmarkReport`s (or ``None``
         when no capability measurement is available); ``before_src``/``after_src`` are the edited
         file's full contents before and after. ``frontier_before``/``frontier_after`` are the
         read-only auto-curriculum probe results (``{frontier_score, by_tier, ...}``) graded on the
         SAME seeded batch against the before-code and after-code — the non-saturating ruler for
-        Method D. Both ``None`` ⇒ Method D simply does not fire and A/B/C decide as before."""
+        Method D. Both ``None`` ⇒ Method D simply does not fire and A/B/C decide as before.
+
+        ``reasoning_before``/``reasoning_after`` are
+        :class:`~nyxara.eval.intelligence.IntelligenceReport`s, and ``teacher_before``/
+        ``teacher_after`` are ``{"on": score, "off": score}`` for the same battery with the cortex
+        attached and detached. Both pairs are **vetoes only** — they withhold a certificate the
+        methods would otherwise grant and can never grant one themselves. Absent pairs veto
+        nothing, exactly as absent frontier probes leave Method D dormant."""
         regressed = self._regressions(before, after)
         cost_b = static_cost(before_src)
         cost_a = static_cost(after_src)
+
+        # ---- vetoes, before any method may certify ---- #
+        #
+        # Every method below is guarded by `not regressed`, and `regressed` reads ONE battery:
+        # 29 tasks, all arithmetic, logic, algebra, calculus, sequence, percent and date. That is
+        # the whole evidence base licensing a whole-file rewrite. A rewrite of the grounding layer
+        # — extraction, canonicalisation, the epistemic states — is certified "provably better" by
+        # 29 sums it never touches, and the certificate says `deterministic dominance proof`.
+        #
+        # The vetoes below close that on the evidence that exists. They are deliberately NOT a
+        # fifth proof method: they can only ever *withhold* a certificate, never grant one. Only
+        # A-D may say "better"; these say "not on this evidence", which is a different and much
+        # weaker claim, and the weaker one is the only one they are entitled to.
+        blocked = self._reasoning_regressions(reasoning_before, reasoning_after)
+        if blocked:
+            return ImprovementCertificate(
+                better=False, method="none", regressed=regressed,
+                cost_before=cost_b, cost_after=cost_a,
+                reason=("reasoning regressed on " + ", ".join(blocked[:4])
+                        + " — the fixed battery cannot see this, so an edit that improves "
+                          "arithmetic while degrading inference would otherwise certify"))
+        if self._teacher_dependent(teacher_before, teacher_after):
+            return ImprovementCertificate(
+                better=False, method="none", regressed=regressed,
+                cost_before=cost_b, cost_after=cost_a,
+                reason=("the gain exists only with the cortex attached — with it detached the "
+                        "score did not improve, so what was measured is her dependence on a "
+                        "language model rather than a capability of her own"))
 
         # ---- A · capability Pareto-gain (the licence for open-ended rewrites) ---- #
         if before is not None and after is not None:
@@ -159,6 +215,67 @@ class ImprovementProver:
                    "proven-cheaper or defect-fix edit")
         return ImprovementCertificate(better=False, method="none", reason=why,
                                       regressed=regressed, cost_before=cost_b, cost_after=cost_a)
+
+    # ---- the vetoes ---- #
+    @staticmethod
+    def _reasoning_regressions(before: Any, after: Any) -> List[str]:
+        """Stages of the reasoning curve whose score fell. Empty when there is nothing to compare.
+
+        Reads :class:`~nyxara.eval.intelligence.IntelligenceReport`, which is the battery that
+        actually exercises what most of this package does — memorisation, generalisation,
+        recombination, causal prediction, self-correction, transfer, and paraphrase. Five of the
+        six categories a rewrite is supposed to be held to are already here and were not being
+        read; the fixed battery covers "old tasks" and the gauntlet's test run covers "regression",
+        and between them nothing looked at inference at all.
+
+        Absent reports veto nothing. That is the same rule Method D follows for its frontier
+        probes: a check that cannot be run must not be treated as a check that failed, or every
+        edit made without the harness would be refused for lack of evidence rather than for
+        lack of merit.
+
+        **Adversarial tasks are the one category with no battery here**, and this does not invent
+        one. A veto backed by nothing would be worse than an acknowledged gap.
+        """
+        try:
+            if before is None or after is None:
+                return []
+            was = {s.stage: s.score for s in getattr(before, "stages", ()) or ()
+                   if getattr(s, "score", None) is not None}
+            now = {s.stage: s.score for s in getattr(after, "stages", ()) or ()
+                   if getattr(s, "score", None) is not None}
+            # A stage that disappeared is not a regression in it — it is a different battery, and
+            # comparing two different batteries is not a comparison.
+            return sorted(name for name, score in was.items()
+                          if name in now and float(now[name]) < float(score) - 1e-9)
+        except Exception:  # noqa: BLE001 — an unreadable pair vetoes nothing
+            return []
+
+    @staticmethod
+    def _teacher_dependent(before: Optional[Dict[str, float]],
+                           after: Optional[Dict[str, float]]) -> bool:
+        """Did the gain exist only while a language model was attached?
+
+        Both arguments are ``{"on": score, "off": score}`` — the same battery run with the cortex
+        reachable and with it detached. The improvement she is entitled to keep is the one that
+        survives the teacher being taken away; a rise that appears only with it is a measurement
+        of the model, and keeping a rewrite on that evidence teaches her to depend on it.
+
+        Vetoes only when the ON side improved and the OFF side did not. An edit that improves both
+        passes, an edit that improves neither is refused by the methods above on their own terms,
+        and a missing pair vetoes nothing.
+        """
+        try:
+            if not before or not after:
+                return False
+            if "on" not in before or "on" not in after:
+                return False
+            if "off" not in before or "off" not in after:
+                return False
+            gained_with = float(after["on"]) > float(before["on"]) + 1e-9
+            gained_without = float(after["off"]) > float(before["off"]) + 1e-9
+            return bool(gained_with and not gained_without)
+        except Exception:  # noqa: BLE001
+            return False
 
     # ---- report helpers (duck-typed so tests can pass lightweight fakes) ---- #
     @staticmethod

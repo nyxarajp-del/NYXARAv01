@@ -65,12 +65,36 @@ __all__ = [
 
 
 class Seat:
-    """Who can answer. Two, and they are not interchangeable."""
+    """Who can answer. Three, and they are not interchangeable.
+
+    :attr:`FABRIC` is the one that does not speak, and the distinction is not a limitation being
+    apologised for — it is what the seat actually is. The fabric produces a
+    :class:`~nyxara.njp.manifold.Prediction`: which cells it expects to fire, with a margin and a
+    familiarity. There is no path by which that becomes the string ``"water"``. A seat that
+    emitted text on its behalf would be inventing the content and attributing it to the substrate,
+    which is the precise failure :mod:`nyxara.njp.voice` refuses for the language surface.
+
+    So the fabric asserts the one thing it is actually entitled to assert: **whether it recognises
+    this situation at all.** That is not an answer and it is not nothing — a confident reply on
+    ground the substrate has never met is exactly the confident-but-wrong case the honesty gates
+    exist to catch, and until this seat existed nothing in arbitration could see it.
+
+    Giving the fabric a genuine third *hypothesis* needs a readout that emits symbols rather than
+    cell ids — :class:`~nyxara.njp.learn.Readout` is where that would come from — and it is
+    deliberately not attempted here.
+    """
 
     CORTEX = "cortex"      # proposes; never sourced, never statable on its own word
     NJP = "njp"            # grounds, recalls, derives, predicts — and owns the record
+    FABRIC = "fabric"      # anticipates; asserts recognition, never content
 
-    ALL = (CORTEX, NJP)
+    ALL = (CORTEX, NJP, FABRIC)
+
+    #: The seats that can produce a text answer, and therefore the only ones routing orders or
+    #: arbitration can hand a turn to. Read by :meth:`Router.route`, which used to read ``ALL`` —
+    #: the split exists so adding a non-speaking seat could not silently put the fabric in a
+    #: running order for a question it has no way to answer.
+    SPEAKING = (CORTEX, NJP)
 
 
 class Verdict:
@@ -90,9 +114,13 @@ class DisagreementKind:
     EVIDENCE = "different_evidence"        # they are not looking at the same facts
     CAUSAL_MODEL = "different_causal_model"  # same facts, different arrows between them
     ASSUMPTIONS = "different_assumptions"  # one holds a condition the other does not
+    #: A speaking seat is confident and the fabric does not recognise the situation. Not a clash
+    #: about *what is true* — the fabric never claimed anything about that — but about whether
+    #: there is any ground under the answer at all.
+    RECOGNITION = "unrecognised_situation"
     UNCLASSIFIED = "unclassified"          # it differs and the record cannot say why
 
-    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, UNCLASSIFIED)
+    ALL = (EVIDENCE, CAUSAL_MODEL, ASSUMPTIONS, RECOGNITION, UNCLASSIFIED)
 
 
 #: Problem kind → the NJP faculty whose posterior speaks for the NJP seat. ``reasoning`` is the
@@ -121,6 +149,11 @@ _DECISIVE_MARGIN = 0.15
 #: A clash costs confidence. Two accounts that cannot both be right are grounds for less certainty
 #: in whichever survives, and this is the floor of that reduction.
 _CLASH_PENALTY = 0.2
+
+#: Below this an answer is already hedged, and the fabric's dissent would be punishing an honest
+#: hedge rather than catching an overconfident claim. Set at the point where a reply starts being
+#: read as an assertion rather than an offer.
+_CONFIDENT_FLOOR = 0.5
 
 
 def _norm(text: Any) -> str:
@@ -246,6 +279,11 @@ class Router:
         self.verdicts: Dict[str, int] = {}
         self.disagreements: Dict[str, int] = {}
         self.questions: List[str] = []
+        #: Turns where the fabric had a trusted prediction behind a confident answer, and turns
+        #: where it had none. The ratio is what says whether the substrate is actually coming to
+        #: recognise the ground she works on, or merely growing.
+        self.fabric_corroborations = 0
+        self.fabric_dissents = 0
 
     # ---- collaborators, all optional --------------------------------------- #
     def _get_meta(self) -> Any:
@@ -405,14 +443,14 @@ class Router:
         if self.learner is not None:
             arm = f"seat:{kind}"
             try:
-                for seat in Seat.ALL:
+                for seat in Seat.SPEAKING:
                     self.learner.register(arm, seat, seat)
                 strategy = self.learner.choose(arm)
                 chosen = getattr(strategy, "name", None)
             except Exception:  # noqa: BLE001
                 chosen = None
-        if chosen in Seat.ALL:
-            routing.seats = (chosen, *(s for s in Seat.ALL if s != chosen))
+        if chosen in Seat.SPEAKING:
+            routing.seats = (chosen, *(s for s in Seat.SPEAKING if s != chosen))
             routing.basis = "bandit"
             routing.why = f"{why}; seat order chosen by the bandit for '{kind}'"
             return routing
@@ -434,20 +472,30 @@ class Router:
         return routing
 
     # ---- arbitration: a clash is information -------------------------------- #
-    def arbitrate(self, question: str, *, cortex: Any = None, njp: Any = None) -> Arbitration:
-        """Reconcile the two seats — or refuse to, and say what would settle it."""
+    def arbitrate(self, question: str, *, cortex: Any = None, njp: Any = None,
+                  fabric: Any = None) -> Arbitration:
+        """Reconcile the speaking seats — or refuse to, and say what would settle it.
+
+        ``fabric`` is the substrate's :class:`~nyxara.njp.manifold.Prediction` for this turn, and
+        it is optional in the signature for a reason that is not politeness: every caller that
+        existed before the seat did keeps its exact behaviour, so the seat can be measured against
+        a baseline rather than replacing one. Passing ``None`` is the old function.
+
+        It does not compete for the answer — see :class:`Seat`. It reviews the one the speaking
+        seats produced, and can only ever *lower* what comes out.
+        """
         self.arbitrated += 1
         cortex_text, njp_text = _claim_text(cortex), _claim_text(njp)
         out = Arbitration(rivals=[t for t in (cortex_text, njp_text) if t])
 
         if not cortex_text and not njp_text:
             out.verdict, out.why = Verdict.SILENT, "neither seat had anything to say"
-            return self._record(out)
+            return self._record(self._review_by_fabric(out, fabric))
         if not cortex_text:
             out.verdict, out.winner = Verdict.NJP_ONLY, Seat.NJP
             out.text, out.confidence = njp_text, _confidence(njp)
             out.provenance, out.why = _provenance(njp), "only NJP answered"
-            return self._record(out)
+            return self._record(self._review_by_fabric(out, fabric))
         if not njp_text:
             out.verdict, out.winner = Verdict.CORTEX_ONLY, Seat.CORTEX
             out.text, out.confidence = cortex_text, _confidence(cortex)
@@ -456,7 +504,7 @@ class Router:
             # becoming a source.
             out.provenance = Provenance.PROPOSED
             out.why = "only the cortex answered — unopposed, and still a proposal"
-            return self._record(out)
+            return self._record(self._review_by_fabric(out, fabric))
 
         if _norm(cortex_text) == _norm(njp_text):
             out.verdict, out.winner = Verdict.AGREE, Seat.NJP
@@ -466,7 +514,7 @@ class Router:
             # proposal that happens to be popular.
             out.provenance = Provenance.weakest(_provenance(cortex), _provenance(njp))
             out.why = "both seats reached the same answer"
-            return self._record(out)
+            return self._record(self._review_by_fabric(out, fabric))
 
         # They differ. Is one of them the record?
         if _is_record(njp):
@@ -475,7 +523,7 @@ class Router:
             out.provenance = _provenance(njp)
             out.why = ("the cortex contradicted a grounded fact — that is a hypothesis meeting "
                        "evidence, not two peers disagreeing")
-            return self._record(out)
+            return self._record(self._review_by_fabric(out, fabric))
 
         # Neither is grounded: this is the case worth keeping whole.
         out.verdict = Verdict.DISAGREEMENT
@@ -489,7 +537,7 @@ class Router:
                    + ("" if gap >= _DECISIVE_MARGIN
                       else "; the two are held about equally, so no side is preferred"))
         self.questions.append(out.question)
-        return self._record(out)
+        return self._record(self._review_by_fabric(out, fabric))
 
     @staticmethod
     def _support_keys(claim: Any) -> set:
@@ -539,6 +587,57 @@ class Router:
         }.get(kind, "what observation would separate them?")
         return f"{head}'{cortex_text}' or '{njp_text}': {tail}"
 
+    def _review_by_fabric(self, out: Arbitration, fabric: Any) -> Arbitration:
+        """Let the substrate dissent from a confident answer on ground it does not recognise.
+
+        **What this deliberately does not do is discount by novelty.** That signal is already
+        spent: :meth:`nyxara.njp.brain.NJPBrain._temper_by_novelty` multiplies a grounded answer's
+        confidence by ``1 − novelty × damping`` on every turn. Applying familiarity again here
+        would charge one turn twice for one unfamiliar substrate, and the second charge would look
+        like independent corroboration of the first.
+
+        So this reads a different property. :attr:`~nyxara.njp.manifold.Prediction.trusted` is the
+        manifold's own statement about whether it had *enough transitions and enough separation*
+        to make a forward prediction at all — an evidence question, not a similarity score, and
+        one it answers ``False`` for honestly rather than by producing a weak guess. A speaking
+        seat that is confident where the substrate could not form a prediction is asserting
+        something about a situation nothing in her dynamics has any purchase on.
+
+        Only above :data:`_CONFIDENT_FLOOR`, because a hedged answer on unfamiliar ground is
+        already behaving correctly and lowering it further would punish exactly the honesty this
+        module wants. And only ``AGREE`` / ``*_ONLY`` verdicts are reviewed: a ``DISAGREEMENT`` has
+        already been penalised and already carries a question, and a ``CONTRADICTION`` was settled
+        by the record — which outranks the substrate, since the record is evidence and recognition
+        is not.
+        """
+        try:
+            if fabric is None:
+                return out
+            if out.verdict not in (Verdict.AGREE, Verdict.NJP_ONLY, Verdict.CORTEX_ONLY):
+                return out
+            if out.confidence < _CONFIDENT_FLOOR:
+                return out
+            # Absent is not the same as untrusted. `getattr(..., False)` alone would read anything
+            # that is not a Prediction — a stub, a mock, a None-shaped placeholder — as a fabric
+            # saying "I do not recognise this", and manufacture a dissent out of a caller's
+            # malformed argument. A seat that cannot be read abstains.
+            if not hasattr(fabric, "trusted"):
+                return out
+            if bool(getattr(fabric, "trusted", False)):
+                self.fabric_corroborations += 1
+                return out
+            self.fabric_dissents += 1
+            out.disagreement = DisagreementKind.RECOGNITION
+            out.confidence = max(0.0, out.confidence - _CLASH_PENALTY)
+            reason = str(getattr(fabric, "reason", "") or "no trusted prediction")
+            out.why += (f"; the fabric does not recognise this situation ({reason}), "
+                        f"so the answer stands on structure alone and is held less firmly")
+            # Deliberately still `settled`: the record answered and recognition does not unseat
+            # it. What changed is how firmly it is held, which is the honest size of the doubt.
+            return out
+        except Exception:  # noqa: BLE001 — an unreadable prediction dissents from nothing
+            return out
+
     def _record(self, out: Arbitration) -> Arbitration:
         self.verdicts[out.verdict] = self.verdicts.get(out.verdict, 0) + 1
         if out.disagreement:
@@ -569,4 +668,6 @@ class Router:
     def stats(self) -> Dict[str, Any]:
         return {"routed": self.routed, "arbitrated": self.arbitrated,
                 "verdicts": dict(self.verdicts), "disagreements": dict(self.disagreements),
-                "open_questions": len(self.questions)}
+                "open_questions": len(self.questions),
+                "fabric_corroborations": self.fabric_corroborations,
+                "fabric_dissents": self.fabric_dissents}

@@ -1,4 +1,4 @@
-"""NYXARA · eval/intelligence.py — the six-stage learning curve (📈, NJP V.05).
+"""NYXARA · eval/intelligence.py — the seven-stage learning curve (📈, NJP V.05).
 
 The benchmark that decides whether :mod:`nyxara.njp.core` is learning or bookkeeping.
 
@@ -10,7 +10,7 @@ unseen task that got easier are different claims, and only the second one is wor
 *intelligence*. So every stage here is scored on items the brain **was never taught**, and the
 teaching set and the test set are disjoint by construction rather than by hope.
 
-**The six stages, hardest last**::
+**The stages, hardest last**::
 
     1 MEMORIZATION        can she hold a fact and give it back
     2 GENERALIZATION      a rule induced from some members, tested on others
@@ -18,10 +18,18 @@ teaching set and the test set are disjoint by construction rather than by hope.
     4 CAUSAL PREDICTION   a counterfactual value at a point never observed
     5 SELF-CORRECTION     a contradiction arrives; does the newer fact win, and is it flagged
     6 TRANSFER            the same structure in a domain sharing no vocabulary
+    7 PARAPHRASE          the simplest of those inferences, said a different way
 
 Stage 1 is not a throwaway. It is the control: if memorisation fails then every later stage is
 measuring a broken pipe rather than an absent faculty, and the report says so instead of
-reporting six zeroes as if they meant six different things.
+reporting zeroes as if they meant six different things.
+
+Stage 7 is a control of the opposite kind, and it was added because the first six could not see
+a defect the audit found by hand: they generate sentences that match the extractor's patterns
+exactly, so all six read 1.00 while the identical inheritance failed on the word "birds". Where
+1-6 hold the surface constant to measure inference, 7 holds the inference constant to measure the
+surface. Measured on the change that introduced it: 0.40 → 1.00, with 1-6 unmoved at 1.00 — which
+is what says the fix was to extraction and not to the thing being extracted.
 
 **Vocabulary is generated, never literary.** Every stage builds its own nonsense terms from the
 seed, so no item can be answered from anything but the facts stated in that stage's own teaching
@@ -59,6 +67,7 @@ STAGE_NAMES: Tuple[str, ...] = (
     "causal_prediction",
     "self_correction",
     "transfer",
+    "paraphrase",
 )
 
 #: Syllables the generated vocabulary is built from. Deliberately meaningless: a term that looks
@@ -150,7 +159,7 @@ class IntelligenceReport:
     def render(self) -> str:
         """The curve as a table. Numbers first; no adjective is applied to any of them."""
         lines = [
-            "NYXARA — six-stage intelligence benchmark",
+            "NYXARA — seven-stage intelligence benchmark",
             f"seed {self.seed} · width {self.width} · {self.ms:.0f} ms",
             "",
             f"{'stage':<20} {'score':>7} {'correct':>9} {'taught':>7}  note",
@@ -535,6 +544,81 @@ def _stage_transfer(rng: random.Random, width: int,
         out.ms = (time.perf_counter() - started) * 1000.0
 
 
+# --------------------------------------------------------------------------- #
+# 7 · PARAPHRASE — the same inference, said a different way
+# --------------------------------------------------------------------------- #
+
+#: How the taught sentence and the asked question are allowed to differ. Each row is
+#: ``(taught kind phrase, asked kind phrase, taught verb, asked verb)`` and every row states the
+#: SAME fact and asks the SAME question — only the surface differs. Nothing here is exotic: these
+#: are the forms an ordinary sentence arrives in.
+_PARAPHRASES: Tuple[Tuple[str, str, str, str], ...] = (
+    ("{k}",        "{k}",        "needs",    "need"),      # bare, verb form only
+    ("{k}s",       "a {k}",      "need",     "need"),      # plural taught, singular asked
+    ("the {k}s",   "{k}",        "require",  "need"),      # article + plural + synonym
+    ("a {k}",      "the {k}",    "needs",    "require"),   # articles both sides
+    ("{k}s",       "{k}s",       "requires", "need"),      # plural both sides
+)
+
+
+def _stage_paraphrase(rng: random.Random, width: int,
+       prepare: Optional[Preparer] = None) -> StageResult:
+    """One inheritance, taught and asked in different words. Surface robustness, isolated.
+
+    **Why this stage exists.** The six above are the reasoning core's control, and they are
+    template-shaped on purpose — every sentence they generate matches the extractor's patterns
+    exactly, which is what makes them a clean read on the *inference*. The cost is that they say
+    nothing about the surface, and an audit found the gap the hard way: the identical two-step
+    inheritance scored perfectly when the kind was written ``bird`` and failed when it was
+    written ``birds``, returning a confident wrong answer rather than a miss. Every stage above
+    read 1.00 through that defect, because none of them ever varied a phrasing.
+
+    So this stage holds the *inference* fixed at the simplest thing that can be called one —
+    ``X is_a K``, ``K needs P`` ⊢ ``X needs P`` — and varies only how the two sentences are
+    written. A score here is a statement about extraction and canonicalisation and nothing else,
+    which is what makes a drop in it diagnosable instead of merely disappointing.
+
+    Scored per phrasing rather than pooled, so the report names which surface form failed instead
+    of averaging one broken form into four working ones.
+    """
+    out = StageResult(stage="paraphrase")
+    started = time.perf_counter()
+    try:
+        rows = max(1, min(width, len(_PARAPHRASES)))
+        failed: List[str] = []
+        # One brain for the whole stage, like every stage above it — the preparer contract is one
+        # prepared brain per stage, and a stage that built five would be measuring five brains the
+        # caller never got to prepare. Isolation comes from the vocabulary instead: each row draws
+        # its own terms from `_vocabulary`, so no row's facts can answer another row's question.
+        brain = _brain(prepare=prepare)
+        if brain is None:
+            out.note = "NJP unavailable"
+            return out
+        for i in range(rows):
+            taught_kind, asked_kind, taught_verb, asked_verb = _PARAPHRASES[i % len(_PARAPHRASES)]
+            member, kind, prop = _vocabulary(rng, 3, tag=f"par{i}")
+            taught = [
+                f"{member} is a {kind}",
+                f"{taught_kind.format(k=kind)} {taught_verb} {prop}",
+            ]
+            out.taught += _teach(brain, taught)
+            out.total += 1
+            answer = _ask(brain, f"what does {asked_kind.format(k=member)} {asked_verb}?")
+            if _hit(answer, prop):
+                out.correct += 1
+            else:
+                failed.append(f"{taught_kind}/{taught_verb} → {asked_kind}/{asked_verb}: "
+                              f"expected {prop}, got {answer!r}")
+        out.detail.extend(failed)
+        out.note = f"{rows} phrasings of one inheritance, taught and asked differently"
+        return out
+    except Exception as exc:  # noqa: BLE001
+        out.note = f"error: {exc}"
+        return out
+    finally:
+        out.ms = (time.perf_counter() - started) * 1000.0
+
+
 _StageRunner = Callable[[random.Random, int, Optional[Preparer]], StageResult]
 
 _STAGES: Tuple[Tuple[str, _StageRunner], ...] = (
@@ -544,6 +628,9 @@ _STAGES: Tuple[Tuple[str, _StageRunner], ...] = (
     ("causal_prediction", _stage_causal),
     ("self_correction", _stage_self_correction),
     ("transfer", _stage_transfer),
+    # Last, and deliberately outside the five that measure inference: this one measures the
+    # surface those five hold constant.
+    ("paraphrase", _stage_paraphrase),
 )
 
 

@@ -121,6 +121,37 @@ the corrections the Master actually made and applies them as unstated wants, and
 is wanted next. On day one it knows nothing and says so — everything it knows, it was taught by a
 correction. A latent want is surfaced so it can be declined, never acted on silently.
 
+**One entity, one key — and the fabric finally reaching the answer.** :mod:`nyxara.njp.canon` and
+the two edges around it exist because an audit found the reasoning core in good order and the
+connections into it broken. Three measured defects, each traced to one call site. ``birds`` and
+``bird`` were two entities, so a correct multi-level inheritance walked to a kind holding nothing —
+and the identical inference scored perfectly whenever the sentence happened to use the singular. A
+lookup miss was then answered from a *neighbouring* relation, so *"what does a sparrow need?"* came
+back ``bird``: confident, sourced, and about a different question. And two equally-supported
+answers had no state of their own, so a live tie was indistinguishable from a gap —
+:attr:`~nyxara.njp.grounding.Epistemic.CONFLICTING` is now its own verdict, kept narrower than
+"contested" because a contradiction that was *revised* has been settled and answering it is right.
+
+The fourth was the largest and had no symptom at all: ``"fabric" in getsource(brain._compose)`` was
+``False``. She grew on every turn and none of it could reach what she said. Two edges close that,
+reading **different** properties of the same organ so one unfamiliar turn is not charged twice —
+:meth:`~nyxara.njp.brain.NJPBrain._temper_by_novelty` discounts a grounded answer by graded
+familiarity, and :attr:`~nyxara.njp.router.Seat.FABRIC` dissents from a confident answer where the
+manifold could form no trusted prediction at all. Both only ever lower. The fabric may make her
+less sure of something she looked up; nothing lets it make her more sure of anything, which is what
+stops "she grew" from becoming its own evidence.
+
+The fabric's seat does not *speak*, and that is what it is rather than a limitation being
+apologised for: the substrate produces cell ids and a margin, and no path turns those into the word
+"water". A seat emitting text on its behalf would be inventing content and attributing it to the
+substrate. It asserts the one thing it is entitled to — whether it recognises this situation.
+
+Measured on the change: :mod:`nyxara.eval.intelligence` gained a seventh stage that holds the
+*inference* fixed and varies only the phrasing, and it read **0.40 → 1.00** while stages 1-6 stayed
+at 1.00 throughout. That the six did not move is the part worth reading: it says the repair was to
+extraction, not to the thing being extracted — and it is also why they could not see the defect in
+the first place, since every sentence they generate matches the extractor's patterns exactly.
+
 Honest, as everywhere in this repo: this is a **simulation on commodity silicon**, not neuromorphic
 hardware. The **fabric's** own plasticity is entirely local — every synaptic update depends only
 on that synapse and its two endpoints, with no global error signal — and alongside it
@@ -154,6 +185,7 @@ from nyxara.njp.adversary import (
     Stance,
 )
 from nyxara.njp.brain import NJPBrain, NJPPercept, NJPThought
+from nyxara.njp.canon import canonical_entity, canonical_relation, singular
 from nyxara.njp.cell import Cell
 from nyxara.njp.concepts import Concept, ConceptGenesis, Coverage, GenesisReport, Observation
 from nyxara.njp.field import (
@@ -279,6 +311,8 @@ __all__ = [
     "SelfAttacker", "Attack", "AttackReport", "Stance", "AttackKind",
     # the one number she is not allowed to compute about herself
     "IntelligenceIndex", "IntelligenceVector", "Term",
+    # one entity, one key — the store's spelling rule
+    "canonical_entity", "canonical_relation", "singular",
     # truth is not relevance, and reasoning is not always what a turn calls for
     "SpeechAct", "Act", "SpeechActReader", "Pathway", "CognitivePolicy",
     "RelevanceGate", "RelevanceScore",

@@ -126,6 +126,7 @@ class LoopReport:
     # structurally pinned at zero before the return edge existed, however well the organ behind
     # it worked when called by hand.
     strategies_graded: int = 0
+    shapes_graded: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
@@ -220,6 +221,20 @@ class _Deferred:
     # grade nothing learns from.
     solution: Any = None
     question: str = ""            # the turn as the Master asked it
+    #: The reasoning *shape* this answer came by, kept so the Master's later statement can grade
+    #: the form and not only the answer. `NJPBrain.resolve` already grades it — but that is an
+    #: external callback a conversation never makes, so on a `think()`-only session the genome
+    #: recorded shapes for ever and graded none of them: measured, `graded: 0` with `success:
+    #: None` on every shape, which makes `liabilities()` structurally unable to fire.
+    trace: Any = None
+    #: What the store held OUTRIGHT for this (subject, predicate) **at the moment she was asked**,
+    #: lowercased. Captured here rather than looked up at resolution time, and that timing is the
+    #: whole point: the fact that grades her arrives by being stated, so by the time
+    #: `_resolve_deferred` runs it has already been written to the store. Asking then returns the
+    #: answer she is being graded against and reports that she had it all along — which turned
+    #: every miss into a retrieval fault. Measured on the sparrow case: `in_memory` came back True
+    #: for `food`, a value the store first saw one sentence earlier.
+    held_when_asked: frozenset = frozenset()
 
 
 class LearningLoop:
@@ -298,6 +313,7 @@ class LearningLoop:
             predictor.register_repair(ErrorKind.PERCEPTION, self._repair_perception)
             predictor.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
             predictor.register_repair(ErrorKind.MEMORY, self._repair_memory)
+            predictor.register_repair(ErrorKind.RELATION, self._repair_relation)
             predictor.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
             predictor.register_repair(ErrorKind.REASONING, self._repair_reasoning)
         except Exception:  # noqa: BLE001 — an unrepairable brain still runs, it just learns less
@@ -345,6 +361,14 @@ class LearningLoop:
                     levels.touch(getattr(entry, "key", ""))
                     hit = True
             return hit
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_relation(self, outcome: Any) -> bool:
+        """Delegate to the brain's own targeted repair — one relation, not the whole model."""
+        try:
+            repair = getattr(self.brain, "_repair_relation", None)
+            return bool(repair(outcome)) if repair is not None else False
         except Exception:  # noqa: BLE001
             return False
 
@@ -419,6 +443,8 @@ class LearningLoop:
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
+            # A live tie is a rival hypothesis set that needs no cortex to exist.
+            self._experiment_from_conflict(thought, rep)
             self._close_curiosity(thought, rep)
             self._track_goals(thought, rep)
             self._observe_capabilities(thought, rep)
@@ -613,7 +639,22 @@ class LearningLoop:
             if not predicate:
                 return
             answer = getattr(grounding, "answer", None)
+            # What she ACTUALLY said, which is not always what grounding produced. `_compose`
+            # answers from the store when it can, and when it cannot the turn falls through to
+            # `_deliberate` (the ladder, and `core._inherit` behind it) and then to `_recall` —
+            # so every *derived* answer, which is precisely the interesting kind, arrives on
+            # `thought.answer` and never on `grounding.answer`.
+            #
+            # Reading only the latter recorded `<unknown>` for them. Measured on the sparrow
+            # case: she answered "water" through a correct two-step inheritance, the deferred
+            # record stored `<unknown>`, and when the Master then stated "sparrow needs food"
+            # the grade compared reality against nothing. Everything downstream is gated on
+            # `pending.answered` being non-empty — `rep.corrections`, belief settlement,
+            # retraction — so a derived answer could not be counted as a correction, could not
+            # settle the belief it staked, and could not be told it was wrong.
             said = str(getattr(answer, "text", "") or "")
+            if not said:
+                said = str(getattr(thought, "answer", "") or "")
             key = f"deferred:{subject.lower()}:{predicate}"
             if key in self._deferred:
                 return
@@ -627,7 +668,9 @@ class LearningLoop:
                 key=key, subject=subject, predicate=predicate,
                 asked_at=int(getattr(self.brain, "turns", 0)), answered=said,
                 solution=getattr(thought, "solution", None),
-                question=str(getattr(thought, "stimulus", "")))
+                trace=getattr(thought, "trace", None),
+                question=str(getattr(thought, "stimulus", "")),
+                held_when_asked=frozenset(self._held_directly(subject, predicate)))
             self._stake_a_belief(thought, said, subject, predicate)
             rep.deferred_opened = 1
             if len(self._deferred) > self.defer_capacity:
@@ -717,11 +760,29 @@ class LearningLoop:
                 pending = self._deferred.pop(key, None)
                 if pending is None:
                     continue
+                # What the diagnosis needs is the difference between three situations that all
+                # look like "she got it wrong" from here, and call for three different repairs:
+                #
+                #   the record HELD the true value and she did not return it  → MEMORY
+                #   she COMPOSED a value and the world has an exception       → RELATION
+                #   she repeated a value she was told, and it was wrong       → the record's,
+                #                                                               already superseded
+                #
+                # `in_memory` used to be `bool(pending.answered)`, which answers none of those —
+                # it says only that she spoke. Asked directly, it makes every wrong answer a
+                # retrieval fault and trains memory for a mistake reasoning made.
+                held = pending.held_when_asked
                 outcome = predictor.observe(
                     key, triple.object,
                     evidence={"stimulus": triple.text, "concepts": [triple.object],
                               "triples": [triple], "expected_triples": True,
-                              "in_memory": bool(pending.answered)})
+                              "predicate": pending.predicate,
+                              # The TRUE value was on record and she still missed it.
+                              "in_memory": bool(held) and triple.object.strip().lower() in held,
+                              # She produced a value the store does not directly contain, so
+                              # something composed it.
+                              "derived": bool(pending.answered)
+                              and pending.answered.strip().lower() not in held})
                 if outcome is None:
                     continue
                 rep.deferred_resolved += 1
@@ -743,6 +804,26 @@ class LearningLoop:
                 rep.scored += 1
         except Exception:  # noqa: BLE001
             pass
+
+    def _held_directly(self, subject: str, predicate: str) -> set:
+        """The values the store holds **outright** for this ``(subject, predicate)``, lowercased.
+
+        Outright, not reachable: an inherited or composed value is deliberately absent from this
+        set, because the whole question it answers is whether she *had* the fact or *made* it.
+        `Grounder._lookup` is the right call for that — it is one dict lookup on the canonical key
+        and it does not walk `is_a` edges.
+
+        Empty on any failure, which reads as "the store held nothing", and that is the safe way
+        round: it can only ever move a diagnosis away from MEMORY, never invent one.
+        """
+        try:
+            grounder = getattr(self.brain, "grounder", None)
+            if grounder is None:
+                return set()
+            return {str(getattr(t, "object", "") or "").strip().lower()
+                    for t in grounder._lookup(str(subject or ""), str(predicate or ""))}
+        except Exception:  # noqa: BLE001
+            return set()
 
     def _grade_by_reality(self, pending: _Deferred, correct: bool,
                           triple: Any, rep: LoopReport) -> None:
@@ -766,6 +847,19 @@ class LearningLoop:
             if metareason is not None and pending.solution is not None:
                 metareason.outcome(pending.solution, correct=correct)
                 rep.strategies_graded += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+        # The reasoning FORM, graded by the same independent outcome. `genome.candidates` asks
+        # for a success rate before naming a shape a primitive and `liabilities` reports the
+        # shapes that keep being wrong — and both were reading a counter nothing moved, so a shape
+        # could be proposed for promotion on recurrence alone with `success: None`. The Master's
+        # later statement is exactly the evidence that number wants.
+        try:
+            genome = getattr(self.brain, "genome", None)
+            if genome is not None and pending.trace is not None:
+                genome.grade(pending.trace, correct=correct)
+                rep.shapes_graded += 1
         except Exception:  # noqa: BLE001
             pass
 
@@ -1100,8 +1194,90 @@ class LearningLoop:
                         rep.attacked += 1
                         rep.attacks_refuted += int(bool(got.refuted_by))
                         rep.attack_verdict = got.verdict
+                        self._experiment_from_attack(got, rep)
             except Exception:  # noqa: BLE001
                 pass
+
+    def _experiment_from_attack(self, attack: Any, rep: LoopReport) -> None:
+        """An attack that settled nothing becomes the experiment that would settle it.
+
+        :meth:`~nyxara.njp.epistemic.EpistemicCompiler.from_attack` is documented as *"the join
+        the adversary never had"* and had no caller anywhere in the package — so the join it names
+        did not exist either. The adversary produced ``UNDECIDED`` verdicts, nothing consumed them,
+        and the claim kept its confidence while the attack counted itself. That is the accumulating
+        end state ``epistemic.py``'s own docstring was written against, reached by the one route it
+        did not check: its own front door.
+
+        A refuted attack is skipped, and that is not an optimisation. Refuted means the record
+        already settled it — the claim lost — and compiling an experiment to decide a question that
+        has an answer is exactly the confirmation this module refuses elsewhere.
+        """
+        try:
+            compiler = getattr(self.brain, "epistemic", None)
+            if compiler is None or attack is None:
+                return
+            experiment = compiler.from_attack(attack)
+            if experiment is None:
+                return
+            rep.experiments_run += 1
+            rep.bits_gained += float(getattr(experiment, "evpi", 0.0) or 0.0)
+            compiler.to_question(experiment,
+                                 subject=str(getattr(attack, "cause", "") or ""),
+                                 predicate="causes")
+        except Exception:  # noqa: BLE001 — an uncompiled experiment loses a question, not the turn
+            return
+
+    def _experiment_from_conflict(self, thought: Any, rep: LoopReport) -> None:
+        """A live tie in the record becomes the intervention that would break it.
+
+        :attr:`~nyxara.njp.grounding.Epistemic.CONFLICTING` says the record holds two equally
+        supported answers and cannot separate them. That is not a gap to be filled by thinking
+        harder — no amount of further *observation* separates two stated causes of one effect,
+        which is precisely why the do-operator exists. It is the cleanest source of rival
+        hypotheses in the package and, until now, nothing consumed it: the compiler's only caller
+        sat behind a cortex disagreement, so on a session with no language model attached it
+        compiled exactly nothing. Measured over 30 turns containing two genuine causal ties:
+        ``{'compiled': 0, 'experiments': 0, 'refused': 0}``.
+
+        **Only a tie between causes.** A tie between two *values* of one relation — two names for
+        one person — is a contradiction in the record, and the thing that settles it is the Master
+        saying which, not an intervention. Compiling ``do(not Jay)`` would be nonsense wearing the
+        shape of an experiment. Those are left to the contradiction handling that already
+        supersedes them.
+        """
+        try:
+            compiler = getattr(self.brain, "epistemic", None)
+            if compiler is None:
+                return
+            from nyxara.njp.grounding import Epistemic
+            if str(getattr(thought, "epistemic", "")) != Epistemic.CONFLICTING:
+                return
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            answer = getattr(grounding, "answer", None)
+            triples = list(getattr(answer, "triples", None) or [])
+            if len(triples) < 2:
+                return
+
+            # The shape of the tie says which kind it is. Rival CAUSES share the effect and differ
+            # in what produced it; rival VALUES share the subject and differ in what is claimed of
+            # it. Only the first is a question an intervention can answer.
+            effects = {str(getattr(t, "object", "") or "").strip().lower() for t in triples}
+            causes = [str(getattr(t, "subject", "") or "").strip() for t in triples]
+            if len(effects) != 1 or len({c.lower() for c in causes}) < 2:
+                return
+
+            effect = str(getattr(triples[0], "object", "") or "").strip()
+            experiment = compiler.compile(
+                str(getattr(thought, "stimulus", "")),
+                compiler.rivals_for_effect(effect, causes))
+            if experiment is None:
+                return
+            rep.experiments_run += 1
+            rep.bits_gained += float(getattr(experiment, "evpi", 0.0) or 0.0)
+            thought.experiment = experiment
+            compiler.to_question(experiment, subject=effect, predicate="causes")
+        except Exception:  # noqa: BLE001
+            return
 
     @staticmethod
     def _as_recorded(world: Any, effect: str) -> str:

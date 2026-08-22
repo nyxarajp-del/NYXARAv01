@@ -11,13 +11,37 @@ it is the same string whether she misheard the question, remembered the wrong th
 badly from correct facts, or knew the answer and phrased it terribly. Four different repairs, one
 undifferentiated error. So every miss here is classified by **kind**:
 
-``perception`` · ``grounding`` · ``memory`` · ``world_model`` · ``reasoning`` · ``planning`` ·
-``language``
+``perception`` · ``grounding`` · ``memory`` · ``relation`` · ``world_model`` · ``reasoning`` ·
+``planning`` · ``language``
 
 and each kind routes its update to the organ actually responsible. A grounding error re-parses; a
-memory error adjusts retrieval; a world-model error feeds a transition; a reasoning error opens a
-debate. That is what makes this stronger than a scalar "correct/incorrect" fed back into
-everything at once, which mostly teaches every organ to be vaguely less confident.
+memory error adjusts retrieval; a world-model error feeds a transition; a relation error lowers
+the transitivity of the one predicate that over-generalised; a reasoning error opens a debate.
+That is what makes this stronger than a scalar "correct/incorrect" fed back into everything at
+once, which mostly teaches every organ to be vaguely less confident.
+
+**A taxonomy is only as real as the evidence that reaches it.** Counted over a 48-turn session,
+before the callers were fixed::
+
+    by_kind: {'world_model': 43, perception 0, grounding 0, memory 0,
+              reasoning 0, planning 0, language 0, unattributed 0}
+    evidence keys ever supplied: ['concepts', 'stimulus', 'triples']
+
+An eight-way discrimination decided before it ran. Five kinds tested evidence keys no caller
+supplied, so they could not fire at all; the one path registering a prediction every turn — the
+manifold's next-state anticipation — was caught by the organ check above them and took everything.
+Three things had to be true before the classifier below meant anything, and none of them were:
+
+* **She has to keep what she said.** The deferred record read ``grounding.answer``, but every
+  *derived* answer arrives on ``thought.answer`` — so a two-step inheritance answering "water" was
+  stored as ``<unknown>`` and graded against nothing.
+* **``in_memory`` has to mean the record held the true value**, not "she spoke". Supplied as the
+  latter, it made every wrong answer a retrieval fault, including values never on record. It is
+  also snapshotted when she is *asked*: the fact that grades her is written by the same turn that
+  grades her, so asking afterwards always reports she had it all along.
+* **``reasoning`` must not be a catch-all.** An honest abstention arrived with everything that
+  branch tests for, and was booked against her reasoning — training her to prefer a guess to an
+  abstention, which is the trade the honesty gates elsewhere exist to prevent.
 
 **Attribution is evidence-based, not a guess.** The classifier does not ask a model what went
 wrong; it reads what each organ actually produced on the turn. If the grounder extracted nothing
@@ -48,15 +72,28 @@ class ErrorKind:
 
     PERCEPTION = "perception"        # the turn was not read correctly at all
     GROUNDING = "grounding"          # read, but not turned into the right structure
-    MEMORY = "memory"                # the structure was right; the wrong thing was retrieved
+    MEMORY = "memory"                # the answer was on record and was not retrieved
+    RELATION = "relation"            # right subject and predicate, wrong value — see below
     WORLD_MODEL = "world_model"      # what she expected to follow did not
     REASONING = "reasoning"          # correct facts, wrong conclusion
     PLANNING = "planning"            # right conclusion, wrong course of action
     LANGUAGE = "language"            # right answer, said wrongly
     UNATTRIBUTED = "unattributed"    # genuinely cannot tell — never guess
 
-    ALL = (PERCEPTION, GROUNDING, MEMORY, WORLD_MODEL,
+    ALL = (PERCEPTION, GROUNDING, MEMORY, RELATION, WORLD_MODEL,
            REASONING, PLANNING, LANGUAGE, UNATTRIBUTED)
+
+    #: RELATION exists because the taxonomy above had no way to name the most ordinary thing that
+    #: goes wrong with a *derived* answer. She was asked what a sparrow needs, answered ``water``
+    #: through a correct two-step inheritance, and the Master then said ``food``. Nothing was
+    #: misperceived; nothing failed to ground; the record never held ``food``, so no retrieval
+    #: missed it; and every fact she reasoned from was true. What the world had an exception to is
+    #: the *defeasible step* — a property of the kind carried down to one member.
+    #:
+    #: Before this, that case reached REASONING by exhaustion rather than by evidence, and its
+    #: repair wrote a line in a ledger. The repair it actually calls for is local, and the error
+    #: names it: lower the transitivity of **that predicate**, so the same inheritance is worth
+    #: less next time and every other one is untouched.
 
 
 @dataclass
@@ -277,9 +314,33 @@ class PredictionEngine:
 
             # 3. Structure was right, but the wrong thing came back. Only claimable when the
             # record actually held the answer — otherwise this is ignorance, not a memory fault.
+            #
+            # `in_memory` means *the true answer was on record*, and it has to keep meaning that.
+            # It was being supplied as `bool(pending.answered)` — "did she say anything" — which
+            # made every wrong answer a memory fault: measured on the sparrow case, she derived
+            # `water` through an inheritance the store never contained and the diagnosis came back
+            # "the answer was in the record and was not retrieved" about a fact that was never in
+            # the record. A wrong attribution trains the wrong organ, which this module's own
+            # docstring calls strictly worse than declining to attribute.
             if evidence.get("in_memory") and not evidence.get("recalled"):
                 return Diagnosis(kind=ErrorKind.MEMORY, confidence=0.75,
                                  evidence="the answer was in the record and was not retrieved")
+
+            # 4. She answered, for the right subject and the right relation, and the value is
+            # wrong. This is the ordinary failure of a defeasible step and it is a different
+            # repair from everything around it — see `ErrorKind.RELATION`.
+            #
+            # `derived` is what separates it from a plain correction: a value she was *told* and
+            # repeated is the record being wrong, which contradiction handling already supersedes.
+            # A value she *composed* is the composition being too general, and that is hers.
+            # `derived` has to be supplied — only the caller knows what the store held outright
+            # when she was asked. What she said does not: it is `outcome.expected`.
+            if evidence.get("derived") and str(outcome.expected or "").strip() not in ("", "<unknown>"):
+                return Diagnosis(
+                    kind=ErrorKind.RELATION, confidence=0.7,
+                    evidence=(f"derived {str(outcome.expected)[:40]!r} for "
+                              f"{str(evidence.get('predicate') or 'this relation')[:40]!r} "
+                              f"and the stated value differs"))
 
             # 4. A miss on what-follows-what belongs to the world model by construction.
             if str(outcome.organ) in ("world", "world_model", "manifold"):
@@ -287,7 +348,22 @@ class PredictionEngine:
                                  evidence=f"{outcome.organ} predicted the next state and missed")
 
             # 5. Facts present and correct, conclusion still wrong.
-            if evidence.get("triples") and evidence.get("facts_correct", True):
+            #
+            # Gated on there BEING a conclusion. Branch 3 already refuses to call ignorance a
+            # memory fault; this is the same rule one layer down, and it was missing. An
+            # abstention reaches here with everything the branch tests for — the turn grounded,
+            # the facts were fine — and the only thing that was not fine is that she had no
+            # answer. Measured: asked what a crow needs with nothing on record, she correctly said
+            # nothing, and the loop booked a reasoning error against her for it and told the
+            # self-model her reasoning had failed. Not knowing is not a defect in the reasoner,
+            # and training it as one teaches her to prefer a guess to an abstention — the exact
+            # trade the honesty gates elsewhere in this package exist to prevent.
+            # Read off the outcome, not off a new evidence key: what she concluded is
+            # `outcome.expected` and always has been, so requiring a caller to restate it would
+            # have made this branch depend on evidence nobody supplies — which is the exact defect
+            # that left five of the eight kinds unreachable in the first place.
+            concluded = str(outcome.expected or "").strip() not in ("", "<unknown>")
+            if evidence.get("triples") and evidence.get("facts_correct", True) and concluded:
                 return Diagnosis(kind=ErrorKind.REASONING, confidence=0.6,
                                  evidence="the facts were right and the conclusion was not")
 
