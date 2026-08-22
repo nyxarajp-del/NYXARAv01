@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from nyxara.eval.intelligence import run_intelligence_benchmark
+from nyxara.eval.intelligence import STAGE_NAMES, run_intelligence_benchmark
 from nyxara.njp.ingest import ingest_triples
 
 
@@ -51,8 +51,8 @@ def test_the_preparer_runs_for_every_stage_not_once(corpus):
     """A stage that was not prepared is a stage measuring a different brain from the others."""
     seen = []
     run_intelligence_benchmark(seed=0, width=2, prepare=lambda brain: seen.append(id(brain)))
-    assert len(seen) == 6
-    assert len(set(seen)) == 6, "each stage must still get its own brain"
+    assert len(seen) == len(STAGE_NAMES)
+    assert len(set(seen)) == len(STAGE_NAMES), "each stage must still get its own brain"
 
 
 def test_a_prepared_fact_is_actually_in_the_brain_the_stage_teaches(corpus):

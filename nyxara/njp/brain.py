@@ -241,8 +241,20 @@ class NJPThought:
         return bool(self.judgement is not None and self.judgement.assertable)
 
     def to_dict(self) -> Dict[str, Any]:
+        # `confidence` and `epistemic_confidence` are different questions and a report that shows
+        # only the first is misread every time. `confidence` is the *gauntlet's* number: it is
+        # 0.0 whenever the verdict was `abstained`, which is the correct, fail-closed outcome for
+        # a claim with no hard evidence source — "Jay" has none, and never will. Meanwhile the
+        # answer itself was `believed` at 0.9. Reading the pair as a contradiction is what an
+        # audit did, and it cost a round trip to establish that nothing was broken.
+        #
+        # So both travel, each labelled with what it is about: what she may *state as fact*, and
+        # how sure she is of what she *said*.
         return {"stimulus": self.stimulus[:200], "answer": self.answer[:400],
                 "cycle_id": self.cycle_id, "confidence": round(self.confidence, 4),
+                "epistemic": self.epistemic,
+                "epistemic_confidence": round(self.epistemic_confidence, 4),
+                "novelty": (round(self.percept.novelty, 4) if self.percept else None),
                 "verified": self.verified, "assertable": self.assertable,
                 "ms": round(self.ms, 3),
                 "percept": self.percept.to_dict() if self.percept else None,
@@ -2461,11 +2473,23 @@ class NJPBrain:
                 return
 
             from nyxara.njp.grounding import Answer
-            from nyxara.njp.router import Verdict
+            from nyxara.njp.router import DisagreementKind, Verdict
             lead = max(hypotheses, key=lambda h: h.confidence)
             njp_side = Answer(text=out.answer, state=out.epistemic,
                               confidence=out.epistemic_confidence, provenance=out.provenance)
-            out.arbitration = self.router.arbitrate(out.stimulus, cortex=lead, njp=njp_side)
+            # The third seat. It reviews rather than competes — see :class:`~nyxara.njp.router.Seat`
+            # — and what it reviews is whether the substrate had any purchase on this turn at all.
+            fabric_side = getattr(out.percept, "anticipated", None) if self._gate("fabric_seat") else None
+            out.arbitration = self.router.arbitrate(out.stimulus, cortex=lead, njp=njp_side,
+                                                    fabric=fabric_side)
+
+            # A recognition dissent lowers confidence on a verdict that DID settle, so it has to
+            # be applied before the disagreement branch returns — otherwise the one case the
+            # fabric seat exists to catch, a confident answer on unrecognised ground, is the one
+            # case that never reads its result.
+            if out.arbitration.disagreement == DisagreementKind.RECOGNITION:
+                out.epistemic_confidence = min(out.epistemic_confidence,
+                                               out.arbitration.confidence)
 
             if out.arbitration.verdict != Verdict.DISAGREEMENT:
                 return
@@ -2483,6 +2507,40 @@ class NJPBrain:
             log.debug("cortex consult degraded: %s", exc)
 
     @staticmethod
+    def _temper_by_novelty(base: float, thought: NJPThought,
+                           *, damping: float = 0.75) -> float:
+        """Discount a stated confidence by how unfamiliar the fabric found this turn.
+
+        **This is the edge that made the fabric part of cognition.** Before it, the fabric grew on
+        every turn and could not reach the answer path at all — ``"fabric" in
+        getsource(_compose)`` was ``False``, and the only consumer of
+        :attr:`~nyxara.njp.brain.NJPPercept.novelty` was :meth:`nyxara.njp.reasoner.NJPReasoner._temper`,
+        a seat that a grounded turn never reaches. So a structural answer left here carrying the
+        store's confidence and nothing else, and the manifold's opinion about whether she had ever
+        seen anything like this was computed, recorded, and dropped.
+
+        The rule is :meth:`~nyxara.njp.reasoner.NJPReasoner._temper`'s, deliberately unchanged —
+        ``reported = base × (1 − novelty × damping)`` — so the two paths discount identically
+        rather than growing two notions of what a novel turn is worth.
+
+        **It can only ever lower.** ``novelty`` is in ``[0, 1]`` and ``damping`` is below 1, so the
+        factor is never above 1 and a familiar turn is left exactly as it was. That direction is
+        the whole safety property: the fabric is allowed to make her less sure of something she
+        looked up, and is never allowed to make her more sure of anything. Growth earns its way
+        into confidence by *removing* a discount as she comes to recognise the ground, which is
+        also what makes it measurable — an unfamiliar turn and a familiar one now differ in a
+        number that leaves this method.
+        """
+        try:
+            percept = getattr(thought, "percept", None)
+            if percept is None:
+                return max(0.0, min(1.0, float(base)))
+            factor = max(0.0, 1.0 - float(percept.novelty) * float(damping))
+            return max(0.0, min(1.0, float(base) * factor))
+        except Exception:  # noqa: BLE001 — an unreadable percept discounts nothing
+            return max(0.0, min(1.0, float(base)))
+
+    @staticmethod
     def _set_epistemic(thought: NJPThought) -> None:
         """Record which of the three states this turn's answer is in.
 
@@ -2497,10 +2555,21 @@ class NJPBrain:
             answer = getattr(grounding, "answer", None)
             if answer is not None and answer.answered:
                 thought.epistemic = answer.state
-                thought.epistemic_confidence = float(answer.confidence)
+                thought.epistemic_confidence = NJPBrain._temper_by_novelty(
+                    float(answer.confidence), thought)
                 # An answer built from proposals is a proposal. Carrying it here is what lets the
                 # router tell "the record says X" from "something guessed X", which is the whole
                 # difference between a contradiction and a disagreement.
+                thought.provenance = getattr(answer, "provenance", thought.provenance)
+                return
+            # A live tie is its own state and must be read before the acknowledgement branch
+            # below, which would otherwise label it KNOWN: that branch means "she is certain about
+            # what she just recorded", and what she recorded here is a contradiction. Confidence
+            # is left at zero deliberately — two answers she cannot separate is not partial
+            # knowledge of either.
+            if answer is not None and answer.conflicting:
+                thought.epistemic = Epistemic.CONFLICTING
+                thought.epistemic_confidence = 0.0
                 thought.provenance = getattr(answer, "provenance", thought.provenance)
                 return
             # An acknowledgement is not a claim about the world. "noted: Master has name Jay"

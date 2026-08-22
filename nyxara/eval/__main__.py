@@ -27,7 +27,7 @@ import sys
 
 
 def _run_intelligence(args: argparse.Namespace) -> int:
-    """The six-stage learning curve.
+    """The seven-stage learning curve.
 
     Exits non-zero only when the **control** stage fails. The other five are measurements, not
     assertions: a low transfer score is a fact about where she currently is, and turning it into
@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", default=None,
                         help="compare against a saved baseline and flag regressions")
     parser.add_argument("--intelligence", action="store_true",
-                        help="run the six-stage learning curve (eval/intelligence.py): "
+                        help="run the seven-stage learning curve (eval/intelligence.py): "
                              "memorization -> generalization -> recombination -> causal "
                              "prediction -> self-correction -> transfer. Every stage is scored "
                              "on items the brain was never taught, on generated vocabulary, "

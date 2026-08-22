@@ -2485,6 +2485,12 @@ class NJPConfig(BaseModel):
     cortex_enabled: bool = True         # ask her cortex for hypotheses (njp/cortex.py)
     router_enabled: bool = True         # which seat answers, and what a clash is worth (njp/router.py)
     epistemic_enabled: bool = True      # UNDECIDED -> the experiment that settles it (njp/epistemic.py)
+    # The fabric's seat in arbitration (njp/router.py). It never answers and never raises a
+    # number — it lowers confidence on a turn the substrate could form no prediction for. On
+    # because that direction is the conservative one; a gate so the seat's effect stays
+    # separable from the novelty damping in `NJPBrain._temper_by_novelty`, which reads a
+    # different property of the same organ.
+    fabric_seat_enabled: bool = True
     # Which provider the cortex speaks through. It is named rather than taken from the ladder on
     # purpose: `complete_with` raises if that rung is down, where `complete` would quietly hand back
     # the n-gram floor — and hypotheses from an n-gram are noise wearing the shape of reasoning,

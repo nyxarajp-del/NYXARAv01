@@ -67,6 +67,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Collection, Dict, List, Optional, Set, Tuple
 
+from nyxara.njp.canon import canonical_entity
+
 __all__ = [
     "Derivation", "Schema", "Transitivity",
     "RepresentReport", "TestReport", "ReviseReport", "CoreReport",
@@ -106,8 +108,17 @@ _MIN_LINK_CONFIDENCE = 0.05
 
 
 def _norm(text: Any) -> str:
-    """The one spelling rule for a name, so two paths to it reach the same key."""
-    return str(text or "").strip().lower()
+    """The one spelling rule for a name, so two paths to it reach the same key.
+
+    It must be the *same* rule :class:`~nyxara.njp.grounding.Grounder` files facts under, and for
+    a while it was not: this was ``.strip().lower()`` while the store keyed on the surface form
+    too, so both halves agreed and both halves were wrong together. The moment the store learned
+    that ``birds`` and ``bird`` are one entity, this had to learn it as well — :meth:`_inherit`
+    reads ``self._facts()`` directly, so a kind reached through a stated ``is_a`` edge would look
+    up a key the store no longer writes, and multi-level inheritance would break in exactly the
+    way canonicalisation was introduced to fix.
+    """
+    return canonical_entity(text)
 
 
 #: How a question says "not that one". Everything after the marker, up to the end or a comma, is
