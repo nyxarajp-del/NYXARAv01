@@ -127,6 +127,9 @@ class LoopReport:
     # it worked when called by hand.
     strategies_graded: int = 0
     shapes_graded: int = 0
+    #: Reasoning forms promoted into strategies this cycle. `genome.candidates()` had produced
+    #: these for a long time and nothing consumed them.
+    shapes_promoted: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
@@ -182,6 +185,7 @@ class LoopReport:
                 "deferred": {"opened": self.deferred_opened, "resolved": self.deferred_resolved,
                              "open": self.deferred_open, "corrections": self.corrections},
                 "diagnoses": dict(self.diagnoses), "repaired": self.repaired,
+                "shapes_promoted": self.shapes_promoted,
                 "graded": {"strategies": self.strategies_graded,
                            "beliefs_settled": self.beliefs_settled,
                            "beliefs_retracted": self.beliefs_retracted,
@@ -1157,6 +1161,17 @@ class LearningLoop:
 
         if turn % self.discover_every == 0:
             self._run_experiments(rep)
+
+        if turn % self.consolidate_every == 0:
+            # A reasoning form she keeps re-deriving becomes a strategy she can choose. On the
+            # consolidation cadence rather than every turn, because `candidates()` is a scan over
+            # every shape and a form does not become worth naming between one turn and the next.
+            try:
+                promote = getattr(self.brain, "_promote_shapes", None)
+                if promote is not None:
+                    rep.shapes_promoted = int(promote())
+            except Exception:  # noqa: BLE001
+                pass
 
         if turn % self.wonder_every == 0:
             try:

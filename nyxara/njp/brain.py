@@ -709,6 +709,70 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
             return None
 
+    # ---- promoting a reasoning form into a strategy ------------------------ #
+    def _shape_strategy(self, shape: Tuple[str, ...]) -> Any:
+        """Bind one reasoning form into something :mod:`nyxara.njp.metareason` can choose.
+
+        The callable is the walk with the predicate sequence *pinned*, which is the whole content
+        of naming a shape: the search that found this chain the first forty times does not have to
+        run the forty-first. Everything else about it is an ordinary arm — it is scored by the
+        same bandit, on the same outcomes, and a promoted shape that stops working loses its
+        record like any other.
+        """
+        def solve(problem: str, ctx: Dict[str, Any]) -> Any:
+            try:
+                if self.learner is None:
+                    return None
+                subject = str(ctx.get("subject") or "").strip()
+                if not subject and self.grounder is not None:
+                    reader = getattr(self.grounder, "_read_question", None)
+                    if reader is not None:
+                        subject = str(reader(str(problem or "").lower())[0] or "")
+                if not subject:
+                    return None
+                derived = self.learner.walk_shape(subject, shape)
+                return derived.answer or None if derived.ok else None
+            except Exception:  # noqa: BLE001
+                return None
+        return solve
+
+    def _promote_shapes(self) -> int:
+        """Register every reasoning form the genome says is worth naming. Returns how many are new.
+
+        :meth:`~nyxara.njp.genome.ReasoningGenome.candidates` has computed this for a long time —
+        enough real uses to be a pattern, a success rate that says following it is a good idea, and
+        a positive MDL saving so naming it costs less than re-deriving it — and had no consumer
+        anywhere. A shape she had re-derived forty times appeared in a stats dict and was
+        re-derived a forty-first.
+
+        ``liabilities()`` is never promoted, and that is not the same as merely not being a
+        candidate: a form that recurs constantly and is usually *wrong* would, if named, teach her
+        to make the same mistake faster.
+        """
+        if self.genome is None or self.metareason is None:
+            return 0
+        added = 0
+        try:
+            from nyxara.njp.metareason import ProblemKind
+            liabilities = {tuple(s.shape) for s in self.genome.liabilities()}
+            for candidate in self.genome.candidates():
+                shape = tuple(candidate.shape)
+                if not shape or shape in liabilities:
+                    continue
+                name = "shape:" + ">".join(shape)
+                if name in self.metareason.strategies:
+                    continue
+                self.metareason.register(
+                    name, (ProblemKind.FACTUAL, ProblemKind.CAUSAL),
+                    self._shape_strategy(shape),
+                    # Its own measured success rate, not a number anyone picked. A shape promoted
+                    # on a strong record starts believed to that degree and no further.
+                    prior=float(candidate.success if candidate.success is not None else 0.5))
+                added += 1
+        except Exception:  # noqa: BLE001 — a failed promotion leaves the registry as it was
+            return added
+        return added
+
     # ---- the repairs, one per error kind ---------------------------------- #
     def _repair_planning(self, outcome: Any) -> bool:
         """A plan reached the wrong state: charge the action it took, and only that action.
