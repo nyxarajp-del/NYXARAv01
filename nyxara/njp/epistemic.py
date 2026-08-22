@@ -237,6 +237,66 @@ class EpistemicCompiler:
         ]
 
     @staticmethod
+    def rivals_for_effect(effect: str, causes: Sequence[str]) -> List[Any]:
+        """Rivals for *two or more stated causes of one effect* — what a live tie actually is.
+
+        :meth:`rivals_for` answers a different question. It takes one bare ``A → B`` claim and
+        builds the four ways a correlation can arise. What arrives from
+        :attr:`~nyxara.njp.grounding.Epistemic.CONFLICTING` is not that: the record holds ``aag
+        causes garmi`` *and* ``dhoop causes garmi``, both stated, both equally supported, and the
+        open question is which of them is doing the work — or whether both are.
+
+        Passing those to `rivals_for` would have discriminated the wrong thing, and passing them
+        as bare claims would have discriminated nothing at all: `discriminate` scores zero unless
+        some candidate **predicts** what another **forbids**, and two claims that only assert
+        themselves forbid nothing. The construction below is what makes the tie testable, and it
+        is the do-operator that supplies it — removing a cause is the observation that separates
+        these, and no amount of further observation of co-occurrence can.
+
+        Three candidates, which is the honest space for a tie between stated causes:
+
+        * **only this one** — remove it and the effect stops; remove the other and it persists;
+        * **only that one** — the mirror image;
+        * **both, independently** — remove either and the effect persists anyway.
+
+        "Something else causes all of it" is deliberately absent. It predicts exactly what *both*
+        predicts under every intervention available here, so including it would add a candidate
+        that no observation in this set can separate — inflating the set and lowering the measured
+        power of a real experiment while pretending to more coverage. `rivals_for` is where a
+        confound is raised, against a single claim, where an intervention can actually speak to it.
+        """
+        from nyxara.njp.cortex import CortexHypothesis, HypothesisKind
+        names = [str(c or "").strip() for c in (causes or ()) if str(c or "").strip()]
+        # Deduplicated, order preserved: the same cause stated twice is one hypothesis, and two
+        # copies of it would score as agreement between rivals.
+        seen: Dict[str, None] = {}
+        for name in names:
+            seen.setdefault(name, None)
+        names = list(seen)
+        if len(names) < 2 or not str(effect or "").strip():
+            return []
+
+        persists = {c: f"do(not {c}): {effect} happens anyway" for c in names}
+        stops = {c: f"do(not {c}): {effect} stops" for c in names}
+
+        out: List[Any] = []
+        for cause in names:
+            others = [c for c in names if c != cause]
+            out.append(CortexHypothesis(
+                claim=f"{cause} causes {effect}",
+                kind=HypothesisKind.CAUSE,
+                # Removing the real cause stops it; removing a bystander does not.
+                predicts=[stops[cause]] + [persists[o] for o in others],
+                forbids=[persists[cause]] + [stops[o] for o in others]))
+        out.append(CortexHypothesis(
+            claim=f"{' and '.join(names)} each independently cause {effect}",
+            kind=HypothesisKind.CONFOUND,
+            # Independent causes: removing any one leaves the others carrying it.
+            predicts=[persists[c] for c in names],
+            forbids=[stops[c] for c in names]))
+        return out
+
+    @staticmethod
     def _observations(candidates: Sequence[Any]) -> List[Observation]:
         """Every distinct thing the candidates commit to, deduplicated by text."""
         seen: Dict[str, Observation] = {}

@@ -436,6 +436,8 @@ class LearningLoop:
             self._observe_transition(thought, fired, rep)
             self._score_next_state(thought, fired, rep)
             self._deferred_answers(thought, rep)
+            # A live tie is a rival hypothesis set that needs no cortex to exist.
+            self._experiment_from_conflict(thought, rep)
             self._close_curiosity(thought, rep)
             self._track_goals(thought, rep)
             self._observe_capabilities(thought, rep)
@@ -1171,8 +1173,90 @@ class LearningLoop:
                         rep.attacked += 1
                         rep.attacks_refuted += int(bool(got.refuted_by))
                         rep.attack_verdict = got.verdict
+                        self._experiment_from_attack(got, rep)
             except Exception:  # noqa: BLE001
                 pass
+
+    def _experiment_from_attack(self, attack: Any, rep: LoopReport) -> None:
+        """An attack that settled nothing becomes the experiment that would settle it.
+
+        :meth:`~nyxara.njp.epistemic.EpistemicCompiler.from_attack` is documented as *"the join
+        the adversary never had"* and had no caller anywhere in the package — so the join it names
+        did not exist either. The adversary produced ``UNDECIDED`` verdicts, nothing consumed them,
+        and the claim kept its confidence while the attack counted itself. That is the accumulating
+        end state ``epistemic.py``'s own docstring was written against, reached by the one route it
+        did not check: its own front door.
+
+        A refuted attack is skipped, and that is not an optimisation. Refuted means the record
+        already settled it — the claim lost — and compiling an experiment to decide a question that
+        has an answer is exactly the confirmation this module refuses elsewhere.
+        """
+        try:
+            compiler = getattr(self.brain, "epistemic", None)
+            if compiler is None or attack is None:
+                return
+            experiment = compiler.from_attack(attack)
+            if experiment is None:
+                return
+            rep.experiments_run += 1
+            rep.bits_gained += float(getattr(experiment, "evpi", 0.0) or 0.0)
+            compiler.to_question(experiment,
+                                 subject=str(getattr(attack, "cause", "") or ""),
+                                 predicate="causes")
+        except Exception:  # noqa: BLE001 — an uncompiled experiment loses a question, not the turn
+            return
+
+    def _experiment_from_conflict(self, thought: Any, rep: LoopReport) -> None:
+        """A live tie in the record becomes the intervention that would break it.
+
+        :attr:`~nyxara.njp.grounding.Epistemic.CONFLICTING` says the record holds two equally
+        supported answers and cannot separate them. That is not a gap to be filled by thinking
+        harder — no amount of further *observation* separates two stated causes of one effect,
+        which is precisely why the do-operator exists. It is the cleanest source of rival
+        hypotheses in the package and, until now, nothing consumed it: the compiler's only caller
+        sat behind a cortex disagreement, so on a session with no language model attached it
+        compiled exactly nothing. Measured over 30 turns containing two genuine causal ties:
+        ``{'compiled': 0, 'experiments': 0, 'refused': 0}``.
+
+        **Only a tie between causes.** A tie between two *values* of one relation — two names for
+        one person — is a contradiction in the record, and the thing that settles it is the Master
+        saying which, not an intervention. Compiling ``do(not Jay)`` would be nonsense wearing the
+        shape of an experiment. Those are left to the contradiction handling that already
+        supersedes them.
+        """
+        try:
+            compiler = getattr(self.brain, "epistemic", None)
+            if compiler is None:
+                return
+            from nyxara.njp.grounding import Epistemic
+            if str(getattr(thought, "epistemic", "")) != Epistemic.CONFLICTING:
+                return
+            grounding = getattr(getattr(thought, "percept", None), "grounding", None)
+            answer = getattr(grounding, "answer", None)
+            triples = list(getattr(answer, "triples", None) or [])
+            if len(triples) < 2:
+                return
+
+            # The shape of the tie says which kind it is. Rival CAUSES share the effect and differ
+            # in what produced it; rival VALUES share the subject and differ in what is claimed of
+            # it. Only the first is a question an intervention can answer.
+            effects = {str(getattr(t, "object", "") or "").strip().lower() for t in triples}
+            causes = [str(getattr(t, "subject", "") or "").strip() for t in triples]
+            if len(effects) != 1 or len({c.lower() for c in causes}) < 2:
+                return
+
+            effect = str(getattr(triples[0], "object", "") or "").strip()
+            experiment = compiler.compile(
+                str(getattr(thought, "stimulus", "")),
+                compiler.rivals_for_effect(effect, causes))
+            if experiment is None:
+                return
+            rep.experiments_run += 1
+            rep.bits_gained += float(getattr(experiment, "evpi", 0.0) or 0.0)
+            thought.experiment = experiment
+            compiler.to_question(experiment, subject=effect, predicate="causes")
+        except Exception:  # noqa: BLE001
+            return
 
     @staticmethod
     def _as_recorded(world: Any, effect: str) -> str:
