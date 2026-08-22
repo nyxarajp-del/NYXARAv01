@@ -340,6 +340,13 @@ class Optimizer:
         # before-code and the after-code, so a strictly higher score is a genuine dominance.
         self._frontier_baseline_path: Optional[Path] = None
         self._frontier_after_path: Optional[Path] = None
+        # The reasoning curve and the teacher-independence pair, both read by the prover's vetoes.
+        # Set by whatever harness runs those batteries around an edit; left None here so an edit
+        # made without them is refused for lack of merit rather than for lack of evidence.
+        self._reasoning_before: Any = None
+        self._reasoning_after: Any = None
+        self._teacher_before: Optional[Dict[str, float]] = None
+        self._teacher_after: Optional[Dict[str, float]] = None
         self._frontier_seed: Optional[int] = None
         self._frontier_tier: Optional[int] = None
         self._tmpdir: Optional[tempfile.TemporaryDirectory] = None
@@ -488,7 +495,9 @@ class Optimizer:
         fa = self._load_frontier(self._frontier_after_path)
         return ImprovementProver(settings=self.settings).prove(
             before=before, after=after, before_src=edit.before, after_src=edit.after,
-            edit_kind=edit.kind, frontier_before=fb, frontier_after=fa)
+            edit_kind=edit.kind, frontier_before=fb, frontier_after=fa,
+            reasoning_before=self._reasoning_before, reasoning_after=self._reasoning_after,
+            teacher_before=self._teacher_before, teacher_after=self._teacher_after)
 
     @staticmethod
     def _load_frontier(path: Optional[Path]) -> Optional[Dict[str, Any]]:
