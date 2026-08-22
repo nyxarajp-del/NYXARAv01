@@ -288,6 +288,12 @@ class NJPBrain:
         # gets no support rather than stale support from a previous one.
         self.observations: List[str] = []
         self.holdout: List[Any] = []
+        #: cell id → the concept label that minted it. The inverse of :func:`_cell_id`, which is a
+        #: one-way digest — so this is the only thing that lets the substrate name anything it
+        #: predicts. Written by :meth:`encode` and persisted with the fabric, because a reloaded
+        #: brain that cannot name its own cells is exactly the failure `_cell_id`'s own docstring
+        #: warns about, one layer up.
+        self.lexicon: Dict[int, str] = {}
         # The kernel runs hypothesis framings CONCURRENTLY when the reason-seat accepts **kwargs,
         # which this one does — so three threads call think() on this same object at once. A
         # fabric is one organism: two thoughts rewiring it simultaneously corrupt the adjacency
@@ -1656,8 +1662,55 @@ class NJPBrain:
             return [w for w in str(text or "").lower().split() if len(w) > 2][:32]
 
     def encode(self, text: str) -> List[int]:
-        """Words to cells. Stable across restarts, which is what makes the fabric reloadable."""
-        return [_cell_id(tok) for tok in self.concepts(text)]
+        """Words to cells. Stable across restarts, which is what makes the fabric reloadable.
+
+        Every call also records the inverse. :func:`_cell_id` is a blake2b digest and is therefore
+        one-way by construction — there is no arithmetic that recovers ``"sparrow"`` from the
+        integer it hashes to. That is fine for addressing a cell and it is exactly what stopped the
+        substrate from ever saying anything: :meth:`~nyxara.njp.learn.Readout.predict` returns
+        gradient-trained probabilities over *cell ids*, which no reader and no other seat can do
+        anything with.
+
+        The map is not hard to recover, though, because she computes it herself on every turn and
+        was throwing it away. Keeping it is the whole of the fix.
+        """
+        out: List[int] = []
+        for token in self.concepts(text):
+            cell = _cell_id(token)
+            # First spelling wins. Two labels colliding on one 48-bit digest is vanishingly
+            # unlikely, and if it ever happens the honest thing is to keep naming the cell what it
+            # was first called rather than to let a later word silently rename an established one.
+            self.lexicon.setdefault(cell, token)
+            out.append(cell)
+        return out
+
+    def fabric_proposes(self, text: str, *, k: int = 5,
+                        floor: float = 0.0) -> List[Tuple[str, float]]:
+        """What the substrate expects to go with this turn, **as concepts she can name**.
+
+        The fabric's own account of a turn, produced by the one learner in the package that uses
+        real gradients rather than local coincidence. It is deliberately not routed into
+        :meth:`_compose`: this is association learned from co-activation, it knows nothing about
+        relations or truth, and an answer path that took it would be guessing fluently.
+
+        What it is *for* is being a third account that was produced differently from the other two
+        — which is the only thing that makes a disagreement between them informative.
+        """
+        try:
+            if self.readout is None:
+                return []
+            return self.readout.predict_symbols(
+                self.encode(text), lexicon=self.lexicon, k=k, floor=floor)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def name_cell(self, cell_id: int) -> str:
+        """What this cell is called, or ``""`` when she has never encoded that concept.
+
+        Empty rather than a placeholder: a cell she cannot name is one the readout must decline to
+        report, and a stand-in string would be a symbol she never learned appearing in a proposal.
+        """
+        return self.lexicon.get(int(cell_id), "")
 
     # ---- perception ------------------------------------------------------- #
     def perceive(self, text: str, *, remember: bool = True,
@@ -2868,7 +2921,12 @@ class NJPBrain:
 
     # ---- persistence ------------------------------------------------------ #
     def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict()}
+        d: Dict[str, Any] = {"turns": self.turns, "fabric": self.fabric.to_dict(),
+                             # Persisted with the fabric, and for the same reason `_cell_id` is a
+                             # stable hash rather than a counter: a reloaded brain wired for cells
+                             # it can no longer name is the one way persistence is worse than
+                             # starting fresh. The lexicon IS the naming.
+                             "lexicon": {str(k): v for k, v in self.lexicon.items()}}
         for name, organ in (("ledger", self.ledger), ("soulsync", self.soul),
                             ("grounding", self.grounder), ("world", self.world), ("predict", self.predictor), ("levels", self.levels),
                             ("discover", self.discoverer), ("reason", self.reasoner),
@@ -2901,6 +2959,11 @@ class NJPBrain:
         """Wake up as the brain that went to sleep. This is what makes tomorrow's NJP today's."""
         try:
             self.turns = int(d.get("turns", 0))
+            for cell, name in (d.get("lexicon") or {}).items():
+                try:
+                    self.lexicon.setdefault(int(cell), str(name))
+                except (TypeError, ValueError):
+                    continue
             if d.get("fabric"):
                 self.fabric.load_dict(d["fabric"])
             if d.get("ledger") and self.ledger is not None:
