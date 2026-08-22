@@ -191,6 +191,8 @@ class NJPThought:
     # different epistemic objects: a derived answer is defeasible however confident it reads, and
     # a caller that cannot tell it from a stated fact will eventually state it as one.
     derivation: Any = None
+    #: The ranked field of accounts for this turn — see :mod:`nyxara.njp.compete`.
+    competition: Any = None
     #: The genome's record of this turn's reasoning, kept so the outcome can be graded against
     #: the *shape* that produced it once reality says whether it was right.
     trace: Any = None
@@ -364,6 +366,7 @@ class NJPBrain:
         self.cortex = self._build_cortex(c)
         self.router = self._build_router(c)
         self.epistemic = self._build_epistemic(c)
+        self.competition = self._build_competition(c)
         # The predictive brain: what follows what in the WORLD, as opposed to which of her own
         # cells fire next. Without it she is a fact store that grows; with it she is something
         # that expects, is wrong, and learns from the difference.
@@ -1004,6 +1007,17 @@ class NJPBrain:
         try:
             from nyxara.njp.router import Router
             return Router(meta=self.metareason, self_model=self.self_model, learner=self.meta)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _build_competition(self, c: Any) -> Any:
+        """Rank rival accounts. Off leaves the router's two-seat reconciliation exactly as it was."""
+        if not self._gate("competition", True):
+            return None
+        try:
+            from nyxara.njp.compete import Competition
+            return Competition(world=self.world, self_model=self.self_model,
+                               floor=self._cfg("competition_floor", 0.35))
         except Exception:  # noqa: BLE001
             return None
 
@@ -1877,6 +1891,13 @@ class NJPBrain:
             # reasoning rather than better sentences. It proposes; the gate below still decides.
             self._consult_cortex(out)
 
+            # 4.6 COMPETE — rank every account of this turn rather than counting them. On the
+            # main path deliberately: the arbitration above needs a cortex and there usually is
+            # not one, and a ranking that only runs when a language model is attached is the
+            # same defect `epistemic` had — an organ reachable in principle and never in fact.
+            # NJP and the fabric are two accounts, which is a field.
+            self._compete(out)
+
             # 5. nothing is stated as fact until the gauntlet says it may be
             if self.truth is not None and out.answer:
                 self._prepare_evidence(out)
@@ -2597,6 +2618,68 @@ class NJPBrain:
             self.epistemic.to_question(experiment)
         except Exception as exc:  # noqa: BLE001 — the cortex is an organ, never a dependency
             log.debug("cortex consult degraded: %s", exc)
+
+    def _compete(self, thought: NJPThought, *, cortex: Any = None, njp: Any = None) -> None:
+        """Rank every account of this turn, including the substrate's, and record the outcome.
+
+        The fabric enters as what it is: :meth:`fabric_proposes` comes from a head trained on
+        turn-to-turn concept succession, measured at MRR 0.238, carrying no provenance and no
+        derivation. It therefore scores ~0 on the two heaviest axes and loses — with the axis
+        that cost it recorded. That is the competition working rather than a reason to leave it
+        out: ranking is what makes entering a weak account safe, where a vote would have made it
+        dangerous.
+
+        Only ever lowers what she will say. On an unsupported or inseparable field the confidence
+        is capped by what the best account actually earned, and the rivals go to
+        :mod:`nyxara.njp.epistemic` — which is the organ that turns exactly this state into an
+        experiment.
+        """
+        try:
+            if self.competition is None:
+                return
+            from nyxara.njp.compete import Hypothesis, Verdict as CVerdict
+
+            accounts: List[Any] = []
+            if njp is None and thought.answer:
+                # Her own answer as it stands, with the epistemic state that licenses it. Built
+                # here so the competition runs on the ordinary path rather than only when a
+                # cortex handed it a rival.
+                from nyxara.njp.grounding import Answer
+                njp = Answer(text=thought.answer, state=thought.epistemic,
+                             confidence=thought.epistemic_confidence,
+                             provenance=thought.provenance,
+                             triples=list(getattr(getattr(thought, "derivation", None),
+                                                  "support", None) or []))
+            for seat, claim in (("cortex", cortex), ("njp", njp)):
+                text = str(getattr(claim, "text", "") or "")
+                if not text:
+                    continue
+                accounts.append(Hypothesis(
+                    seat=seat, claim=text,
+                    confidence=float(getattr(claim, "confidence", 0.0) or 0.0),
+                    provenance=str(getattr(claim, "provenance", "") or "proposed"),
+                    state=str(getattr(claim, "state", "") or "unknown"),
+                    support=list(getattr(claim, "triples", None) or [])))
+
+            for name, probability in self.fabric_proposes(thought.stimulus, k=1):
+                accounts.append(Hypothesis(
+                    seat="fabric", claim=name, confidence=float(probability),
+                    # No provenance and no support, stated rather than implied: the head
+                    # associates, it does not derive, and dressing that as a derivation would be
+                    # the one thing this seat must never do.
+                    provenance="proposed", state="unknown", support=[]))
+
+            if len(accounts) < 2:
+                return
+            outcome = self.competition.compete(accounts)
+            thought.competition = outcome
+            if outcome.verdict in (CVerdict.UNSUPPORTED, CVerdict.TIED):
+                best = outcome.scores[0].total if outcome.scores else 0.0
+                thought.epistemic_confidence = min(thought.epistemic_confidence, float(best))
+                if self.epistemic is not None and len(outcome.rivals) >= 2:
+                    self.epistemic.compile(thought.stimulus, accounts)
+        except Exception as exc:  # noqa: BLE001 — ranking is an organ, never a dependency
+            log.debug("competition degraded: %s", exc)
 
     @staticmethod
     def _temper_by_novelty(base: float, thought: NJPThought,

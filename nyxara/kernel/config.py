@@ -2491,6 +2491,10 @@ class NJPConfig(BaseModel):
     # separable from the novelty damping in `NJPBrain._temper_by_novelty`, which reads a
     # different property of the same organ.
     fabric_seat_enabled: bool = True
+    # Rank rival accounts on named axes instead of reconciling two seats structurally
+    # (njp/compete.py). Off leaves the router exactly as it was.
+    competition_enabled: bool = True
+    competition_floor: float = 0.35
     # Which provider the cortex speaks through. It is named rather than taken from the ladder on
     # purpose: `complete_with` raises if that rung is down, where `complete` would quietly hand back
     # the n-gram floor — and hypotheses from an n-gram are noise wearing the shape of reasoning,
