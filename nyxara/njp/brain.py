@@ -1864,6 +1864,12 @@ class NJPBrain:
                 # happen before deliberation, not after it.
                 if out.answer:
                     self._set_epistemic(out)
+                    # A deliberated answer came by a *form* of reasoning, and the genome has been
+                    # keeping that form's record. Applied here rather than inside
+                    # `_set_epistemic` because only this branch produced one: a grounded answer
+                    # is a lookup with no shape to hold responsible.
+                    out.epistemic_confidence = self._temper_by_shape(
+                        out.epistemic_confidence, out)
                 else:
                     self._ask_back(out)
 
@@ -2626,6 +2632,39 @@ class NJPBrain:
         except Exception:  # noqa: BLE001 — an unreadable percept discounts nothing
             return max(0.0, min(1.0, float(base)))
 
+    def _temper_by_shape(self, base: float, thought: NJPThought) -> float:
+        """Discount an answer by how the *form of reasoning* behind it has actually done.
+
+        The consumer :mod:`nyxara.njp.genome` never had. It counts the shapes she reasons in,
+        prices each by the MDL saving naming it would earn, and reports the ones that keep being
+        wrong as :meth:`~nyxara.njp.genome.ReasoningGenome.liabilities` — and nothing anywhere
+        read either list. So a recurring form with a measured record of failure went on producing
+        answers at full confidence, and "a habit worth breaking" was a phrase in a docstring.
+
+        This is a different question from :meth:`_temper_by_novelty` and from
+        :class:`~nyxara.njp.core.Transitivity`, which is why it is a third number rather than a
+        tweak to either. Novelty asks whether the substrate recognises the *situation*.
+        Transitivity asks whether a *predicate* chains. This asks whether reasoning of this
+        *shape* works — and the three come apart: inheriting through a stated ``is_a`` edge and
+        chaining a predicate through itself may use the same predicate on equally familiar ground
+        and fail at completely different rates.
+
+        **Untested discounts nothing**, and that is the load-bearing half.
+        :meth:`~nyxara.njp.genome.ReasoningGenome.reliability` returns ``None`` until a shape has
+        been graded enough times to have a record, and a new inference must not be penalised for
+        being new. Only measured failure lowers anything, and it can only lower — the evidence for
+        an answer is the facts it was composed from, and this is evidence about her machinery.
+        """
+        try:
+            if self.genome is None:
+                return max(0.0, min(1.0, float(base)))
+            measured = self.genome.reliability(getattr(thought, "trace", None))
+            if measured is None:
+                return max(0.0, min(1.0, float(base)))
+            return max(0.0, min(1.0, float(base) * max(0.0, min(1.0, float(measured)))))
+        except Exception:  # noqa: BLE001
+            return max(0.0, min(1.0, float(base)))
+
     @staticmethod
     def _set_epistemic(thought: NJPThought) -> None:
         """Record which of the three states this turn's answer is in.
@@ -2680,8 +2719,22 @@ class NJPBrain:
                 relevance = max((s.total for s in scores), default=0.0)
             judgement = thought.judgement
             supports = int(len(getattr(judgement, "supports", None) or [])) if judgement else 0
+            # A derived answer prices its own chain: `core` multiplies each link's confidence by
+            # that predicate's transitivity and caps the product below the KNOWN floor, so 0.448
+            # for a two-hop inheritance is a real number about a real derivation. Starting from
+            # `thought.confidence` instead threw it away — that field is the *gauntlet's* verdict,
+            # correctly 0.0 whenever it abstains, which it does for every composed claim. So a
+            # two-hop chain and a five-hop one both reported 0.0 and were indistinguishable, and
+            # anything downstream that discounts a derived answer had nothing to discount.
+            #
+            # The prior is still never above what the derivation itself claimed, and
+            # `revise_confidence` remains monotonic from there.
+            prior = float(thought.confidence)
+            derivation = getattr(thought, "derivation", None)
+            if derivation is not None and getattr(derivation, "ok", False):
+                prior = max(prior, float(getattr(derivation, "confidence", 0.0) or 0.0))
             confidence = revise_confidence(
-                thought.confidence, independent_evidence=supports,
+                prior, independent_evidence=supports,
                 relevance=relevance,
                 consistent=not bool(getattr(judgement, "refutations", None)))
             if thought.answer and thought.verified:

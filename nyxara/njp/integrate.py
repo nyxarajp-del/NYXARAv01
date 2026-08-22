@@ -126,6 +126,7 @@ class LoopReport:
     # structurally pinned at zero before the return edge existed, however well the organ behind
     # it worked when called by hand.
     strategies_graded: int = 0
+    shapes_graded: int = 0
     beliefs_settled: int = 0
     beliefs_retracted: int = 0
     questions_closed: int = 0
@@ -220,6 +221,12 @@ class _Deferred:
     # grade nothing learns from.
     solution: Any = None
     question: str = ""            # the turn as the Master asked it
+    #: The reasoning *shape* this answer came by, kept so the Master's later statement can grade
+    #: the form and not only the answer. `NJPBrain.resolve` already grades it — but that is an
+    #: external callback a conversation never makes, so on a `think()`-only session the genome
+    #: recorded shapes for ever and graded none of them: measured, `graded: 0` with `success:
+    #: None` on every shape, which makes `liabilities()` structurally unable to fire.
+    trace: Any = None
     #: What the store held OUTRIGHT for this (subject, predicate) **at the moment she was asked**,
     #: lowercased. Captured here rather than looked up at resolution time, and that timing is the
     #: whole point: the fact that grades her arrives by being stated, so by the time
@@ -661,6 +668,7 @@ class LearningLoop:
                 key=key, subject=subject, predicate=predicate,
                 asked_at=int(getattr(self.brain, "turns", 0)), answered=said,
                 solution=getattr(thought, "solution", None),
+                trace=getattr(thought, "trace", None),
                 question=str(getattr(thought, "stimulus", "")),
                 held_when_asked=frozenset(self._held_directly(subject, predicate)))
             self._stake_a_belief(thought, said, subject, predicate)
@@ -839,6 +847,19 @@ class LearningLoop:
             if metareason is not None and pending.solution is not None:
                 metareason.outcome(pending.solution, correct=correct)
                 rep.strategies_graded += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+        # The reasoning FORM, graded by the same independent outcome. `genome.candidates` asks
+        # for a success rate before naming a shape a primitive and `liabilities` reports the
+        # shapes that keep being wrong — and both were reading a counter nothing moved, so a shape
+        # could be proposed for promotion on recurrence alone with `success: None`. The Master's
+        # later statement is exactly the evidence that number wants.
+        try:
+            genome = getattr(self.brain, "genome", None)
+            if genome is not None and pending.trace is not None:
+                genome.grade(pending.trace, correct=correct)
+                rep.shapes_graded += 1
         except Exception:  # noqa: BLE001
             pass
 

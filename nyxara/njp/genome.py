@@ -216,6 +216,25 @@ class ReasoningGenome:
             pass
 
     # ---- reading ------------------------------------------------------------ #
+    def reliability(self, trace: Any) -> Optional[float]:
+        """How often this trace's *shape* has actually held up, or ``None`` if untested.
+
+        ``None`` and ``0.0`` are different answers and the caller must be able to tell them
+        apart: a shape nobody has graded yet has no record, and penalising it for that would
+        punish a new inference for being new. Only a measured failure is a reason to discount.
+
+        Deliberately keyed on the shape rather than the trace, because that is the unit the whole
+        module is about — the question is not "was this answer right" but "does reasoning of this
+        form work", and the second only has an answer once several traces have shared it.
+        """
+        try:
+            shape = self.shapes.get(tuple(getattr(trace, "shape", ()) or ()))
+            if shape is None or shape.graded < self.min_seen:
+                return None
+            return shape.success
+        except Exception:  # noqa: BLE001
+            return None
+
     def candidates(self) -> List[Shape]:
         """Shapes worth compressing into a primitive, best saving first.
 
