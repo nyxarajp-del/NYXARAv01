@@ -326,8 +326,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="intelligence: items per stage. Resolution, not difficulty")
     parser.add_argument("--stage", action="append", default=None,
                         help="intelligence: run only this stage (repeatable)")
+    parser.add_argument("--relational", action="store_true",
+                        help="probe whether the gradient head can generalise a relation "
+                             "(eval/relational.py). Always reports the nonsense-subject control "
+                             "beside the real one — the gap between them is the only number here "
+                             "that means anything")
+    parser.add_argument("--teach-is-a", action="store_true",
+                        help="relational: also teach every member's kind, so two hops are "
+                             "composable in principle. It measures worse")
+    parser.add_argument("--epochs", type=int, default=60,
+                        help="relational: passes over the training triples")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
+    if args.relational:
+        from nyxara.eval.relational import probe
+        report = probe(epochs=args.epochs, teach_is_a=args.teach_is_a)
+        print(report.render())
+        return 0
     if args.intelligence:
         return _run_intelligence(args)
     if args.general:
