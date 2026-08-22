@@ -408,12 +408,20 @@ class RecursiveCognitiveField:
         # ("water boils at 100") is a variable with a value, and without this the simulator would
         # own a causal skeleton it could never fit a single coefficient to.
         state: Dict[str, float] = {}
+        # The order the numbers were *stated* in, carried alongside their values. `obs.numbers` is
+        # filled in extraction order, so "the plant got 2 litres of water and grew 4 cm" arrives
+        # as water-then-growth — and dropping that, which is what happened before, throws away the
+        # only thing in a joint observation that can say which way an arrow runs. The numbers on
+        # their own are Markov-equivalent however many of them there are.
+        order: List[str] = []
         for subject, obs in list(getattr(self.concepts, "_by_subject", {}).items())[-32:] \
                 if self.concepts is not None else []:
             for key, value in obs.numbers.items():
-                state[f"{subject}.{key}"] = value
+                name = f"{subject}.{key}"
+                state[name] = value
+                order.append(name)
         if state:
-            self.universe.observe(state)
+            self.universe.observe(state, order=order)
         return added
 
     # ---- causal hypotheses --------------------------------------------------- #

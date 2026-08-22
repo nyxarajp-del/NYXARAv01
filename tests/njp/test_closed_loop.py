@@ -16,6 +16,7 @@ import pytest
 
 from nyxara.njp import NJPBrain
 from nyxara.njp.grounding import _measurements
+from nyxara.njp.universe import Orientation
 
 # The session every test here teaches from: one entity, two variables, an exact 2× relation and
 # no noise. Exactness is deliberate — a fitted slope of 2.0 is a claim that can be checked to
@@ -86,8 +87,22 @@ def test_the_do_operator_answers_from_what_a_conversation_taught():
     brain = _taught_brain()
     out = brain.universe.what_if("plant.water", 1.0)
     assert abs(out.predicted["plant.growth"] - 2.0) < 1e-6, out.predicted
-    assert out.confidence > 0.5, out.confidence
+    assert out.confidence > 0.0, out.confidence
     assert not out.reason, out.reason
+
+    # And the direction it answered along came from the conversation's word order, not from the
+    # numbers: five readings of water beside growth are Markov-equivalent however good the fit.
+    arrow = brain.universe.relations[("plant.water", "plant.growth")]
+    assert arrow.orientation == Orientation.INFERRED
+    assert brain.universe.relations[("plant.growth", "plant.water")].orientation == \
+        Orientation.UNKNOWN
+
+    # An inferred direction is worth less than a stated one, and the confidence says so. This is
+    # the assertion a hard-coded confidence would fail.
+    brain.universe.declare("plant.water", "plant.growth", sign=1,
+                           orientation=Orientation.ASSERTED)
+    stated = brain.universe.what_if("plant.water", 1.0)
+    assert stated.confidence > out.confidence, (stated.confidence, out.confidence)
 
 
 def test_a_counterfactual_far_outside_the_observed_range_loses_confidence():

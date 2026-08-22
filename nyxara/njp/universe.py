@@ -65,6 +65,9 @@ __all__ = [
 
 _MIN_FIT = 3          # samples before a relation is allowed to claim anything
 _MIN_R2 = 0.25        # below this the fit explains too little to propagate through
+# Consistent statements of "X then Y" before word order is treated as evidence about the world.
+# One sentence's ordering is incidental; the same ordering three times running is not.
+_MIN_PRECEDENCE = 3
 # What a direction-only answer is worth. Capped well under what any fit earns: she was *told* the
 # arrow exists, which is real knowledge and is not a measurement, and a number that reads like one
 # would let testimony borrow the credibility of data.
@@ -86,6 +89,58 @@ def _finite(x: Any) -> Optional[float]:
 # --------------------------------------------------------------------------- #
 # One arrow
 # --------------------------------------------------------------------------- #
+class Orientation:
+    """Whether an arrow's *direction* has been established — a different question from its fit.
+
+    The two were conflated, and the conflation is the whole defect. ``usable`` is ``n >= 3 and
+    r2 >= 0.25``: a goodness-of-fit test with no causal content whatsoever, and it was the only
+    gate on propagation. Measured, with ``growth = 2·water + 3·light``: regressing ``light`` on
+    ``growth`` gives r² ≈ 0.74 — a perfectly good statistical fit and a nonsense causal one — so
+    ``do(water)`` propagated forward into ``growth`` and then *backwards* out of it into ``light``,
+    which nothing upstream of exists.
+
+    The fields that did carry orientation, ``stated`` and ``sign``, were read only by
+    ``directional``, which requires ``not usable``. So the instant an arrow had enough data to be
+    used, everything known about which way it runs became unreachable — the one place orientation
+    was honoured was the one place the data could never reach.
+
+    Four states, and the rank matters: a later, vaguer statement must never demote a direction
+    that was established more strongly. Only the first three may propagate, and ``UNKNOWN`` is
+    where an arrow starts however well it fits.
+    """
+
+    UNKNOWN = "unknown"      # both ways fit and nothing settles it — Markov equivalence
+    INFERRED = "inferred"    # temporal precedence: the cause was seen before the effect
+    ASSERTED = "asserted"    # a stated law — she was told which way it runs
+    VERIFIED = "verified"    # an intervention was actually run and the direction held
+
+    ALL: Tuple[str, ...] = (UNKNOWN, INFERRED, ASSERTED, VERIFIED)
+
+    #: Established enough to push a value along. Everything else abstains and says so.
+    ESTABLISHED: Tuple[str, ...] = (INFERRED, ASSERTED, VERIFIED)
+
+    _RANK: Dict[str, int] = {UNKNOWN: 0, INFERRED: 1, ASSERTED: 2, VERIFIED: 3}
+
+    @classmethod
+    def rank(cls, orientation: str) -> int:
+        return cls._RANK.get(str(orientation), 0)
+
+    @classmethod
+    def stronger(cls, current: str, proposed: str) -> str:
+        """The better-established of the two. Direction is not un-learned by being re-mentioned."""
+        return proposed if cls.rank(proposed) > cls.rank(current) else current
+
+    @classmethod
+    def confidence(cls, orientation: str) -> float:
+        """How much of an arrow's fitted confidence its *direction* is entitled to carry.
+
+        An arrow she was told about is not an arrow she has tested, and one she has tested by
+        intervening is worth more than either. A fit's r² says nothing about any of this.
+        """
+        return {cls.VERIFIED: 1.0, cls.ASSERTED: 0.8, cls.INFERRED: 0.6}.get(
+            str(orientation), 0.0)
+
+
 @dataclass
 class Relation:
     """``effect = slope · cause + intercept``, fitted online, with its own error bars.
@@ -110,6 +165,19 @@ class Relation:
     # Only meaningful for an arrow that has never been fitted — once there are numbers, the
     # slope's own sign is the answer and this is not consulted.
     sign: int = 0
+    #: Whether this arrow's *direction* has been established, and by what. Deliberately separate
+    #: from `stated`, which conflates "an arrow may exist here" with "it runs this way", and
+    #: deliberately independent of the fit, which cannot speak to direction at all.
+    orientation: str = Orientation.UNKNOWN
+    #: Times the cause was *stated* before the effect, and times that order was contradicted.
+    #: The only orientation evidence a joint observation carries — see `_note_precedence`.
+    precedence: int = 0
+    contradicted: int = 0
+
+    @property
+    def oriented(self) -> bool:
+        """May a value be pushed along this arrow at all?"""
+        return self.orientation in Orientation.ESTABLISHED
 
     def observe(self, x: float, y: float) -> None:
         self.n += 1
@@ -199,6 +267,11 @@ class Relation:
         return {"cause": self.cause, "effect": self.effect, "n": self.n,
                 "slope": round(self.slope, 5), "intercept": round(self.intercept, 5),
                 "r2": round(self.r2, 4), "usable": self.usable, "stated": self.stated,
+                # `sign` was written by `declare`, read by `directional`, and serialised by
+                # nothing — so a stated direction died at every save. `orientation` joins it here
+                # for the same reason.
+                "sign": self.sign, "orientation": self.orientation,
+                "oriented": self.oriented,
                 "range": [None if self.lo == math.inf else round(self.lo, 4),
                           None if self.hi == -math.inf else round(self.hi, 4)]}
 
@@ -247,6 +320,9 @@ class CounterfactualResult:
     deltas: List[StateDelta] = field(default_factory=list)
     confidence: float = 0.0
     reason: str = ""
+    #: Arrows that fit well enough to use and were not used, because nothing has established
+    #: which way they run. The honest content of a refusal, and the input to an experiment.
+    abstained: List[str] = field(default_factory=list)
 
     @property
     def answerable(self) -> bool:
@@ -305,14 +381,29 @@ class InternalUniverse:
         self.reconciled = 0
         self.surprises = 0
         self.total_error = 0.0
+        #: Variables declared to have no parents. See :meth:`exogenous`.
+        self._exogenous: Set[str] = set()
+        #: How many times a propagation stopped because an arrow's direction was unestablished.
+        #: Counted so "fewer answers" and "wrong answers" are distinguishable in the report.
+        self.abstained_for_direction = 0
 
     # ---- learning the arrows ---------------------------------------------- #
-    def observe(self, state: Dict[str, Any]) -> int:
+    def observe(self, state: Dict[str, Any],
+                order: Optional[Sequence[str]] = None) -> int:
         """Record one joint observation of the world's variables and refit every live arrow.
 
         Only pairs that the causal skeleton permits are fitted. Fitting every pair would give a
         model that regresses tomorrow's sunrise on yesterday's mood at ``R² = 0.9`` given enough
         variables, which is not a world model but a machine for finding coincidences.
+
+        ``order`` is the sequence the variables were *stated* in, and it is the one piece of
+        orientation evidence a joint observation can carry. Five readings of ``water`` beside
+        ``growth`` cannot tell which drives which — that is Markov equivalence and no amount of
+        the same data fixes it. But *"the plant **got** 2 litres of water **and grew** 4 cm"* does
+        say which came first, and the numbers alone throw that away. Repetition is required
+        (:data:`_MIN_PRECEDENCE` consistent readings) and a single contradicting order disqualifies
+        the pair permanently, because one sentence's word order is a weak signal and a *consistent*
+        word order across many is not.
         """
         clean: Dict[str, float] = {}
         for key, raw in (state or {}).items():
@@ -331,20 +422,69 @@ class InternalUniverse:
                 if rel is None:
                     if len(self.relations) >= self.capacity:
                         continue
+                    # A skeleton that permits this arrow and forbids its reverse has *stated a
+                    # direction*, and reading only `_stated` threw that away. Permission is
+                    # symmetric-by-default, so the asymmetry is the signal: when it is there it is
+                    # the world model saying which way this runs, in the only vocabulary
+                    # `_permitted` has.
+                    oriented_by_skeleton = (self.world is not None
+                                            and not self._permitted(effect, cause))
                     rel = Relation(cause=cause, effect=effect,
-                                   stated=self._stated(cause, effect))
+                                   stated=self._stated(cause, effect),
+                                   orientation=(Orientation.ASSERTED if oriented_by_skeleton
+                                                else Orientation.UNKNOWN))
                     self.relations[(cause, effect)] = rel
                 rel.observe(clean[cause], clean[effect])
                 fitted += 1
         self.state.update(clean)
+        self._note_precedence(order, clean)
         return fitted
 
-    def declare(self, cause: str, effect: str, *, sign: int = 0) -> Relation:
-        """Assert that an arrow may exist, before any numbers for it have been seen.
+    def _note_precedence(self, order: Optional[Sequence[str]],
+                         clean: Dict[str, float]) -> None:
+        """Record which variable was *stated* first, and orient a pair once that keeps holding.
+
+        The evidence is weak per sentence and strong in aggregate, so both halves are enforced:
+        a pair needs :data:`_MIN_PRECEDENCE` readings in one order, and one reading in the other
+        order kills it outright. A word order that flips is not evidence about the world, it is
+        evidence that the phrasing was incidental.
+        """
+        if not order:
+            return
+        try:
+            seen: List[str] = []
+            for raw in order:
+                name = _norm(raw)
+                if name in clean and name not in seen:
+                    seen.append(name)
+            for i, earlier in enumerate(seen):
+                for later in seen[i + 1:]:
+                    forward = self.relations.get((earlier, later))
+                    backward = self.relations.get((later, earlier))
+                    if forward is not None:
+                        forward.precedence += 1
+                    if backward is not None:
+                        backward.contradicted += 1
+            for relation in self.relations.values():
+                if (relation.orientation == Orientation.UNKNOWN
+                        and relation.precedence >= _MIN_PRECEDENCE
+                        and relation.contradicted == 0):
+                    relation.orientation = Orientation.INFERRED
+                    if relation.sign == 0:
+                        relation.sign = 1 if relation.slope >= 0 else -1
+        except Exception:  # noqa: BLE001 — an unusable order simply orients nothing
+            return
+
+    def declare(self, cause: str, effect: str, *, sign: int = 0,
+                orientation: str = Orientation.ASSERTED) -> Relation:
+        """Assert that an arrow exists and which way it runs, before any numbers have been seen.
 
         This is how a stated law reaches the simulator. "paudhe ko pani chahiye" gives no
         quantities at all, and so can never be fitted — but it does say which arrow to *watch*,
         and an arrow she is watching gets fitted the moment two numbers for it arrive.
+
+        Orientation only ever strengthens. A direction established by an intervention is not
+        un-established by someone mentioning the arrow again in passing.
         """
         cause, effect = _norm(cause), _norm(effect)
         key = (cause, effect)
@@ -357,7 +497,31 @@ class InternalUniverse:
         # said nothing must not overwrite it back to unknown.
         if sign:
             rel.sign = 1 if sign > 0 else -1
+        rel.orientation = Orientation.stronger(rel.orientation, orientation)
         return rel
+
+    def exogenous(self, variable: str) -> int:
+        """Declare that nothing in this model causes ``variable``: sever every arrow into it.
+
+        The negation :meth:`declare` never had. There was no way to say an arrow does *not* exist,
+        or that a variable has no parents — only ways to add. So a variable that is genuinely
+        upstream of everything (the light a plant is given, the dose in an experiment) could be
+        written into by any relation whose slots happened to be filled the convenient way round,
+        and the model had no vocabulary in which to be told otherwise.
+
+        Returns how many arrows were closed. Permanent for this universe: a later `observe` may
+        re-fit those relations' coefficients, and none of them will ever propagate again.
+        """
+        name = _norm(variable)
+        if not name:
+            return 0
+        self._exogenous.add(name)
+        closed = 0
+        for (cause, effect), relation in self.relations.items():
+            if effect == name and relation.oriented:
+                relation.orientation = Orientation.UNKNOWN
+                closed += 1
+        return closed
 
     def sync_from_world(self) -> int:
         """Import the causal skeleton from :mod:`nyxara.njp.world`. Idempotent."""
@@ -371,7 +535,17 @@ class InternalUniverse:
                 # fire, no heat", which is the counterfactual anyone actually asks. A skeleton
                 # link carries no sign of its own, so this is the reading applied — and a caller
                 # that knows better (grounding saw `decreases`) passes its own.
-                self.declare(link.cause, link.effect, sign=1)
+                #
+                # Two different kinds of evidence arrive through this one call and must not be
+                # recorded as one. A *stated* law is testimony about the mechanism — she was told
+                # which way it runs. A link that earned `causal` without being stated earned it
+                # from `world._pairs`, which is built as `prior_event → this_event`: genuine
+                # temporal precedence, and the only orientation evidence observation can supply.
+                # Weaker than testimony, and far from nothing.
+                told = int(getattr(link, "stated", 0) or 0) > 0
+                self.declare(link.cause, link.effect, sign=1,
+                             orientation=(Orientation.ASSERTED if told
+                                          else Orientation.INFERRED))
                 added += int(len(self.relations) > before)
         except Exception:  # noqa: BLE001 — no skeleton just means fewer permitted arrows
             return added
@@ -422,7 +596,24 @@ class InternalUniverse:
         return [r for (c, e), r in self.relations.items() if e == variable and r.usable]
 
     def _children(self, variable: str) -> List[Relation]:
-        return [r for (c, e), r in self.relations.items() if c == variable and r.usable]
+        """Arrows a value may actually be pushed along: fitted **and** oriented.
+
+        `usable` alone was the gate, and `usable` is a goodness-of-fit test. Both halves are
+        required now, and they answer different questions — how much, and which way.
+        """
+        return [r for (c, e), r in self.relations.items()
+                if c == variable and r.usable and r.oriented
+                and e not in self._exogenous]
+
+    def _blocked_children(self, variable: str) -> List[Relation]:
+        """Arrows that fit and would have propagated, but whose direction nothing has established.
+
+        Kept separate so the refusal can be *reported*. "She answered less" and "she answered
+        wrongly" must not look the same from outside, and without this they would.
+        """
+        return [r for (c, e), r in self.relations.items()
+                if c == variable and r.usable and not r.oriented
+                and e not in self._exogenous]
 
     def _directional_children(self, variable: str) -> List[Relation]:
         return [r for (c, e), r in self.relations.items() if c == variable and r.directional]
@@ -486,7 +677,12 @@ class InternalUniverse:
                         if x is None:
                             continue
                         estimate = rel.predict(x)
-                        conf = rel.confidence_at(x) * confidences.get(parent, 1.0)
+                        # The fit's confidence, scaled by how well its *direction* is established.
+                        # An arrow she was told about is not one she has tested by intervening,
+                        # and r² cannot tell the two apart.
+                        conf = (rel.confidence_at(x)
+                                * Orientation.confidence(rel.orientation)
+                                * confidences.get(parent, 1.0))
                         if conf <= 0.0:
                             continue
                         known = confidences.get(rel.effect, 0.0)
@@ -518,9 +714,23 @@ class InternalUniverse:
             self._propagate_direction(fixed, factual, settled, result,
                                       stated=stated_direction or {})
 
+            # Arrows that fit and were refused for want of an established direction. Reported,
+            # never silently dropped: an answer withheld for a stated reason is a different thing
+            # from an answer that was never possible, and the Master must be able to tell them
+            # apart — the second is a gap in her model, the first is an experiment waiting.
+            blocked = sorted({f"{r.cause}→{r.effect}"
+                              for name in fixed for r in self._blocked_children(name)})
+            if blocked:
+                self.abstained_for_direction += 1
+                result.abstained = blocked
+
             downstream = [d.confidence for d in result.deltas if d.variable not in fixed]
             result.confidence = (sum(downstream) / len(downstream)) if downstream else 0.0
-            if not downstream:
+            if not downstream and blocked:
+                result.reason = (
+                    "direction unverified: " + ", ".join(blocked[:3])
+                    + " fit both ways and nothing has established which one runs")
+            elif not downstream:
                 result.reason = "no arrow of any kind leaves the intervened variables"
             elif all(d.qualitative for d in result.deltas if d.variable not in fixed):
                 result.reason = "direction only — no arrow on this path has ever been measured"
@@ -685,15 +895,55 @@ class InternalUniverse:
         There are exactly two ways out, and both are elsewhere: a causal skeleton from
         :mod:`nyxara.njp.world` (a stated law fixes the direction), or an actual intervention.
         Reporting the pair is what lets :mod:`nyxara.njp.field` aim an experiment at it.
+
+        The docstring above was written before there was a consumer, and for a long time there
+        was not one — this was called by a demo and a test, and by nothing that could act on it.
+        :meth:`seed_ambiguities` is the consumer.
         """
         out: List[Tuple[str, str]] = []
         for (cause, effect), relation in self.relations.items():
             if not relation.usable or cause > effect:
                 continue
             back = self.relations.get((effect, cause))
-            if back is not None and back.usable and not (relation.stated ^ back.stated):
-                out.append((cause, effect))
+            if back is None or not back.usable:
+                continue
+            # Oriented either way ⇒ settled, and no longer a question for evidence to answer.
+            if relation.oriented or back.oriented:
+                continue
+            out.append((cause, effect))
         return out
+
+    def seed_ambiguities(self, designer: Any) -> int:
+        """Hand every unsettled direction to the experiment designer as two rival hypotheses.
+
+        This is what turns "she cannot answer that" into "she knows what would tell her". A pair
+        that fits both ways is not a gap in the data — there is plenty of data — it is a question
+        observation is structurally unable to settle, and exactly one thing settles it: doing
+        something to one of the two variables and watching the other.
+
+        Stated as two rivals rather than one hypothesis because a single proposal has nothing to
+        be selected against. ``A→B`` and ``B→A`` predict *differently* under ``do(A)`` — one says
+        B moves, the other says it does not — so the designer's information gain over the pair is
+        structurally non-zero, and it is the one experiment that can break Markov equivalence.
+
+        Returns how many hypotheses were seeded. Fail-soft: a designer that raises seeds nothing
+        and the caller continues.
+        """
+        if designer is None:
+            return 0
+        seeded = 0
+        try:
+            for cause, effect in self.ambiguous():
+                for a, b in ((cause, effect), (effect, cause)):
+                    hypothesis = designer.propose(
+                        f"{a}->{b}", probability=0.5,
+                        # What each rival says will happen when `a` is intervened on. They differ
+                        # on the answer, which is the whole reason the experiment is worth running.
+                        predictions={f"do({a})": f"{b} moves", f"do({b})": f"{a} unchanged"})
+                    seeded += int(hypothesis is not None)
+        except Exception:  # noqa: BLE001 — an unseedable pair is simply not seeded
+            return seeded
+        return seeded
 
     def stats(self) -> Dict[str, Any]:
         usable = self.usable_relations()
@@ -706,6 +956,19 @@ class InternalUniverse:
             # covering both would hide that every arrow she has is of the second kind.
             "directional_relations": len(self.directional_relations()),
             "stated_arrows": sum(1 for r in self.relations.values() if r.stated),
+            # Arrows a value may actually be pushed along: fitted AND oriented. The gap between
+            # this and `usable_relations` is the honest size of what she cannot yet answer.
+            "oriented_relations": sum(1 for r in self.relations.values()
+                                      if r.usable and r.oriented),
+            "by_orientation": {k: n for k, n in
+                               ((k, sum(1 for r in self.relations.values()
+                                        if r.orientation == k))
+                                for k in Orientation.ALL) if n},
+            "exogenous": sorted(self._exogenous),
+            # Kept separate from any failure count on purpose. A refusal for want of a direction
+            # is not the model being wrong; it is the model declining to guess, and a report that
+            # made the two look alike would punish exactly the behaviour that is wanted.
+            "abstained_for_direction": self.abstained_for_direction,
             "observations": self.observations,
             "rollouts": len(self.rollouts),
             "scored": sum(1 for r in self.rollouts if r.scored),
@@ -742,7 +1005,12 @@ class InternalUniverse:
                                sum_xx=float(row.get("sum_xx", 0.0)),
                                sum_yy=float(row.get("sum_yy", 0.0)),
                                sum_xy=float(row.get("sum_xy", 0.0)),
-                               stated=bool(row.get("stated", False)))
+                               stated=bool(row.get("stated", False)),
+                               sign=int(row.get("sign", 0) or 0),
+                               # A snapshot written before orientation existed has neither key,
+                               # and must still load — an old brain on disk is not a broken brain.
+                               orientation=str(row.get("orientation")
+                                               or Orientation.UNKNOWN))
                 lo, hi = row.get("lo"), row.get("hi")
                 rel.lo = math.inf if lo is None else float(lo)
                 rel.hi = -math.inf if hi is None else float(hi)
