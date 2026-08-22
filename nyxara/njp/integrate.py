@@ -220,6 +220,14 @@ class _Deferred:
     # grade nothing learns from.
     solution: Any = None
     question: str = ""            # the turn as the Master asked it
+    #: What the store held OUTRIGHT for this (subject, predicate) **at the moment she was asked**,
+    #: lowercased. Captured here rather than looked up at resolution time, and that timing is the
+    #: whole point: the fact that grades her arrives by being stated, so by the time
+    #: `_resolve_deferred` runs it has already been written to the store. Asking then returns the
+    #: answer she is being graded against and reports that she had it all along — which turned
+    #: every miss into a retrieval fault. Measured on the sparrow case: `in_memory` came back True
+    #: for `food`, a value the store first saw one sentence earlier.
+    held_when_asked: frozenset = frozenset()
 
 
 class LearningLoop:
@@ -298,6 +306,7 @@ class LearningLoop:
             predictor.register_repair(ErrorKind.PERCEPTION, self._repair_perception)
             predictor.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
             predictor.register_repair(ErrorKind.MEMORY, self._repair_memory)
+            predictor.register_repair(ErrorKind.RELATION, self._repair_relation)
             predictor.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
             predictor.register_repair(ErrorKind.REASONING, self._repair_reasoning)
         except Exception:  # noqa: BLE001 — an unrepairable brain still runs, it just learns less
@@ -345,6 +354,14 @@ class LearningLoop:
                     levels.touch(getattr(entry, "key", ""))
                     hit = True
             return hit
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_relation(self, outcome: Any) -> bool:
+        """Delegate to the brain's own targeted repair — one relation, not the whole model."""
+        try:
+            repair = getattr(self.brain, "_repair_relation", None)
+            return bool(repair(outcome)) if repair is not None else False
         except Exception:  # noqa: BLE001
             return False
 
@@ -613,7 +630,22 @@ class LearningLoop:
             if not predicate:
                 return
             answer = getattr(grounding, "answer", None)
+            # What she ACTUALLY said, which is not always what grounding produced. `_compose`
+            # answers from the store when it can, and when it cannot the turn falls through to
+            # `_deliberate` (the ladder, and `core._inherit` behind it) and then to `_recall` —
+            # so every *derived* answer, which is precisely the interesting kind, arrives on
+            # `thought.answer` and never on `grounding.answer`.
+            #
+            # Reading only the latter recorded `<unknown>` for them. Measured on the sparrow
+            # case: she answered "water" through a correct two-step inheritance, the deferred
+            # record stored `<unknown>`, and when the Master then stated "sparrow needs food"
+            # the grade compared reality against nothing. Everything downstream is gated on
+            # `pending.answered` being non-empty — `rep.corrections`, belief settlement,
+            # retraction — so a derived answer could not be counted as a correction, could not
+            # settle the belief it staked, and could not be told it was wrong.
             said = str(getattr(answer, "text", "") or "")
+            if not said:
+                said = str(getattr(thought, "answer", "") or "")
             key = f"deferred:{subject.lower()}:{predicate}"
             if key in self._deferred:
                 return
@@ -627,7 +659,8 @@ class LearningLoop:
                 key=key, subject=subject, predicate=predicate,
                 asked_at=int(getattr(self.brain, "turns", 0)), answered=said,
                 solution=getattr(thought, "solution", None),
-                question=str(getattr(thought, "stimulus", "")))
+                question=str(getattr(thought, "stimulus", "")),
+                held_when_asked=frozenset(self._held_directly(subject, predicate)))
             self._stake_a_belief(thought, said, subject, predicate)
             rep.deferred_opened = 1
             if len(self._deferred) > self.defer_capacity:
@@ -717,11 +750,29 @@ class LearningLoop:
                 pending = self._deferred.pop(key, None)
                 if pending is None:
                     continue
+                # What the diagnosis needs is the difference between three situations that all
+                # look like "she got it wrong" from here, and call for three different repairs:
+                #
+                #   the record HELD the true value and she did not return it  → MEMORY
+                #   she COMPOSED a value and the world has an exception       → RELATION
+                #   she repeated a value she was told, and it was wrong       → the record's,
+                #                                                               already superseded
+                #
+                # `in_memory` used to be `bool(pending.answered)`, which answers none of those —
+                # it says only that she spoke. Asked directly, it makes every wrong answer a
+                # retrieval fault and trains memory for a mistake reasoning made.
+                held = pending.held_when_asked
                 outcome = predictor.observe(
                     key, triple.object,
                     evidence={"stimulus": triple.text, "concepts": [triple.object],
                               "triples": [triple], "expected_triples": True,
-                              "in_memory": bool(pending.answered)})
+                              "predicate": pending.predicate,
+                              # The TRUE value was on record and she still missed it.
+                              "in_memory": bool(held) and triple.object.strip().lower() in held,
+                              # She produced a value the store does not directly contain, so
+                              # something composed it.
+                              "derived": bool(pending.answered)
+                              and pending.answered.strip().lower() not in held})
                 if outcome is None:
                     continue
                 rep.deferred_resolved += 1
@@ -743,6 +794,26 @@ class LearningLoop:
                 rep.scored += 1
         except Exception:  # noqa: BLE001
             pass
+
+    def _held_directly(self, subject: str, predicate: str) -> set:
+        """The values the store holds **outright** for this ``(subject, predicate)``, lowercased.
+
+        Outright, not reachable: an inherited or composed value is deliberately absent from this
+        set, because the whole question it answers is whether she *had* the fact or *made* it.
+        `Grounder._lookup` is the right call for that — it is one dict lookup on the canonical key
+        and it does not walk `is_a` edges.
+
+        Empty on any failure, which reads as "the store held nothing", and that is the safe way
+        round: it can only ever move a diagnosis away from MEMORY, never invent one.
+        """
+        try:
+            grounder = getattr(self.brain, "grounder", None)
+            if grounder is None:
+                return set()
+            return {str(getattr(t, "object", "") or "").strip().lower()
+                    for t in grounder._lookup(str(subject or ""), str(predicate or ""))}
+        except Exception:  # noqa: BLE001
+            return set()
 
     def _grade_by_reality(self, pending: _Deferred, correct: bool,
                           triple: Any, rep: LoopReport) -> None:

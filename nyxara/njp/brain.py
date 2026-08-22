@@ -666,6 +666,7 @@ class NJPBrain:
             engine.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
             engine.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
             engine.register_repair(ErrorKind.MEMORY, self._repair_memory)
+            engine.register_repair(ErrorKind.RELATION, self._repair_relation)
             engine.register_repair(ErrorKind.REASONING, self._repair_reasoning)
             return engine
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
@@ -705,6 +706,38 @@ class NJPBrain:
                 return False
             self.memory.remember(f"repair-{self.turns}", str(getattr(outcome, "actual", "")),
                                  kind="conclusion", cue=str(getattr(outcome, "key", "")))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repair_relation(self, outcome: Any) -> bool:
+        """A value she composed turned out wrong: make **that** inheritance worth less.
+
+        The targeted repair, and the reason :attr:`~nyxara.njp.predict.ErrorKind.RELATION` was
+        worth adding. She answered ``water`` for what a sparrow needs by carrying a property of
+        birds down to a member, the Master said ``food``, and the thing that failed is neither her
+        perception nor her memory nor her facts — every premise was true. It is the defeasible
+        step, for **this predicate**, being more general than the world.
+
+        So exactly one number moves: ``requires`` loses transitivity, and ``is_a``, ``causes`` and
+        every other relation are untouched. That is what makes it a repair rather than a retrain —
+        the alternative on offer was widening a similarity threshold or writing a ledger line, and
+        neither of those makes the next inheritance over the same relation any less confident.
+
+        **Refuted, not zeroed.** :class:`~nyxara.njp.core.Transitivity` is a Beta posterior, so one
+        exception moves it by an amount that shrinks as evidence accumulates: a relation that has
+        chained correctly a hundred times is barely touched by a single counterexample, and one
+        that has never been tested moves a long way. Setting it to zero on a first exception would
+        be treating one sparrow as proof that kinds do not carry properties at all.
+        """
+        try:
+            if self.learner is None:
+                return False
+            context = getattr(outcome, "context", None) or {}
+            predicate = str(context.get("predicate") or "").strip()
+            if not predicate:
+                return False
+            self.learner._transitivity(predicate).refute(1.0)
             return True
         except Exception:  # noqa: BLE001
             return False
