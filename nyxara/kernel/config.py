@@ -2495,6 +2495,10 @@ class NJPConfig(BaseModel):
     # (njp/compete.py). Off leaves the router exactly as it was.
     competition_enabled: bool = True
     competition_floor: float = 0.35
+    # Entity similarity from shared relational context (njp/embed.py) — the structure a hashed
+    # cell id cannot have. Off leaves every query unwidened.
+    embedding_enabled: bool = True
+    embedding_floor: float = 0.35
     # Which provider the cortex speaks through. It is named rather than taken from the ladder on
     # purpose: `complete_with` raises if that rung is down, where `complete` would quietly hand back
     # the n-gram floor — and hypotheses from an n-gram are noise wearing the shape of reasoning,

@@ -334,13 +334,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--teach-is-a", action="store_true",
                         help="relational: also teach every member's kind, so two hops are "
                              "composable in principle. It measures worse")
+    parser.add_argument("--expand", action="store_true",
+                        help="relational: widen each query by the subject's neighbours from "
+                             "njp/embed.py — the similarity structure a hashed cell id lacks")
     parser.add_argument("--epochs", type=int, default=60,
                         help="relational: passes over the training triples")
     parser.add_argument("--save", default=None, help="save this run as a baseline JSON")
     args = parser.parse_args(argv)
     if args.relational:
         from nyxara.eval.relational import probe
-        report = probe(epochs=args.epochs, teach_is_a=args.teach_is_a)
+        report = probe(epochs=args.epochs, teach_is_a=args.teach_is_a,
+                       expand=args.expand)
         print(report.render())
         return 0
     if args.intelligence:

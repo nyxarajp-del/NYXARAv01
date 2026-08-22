@@ -27,17 +27,30 @@ that row to predict *bird*, so asking ``(sparrow, requires)`` pushes toward ``bi
 **The cause is the encoding, not the objective.** :func:`~nyxara.njp.brain._cell_id` is a blake2b
 digest, so ``sparrow`` and ``finch`` have orthogonal representations with no shared structure.
 Generalisation requires that similar things be represented similarly, and a hash guarantees exactly
-the opposite. No training objective repairs that — it needs learned entity embeddings, which is a
-different and much larger piece of work than a rewiring.
+the opposite. No training objective repairs that.
 
-**What this module is for.** The claim above should be checkable rather than remembered, and any
-future attempt should inherit the control that caught the first one. :func:`probe` runs the
-experiment and always reports the nonsense-subject baseline beside the real one, because the gap
-between them is the only number that means anything here.
+**And that is what :mod:`nyxara.njp.embed` supplies**, which is why there is a third run::
+
+    3 · the same, with each query widened by the subject's neighbours
+        held-out members   MRR 1.000     six of six at rank 1
+        nonsense subjects  MRR 0.500     the control, unmoved
+
+Same head, same weights, same objective — only the *query* changed, from a hashed cell id to that
+id plus the entities whose relational context resembles it. The control not moving is what says the
+gain came from the subject: a nonsense subject has no neighbours, so nothing widens, and it scores
+exactly what it scored before.
+
+**What this module is for.** The claims above should be checkable rather than remembered, and any
+future attempt should inherit the control that caught the first one — the first version of run 3
+was measured on two candidate objects, where a nonsense subject reached rank 1 by chance, and was
+rebuilt rather than reported. :func:`probe` always reports the nonsense-subject baseline beside the
+real one, because the gap between them is the only number that means anything here.
 
 Run it::
 
     python -m nyxara.eval --relational
+    python -m nyxara.eval --relational --teach-is-a
+    python -m nyxara.eval --relational --expand
 """
 
 from __future__ import annotations
@@ -69,6 +82,7 @@ class RelationalProbe:
     held_mrr: float = 0.0           # on members never trained
     control_mrr: float = 0.0        # on subjects that do not exist
     taught_is_a: bool = False
+    expanded: bool = False
     detail: List[str] = field(default_factory=list)
 
     @property
@@ -96,13 +110,15 @@ class RelationalProbe:
                 "held_mrr": round(self.held_mrr, 4),
                 "control_mrr": round(self.control_mrr, 4),
                 "gap": round(self.gap, 4), "generalises": self.generalises,
-                "taught_is_a": self.taught_is_a, "detail": self.detail[:8]}
+                "taught_is_a": self.taught_is_a, "expanded": self.expanded,
+                "detail": self.detail[:8]}
 
     def render(self) -> str:
         lines = [
             "NYXARA — relational generalisation probe",
             f"{self.steps} gradient steps · vocabulary {self.vocabulary}"
-            f" · is_a taught: {'yes' if self.taught_is_a else 'no'}",
+            f" · is_a taught: {'yes' if self.taught_is_a else 'no'}"
+            f" · embedding-expanded: {'yes' if self.expanded else 'no'}",
             "",
             f"  trained pairs (memorisation) : MRR {self.trained_mrr:.3f}",
             f"  held-out members             : MRR {self.held_mrr:.3f}",
@@ -126,13 +142,18 @@ def _mrr(rank_of, pairs: Sequence[Tuple[str, str, str]]) -> Tuple[float, List[Op
     return (sum(1.0 / r for r in hits) / max(1, len(ranks))), ranks
 
 
-def probe(*, epochs: int = 60, seed: int = 0, teach_is_a: bool = False) -> RelationalProbe:
+def probe(*, epochs: int = 60, seed: int = 0, teach_is_a: bool = False,
+          expand: bool = False) -> RelationalProbe:
     """Train the readout on ``(subject, predicate) → object`` and measure against the control.
 
     ``teach_is_a`` also teaches every member's kind, so a two-hop composition is available in
     principle. It measures *worse*, which is the more interesting of the two results.
+
+    ``expand`` widens each query by the subject's neighbours from :mod:`nyxara.njp.embed` — the
+    similarity structure the hashed encoding cannot have. This is the variant that works, and the
+    control is reported beside it for the same reason as everywhere else here.
     """
-    out = RelationalProbe(taught_is_a=bool(teach_is_a))
+    out = RelationalProbe(taught_is_a=bool(teach_is_a), expanded=bool(expand))
     try:
         from nyxara.njp.brain import NJPBrain
     except Exception as exc:  # noqa: BLE001
@@ -170,9 +191,31 @@ def probe(*, epochs: int = 60, seed: int = 0, teach_is_a: bool = False) -> Relat
     out.steps = int(readout.stats().get("steps", 0))
     out.vocabulary = len(vocabulary)
 
+    embedding = None
+    if expand:
+        try:
+            from nyxara.njp.brain import _cell_id
+            from nyxara.njp.embed import EntityEmbedding
+            embedding = EntityEmbedding(brain.fabric.manifold, cell_id=_cell_id)
+            contexts: Dict[str, List[Tuple[str, str]]] = {}
+            for kind, (prop, members) in _WORLD.items():
+                for m in members:
+                    # The CONTEXT only — never the answer being asked for. Feeding the held-out
+                    # member its own `requires` would make the probe measure a lookup.
+                    contexts.setdefault(m, []).append(("is_a", kind))
+            for entity, pairs in contexts.items():
+                embedding.observe(entity, pairs)
+        except Exception as exc:  # noqa: BLE001
+            out.detail.append(f"embedding unavailable: {exc}")
+            embedding = None
+
     def rank_of(subject: str, predicate: str, truth: str) -> Optional[int]:
+        query = cells(subject) + cells(predicate)
+        if embedding is not None:
+            for neighbour in embedding.expand(subject):
+                query = query + cells(neighbour)
         got = [n for n, _ in readout.predict_symbols(
-            cells(subject) + cells(predicate), lexicon=lexicon, k=len(vocabulary))]
+            query, lexicon=lexicon, k=len(vocabulary))]
         return got.index(truth) + 1 if truth in got else None
 
     out.trained_mrr, _ = _mrr(rank_of, train[:8])
