@@ -310,12 +310,17 @@ class LearningLoop:
                 return
             from nyxara.njp.predict import ErrorKind
 
-            predictor.register_repair(ErrorKind.PERCEPTION, self._repair_perception)
-            predictor.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
-            predictor.register_repair(ErrorKind.MEMORY, self._repair_memory)
-            predictor.register_repair(ErrorKind.RELATION, self._repair_relation)
-            predictor.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
-            predictor.register_repair(ErrorKind.REASONING, self._repair_reasoning)
+            # Registered as the owner. The brain registers the same kinds as fallbacks in
+            # `_build_predictor`, for the configuration where this loop is gated off; naming the
+            # owner is what makes the precedence a decision rather than a consequence of which
+            # object was constructed last.
+            for kind, repair in ((ErrorKind.PERCEPTION, self._repair_perception),
+                                 (ErrorKind.GROUNDING, self._repair_grounding),
+                                 (ErrorKind.MEMORY, self._repair_memory),
+                                 (ErrorKind.RELATION, self._repair_relation),
+                                 (ErrorKind.WORLD_MODEL, self._repair_world),
+                                 (ErrorKind.REASONING, self._repair_reasoning)):
+                predictor.register_repair(kind, repair, owner="loop")
         except Exception:  # noqa: BLE001 — an unrepairable brain still runs, it just learns less
             pass
 

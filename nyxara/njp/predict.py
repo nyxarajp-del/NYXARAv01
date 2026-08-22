@@ -230,6 +230,12 @@ class PredictionEngine:
         self.outcomes: List[Outcome] = []
         self.by_kind: Dict[str, int] = {k: 0 for k in ErrorKind.ALL}
         self.repaired: Dict[str, int] = {k: 0 for k in ErrorKind.ALL}
+        # A miss that was attributed to an organ and then reached no repair at all. Counted
+        # because it used to be invisible: `_repair` returned on a missing key and nothing said so.
+        self.unrepaired: Dict[str, int] = {}
+        self._repair_owner: Dict[str, str] = {}
+        self._defaulted: Dict[str, bool] = {}
+        self._unrepairable: Dict[str, str] = {}
         self.predictions = 0
         self.scored = 0
         self.correct = 0
@@ -383,9 +389,71 @@ class PredictionEngine:
             return Diagnosis()
 
     # ---- learn -------------------------------------------------------------- #
-    def register_repair(self, kind: str, fn: Callable[[Outcome], bool]) -> None:
-        """Attach the update that fixes one kind of error."""
-        self.repairs[str(kind)] = fn
+    def register_repair(self, kind: str, fn: Callable[[Outcome], bool], *,
+                        owner: str = "", default: bool = False) -> None:
+        """Attach the update that fixes one kind of error, and say who owns it.
+
+        This was a plain dict assignment, and two objects were assigning to it. ``NJPBrain.
+        _build_predictor`` registers five repairs; ``LearningLoop._install_repairs`` then registers
+        six over the top. Which body actually ran was decided by which of the two happened to be
+        constructed last, and both of their docstrings claim nothing had ever registered one —
+        each was right about the other.
+
+        It is not dead code, which is why the fix is precedence rather than deletion: the loop is
+        gated, and with it off the brain's registrations are the only ones there are. So two
+        supported configurations ran different repairs and nothing said so.
+
+        ``default=True`` registers a fallback that will not displace an owner and will be
+        displaced by one, whichever order the two arrive in. ``owner`` is recorded so
+        :meth:`repair_report` can answer "who fixes this?" without anyone having to reason about
+        construction order.
+        """
+        key = str(kind)
+        if default and key in self.repairs and not self._defaulted.get(key, False):
+            return                      # an owner is already here; a fallback does not displace it
+        self.repairs[key] = fn
+        self._defaulted[key] = bool(default)
+        self._repair_owner[key] = str(owner or ("fallback" if default else "unnamed"))
+        self._unrepairable.pop(key, None)
+
+    def mark_unrepairable(self, kind: str, why: str) -> None:
+        """Record that no organ owns this kind of error, and why.
+
+        The alternative — which is what happened — is ``_repair``'s ``if fn is None: return``,
+        and that is silence. ``PLANNING`` and ``LANGUAGE`` were diagnosed, counted, and dropped
+        there on every occurrence. A diagnosis nothing acts on is a more expensive way to not
+        learn, and the honest form of it is a statement, not an absence.
+        """
+        key = str(kind)
+        self._unrepairable[key] = str(why)
+        self.repairs.pop(key, None)
+        self._defaulted.pop(key, None)
+        self._repair_owner[key] = "none"
+
+    def repair_report(self) -> Dict[str, Dict[str, Any]]:
+        """Who fixes what, and which kinds nothing fixes. Every kind is accounted for."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for kind in ErrorKind.ALL:
+            if kind == ErrorKind.UNATTRIBUTED:
+                continue        # by design never routed: a wrong attribution trains the wrong organ
+            if kind in self._unrepairable:
+                out[kind] = {"owner": "none", "repairable": False,
+                             "why": self._unrepairable[kind],
+                             "diagnosed": self.by_kind.get(kind, 0),
+                             "repaired": self.repaired.get(kind, 0)}
+            elif kind in self.repairs:
+                out[kind] = {"owner": self._repair_owner.get(kind, "unnamed"),
+                             "repairable": True, "why": "",
+                             "diagnosed": self.by_kind.get(kind, 0),
+                             "repaired": self.repaired.get(kind, 0)}
+            else:
+                # Neither claimed nor declared. This is the state the whole mechanism exists to
+                # make impossible, and reporting it is better than it being invisible.
+                out[kind] = {"owner": "unclaimed", "repairable": False,
+                             "why": "no repair registered and none declared unrepairable",
+                             "diagnosed": self.by_kind.get(kind, 0),
+                             "repaired": self.repaired.get(kind, 0)}
+        return out
 
     def _repair(self, outcome: Outcome) -> None:
         """Route the error to the organ that owns it. An unattributed error is not routed."""
@@ -395,6 +463,10 @@ class PredictionEngine:
                 return
             fn = self.repairs.get(diagnosis.kind)
             if fn is None:
+                # An organ was named and nothing acts on it. This used to be a bare `return`,
+                # which is how `PLANNING` and `LANGUAGE` were diagnosed and dropped on every
+                # occurrence with no trace anywhere that it had happened.
+                self.unrepaired[diagnosis.kind] = self.unrepaired.get(diagnosis.kind, 0) + 1
                 return
             diagnosis.repaired = bool(fn(outcome))
             if diagnosis.repaired:
@@ -463,6 +535,9 @@ class PredictionEngine:
             "improving": self.improving(),
             "by_kind": {k: n for k, n in self.by_kind.items() if n},
             "repaired": {k: n for k, n in self.repaired.items() if n},
+            # Attributed to an organ and acted on by nobody. The gap between `by_kind` and
+            # `repaired` used to have no name, so it looked like the repairs were simply failing.
+            "unrepaired": {k: n for k, n in self.unrepaired.items() if n},
             "worst_kind": self.worst_kind(),
             "calibration": self.calibration().to_dict(),
         }

@@ -681,16 +681,59 @@ class NJPBrain:
         try:
             from nyxara.njp.predict import ErrorKind, PredictionEngine
             engine = PredictionEngine(self)
-            engine.register_repair(ErrorKind.GROUNDING, self._repair_grounding)
-            engine.register_repair(ErrorKind.WORLD_MODEL, self._repair_world)
-            engine.register_repair(ErrorKind.MEMORY, self._repair_memory)
-            engine.register_repair(ErrorKind.RELATION, self._repair_relation)
-            engine.register_repair(ErrorKind.REASONING, self._repair_reasoning)
+            # Registered as fallbacks. `LearningLoop._install_repairs` owns these kinds whenever
+            # the loop is on, and these are what remains when it is off — which is a supported
+            # configuration and was, until this, an undocumented behaviour difference decided by
+            # construction order.
+            for kind, repair in ((ErrorKind.GROUNDING, self._repair_grounding),
+                                 (ErrorKind.WORLD_MODEL, self._repair_world),
+                                 (ErrorKind.MEMORY, self._repair_memory),
+                                 (ErrorKind.RELATION, self._repair_relation),
+                                 (ErrorKind.REASONING, self._repair_reasoning)):
+                engine.register_repair(kind, repair, owner="brain", default=True)
+
+            # The plan did what it predicted would work and it did not work. The action it took is
+            # the thing that was wrong, and `agency._credit` moves exactly that action's record —
+            # one arm, not the model. This kind had no repair at all: it was diagnosed, counted,
+            # and dropped.
+            engine.register_repair(ErrorKind.PLANNING, self._repair_planning, owner="brain")
+
+            # And the one that honestly has no organ. The content was right and the rendering
+            # lost it; rendering belongs to `njp.voice`, which has a faithfulness *check* and no
+            # learning surface of any kind — no counters, nothing that adapts. Inventing a repair
+            # to fill the row would be worse than saying so.
+            engine.mark_unrepairable(
+                ErrorKind.LANGUAGE,
+                "rendering is njp.voice's, and it has a faithfulness check but nothing that learns")
             return engine
         except Exception:  # noqa: BLE001 — she still learns per-organ, just without the diagnosis
             return None
 
     # ---- the repairs, one per error kind ---------------------------------- #
+    def _repair_planning(self, outcome: Any) -> bool:
+        """A plan reached the wrong state: charge the action it took, and only that action.
+
+        `ActionValue` is a tried/worked pair per action, and `agency._credit` is the one call that
+        moves it. That makes this the same shape of surgery as `_repair_relation` — one arm of one
+        organ, chosen by what the failure names — rather than a scalar fed back into everything,
+        which is the generic repair the whole error taxonomy exists to avoid.
+
+        An outcome that does not name an action is not repaired. Guessing which action to blame
+        would train against a plan she may never have run.
+        """
+        try:
+            agent = getattr(self, "agent", None)
+            if agent is None:
+                return False
+            context = getattr(outcome, "context", None) or {}
+            action = str(context.get("action") or "").strip()
+            if not action:
+                return False
+            agent._credit(action, worked=False)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def _repair_grounding(self, outcome: Any) -> bool:
         """A sentence that should have grounded and did not: try again with the fluent surface.
 
