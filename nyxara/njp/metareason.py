@@ -335,10 +335,35 @@ class MetaReasoner:
     def register(self, name: str, kinds: Sequence[str],
                  solve: Callable[[str, Dict[str, Any]], Any], *,
                  prior: float = 0.5) -> Strategy:
-        """Add a way of thinking. The brain owns the callables; this owns the choosing."""
+        """Add a way of thinking. The brain owns the callables; this owns the choosing.
+
+        **Also declared to the shared bandit, once per kind it serves.** :meth:`choose` asks
+        ``meta_learner.choose(f"strategy:{kind}")`` before anything else and :meth:`outcome`
+        rewards the same arm — and nothing had ever registered an option under those arms, so on
+        every session ``choose`` returned ``None``, the kind-blind fallback decided every turn, and
+        ``reward`` found an empty ``_pending`` and credited nothing. Measured: the learner's arms
+        were ``settle_steps``, ``recall_k``, ``reason_depth``, ``seat:causal``, ``seat:factual`` —
+        every ``strategy:*`` arm absent. The seat arms are there because
+        :mod:`nyxara.njp.router` registers its options properly; this is the same pattern, in the
+        organ that most needed it.
+
+        **One arm per kind, and that is the whole point.** :class:`Strategy` carries a single
+        ``wins``/``trials`` pair spanning every kind it serves, so ``derive`` — registered for
+        factual, causal and empirical — averages three different competences into one number, and
+        a strategy that is excellent at one and useless at another reports the mean of the two.
+        A per-kind arm is what makes *"which way of thinking suits this kind of problem"* a
+        question with an answer, which is the difference between choosing well and choosing on
+        average.
+        """
         strategy = Strategy(name=str(name), kinds=tuple(kinds), solve=solve,
                             prior=min(1.0, max(0.0, float(prior))))
         self.strategies[strategy.name] = strategy
+        if self.meta_learner is not None:
+            for kind in strategy.kinds:
+                try:
+                    self.meta_learner.register(f"strategy:{kind}", strategy.name, strategy.name)
+                except Exception:  # noqa: BLE001 — the shared bandit is optional throughout
+                    break
         return strategy
 
     def _candidates(self, kind: str) -> List[Strategy]:
@@ -564,7 +589,13 @@ class MetaReasoner:
         strategy.wins = max(0.0, strategy.wins - provisional) + (1.0 if correct else 0.0)
         if self.meta_learner is not None:
             try:
-                self.meta_learner.reward(f"strategy:{solution.kind}", 1.0 if correct else 0.0)
+                # Named, not left to `_pending`. This outcome comes from the Master's later
+                # statement and can arrive many turns after the choice — any question of the same
+                # kind in between would otherwise move the pending slot and hand the credit to
+                # whichever strategy was chosen most recently.
+                self.meta_learner.reward(f"strategy:{solution.kind}",
+                                         1.0 if correct else 0.0,
+                                         name=solution.strategy)
             except Exception:  # noqa: BLE001
                 pass
 
